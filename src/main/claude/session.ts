@@ -8,6 +8,7 @@ import type {
 import { AsyncQueue } from './asyncQueue'
 import { clampText, clampInput } from './clamp'
 import { resolveClaudeExecutable } from './executable'
+import { log } from '../logger'
 import { MCP_SETTING_SOURCES, resolveUserMcpServers } from './mcp'
 import type {
   ChatItem,
@@ -76,6 +77,14 @@ const AUTO_COMPACT_THRESHOLD = 92
 
 /** getContextUsage 제어 요청 상한. 지연돼도 미터·자동압축 판단이 멈추지 않도록 둔다. */
 const CONTEXT_USAGE_TIMEOUT_MS = 5000
+
+/**
+ * query 생성 후 SDK 메시지(system:init 등)가 하나도 안 오는 것을 스톨로 보고 abort 하는 상한.
+ * 정상 세션은 보통 수 초 내 첫 메시지가 온다. 옛 세션 resume 재생이나 MCP 서버 기동이 응답 없이
+ * 멈추면 첫 메시지가 영영 안 와 UI 가 무한 로딩에 갇히는데, 이 워치독이 abort → (resume 이던
+ * 경우) 새 세션으로 1회 폴백, (그래도 스톨이면) 명확한 에러 + idle 로 떨어뜨려 자가 복구한다.
+ */
+const FIRST_MESSAGE_TIMEOUT_MS = 60_000
 
 /** p 가 ms 안에 끝나지 않으면 reject 한다(타임아웃 시 호출부가 폴백 경로로 빠지도록). */
 function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
@@ -297,8 +306,9 @@ export class ClaudeSession {
     try {
       const ctx = await withTimeout(q.getContextUsage(), CONTEXT_USAGE_TIMEOUT_MS)
       percentage = ctx.percentage
-    } catch {
+    } catch (err) {
       // 확인 실패 시 압축 없이 그대로 진행한다(기존 동작과 동일 — 큰 패스 1회는 불가피).
+      log.warn('session: resume preflight getContextUsage failed/timed out; flushing buffered', err)
       this.flushBuffered()
       return
     }
@@ -348,6 +358,19 @@ export class ClaudeSession {
   private async run(): Promise<void> {
     // resume 실패 시 새 세션으로 폴백할지. finally 이후에 재시도해 this.q 클로버를 피한다.
     let retrying = false
+    // 첫 메시지가 안 오는 스톨을 감지해 abort 하기 위한 워치독. abort 하면 for-await 가
+    // (throw 또는 정상 종료로) 풀리고, 아래 first-message 실패 처리로 폴백/에러가 확정된다.
+    const abort = new AbortController()
+    let stalled = false
+    const watchdog = setTimeout(() => {
+      if (this.sawAnyMessage) return
+      stalled = true
+      log.error(
+        `session: no SDK message within ${FIRST_MESSAGE_TIMEOUT_MS}ms — aborting stuck query ` +
+          `(likely stalled MCP startup or resume replay)`
+      )
+      abort.abort()
+    }, FIRST_MESSAGE_TIMEOUT_MS)
     try {
       // 사용자가 claude CLI 용으로 등록한 MCP 서버(user/project/local 스코프)를 명시 주입한다.
       // cwd 가 worktree 라 SDK 자동 탐색만으로는 원본 repo 의 project 스코프 서버가 누락되기 때문.
@@ -384,45 +407,33 @@ export class ClaudeSession {
           ...(sdkEffort ? { effort: sdkEffort } : {}),
           // 이전 세션 ID 가 있으면 디스크에서 대화 맥락을 복원한다(과거 메시지는 재방출되지 않음).
           ...(this.deps.resumeSessionId ? { resume: this.deps.resumeSessionId } : {}),
+          abortController: abort,
           canUseTool: this.canUseTool
         }
       })
 
+      log.info(
+        `session: query created (resume=${this.deps.resumeSessionId ? 'yes' : 'no'}, ` +
+          `mcp=${Object.keys(mcpServers).length}, preflight=${this.preflightPending}) — awaiting first message…`
+      )
+
       for await (const msg of this.q) {
+        if (!this.sawAnyMessage) {
+          clearTimeout(watchdog)
+          log.info(`session: first SDK message received (type=${msg.type})`)
+        }
         this.sawAnyMessage = true
         this.handleMessage(msg)
       }
-    } catch (err) {
-      // 아직 큐로 내보내지 않고 버퍼링해 둔 사용자 메시지가 있으면 입력 큐로 옮긴다 — 폴백 재시도
-      // 세션이나 다음 send 가 이어서 처리할 수 있도록(메시지를 잃지 않게). preflight 도 함께 종료된다.
-      if (this.preflightPending) this.flushBuffered()
-      // resume 대상 세션이 사라졌거나 손상돼 첫 메시지 전에 실패한 경우, 맥락만 포기하고
-      // 새 세션으로 1회 폴백한다 — 보존하려던 맥락 때문에 오히려 워크스페이스가 막히는 것을 막는다.
-      if (this.deps.resumeSessionId && !this.sawAnyMessage && !this.resumeRetried) {
-        retrying = true
-        this.resumeRetried = true
-        this.deps.resumeSessionId = null
-        this.emitItem({
-          id: `system:resume-fallback:${Date.now()}`,
-          type: 'system',
-          text: "Couldn't restore the previous session context — continuing in a fresh session.",
-          ts: Date.now()
-        })
-      } else {
-        this.emitItem({
-          id: `error:${Date.now()}`,
-          type: 'error',
-          text: clampText(err instanceof Error ? err.message : String(err)),
-          ts: Date.now()
-        })
-        // 에러로 턴이 죽었다 — 딸린 백그라운드 워크플로우도 이 query 와 함께 사라지므로 정리하고,
-        // busy 플래그도 내려 다음 턴에서 running 이 정상적으로 다시 방출되게 한다.
-        this.active = false
-        this.busy = false
-        this.workflowTasks.clear()
-        this.deps.emit({ type: 'status', status: 'error' })
+      log.info('session: query stream ended')
+      // abort 가 예외 없이 스트림을 닫은 스톨 케이스 — catch 를 안 타므로 여기서 실패 처리한다.
+      if (stalled && !this.sawAnyMessage) {
+        retrying = this.handleFirstMessageFailure(new Error('stalled before first message'), true)
       }
+    } catch (err) {
+      retrying = this.handleFirstMessageFailure(err, stalled)
     } finally {
+      clearTimeout(watchdog)
       this.q = null
       // 루프가 (예외도, 정상 result 도 없이) 끝났는데 턴이나 백그라운드 워크플로우가 진행 중으로
       // 남아 있으면 — 예: CLI 프로세스가 턴 도중 죽어 스트림이 result 없이 닫힌 경우 — 'running' 에
@@ -440,6 +451,57 @@ export class ClaudeSession {
     // 폴백 재시도는 finally 가 this.q 를 비운 뒤에 시작해, 새 query 핸들이 덮어써지지 않게 한다.
     // input 큐는 그대로라 폴백 세션이 같은(아직 처리되지 않은) 사용자 메시지를 이어 처리한다.
     if (retrying) this.run()
+  }
+
+  /**
+   * 첫 SDK 메시지가 오기 전에 query 가 끝난 경우(예외 throw 또는 워치독 abort)를 처리하고,
+   * 새 세션으로 재시도할지 여부를 돌려준다.
+   *
+   * - **진짜 resume 예외**(스톨이 아니라 예외로 죽음): 이전 세션이 사라졌거나 손상된 것이므로
+   *   맥락을 포기하고 새 세션으로 1회 폴백한다(기존 동작 유지).
+   * - **워치독 스톨**: resume 이 원인이라고 단정할 수 없고(예: MCP 서버 기동 정체) resume 은
+   *   정상 동작이므로 sessionId 를 버리지 않는다. 무한 로딩만 끊어 명확한 에러 + idle 로
+   *   떨어뜨리고, 다음 전송에서 평소처럼 다시 resume 하게 둔다.
+   * - **그 외 에러**(스트림 도중 실패 등): 에러를 표면화하고 idle 로 확정한다.
+   */
+  private handleFirstMessageFailure(err: unknown, stalled: boolean): boolean {
+    // 버퍼링해 둔 사용자 메시지가 있으면 큐로 옮긴다 — 폴백 세션이나 다음 send 가 이어받도록.
+    if (this.preflightPending) this.flushBuffered()
+
+    if (!stalled && this.deps.resumeSessionId && !this.sawAnyMessage && !this.resumeRetried) {
+      log.warn('session: resume failed before first message — falling back to a fresh session', err)
+      this.resumeRetried = true
+      this.deps.resumeSessionId = null
+      this.emitItem({
+        id: `system:resume-fallback:${Date.now()}`,
+        type: 'system',
+        text: "Couldn't restore the previous session context — continuing in a fresh session.",
+        ts: Date.now()
+      })
+      return true
+    }
+
+    if (stalled) {
+      // resume 은 유지한다 — 원인이 resume 이라고 확정되지 않았고, 정상 동작이기 때문.
+      log.error('session: aborted a stuck query before first message (session context kept)')
+    } else {
+      log.error('session: query errored', err)
+    }
+    this.emitItem({
+      id: `error:${Date.now()}`,
+      type: 'error',
+      text: stalled
+        ? 'The agent stopped responding and the request was cancelled. Please try again. (An MCP server or session restore may be stalling.)'
+        : clampText(err instanceof Error ? err.message : String(err)),
+      ts: Date.now()
+    })
+    // 턴이 죽었다 — 딸린 백그라운드 워크플로우도 이 query 와 함께 사라지므로 정리하고,
+    // busy 플래그도 내려 다음 턴에서 running 이 정상적으로 다시 방출되게 한다.
+    this.active = false
+    this.busy = false
+    this.workflowTasks.clear()
+    this.deps.emit({ type: 'status', status: 'error' })
+    return false
   }
 
   /**
@@ -553,6 +615,7 @@ export class ClaudeSession {
 
   private handleSystem(msg: Extract<SDKMessage, { type: 'system' }>): void {
     if (msg.subtype === 'init') {
+      log.info(`session: init received (session_id=${msg.session_id})`)
       this.deps.onSessionId(msg.session_id)
       this.deps.emit({ type: 'session', sessionId: msg.session_id, model: msg.model })
       // 콜드 resume 첫 턴 전에 컨텍스트를 확인해, 필요하면 사용자 턴보다 /compact 를 먼저 보낸다.
@@ -806,6 +869,7 @@ export class ClaudeSession {
   }
 
   private handleResult(msg: Extract<SDKMessage, { type: 'result' }>): void {
+    log.info(`session: result received (subtype=${msg.subtype}, turns=${msg.num_turns})`)
     this.deps.onSessionId(msg.session_id)
     this.emitItem({
       id: `result:${msg.uuid}`,
