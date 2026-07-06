@@ -138,6 +138,35 @@ A tabbed panel on top plus an interactive terminal below (resizable split):
   (`~/Library/Application Support/Ditto/`).
 - See [`PRIVACY.md`](./PRIVACY.md) and [`TERMS.md`](./TERMS.md) for details.
 
+## Build from source
+
+Requires **Node.js 20** (see [`.nvmrc`](./.nvmrc)) on **macOS (Apple Silicon)**.
+
+```bash
+git clone https://github.com/youngminnnn/ditto.git
+cd ditto
+nvm use          # optional, selects Node 20
+npm install      # installs deps + Electron binary
+npm run dev      # launch in development mode
+```
+
+Other useful scripts:
+
+```bash
+npm run typecheck   # node + web TypeScript
+npm run lint        # eslint
+npm test            # vitest unit tests
+npm run build       # production build
+npm run dist        # package a macOS build into release/
+```
+
+## Contributing
+
+Contributions are welcome! Please read **[CONTRIBUTING.md](./CONTRIBUTING.md)** for
+the dev setup, branch/commit conventions, and PR process, and follow the
+[Code of Conduct](./CODE_OF_CONDUCT.md). To report a security issue, see
+[SECURITY.md](./SECURITY.md) — please don't file security bugs as public issues.
+
 ## License
 
 [MIT](./LICENSE) © youngminnnn. You are free to use, modify, and redistribute the

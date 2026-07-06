@@ -123,6 +123,35 @@ Ditto 는 **설치된 Claude Code 와 `gh` CLI 의 로그인 정보를 그대로
 - 설정·대화 기록은 **로컬**(`~/Library/Application Support/Ditto/`)에만 저장된다.
 - 상세는 [`PRIVACY.md`](./PRIVACY.md) · [`TERMS.md`](./TERMS.md) 참고.
 
+## 소스로 빌드하기
+
+**macOS (Apple Silicon)** 에서 **Node.js 20**([`.nvmrc`](./.nvmrc))이 필요하다.
+
+```bash
+git clone https://github.com/youngminnnn/ditto.git
+cd ditto
+nvm use          # 선택 사항, Node 20 선택
+npm install      # 의존성 + Electron 바이너리 설치
+npm run dev      # 개발 모드 실행
+```
+
+그 밖의 유용한 스크립트:
+
+```bash
+npm run typecheck   # node + web 타입체크
+npm run lint        # eslint
+npm test            # vitest 유닛 테스트
+npm run build       # 프로덕션 빌드
+npm run dist        # macOS 배포본을 release/ 로 패키징
+```
+
+## 기여하기
+
+기여를 환영한다! 개발 환경 설정·브랜치/커밋 규칙·PR 절차는
+**[CONTRIBUTING.md](./CONTRIBUTING.md)** 를 참고하고, [행동 강령](./CODE_OF_CONDUCT.md)을
+지켜 주세요. 보안 이슈는 공개 이슈로 올리지 말고 [SECURITY.md](./SECURITY.md) 의 절차를
+따라 주세요.
+
 ## 라이선스
 
 [MIT](./LICENSE) © youngminnnn. MIT 라이선스 조건에 따라 자유롭게 사용·수정·재배포할 수 있다.
