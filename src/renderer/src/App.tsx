@@ -162,6 +162,68 @@ export default function App(): React.JSX.Element {
         return
       }
 
+      // 우상단 헤더 도구 단축키 — 현재 선택된 workspace 를 대상으로 한다.
+      // ⇧⌘ 조합이라 macOS 기본 단축키(⌘S/E/F, ⌘⌫ 등)나 앱 기존 단축키와 충돌하지 않는다.
+      // (dev 실행은 아래에서 ⌃⌘R 로 별도 처리 — ⇧⌘R 은 기본 메뉴 Force Reload 와 충돌.)
+      const selId = st.selectedWorkspaceId
+      // 키 판별은 e.code 로 한다 — 한글 IME 등에서 e.key 가 문자가 아닐 수 있다.
+      if (selId && e.shiftKey) {
+        // ⇧⌘S: 스크립트 패널 열기/닫기.
+        if (e.code === 'KeyS') {
+          e.preventDefault()
+          st.setScriptPanelOpen(selId, !(st.scriptPanelOpen[selId] ?? false))
+          return
+        }
+        // ⇧⌘E: 에디터에서 열기.
+        if (e.code === 'KeyE') {
+          e.preventDefault()
+          void window.api.workspace.openInEditor(selId)
+          return
+        }
+        // ⇧⌘F: Finder 에서 보기.
+        if (e.code === 'KeyF') {
+          e.preventDefault()
+          void window.api.workspace.revealInFinder(selId)
+          return
+        }
+        // ⇧⌘X: 대화 내보내기 메뉴 열기(ExportMenu 가 이벤트를 받아 드롭다운을 연다).
+        if (e.code === 'KeyX') {
+          e.preventDefault()
+          window.dispatchEvent(new CustomEvent('ditto:export-conversation', { detail: selId }))
+          return
+        }
+        // ⇧⌘⌫: workspace 아카이브(ChatView 가 확인 다이얼로그와 함께 처리).
+        if (e.key === 'Backspace' || e.key === 'Delete') {
+          e.preventDefault()
+          window.dispatchEvent(new CustomEvent('ditto:archive-workspace', { detail: selId }))
+          return
+        }
+      }
+
+      // ⌃⌘R: dev 스크립트 실행/중지 — 스크립트 패널 열림 여부와 무관하게 동작한다.
+      // (⇧⌘R 은 Electron 기본 메뉴의 Force Reload 와 충돌하므로 Control 조합을 쓴다.)
+      // 키 판별은 e.code('KeyR')로 한다 — 한글 IME·Control 조합에서 e.key 가 'r' 이 아닐 수 있다.
+      if (selId && e.ctrlKey && e.code === 'KeyR') {
+        e.preventDefault()
+        const ws = st.app?.workspaces.find((w) => w.id === selId)
+        const devCmd = ws && st.app?.repos.find((r) => r.id === ws.repoId)?.devScript
+        if (!devCmd || !devCmd.trim()) {
+          st.pushToast('info', 'No dev command set for this repo — add one in repo settings.')
+          return
+        }
+        const devRunning = (st.scriptStatus[selId] ?? []).some(
+          (s) => s.kind === 'dev' && s.state === 'running'
+        )
+        if (devRunning) {
+          void window.api.script.stop(selId, 'dev').then(() => st.refreshScriptStatus(selId))
+        } else {
+          // 실행 시 스크립트 패널(dev 탭)을 열어 로그·상태를 바로 볼 수 있게 한다.
+          st.setScriptPanelOpen(selId, true)
+          void window.api.script.run(selId, 'dev').then(() => st.refreshScriptStatus(selId))
+        }
+        return
+      }
+
       const list = (st.app?.workspaces ?? []).filter((w) => !w.archived)
       if (!list.length) return
 

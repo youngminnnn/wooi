@@ -16,8 +16,19 @@ const GROUPS: { title: string; items: { keys: string[]; label: string }[] }[] = 
     title: 'Session & panels',
     items: [
       { keys: ['⌘J'], label: 'Toggle the work panel' },
+      { keys: ['⇧⌘S'], label: 'Toggle the scripts panel' },
+      { keys: ['⌃⌘R'], label: 'Run / stop the dev script' },
       { keys: ['⇧⇥'], label: 'Cycle permission mode' },
       { keys: ['⇧⌘A'], label: 'Approve all pending permissions' }
+    ]
+  },
+  {
+    title: 'Workspace tools',
+    items: [
+      { keys: ['⇧⌘E'], label: 'Open workspace in editor' },
+      { keys: ['⇧⌘F'], label: 'Reveal workspace in Finder' },
+      { keys: ['⇧⌘X'], label: 'Export conversation' },
+      { keys: ['⇧⌘⌫'], label: 'Archive workspace' }
     ]
   },
   {
