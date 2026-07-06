@@ -138,6 +138,8 @@ export interface Workspace {
   lastModel: string | null
   /** 아카이브되면 사이드바 기본 목록에서 숨기고 worktree 를 제거한다(브랜치·기록은 유지). */
   archived: boolean
+  /** 이 워크스페이스의 모든 알림(OS 알림·소리·Dock 배지)을 음소거한다. 레거시는 undefined=false. */
+  muted?: boolean
   createdAt: number
   lastActiveAt: number
 }
@@ -151,6 +153,37 @@ export const CURRENT_TERMS_VERSION = 1
 /** UI 색상 테마. 'system' 은 OS 의 다크/라이트 설정을 따른다. */
 export type ThemePreference = 'system' | 'light' | 'dark'
 
+// ── 알림 설정 ────────────────────────────────────────────────────────────
+// 알림을 이벤트(무엇이 일어났는지) × 채널(어떻게 알릴지)로 세분화한다.
+// 워크스페이스별 음소거(Workspace.muted)와 함께, 병렬 세션이 많을 때 소음을 통제한다.
+
+/** 알림을 유발하는 이벤트. */
+export type NotificationEvent = 'completed' | 'error' | 'needsInput'
+/** 알림을 전달하는 채널. */
+export type NotificationChannel = 'osNotification' | 'sound' | 'badge'
+/** 이벤트별로 각 채널의 on/off 를 담는 매트릭스. */
+export type NotificationSettings = Record<NotificationEvent, Record<NotificationChannel, boolean>>
+
+/** 표시용 이벤트 라벨(설정 UI 의 행 제목). */
+export const NOTIFICATION_EVENT_LABELS: Record<NotificationEvent, string> = {
+  completed: 'Response complete',
+  error: 'Session error',
+  needsInput: 'Needs input (permission)'
+}
+/** 표시용 채널 라벨(설정 UI 의 열 제목). */
+export const NOTIFICATION_CHANNEL_LABELS: Record<NotificationChannel, string> = {
+  osNotification: 'OS notification',
+  sound: 'Sound',
+  badge: 'Dock badge'
+}
+
+/** 기본 알림 설정. 완료는 소리까지, 에러/입력대기는 알림+배지만 기본으로 켠다. */
+export const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettings = {
+  completed: { osNotification: true, sound: true, badge: true },
+  error: { osNotification: true, sound: false, badge: true },
+  needsInput: { osNotification: true, sound: false, badge: true }
+}
+
 export interface AppSettings {
   defaultPermissionMode: PermissionMode
   /** 사용할 모델 ID (예: "claude-opus-4-8[1m]"). */
@@ -162,8 +195,13 @@ export interface AppSettings {
   effort: EffortSetting | null
   /** UI 색상 테마(다크 기본). */
   theme: ThemePreference
-  /** 세션 응답이 완료되면 소리로 알림. */
+  /**
+   * @deprecated notifications.completed.sound 로 대체됨. 하위호환을 위해 남겨 두며,
+   * 마이그레이션 시 이 값을 notifications 로 옮긴다. 새 코드는 notifications 를 본다.
+   */
   soundOnComplete: boolean
+  /** 이벤트×채널 세분화 알림 설정. */
+  notifications: NotificationSettings
   /**
    * 우측 작업 패널(파일/변경/체크 + 터미널)의 펼침 기본값.
    * true(기본)면 펼침, false 면 접힘. 사용자가 아직 패널을 토글한 적이 없을 때의 시작값으로 쓰인다
@@ -423,6 +461,8 @@ export const IPC = {
   workspaceSetPermissionMode: 'workspace:setPermissionMode',
   workspaceSetModel: 'workspace:setModel',
   workspaceSetEffort: 'workspace:setEffort',
+  /** 워크스페이스별 알림 음소거 토글. */
+  workspaceSetMuted: 'workspace:setMuted',
   workspaceRename: 'workspace:rename',
   workspaceOpenInEditor: 'workspace:openInEditor',
   workspaceRevealInFinder: 'workspace:revealInFinder',
@@ -448,6 +488,14 @@ export const IPC = {
   prStatus: 'pr:status',
   prCreate: 'pr:create',
   prChecks: 'pr:checks',
+  /** 현재 브랜치의 PR 을 병합한다(squash/merge/rebase). */
+  prMerge: 'pr:merge',
+  /** 현재 브랜치의 PR 을 닫는다(병합 없이). */
+  prClose: 'pr:close',
+  /** 닫힌 PR 을 다시 연다. */
+  prReopen: 'pr:reopen',
+  /** Draft PR 을 리뷰 가능 상태로 전환한다. */
+  prReady: 'pr:ready',
   openExternal: 'shell:openExternal',
   settingsUpdate: 'settings:update',
   authGetStatus: 'auth:getStatus',
@@ -570,6 +618,9 @@ export type PrState =
   | 'open'
   | 'merged'
   | 'closed'
+
+/** PR 병합 방식(gh pr merge 플래그에 대응). */
+export type PrMergeMethod = 'squash' | 'merge' | 'rebase'
 
 export interface PrStatus {
   number: number

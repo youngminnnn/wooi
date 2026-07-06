@@ -1,10 +1,32 @@
-import { useMemo, useState } from 'react'
-import { GitBranch, Loader2, ShieldQuestion, GitPullRequest, Square } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import {
+  GitBranch,
+  Loader2,
+  ShieldQuestion,
+  GitPullRequest,
+  Square,
+  DollarSign,
+  Repeat,
+  AlertTriangle
+} from 'lucide-react'
 import { useStore } from '../store'
 import { useNow } from '../lib/useNow'
-import { formatDuration } from '../lib/format'
+import { formatCost, formatDuration } from '../lib/format'
 import { workspaceDisplayName } from '@shared/types'
-import type { Workspace } from '@shared/types'
+import type { ChatItem, Workspace } from '@shared/types'
+
+/** 트랜스크립트의 result 아이템에서 누적 비용(USD)과 턴 수를 합산한다. */
+function sessionStats(items: ChatItem[]): { cost: number; turns: number } {
+  let cost = 0
+  let turns = 0
+  for (const it of items) {
+    if (it.type === 'result') {
+      cost += it.costUsd
+      turns += it.numTurns
+    }
+  }
+  return { cost, turns }
+}
 
 type FilterKey = 'all' | 'running' | 'attention' | 'unread' | 'idle'
 
@@ -25,6 +47,27 @@ export default function Overview(): React.JSX.Element {
   const active = useMemo(() => app.workspaces.filter((w) => !w.archived), [app.workspaces])
   const anyRunning = active.some((w) => w.status === 'running')
   const now = useNow(1000, anyRunning)
+
+  // 비용/토큰 롤업: 모든 활성 세션의 트랜스크립트를 (없으면) 불러와 result 아이템에서 집계한다.
+  const transcripts = useStore((s) => s.transcripts)
+  const ensureHistory = useStore((s) => s.ensureHistory)
+  useEffect(() => {
+    for (const w of active) void ensureHistory(w.id)
+  }, [active, ensureHistory])
+  const perWorkspace = useMemo(() => {
+    const map: Record<string, { cost: number; turns: number }> = {}
+    for (const w of active) map[w.id] = sessionStats(transcripts[w.id] ?? [])
+    return map
+  }, [active, transcripts])
+  const totals = useMemo(() => {
+    let cost = 0
+    let turns = 0
+    for (const w of active) {
+      cost += perWorkspace[w.id]?.cost ?? 0
+      turns += perWorkspace[w.id]?.turns ?? 0
+    }
+    return { cost, turns }
+  }, [active, perWorkspace])
 
   const pendingIds = new Set(permissions.map((p) => p.workspaceId))
 
@@ -91,6 +134,28 @@ export default function Overview(): React.JSX.Element {
           )}
         </div>
 
+        {/* 비용/토큰 롤업: 모든 세션의 누적 지출·턴 수를 한눈에. */}
+        <div className="flex flex-wrap gap-2.5 mb-5">
+          <StatTile
+            icon={<DollarSign size={14} className="text-[var(--success-400)]" />}
+            label="Total spend"
+            value={formatCost(totals.cost)}
+            hint="Sum of session costs across all workspaces"
+          />
+          <StatTile
+            icon={<Repeat size={14} className="text-[var(--accent-400)]" />}
+            label="Agent turns"
+            value={totals.turns.toLocaleString()}
+            hint="Total assistant turns across all workspaces"
+          />
+          <StatTile
+            icon={<Loader2 size={14} className="text-[var(--info-400)]" />}
+            label="Active now"
+            value={String(counts.running)}
+            hint="Sessions currently running"
+          />
+        </div>
+
         <div className="flex flex-wrap items-center gap-1.5 mb-5">
           {FILTERS.map((f) => (
             <button
@@ -122,6 +187,7 @@ export default function Overview(): React.JSX.Element {
                 repoName={repoName(w.repoId)}
                 flags={flagsOf(w)}
                 now={now}
+                cost={perWorkspace[w.id]?.cost ?? 0}
                 onOpen={() => void selectWorkspace(w.id)}
               />
             ))}
@@ -129,8 +195,41 @@ export default function Overview(): React.JSX.Element {
         )}
 
         <p className="mt-6 text-xs text-neutral-600 text-center">
-          ⌘1–9 to switch · ⌘[ / ⌘] to cycle
+          ⌘1–9 to switch · ⌘[ / ⌘] to cycle ·{' '}
+          <button
+            onClick={() => window.dispatchEvent(new CustomEvent('ditto:open-shortcuts'))}
+            className="underline decoration-dotted hover:text-neutral-400"
+          >
+            press ? for all shortcuts
+          </button>
         </p>
+      </div>
+    </div>
+  )
+}
+
+function StatTile({
+  icon,
+  label,
+  value,
+  hint
+}: {
+  icon: React.ReactNode
+  label: string
+  value: string
+  hint?: string
+}): React.JSX.Element {
+  return (
+    <div
+      className="flex items-center gap-2.5 rounded-xl border border-[var(--surface-2)] bg-[var(--bg-2)] px-3.5 py-2.5 min-w-[140px]"
+      title={hint}
+    >
+      <div className="grid h-8 w-8 place-items-center rounded-lg bg-[var(--surface-2)] shrink-0">
+        {icon}
+      </div>
+      <div className="min-w-0">
+        <div className="text-[11px] uppercase tracking-wide text-neutral-500">{label}</div>
+        <div className="text-base font-semibold text-neutral-100 tabular-nums">{value}</div>
       </div>
     </div>
   )
@@ -141,17 +240,20 @@ function OverviewCard({
   repoName,
   flags,
   now,
+  cost,
   onOpen
 }: {
   workspace: Workspace
   repoName: string
   flags: { running: boolean; attention: boolean; unread: boolean; idle: boolean }
   now: number
+  cost: number
   onOpen: () => void
 }): React.JSX.Element {
   const git = useStore((s) => s.gitStatus[workspace.id])
   const pr = useStore((s) => s.prStatus[workspace.id])
   const runningSince = useStore((s) => s.runningSince[workspace.id])
+  const context = useStore((s) => s.contextUsage[workspace.id])
 
   const displayName = workspaceDisplayName(workspace, pr?.title)
 
@@ -205,6 +307,20 @@ function OverviewCard({
             {git.changedFiles} changed
           </span>
         )}
+        {cost > 0 && (
+          <span className="text-neutral-500 tabular-nums" title="Cost so far in this workspace">
+            {formatCost(cost)}
+          </span>
+        )}
+        {context && context.percentage > 0 && (
+          <span
+            className="text-neutral-600 tabular-nums"
+            title="Context window used in the last turn"
+          >
+            {Math.round(context.percentage <= 1 ? context.percentage * 100 : context.percentage)}%
+            ctx
+          </span>
+        )}
         {pr && (
           <span
             className="flex items-center gap-1 text-[var(--accent-300)]/80 ml-auto truncate"
@@ -229,6 +345,10 @@ function StatusDot({
   if (attention) return <ShieldQuestion size={13} className="text-[var(--warning-400)] shrink-0" />
   if (workspace.status === 'running')
     return <Loader2 size={13} className="text-[var(--info-400)] animate-spin shrink-0" />
-  const color = workspace.status === 'error' ? 'bg-[var(--danger-500)]' : 'bg-neutral-600'
-  return <span className={`h-2 w-2 rounded-full shrink-0 ${color}`} />
+  // 색만으로 idle/error 를 구분하지 않도록 error 는 별도 아이콘(경고 삼각형)으로 표시한다.
+  if (workspace.status === 'error')
+    return (
+      <AlertTriangle size={12} className="text-[var(--danger-400)] shrink-0" aria-label="Error" />
+    )
+  return <span className="h-2 w-2 rounded-full shrink-0 bg-neutral-600" aria-label="Idle" />
 }

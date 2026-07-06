@@ -12,9 +12,25 @@ import type {
   ScriptStatus,
   Workspace
 } from '@shared/types'
+import type { NotificationChannel, NotificationEvent } from '@shared/types'
 import { playNotification } from './lib/sound'
 
 export const scriptKey = (workspaceId: string, kind: ScriptKind): string => `${workspaceId}:${kind}`
+
+/**
+ * 특정 워크스페이스에서 (event, channel) 알림이 켜져 있는지. 워크스페이스가 음소거면 항상 false.
+ * 알림 설정이 아직 없으면(초기화 전) 보수적으로 false.
+ */
+function notifyEnabled(
+  s: UIState,
+  workspaceId: string,
+  event: NotificationEvent,
+  channel: NotificationChannel
+): boolean {
+  const w = s.app?.workspaces.find((x) => x.id === workspaceId)
+  if (w?.muted) return false
+  return !!s.app?.settings.notifications?.[event]?.[channel]
+}
 
 /** 실행 중 대기 큐에 보관되는 후속 메시지(텍스트 + 선택적 이미지 첨부). */
 export interface QueuedMessage {
@@ -30,10 +46,17 @@ export interface ContextUsage {
 }
 
 export type ToastKind = 'info' | 'success' | 'error'
+/** 토스트에 붙는 인라인 액션 버튼(예: "Retry"). 클릭하면 run 실행 후 토스트가 닫힌다. */
+export interface ToastAction {
+  label: string
+  run: () => void
+}
 export interface Toast {
   id: string
   kind: ToastKind
   message: string
+  /** 있으면 메시지 아래 버튼으로 렌더된다. 액션이 있으면 자동으로 사라지지 않는다. */
+  actions?: ToastAction[]
 }
 
 /** 생성 중(아직 worktree 준비 전)인 workspace 의 사이드바 자리표시 행. 영속되지 않는 렌더러 전용 상태. */
@@ -136,6 +159,8 @@ interface UIState {
     displayName?: string
   ) => Promise<void>
   selectWorkspace: (id: string | null) => Promise<void>
+  /** 아직 로드되지 않았으면 해당 workspace 의 트랜스크립트를 불러온다(대시보드 비용 집계 등에서 사용). */
+  ensureHistory: (workspaceId: string) => Promise<void>
   refreshGit: (workspaceId: string) => Promise<void>
   /** 진입 여부와 무관하게 모든(비아카이브) 워크스페이스의 git 상태를 한 번에 갱신한다. */
   refreshAllGit: () => Promise<void>
@@ -167,8 +192,11 @@ interface UIState {
   setRightWidth: (px: number) => void
   toggleRightPanel: () => void
   setTerminalRatio: (ratio: number) => void
-  pushToast: (kind: ToastKind, message: string) => void
+  /** 토스트를 띄우고 그 id 를 반환한다. actions 를 주면 인라인 버튼이 붙고 자동으로 닫히지 않는다. */
+  pushToast: (kind: ToastKind, message: string, actions?: ToastAction[]) => string
   dismissToast: (id: string) => void
+  /** setup 스크립트를 다시 실행한다(스크립트 패널을 함께 연다). 결과는 메인이 setupState 로 영속. */
+  retrySetup: (workspaceId: string) => void
   confirm: (opts: ConfirmOptions) => Promise<boolean>
   resolveConfirm: (ok: boolean) => void
 }
@@ -320,14 +348,27 @@ export const useStore = create<UIState>((set, get) => ({
     // 질문에서 멈추면 result 가 없어 unread 가 안 잡히므로, 권한 대기를 세지 않으면 작업이
     // 사실상 끝났는데도 배지가 안 떴다. workspace 단위로 중복 없이 센다(완료+질문이 겹쳐도 1).
     // 선택/열람(unread 해제)·응답(permissions 제거) 시 자동으로 감소한다.
+    // 이벤트별 badge 채널 토글과 워크스페이스 음소거를 반영한다. unread 는 완료/에러가 섞여
+    // 있으므로 completed.badge 로 대표해 게이팅한다(배지는 세밀한 구분보다 "주의 필요 수"가 핵심).
     const refreshBadge = (state: UIState): void => {
+      const n = state.app?.settings.notifications
+      const muted = new Set((state.app?.workspaces ?? []).filter((w) => w.muted).map((w) => w.id))
       const needsAttention = new Set<string>()
-      for (const [id, on] of Object.entries(state.unread)) if (on) needsAttention.add(id)
-      for (const p of state.permissions) needsAttention.add(p.workspaceId)
+      if (n?.completed.badge)
+        for (const [id, on] of Object.entries(state.unread))
+          if (on && !muted.has(id)) needsAttention.add(id)
+      if (n?.needsInput.badge)
+        for (const p of state.permissions)
+          if (!muted.has(p.workspaceId)) needsAttention.add(p.workspaceId)
       void window.api.app.setBadgeCount(needsAttention.size)
     }
     useStore.subscribe((state, prev) => {
-      if (state.unread !== prev.unread || state.permissions !== prev.permissions) {
+      // 알림 설정/음소거(app)나 unread·permissions 가 바뀌면 배지를 다시 계산한다.
+      if (
+        state.unread !== prev.unread ||
+        state.permissions !== prev.permissions ||
+        state.app !== prev.app
+      ) {
         refreshBadge(state)
       }
     })
@@ -347,7 +388,7 @@ export const useStore = create<UIState>((set, get) => ({
         // 정착하고 대기 큐가 빈 시점(아래 status 처리)에서만 unread 를 켠다.
         if (event.item.type === 'result') {
           const s = get()
-          if (s.app?.settings.soundOnComplete) playNotification()
+          if (notifyEnabled(s, workspaceId, 'completed', 'sound')) playNotification()
           void s.refreshGit(workspaceId)
           void s.refreshPr(workspaceId)
         }
@@ -433,6 +474,7 @@ export const useStore = create<UIState>((set, get) => ({
         // 백그라운드 세션이 에러로 끝나면 미확인으로 표시(빨간 점 + 점프 대상).
         if (event.type === 'status' && event.status === 'error') {
           const s = get()
+          if (notifyEnabled(s, workspaceId, 'error', 'sound')) playNotification()
           if (workspaceId !== s.selectedWorkspaceId) {
             set({ unread: { ...s.unread, [workspaceId]: true } })
           }
@@ -454,6 +496,7 @@ export const useStore = create<UIState>((set, get) => ({
     })
 
     window.api.onPermission((req: PermissionRequest) => {
+      if (notifyEnabled(get(), req.workspaceId, 'needsInput', 'sound')) playNotification()
       set({ permissions: [...get().permissions, req] })
     })
 
@@ -477,6 +520,28 @@ export const useStore = create<UIState>((set, get) => ({
         }
       })
       void get().refreshScriptStatus(workspaceId)
+
+      // setup 스크립트 실패(0 이 아닌 종료 코드)는 조용히 넘어가면 안 된다 — 사용자는 왜 dev 가
+      // 안 뜨는지 모른다. 재시도/출력 보기 버튼이 달린 토스트로 알린다. 실패 상태 자체는 메인이
+      // Workspace.setupState 로 영속하므로(헤더/스크립트 패널이 이를 읽음) 여기선 알림만 담당한다.
+      // code === null 은 kill(아카이브·중지)이라 실패로 보지 않는다.
+      if (kind === 'setup') {
+        const failed = code !== null && code !== 0
+        if (failed) {
+          const ws = get().app?.workspaces.find((w) => w.id === workspaceId)
+          const label = ws?.displayName?.trim() || ws?.name || 'workspace'
+          get().pushToast('error', `Setup failed in “${label}” (exit code ${code}).`, [
+            { label: 'Retry setup', run: () => get().retrySetup(workspaceId) },
+            {
+              label: 'View output',
+              run: () => {
+                void get().selectWorkspace(workspaceId)
+                get().setScriptPanelOpen(workspaceId, true)
+              }
+            }
+          ])
+        }
+      }
     })
   },
 
@@ -529,6 +594,15 @@ export const useStore = create<UIState>((set, get) => ({
     void get().refreshGit(id)
     void get().refreshPr(id)
     void get().refreshScriptStatus(id)
+  },
+
+  ensureHistory: async (workspaceId) => {
+    if (get().loadedTranscripts[workspaceId]) return
+    const history = await window.api.chat.getHistory(workspaceId).catch(() => [])
+    set((s) => ({
+      transcripts: { ...s.transcripts, [workspaceId]: history },
+      loadedTranscripts: { ...s.loadedTranscripts, [workspaceId]: true }
+    }))
   },
 
   refreshGit: async (workspaceId) => {
@@ -669,16 +743,23 @@ export const useStore = create<UIState>((set, get) => ({
   // 터미널 비율 — 패널/터미널 어느 쪽도 사라지지 않도록 0.15~0.85 로 클램프한다.
   setTerminalRatio: (ratio) => set({ terminalRatio: Math.max(0.15, Math.min(0.85, ratio)) }),
 
-  pushToast: (kind, message) => {
+  pushToast: (kind, message, actions) => {
     const id = `toast:${++toastSeq}`
-    set((s) => ({ toasts: [...s.toasts, { id, kind, message }] }))
-    // info/success 는 자동으로 사라지고, error 는 사용자가 닫을 때까지 둔다.
-    if (kind !== 'error') {
+    set((s) => ({ toasts: [...s.toasts, { id, kind, message, actions }] }))
+    // info/success 는 자동으로 사라지고, error 또는 액션이 달린 토스트는 사용자가 닫을 때까지 둔다.
+    if (kind !== 'error' && !actions?.length) {
       setTimeout(() => get().dismissToast(id), 4000)
     }
+    return id
   },
 
   dismissToast: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
+
+  retrySetup: (workspaceId) => {
+    // 실패 상태(Workspace.setupState)는 재실행이 끝나면 메인의 onExit 훅이 success/failed 로 갱신한다.
+    get().setScriptPanelOpen(workspaceId, true)
+    void window.api.script.run(workspaceId, 'setup')
+  },
 
   confirm: (opts) =>
     new Promise<boolean>((resolve) => {

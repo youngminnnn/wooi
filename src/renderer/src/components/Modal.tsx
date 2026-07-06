@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useId, useRef } from 'react'
 import { X } from 'lucide-react'
 import { useStore } from '../store'
 
@@ -15,6 +15,9 @@ export default function Modal({
   footer?: React.ReactNode
   width?: number
 }): React.JSX.Element {
+  const titleId = useId()
+  const panelRef = useRef<HTMLDivElement>(null)
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       // 위에 confirm 대화상자가 떠 있으면 Escape 는 그쪽이 처리한다(하위 모달까지 닫히지 않게).
@@ -24,18 +27,34 @@ export default function Modal({
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
+  // 열릴 때 '한 번만' 첫 포커스 가능한 요소로 포커스를 옮긴다. onClose 가 매 렌더 새 클로저여도
+  // 재실행되지 않도록 마운트 전용 이펙트로 분리한다(리렌더마다 포커스를 뺏는 문제 방지).
+  useEffect(() => {
+    const first = panelRef.current?.querySelector<HTMLElement>(
+      'input, select, textarea, button, [tabindex]:not([tabindex="-1"])'
+    )
+    first?.focus()
+  }, [])
+
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/50" onMouseDown={onClose}>
       <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
         className="no-drag bg-[var(--surface)] border border-[var(--border)] rounded-xl shadow-2xl max-w-[92vw] max-h-[88vh] flex flex-col"
         style={{ width }}
         onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="shrink-0 flex items-center justify-between px-4 h-12 border-b border-[var(--border)]">
-          <h3 className="text-base font-semibold text-neutral-100">{title}</h3>
+          <h3 id={titleId} className="text-base font-semibold text-neutral-100">
+            {title}
+          </h3>
           <button
             onClick={onClose}
-            className="h-7 w-7 grid place-items-center rounded-md text-neutral-400 hover:bg-[var(--surface-2)] hover:text-neutral-100"
+            aria-label="Close dialog"
+            className="h-7 w-7 grid place-items-center rounded-md text-neutral-400 hover:bg-[var(--surface-2)] hover:text-neutral-100 focus-visible:outline-2 focus-visible:outline-[var(--accent-500)]"
           >
             <X size={15} />
           </button>

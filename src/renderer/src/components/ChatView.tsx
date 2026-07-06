@@ -20,6 +20,9 @@ import {
   ShieldQuestion,
   PanelRight,
   Pencil,
+  AlertTriangle,
+  RotateCw,
+  X,
   type LucideIcon
 } from 'lucide-react'
 import { useStore } from '../store'
@@ -29,6 +32,8 @@ import ScriptPanel from './ScriptPanel'
 import PermissionPrompt from './PermissionPrompt'
 import QuestionPrompt from './QuestionPrompt'
 import DiffModal from './DiffModal'
+import PrActionsMenu from './PrActionsMenu'
+import ExportMenu from './ExportMenu'
 import { workspaceDisplayName } from '@shared/types'
 import type { PrState, Workspace } from '@shared/types'
 
@@ -104,8 +109,16 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
     return () => window.removeEventListener('ditto:open-diff', onOpenDiff)
   }, [workspace.id])
   const [editingName, setEditingName] = useState<string | null>(null)
+  // 세션이 에러로 멈췄을 때 노출하는 복구 배너의 로컬 dismiss. 다시 에러 상태로 진입하면 리셋된다.
+  const [errorDismissed, setErrorDismissed] = useState(false)
+  useEffect(() => {
+    if (workspace.status !== 'error') setErrorDismissed(false)
+  }, [workspace.status])
   const git = useStore((s) => s.gitStatus[workspace.id])
   const pr = useStore((s) => s.prStatus[workspace.id])
+  // setup 실패는 메인이 Workspace.setupState 로 영속하므로 workspace prop 에서 바로 읽는다(재시작에도 유지).
+  const setupFailed = workspace.setupState === 'failed'
+  const retrySetup = useStore((s) => s.retrySetup)
   const refreshGit = useStore((s) => s.refreshGit)
   const refreshPr = useStore((s) => s.refreshPr)
   const permissions = useStore((s) => s.permissions)
@@ -187,6 +200,21 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
     await window.api.git.abortMerge(workspace.id)
     pushToast('info', 'Merge aborted.')
     await refresh()
+  }
+
+  // 세션이 에러(네트워크 끊김·에이전트 크래시 등)로 멈췄을 때 마지막 사용자 메시지를 다시 보내
+  // 대화를 이어 간다. 재전송이 세션을 running 으로 되돌려 error 상태를 해제한다.
+  const retryLastMessage = (): void => {
+    // ChatView 는 트랜스크립트를 구독하지 않으므로(재렌더 회피) 클릭 시점에 상태를 임시로 읽는다.
+    const transcript = useStore.getState().transcripts[workspace.id] ?? []
+    const lastUser = [...transcript].reverse().find((i) => i.type === 'user') as
+      { text: string; attachments?: unknown[] } | undefined
+    if (lastUser?.text?.trim()) {
+      void window.api.chat.send(workspace.id, lastUser.text)
+      // 트랜스크립트에는 첨부 원본(base64)이 남지 않아 이미지는 다시 보낼 수 없다 — 조용히 빠뜨리지 말고 알린다.
+      if (lastUser.attachments?.length)
+        pushToast('info', 'Retried with text only — re-attach any images if needed.')
+    } else pushToast('info', 'No previous message to retry — type a message to continue.')
   }
 
   const commitName = (): void => {
@@ -285,6 +313,16 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
                 </button>
               )
             )}
+            {setupFailed && (
+              <button
+                onClick={() => retrySetup(workspace.id)}
+                className="flex items-center gap-1 text-[var(--danger-400)] hover:text-[var(--danger-300)] underline decoration-dotted"
+                title="The setup script failed. Click to re-run it and open the Scripts panel."
+              >
+                <AlertTriangle size={11} />
+                setup failed · retry
+              </button>
+            )}
           </div>
         </div>
 
@@ -309,6 +347,7 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
         >
           <FolderOpen size={15} />
         </HeaderButton>
+        <ExportMenu workspaceId={workspace.id} title={displayName} />
         <HeaderButton title="Archive workspace" onClick={archiveWorkspace} danger>
           <Archive size={15} />
         </HeaderButton>
@@ -323,24 +362,28 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
         {/* PR 상태 + 링크: 헤더 우측 끝. 상태별 색·아이콘으로 한눈에 구분. */}
         {(pr || (git && git.ahead > 0)) && (
           <div className="flex items-center pl-2 ml-0.5 border-l border-[var(--border)]">
+            {pr
+              ? (() => {
+                  const { Icon, iconClass, badgeClass } = PR_STYLE[pr.state]
+                  return (
+                    <button
+                      onClick={() => void window.api.openExternal(pr.url)}
+                      className={
+                        'flex items-center gap-1.5 text-xs px-2 py-1 rounded-md border ' +
+                        badgeClass
+                      }
+                      title={`${pr.label} — open pull request #${pr.number} in browser`}
+                    >
+                      <Icon size={12} className={iconClass} />
+                      <span className="opacity-60">#{pr.number}</span>
+                      <span className="font-medium">{pr.label}</span>
+                      <ExternalLink size={10} className="opacity-50" />
+                    </button>
+                  )
+                })()
+              : null}
             {pr ? (
-              (() => {
-                const { Icon, iconClass, badgeClass } = PR_STYLE[pr.state]
-                return (
-                  <button
-                    onClick={() => void window.api.openExternal(pr.url)}
-                    className={
-                      'flex items-center gap-1.5 text-xs px-2 py-1 rounded-md border ' + badgeClass
-                    }
-                    title={`${pr.label} — open pull request #${pr.number} in browser`}
-                  >
-                    <Icon size={12} className={iconClass} />
-                    <span className="opacity-60">#{pr.number}</span>
-                    <span className="font-medium">{pr.label}</span>
-                    <ExternalLink size={10} className="opacity-50" />
-                  </button>
-                )
-              })()
+              <PrActionsMenu workspaceId={workspace.id} pr={pr} />
             ) : (
               <button
                 onClick={createPr}
@@ -415,6 +458,32 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
                 </kbd>
               </button>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* 세션 에러 복구 배너 — 네트워크 끊김·에이전트 크래시로 멈췄을 때 재시도/닫기 제공 */}
+      {workspace.status === 'error' && !errorDismissed && (
+        <div className="px-4 pb-2">
+          <div className="max-w-3xl mx-auto flex items-center gap-2.5 rounded-lg border border-[var(--danger-500)]/30 bg-[var(--danger-500)]/10 px-3.5 py-2">
+            <AlertTriangle size={15} className="shrink-0 text-[var(--danger-400)]" />
+            <span className="flex-1 text-sm text-[var(--danger-200)]">
+              The session hit an error and stopped. Retry your last message to reconnect.
+            </span>
+            <button
+              onClick={retryLastMessage}
+              className="flex items-center gap-1.5 rounded-md bg-[var(--danger-500)]/90 px-2.5 py-1 text-xs font-medium text-white hover:bg-[var(--danger-500)] focus-visible:outline-2 focus-visible:outline-[var(--danger-300)]"
+            >
+              <RotateCw size={12} />
+              Retry last message
+            </button>
+            <button
+              onClick={() => setErrorDismissed(true)}
+              aria-label="Dismiss"
+              className="shrink-0 grid h-6 w-6 place-items-center rounded text-neutral-400 hover:text-neutral-100"
+            >
+              <X size={13} />
+            </button>
           </div>
         </div>
       )}

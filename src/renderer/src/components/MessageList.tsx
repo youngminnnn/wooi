@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
@@ -11,11 +11,14 @@ import {
   Copy,
   Loader2,
   ArrowDown,
+  ArrowUp,
   ImageIcon,
   Workflow,
   XCircle,
   MessageSquarePlus,
   Terminal as TerminalIcon,
+  Search,
+  X,
   Square
 } from 'lucide-react'
 import { useStore } from '../store'
@@ -38,6 +41,55 @@ export default function MessageList({
   // 트랜스크립트는 비동기로 로드되므로, 내용이 처음 채워질 때 스크롤 위치를 1회 복원한다.
   const restoredRef = useRef(false)
   const [showJump, setShowJump] = useState(false)
+
+  // ── 대화 내 검색(⌘F) ─────────────────────────────────────────────────────
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const [activeIdx, setActiveIdx] = useState(0)
+  const searchInputRef = useRef<HTMLInputElement>(null)
+
+  const matches = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    if (!q) return [] as string[]
+    return items.filter((it) => itemText(it).toLowerCase().includes(q)).map((it) => it.id)
+  }, [items, query])
+
+  // 검색어가 바뀌면 첫 매치부터 다시 훑는다.
+  useEffect(() => setActiveIdx(0), [query])
+
+  // ⌘F / Ctrl+F 로 검색바를 연다(입력창 등 다른 곳에 포커스가 있어도 대화 검색을 우선한다).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f') {
+        e.preventDefault()
+        setSearchOpen(true)
+        setTimeout(() => searchInputRef.current?.select(), 0)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  // 검색어 변경으로 matches 가 줄어들면 setActiveIdx(0) 이펙트가 커밋되기 전 프레임에서 activeIdx 가
+  // 범위를 벗어날 수 있다 — 카운터/하이라이트/스크롤 모두 클램프한 인덱스를 쓴다.
+  const safeIdx = matches.length ? Math.min(activeIdx, matches.length - 1) : 0
+
+  // 활성 매치를 화면 중앙으로 스크롤한다.
+  useEffect(() => {
+    if (!searchOpen || matches.length === 0) return
+    const el = containerRef.current?.querySelector(`[data-item-id="${cssAttr(matches[safeIdx])}"]`)
+    el?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  }, [safeIdx, matches, searchOpen])
+
+  const activeMatchId = searchOpen ? matches[safeIdx] : undefined
+  const stepMatch = (dir: 1 | -1): void => {
+    if (!matches.length) return
+    setActiveIdx((i) => (i + dir + matches.length) % matches.length)
+  }
+  const closeSearch = (): void => {
+    setSearchOpen(false)
+    setQuery('')
+  }
 
   // 이 workspace 에서 결과가 도착한 tool_use id (진행 중 spinner 판별용).
   const resolved = new Set(
@@ -104,16 +156,63 @@ export default function MessageList({
 
   return (
     <div className="relative flex-1 min-h-0">
+      {searchOpen && (
+        <div className="absolute top-2 right-4 z-20 flex items-center gap-1 rounded-lg border border-[var(--border-strong)] bg-[var(--surface)] px-2 py-1 shadow-xl">
+          <Search size={13} className="text-neutral-500 shrink-0" />
+          <input
+            ref={searchInputRef}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') closeSearch()
+              else if (e.key === 'Enter') stepMatch(e.shiftKey ? -1 : 1)
+            }}
+            placeholder="Search conversation"
+            aria-label="Search conversation"
+            className="w-52 bg-transparent text-sm text-neutral-100 placeholder:text-neutral-600 outline-none"
+          />
+          <span className="text-xs tabular-nums text-neutral-500 shrink-0 px-1">
+            {matches.length ? `${safeIdx + 1}/${matches.length}` : '0/0'}
+          </span>
+          <button
+            onClick={() => stepMatch(-1)}
+            disabled={!matches.length}
+            aria-label="Previous match"
+            className="grid h-6 w-6 place-items-center rounded text-neutral-400 hover:text-neutral-100 disabled:opacity-30"
+          >
+            <ArrowUp size={13} />
+          </button>
+          <button
+            onClick={() => stepMatch(1)}
+            disabled={!matches.length}
+            aria-label="Next match"
+            className="grid h-6 w-6 place-items-center rounded text-neutral-400 hover:text-neutral-100 disabled:opacity-30"
+          >
+            <ArrowDown size={13} />
+          </button>
+          <button
+            onClick={closeSearch}
+            aria-label="Close search"
+            className="grid h-6 w-6 place-items-center rounded text-neutral-400 hover:text-neutral-100"
+          >
+            <X size={13} />
+          </button>
+        </div>
+      )}
       <div ref={containerRef} onScroll={onScroll} className="h-full overflow-y-auto">
         <div className="max-w-3xl mx-auto px-5 py-5 space-y-3">
           {items.map((item) => (
-            <Item
+            <div
               key={item.id}
-              item={item}
-              running={running}
-              resolved={resolved}
-              workspaceId={workspaceId}
-            />
+              data-item-id={item.id}
+              className={
+                item.id === activeMatchId
+                  ? 'rounded-xl ring-2 ring-[var(--accent-500)]/70 ring-offset-2 ring-offset-[var(--bg)]'
+                  : undefined
+              }
+            >
+              <Item item={item} running={running} resolved={resolved} workspaceId={workspaceId} />
+            </div>
           ))}
           <div ref={bottomRef} />
         </div>
@@ -546,3 +645,29 @@ function summarizeToolInput(name: string, input: unknown): string {
 }
 
 const EMPTY: ChatItem[] = []
+
+/** 대화 검색 대상 텍스트를 항목 종류별로 뽑아낸다. */
+function itemText(it: ChatItem): string {
+  switch (it.type) {
+    case 'user':
+    case 'assistant':
+    case 'thinking':
+    case 'system':
+    case 'error':
+    case 'tool_result':
+      return it.text
+    case 'bash':
+      return `${it.command}\n${it.output}`
+    case 'tool_use':
+      return it.name
+    case 'task':
+      return `${it.name} ${it.description} ${it.summary ?? ''}`
+    default:
+      return ''
+  }
+}
+
+/** 속성 선택자 값에 들어갈 수 있는 따옴표·역슬래시를 이스케이프한다. */
+function cssAttr(value: string): string {
+  return value.replace(/["\\]/g, '\\$&')
+}

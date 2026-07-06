@@ -15,6 +15,7 @@ import SettingsModal from './components/SettingsModal'
 import NewWorkspaceModal from './components/NewWorkspaceModal'
 import RepoConfigModal from './components/RepoConfigModal'
 import OnboardingModal from './components/OnboardingModal'
+import ShortcutsHelp from './components/ShortcutsHelp'
 import FeatureTour from './components/FeatureTour'
 import GithubGate from './components/GithubGate'
 import Toaster from './components/Toaster'
@@ -46,6 +47,7 @@ export default function App(): React.JSX.Element {
   }, [])
 
   const [showSettings, setShowSettings] = useState(false)
+  const [showShortcuts, setShowShortcuts] = useState(false)
   const [newWsRepoId, setNewWsRepoId] = useState<string | null>(null)
   const [configRepoId, setConfigRepoId] = useState<string | null>(null)
   // 설정의 "Take a tour" 로 여는 기능 투어. 실제 화면 위에서 진행하도록 앱 레벨에서 렌더한다.
@@ -75,11 +77,20 @@ export default function App(): React.JSX.Element {
 
   const anyModalOpen =
     showSettings ||
+    showShortcuts ||
     newWsRepoId !== null ||
     configRepoId !== null ||
     onboardingOpen ||
     githubGateOpen ||
     tourOpen
+
+  // '?' 키(어디서든, 단 입력 중이 아닐 때)로 단축키 도움말을 연다. Overview 등에서
+  // 커스텀 이벤트로도 열 수 있다.
+  useEffect(() => {
+    const onHelp = (): void => setShowShortcuts(true)
+    window.addEventListener('ditto:open-shortcuts', onHelp)
+    return () => window.removeEventListener('ditto:open-shortcuts', onHelp)
+  }, [])
 
   // 키보드: ⇧⇥ 권한 모드 순환, ⌘1–9 워크스페이스 선택, ⌘[ / ⌘] 이전/다음.
   useEffect(() => {
@@ -94,6 +105,18 @@ export default function App(): React.JSX.Element {
         e.preventDefault()
         void window.api.workspace.setPermissionMode(ws.id, nextPermissionMode(ws.permissionMode))
         return
+      }
+
+      // '?' — 단축키 도움말. 입력창/텍스트영역에 포커스가 있으면 무시(글자 입력을 방해하지 않게).
+      if (e.key === '?' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        const el = document.activeElement as HTMLElement | null
+        const typing =
+          !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)
+        if (!typing) {
+          e.preventDefault()
+          setShowShortcuts(true)
+          return
+        }
       }
 
       if (!e.metaKey) return
@@ -258,6 +281,7 @@ export default function App(): React.JSX.Element {
         />
       )}
       {tourOpen && <FeatureTour onDone={() => setTourOpen(false)} />}
+      {showShortcuts && <ShortcutsHelp onClose={() => setShowShortcuts(false)} />}
       {newWsRepoId && (
         <NewWorkspaceModal repoId={newWsRepoId} onClose={() => setNewWsRepoId(null)} />
       )}

@@ -30,6 +30,7 @@ const api: DittoApi = {
     setModel: (workspaceId, model) => ipcRenderer.invoke(IPC.workspaceSetModel, workspaceId, model),
     setEffort: (workspaceId, effort) =>
       ipcRenderer.invoke(IPC.workspaceSetEffort, workspaceId, effort),
+    setMuted: (workspaceId, muted) => ipcRenderer.invoke(IPC.workspaceSetMuted, workspaceId, muted),
     rename: (workspaceId, name) => ipcRenderer.invoke(IPC.workspaceRename, workspaceId, name),
     revealInFinder: (workspaceId) => ipcRenderer.invoke(IPC.workspaceRevealInFinder, workspaceId),
     openInEditor: (workspaceId) => ipcRenderer.invoke(IPC.workspaceOpenInEditor, workspaceId),
@@ -66,6 +67,10 @@ const api: DittoApi = {
   pr: {
     status: (workspaceId) => ipcRenderer.invoke(IPC.prStatus, workspaceId),
     create: (workspaceId) => ipcRenderer.invoke(IPC.prCreate, workspaceId),
+    merge: (workspaceId, method) => ipcRenderer.invoke(IPC.prMerge, workspaceId, method),
+    close: (workspaceId) => ipcRenderer.invoke(IPC.prClose, workspaceId),
+    reopen: (workspaceId) => ipcRenderer.invoke(IPC.prReopen, workspaceId),
+    ready: (workspaceId) => ipcRenderer.invoke(IPC.prReady, workspaceId),
     checks: (workspaceId) => ipcRenderer.invoke(IPC.prChecks, workspaceId)
   },
 

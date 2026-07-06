@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { writeFileAtomic } from './fsutil'
 import { log } from './logger'
 import { CLAUDE_DEFAULT_MODEL } from './agent/backend'
-import { BASE_DEV_PORT, DEFAULT_AGENT_BACKEND } from '@shared/types'
+import { BASE_DEV_PORT, DEFAULT_AGENT_BACKEND, DEFAULT_NOTIFICATION_SETTINGS } from '@shared/types'
 import type { AppState, AppSettings, PermissionMode, Repo, Workspace } from '@shared/types'
 
 // 기본 모델은 백엔드 메타(agent/backend.ts)와 같은 출처를 본다 — 모델 ID 가 한 곳에만 박혀 있도록.
@@ -14,7 +14,7 @@ const DEFAULT_MODEL = CLAUDE_DEFAULT_MODEL
  * 디스크 영속 형식의 현재 스키마 버전. 영속 데이터 모양이 바뀔 때마다 1 올리고,
  * MIGRATIONS 에 직전 버전 → 새 버전 변환 함수를 추가한다.
  */
-const CURRENT_SCHEMA_VERSION = 7
+const CURRENT_SCHEMA_VERSION = 8
 
 /** 더 이상 노출하지 않는 'bypassPermissions' 등 옛 모드는 acceptEdits 로 환산한다. */
 function normalizeMode(mode: unknown): PermissionMode {
@@ -31,6 +31,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   // 기본 다크 — 기존 사용자도 load 의 기본값 병합으로 다크를 유지한다.
   theme: 'dark',
   soundOnComplete: true,
+  notifications: DEFAULT_NOTIFICATION_SETTINGS,
   // 우측 작업 패널은 기본 펼침. 기존 사용자도 load 의 기본값 병합으로 펼침을 유지한다.
   defaultRightPanelOpen: true,
   // CLI 와 동일하게 자동 압축을 기본 켜둔다(autoCompactEnabled). 압축을 트리거하는 임계치는
@@ -143,6 +144,22 @@ const MIGRATIONS: Array<(raw: Record<string, unknown>) => Record<string, unknown
       setupState: w.setupState ?? 'success'
     }))
     return { ...raw, workspaces }
+  },
+  // v7 → v8: 세분화 알림 설정(notifications) + 워크스페이스별 음소거(muted) 도입.
+  // 기존 soundOnComplete 를 존중해 완료 알림의 소리 채널로 옮기고, 나머지는 기본값을 쓴다.
+  (raw) => {
+    const settings = { ...((raw.settings as Partial<AppSettings>) ?? {}) }
+    const sound = settings.soundOnComplete !== false
+    settings.notifications = {
+      completed: { osNotification: true, sound, badge: true },
+      error: { osNotification: true, sound: false, badge: true },
+      needsInput: { osNotification: true, sound: false, badge: true }
+    }
+    const workspaces = ((raw.workspaces as Partial<Workspace>[]) ?? []).map((w) => ({
+      ...w,
+      muted: w.muted ?? false
+    }))
+    return { ...raw, settings, workspaces }
   }
 ]
 

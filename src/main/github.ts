@@ -1,5 +1,12 @@
 import { spawn } from 'node:child_process'
-import type { PrCheck, PrCheckState, PrChecks, PrState, PrStatus } from '@shared/types'
+import type {
+  PrCheck,
+  PrCheckState,
+  PrChecks,
+  PrMergeMethod,
+  PrState,
+  PrStatus
+} from '@shared/types'
 
 /**
  * GitHub PR 상태를 gh CLI 로 조회한다.
@@ -218,6 +225,51 @@ export async function createPrWeb(worktreePath: string): Promise<{ error?: strin
     const msg = stderr.trim().split('\n').filter(Boolean).pop()
     return { error: msg || 'Failed to open the PR creation page.' }
   }
+  return {}
+}
+
+// ── PR 라이프사이클 액션 (merge / close / reopen / ready-for-review) ─────────
+// 전부 worktree 의 현재 브랜치에 연결된 PR 을 대상으로 한다(인자 없는 gh pr 서브커맨드).
+// gh 종료 코드가 0 이 아니면 마지막 stderr 줄을 사용자에게 그대로 보여 준다.
+
+/** gh 명령의 마지막 의미 있는 오류 줄을 추린다. */
+function lastError(stderr: string, fallback: string): string {
+  return stderr.trim().split('\n').filter(Boolean).pop() || fallback
+}
+
+/**
+ * 현재 브랜치의 PR 을 병합한다. method 로 squash/merge/rebase 를 고른다.
+ * 로컬 브랜치는 worktree 에서 체크아웃돼 있어 삭제할 수 없으므로 --delete-branch 는 쓰지 않는다
+ * (병합 후 워크스페이스를 아카이브하면 worktree·브랜치 정리는 그쪽 흐름이 담당한다).
+ */
+export async function mergePr(
+  worktreePath: string,
+  method: PrMergeMethod
+): Promise<{ error?: string }> {
+  const flag = method === 'merge' ? '--merge' : method === 'rebase' ? '--rebase' : '--squash'
+  const { stderr, code } = await runLoginShell(`gh pr merge ${flag}`, worktreePath)
+  if (code !== 0) return { error: lastError(stderr, 'Failed to merge the pull request.') }
+  return {}
+}
+
+/** 현재 브랜치의 PR 을 닫는다(병합하지 않고 종료). */
+export async function closePr(worktreePath: string): Promise<{ error?: string }> {
+  const { stderr, code } = await runLoginShell('gh pr close', worktreePath)
+  if (code !== 0) return { error: lastError(stderr, 'Failed to close the pull request.') }
+  return {}
+}
+
+/** 닫힌 PR 을 다시 연다. */
+export async function reopenPr(worktreePath: string): Promise<{ error?: string }> {
+  const { stderr, code } = await runLoginShell('gh pr reopen', worktreePath)
+  if (code !== 0) return { error: lastError(stderr, 'Failed to reopen the pull request.') }
+  return {}
+}
+
+/** Draft PR 을 리뷰 가능 상태로 전환한다(gh pr ready). */
+export async function markPrReady(worktreePath: string): Promise<{ error?: string }> {
+  const { stderr, code } = await runLoginShell('gh pr ready', worktreePath)
+  if (code !== 0) return { error: lastError(stderr, 'Failed to mark the pull request as ready.') }
   return {}
 }
 
