@@ -13,6 +13,23 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # PR 브랜치 이름이 Conventional Commits prefix 규칙(feat/…, fix/… 등)을 지키는지 검증한다.
+  # 로컬 husky pre-push 훅과 동일한 스크립트를 공유하며, 우회 불가한 최종 게이트다.
+  branch-name:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+
+      - name: Validate branch name
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: node scripts/check-branch-name.mjs "$HEAD_REF"
+
   verify:
     runs-on: ubuntu-latest
     steps:

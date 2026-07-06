@@ -58,7 +58,7 @@ export default tseslint.config(
 
   // 설정 파일 등 빌드 스크립트.
   {
-    files: ['*.config.{js,ts}'],
+    files: ['*.config.{js,ts}', 'scripts/**/*.{js,mjs,cjs,ts}'],
     languageOptions: {
       globals: { ...globals.node }
     }
