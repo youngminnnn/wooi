@@ -163,6 +163,18 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
     void selectWorkspace(null)
   }
 
+  // 우상단 '아카이브(⇧⌘⌫)' 단축키는 확인 다이얼로그와 displayName 이 필요하므로
+  // 전역 핸들러(App.tsx)에서 직접 처리하지 않고 이 이벤트로 신호를 받아 처리한다.
+  useEffect(() => {
+    const onArchive = (e: Event): void => {
+      if ((e as CustomEvent<string>).detail === workspace.id) void archiveWorkspace()
+    }
+    window.addEventListener('ditto:archive-workspace', onArchive)
+    return () => window.removeEventListener('ditto:archive-workspace', onArchive)
+    // archiveWorkspace 는 매 렌더 재생성되므로 최신 displayName 반영 위해 deps 에 포함한다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspace.id, displayName])
+
   const refresh = async (): Promise<void> => {
     setRefreshing(true)
     await Promise.all([refreshGit(workspace.id), refreshPr(workspace.id)])
@@ -329,7 +341,8 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
         <div className="flex-1" />
 
         <HeaderButton
-          title="Scripts"
+          title="Run project scripts"
+          shortcut="⇧⌘S"
           onClick={() => setShowScripts(workspace.id, !showScripts)}
           active={showScripts}
         >
@@ -337,22 +350,25 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
         </HeaderButton>
         <HeaderButton
           title="Open in editor"
+          shortcut="⇧⌘E"
           onClick={() => void window.api.workspace.openInEditor(workspace.id)}
         >
           <Code2 size={15} />
         </HeaderButton>
         <HeaderButton
           title="Reveal in Finder"
+          shortcut="⇧⌘F"
           onClick={() => void window.api.workspace.revealInFinder(workspace.id)}
         >
           <FolderOpen size={15} />
         </HeaderButton>
         <ExportMenu workspaceId={workspace.id} title={displayName} />
-        <HeaderButton title="Archive workspace" onClick={archiveWorkspace} danger>
+        <HeaderButton title="Archive workspace" shortcut="⇧⌘⌫" onClick={archiveWorkspace} danger>
           <Archive size={15} />
         </HeaderButton>
         <HeaderButton
-          title={rightPanelOpen ? 'Hide work panel — ⌘J' : 'Show work panel — ⌘J'}
+          title={rightPanelOpen ? 'Hide work panel' : 'Show work panel'}
+          shortcut="⌘J"
           onClick={toggleRightPanel}
           active={rightPanelOpen}
         >
@@ -514,29 +530,43 @@ function HeaderButton({
   children,
   onClick,
   title,
+  shortcut,
   active,
   danger
 }: {
   children: React.ReactNode
   onClick: () => void
   title: string
+  /** 호버 툴팁에 함께 보여줄 키보드 단축키(예: '⇧⌘E'). */
+  shortcut?: string
   active?: boolean
   danger?: boolean
 }): React.JSX.Element {
   return (
-    <button
-      onClick={onClick}
-      title={title}
-      className={
-        'no-drag h-7 w-7 grid place-items-center rounded-md active:scale-90 ' +
-        (danger
-          ? 'text-neutral-400 hover:bg-[var(--danger-500)]/15 hover:text-[var(--danger-400)]'
-          : active
-            ? 'bg-[var(--surface-2)] text-neutral-100'
-            : 'text-neutral-400 hover:bg-[var(--surface-2)] hover:text-neutral-100')
-      }
-    >
-      {children}
-    </button>
+    <div className="no-drag group relative inline-flex">
+      <button
+        onClick={onClick}
+        aria-label={title}
+        className={
+          'h-7 w-7 grid place-items-center rounded-md active:scale-90 ' +
+          (danger
+            ? 'text-neutral-400 hover:bg-[var(--danger-500)]/15 hover:text-[var(--danger-400)]'
+            : active
+              ? 'bg-[var(--surface-2)] text-neutral-100'
+              : 'text-neutral-400 hover:bg-[var(--surface-2)] hover:text-neutral-100')
+        }
+      >
+        {children}
+      </button>
+      {/* 커스텀 호버 툴팁: 한 줄 설명 + 단축키. native title 은 지연이 있고 스타일이 없어 대체한다. */}
+      <div className="pointer-events-none absolute right-0 top-full z-50 mt-1.5 hidden items-center gap-1.5 whitespace-nowrap rounded-md border border-[var(--border)] bg-[var(--surface-2)] px-2 py-1 text-xs text-neutral-200 shadow-lg group-hover:flex">
+        <span>{title}</span>
+        {shortcut && (
+          <kbd className="rounded bg-black/30 px-1 py-0.5 text-[10px] leading-none font-medium tabular-nums text-neutral-400">
+            {shortcut}
+          </kbd>
+        )}
+      </div>
+    </div>
   )
 }

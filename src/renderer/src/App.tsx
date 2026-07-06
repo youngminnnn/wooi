@@ -162,6 +162,36 @@ export default function App(): React.JSX.Element {
         return
       }
 
+      // 우상단 헤더 도구 단축키 — 현재 선택된 workspace 를 대상으로 한다.
+      // 모두 ⇧⌘ 조합이라 macOS 기본 단축키(⌘S/E/F, ⌘⌫ 등)나 앱 기존 단축키와 충돌하지 않는다.
+      const selId = st.selectedWorkspaceId
+      if (selId && e.shiftKey) {
+        // ⇧⌘S: 스크립트 패널 열기/닫기.
+        if (e.key.toLowerCase() === 's') {
+          e.preventDefault()
+          st.setScriptPanelOpen(selId, !(st.scriptPanelOpen[selId] ?? false))
+          return
+        }
+        // ⇧⌘E: 에디터에서 열기.
+        if (e.key.toLowerCase() === 'e') {
+          e.preventDefault()
+          void window.api.workspace.openInEditor(selId)
+          return
+        }
+        // ⇧⌘F: Finder 에서 보기.
+        if (e.key.toLowerCase() === 'f') {
+          e.preventDefault()
+          void window.api.workspace.revealInFinder(selId)
+          return
+        }
+        // ⇧⌘⌫: workspace 아카이브(ChatView 가 확인 다이얼로그와 함께 처리).
+        if (e.key === 'Backspace' || e.key === 'Delete') {
+          e.preventDefault()
+          window.dispatchEvent(new CustomEvent('ditto:archive-workspace', { detail: selId }))
+          return
+        }
+      }
+
       const list = (st.app?.workspaces ?? []).filter((w) => !w.archived)
       if (!list.length) return
 
