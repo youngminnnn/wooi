@@ -1,14 +1,29 @@
 # Ditto
 
+**Run multiple AI coding agents at once — each in its own git worktree, each shipping its own PR.**
+
 **English** · [한국어](./README.ko.md)
 
-A desktop app for orchestrating multiple **AI coding agents** in parallel, each on
-its own isolated git worktree. Each task runs in its own dedicated worktree + branch
-+ agent session, and every session starts with **an empty input box and no automatic
-prompt** — nothing runs until you send your first message.
+![Ditto demo](docs/demo.gif)
+
+Ditto is a macOS desktop app for orchestrating multiple **AI coding agents** in
+parallel, each on its own isolated git worktree. Each task runs in its own dedicated
+worktree + branch + agent session, and every session starts with **an empty input box
+and no automatic prompt** — nothing runs until you send your first message.
 
 > **Agent support** — Ditto currently drives **Claude Code** (via the Claude
 > Agent SDK). Support for more agents such as **Codex** is planned.
+
+## Why Ditto
+
+- 🧵 **True parallelism** — kick off a refactor, a feature, and a bugfix at the same
+  time, and watch all three from one sidebar.
+- 🔒 **Isolated by default** — a separate worktree + branch per task means agents never
+  collide in a shared working tree.
+- 🚢 **PR-native** — jump straight from an agent's diff to a GitHub PR in one click.
+- 🕵️ **No telemetry** — no servers of its own; transcripts stored locally only.
+
+**[Download the latest release →](https://github.com/youngminnnn/ditto/releases)**
 
 ## Concept
 
