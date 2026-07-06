@@ -3,6 +3,7 @@ import { Check, Loader2, RefreshCw } from 'lucide-react'
 import { useStore } from '../store'
 import { ClaudeMark, GithubMark } from './BrandIcons'
 import ClaudeLoginModal from './ClaudeLoginModal'
+import GithubLoginModal from './GithubLoginModal'
 
 export default function IntegrationsPanel(): React.JSX.Element {
   const auth = useStore((s) => s.authStatus)
@@ -10,6 +11,8 @@ export default function IntegrationsPanel(): React.JSX.Element {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const [claudeLoginOpen, setClaudeLoginOpen] = useState(false)
   const closeClaudeLogin = useCallback(() => setClaudeLoginOpen(false), [])
+  const [githubLoginOpen, setGithubLoginOpen] = useState(false)
+  const closeGithubLogin = useCallback(() => setGithubLoginOpen(false), [])
 
   useEffect(() => {
     void refreshAuth()
@@ -18,9 +21,9 @@ export default function IntegrationsPanel(): React.JSX.Element {
     }
   }, [refreshAuth])
 
-  // GitHub(gh) 로그인/로그아웃은 Terminal 에서 진행되므로, 트리거 후 인증 상태를 폴링해 자동
-  // 반영한다. 상태가 바뀌면(로그인/로그아웃 감지) 즉시 멈추고, 최대 60초까지만 시도한다.
-  // (Claude 로그인은 앱 내부 모달이 직접 refreshAuth 하므로 폴링하지 않는다.)
+  // GitHub 로그아웃은 계정 확인 프롬프트 때문에 Terminal 에서 진행되므로, 트리거 후 인증 상태를
+  // 폴링해 자동 반영한다. 상태가 바뀌면(로그아웃 감지) 즉시 멈추고, 최대 60초까지만 시도한다.
+  // (Claude·GitHub 로그인은 앱 내부 모달이 직접 refreshAuth 하므로 폴링하지 않는다.)
   const pollUntilChange = (): void => {
     if (pollRef.current) clearInterval(pollRef.current)
     const before = JSON.stringify(useStore.getState().authStatus)
@@ -79,10 +82,7 @@ export default function IntegrationsPanel(): React.JSX.Element {
               ? `@${github.account ?? '?'}${github.protocol ? ` · ${github.protocol}` : ''}`
               : 'Sign in to GitHub to continue'
         }
-        onConnect={() => {
-          void window.api.auth.githubLogin()
-          pollUntilChange()
-        }}
+        onConnect={() => setGithubLoginOpen(true)}
         onDisconnect={() => {
           void window.api.auth.githubLogout()
           pollUntilChange()
@@ -91,8 +91,8 @@ export default function IntegrationsPanel(): React.JSX.Element {
 
       <div className="flex items-center justify-between pt-1">
         <p className="text-xs text-neutral-500 leading-relaxed pr-3">
-          Claude sign-in finishes in-app via your browser. GitHub opens your Terminal. Status
-          refreshes automatically — or click Refresh.
+          Claude and GitHub sign-in finish in-app via your browser. Status refreshes automatically —
+          or click Refresh.
         </p>
         <button
           onClick={() => void refreshAuth()}
@@ -103,6 +103,7 @@ export default function IntegrationsPanel(): React.JSX.Element {
       </div>
 
       {claudeLoginOpen && <ClaudeLoginModal onClose={closeClaudeLogin} />}
+      {githubLoginOpen && <GithubLoginModal onClose={closeGithubLogin} />}
     </div>
   )
 }
