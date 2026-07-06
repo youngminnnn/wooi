@@ -80,11 +80,16 @@ const CONTEXT_USAGE_TIMEOUT_MS = 5000
 
 /**
  * query 생성 후 SDK 메시지(system:init 등)가 하나도 안 오는 것을 스톨로 보고 abort 하는 상한.
- * 정상 세션은 보통 수 초 내 첫 메시지가 온다. 옛 세션 resume 재생이나 MCP 서버 기동이 응답 없이
- * 멈추면 첫 메시지가 영영 안 와 UI 가 무한 로딩에 갇히는데, 이 워치독이 abort → (resume 이던
- * 경우) 새 세션으로 1회 폴백, (그래도 스톨이면) 명확한 에러 + idle 로 떨어뜨려 자가 복구한다.
+ * "진짜 무한 스톨"만 걸러내는 최후 백스톱이지, 느린 startup 을 끊는 용도가 아니다.
+ *
+ * 관측/실측 결과: MCP 서버 기동은 비블로킹이라(응답 없는 서버를 붙여도 init 은 수백 ms 에 온다)
+ * 첫 메시지를 막지 않는다. 실제로 오래 걸리는 건 **옛 세션의 콜드 resume 재생**으로, 오래된/큰
+ * 트랜스크립트를 처음 복원할 때 수십 초가 걸리다가 **결국 성공**하는 경우가 있다. 그래서 상한을
+ * 넉넉히(3분) 둬서 "느리지만 되는 resume" 을 죽이지 않는다 — 너무 짧으면 성공 직전의 resume 을
+ * 잘라 정상 동작을 반복 실패로 바꿔버린다. 이 시간을 넘겨도 첫 메시지가 없으면 resume 은 그대로
+ * 두고(맥락 보존) 명확한 에러 + idle 로 떨어뜨려 무한 로딩만 끊는다.
  */
-const FIRST_MESSAGE_TIMEOUT_MS = 60_000
+const FIRST_MESSAGE_TIMEOUT_MS = 180_000
 
 /** p 가 ms 안에 끝나지 않으면 reject 한다(타임아웃 시 호출부가 폴백 경로로 빠지도록). */
 function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
@@ -367,7 +372,7 @@ export class ClaudeSession {
       stalled = true
       log.error(
         `session: no SDK message within ${FIRST_MESSAGE_TIMEOUT_MS}ms — aborting stuck query ` +
-          `(likely stalled MCP startup or resume replay)`
+          `(session restore/resume likely stalled; MCP startup is non-blocking and ruled out)`
       )
       abort.abort()
     }, FIRST_MESSAGE_TIMEOUT_MS)
@@ -491,7 +496,7 @@ export class ClaudeSession {
       id: `error:${Date.now()}`,
       type: 'error',
       text: stalled
-        ? 'The agent stopped responding and the request was cancelled. Please try again. (An MCP server or session restore may be stalling.)'
+        ? 'Restoring the previous session took too long, so the request was cancelled. Please try again — if it keeps happening, use /clear to start this worktree in a fresh session.'
         : clampText(err instanceof Error ? err.message : String(err)),
       ts: Date.now()
     })
