@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { IPC } from '@shared/types'
 import { AgentOrchestrator } from './agent/orchestrator'
 import { ScriptRunner } from './scripts'
+import { getStore } from './store'
 import { TerminalManager } from './terminal'
 import { registerIpc } from './ipc'
 import { log } from './logger'
@@ -38,7 +39,17 @@ function dispatch(channel: string, payload: unknown): void {
 }
 
 const sessions = new AgentOrchestrator(dispatch, () => mainWindow)
-const scripts = new ScriptRunner(dispatch)
+// setup 스크립트가 끝나면 결과를 workspace 에 영속하고 상태를 방송한다 — 재시작 후에도 성공한
+// setup 은 재실행 버튼을 노출하지 않고, 실패했을 때만 Retry 를 보여 주기 위한 것.
+const scripts = new ScriptRunner(dispatch, (workspaceId, kind, code) => {
+  if (kind !== 'setup') return
+  const store = getStore()
+  store.update((s) => {
+    const ws = s.workspaces.find((w) => w.id === workspaceId)
+    if (ws) ws.setupState = code === 0 ? 'success' : 'failed'
+  })
+  dispatch(IPC.evtState, store.getState())
+})
 const terminals = new TerminalManager(dispatch)
 
 /**

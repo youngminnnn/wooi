@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Play, Square, X, ExternalLink, AlertTriangle } from 'lucide-react'
+import { Play, Square, X, ExternalLink, AlertTriangle, Check } from 'lucide-react'
 import { useStore, scriptKey } from '../store'
 import type { ScriptKind } from '@shared/types'
 
@@ -21,6 +21,11 @@ export default function ScriptPanel({
   const command = tab === 'setup' ? repo.setupScript : repo.devScript
   const status = statuses.find((s) => s.kind === tab)
   const running = status?.state === 'running'
+  // setup 은 생성 직후 자동 실행되는 일회성 초기화 스크립트다. 성공한 걸 다시 돌리면 재설치·재시드처럼
+  // 무의미하거나 파괴적일 수 있으므로, 실패했을 때만 재실행을 허용한다. 결과는 workspace 에 영속되어
+  // (ws.setupState) 앱을 재시작해도 유지된다 — 라이브 프로세스 상태가 아니라 이 값으로 판별한다.
+  const setupSucceeded = tab === 'setup' && ws.setupState === 'success'
+  const setupFailed = tab === 'setup' && ws.setupState === 'failed'
   const out = output[scriptKey(workspaceId, tab)] ?? ''
   // 이 workspace 에 배정된 dev 포트. 스크립트에는 $PORT/$DITTO_DEV_PORT 로 주입된다.
   const port = ws.devPort
@@ -52,7 +57,7 @@ export default function ScriptPanel({
                   : 'text-neutral-400 hover:text-neutral-200')
               }
             >
-              {kind === 'dev' ? 'Dev server' : 'Setup'}
+              {kind === 'dev' ? 'Dev' : 'Setup'}
               {isRunning && <span className="h-1.5 w-1.5 rounded-full bg-[var(--info-400)]" />}
             </button>
           )
@@ -60,24 +65,26 @@ export default function ScriptPanel({
 
         <div className="flex-1" />
 
-        {command.trim() ? (
-          running ? (
-            <button
-              onClick={stop}
-              className="flex items-center gap-1 text-sm px-2 py-1 rounded-md text-[var(--danger-400)] hover:bg-[var(--danger-500)]/15"
-            >
-              <Square size={12} fill="currentColor" /> Stop
-            </button>
-          ) : (
-            <button
-              onClick={run}
-              className="flex items-center gap-1 text-sm px-2 py-1 rounded-md text-[var(--success-400)] hover:bg-[var(--success-500)]/15"
-            >
-              <Play size={12} fill="currentColor" /> Run
-            </button>
-          )
-        ) : (
+        {!command.trim() ? (
           <span className="text-xs text-neutral-600">Set a command in repo settings</span>
+        ) : running ? (
+          <button
+            onClick={stop}
+            className="flex items-center gap-1 text-sm px-2 py-1 rounded-md text-[var(--danger-400)] hover:bg-[var(--danger-500)]/15"
+          >
+            <Square size={12} fill="currentColor" /> Stop
+          </button>
+        ) : setupSucceeded ? (
+          <span className="flex items-center gap-1 text-xs text-[var(--success-400)]">
+            <Check size={12} /> Setup complete
+          </span>
+        ) : (
+          <button
+            onClick={run}
+            className="flex items-center gap-1 text-sm px-2 py-1 rounded-md text-[var(--success-400)] hover:bg-[var(--success-500)]/15"
+          >
+            <Play size={12} fill="currentColor" /> {setupFailed ? 'Retry' : 'Run'}
+          </button>
         )}
 
         <button
@@ -118,7 +125,7 @@ export default function ScriptPanel({
           <span>
             Port already in use. Make your dev command bind to{' '}
             <span className="font-mono">$PORT</span>
-            {port != null ? ` (${port})` : ''} so parallel dev servers don&rsquo;t collide — e.g.{' '}
+            {port != null ? ` (${port})` : ''} so parallel dev processes don&rsquo;t collide — e.g.{' '}
             <span className="font-mono">vite --port $PORT</span> or{' '}
             <span className="font-mono">PORT=$PORT npm start</span>.
           </span>

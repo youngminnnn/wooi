@@ -268,6 +268,8 @@ export function registerIpc(ctx: IpcContext): void {
           baseBranch,
           worktreePath,
           devPort,
+          // setup 은 아래에서 곧 실행된다. 종료 시 onExit 훅이 success/failed 로 갱신한다.
+          setupState: 'idle',
           sessionId: null,
           permissionMode: settings.defaultPermissionMode,
           model: null,

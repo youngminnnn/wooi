@@ -53,7 +53,14 @@ function killProcessGroup(proc: ChildProcess, signal: NodeJS.Signals = 'SIGTERM'
 export class ScriptRunner {
   private running = new Map<string, Running>()
 
-  constructor(private dispatch: Dispatch) {}
+  /**
+   * @param onExit 스크립트 프로세스가 종료될 때(정상/비정상 무관) 불린다. setup 결과를
+   *   영속화하는 등 종료 결과를 관찰해야 하는 상위 계층에서 사용한다.
+   */
+  constructor(
+    private dispatch: Dispatch,
+    private onExit?: (workspaceId: string, kind: ScriptKind, code: number | null) => void
+  ) {}
 
   private key(workspaceId: string, kind: ScriptKind): string {
     return `${workspaceId}:${kind}`
@@ -121,6 +128,7 @@ export class ScriptRunner {
         entry.exitCode = code
       }
       this.dispatch(IPC.evtScriptExit, { workspaceId, kind, code })
+      this.onExit?.(workspaceId, kind, code)
     })
   }
 
