@@ -125,7 +125,7 @@ Ditto 는 **설치된 Claude Code 와 `gh` CLI 의 로그인 정보를 그대로
 
 ## 소스로 빌드하기
 
-**macOS (Apple Silicon)** 에서 **Node.js 20**([`.nvmrc`](./.nvmrc))이 필요하다.
+**macOS (Apple Silicon)** 와 **Node.js 20** 이 필요하다(버전은 [`.nvmrc`](./.nvmrc) 참고).
 
 ```bash
 git clone https://github.com/youngminnnn/ditto.git
@@ -147,10 +147,10 @@ npm run dist        # macOS 배포본을 release/ 로 패키징
 
 ## 기여하기
 
-작은 기여라도 언제든 반갑습니다. 개발 환경 설정·브랜치/커밋 규칙·PR 절차는
-**[CONTRIBUTING.md](./CONTRIBUTING.md)** 를 참고해 주세요. [행동 강령](./CODE_OF_CONDUCT.md)을
-함께 지켜 주시면 감사하겠습니다. 보안 이슈는 공개 이슈 대신
-[SECURITY.md](./SECURITY.md) 의 절차를 따라 주세요.
+작은 기여라도 언제든 반갑다. 개발 환경 설정·브랜치/커밋 규칙·PR 절차는
+**[CONTRIBUTING.md](./CONTRIBUTING.md)** 에 정리해 두었으니 참고 바란다.
+[행동 강령](./CODE_OF_CONDUCT.md)도 함께 지켜 주면 좋겠다. 보안 이슈는 공개 이슈 대신
+[SECURITY.md](./SECURITY.md) 의 절차를 따라 달라.
 
 ## 라이선스
 
