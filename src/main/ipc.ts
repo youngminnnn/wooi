@@ -31,7 +31,8 @@ import {
   claudeLoginSubmitCode,
   claudeLoginCancel,
   claudeLogout,
-  githubLogin,
+  githubLoginStart,
+  githubLoginCancel,
   githubLogout
 } from './auth'
 import { IPC, DEFAULT_AGENT_BACKEND } from '@shared/types'
@@ -766,6 +767,9 @@ export function registerIpc(ctx: IpcContext): void {
     ctx.sessions.abortAll()
     broadcastState()
   })
-  ipcMain.handle(IPC.authGithubLogin, () => githubLogin())
+  // GitHub 로그인도 별도 Terminal 창 없이 앱 내부 PTY(디바이스 플로우)로 진행하고,
+  // 진행 상황은 evtGithubLogin 으로 흘려보낸다.
+  ipcMain.handle(IPC.authGithubLoginStart, () => githubLoginStart(dispatch))
+  ipcMain.handle(IPC.authGithubLoginCancel, () => githubLoginCancel())
   ipcMain.handle(IPC.authGithubLogout, () => githubLogout())
 }

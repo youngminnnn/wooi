@@ -12,7 +12,10 @@ import { log } from './logger'
  * Claude 로그인(OAuth 코드 붙여넣기 플로우)은 별도 Terminal.app 을 띄우지 않고
  * 앱 내부 PTY 에서 실행한다 — `claude auth login` 이 브라우저를 열고 출력하는 인증 URL 과
  * "Paste code here" 프롬프트를 가로채, URL 은 모달에 노출하고 사용자가 붙여넣은 코드는
- * 다시 PTY 로 흘려보내 흐름을 앱 안에서 끝낸다. (gh 로그인은 여전히 Terminal 을 쓴다.)
+ * 다시 PTY 로 흘려보내 흐름을 앱 안에서 끝낸다. GitHub 로그인(`gh auth login --web`
+ * 디바이스 플로우)도 같은 방식으로 앱 내부 PTY 에서 실행한다 — one-time 코드·디바이스 URL 을
+ * 모달에 노출하고, gh 가 멈춰 기다리는 프롬프트는 기본값으로 대신 응답한다.
+ * (gh 로그아웃은 계정 확인 프롬프트 때문에 여전히 Terminal 을 쓴다.)
  */
 
 type Dispatch = (channel: string, payload: unknown) => void
@@ -195,8 +198,97 @@ export async function claudeLogout(): Promise<void> {
   if (code !== 0) log.error(`auth: claude logout exited with code ${code}`, stderr.trim())
 }
 
-export function githubLogin(): void {
-  openInTerminal('gh auth login')
+/**
+ * 진행 중인 GitHub 로그인 PTY 세션. Claude 와 마찬가지로 동시에 하나만 둔다.
+ * cancelled 는 사용자가 모달을 닫아 우리가 죽인 종료를 "실패"로 잘못 보고하지 않기 위한 가드.
+ */
+let githubLoginSession: { proc: pty.IPty; cancelled: boolean } | null = null
+
+/**
+ * 앱 내부 PTY 에서 `gh auth login --web`(디바이스 플로우)을 실행한다 — 별도 Terminal 창 없이.
+ * 출력에서 one-time 코드와 디바이스 URL 을 감지해 renderer 에 알리고(awaiting-auth),
+ * gh 가 멈춰 기다리는 프롬프트("Press Enter to open…", "Authenticate Git…")는 기본값으로
+ * 대신 응답해 흐름을 앱 안에서 끝낸다. 사용자는 모달에 표시된 코드를 브라우저에 입력하면 된다.
+ * 프로토콜/호스트는 플래그로 고정해 대화형 질문을 건너뛴다.
+ */
+export function githubLoginStart(dispatch: Dispatch): void {
+  // 이미 떠 있는 세션이 있으면 조용히 정리하고 새로 시작한다(재시도/중복 클릭 대비).
+  githubLoginCancel()
+
+  const shell = process.env.SHELL || '/bin/zsh'
+  let proc: pty.IPty
+  try {
+    proc = pty.spawn(
+      shell,
+      ['-lc', 'gh auth login --hostname github.com --git-protocol https --web'],
+      {
+        name: 'xterm-256color',
+        cols: 80,
+        rows: 30,
+        env: { ...process.env, TERM: 'xterm-256color' } as Record<string, string>
+      }
+    )
+  } catch (err) {
+    log.error('auth: failed to spawn gh login pty', err)
+    dispatch(IPC.evtGithubLogin, { phase: 'done', success: false })
+    return
+  }
+
+  const session = { proc, cancelled: false }
+  githubLoginSession = session
+
+  // PTY 출력을 누적하며 (1) one-time 코드를 최초 1회 모달에 노출하고,
+  // (2) gh 가 멈춰 기다리는 프롬프트를 감지해 기본값(Enter)으로 대신 응답한다.
+  let out = ''
+  let announced = false
+  let pressedEnter = false
+  let confirmedGit = false
+  proc.onData((data) => {
+    out += stripAnsi(data)
+
+    if (!announced) {
+      const code = out.match(/one-time code:\s*([A-Z0-9]{4}-[A-Z0-9]{4})/)?.[1]
+      if (code) {
+        announced = true
+        // gh 는 보통 "…open https://github.com/login/device in your browser…" 형태로 URL 을 찍는다.
+        // 못 잡으면 표준 디바이스 URL 로 폴백한다(브라우저가 안 열렸을 때의 수동 링크).
+        const url = out.match(/https?:\/\/\S*device\S*/)?.[0] ?? 'https://github.com/login/device'
+        dispatch(IPC.evtGithubLogin, { phase: 'awaiting-auth', code, url })
+      }
+    }
+
+    // "Press Enter to open … in your browser" — 브라우저를 열도록 Enter 를 대신 눌러 준다.
+    if (!pressedEnter && /Press Enter to open/.test(out)) {
+      pressedEnter = true
+      session.proc.write('\r')
+    }
+
+    // https 프로토콜에서 뜨는 git 자격증명 설정 확인 — 기본값(Yes)으로 진행한다.
+    if (!confirmedGit && /Authenticate Git with your GitHub credentials/.test(out)) {
+      confirmedGit = true
+      session.proc.write('\r')
+    }
+  })
+
+  proc.onExit(({ exitCode }) => {
+    if (githubLoginSession === session) githubLoginSession = null
+    // 우리가 취소(kill)한 종료는 사용자 의도이므로 실패로 보고하지 않는다.
+    if (session.cancelled) return
+    dispatch(IPC.evtGithubLogin, { phase: 'done', success: exitCode === 0 })
+  })
+}
+
+/** 진행 중인 GitHub 로그인 PTY 를 종료한다(모달 닫기/취소). 종료는 실패로 보고하지 않는다. */
+export function githubLoginCancel(): void {
+  const session = githubLoginSession
+  if (!session) return
+  session.cancelled = true
+  githubLoginSession = null
+  try {
+    session.proc.kill()
+  } catch {
+    // 이미 종료됨.
+  }
 }
 
 export function githubLogout(): void {

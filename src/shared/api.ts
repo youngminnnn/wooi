@@ -12,6 +12,7 @@ import type {
   EffortSetting,
   FileContent,
   GitStatus,
+  GithubLoginEvent,
   ImageAttachment,
   McpAction,
   McpServerInfo,
@@ -189,7 +190,10 @@ export interface DittoApi {
     /** 진행 중인 로그인 PTY 를 취소·종료한다(모달 닫기). */
     claudeLoginCancel(): Promise<void>
     claudeLogout(): Promise<void>
-    githubLogin(): Promise<void>
+    /** 앱 내부 PTY 에서 `gh auth login --web` 을 시작한다(별도 Terminal 창 없이). 진행은 onGithubLogin 으로. */
+    githubLoginStart(): Promise<void>
+    /** 진행 중인 GitHub 로그인 PTY 를 취소·종료한다(모달 닫기). */
+    githubLoginCancel(): Promise<void>
     githubLogout(): Promise<void>
   }
 
@@ -211,4 +215,6 @@ export interface DittoApi {
   onWindowBlur(cb: () => void): () => void
   /** 앱 내부 Claude 로그인 진행 이벤트(인증 URL / 코드 입력 요청 / 완료) 구독. */
   onClaudeLogin(cb: (e: ClaudeLoginEvent) => void): () => void
+  /** 앱 내부 GitHub 로그인 진행 이벤트(one-time 코드·디바이스 URL / 완료) 구독. */
+  onGithubLogin(cb: (e: GithubLoginEvent) => void): () => void
 }

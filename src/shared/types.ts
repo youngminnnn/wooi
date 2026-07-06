@@ -448,7 +448,10 @@ export const IPC = {
   /** 진행 중인 로그인 PTY 를 취소·종료한다(모달 닫기). */
   authClaudeLoginCancel: 'auth:claudeLoginCancel',
   authClaudeLogout: 'auth:claudeLogout',
-  authGithubLogin: 'auth:githubLogin',
+  /** 앱 내부 PTY 에서 `gh auth login --web` 을 시작한다(별도 Terminal 창 없이). */
+  authGithubLoginStart: 'auth:githubLoginStart',
+  /** 진행 중인 GitHub 로그인 PTY 를 취소·종료한다(모달 닫기). */
+  authGithubLoginCancel: 'auth:githubLoginCancel',
   authGithubLogout: 'auth:githubLogout',
   // 슬래시 명령 목록 (입력창 자동완성)
   commandsList: 'commands:list',
@@ -496,7 +499,9 @@ export const IPC = {
   /** 터미널 PTY 종료. */
   evtTerminalExit: 'evt:terminalExit',
   /** 앱 내부 Claude 로그인 진행 이벤트(인증 URL 노출 / 코드 입력 요청 / 완료). */
-  evtClaudeLogin: 'evt:claudeLogin'
+  evtClaudeLogin: 'evt:claudeLogin',
+  /** 앱 내부 GitHub 로그인 진행 이벤트(one-time 코드·디바이스 URL 노출 / 완료). */
+  evtGithubLogin: 'evt:githubLogin'
 } as const
 
 // ── IPC 페이로드 타입 ────────────────────────────────────────────────────
@@ -796,6 +801,15 @@ export interface TerminalExitEvent {
  */
 export type ClaudeLoginEvent =
   { phase: 'awaiting-code'; url?: string; reprompt?: boolean } | { phase: 'done'; success: boolean }
+
+/**
+ * 앱 내부 GitHub 로그인(디바이스 플로우) 진행 이벤트.
+ * - awaiting-auth: `gh auth login --web` 이 one-time 코드를 띄우고 브라우저 인증을 기다린다.
+ *   code 는 사용자가 브라우저의 디바이스 페이지에 입력할 코드, url 은 그 페이지 링크(폴백).
+ * - done: 로그인 프로세스가 종료됨. success 면 로그인 성공.
+ */
+export type GithubLoginEvent =
+  { phase: 'awaiting-auth'; code: string; url?: string } | { phase: 'done'; success: boolean }
 
 export interface ChatEnvelope {
   workspaceId: string
