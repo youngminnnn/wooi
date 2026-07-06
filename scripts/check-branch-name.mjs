@@ -18,7 +18,7 @@ const TYPES = [
   'ci',
   'chore',
   'revert',
-  'release',
+  'release'
 ]
 
 // 규칙에서 제외하는 보호/특수 브랜치.
@@ -55,7 +55,7 @@ console.error(
     '',
     '  현재 브랜치 이름을 바꾸려면:',
     `    git branch -m ${branch} feat/${suggestion}`,
-    '',
+    ''
   ].join('\n')
 )
 
