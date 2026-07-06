@@ -14,6 +14,7 @@ export const MODEL_OPTIONS: ModelOption[] = [
   { id: 'claude-opus-4-8', label: 'Opus 4.8' },
   { id: 'claude-opus-4-7[1m]', label: 'Opus 4.7 (1M context)' },
   { id: 'claude-opus-4-7', label: 'Opus 4.7' },
+  { id: 'claude-sonnet-5', label: 'Sonnet 5' },
   { id: 'claude-sonnet-4-6', label: 'Sonnet 4.6' },
   { id: 'claude-haiku-4-5', label: 'Haiku 4.5' }
 ]
