@@ -2,7 +2,7 @@ import { app } from 'electron'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { basename, join } from 'node:path'
-import { readFileSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, statSync } from 'node:fs'
 import type {
   FileDiff,
   FileDiffStatus,
@@ -96,6 +96,30 @@ export function worktreePathFor(repoPath: string, branch: string): string {
   const repoName = basename(repoPath)
   const slug = sanitizeBranch(branch).replace(/\//g, '-')
   return join(app.getPath('home'), 'ditto', 'workspaces', repoName, slug)
+}
+
+/** 로컬 브랜치가 이미 존재하는지 확인. */
+async function localBranchExists(repoPath: string, branch: string): Promise<boolean> {
+  const r = await gitTry(repoPath, ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`])
+  return r.ok
+}
+
+/**
+ * 원하는 브랜치 이름이 기존 로컬 브랜치나 이미 존재하는 worktree 디렉토리와 충돌하면
+ * `-2`, `-3` … 처럼 접미사를 붙여 충돌하지 않는 브랜치/경로 쌍을 반환한다.
+ * 새 worktree 생성 시 이름 충돌로 `git worktree add` 가 실패하는 것을 막는다.
+ */
+export async function resolveUniqueWorktree(
+  repoPath: string,
+  desiredBranch: string
+): Promise<{ branch: string; worktreePath: string }> {
+  const base = sanitizeBranch(desiredBranch)
+  for (let n = 1; ; n++) {
+    const candidate = n === 1 ? base : `${base}-${n}`
+    const worktreePath = worktreePathFor(repoPath, candidate)
+    const taken = existsSync(worktreePath) || (await localBranchExists(repoPath, candidate))
+    if (!taken) return { branch: candidate, worktreePath }
+  }
 }
 
 /** origin 에서 fetch 한다 (origin 미설정/오프라인 등은 조용히 무시). */

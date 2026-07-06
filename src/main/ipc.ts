@@ -18,9 +18,8 @@ import {
   listBranches,
   removeWorktree,
   repoNameFromPath,
-  sanitizeBranch,
-  updateFromBase,
-  worktreePathFor
+  resolveUniqueWorktree,
+  updateFromBase
 } from './git'
 import { generateWorkspaceName } from './names'
 import { findFreePort, waitForPortFree } from './net'
@@ -238,8 +237,8 @@ export function registerIpc(ctx: IpcContext): void {
       }
       // 항상 origin 기본 브랜치(origin/<defaultBranch>)에서 분기한다 — args.baseBranch 는 무시.
       const baseBranch = repo.defaultBranch
-      const branch = sanitizeBranch(rawName)
-      const worktreePath = worktreePathFor(repo.path, branch)
+      // 기존 브랜치/worktree 디렉토리와 충돌하면 접미사(-2, -3 …)를 붙여 고유 이름을 만든다.
+      const { branch, worktreePath } = await resolveUniqueWorktree(repo.path, rawName)
 
       try {
         await addWorktree(repo.path, branch, baseBranch, worktreePath)
