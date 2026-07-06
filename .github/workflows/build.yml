@@ -23,11 +23,15 @@ jobs:
 
       - run: npm ci
 
-      - name: Build unsigned dmg + zip
-        env:
-          # 서명 인증서가 없으므로 자동 탐색을 끄고 미서명으로 빌드한다.
-          # 인증서 준비 후에는 CSC_LINK/CSC_KEY_PASSWORD 와 공증 자격증명을 secrets 로 주입한다.
-          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - name: Build ad-hoc signed dmg + zip
+        # 서명은 package.json build.mac.identity: "-" (ad-hoc)이 담당한다.
+        # CI 러너의 keychain 에는 Apple 인증서가 없어 자동 탐색이 실제 인증서를
+        # 잘못 집을 일이 없고, CSC_IDENTITY_AUTO_DISCOVERY=false 는 오히려 서명을
+        # 통째로 건너뛰어 ad-hoc 서명까지 무력화할 수 있으므로 지정하지 않는다.
+        # ad-hoc 서명은 arm64에서 "손상됨" 대신 "확인되지 않은 개발자" 경고로 완화돼
+        # 사용자가 우클릭 → 열기 / "확인 없이 열기"로 터미널 없이 우회할 수 있다.
+        # 인증서 준비 후에는 identity 를 실제 Developer ID 로 바꾸고
+        # CSC_LINK/CSC_KEY_PASSWORD 와 공증 자격증명을 secrets 로 주입한다.
         run: npm run dist
 
       - uses: actions/upload-artifact@v7

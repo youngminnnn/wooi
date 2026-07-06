@@ -54,7 +54,8 @@
         "dmg",
         "zip"
       ],
-      "icon": "build/icon.png"
+      "icon": "build/icon.png",
+      "identity": "-"
     }
   },
   "devDependencies": {
