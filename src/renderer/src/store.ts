@@ -247,6 +247,13 @@ export const useStore = create<UIState>((set, get) => ({
       }, STATUS_POLL_INTERVAL_MS)
     }
 
+    // git 상태와 마찬가지로, 최초 진입 시 모든 활성 workspace 의 PR 상태도 미리 갱신한다.
+    // 그러지 않으면 prStatus 가 비어 있어, 해당 세션에 직접 들어가 selectWorkspace 의
+    // refreshPr 가 실행되기 전까지 사이드바에 PR 칩이 뜨지 않는다.
+    for (const w of app.workspaces) {
+      if (!w.archived) void get().refreshPr(w.id)
+    }
+
     // 패널을 토글할 때마다(키보드 ⌘J·버튼·Composer 등 경로 무관) 마지막 상태를 기억해 둔다.
     useStore.subscribe((state, prev) => {
       if (state.rightPanelOpen !== prev.rightPanelOpen) rememberRightPanel(state.rightPanelOpen)
