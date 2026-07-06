@@ -94,7 +94,11 @@ export default function GithubLoginModal({ onClose }: { onClose: () => void }): 
               >
                 <span className="font-mono text-xl tracking-[0.3em] text-neutral-100">{code}</span>
                 <span className="flex items-center gap-1.5 text-xs text-neutral-400">
-                  {copied ? <Check size={13} className="text-[var(--success-400)]" /> : <Copy size={13} />}
+                  {copied ? (
+                    <Check size={13} className="text-[var(--success-400)]" />
+                  ) : (
+                    <Copy size={13} />
+                  )}
                   {copied ? 'Copied' : 'Copy'}
                 </span>
               </button>
