@@ -147,10 +147,10 @@ npm run dist        # macOS 배포본을 release/ 로 패키징
 
 ## 기여하기
 
-기여를 환영한다! 개발 환경 설정·브랜치/커밋 규칙·PR 절차는
-**[CONTRIBUTING.md](./CONTRIBUTING.md)** 를 참고하고, [행동 강령](./CODE_OF_CONDUCT.md)을
-지켜 주세요. 보안 이슈는 공개 이슈로 올리지 말고 [SECURITY.md](./SECURITY.md) 의 절차를
-따라 주세요.
+작은 기여라도 언제든 반갑습니다. 개발 환경 설정·브랜치/커밋 규칙·PR 절차는
+**[CONTRIBUTING.md](./CONTRIBUTING.md)** 를 참고해 주세요. [행동 강령](./CODE_OF_CONDUCT.md)을
+함께 지켜 주시면 감사하겠습니다. 보안 이슈는 공개 이슈 대신
+[SECURITY.md](./SECURITY.md) 의 절차를 따라 주세요.
 
 ## 라이선스
 
