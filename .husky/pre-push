@@ -1,0 +1,3 @@
+# 파일 단위로 스코프하기 어려운 typecheck 를 push 직전에 한 번만 돌린다.
+# CI 의 typecheck 게이트를 사전 차단한다. (무거운 build, 느린 test 는 CI 에 위임)
+npm run typecheck
