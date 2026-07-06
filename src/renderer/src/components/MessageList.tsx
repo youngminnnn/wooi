@@ -452,7 +452,7 @@ function ResultFooter({
 }): React.JSX.Element {
   const text =
     item.subtype === 'success'
-      ? `${item.numTurns} turns · ${(item.durationMs / 1000).toFixed(1)}s · $${item.costUsd.toFixed(4)}`
+      ? `${item.numTurns} turns · ${(item.durationMs / 1000).toFixed(1)}s`
       : `${item.subtype} · ${item.numTurns} turns`
   return (
     <div

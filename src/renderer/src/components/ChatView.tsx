@@ -23,7 +23,6 @@ import {
   type LucideIcon
 } from 'lucide-react'
 import { useStore } from '../store'
-import { formatCost } from '../lib/format'
 import MessageList from './MessageList'
 import Composer from './Composer'
 import ScriptPanel from './ScriptPanel'
@@ -31,7 +30,7 @@ import PermissionPrompt from './PermissionPrompt'
 import QuestionPrompt from './QuestionPrompt'
 import DiffModal from './DiffModal'
 import { workspaceDisplayName } from '@shared/types'
-import type { ChatItem, PrState, Workspace } from '@shared/types'
+import type { PrState, Workspace } from '@shared/types'
 
 /**
  * PR 상태별 아이콘 + 색. Tailwind v4 는 동적으로 조합한 클래스명을 스캔하지 못하므로
@@ -111,7 +110,6 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
   const refreshPr = useStore((s) => s.refreshPr)
   const permissions = useStore((s) => s.permissions)
   const pending = permissions.find((p) => p.workspaceId === workspace.id) ?? null
-  const transcript = useStore((s) => s.transcripts[workspace.id]) ?? EMPTY
   const confirm = useStore((s) => s.confirm)
   const pushToast = useStore((s) => s.pushToast)
 
@@ -135,10 +133,6 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
     if (ok) approveAllPermissions()
   }
 
-  const sessionCost = transcript.reduce(
-    (sum, it) => sum + (it.type === 'result' ? it.costUsd : 0),
-    0
-  )
   const running = workspace.status === 'running'
 
   // 표시 이름: 사용자 override → PR 제목 → worktree 이름 순으로 결정한다.
@@ -290,11 +284,6 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
                   Update from base
                 </button>
               )
-            )}
-            {sessionCost > 0 && (
-              <span className="text-neutral-600" title="Total cost this session">
-                · {formatCost(sessionCost)}
-              </span>
             )}
           </div>
         </div>
@@ -482,5 +471,3 @@ function HeaderButton({
     </button>
   )
 }
-
-const EMPTY: ChatItem[] = []
