@@ -119,6 +119,13 @@ export interface Workspace {
    * 레거시 workspace(배정 전)는 null 일 수 있으며, dev 실행 시 lazy 하게 배정·영속된다.
    */
   devPort: number | null
+  /**
+   * setup 스크립트의 마지막 실행 결과(영속). setup 은 생성 직후 자동 실행되는 일회성 초기화라,
+   * 이미 성공한 걸 다시 돌리면 재설치·재시드처럼 무의미하거나 파괴적일 수 있다. 그래서 결과를
+   * 디스크에 남겨, 앱을 재시작해도 성공한 setup 은 재실행 버튼을 노출하지 않는다(실패했을 때만 Retry).
+   * 'idle' = 아직 완료된 실행 없음, 'success' = 마지막 실행이 exit 0, 'failed' = 그 외로 종료.
+   */
+  setupState: SetupState
   /** resume 용 Claude 세션 ID. 아직 세션을 시작하지 않았으면 null. */
   sessionId: string | null
   permissionMode: PermissionMode
@@ -320,6 +327,9 @@ export type PermissionDecision =
 // ── 스크립트 실행 (setup / dev) ──────────────────────────────────────────
 
 export type ScriptKind = 'setup' | 'dev'
+
+/** setup 스크립트의 마지막 실행 결과(Workspace.setupState 에 영속). */
+export type SetupState = 'idle' | 'success' | 'failed'
 
 export interface ScriptOutputEvent {
   workspaceId: string

@@ -14,7 +14,7 @@ const DEFAULT_MODEL = CLAUDE_DEFAULT_MODEL
  * 디스크 영속 형식의 현재 스키마 버전. 영속 데이터 모양이 바뀔 때마다 1 올리고,
  * MIGRATIONS 에 직전 버전 → 새 버전 변환 함수를 추가한다.
  */
-const CURRENT_SCHEMA_VERSION = 6
+const CURRENT_SCHEMA_VERSION = 7
 
 /** 더 이상 노출하지 않는 'bypassPermissions' 등 옛 모드는 acceptEdits 로 환산한다. */
 function normalizeMode(mode: unknown): PermissionMode {
@@ -133,6 +133,16 @@ const MIGRATIONS: Array<(raw: Record<string, unknown>) => Record<string, unknown
     const settings = { ...((raw.settings as Partial<AppSettings>) ?? {}) }
     settings.onboarded = false
     return { ...raw, settings }
+  },
+  // v6 → v7: setup 스크립트 실행 결과(setupState) 영속화. 기존 workspace 는 이미 생성 시 setup 을
+  // 마치고 사용 중이므로 'success' 로 본다 — 재실행 버튼을 새로 노출해 파괴적 재-setup 을 유도하지
+  // 않도록. 신규 workspace 는 생성 시 'idle' 로 시작해 setup 종료 시점에 success/failed 로 갱신된다.
+  (raw) => {
+    const workspaces = ((raw.workspaces as Partial<Workspace>[]) ?? []).map((w) => ({
+      ...w,
+      setupState: w.setupState ?? 'success'
+    }))
+    return { ...raw, workspaces }
   }
 ]
 
