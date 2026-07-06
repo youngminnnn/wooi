@@ -93,6 +93,10 @@ const PR_STYLE: Record<PrState, { Icon: LucideIcon; iconClass: string; badgeClas
 export default function ChatView({ workspace }: { workspace: Workspace }): React.JSX.Element {
   const showScripts = useStore((s) => s.scriptPanelOpen[workspace.id] ?? false)
   const setShowScripts = useStore((s) => s.setScriptPanelOpen)
+  // dev 스크립트 실행 여부 — 스크립트 버튼에 실행 중 점을 띄워 패널을 닫아도 알 수 있게 한다.
+  const devRunning = useStore((s) =>
+    (s.scriptStatus[workspace.id] ?? []).some((x) => x.kind === 'dev' && x.state === 'running')
+  )
   const rightPanelOpen = useStore((s) => s.rightPanelOpen)
   const toggleRightPanel = useStore((s) => s.toggleRightPanel)
   const [showDiff, setShowDiff] = useState(false)
@@ -341,10 +345,11 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
         <div className="flex-1" />
 
         <HeaderButton
-          title="Run project scripts"
+          title={devRunning ? 'Scripts — dev running' : 'Run project scripts'}
           shortcut="⇧⌘S"
           onClick={() => setShowScripts(workspace.id, !showScripts)}
           active={showScripts}
+          indicator={devRunning}
         >
           <Terminal size={15} />
         </HeaderButton>
@@ -532,7 +537,8 @@ function HeaderButton({
   title,
   shortcut,
   active,
-  danger
+  danger,
+  indicator
 }: {
   children: React.ReactNode
   onClick: () => void
@@ -541,6 +547,8 @@ function HeaderButton({
   shortcut?: string
   active?: boolean
   danger?: boolean
+  /** 우상단에 실행 중 표시 점을 띄운다(예: dev 스크립트 실행 중). */
+  indicator?: boolean
 }): React.JSX.Element {
   return (
     <div className="no-drag group relative inline-flex">
@@ -558,6 +566,10 @@ function HeaderButton({
       >
         {children}
       </button>
+      {/* 실행 중 표시: 패널을 닫아도 dev 스크립트가 돌고 있음을 알 수 있게 우상단에 점을 띄운다. */}
+      {indicator && (
+        <span className="pointer-events-none absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-[var(--info-400)] ring-2 ring-[var(--bg)]" />
+      )}
       {/* 커스텀 호버 툴팁: 한 줄 설명 + 단축키. native title 은 지연이 있고 스타일이 없어 대체한다. */}
       <div className="pointer-events-none absolute right-0 top-full z-50 mt-1.5 hidden items-center gap-1.5 whitespace-nowrap rounded-md border border-[var(--border)] bg-[var(--surface-2)] px-2 py-1 text-xs text-neutral-200 shadow-lg group-hover:flex">
         <span>{title}</span>

@@ -214,8 +214,13 @@ export default function App(): React.JSX.Element {
         const devRunning = (st.scriptStatus[selId] ?? []).some(
           (s) => s.kind === 'dev' && s.state === 'running'
         )
-        const run = devRunning ? window.api.script.stop : window.api.script.run
-        void run(selId, 'dev').then(() => st.refreshScriptStatus(selId))
+        if (devRunning) {
+          void window.api.script.stop(selId, 'dev').then(() => st.refreshScriptStatus(selId))
+        } else {
+          // 실행 시 스크립트 패널(dev 탭)을 열어 로그·상태를 바로 볼 수 있게 한다.
+          st.setScriptPanelOpen(selId, true)
+          void window.api.script.run(selId, 'dev').then(() => st.refreshScriptStatus(selId))
+        }
         return
       }
 
