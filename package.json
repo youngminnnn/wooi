@@ -24,7 +24,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "dist": "electron-vite build && electron-builder --mac --publish never",
-    "postinstall": "chmod +x node_modules/node-pty/prebuilds/*/spawn-helper 2>/dev/null || true"
+    "postinstall": "node node_modules/electron/install.js; chmod +x node_modules/node-pty/prebuilds/*/spawn-helper 2>/dev/null || true"
   },
   "build": {
     "appId": "com.ditto.app",
