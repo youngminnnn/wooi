@@ -7,7 +7,18 @@ import { PERMISSION_ORDER, PERMISSION_LABELS, PERMISSION_DESCRIPTIONS } from '..
 import { MODEL_OPTIONS } from '../lib/models'
 import { EFFORT_OPTIONS } from '../lib/effort'
 import { applyTheme } from '../lib/theme'
-import type { EffortSetting, PermissionMode, ThemePreference } from '@shared/types'
+import { NOTIFICATION_CHANNEL_LABELS, NOTIFICATION_EVENT_LABELS } from '@shared/types'
+import type {
+  EffortSetting,
+  NotificationChannel,
+  NotificationEvent,
+  NotificationSettings,
+  PermissionMode,
+  ThemePreference
+} from '@shared/types'
+
+const NOTIFICATION_EVENTS: NotificationEvent[] = ['completed', 'error', 'needsInput']
+const NOTIFICATION_CHANNELS: NotificationChannel[] = ['osNotification', 'sound', 'badge']
 
 const THEME_OPTIONS: { value: ThemePreference; label: string }[] = [
   { value: 'system', label: 'System' },
@@ -25,8 +36,14 @@ export default function SettingsModal({
   const settings = useStore((s) => s.app!.settings)
   const [mode, setMode] = useState<PermissionMode>(settings.defaultPermissionMode)
   const [manualWorkspaceSetup, setManualWorkspaceSetup] = useState(settings.manualWorkspaceSetup)
-  const [soundOnComplete, setSoundOnComplete] = useState(settings.soundOnComplete)
+  const [notifications, setNotifications] = useState<NotificationSettings>(settings.notifications)
   const [autoCompact, setAutoCompact] = useState(settings.autoCompact)
+
+  const toggleNotification = (event: NotificationEvent, channel: NotificationChannel): void =>
+    setNotifications((n) => ({
+      ...n,
+      [event]: { ...n[event], [channel]: !n[event][channel] }
+    }))
   const [defaultRightPanelOpen, setDefaultRightPanelOpen] = useState(settings.defaultRightPanelOpen)
   const [model, setModel] = useState(settings.model ?? MODEL_OPTIONS[0].id)
   const [effort, setEffort] = useState<EffortSetting | null>(settings.effort)
@@ -46,7 +63,9 @@ export default function SettingsModal({
     await window.api.settings.update({
       defaultPermissionMode: mode,
       manualWorkspaceSetup,
-      soundOnComplete,
+      notifications,
+      // 하위호환: 레거시 soundOnComplete 를 완료 소리 채널과 동기화해 둔다.
+      soundOnComplete: notifications.completed.sound,
       autoCompact,
       defaultRightPanelOpen,
       model,
@@ -153,18 +172,50 @@ export default function SettingsModal({
               </span>
             </span>
           </label>
+        </Section>
 
-          <label className="flex items-start gap-2.5 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={soundOnComplete}
-              onChange={(e) => setSoundOnComplete(e.target.checked)}
-              className="accent-blue-600 h-3.5 w-3.5 mt-0.5"
-            />
-            <span className="text-sm text-neutral-300">
-              Play a sound when a session response completes
-            </span>
-          </label>
+        <Section title="Notifications">
+          <p className="text-xs text-neutral-500 -mt-1">
+            Choose how each event notifies you. OS notifications only appear when the window is in
+            the background. Mute individual workspaces from the sidebar.
+          </p>
+          <div className="overflow-hidden rounded-lg border border-[var(--border)]">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-[var(--border)] bg-[var(--surface-2)]/50">
+                  <th className="px-3 py-2 text-left font-medium text-neutral-400">Event</th>
+                  {NOTIFICATION_CHANNELS.map((c) => (
+                    <th
+                      key={c}
+                      className="px-2 py-2 text-center font-medium text-neutral-400 whitespace-nowrap"
+                    >
+                      {NOTIFICATION_CHANNEL_LABELS[c]}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {NOTIFICATION_EVENTS.map((event) => (
+                  <tr key={event} className="border-b border-[var(--border)] last:border-0">
+                    <td className="px-3 py-2 text-neutral-300">
+                      {NOTIFICATION_EVENT_LABELS[event]}
+                    </td>
+                    {NOTIFICATION_CHANNELS.map((channel) => (
+                      <td key={channel} className="px-2 py-2 text-center">
+                        <input
+                          type="checkbox"
+                          aria-label={`${NOTIFICATION_EVENT_LABELS[event]} — ${NOTIFICATION_CHANNEL_LABELS[channel]}`}
+                          checked={notifications[event][channel]}
+                          onChange={() => toggleNotification(event, channel)}
+                          className="accent-blue-600 h-3.5 w-3.5 align-middle cursor-pointer"
+                        />
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </Section>
 
         <Section title="Agent">

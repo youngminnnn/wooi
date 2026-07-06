@@ -10,7 +10,10 @@ import {
   Trash2,
   ChevronRight,
   ShieldQuestion,
-  Pencil
+  Pencil,
+  Bell,
+  BellOff,
+  AlertTriangle
 } from 'lucide-react'
 import { useStore } from '../store'
 import { workspaceDisplayName } from '@shared/types'
@@ -340,6 +343,24 @@ function WorkspaceRow({
           title="Completed response — unread"
         />
       )}
+      {/* 음소거 상태는 호버하지 않아도 보이도록 상시 표시(호버 시 토글 버튼으로 대체된다). */}
+      {workspace.muted && (
+        <BellOff
+          size={12}
+          className="shrink-0 text-neutral-600 group-hover/ws:hidden"
+          aria-label="Notifications muted"
+        />
+      )}
+      <button
+        onClick={(e) => {
+          e.stopPropagation()
+          void window.api.workspace.setMuted(workspace.id, !workspace.muted)
+        }}
+        className="opacity-0 group-hover/ws:opacity-100 h-5 w-5 grid place-items-center rounded text-neutral-500 hover:bg-[var(--surface-2)] hover:text-neutral-200 shrink-0"
+        title={workspace.muted ? 'Unmute notifications' : 'Mute notifications'}
+      >
+        {workspace.muted ? <BellOff size={13} /> : <Bell size={13} />}
+      </button>
       <button
         onClick={archive}
         className="opacity-0 group-hover/ws:opacity-100 h-5 w-5 grid place-items-center rounded text-neutral-500 hover:bg-[var(--surface-2)] hover:text-neutral-200 shrink-0"
@@ -521,13 +542,12 @@ function StatusDot({
       </span>
     )
   }
-  // 에러는 PR 상태보다 우선해 빨갛게 알린다.
+  // 에러는 PR 상태보다 우선해 알린다. 색만으로 idle 과 구분되지 않도록 경고 아이콘을 쓴다.
   if (status === 'error') {
     return (
-      <span
-        title="Last turn ended with an error"
-        className="h-2 w-2 rounded-full shrink-0 bg-[var(--danger-500)]"
-      />
+      <span title="Last turn ended with an error" className="shrink-0 grid place-items-center">
+        <AlertTriangle size={12} className="text-[var(--danger-400)]" aria-label="Error" />
+      </span>
     )
   }
   // idle 이면서 PR 이 있으면 점 색으로 PR 상태를 한눈에 보여 준다.

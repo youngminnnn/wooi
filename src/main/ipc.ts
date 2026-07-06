@@ -24,7 +24,16 @@ import {
 } from './git'
 import { generateWorkspaceName } from './names'
 import { findFreePort, waitForPortFree } from './net'
-import { getPrStatus, getPrChecks, createPrWeb, fetchOwnerAvatarDataUrl } from './github'
+import {
+  getPrStatus,
+  getPrChecks,
+  createPrWeb,
+  mergePr,
+  closePr,
+  reopenPr,
+  markPrReady,
+  fetchOwnerAvatarDataUrl
+} from './github'
 import {
   getAuthStatus,
   claudeLoginStart,
@@ -47,6 +56,7 @@ import type {
   McpServerInfo,
   PermissionDecision,
   PermissionMode,
+  PrMergeMethod,
   Repo,
   RewindActionResult,
   ScriptKind,
@@ -430,6 +440,14 @@ export function registerIpc(ctx: IpcContext): void {
     }
   )
 
+  ipcMain.handle(IPC.workspaceSetMuted, (_e, workspaceId: string, muted: boolean) => {
+    store.update((st) => {
+      const w = st.workspaces.find((x) => x.id === workspaceId)
+      if (w) w.muted = muted
+    })
+    broadcastState()
+  })
+
   // 표시 이름 수정: 사용자 override(displayName)만 바꾼다. worktree 이름(name)·브랜치는 그대로 둔다.
   // 빈 문자열을 넘기면 override 를 지워 기본 규칙(worktree 이름 → PR 제목)으로 되돌린다.
   ipcMain.handle(IPC.workspaceRename, (_e, workspaceId: string, name: string) => {
@@ -606,6 +624,42 @@ export function registerIpc(ctx: IpcContext): void {
     const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
     if (!ws) return { error: 'Workspace not found.' }
     return createPrWeb(ws.worktreePath).catch((err) => ({
+      error: err instanceof Error ? err.message : String(err)
+    }))
+  })
+
+  // PR 라이프사이클 액션(merge/close/reopen/ready). 전부 worktree 현재 브랜치의 PR 대상.
+  ipcMain.handle(
+    IPC.prMerge,
+    async (_e, workspaceId: string, method: PrMergeMethod): Promise<{ error?: string }> => {
+      const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
+      if (!ws || ws.archived) return { error: 'Workspace not found.' }
+      return mergePr(ws.worktreePath, method).catch((err) => ({
+        error: err instanceof Error ? err.message : String(err)
+      }))
+    }
+  )
+
+  ipcMain.handle(IPC.prClose, async (_e, workspaceId: string): Promise<{ error?: string }> => {
+    const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
+    if (!ws || ws.archived) return { error: 'Workspace not found.' }
+    return closePr(ws.worktreePath).catch((err) => ({
+      error: err instanceof Error ? err.message : String(err)
+    }))
+  })
+
+  ipcMain.handle(IPC.prReopen, async (_e, workspaceId: string): Promise<{ error?: string }> => {
+    const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
+    if (!ws || ws.archived) return { error: 'Workspace not found.' }
+    return reopenPr(ws.worktreePath).catch((err) => ({
+      error: err instanceof Error ? err.message : String(err)
+    }))
+  })
+
+  ipcMain.handle(IPC.prReady, async (_e, workspaceId: string): Promise<{ error?: string }> => {
+    const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
+    if (!ws || ws.archived) return { error: 'Workspace not found.' }
+    return markPrReady(ws.worktreePath).catch((err) => ({
       error: err instanceof Error ? err.message : String(err)
     }))
   })

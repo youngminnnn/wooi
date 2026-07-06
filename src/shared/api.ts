@@ -20,6 +20,7 @@ import type {
   PermissionMode,
   PermissionRequest,
   PrChecks,
+  PrMergeMethod,
   PrStatus,
   Repo,
   RewindActionResult,
@@ -64,6 +65,8 @@ export interface DittoApi {
     setPermissionMode(workspaceId: string, mode: PermissionMode): Promise<void>
     setModel(workspaceId: string, model: string | null): Promise<void>
     setEffort(workspaceId: string, effort: EffortSetting | null): Promise<void>
+    /** 워크스페이스별 알림 음소거를 설정한다. */
+    setMuted(workspaceId: string, muted: boolean): Promise<void>
     /** 표시 이름 override 를 지정한다. 빈 문자열이면 override 를 지워 기본 규칙으로 되돌린다. */
     rename(workspaceId: string, name: string): Promise<void>
     revealInFinder(workspaceId: string): Promise<void>
@@ -106,6 +109,14 @@ export interface DittoApi {
     status(workspaceId: string): Promise<PrStatus | null>
     /** GitHub PR 작성 화면을 브라우저로 연다(`gh pr create --web`). 에러 시 문자열 반환. */
     create(workspaceId: string): Promise<{ error?: string }>
+    /** 현재 브랜치의 PR 을 병합한다(squash/merge/rebase). */
+    merge(workspaceId: string, method: PrMergeMethod): Promise<{ error?: string }>
+    /** 현재 브랜치의 PR 을 병합 없이 닫는다. */
+    close(workspaceId: string): Promise<{ error?: string }>
+    /** 닫힌 PR 을 다시 연다. */
+    reopen(workspaceId: string): Promise<{ error?: string }>
+    /** Draft PR 을 리뷰 가능 상태로 전환한다. */
+    ready(workspaceId: string): Promise<{ error?: string }>
     /** PR 의 CI 체크 롤업(Check 탭). PR 이 없으면 null. */
     checks(workspaceId: string): Promise<PrChecks | null>
   }

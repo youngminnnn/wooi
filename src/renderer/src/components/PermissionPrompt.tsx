@@ -1,8 +1,11 @@
-import { useEffect, useRef } from 'react'
-import { ShieldQuestion } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { ShieldQuestion, Clock } from 'lucide-react'
 import { useStore } from '../store'
 import { summarizePermission } from '../lib/permission'
 import type { PermissionRequest } from '@shared/types'
+
+/** 대기 시간이 이 값을 넘으면 "얼마나 멈춰 있었는지"를 프롬프트에 노출한다(오래 방치 인지용). */
+const SHOW_WAIT_AFTER_MS = 20_000
 
 export default function PermissionPrompt({
   request
@@ -11,6 +14,22 @@ export default function PermissionPrompt({
 }): React.JSX.Element {
   const dismiss = useStore((s) => s.dismissPermission)
   const allowRef = useRef<HTMLButtonElement>(null)
+  // 이 프롬프트가 처음 뜬 시각. 자리를 비운 사이 얼마나 블로킹됐는지 보여 주기 위해 경과를 계산한다.
+  // (렌더 중 Date.now() 호출을 피하려 0 으로 두고, 마운트 이펙트에서 실제 시각을 채운다.)
+  const shownAtRef = useRef(0)
+  const [elapsedMs, setElapsedMs] = useState(0)
+  useEffect(() => {
+    shownAtRef.current = Date.now()
+    setElapsedMs(0)
+    const t = setInterval(() => setElapsedMs(Date.now() - shownAtRef.current), 1000)
+    return () => clearInterval(t)
+  }, [request.requestId])
+  const waiting = elapsedMs >= SHOW_WAIT_AFTER_MS
+  const waitLabel = (() => {
+    const s = Math.floor(elapsedMs / 1000)
+    const m = Math.floor(s / 60)
+    return m > 0 ? `${m}m ${s % 60}s` : `${s}s`
+  })()
 
   const respond = (behavior: 'allow' | 'deny', remember = false): void => {
     void window.api.permission.respond(
@@ -45,7 +64,18 @@ export default function PermissionPrompt({
       <div className="flex items-start gap-2.5">
         <ShieldQuestion size={16} className="text-[var(--warning-400)] mt-0.5 shrink-0" />
         <div className="min-w-0 flex-1">
-          <div className="text-sm text-neutral-100">{heading}</div>
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-neutral-100">{heading}</span>
+            {waiting && (
+              <span
+                className="flex items-center gap-1 text-[11px] text-[var(--warning-300)]/80 tabular-nums"
+                title="This request has been waiting for your response. Esc denies (skips) it."
+              >
+                <Clock size={11} />
+                waiting {waitLabel}
+              </span>
+            )}
+          </div>
           {detail && (
             <pre className="mt-1 text-xs text-neutral-400 whitespace-pre-wrap break-all max-h-24 overflow-y-auto">
               {detail}

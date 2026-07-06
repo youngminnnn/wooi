@@ -17,6 +17,12 @@ export function formatTime(ts: number): string {
   return new Date(ts).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
 }
 
+/** USD 비용을 표시용 문자열로. 0 이면 빈 문자열, 1센트 미만은 4자리, 그 이상은 2자리. */
+export function formatCost(usd: number): string {
+  if (!usd) return ''
+  return usd < 0.01 ? `$${usd.toFixed(4)}` : `$${usd.toFixed(2)}`
+}
+
 /**
  * 경과 시간(ms)을 짧은 표시 문자열로(실행 중 세션의 진행 시간용).
  * 1분 미만은 초, 1시간 미만은 분(+초), 그 이상은 시(+분).

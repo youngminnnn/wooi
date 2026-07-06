@@ -22,6 +22,7 @@ import type {
   ImageAttachment,
   McpAction,
   McpServerInfo,
+  NotificationEvent,
   PermissionDecision,
   PermissionMode,
   PermissionRequest,
@@ -393,6 +394,7 @@ export class SessionManager implements AgentBackend {
     // 백그라운드 세션이 권한 대기로 멈춘 것을 놓치지 않도록 비활성 창에서는 알린다.
     this.notify(
       request.workspaceId,
+      'needsInput',
       `Needs permission: ${request.displayName ?? request.toolName}`,
       false
     )
@@ -422,8 +424,8 @@ export class SessionManager implements AgentBackend {
         }
       })
       // 창이 비활성일 때만 완료/에러를 OS 알림으로. (활성 창은 사이드바·알림음으로 충분)
-      if (event.status === 'idle') this.notify(workspaceId, 'Response complete', false)
-      else if (event.status === 'error') this.notify(workspaceId, 'Session error', true)
+      if (event.status === 'idle') this.notify(workspaceId, 'completed', 'Response complete', false)
+      else if (event.status === 'error') this.notify(workspaceId, 'error', 'Session error', true)
     } else if (event.type === 'session' && event.model) {
       getStore().update((st) => {
         const w = st.workspaces.find((x) => x.id === workspaceId)
@@ -443,15 +445,27 @@ export class SessionManager implements AgentBackend {
     })
   }
 
-  /** 창이 비활성일 때 OS 알림을 띄운다. 클릭하면 창을 포커스하고 해당 workspace 를 연다. */
-  private notify(workspaceId: string, body: string, urgent: boolean): void {
+  /**
+   * 창이 비활성일 때 OS 알림을 띄운다. 클릭하면 창을 포커스하고 해당 workspace 를 연다.
+   * 이벤트별 osNotification 채널이 꺼져 있거나 워크스페이스가 음소거면 띄우지 않는다.
+   */
+  private notify(
+    workspaceId: string,
+    event: NotificationEvent,
+    body: string,
+    urgent: boolean
+  ): void {
     const win = this.getWindow()
     if (win && win.isFocused()) return
     if (!Notification.isSupported()) return
 
     const ws = this.getWorkspace(workspaceId)
+    if (ws?.muted) return
+    const channels = getStore().getState().settings.notifications?.[event]
+    if (!channels?.osNotification) return
     const title = ws ? `${urgent ? '⚠️ ' : ''}${workspaceDisplayName(ws)}` : 'Ditto'
-    const notification = new Notification({ title, body, silent: false })
+    // OS 알림 소리는 이벤트별 sound 채널을 따른다(설정에서 sound 를 끄면 무음 알림).
+    const notification = new Notification({ title, body, silent: !channels.sound })
     notification.on('click', () => {
       const w = this.getWindow()
       if (w) {

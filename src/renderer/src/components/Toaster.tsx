@@ -11,14 +11,34 @@ export default function Toaster(): React.JSX.Element {
       {toasts.map((t) => (
         <div
           key={t.id}
+          role="alert"
           className="flex items-start gap-2.5 rounded-lg border bg-[var(--surface)] px-3.5 py-2.5 shadow-2xl border-[var(--border)]"
         >
           <Icon kind={t.kind} />
-          <span className="flex-1 text-sm text-neutral-200 whitespace-pre-wrap break-words">
-            {t.message}
-          </span>
+          <div className="flex-1 min-w-0">
+            <span className="block text-sm text-neutral-200 whitespace-pre-wrap break-words">
+              {t.message}
+            </span>
+            {t.actions && t.actions.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-2">
+                {t.actions.map((a, i) => (
+                  <button
+                    key={i}
+                    onClick={() => {
+                      a.run()
+                      dismiss(t.id)
+                    }}
+                    className="rounded-md border border-[var(--border-strong)] bg-[var(--surface-2)] px-2 py-1 text-xs font-medium text-neutral-100 hover:border-[var(--accent-500)] focus-visible:outline-2 focus-visible:outline-[var(--accent-500)]"
+                  >
+                    {a.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           <button
             onClick={() => dismiss(t.id)}
+            aria-label="Dismiss"
             className="shrink-0 h-5 w-5 grid place-items-center rounded text-neutral-500 hover:text-neutral-200"
           >
             <X size={13} />
