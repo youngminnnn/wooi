@@ -33,6 +33,15 @@ export default function ExportMenu({
     }
   }, [open])
 
+  // ⇧⌘X 전역 단축키(App.tsx)가 이 이벤트로 내보내기 메뉴를 연다.
+  useEffect(() => {
+    const onOpen = (e: Event): void => {
+      if ((e as CustomEvent<string>).detail === workspaceId) setOpen(true)
+    }
+    window.addEventListener('ditto:export-conversation', onOpen)
+    return () => window.removeEventListener('ditto:export-conversation', onOpen)
+  }, [workspaceId])
+
   const exportAs = (kind: 'md' | 'json'): void => {
     setOpen(false)
     if (transcript.length === 0) {
@@ -56,7 +65,7 @@ export default function ExportMenu({
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="menu"
         aria-expanded={open}
-        title="Export conversation"
+        title="Export conversation — ⇧⌘X"
         className="grid h-8 w-8 place-items-center rounded-lg text-neutral-400 hover:bg-[var(--surface-2)] hover:text-neutral-200 focus-visible:outline-2 focus-visible:outline-[var(--accent-500)]"
       >
         <Download size={15} />

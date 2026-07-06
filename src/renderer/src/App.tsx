@@ -163,7 +163,8 @@ export default function App(): React.JSX.Element {
       }
 
       // 우상단 헤더 도구 단축키 — 현재 선택된 workspace 를 대상으로 한다.
-      // 모두 ⇧⌘ 조합이라 macOS 기본 단축키(⌘S/E/F, ⌘⌫ 등)나 앱 기존 단축키와 충돌하지 않는다.
+      // ⇧⌘ 조합이라 macOS 기본 단축키(⌘S/E/F, ⌘⌫ 등)나 앱 기존 단축키와 충돌하지 않는다.
+      // (dev 실행은 아래에서 ⌃⌘R 로 별도 처리 — ⇧⌘R 은 기본 메뉴 Force Reload 와 충돌.)
       const selId = st.selectedWorkspaceId
       if (selId && e.shiftKey) {
         // ⇧⌘S: 스크립트 패널 열기/닫기.
@@ -184,12 +185,36 @@ export default function App(): React.JSX.Element {
           void window.api.workspace.revealInFinder(selId)
           return
         }
+        // ⇧⌘X: 대화 내보내기 메뉴 열기(ExportMenu 가 이벤트를 받아 드롭다운을 연다).
+        if (e.key.toLowerCase() === 'x') {
+          e.preventDefault()
+          window.dispatchEvent(new CustomEvent('ditto:export-conversation', { detail: selId }))
+          return
+        }
         // ⇧⌘⌫: workspace 아카이브(ChatView 가 확인 다이얼로그와 함께 처리).
         if (e.key === 'Backspace' || e.key === 'Delete') {
           e.preventDefault()
           window.dispatchEvent(new CustomEvent('ditto:archive-workspace', { detail: selId }))
           return
         }
+      }
+
+      // ⌃⌘R: dev 스크립트 실행/중지 — 스크립트 패널 열림 여부와 무관하게 동작한다.
+      // (⇧⌘R 은 Electron 기본 메뉴의 Force Reload 와 충돌하므로 Control 조합을 쓴다.)
+      if (selId && e.ctrlKey && e.key.toLowerCase() === 'r') {
+        e.preventDefault()
+        const ws = st.app?.workspaces.find((w) => w.id === selId)
+        const devCmd = ws && st.app?.repos.find((r) => r.id === ws.repoId)?.devScript
+        if (!devCmd || !devCmd.trim()) {
+          st.pushToast('info', 'No dev command set for this repo — add one in repo settings.')
+          return
+        }
+        const devRunning = (st.scriptStatus[selId] ?? []).some(
+          (s) => s.kind === 'dev' && s.state === 'running'
+        )
+        const run = devRunning ? window.api.script.stop : window.api.script.run
+        void run(selId, 'dev').then(() => st.refreshScriptStatus(selId))
+        return
       }
 
       const list = (st.app?.workspaces ?? []).filter((w) => !w.archived)
