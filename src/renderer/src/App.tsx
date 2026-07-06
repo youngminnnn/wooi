@@ -166,27 +166,28 @@ export default function App(): React.JSX.Element {
       // ⇧⌘ 조합이라 macOS 기본 단축키(⌘S/E/F, ⌘⌫ 등)나 앱 기존 단축키와 충돌하지 않는다.
       // (dev 실행은 아래에서 ⌃⌘R 로 별도 처리 — ⇧⌘R 은 기본 메뉴 Force Reload 와 충돌.)
       const selId = st.selectedWorkspaceId
+      // 키 판별은 e.code 로 한다 — 한글 IME 등에서 e.key 가 문자가 아닐 수 있다.
       if (selId && e.shiftKey) {
         // ⇧⌘S: 스크립트 패널 열기/닫기.
-        if (e.key.toLowerCase() === 's') {
+        if (e.code === 'KeyS') {
           e.preventDefault()
           st.setScriptPanelOpen(selId, !(st.scriptPanelOpen[selId] ?? false))
           return
         }
         // ⇧⌘E: 에디터에서 열기.
-        if (e.key.toLowerCase() === 'e') {
+        if (e.code === 'KeyE') {
           e.preventDefault()
           void window.api.workspace.openInEditor(selId)
           return
         }
         // ⇧⌘F: Finder 에서 보기.
-        if (e.key.toLowerCase() === 'f') {
+        if (e.code === 'KeyF') {
           e.preventDefault()
           void window.api.workspace.revealInFinder(selId)
           return
         }
         // ⇧⌘X: 대화 내보내기 메뉴 열기(ExportMenu 가 이벤트를 받아 드롭다운을 연다).
-        if (e.key.toLowerCase() === 'x') {
+        if (e.code === 'KeyX') {
           e.preventDefault()
           window.dispatchEvent(new CustomEvent('ditto:export-conversation', { detail: selId }))
           return
@@ -201,7 +202,8 @@ export default function App(): React.JSX.Element {
 
       // ⌃⌘R: dev 스크립트 실행/중지 — 스크립트 패널 열림 여부와 무관하게 동작한다.
       // (⇧⌘R 은 Electron 기본 메뉴의 Force Reload 와 충돌하므로 Control 조합을 쓴다.)
-      if (selId && e.ctrlKey && e.key.toLowerCase() === 'r') {
+      // 키 판별은 e.code('KeyR')로 한다 — 한글 IME·Control 조합에서 e.key 가 'r' 이 아닐 수 있다.
+      if (selId && e.ctrlKey && e.code === 'KeyR') {
         e.preventDefault()
         const ws = st.app?.workspaces.find((w) => w.id === selId)
         const devCmd = ws && st.app?.repos.find((r) => r.id === ws.repoId)?.devScript
