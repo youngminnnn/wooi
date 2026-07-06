@@ -13,7 +13,8 @@ import {
   Pencil,
   Bell,
   BellOff,
-  AlertTriangle
+  AlertTriangle,
+  LayoutDashboard
 } from 'lucide-react'
 import { useStore } from '../store'
 import { workspaceDisplayName } from '@shared/types'
@@ -34,6 +35,12 @@ export default function Sidebar({
   const app = useStore((s) => s.app)!
   const pending = useStore((s) => s.pending)
   const pushToast = useStore((s) => s.pushToast)
+  const selectedId = useStore((s) => s.selectedWorkspaceId)
+  const select = useStore((s) => s.selectWorkspace)
+
+  // Overview 는 활성(비아카이브) 워크스페이스가 하나라도 있을 때만 의미가 있다(App.tsx 라우팅과 동일).
+  const hasActiveWorkspaces = app.workspaces.some((w) => !w.archived)
+  const onOverview = selectedId === null
 
   // 실행 중인 세션이 하나라도 있으면 1초마다 갱신해 경과 시간을 흐르게 하고("오래 실행 중" 힌트도
   // 같은 틱으로 갱신), 없으면 틱을 멈춰 불필요한 재렌더를 막는다.
@@ -55,6 +62,24 @@ export default function Sidebar({
 
   return (
     <aside className="w-72 shrink-0 flex flex-col bg-[var(--bg-2)]">
+      {hasActiveWorkspaces && (
+        <div className="px-2 pt-2 shrink-0">
+          <button
+            onClick={() => void select(null)}
+            aria-current={onOverview ? 'page' : undefined}
+            className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm transition-colors ${
+              onOverview
+                ? 'bg-[var(--surface-2)] text-neutral-100'
+                : 'text-neutral-400 hover:bg-[var(--surface)] hover:text-neutral-200'
+            }`}
+            title="Overview — all active sessions at a glance"
+          >
+            <LayoutDashboard size={15} />
+            <span className="font-medium">Overview</span>
+          </button>
+        </div>
+      )}
+
       <div data-tour="repos" className="flex items-center justify-between px-3 h-10 shrink-0">
         <span className="text-xs uppercase tracking-wider text-neutral-500 font-semibold">
           Repositories
