@@ -62,7 +62,6 @@ export default function QuestionPrompt({
   useLayoutEffect(() => {
     const el = listRef.current
     if (el && el.scrollHeight > el.clientHeight + 4) setCollapsed(true)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [request.requestId])
 
   // 첫 옵션에 포커스하고 Esc=취소를 바인딩한다. ChatView 가 requestId 를 key 로 주어
@@ -138,8 +137,8 @@ export default function QuestionPrompt({
 
   return (
     <div className="shrink-0 mx-4 mb-2 flex max-h-[40vh] flex-col rounded-lg border border-[var(--brand-500)]/30 bg-[var(--brand-500)]/10 px-3.5 py-3">
-      <div className="flex min-h-0 flex-1 items-start gap-2.5">
-        <MessagesSquare size={16} className="text-[var(--brand-400)] mt-0.5 shrink-0" />
+      <div className="flex min-h-0 flex-1 gap-2.5">
+        <MessagesSquare size={16} className="text-[var(--brand-400)] mt-0.5 shrink-0 self-start" />
         <div ref={listRef} className="min-w-0 flex-1 overflow-y-auto">
           {questions.map((q, qi) => {
             const multi = Boolean(q.multiSelect)
