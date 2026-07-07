@@ -8,6 +8,9 @@ swapped and extended (`src/main/agent/*`). This is a living document tracking th
 v1.0.0 ships as **Claude Code only**; later versions add the OpenAI **Codex** backend in
 stages. This document currently covers up to **Phase 1 (running Codex alone in one session)**.
 
+> ⚠️ This is a living document. The details below (scope, phasing, file layout, concept mappings)
+> are subject to change at any time as the design evolves and investigation progresses.
+
 ---
 
 ## 0. Current-state assessment (starting point)
