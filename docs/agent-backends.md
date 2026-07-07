@@ -8,10 +8,6 @@ swapped and extended (`src/main/agent/*`). This is a living document tracking th
 v1.0.0 ships as **Claude Code only**; later versions add the OpenAI **Codex** backend in
 stages. This document currently covers up to **Phase 1 (running Codex alone in one session)**.
 
-> Phase 2 (using Claude + Codex together in a single session) carries larger design decisions —
-> notably the cross-session context-sharing policy — so it is out of scope here and only
-> previewed in the final section.
-
 ---
 
 ## 0. Current-state assessment (starting point)
@@ -149,10 +145,3 @@ Author anew, referencing the matching Claude files.
 - **The core risk is the concept mapping** — permission modes, effort, auth, and config paths differ semantically
   between Claude and Codex, so a decision to split the shared types per-backend is needed.
 - Transcripts are backend-neutral, so the storage layer can be reused as-is.
-
-## Phase 2 preview (out of scope)
-
-Using Claude + Codex together in one session. This breaks the current "one backend per workspace"
-assumption and requires, up front: adding a `backend` tag to `ChatItem`, per-turn routing, and a
-**cross-session context-sharing policy between Claude↔Codex** (a product decision, not just engineering).
-Covered in a separate document.
