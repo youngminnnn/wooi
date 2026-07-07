@@ -1,0 +1,77 @@
+name: ci
+
+# PR 와 main push 마다 도는 검증 게이트.
+# 저렴한 ubuntu 러너에서만 실행하고, 비싼 macOS 빌드는 build.yml 로 분리한다.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# 같은 브랜치/PR 에 새 커밋이 오면 진행 중이던 실행을 취소해 러너를 아낀다.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # PR 브랜치 이름이 Conventional Commits prefix 규칙(feat/…, fix/… 등)을 지키는지 검증한다.
+  # 로컬 husky pre-push 훅과 동일한 스크립트를 공유하며, 우회 불가한 최종 게이트다.
+  branch-name:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+
+      - name: Validate branch name
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: node scripts/check-branch-name.mjs "$HEAD_REF"
+
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Format check
+        run: npm run format:check
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - run: npm ci
+
+      # 고위험 이상 취약점을 노출한다. 새 advisory 는 수시로 공개되므로 무관한 PR 까지
+      # 막지 않도록 non-blocking(continue-on-error) 으로 두고, 실제 수정은 Dependabot PR 로
+      # 처리한다. 정기 정리를 강제하려면 continue-on-error 를 제거해 blocking 으로 바꾸면 된다.
+      - name: npm audit (high+, informational)
+        continue-on-error: true
+        run: npm audit --audit-level=high

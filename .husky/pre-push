@@ -1,0 +1,15 @@
+# push 되는 브랜치 이름이 Conventional Commits prefix 규칙을 지키는지 먼저 검증한다.
+# (main 등 보호 브랜치는 스크립트에서 예외 처리)
+z40=0000000000000000000000000000000000000000
+while read -r local_ref local_sha remote_ref remote_sha; do
+  case "$local_ref" in
+    refs/heads/*) ;;
+    *) continue ;; # 태그 등 브랜치가 아닌 ref 는 건너뜀
+  esac
+  [ "$local_sha" = "$z40" ] && continue # 브랜치 삭제 push 는 건너뜀
+  node scripts/check-branch-name.mjs "${local_ref#refs/heads/}" || exit 1
+done
+
+# 파일 단위로 스코프하기 어려운 typecheck 를 push 직전에 한 번만 돌린다.
+# CI 의 typecheck 게이트를 사전 차단한다. (무거운 build, 느린 test 는 CI 에 위임)
+npm run typecheck

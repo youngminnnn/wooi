@@ -1,0 +1,54 @@
+name: build
+
+# private repo 의 macOS 러너는 분당 과금이 크므로(무료 분량 10배 소진),
+# 일반 push 마다 돌지 않게 수동 실행과 버전 태그 push 에서만 빌드한다.
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  macos:
+    runs-on: macos-14 # Apple Silicon (arm64)
+    permissions:
+      contents: write # 태그 빌드 시 GitHub Release 생성/업로드에 필요
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - run: npm ci
+
+      - name: Build ad-hoc signed dmg + zip
+        # 서명은 package.json build.mac.identity: "-" (ad-hoc)이 담당한다.
+        # CI 러너의 keychain 에는 Apple 인증서가 없어 자동 탐색이 실제 인증서를
+        # 잘못 집을 일이 없고, CSC_IDENTITY_AUTO_DISCOVERY=false 는 오히려 서명을
+        # 통째로 건너뛰어 ad-hoc 서명까지 무력화할 수 있으므로 지정하지 않는다.
+        # ad-hoc 서명은 arm64에서 "손상됨" 대신 "확인되지 않은 개발자" 경고로 완화돼
+        # 사용자가 우클릭 → 열기 / "확인 없이 열기"로 터미널 없이 우회할 수 있다.
+        # 인증서 준비 후에는 identity 를 실제 Developer ID 로 바꾸고
+        # CSC_LINK/CSC_KEY_PASSWORD 와 공증 자격증명을 secrets 로 주입한다.
+        run: npm run dist
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ditto-macos-arm64
+          path: |
+            release/*.dmg
+            release/*.zip
+          if-no-files-found: error
+
+      # v* 태그로 트리거된 경우에만 GitHub Release 를 만들고 산출물을 첨부한다.
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            release/*.dmg release/*.zip \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes

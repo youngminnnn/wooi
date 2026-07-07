@@ -1,0 +1,315 @@
+@import 'tailwindcss';
+
+/*
+  타이포그래피 스케일 — 4단계로 통일한다. 예전엔 text-[9.5px]~text-[15px] 까지 9종의
+  임의 크기가 흩어져 있었는데, 이를 text-xs/sm/base/lg 네 단계로 모은다.
+  (11/12/13/15px) line-height 도 함께 정해 세로 리듬을 일관되게 한다.
+  개별 컴포넌트에서 leading-* 를 명시하면 그쪽이 우선한다.
+*/
+@theme {
+  --text-xs: 11px;
+  --text-xs--line-height: 1.45;
+  --text-sm: 12px;
+  --text-sm--line-height: 1.45;
+  --text-base: 13px;
+  --text-base--line-height: 1.5;
+  --text-lg: 15px;
+  --text-lg--line-height: 1.4;
+}
+
+/*
+  시맨틱 상태 색 — 하드코딩된 Tailwind 색(red/amber/emerald/blue/violet/sky)을 의미 기반
+  토큰으로 모은다. 값은 Tailwind v4 기본 팔레트와 동일(oklch)해 외관 변화는 없다.
+  컴포넌트는 text-[var(--danger-fg)] / bg-[var(--warning-500)]/10 처럼 쓰고, 알파(/10)는
+  Tailwind 가 color-mix 로 처리한다. 라이트/다크 공통(기존 코드도 두 테마에서 동일 색을 썼다).
+  ─ danger=red · warning=amber · success=emerald · info=blue · accent=violet · brand=sky
+  PR 상태 배지·MCP 상태 점 같은 '범주형' 팔레트(orange/purple/cyan 포함)는 의도적으로 원형 유지.
+*/
+:root {
+  /* danger (red) */
+  --danger-200: oklch(88.5% 0.062 18.334);
+  --danger-300: oklch(80.8% 0.114 19.571);
+  --danger-400: oklch(70.4% 0.191 22.216);
+  --danger-500: oklch(63.7% 0.237 25.331);
+  --danger-600: oklch(57.7% 0.245 27.325);
+  --danger-fg: var(--danger-400);
+
+  /* warning (amber) */
+  --warning-200: oklch(92.4% 0.12 95.746);
+  --warning-300: oklch(87.9% 0.169 91.605);
+  --warning-400: oklch(82.8% 0.189 84.429);
+  --warning-500: oklch(76.9% 0.188 70.08);
+  --warning-600: oklch(66.6% 0.179 58.318);
+  --warning-fg: var(--warning-400);
+
+  /* success (emerald) */
+  --success-200: oklch(90.5% 0.093 164.15);
+  --success-300: oklch(84.5% 0.143 164.978);
+  --success-400: oklch(76.5% 0.177 163.223);
+  --success-500: oklch(69.6% 0.17 162.48);
+  --success-600: oklch(59.6% 0.145 163.225);
+  --success-fg: var(--success-400);
+
+  /* info (blue) */
+  --info-200: oklch(88.2% 0.059 254.128);
+  --info-300: oklch(80.9% 0.105 251.813);
+  --info-400: oklch(70.7% 0.165 254.624);
+  --info-500: oklch(62.3% 0.214 259.815);
+  --info-600: oklch(54.6% 0.245 262.881);
+  --info-fg: var(--info-400);
+
+  /* accent (violet) */
+  --accent-200: oklch(89.4% 0.057 293.283);
+  --accent-300: oklch(81.1% 0.111 293.571);
+  --accent-400: oklch(70.2% 0.183 293.541);
+  --accent-500: oklch(60.6% 0.25 292.717);
+  --accent-600: oklch(54.1% 0.281 293.009);
+  --accent-fg: var(--accent-400);
+
+  /* brand (sky) — Claude/GitHub 연동 등 브랜드 강조 */
+  --brand-200: oklch(90.1% 0.058 230.902);
+  --brand-300: oklch(82.8% 0.111 230.318);
+  --brand-400: oklch(74.6% 0.16 232.661);
+  --brand-500: oklch(68.5% 0.169 237.323);
+  --brand-600: oklch(58.8% 0.158 241.966);
+  --brand-fg: var(--brand-400);
+}
+
+/*
+  테마 토큰 — 다크가 기본값(:root), 라이트는 html[data-theme='light'] 에서 덮어쓴다.
+  컴포넌트는 하드코딩된 hex 대신 이 변수들을 통해 색을 참조한다(예: bg-[var(--surface-2)]).
+  data-theme 속성은 렌더러의 lib/theme.ts 가 <html> 에 설정한다.
+*/
+:root {
+  color-scheme: dark;
+
+  /* 배경(어두운→밝은 순) */
+  --bg: #0b0c0e;
+  --bg-2: #0d0e11;
+  --bg-3: #101216;
+
+  /* 패널/카드 표면 */
+  --surface: #15171c;
+  --surface-2: #1c1f25;
+  --surface-3: #1b1f27;
+  --surface-4: #1f2630;
+
+  /* 경계선 */
+  --border: #23262d;
+  --border-2: #2a2e36;
+  --border-3: #2f333b;
+  --border-strong: #384050;
+
+  /* 본문 텍스트 */
+  --text: #e6e7ea;
+  --text-muted: #aab0ba;
+
+  /* 마크다운 링크 */
+  --link: #6ea8fe;
+
+  /* 스크롤바 */
+  --scroll-thumb: #2a2d33;
+  --scroll-thumb-hover: #383c44;
+
+  /* 포커스 링 */
+  --focus-ring: #4b88f5;
+
+  /* 코드 블록은 두 테마 모두 어두운 표면을 유지한다(highlight.js github-dark 토큰과 맞추기 위함). */
+  --code-bg: #15171c;
+  --code-border: #23262d;
+  --code-inline-bg: #1c1f25;
+}
+
+html[data-theme='light'] {
+  color-scheme: light;
+
+  --bg: #f4f4f5;
+  --bg-2: #ffffff;
+  --bg-3: #ebebee;
+
+  --surface: #ffffff;
+  --surface-2: #f4f4f5;
+  --surface-3: #efeff1;
+  --surface-4: #eaeaed;
+
+  --border: #e3e3e6;
+  --border-2: #d8d8dc;
+  --border-3: #cdcdd2;
+  --border-strong: #bcbcc4;
+
+  --text: #18181b;
+  --text-muted: #52525b;
+
+  --link: #2563eb;
+
+  --scroll-thumb: #cdcdd2;
+  --scroll-thumb-hover: #b4b4bc;
+
+  --focus-ring: #2563eb;
+
+  /* 코드 블록은 라이트 모드에서도 어둡게 유지(가독성 높은 대비, 의도된 디자인). */
+  --code-bg: #1a1d23;
+  --code-border: #2a2e36;
+  --code-inline-bg: #ececef;
+
+  /*
+    이 앱은 다크 우선으로 작성되어 텍스트가 neutral 스케일(밝을수록 작은 숫자)을 쓴다.
+    Tailwind v4 의 유틸리티는 var(--color-neutral-*) 를 참조하므로, 라이트 모드에서 이
+    스케일을 반전시키면 text-neutral-100(다크의 가장 밝은 글자)이 자동으로 가장 어두운
+    글자가 된다 — 수백 곳의 className 을 건드리지 않고 색을 뒤집는다.
+  */
+  --color-neutral-100: #18181b;
+  --color-neutral-200: #27272a;
+  --color-neutral-300: #3f3f46;
+  --color-neutral-400: #52525b;
+  --color-neutral-500: #71717a;
+  --color-neutral-600: #9a9aa2;
+  --color-neutral-700: #c4c4ca;
+  --color-neutral-800: #d4d4d8;
+  --color-neutral-900: #e4e4e7;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background-color: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif;
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+/* 프레임리스 타이틀바 드래그 영역 */
+.drag {
+  -webkit-app-region: drag;
+}
+.no-drag {
+  -webkit-app-region: no-drag;
+}
+
+/*
+  인터랙티브 요소 전반에 부드러운 색/배경/투명도 전환을 기본 적용한다.
+  개별 컴포넌트가 transition 클래스를 빠뜨려 생기던 hover 의 즉각적인 "점프"를
+  한곳에서 없앤다. Tailwind 의 .transition 유틸(클래스 선택자)이 있는 곳은 그쪽이
+  우선하므로(요소 선택자보다 specificity 가 높음) 충돌 없이 빈틈만 메운다.
+*/
+button,
+[role='button'],
+select,
+summary,
+a {
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease,
+    box-shadow 120ms ease,
+    opacity 120ms ease,
+    transform 120ms ease;
+}
+
+/* 키보드 포커스 가시성 (마우스 클릭에는 적용되지 않음) */
+button:focus-visible,
+[role='button']:focus-visible,
+select:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+  border-radius: 6px;
+}
+
+/* 얇은 스크롤바 */
+::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--scroll-thumb);
+  border-radius: 6px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scroll-thumb-hover);
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* 마크다운 본문 */
+.md {
+  line-height: 1.6;
+  word-break: break-word;
+}
+.md p {
+  margin: 0.4em 0;
+}
+.md ul,
+.md ol {
+  margin: 0.4em 0;
+  padding-left: 1.3em;
+}
+.md ul {
+  list-style: disc;
+}
+.md ol {
+  list-style: decimal;
+}
+.md h1,
+.md h2,
+.md h3 {
+  font-weight: 600;
+  margin: 0.7em 0 0.35em;
+}
+.md h1 {
+  font-size: 1.25em;
+}
+.md h2 {
+  font-size: 1.15em;
+}
+.md h3 {
+  font-size: 1.05em;
+}
+.md a {
+  color: var(--link);
+  text-decoration: underline;
+}
+.md code {
+  font-family: 'SF Mono', ui-monospace, 'JetBrains Mono', Menlo, monospace;
+  font-size: 0.92em;
+}
+.md :not(pre) > code {
+  background: var(--code-inline-bg);
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+}
+.md pre {
+  background: var(--code-bg);
+  border: 1px solid var(--code-border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  overflow-x: auto;
+  margin: 0.5em 0;
+}
+.md pre code {
+  background: transparent;
+  padding: 0;
+}
+.md blockquote {
+  border-left: 3px solid var(--border-3);
+  margin: 0.5em 0;
+  padding-left: 0.8em;
+  color: var(--text-muted);
+}
+.md table {
+  border-collapse: collapse;
+  margin: 0.5em 0;
+}
+.md th,
+.md td {
+  border: 1px solid var(--border);
+  padding: 4px 8px;
+}

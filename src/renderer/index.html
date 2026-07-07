@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      로컬 번들/dev 서버만 로드한다. dev 모드의 Vite·React HMR(인라인 프리앰블 스크립트 +
+      ws 핫리로드)을 위해 script 인라인과 localhost ws 를 허용한다. 프로덕션 번들은
+      인라인/원격을 쓰지 않으므로 실효 표면은 좁다.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws: http://localhost:*; img-src 'self' data:; font-src 'self' data:"
+    />
+    <title>Ditto</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

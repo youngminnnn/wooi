@@ -1,0 +1,20 @@
+version: 2
+updates:
+  # npm 의존성 업데이트.
+  - package-ecosystem: npm
+    directory: '/'
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      # 자잘한 patch/minor 업데이트는 하나의 PR 로 묶어 노이즈를 줄인다.
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  # GitHub Actions 워크플로에서 쓰는 액션 버전 업데이트.
+  - package-ecosystem: github-actions
+    directory: '/'
+    schedule:
+      interval: weekly

@@ -1,0 +1,3 @@
+# 변경(staged) 파일만 대상으로 prettier + eslint 를 돌린다. 빠르게 끝나므로
+# 매 커밋마다 부담 없이 실행할 수 있고, CI 의 format:check / lint 게이트를 사전 차단한다.
+npx lint-staged
