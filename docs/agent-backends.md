@@ -1,151 +1,158 @@
-# 에이전트 백엔드 확장 로드맵
+# Agent Backend Roadmap
 
-ditto 는 AI 코딩 에이전트를 `AgentBackend` 추상화 뒤에 두어, 여러 백엔드를 교체·확장할 수 있게
-설계돼 있다(`src/main/agent/*`). 이 문서는 그 확장 계획을 담는 살아있는 문서다.
+**English** · [한국어](./agent-backends.ko.md)
 
-v1.0.0 은 **Claude Code 전용**으로 출시하고, 이후 버전에서 OpenAI **Codex** 백엔드를 단계적으로
-추가한다. 이 문서는 현재 그중 **Phase 1(한 세션에서 Codex 단독 사용)** 까지를 다룬다.
+ditto keeps its AI coding agents behind an `AgentBackend` abstraction so backends can be
+swapped and extended (`src/main/agent/*`). This is a living document tracking that expansion.
 
-> Phase 2(한 세션에서 Claude + Codex 복합 사용)는 별도 결정 사항(특히 세션 간 컨텍스트
-> 공유 정책)이 크므로 이 문서 범위에서 제외한다. 마지막 절에 예고만 남긴다.
+v1.0.0 ships as **Claude Code only**; later versions add the OpenAI **Codex** backend in
+stages. This document currently covers up to **Phase 1 (running Codex alone in one session)**.
+
+> Phase 2 (using Claude + Codex together in a single session) carries larger design decisions —
+> notably the cross-session context-sharing policy — so it is out of scope here and only
+> previewed in the final section.
 
 ---
 
-## 0. 현재 구조 진단 (출발점)
+## 0. Current-state assessment (starting point)
 
-Codex를 붙일 수 있도록 **백엔드 추상화 계층이 이미 선제적으로 구축**되어 있다.
+A **backend abstraction layer is already in place** so Codex can be attached.
 
-- `src/main/agent/backend.ts` — `AgentBackend` 인터페이스 + `AgentCapabilities` + `AgentBackendMeta`
-- `src/main/agent/orchestrator.ts` — `workspace.agentBackend` 기준 라우팅, 미지원 capability 가드
-- `src/main/agent/registry.ts` — `createBackend(id)` 분기가 **구체 구현(Claude SDK)을 아는 유일한 지점**
-- `src/shared/types.ts` — `AgentBackendId`, `Workspace.agentBackend`, store 마이그레이션(v4→v5)
+- `src/main/agent/backend.ts` — `AgentBackend` interface + `AgentCapabilities` + `AgentBackendMeta`
+- `src/main/agent/orchestrator.ts` — routes by `workspace.agentBackend`, guards unsupported capabilities
+- `src/main/agent/registry.ts` — `createBackend(id)` is the **only place that knows a concrete impl (the Claude SDK)**
+- `src/shared/types.ts` — `AgentBackendId`, `Workspace.agentBackend`, store migration (v4→v5)
 
-즉 "새 백엔드는 식별자·구현·capabilities만 추가"라는 설계 의도가 코드에 반영돼 있다.
+In other words, the design intent — "a new backend only adds an id, an impl, and capabilities" —
+is already reflected in the code.
 
-### 그러나 남아 있는 결합
+### But the coupling that remains
 
-추상화는 **main의 오케스트레이션 레이어에만** 있고, 그 위(UI)와 아래(실행/인증/설정)는
-여전히 Claude 전제다.
+The abstraction lives **only in main's orchestration layer**. Above it (UI) and below it
+(execution / auth / config) still assume Claude.
 
-| 계층 | Claude 결합 지점 | 파일 |
+| Layer | Claude coupling | File |
 |---|---|---|
-| 렌더러(UI) | capabilities/backend를 **전혀 모름**. 모델·effort·슬래시명령·권한모드·MCP가 Claude 하드코딩 | `src/renderer/**` |
-| 데이터 모델 | `PermissionMode`(plan/acceptEdits), `EffortSetting`(ultracode), `ChatItem`(thinking/costUsd/task/compacting) | `src/shared/types.ts` |
-| 프로세스 실행 | Claude Agent SDK 직결 (`@anthropic-ai/claude-agent-sdk`) | `src/main/claude/{session,host,executable}.ts` |
-| 인증 | `claude auth login/status`, `ANTHROPIC_API_KEY`, `CLAUDE_CONFIG_DIR`, `~/.claude.json` | `src/main/auth.ts`, `src/main/claude/mcp.ts` |
-| 모델 목록 | `claude-opus-4-8[1m]` 등 하드코딩 | `src/renderer/src/lib/models.ts` |
-| 워크스페이스 생성 | `agentBackend: DEFAULT_AGENT_BACKEND` 하드코딩, 선택 UI 없음 | `src/main/ipc.ts` |
+| Renderer (UI) | **Has no notion of capabilities/backend.** Models, effort, slash commands, permission modes, MCP are hardcoded to Claude | `src/renderer/**` |
+| Data model | `PermissionMode` (plan/acceptEdits), `EffortSetting` (ultracode), `ChatItem` (thinking/costUsd/task/compacting) | `src/shared/types.ts` |
+| Process execution | Directly bound to the Claude Agent SDK (`@anthropic-ai/claude-agent-sdk`) | `src/main/claude/{session,host,executable}.ts` |
+| Auth | `claude auth login/status`, `ANTHROPIC_API_KEY`, `CLAUDE_CONFIG_DIR`, `~/.claude.json` | `src/main/auth.ts`, `src/main/claude/mcp.ts` |
+| Model list | Hardcoded (`claude-opus-4-8[1m]`, etc.) | `src/renderer/src/lib/models.ts` |
+| Workspace creation | `agentBackend: DEFAULT_AGENT_BACKEND` hardcoded, no picker UI | `src/main/ipc.ts` |
 
-### Agent-agnostic (손댈 필요 없음)
+### Agent-agnostic (no changes needed)
 
-git worktree/PR 관리, 터미널·스크립트, 파일 브라우저·diff, 트랜스크립트 저장
-(`transcripts/{workspaceId}.jsonl`), 알림·테마·사이드바 구조는 백엔드와 무관하게 재사용된다.
+git worktree/PR management, terminal & scripts, file browser & diff, transcript storage
+(`transcripts/{workspaceId}.jsonl`), and the notifications/theme/sidebar structure are reused
+regardless of backend.
 
 ---
 
-## Phase 0 — 공통 기반 (어느 시나리오든 선행)
+## Phase 0 — Common foundation (precedes any scenario)
 
-Codex 구현 이전에, **UI가 백엔드 capability를 인지**하도록 만드는 기반 작업.
-현재 렌더러는 backend/capabilities 개념을 전혀 모르므로 이 작업이 후속 단계의 전제가 된다.
+Before implementing Codex, make the **UI aware of backend capabilities**. The renderer today has
+no concept of backend/capabilities, so this work is a prerequisite for the later stages.
 
-### 0-1. 렌더러로 capabilities/meta 노출
-- [ ] `AgentBackendMeta`(capabilities 포함)를 렌더러가 읽을 수 있게 노출
-      (예: `evt:state`/`Workspace`에 capabilities 스냅샷 포함, 또는 `api.getBackendMeta(workspaceId)` 신설)
-- [ ] `src/renderer/src/store.ts` 가 활성 워크스페이스의 capabilities 를 보관
-- [ ] `src/shared/api.ts` / `src/preload/index.ts` 계약 갱신
+### 0-1. Expose capabilities/meta to the renderer
+- [ ] Expose `AgentBackendMeta` (including capabilities) so the renderer can read it
+      (e.g. include a capabilities snapshot in `evt:state`/`Workspace`, or add `api.getBackendMeta(workspaceId)`)
+- [ ] Have `src/renderer/src/store.ts` hold the active workspace's capabilities
+- [ ] Update the `src/shared/api.ts` / `src/preload/index.ts` contract
 
-### 0-2. UI capability 게이팅
-capabilities 기준으로 조건부 렌더로 전환한다.
+### 0-2. Gate the UI on capabilities
+Switch to conditional rendering driven by capabilities.
 
-| 위치 | 게이트할 capability |
+| Location | Capability to gate on |
 |---|---|
 | `Composer.tsx` — `/mcp` McpPanel | `mcp` |
 | `Composer.tsx` — `/rewind` RewindPanel | `rewind` |
 | `Composer.tsx` — `/btw` SideAnswer | `sideQuestion` |
-| `Composer.tsx` — `/context`·`/usage`·`/agents`·`/permissions` 카드 | `interactiveCommands` |
-| `Composer.tsx` / `SettingsModal.tsx` — effort 피커 | `effort` |
-| `Composer.tsx` — 슬래시 자동완성 | `slashCommands` |
+| `Composer.tsx` — `/context`·`/usage`·`/agents`·`/permissions` cards | `interactiveCommands` |
+| `Composer.tsx` / `SettingsModal.tsx` — effort picker | `effort` |
+| `Composer.tsx` — slash-command autocomplete | `slashCommands` |
 
-### 0-3. 하드코딩 목록을 백엔드별 데이터로
-- [ ] `src/renderer/src/lib/models.ts` — backend별 모델 맵(또는 meta 공급)으로
-- [ ] `src/renderer/src/lib/effort.ts` — backend별 effort 옵션으로
-- [ ] `src/renderer/src/lib/permission.ts` — backend별 권한모드 집합 + Shift+Tab 순환 재정의
+### 0-3. Turn hardcoded lists into per-backend data
+- [ ] `src/renderer/src/lib/models.ts` — a per-backend model map (or supplied by meta)
+- [ ] `src/renderer/src/lib/effort.ts` — per-backend effort options
+- [ ] `src/renderer/src/lib/permission.ts` — per-backend permission-mode set + redefine the Shift+Tab cycle
 
-**완료 기준(DoD):** Claude 백엔드에서 기존 동작이 100% 동일하게 유지되며(회귀 없음),
-capability 를 임의로 false 로 바꾸면 해당 UI 가 사라진다.
+**Definition of Done:** the Claude backend behaves 100% identically (no regression), and flipping a
+capability to false makes the corresponding UI disappear.
 
 ---
 
-## Phase 1 — 한 세션에서 Codex 단독 사용
+## Phase 1 — Running Codex alone in one session
 
-한 워크스페이스를 Codex 백엔드로 구동한다. Claude 구현(`src/main/claude/*`)을 참고 모델로
-`src/main/codex/*` 를 신규 작성한다.
+Drive a workspace with the Codex backend. Author `src/main/codex/*` anew, using the Claude
+implementation (`src/main/claude/*`) as the reference model.
 
-> ⚠️ **선행 조사 필요:** Codex CLI 의 실행 방식, JSON 이벤트 스키마, 세션 재개 방식,
-> 인증 플로우, 모델 ID, approval/sandbox 모델은 **공식 문서로 확정**한 뒤 착수한다.
-> 아래 표의 "Codex" 열은 매핑해야 할 대상 개념을 가리키며, 정확한 값은 조사 결과로 채운다.
+> ⚠️ **Investigation required first:** the Codex CLI's invocation, JSON event schema, session-resume
+> mechanism, auth flow, model IDs, and approval/sandbox model must be **confirmed from official docs**
+> before starting. The "Codex" column below points at the target concept to map; fill in exact values
+> from the investigation.
 
-### 1-1. 식별자·레지스트리 등록
+### 1-1. Register the id / registry
 - [ ] `src/shared/types.ts` — `AgentBackendId = 'claude' | 'codex'`
-- [ ] `src/main/agent/backend.ts` — `CODEX_META`(id·label·defaultModel·capabilities) 정의
-- [ ] `src/main/agent/registry.ts` — `AGENT_BACKENDS['codex']` + `createBackend` 분기 추가
+- [ ] `src/main/agent/backend.ts` — define `CODEX_META` (id·label·defaultModel·capabilities)
+- [ ] `src/main/agent/registry.ts` — add `AGENT_BACKENDS['codex']` + a `createBackend` branch
 
-### 1-2. Codex 백엔드 구현
-Claude 대응 파일을 참고해 신규 작성한다.
+### 1-2. Implement the Codex backend
+Author anew, referencing the matching Claude files.
 
-| 신규 파일 | 역할 | 참고 |
+| New file | Role | Reference |
 |---|---|---|
-| `src/main/codex/manager.ts` | `implements AgentBackend` (호스트 프로세스 spawn·프록시) | `claude/manager.ts` |
-| `src/main/codex/host.ts` | Codex CLI 실행 유틸리티 프로세스 진입점 | `claude/host.ts` |
-| `src/main/codex/session.ts` | Codex 스트림 → `ChatItem`/`ChatEvent` 어댑터 | `claude/session.ts` |
-| `src/main/codex/executable.ts` | 패키징 빌드에서 Codex 바이너리 경로 해석 | `claude/executable.ts` |
+| `src/main/codex/manager.ts` | `implements AgentBackend` (spawns/proxies the host process) | `claude/manager.ts` |
+| `src/main/codex/host.ts` | Utility-process entry point that runs the Codex CLI | `claude/host.ts` |
+| `src/main/codex/session.ts` | Adapter: Codex stream → `ChatItem`/`ChatEvent` | `claude/session.ts` |
+| `src/main/codex/executable.ts` | Resolve the Codex binary path in packaged builds | `claude/executable.ts` |
 
-- [ ] 핵심 메서드 구현: `sendMessage`·`interrupt`·`setModel`·`setPermissionMode`·`clearSession`·
+- [ ] Implement core methods: `sendMessage`·`interrupt`·`setModel`·`setPermissionMode`·`clearSession`·
       `respondPermission`·`dispose`/`disposeAll`·`abortAll`
-- [ ] Codex 이벤트를 기존 `ChatItem` 형태로 매핑 (assistant / tool_use / tool_result / result)
-      — `thinking`·`task`·`costUsd` 등 Claude 고유 항목은 대응되는 것만 채우고 나머지는 생략
-- [ ] capability-게이트 메서드는 **미지원 시 no-op/명확한 에러** (오케스트레이터가 이미 가드)
+- [ ] Map Codex events onto the existing `ChatItem` shapes (assistant / tool_use / tool_result / result) —
+      Claude-specific items like `thinking`·`task`·`costUsd` are filled only where they correspond, otherwise omitted
+- [ ] Capability-gated methods should be **a no-op / clear error when unsupported** (the orchestrator already guards)
 
-### 1-3. 개념 매핑 (Claude ↔ Codex)
+### 1-3. Concept mapping (Claude ↔ Codex)
 
-| 개념 | Claude | Codex(대상) | 처리 |
+| Concept | Claude | Codex (target) | Handling |
 |---|---|---|---|
-| 권한/승인 | `PermissionMode` default/acceptEdits/plan/auto | approval + sandbox 모델 | backend별 모드 집합으로 분리 |
-| reasoning effort | low~max + ultracode | (Codex 자체 단계) | backend별 effort 옵션 |
-| 세션 재개 | `sessionId` (SDK resume) | (Codex session/rollout id) | 기존 `sessionId: string` 재사용 |
-| MCP | 지원 | (지원 여부 확인) | capability 로 on/off |
-| 모델 ID | `claude-*` | (Codex 모델 ID) | backend별 모델 목록 |
+| Permission/approval | `PermissionMode` default/acceptEdits/plan/auto | approval + sandbox model | split into a per-backend mode set |
+| reasoning effort | low~max + ultracode | (Codex's own levels) | per-backend effort options |
+| Session resume | `sessionId` (SDK resume) | (Codex session/rollout id) | reuse the existing `sessionId: string` |
+| MCP | supported | (confirm support) | on/off via capability |
+| Model ID | `claude-*` | (Codex model IDs) | per-backend model list |
 
-### 1-4. 인증
-- [ ] `src/main/auth.ts` — `getCodexStatus()` + Codex 로그인 플로우(`codexLoginStart` 등) 추가
+### 1-4. Auth
+- [ ] `src/main/auth.ts` — add `getCodexStatus()` + a Codex login flow (`codexLoginStart`, etc.)
 - [ ] `src/shared/types.ts` — `CodexAuthStatus` + `AuthStatus.codex`
-- [ ] IPC 채널 추가 (`auth:codexLoginStart` 등) + `evt:codexLogin`
-- [ ] `src/renderer/src/components/CodexLoginModal.tsx` 신설 (`ClaudeLoginModal.tsx` 참고)
-- [ ] `IntegrationsPanel.tsx` / `OnboardingModal.tsx` 에 Codex 카드 추가
-- [ ] 환경변수/설정 경로 분기: `OPENAI_API_KEY`, `~/.codex/` (Claude 의 `ANTHROPIC_*`·`~/.claude.json` 대응)
+- [ ] Add IPC channels (`auth:codexLoginStart`, etc.) + `evt:codexLogin`
+- [ ] Add `src/renderer/src/components/CodexLoginModal.tsx` (reference `ClaudeLoginModal.tsx`)
+- [ ] Add a Codex card to `IntegrationsPanel.tsx` / `OnboardingModal.tsx`
+- [ ] Branch env vars/config paths: `OPENAI_API_KEY`, `~/.codex/` (mirrors Claude's `ANTHROPIC_*`·`~/.claude.json`)
 
-### 1-5. 워크스페이스 생성 시 백엔드 선택
-- [ ] `src/main/ipc.ts` — `workspace:create` 가 하드코딩(`DEFAULT_AGENT_BACKEND`) 대신 선택값 저장
-- [ ] `src/renderer/src/components/NewWorkspaceModal.tsx` — 백엔드 선택 UI
-- [ ] (선택) 워크스페이스 생성 후 백엔드 변경 허용 여부 결정
+### 1-5. Backend picker on workspace creation
+- [ ] `src/main/ipc.ts` — have `workspace:create` store the chosen value instead of the hardcoded `DEFAULT_AGENT_BACKEND`
+- [ ] `src/renderer/src/components/NewWorkspaceModal.tsx` — a backend picker UI
+- [ ] (Optional) decide whether to allow changing the backend after creation
 
-**완료 기준(DoD):**
-- 새 워크스페이스를 Codex 로 생성해 대화 1턴이 정상 스트리밍·도구 실행·권한 프롬프트까지 동작
-- Codex 로그인/로그아웃이 앱 내에서 완결
-- Codex 미지원 기능(예: `/rewind`, `/btw`)은 UI 에서 자동으로 숨겨짐
-- Claude 워크스페이스 동작은 회귀 없음
+**Definition of Done:**
+- Create a workspace with Codex and have one turn work end-to-end: streaming, tool execution, permission prompts
+- Codex login/logout completes inside the app
+- Codex-unsupported features (e.g. `/rewind`, `/btw`) are hidden automatically in the UI
+- No regression in Claude-workspace behavior
 
 ---
 
-## 리스크 & 메모
+## Risks & notes
 
-- **가장 작업량이 몰리는 곳은 Phase 0** (렌더러 capability 인지). 여기가 후속 UI 게이팅 전부의 전제다.
-- **개념 매핑이 핵심 리스크** — 권한모드·effort·인증·설정 경로의 의미론이 Claude/Codex 간 달라서,
-  shared 타입을 백엔드별로 분리하는 판단이 필요하다.
-- 트랜스크립트는 backend 중립적이라 저장 계층은 그대로 쓸 수 있다.
+- **The heaviest lift is Phase 0** (renderer capability awareness). It is the prerequisite for all later UI gating.
+- **The core risk is the concept mapping** — permission modes, effort, auth, and config paths differ semantically
+  between Claude and Codex, so a decision to split the shared types per-backend is needed.
+- Transcripts are backend-neutral, so the storage layer can be reused as-is.
 
-## Phase 2 예고 (범위 밖)
+## Phase 2 preview (out of scope)
 
-한 세션에서 Claude + Codex 복합 사용. 현재 "워크스페이스당 백엔드 1개" 전제를 깨야 하며,
-`ChatItem` 에 `backend` 태그 추가, 턴별 라우팅, **Claude↔Codex 세션 간 컨텍스트 공유 정책**
-(엔지니어링이 아닌 제품 결정)이 선행되어야 한다. 별도 문서로 다룬다.
+Using Claude + Codex together in one session. This breaks the current "one backend per workspace"
+assumption and requires, up front: adding a `backend` tag to `ChatItem`, per-turn routing, and a
+**cross-session context-sharing policy between Claude↔Codex** (a product decision, not just engineering).
+Covered in a separate document.
