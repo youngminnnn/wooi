@@ -1,0 +1,1576 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Ditto — Run multiple AI coding agents at once</title>
+    <meta
+      name="description"
+      content="Ditto is a macOS app for orchestrating multiple AI coding agents in parallel — each in its own git worktree, each shipping its own PR."
+    />
+
+    <!-- Open Graph / social -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Ditto — Run multiple AI coding agents at once" />
+    <meta
+      property="og:description"
+      content="Orchestrate parallel AI coding agents across isolated git worktrees. Each task = its own worktree + branch + agent session."
+    />
+    <meta property="og:image" content="https://youngminnnn.github.io/ditto/og.png" />
+    <meta name="theme-color" content="#0a0b0d" />
+
+    <link rel="icon" type="image/svg+xml" href="./icon.svg" />
+
+    <style>
+      :root {
+        --bg: #0a0b0d;
+        --bg-soft: #13161c;
+        --bg-card: #161a22;
+        --bg-card-2: #1b2029;
+        --border: #262c37;
+        --border-soft: #20252e;
+        --text: #e8ecf3;
+        --text-dim: #a3adbe;
+        --text-faint: #6c7688;
+        --blue: #74acff;
+        --purple: #b08bfa;
+        --accent-grad: linear-gradient(120deg, #74acff 0%, #b08bfa 100%);
+        --glow: rgba(124, 155, 255, 0.35);
+        --radius: 16px;
+        --maxw: 1080px;
+        --mono: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
+        --sans:
+          -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Pretendard', 'Apple SD Gothic Neo',
+          Roboto, 'Helvetica Neue', Arial, sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        scroll-behavior: smooth;
+      }
+
+      body {
+        margin: 0;
+        font-family: var(--sans);
+        background: var(--bg);
+        color: var(--text);
+        line-height: 1.65;
+        -webkit-font-smoothing: antialiased;
+        text-rendering: optimizeLegibility;
+        overflow-x: hidden;
+        /* keep Korean (CJK) words intact — break on word boundaries, not mid-word */
+        word-break: keep-all;
+        overflow-wrap: break-word;
+      }
+
+      /* ambient background glow */
+      body::before {
+        content: '';
+        position: fixed;
+        top: -20%;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 90vw;
+        height: 90vw;
+        max-width: 1100px;
+        max-height: 1100px;
+        background: radial-gradient(
+          circle,
+          rgba(124, 155, 255, 0.14) 0%,
+          rgba(176, 139, 250, 0.06) 35%,
+          transparent 68%
+        );
+        pointer-events: none;
+        z-index: 0;
+      }
+
+      a {
+        color: var(--blue);
+        text-decoration: none;
+      }
+      a:hover {
+        text-decoration: underline;
+      }
+
+      .wrap {
+        max-width: var(--maxw);
+        margin: 0 auto;
+        padding: 0 24px;
+        position: relative;
+        z-index: 1;
+      }
+
+      /* ---------- language toggle ---------- */
+      /* default: show English, hide Korean */
+      .ko {
+        display: none;
+      }
+      body.lang-ko .ko {
+        display: revert;
+      }
+      body.lang-ko .en {
+        display: none;
+      }
+      /* inline variants keep flow */
+      span.ko,
+      span.en {
+        display: none;
+      }
+      body:not(.lang-ko) span.en {
+        display: inline;
+      }
+      body.lang-ko span.ko {
+        display: inline;
+      }
+
+      /* ---------- header ---------- */
+      header {
+        position: sticky;
+        top: 0;
+        z-index: 50;
+        backdrop-filter: saturate(140%) blur(14px);
+        background: rgba(10, 11, 13, 0.72);
+        border-bottom: 1px solid var(--border-soft);
+      }
+      .nav {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        height: 62px;
+      }
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-weight: 700;
+        font-size: 18px;
+        letter-spacing: -0.02em;
+        color: var(--text);
+      }
+      .brand:hover {
+        text-decoration: none;
+      }
+      .brand img {
+        width: 30px;
+        height: 30px;
+        border-radius: 8px;
+      }
+      .nav-links {
+        display: flex;
+        gap: 22px;
+        margin-left: auto;
+        align-items: center;
+      }
+      .nav-links a {
+        color: var(--text-dim);
+        font-size: 14px;
+        font-weight: 500;
+      }
+      .nav-links a:hover {
+        color: var(--text);
+        text-decoration: none;
+      }
+      .lang-btn {
+        font-family: var(--mono);
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--text-dim);
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 6px 10px;
+        cursor: pointer;
+        transition: all 0.15s ease;
+      }
+      .lang-btn:hover {
+        color: var(--text);
+        border-color: var(--blue);
+      }
+      @media (max-width: 720px) {
+        .nav-links a.hide-sm {
+          display: none;
+        }
+      }
+
+      /* ---------- hero ---------- */
+      .hero {
+        padding: 84px 0 56px;
+        text-align: center;
+      }
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 13px;
+        color: var(--text-dim);
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        padding: 6px 14px;
+        margin-bottom: 26px;
+      }
+      .badge .dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--blue);
+        box-shadow: 0 0 8px var(--blue);
+      }
+      h1 {
+        font-size: clamp(34px, 6vw, 60px);
+        line-height: 1.08;
+        letter-spacing: -0.03em;
+        margin: 0 auto 22px;
+        max-width: 16ch;
+        font-weight: 800;
+      }
+      h1 .grad {
+        background: var(--accent-grad);
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+      }
+      .subtitle {
+        font-size: clamp(16px, 2.4vw, 20px);
+        color: var(--text-dim);
+        max-width: 62ch;
+        margin: 0 auto 36px;
+      }
+      .cta-row {
+        display: flex;
+        gap: 14px;
+        justify-content: center;
+        flex-wrap: wrap;
+        margin-bottom: 16px;
+      }
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 9px;
+        font-size: 15px;
+        font-weight: 600;
+        padding: 13px 24px;
+        border-radius: 12px;
+        border: 1px solid transparent;
+        cursor: pointer;
+        transition:
+          transform 0.12s ease,
+          box-shadow 0.2s ease,
+          background 0.2s ease;
+      }
+      .btn:hover {
+        text-decoration: none;
+        transform: translateY(-1px);
+      }
+      .btn-primary {
+        background: var(--accent-grad);
+        color: #0a0b0d;
+        box-shadow: 0 8px 30px rgba(124, 155, 255, 0.28);
+      }
+      .btn-primary:hover {
+        box-shadow: 0 12px 38px rgba(124, 155, 255, 0.42);
+      }
+      .btn-ghost {
+        background: var(--bg-card);
+        border-color: var(--border);
+        color: var(--text);
+      }
+      .btn-ghost:hover {
+        border-color: var(--blue);
+      }
+      .hero-note {
+        font-size: 13px;
+        color: var(--text-faint);
+      }
+
+      .demo-frame {
+        margin: 52px auto 0;
+        max-width: 940px;
+        border-radius: 18px;
+        border: 1px solid var(--border);
+        background: linear-gradient(180deg, var(--bg-card) 0%, var(--bg-soft) 100%);
+        padding: 10px;
+        box-shadow:
+          0 40px 90px rgba(0, 0, 0, 0.55),
+          0 0 0 1px rgba(124, 155, 255, 0.06);
+      }
+      .demo-frame img {
+        width: 100%;
+        display: block;
+        border-radius: 10px;
+      }
+      .demo-bar {
+        display: flex;
+        gap: 7px;
+        padding: 6px 8px 12px;
+      }
+      .demo-bar span {
+        width: 11px;
+        height: 11px;
+        border-radius: 50%;
+        background: #333a47;
+      }
+
+      /* ---------- section shells ---------- */
+      section {
+        padding: 72px 0;
+        border-top: 1px solid var(--border-soft);
+      }
+      .section-head {
+        text-align: center;
+        margin-bottom: 48px;
+      }
+      .eyebrow {
+        font-family: var(--mono);
+        font-size: 12.5px;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--blue);
+        margin-bottom: 12px;
+      }
+      h2 {
+        font-size: clamp(26px, 4vw, 38px);
+        letter-spacing: -0.025em;
+        margin: 0 auto 14px;
+        font-weight: 800;
+        max-width: 20ch;
+      }
+      .section-sub {
+        color: var(--text-dim);
+        max-width: 60ch;
+        margin: 0 auto;
+        font-size: 16px;
+      }
+
+      /* ---------- why grid ---------- */
+      .why-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 18px;
+      }
+      .why-card {
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 26px 22px;
+        transition:
+          transform 0.15s ease,
+          border-color 0.15s ease;
+      }
+      .why-card:hover {
+        transform: translateY(-3px);
+        border-color: #33404f;
+      }
+      .why-card .emoji {
+        font-size: 26px;
+        margin-bottom: 14px;
+      }
+      .why-card h3 {
+        margin: 0 0 8px;
+        font-size: 17px;
+        letter-spacing: -0.01em;
+      }
+      .why-card p {
+        margin: 0;
+        color: var(--text-dim);
+        font-size: 14.5px;
+      }
+      @media (max-width: 900px) {
+        .why-grid {
+          grid-template-columns: repeat(2, 1fr);
+        }
+      }
+      @media (max-width: 520px) {
+        .why-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      /* ---------- concept flow ---------- */
+      .concept {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        gap: 18px;
+        margin-bottom: 26px;
+      }
+      .concept-step {
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 24px;
+        position: relative;
+      }
+      .concept-step .num {
+        font-family: var(--mono);
+        font-size: 13px;
+        color: var(--blue);
+        font-weight: 700;
+        margin-bottom: 10px;
+      }
+      .concept-step h3 {
+        margin: 0 0 8px;
+        font-size: 18px;
+      }
+      .concept-step p {
+        margin: 0;
+        color: var(--text-dim);
+        font-size: 14.5px;
+      }
+      .concept-step code {
+        font-family: var(--mono);
+        font-size: 12.5px;
+        color: var(--purple);
+        background: rgba(176, 139, 250, 0.1);
+        padding: 1px 6px;
+        border-radius: 5px;
+      }
+      @media (max-width: 820px) {
+        .concept {
+          grid-template-columns: 1fr;
+        }
+      }
+      .note {
+        background: rgba(176, 139, 250, 0.07);
+        border: 1px solid rgba(176, 139, 250, 0.22);
+        border-left: 3px solid var(--purple);
+        border-radius: 10px;
+        padding: 14px 18px;
+        color: var(--text-dim);
+        font-size: 14.5px;
+      }
+      .note strong {
+        color: var(--text);
+      }
+
+      /* ---------- feature blocks ---------- */
+      .features {
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+      }
+      .feature {
+        display: grid;
+        grid-template-columns: 240px 1fr;
+        gap: 30px;
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 30px 32px;
+      }
+      .feature-label {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .feature-icon {
+        width: 44px;
+        height: 44px;
+        border-radius: 11px;
+        display: grid;
+        place-items: center;
+        font-size: 22px;
+        background: linear-gradient(135deg, rgba(116, 172, 255, 0.18), rgba(176, 139, 250, 0.18));
+        border: 1px solid var(--border);
+      }
+      .feature-label h3 {
+        margin: 0;
+        font-size: 20px;
+        letter-spacing: -0.02em;
+      }
+      .feature ul {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      .feature li {
+        position: relative;
+        padding-left: 24px;
+        color: var(--text-dim);
+        font-size: 15px;
+      }
+      .feature li::before {
+        content: '';
+        position: absolute;
+        left: 4px;
+        top: 9px;
+        width: 7px;
+        height: 7px;
+        border-radius: 2px;
+        background: var(--accent-grad);
+      }
+      .feature li strong {
+        color: var(--text);
+        font-weight: 600;
+      }
+      .feature li code,
+      .feature p code {
+        font-family: var(--mono);
+        font-size: 13px;
+        color: var(--blue);
+        background: rgba(116, 172, 255, 0.1);
+        padding: 1px 6px;
+        border-radius: 5px;
+      }
+      @media (max-width: 760px) {
+        .feature {
+          grid-template-columns: 1fr;
+          gap: 20px;
+          padding: 24px 22px;
+        }
+      }
+
+      /* ---------- install ---------- */
+      .install-steps {
+        counter-reset: step;
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+        margin-bottom: 26px;
+      }
+      .install-step {
+        display: flex;
+        gap: 18px;
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 22px 24px;
+        align-items: flex-start;
+      }
+      .install-step .step-num {
+        flex: none;
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        display: grid;
+        place-items: center;
+        font-family: var(--mono);
+        font-weight: 700;
+        font-size: 14px;
+        color: #0a0b0d;
+        background: var(--accent-grad);
+      }
+      .install-step h3 {
+        margin: 0 0 6px;
+        font-size: 16.5px;
+      }
+      .install-step p {
+        margin: 0;
+        color: var(--text-dim);
+        font-size: 14.5px;
+      }
+      pre {
+        margin: 12px 0 0;
+        background: #05060a;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 14px 16px;
+        overflow-x: auto;
+        font-family: var(--mono);
+        font-size: 13px;
+        color: #cdd6e4;
+      }
+      pre .c {
+        color: var(--text-faint);
+      }
+      pre .g {
+        color: var(--blue);
+      }
+
+      .req-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 14px;
+      }
+      .req {
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 18px;
+      }
+      .req h4 {
+        margin: 0 0 6px;
+        font-size: 15px;
+        display: flex;
+        align-items: center;
+        gap: 7px;
+      }
+      .req .tag {
+        font-family: var(--mono);
+        font-size: 10px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        padding: 2px 6px;
+        border-radius: 5px;
+      }
+      .tag.req-req {
+        background: rgba(176, 139, 250, 0.16);
+        color: var(--purple);
+      }
+      .tag.req-opt {
+        background: rgba(116, 172, 255, 0.14);
+        color: var(--blue);
+      }
+      .req p {
+        margin: 0;
+        font-size: 13.5px;
+        color: var(--text-dim);
+      }
+      @media (max-width: 820px) {
+        .req-grid {
+          grid-template-columns: repeat(2, 1fr);
+        }
+      }
+
+      /* ---------- privacy ---------- */
+      .privacy-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 18px;
+      }
+      .privacy-card {
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 26px 24px;
+      }
+      .privacy-card .emoji {
+        font-size: 24px;
+        margin-bottom: 12px;
+      }
+      .privacy-card h3 {
+        margin: 0 0 8px;
+        font-size: 16px;
+      }
+      .privacy-card p {
+        margin: 0;
+        color: var(--text-dim);
+        font-size: 14px;
+      }
+      .privacy-card code {
+        font-family: var(--mono);
+        font-size: 12px;
+        color: var(--purple);
+      }
+      @media (max-width: 820px) {
+        .privacy-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      /* ---------- final cta ---------- */
+      .final-cta {
+        text-align: center;
+        background:
+          radial-gradient(circle at 50% 0%, rgba(124, 155, 255, 0.12), transparent 60%),
+          var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: 22px;
+        padding: 56px 32px;
+        margin: 8px 0 0;
+      }
+      .final-cta h2 {
+        margin-bottom: 12px;
+      }
+      .final-cta p {
+        color: var(--text-dim);
+        margin: 0 auto 28px;
+        max-width: 48ch;
+      }
+
+      /* ---------- footer ---------- */
+      footer {
+        border-top: 1px solid var(--border-soft);
+        padding: 40px 0 60px;
+        color: var(--text-faint);
+        font-size: 14px;
+      }
+      .footer-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 20px;
+        flex-wrap: wrap;
+      }
+      .footer-links {
+        display: flex;
+        gap: 20px;
+        flex-wrap: wrap;
+      }
+      .footer-links a {
+        color: var(--text-dim);
+      }
+
+      .hl {
+        color: var(--text);
+        font-weight: 600;
+      }
+    </style>
+  </head>
+  <body class="lang-en">
+    <!-- ===================== HEADER ===================== -->
+    <header>
+      <div class="wrap nav">
+        <a class="brand" href="#top">
+          <img src="./icon.svg" alt="Ditto" />
+          Ditto
+        </a>
+        <nav class="nav-links">
+          <a class="hide-sm" href="#why"><span class="en">Why</span><span class="ko">왜</span></a>
+          <a class="hide-sm" href="#concept"
+            ><span class="en">Concept</span><span class="ko">컨셉</span></a
+          >
+          <a href="#features"><span class="en">Features</span><span class="ko">기능</span></a>
+          <a href="#install"><span class="en">Install</span><span class="ko">설치</span></a>
+          <a href="https://github.com/youngminnnn/ditto" target="_blank" rel="noopener">GitHub</a>
+          <button class="lang-btn" id="langToggle" aria-label="Toggle language">
+            <span class="en">한국어</span><span class="ko">EN</span>
+          </button>
+        </nav>
+      </div>
+    </header>
+
+    <a id="top"></a>
+
+    <!-- ===================== HERO ===================== -->
+    <div class="hero wrap">
+      <div class="badge">
+        <span class="dot"></span>
+        <span class="en">macOS · Powered by Claude Code</span>
+        <span class="ko">macOS · Claude Code 기반</span>
+      </div>
+
+      <h1>
+        <span class="en">Run multiple AI coding agents <span class="grad">at once</span></span>
+        <span class="ko">여러 AI 코딩 에이전트를 <span class="grad">동시에</span></span>
+      </h1>
+
+      <p class="subtitle">
+        <span class="en"
+          >Ditto orchestrates parallel AI coding agents on macOS — each in its own isolated git
+          worktree, each on its own branch, each shipping its own PR. Kick off a refactor, a
+          feature, and a bugfix at the same time and watch all three from one sidebar.</span
+        >
+        <span class="ko"
+          >Ditto 는 macOS 에서 여러 AI 코딩 에이전트를 병렬로 오케스트레이션합니다 — 각자 격리된 git
+          worktree 위에서, 각자 자기 브랜치로, 각자 자기 PR 로. 리팩터링·기능 추가·버그 수정을
+          한꺼번에 시작해 사이드바 하나에서 셋 다 지켜보세요.</span
+        >
+      </p>
+
+      <div class="cta-row">
+        <a
+          class="btn btn-primary"
+          href="https://github.com/youngminnnn/ditto/releases"
+          target="_blank"
+          rel="noopener"
+        >
+          <span class="en">⬇ Download for macOS</span>
+          <span class="ko">⬇ macOS 다운로드</span>
+        </a>
+        <a
+          class="btn btn-ghost"
+          href="https://github.com/youngminnnn/ditto"
+          target="_blank"
+          rel="noopener"
+        >
+          <span class="en">★ View on GitHub</span>
+          <span class="ko">★ GitHub 에서 보기</span>
+        </a>
+      </div>
+
+      <p class="hero-note">
+        <span class="en">Free & open source (MIT) · Apple Silicon · No API key required</span>
+        <span class="ko">무료 & 오픈소스 (MIT) · Apple Silicon · 별도 API 키 불필요</span>
+      </p>
+
+      <div class="demo-frame">
+        <div class="demo-bar"><span></span><span></span><span></span></div>
+        <img src="./demo.gif" alt="Ditto in action" loading="lazy" />
+      </div>
+    </div>
+
+    <!-- ===================== WHY ===================== -->
+    <section id="why">
+      <div class="wrap">
+        <div class="section-head">
+          <div class="eyebrow">
+            <span class="en">Why Ditto</span><span class="ko">왜 Ditto 인가</span>
+          </div>
+          <h2>
+            <span class="en">One agent at a time is a bottleneck</span>
+            <span class="ko">에이전트를 하나씩 돌리는 건 병목입니다</span>
+          </h2>
+          <p class="section-sub">
+            <span class="en"
+              >Ditto removes the wait. Every task gets its own sandbox, so agents never step on each
+              other — and you never lose track of what needs you.</span
+            >
+            <span class="ko"
+              >Ditto 는 그 기다림을 없앱니다. 작업마다 전용 샌드박스가 주어지므로 에이전트끼리
+              충돌하지 않고, 사용자 확인이 필요한 세션을 놓칠 일도 없습니다.</span
+            >
+          </p>
+        </div>
+
+        <div class="why-grid">
+          <div class="why-card">
+            <div class="emoji">🧵</div>
+            <h3><span class="en">True parallelism</span><span class="ko">진짜 병렬</span></h3>
+            <p>
+              <span class="en"
+                >Kick off a refactor, a feature, and a bugfix at the same time and watch all three
+                from one sidebar.</span
+              >
+              <span class="ko"
+                >리팩터링·기능 추가·버그 수정을 한꺼번에 시작하고 사이드바 하나에서 셋 다
+                지켜봅니다.</span
+              >
+            </p>
+          </div>
+          <div class="why-card">
+            <div class="emoji">🔒</div>
+            <h3><span class="en">Isolated by default</span><span class="ko">기본이 격리</span></h3>
+            <p>
+              <span class="en"
+                >A separate worktree + branch per task means agents never collide in a shared
+                working tree.</span
+              >
+              <span class="ko"
+                >작업마다 별도 worktree + 브랜치라, 공유 작업 트리에서 에이전트끼리 충돌하지
+                않습니다.</span
+              >
+            </p>
+          </div>
+          <div class="why-card">
+            <div class="emoji">🚢</div>
+            <h3><span class="en">PR-native</span><span class="ko">PR 친화적</span></h3>
+            <p>
+              <span class="en"
+                >Jump straight from an agent's diff to a GitHub PR in one click.</span
+              >
+              <span class="ko">에이전트의 diff 에서 GitHub PR 까지 클릭 한 번으로 넘어갑니다.</span>
+            </p>
+          </div>
+          <div class="why-card">
+            <div class="emoji">🕵️</div>
+            <h3><span class="en">No telemetry</span><span class="ko">텔레메트리 없음</span></h3>
+            <p>
+              <span class="en">No servers of its own; transcripts are stored locally only.</span>
+              <span class="ko">자체 서버 없이, 대화 기록은 로컬에만 저장됩니다.</span>
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== CONCEPT ===================== -->
+    <section id="concept">
+      <div class="wrap">
+        <div class="section-head">
+          <div class="eyebrow">
+            <span class="en">How it works</span><span class="ko">동작 방식</span>
+          </div>
+          <h2>
+            <span class="en">Repository → Workspace → PR</span
+            ><span class="ko">리포 → 워크스페이스 → PR</span>
+          </h2>
+          <p class="section-sub">
+            <span class="en"
+              >One task = one dedicated git worktree + branch + agent session. Nothing runs until
+              you send your first message.</span
+            >
+            <span class="ko"
+              >작업 1개 = 전용 git worktree + 브랜치 + 에이전트 세션 1개. 첫 메시지를 보내기 전까지
+              아무것도 실행되지 않습니다.</span
+            >
+          </p>
+        </div>
+
+        <div class="concept">
+          <div class="concept-step">
+            <div class="num">01</div>
+            <h3><span class="en">Connect a repo</span><span class="ko">리포 연결</span></h3>
+            <p>
+              <span class="en"
+                >Point Ditto at a git repository (its main checkout). Configure per-repo
+                <strong>Setup / Dev / Archive</strong> scripts like <code>npm install</code>.</span
+              >
+              <span class="ko"
+                >git 리포(메인 체크아웃)를 연결합니다. 리포 단위로
+                <strong>Setup / Dev / Archive</strong> 스크립트(<code>npm install</code> 등)를
+                지정합니다.</span
+              >
+            </p>
+          </div>
+          <div class="concept-step">
+            <div class="num">02</div>
+            <h3>
+              <span class="en">Spin up a workspace</span><span class="ko">워크스페이스 생성</span>
+            </h3>
+            <p>
+              <span class="en"
+                >Each task gets its own worktree + branch + agent session under
+                <code>~/ditto/workspaces/&lt;repo&gt;/&lt;branch&gt;</code>, running independently
+                and in parallel.</span
+              >
+              <span class="ko"
+                >작업마다 전용 worktree + 브랜치 + 세션이
+                <code>~/ditto/workspaces/&lt;repo&gt;/&lt;branch&gt;</code> 에 생성되어
+                독립적·병렬로 실행됩니다.</span
+              >
+            </p>
+          </div>
+          <div class="concept-step">
+            <div class="num">03</div>
+            <h3><span class="en">Ship a PR</span><span class="ko">PR 발행</span></h3>
+            <p>
+              <span class="en"
+                >Review the diff against the base branch and open a GitHub PR in one click — while
+                other agents keep working.</span
+              >
+              <span class="ko"
+                >다른 에이전트들이 계속 작업하는 동안, base 브랜치 대비 diff 를 검토하고 클릭 한
+                번으로 GitHub PR 을 엽니다.</span
+              >
+            </p>
+          </div>
+        </div>
+
+        <div class="note">
+          <span class="en"
+            ><strong>Agent support:</strong> Ditto currently drives <strong>Claude Code</strong> via
+            the Claude Agent SDK, reusing your installed Claude Code and <code>gh</code> credentials
+            — no separate API key. Support for more agents such as <strong>Codex</strong> is
+            planned.</span
+          >
+          <span class="ko"
+            ><strong>에이전트 지원:</strong> Ditto 는 현재 Claude Agent SDK 를 통해
+            <strong>Claude Code</strong> 를 구동하며, 설치된 Claude Code 와 <code>gh</code> 의
+            로그인 정보를 그대로 사용합니다 — 별도 API 키가 필요 없습니다. 앞으로
+            <strong>Codex</strong> 등 더 다양한 에이전트를 지원할 예정입니다.</span
+          >
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== FEATURES ===================== -->
+    <section id="features">
+      <div class="wrap">
+        <div class="section-head">
+          <div class="eyebrow"><span class="en">Features</span><span class="ko">기능</span></div>
+          <h2>
+            <span class="en">Everything you need to run agents in parallel</span
+            ><span class="ko">에이전트를 병렬로 돌리는 데 필요한 모든 것</span>
+          </h2>
+        </div>
+
+        <div class="features">
+          <!-- Workspaces -->
+          <div class="feature">
+            <div class="feature-label">
+              <div class="feature-icon">🗂️</div>
+              <h3><span class="en">Workspaces</span><span class="ko">워크스페이스</span></h3>
+            </div>
+            <ul>
+              <li>
+                <strong
+                  ><span class="en">No default prompt</span
+                  ><span class="ko">기본 프롬프트 없음</span></strong
+                >
+                —
+                <span class="en"
+                  >the input box starts empty; the session begins only when you send your first
+                  message.</span
+                >
+                <span class="ko"
+                  >입력창은 빈 상태로 시작하고, 첫 메시지를 보낼 때 비로소 세션이 시작됩니다.</span
+                >
+              </li>
+              <li>
+                <strong
+                  ><span class="en">Automatic creation</span
+                  ><span class="ko">자동 생성</span></strong
+                >
+                —
+                <span class="en"
+                  >workspaces get an auto-generated name (like <code>witty-otter</code>) and branch
+                  off the default branch. Turn on manual setup to choose the name and base branch
+                  yourself.</span
+                >
+                <span class="ko"
+                  >자동 생성된 이름(<code>witty-otter</code> 등)을 받고 기본 브랜치에서 분기됩니다.
+                  직접 입력을 켜면 이름·베이스 브랜치를 직접 고를 수 있습니다.</span
+                >
+              </li>
+              <li>
+                <strong
+                  ><span class="en">Per-workspace model & effort</span
+                  ><span class="ko">워크스페이스별 모델·effort</span></strong
+                >
+                —
+                <span class="en"
+                  >set from the status line or by typing <code>/model</code> and
+                  <code>/effort</code>. Effort ranges through to <strong>ultracode</strong>.</span
+                >
+                <span class="ko"
+                  >상태줄에서 고르거나 <code>/model</code>·<code>/effort</code> 로 바꿉니다. effort
+                  는 <strong>ultracode</strong> 까지 단계가 있습니다.</span
+                >
+              </li>
+              <li>
+                <strong
+                  ><span class="en">Sessions resume across restarts</span
+                  ><span class="ko">재시작 간 세션 resume</span></strong
+                >
+                —
+                <span class="en"
+                  >your conversation context is restored, so the next message continues where you
+                  left off.</span
+                >
+                <span class="ko"
+                  >대화 맥락이 복원되어, 재시작 후 첫 메시지에서 하던 작업을 이어갑니다.</span
+                >
+              </li>
+            </ul>
+          </div>
+
+          <!-- Permissions -->
+          <div class="feature">
+            <div class="feature-label">
+              <div class="feature-icon">🛡️</div>
+              <h3><span class="en">Permissions</span><span class="ko">권한</span></h3>
+            </div>
+            <ul>
+              <li>
+                <strong
+                  ><span class="en">Cycle modes with Shift+Tab</span
+                  ><span class="ko">Shift+Tab 으로 모드 순환</span></strong
+                >
+                —
+                <span class="en"
+                  >same as Claude Code: default → accept edits → plan → auto. The current mode is
+                  shown below the input box.</span
+                >
+                <span class="ko"
+                  >Claude Code 와 동일: default → accept edits → plan → auto. 현재 모드는 입력창
+                  아래에 표시됩니다.</span
+                >
+              </li>
+              <li>
+                <strong
+                  ><span class="en">"Always allow"</span
+                  ><span class="ko">"Always allow"</span></strong
+                >
+                —
+                <span class="en"
+                  >permission prompts offer auto-approve for the rest of the session alongside
+                  Allow/Deny — Enter = Allow, Esc = Deny.</span
+                >
+                <span class="ko"
+                  >권한 프롬프트는 Allow/Deny 외에 세션 동안 자동 허용을 제공합니다 — Enter=Allow /
+                  Esc=Deny.</span
+                >
+              </li>
+            </ul>
+          </div>
+
+          <!-- Parallel visibility -->
+          <div class="feature">
+            <div class="feature-label">
+              <div class="feature-icon">👁️</div>
+              <h3>
+                <span class="en">Parallel-session visibility</span
+                ><span class="ko">병렬 세션 가시화</span>
+              </h3>
+            </div>
+            <ul>
+              <li>
+                <strong
+                  ><span class="en">Status at a glance</span
+                  ><span class="ko">한눈에 보는 상태</span></strong
+                >
+                —
+                <span class="en"
+                  >the sidebar distinguishes running (spinner), awaiting permission (yellow shield),
+                  and unread responses (blue dot).</span
+                >
+                <span class="ko"
+                  >사이드바에서 실행 중(spinner)·권한 대기(노란 방패)·미확인 응답(파란 점)을 구분해
+                  보여줍니다.</span
+                >
+              </li>
+              <li>
+                <strong
+                  ><span class="en">OS notifications & Dock badge</span
+                  ><span class="ko">OS 알림 · Dock 배지</span></strong
+                >
+                —
+                <span class="en"
+                  >when the window is inactive, completions / errors / permission requests appear as
+                  notifications and a Dock badge count.</span
+                >
+                <span class="ko"
+                  >창이 비활성이면 완료·에러·권한 요청을 OS 알림으로 띄우고 Dock 배지에
+                  집계합니다.</span
+                >
+              </li>
+              <li>
+                <strong
+                  ><span class="en">Jump to what needs you</span
+                  ><span class="ko">확인 필요한 곳으로 이동</span></strong
+                >
+                —
+                <span class="en"
+                  >"Needs input" / "Next unread" buttons jump straight to the session that needs
+                  you.</span
+                >
+                <span class="ko"
+                  >"Needs input / Next unread" 버튼으로 사용자 확인이 필요한 세션으로 바로
+                  이동합니다.</span
+                >
+              </li>
+              <li>
+                <strong
+                  ><span class="en">Overview board</span
+                  ><span class="ko">Overview 보드</span></strong
+                >
+                —
+                <span class="en"
+                  >lists every active session with status filters (All / Running / Needs input /
+                  Unread / Idle) and a Stop all action.</span
+                >
+                <span class="ko"
+                  >모든 활성 세션을 상태별 필터(All / Running / Needs input / Unread / Idle)로 훑고
+                  Stop all 로 일괄 중단합니다.</span
+                >
+              </li>
+            </ul>
+          </div>
+
+          <!-- Work area -->
+          <div class="feature">
+            <div class="feature-label">
+              <div class="feature-icon">🧰</div>
+              <h3><span class="en">Work area</span><span class="ko">작업 영역</span></h3>
+            </div>
+            <ul>
+              <li>
+                <strong><span class="en">All files</span><span class="ko">All files</span></strong>
+                —
+                <span class="en"
+                  >a file tree of the worktree with a read-only, syntax-highlighted viewer.</span
+                >
+                <span class="ko">worktree 파일 트리와 읽기 전용·구문 강조 뷰어.</span>
+              </li>
+              <li>
+                <strong><span class="en">Changes</span><span class="ko">Changes</span></strong> —
+                <span class="en"
+                  >a per-file diff against the base branch (same as a PR diff), covering commits +
+                  staged + unstaged + untracked. A <strong>Create PR</strong> button opens GitHub's
+                  PR page.</span
+                >
+                <span class="ko"
+                  >base 브랜치 대비 파일별 diff(PR diff 와 동일). 커밋 + staged + unstaged +
+                  untracked 를 모두 포함하고, <strong>Create PR</strong> 버튼이 PR 작성 화면을
+                  엽니다.</span
+                >
+              </li>
+              <li>
+                <strong><span class="en">Check</span><span class="ko">Check</span></strong> —
+                <span class="en">CI check results for the PR on the current branch.</span>
+                <span class="ko">현재 브랜치 PR 의 CI 체크 결과.</span>
+              </li>
+              <li>
+                <strong><span class="en">Terminal</span><span class="ko">Terminal</span></strong> —
+                <span class="en"
+                  >a per-workspace login-shell terminal that survives workspace switches, preserving
+                  running commands and shell state.</span
+                >
+                <span class="ko"
+                  >workspace 별 로그인 셸 터미널. 전환했다 돌아와도 실행 중이던 명령과 셸 상태가
+                  유지됩니다.</span
+                >
+              </li>
+            </ul>
+          </div>
+
+          <!-- Composing messages -->
+          <div class="feature">
+            <div class="feature-label">
+              <div class="feature-icon">✍️</div>
+              <h3><span class="en">Composing messages</span><span class="ko">메시지 작성</span></h3>
+            </div>
+            <ul>
+              <li>
+                <strong
+                  ><span class="en">Slash-command autocomplete</span
+                  ><span class="ko">슬래시 명령 자동완성</span></strong
+                >
+                —
+                <span class="en"
+                  >type <code>/</code> to see the Claude Code commands/skills available in that
+                  worktree.</span
+                >
+                <span class="ko"
+                  ><code>/</code> 를 치면 해당 worktree 에서 쓸 수 있는 명령/스킬 목록이
+                  뜹니다.</span
+                >
+              </li>
+              <li>
+                <strong
+                  ><span class="en">Inline shell commands</span
+                  ><span class="ko">인라인 셸 명령</span></strong
+                >
+                —
+                <span class="en"
+                  >start a message with <code>!</code> to run it as a shell command, with output
+                  shown right in the chat.</span
+                >
+                <span class="ko"
+                  >메시지를 <code>!</code> 로 시작하면 셸 명령으로 실행되고 결과가 채팅에 바로
+                  표시됩니다.</span
+                >
+              </li>
+              <li>
+                <strong
+                  ><span class="en">Image attachments</span
+                  ><span class="ko">이미지 첨부</span></strong
+                >
+                —
+                <span class="en">paste or drop images into the input box to send them along.</span>
+                <span class="ko">입력창에 이미지를 붙여넣거나 끌어다 놓으면 함께 전송됩니다.</span>
+              </li>
+              <li>
+                <strong
+                  ><span class="en">Status line & auto-compact</span
+                  ><span class="ko">상태줄 · 자동 압축</span></strong
+                >
+                —
+                <span class="en"
+                  >branch · directory · model · effort · context usage always shown; long
+                  conversations auto-compact, or run <code>/compact</code> manually.</span
+                >
+                <span class="ko"
+                  >브랜치 · 디렉토리 · 모델 · effort · 컨텍스트 사용량이 항상 표시되고, 길어지면
+                  자동 압축되거나 <code>/compact</code> 로 수동 압축합니다.</span
+                >
+              </li>
+              <li>
+                <strong
+                  ><span class="en">Drafts, queueing & shortcuts</span
+                  ><span class="ko">초안·큐잉·단축키</span></strong
+                >
+                —
+                <span class="en"
+                  >in-progress messages survive workspace switches; queue follow-ups while a turn
+                  runs; ↑/↓ recall messages, ⌘1–9 and ⌘[ ⌘] switch workspaces.</span
+                >
+                <span class="ko"
+                  >작성 중 메시지는 전환에도 유지되고, 실행 중 후속 메시지를 큐에 넣습니다. ↑/↓ 로
+                  이전 메시지, ⌘1–9 / ⌘[ ⌘] 로 전환합니다.</span
+                >
+              </li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== INSTALL ===================== -->
+    <section id="install">
+      <div class="wrap">
+        <div class="section-head">
+          <div class="eyebrow">
+            <span class="en">Get started</span><span class="ko">시작하기</span>
+          </div>
+          <h2>
+            <span class="en">Install in a couple of minutes</span
+            ><span class="ko">몇 분이면 설치 완료</span>
+          </h2>
+          <p class="section-sub">
+            <span class="en"
+              >Download the latest build, drag it in, and finish a quick onboarding.</span
+            >
+            <span class="ko">최신 빌드를 받아 드래그하고, 간단한 온보딩만 마치면 됩니다.</span>
+          </p>
+        </div>
+
+        <div class="install-steps">
+          <div class="install-step">
+            <div class="step-num">1</div>
+            <div>
+              <h3>
+                <span class="en">Download & drag to Applications</span
+                ><span class="ko">다운로드 후 Applications 로 드래그</span>
+              </h3>
+              <p>
+                <span class="en"
+                  >Grab the latest <code>.dmg</code> from the
+                  <a
+                    href="https://github.com/youngminnnn/ditto/releases"
+                    target="_blank"
+                    rel="noopener"
+                    >Releases page</a
+                  >
+                  and drag <strong>Ditto</strong> into <strong>Applications</strong>.</span
+                >
+                <span class="ko"
+                  ><a
+                    href="https://github.com/youngminnnn/ditto/releases"
+                    target="_blank"
+                    rel="noopener"
+                    >Releases 페이지</a
+                  >에서 최신 <code>.dmg</code> 를 받아 <strong>Ditto</strong> 를
+                  <strong>Applications</strong> 로 드래그합니다.</span
+                >
+              </p>
+            </div>
+          </div>
+          <div class="install-step">
+            <div class="step-num">2</div>
+            <div>
+              <h3>
+                <span class="en">Onboarding: consent & sign in</span
+                ><span class="ko">온보딩: 동의 & 로그인</span>
+              </h3>
+              <p>
+                <span class="en"
+                  >Consent to the Terms/Privacy, then sign in to Claude (finishes in-app via your
+                  browser) and GitHub (opens your Terminal). The <code>gh</code> CLI is required — a
+                  hard gate blocks the app until it's installed and signed in.</span
+                >
+                <span class="ko"
+                  >약관·개인정보처리방침에 동의한 뒤 Claude(앱 안에서 브라우저로 마무리)와
+                  GitHub(Terminal 에서 진행)에 로그인합니다. <code>gh</code> CLI 는 필수라,
+                  설치·로그인 전에는 하드 게이트가 앱 진입을 막습니다.</span
+                >
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <h3 style="text-align: center; margin: 40px 0 22px; font-size: 20px">
+          <span class="en">Requirements</span><span class="ko">요구 사항</span>
+        </h3>
+        <div class="req-grid">
+          <div class="req">
+            <h4>macOS <span class="tag req-req">req</span></h4>
+            <p><span class="en">Apple Silicon.</span><span class="ko">Apple Silicon.</span></p>
+          </div>
+          <div class="req">
+            <h4>Claude Code <span class="tag req-req">req</span></h4>
+            <p>
+              <span class="en">Installed and signed in.</span
+              ><span class="ko">설치·로그인된 상태.</span>
+            </p>
+          </div>
+          <div class="req">
+            <h4><code>gh</code> CLI <span class="tag req-req">req</span></h4>
+            <p>
+              <span class="en">GitHub CLI for branch/PR management.</span
+              ><span class="ko">브랜치·PR 관리용 GitHub CLI.</span>
+            </p>
+          </div>
+          <div class="req">
+            <h4><code>git</code> <span class="tag req-req">req</span></h4>
+            <p>
+              <span class="en">Standard git install.</span><span class="ko">기본 git 설치.</span>
+            </p>
+          </div>
+        </div>
+
+        <div class="note" style="margin-top: 28px">
+          <span class="en"
+            ><strong>Prefer to build from source?</strong> Requires Node.js 20 on Apple
+            Silicon:</span
+          >
+          <span class="ko"
+            ><strong>소스로 빌드하시겠어요?</strong> Apple Silicon 에 Node.js 20 이
+            필요합니다:</span
+          >
+          <pre><span class="g">git</span> clone https://github.com/youngminnnn/ditto.git
+<span class="g">cd</span> ditto
+<span class="g">nvm</span> use          <span class="c"># optional — Node 20</span>
+<span class="g">npm</span> install      <span class="c"># deps + Electron binary</span>
+<span class="g">npm</span> run dev      <span class="c"># launch in dev mode</span></pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== PRIVACY ===================== -->
+    <section id="privacy">
+      <div class="wrap">
+        <div class="section-head">
+          <div class="eyebrow">
+            <span class="en">Privacy & Data</span><span class="ko">개인정보 / 데이터</span>
+          </div>
+          <h2>
+            <span class="en">Your code stays yours</span><span class="ko">코드는 당신의 것</span>
+          </h2>
+        </div>
+        <div class="privacy-grid">
+          <div class="privacy-card">
+            <div class="emoji">🚫</div>
+            <h3><span class="en">No analytics</span><span class="ko">분석 없음</span></h3>
+            <p>
+              <span class="en"
+                >Ditto has no servers of its own and collects no analytics or telemetry.</span
+              >
+              <span class="ko">Ditto 는 자체 서버가 없고 분석·텔레메트리를 수집하지 않습니다.</span>
+            </p>
+          </div>
+          <div class="privacy-card">
+            <div class="emoji">🔗</div>
+            <h3>
+              <span class="en">Direct to providers</span><span class="ko">공급자로 직접 전송</span>
+            </h3>
+            <p>
+              <span class="en"
+                >Prompts & code go to Anthropic via the Claude Agent SDK; PR metadata goes to GitHub
+                via the <code>gh</code> CLI.</span
+              >
+              <span class="ko"
+                >프롬프트·코드는 Claude Agent SDK 로 Anthropic 에, PR 메타데이터는
+                <code>gh</code> CLI 로 GitHub 에 전송됩니다.</span
+              >
+            </p>
+          </div>
+          <div class="privacy-card">
+            <div class="emoji">💾</div>
+            <h3><span class="en">Local only</span><span class="ko">로컬에만 저장</span></h3>
+            <p>
+              <span class="en"
+                >Settings & transcripts are stored locally in
+                <code>~/Library/Application Support/Ditto/</code>.</span
+              >
+              <span class="ko"
+                >설정·대화 기록은 <code>~/Library/Application Support/Ditto/</code> 에만
+                저장됩니다.</span
+              >
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== FINAL CTA ===================== -->
+    <section style="border-top: none">
+      <div class="wrap">
+        <div class="final-cta">
+          <h2>
+            <span class="en">Ready to run your agents in parallel?</span
+            ><span class="ko">에이전트를 병렬로 돌릴 준비되셨나요?</span>
+          </h2>
+          <p>
+            <span class="en"
+              >Free and open source under the MIT License. Download the latest build and ship from
+              three branches at once.</span
+            >
+            <span class="ko"
+              >MIT 라이선스의 무료 오픈소스입니다. 최신 빌드를 받아 세 브랜치에서 동시에 배포해
+              보세요.</span
+            >
+          </p>
+          <div class="cta-row">
+            <a
+              class="btn btn-primary"
+              href="https://github.com/youngminnnn/ditto/releases"
+              target="_blank"
+              rel="noopener"
+            >
+              <span class="en">⬇ Download for macOS</span><span class="ko">⬇ macOS 다운로드</span>
+            </a>
+            <a
+              class="btn btn-ghost"
+              href="https://github.com/youngminnnn/ditto"
+              target="_blank"
+              rel="noopener"
+            >
+              <span class="en">★ Star on GitHub</span><span class="ko">★ GitHub 에서 스타</span>
+            </a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== FOOTER ===================== -->
+    <footer>
+      <div class="wrap footer-row">
+        <div class="brand" style="font-size: 16px">
+          <img src="./icon.svg" alt="Ditto" style="width: 24px; height: 24px" />
+          <span>Ditto</span>
+          <span style="color: var(--text-faint); font-weight: 400; margin-left: 6px">
+            © youngminnnn · MIT
+          </span>
+        </div>
+        <div class="footer-links">
+          <a href="https://github.com/youngminnnn/ditto" target="_blank" rel="noopener">GitHub</a>
+          <a href="https://github.com/youngminnnn/ditto/releases" target="_blank" rel="noopener"
+            ><span class="en">Releases</span><span class="ko">릴리스</span></a
+          >
+          <a
+            href="https://github.com/youngminnnn/ditto/blob/main/PRIVACY.md"
+            target="_blank"
+            rel="noopener"
+            ><span class="en">Privacy</span><span class="ko">개인정보</span></a
+          >
+          <a
+            href="https://github.com/youngminnnn/ditto/blob/main/TERMS.md"
+            target="_blank"
+            rel="noopener"
+            ><span class="en">Terms</span><span class="ko">약관</span></a
+          >
+          <a
+            href="https://github.com/youngminnnn/ditto/blob/main/CONTRIBUTING.md"
+            target="_blank"
+            rel="noopener"
+            ><span class="en">Contributing</span><span class="ko">기여</span></a
+          >
+        </div>
+      </div>
+    </footer>
+
+    <script>
+      ;(function () {
+        var KEY = 'ditto-lang'
+        var body = document.body
+
+        function apply(lang) {
+          if (lang === 'ko') {
+            body.classList.add('lang-ko')
+            document.documentElement.lang = 'ko'
+          } else {
+            body.classList.remove('lang-ko')
+            document.documentElement.lang = 'en'
+          }
+        }
+
+        // initial: stored preference → browser language → English
+        var stored = null
+        try {
+          stored = localStorage.getItem(KEY)
+        } catch (e) {}
+        var initial =
+          stored || ((navigator.language || '').toLowerCase().indexOf('ko') === 0 ? 'ko' : 'en')
+        apply(initial)
+
+        var btn = document.getElementById('langToggle')
+        btn.addEventListener('click', function () {
+          var next = body.classList.contains('lang-ko') ? 'en' : 'ko'
+          apply(next)
+          try {
+            localStorage.setItem(KEY, next)
+          } catch (e) {}
+        })
+      })()
+    </script>
+  </body>
+</html>

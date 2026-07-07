@@ -1,0 +1,51 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- 배경: 위쪽이 살짝 밝은 차콜 → 아래쪽 거의 검정 -->
+    <linearGradient id="bg" x1="0.1" y1="0" x2="0.9" y2="1">
+      <stop offset="0" stop-color="#20242e" />
+      <stop offset="0.55" stop-color="#13161c" />
+      <stop offset="1" stop-color="#0a0b0d" />
+    </linearGradient>
+    <!-- 심볼 그라데이션: 파랑(액션) → 보라(PR) -->
+    <linearGradient id="sym" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#74acff" />
+      <stop offset="1" stop-color="#b08bfa" />
+    </linearGradient>
+    <!-- 카드 상단 글래스 하이라이트 -->
+    <linearGradient id="gloss" x1="0.5" y1="0" x2="0.5" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.5" />
+      <stop offset="0.45" stop-color="#ffffff" stop-opacity="0" />
+    </linearGradient>
+    <!-- 심볼 뒤 부드러운 광원 -->
+    <radialGradient id="glow" cx="0.5" cy="0.46" r="0.5">
+      <stop offset="0" stop-color="#7c9bff" stop-opacity="0.45" />
+      <stop offset="1" stop-color="#7c9bff" stop-opacity="0" />
+    </radialGradient>
+    <!-- 앞 카드 그림자 -->
+    <filter id="cardShadow" x="-30%" y="-30%" width="160%" height="170%">
+      <feDropShadow dx="0" dy="26" stdDeviation="34" flood-color="#000000" flood-opacity="0.45" />
+    </filter>
+  </defs>
+
+  <!-- macOS squircle 근사 배경 -->
+  <rect width="1024" height="1024" rx="228" fill="url(#bg)" />
+  <!-- 상단 가장자리 미세 하이라이트로 입체감 -->
+  <rect x="2" y="2" width="1020" height="1020" rx="226" fill="none" stroke="#ffffff" stroke-opacity="0.06" stroke-width="2" />
+
+  <!-- 심볼 뒤 광원 -->
+  <rect x="160" y="150" width="704" height="704" rx="240" fill="url(#glow)" />
+
+  <!-- 겹쳐 쌓인 둥근 카드 = 병렬 복제된 workspace. 뒤로 갈수록 흐려져 깊이감을 준다. -->
+  <g>
+    <!-- 뒤 카드 -->
+    <rect x="304" y="300" width="332" height="332" rx="92" fill="url(#sym)" opacity="0.28" />
+    <!-- 중간 카드 -->
+    <rect x="372" y="368" width="332" height="332" rx="92" fill="url(#sym)" opacity="0.55" />
+    <!-- 앞 카드 (가장 선명, 그림자 + 하이라이트) -->
+    <g filter="url(#cardShadow)">
+      <rect x="440" y="436" width="332" height="332" rx="92" fill="url(#sym)" />
+      <rect x="440" y="436" width="332" height="332" rx="92" fill="url(#gloss)" />
+      <rect x="441.5" y="437.5" width="329" height="329" rx="90.5" fill="none" stroke="#ffffff" stroke-opacity="0.28" stroke-width="3" />
+    </g>
+  </g>
+</svg>
