@@ -125,7 +125,7 @@ export function registerIpc(ctx: IpcContext): void {
   /** workspace 별 스크립트에 주입할 환경변수. dev 서버가 충돌 없이 고유 포트를 쓰게 한다. */
   const scriptEnvFor = (port: number): Record<string, string> => ({
     PORT: String(port),
-    DITTO_DEV_PORT: String(port)
+    WOOI_DEV_PORT: String(port)
   })
 
   /**
@@ -536,7 +536,7 @@ export function registerIpc(ctx: IpcContext): void {
     const repo = repoFor(ws.repoId)
     if (!repo) return
     const command = kind === 'setup' ? repo.setupScript : repo.devScript
-    // 고유 포트를 env(PORT/DITTO_DEV_PORT)로 주입한다. 레거시 workspace 는 여기서 lazy 배정.
+    // 고유 포트를 env(PORT/WOOI_DEV_PORT)로 주입한다. 레거시 workspace 는 여기서 lazy 배정.
     let port = await ensureDevPort(workspaceId)
 
     // dev 서버는 실제로 포트를 바인딩하므로, 배정된 포트가 며칠 전 값이라 그 사이 다른 프로세스가

@@ -24,10 +24,10 @@ type Step = {
 
 const STEPS: Step[] = [
   {
-    title: 'Welcome to Ditto',
+    title: 'Welcome to Wooi',
     body: (
       <>
-        Ditto runs multiple AI coding agents at once — each in its own isolated git worktree. This
+        Wooi runs multiple AI coding agents at once — each in its own isolated git worktree. This
         quick tour points out where everything lives. Use <b className="text-neutral-200">Next</b>{' '}
         (or the arrow keys) to move through it.
       </>
@@ -257,7 +257,7 @@ export default function FeatureTour({
             </button>
           )}
           <button className={primaryBtn} onClick={next}>
-            {last ? (firstRun ? 'Start using Ditto' : 'Done') : 'Next'}
+            {last ? (firstRun ? 'Start using Wooi' : 'Done') : 'Next'}
           </button>
         </div>
       </div>

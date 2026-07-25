@@ -272,7 +272,7 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
       return
     }
 
-    // /diff·/copy·/help·/clear·/memory 는 Ditto UI 에서 직접 처리한다(에이전트로 보내지 않는다).
+    // /diff·/copy·/help·/clear·/memory 는 Wooi UI 에서 직접 처리한다(에이전트로 보내지 않는다).
     // runLocal 이 입력창 텍스트를 알맞게 정리하므로(대부분 비우고, /help 만 '/' 로 메뉴를 띄움)
     // 여기서는 setText 를 호출하지 않는다.
     const local = images.length ? null : matchLocal(trimmed)
@@ -345,7 +345,7 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
   }
 
   /**
-   * Ditto UI 에서 직접 처리하는 로컬 명령(/diff·/copy·/help·/clear·/memory). 에이전트로
+   * Wooi UI 에서 직접 처리하는 로컬 명령(/diff·/copy·/help·/clear·/memory). 에이전트로
    * 보내지 않고 앱 기능으로 매핑한다. 입력창 텍스트 정리도 여기서 한다(대부분 비우고, /help 만
    * 자동완성 메뉴를 다시 띄우도록 '/' 를 남긴다).
    */
@@ -363,7 +363,7 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
     setText('')
     if (kind === 'diff') {
       // ChatView 가 가진 diff 모달을 연다(Composer 에서 직접 접근할 수 없어 이벤트로 신호한다).
-      window.dispatchEvent(new CustomEvent('ditto:open-diff', { detail: workspace.id }))
+      window.dispatchEvent(new CustomEvent('wooi:open-diff', { detail: workspace.id }))
       return
     }
     if (kind === 'copy') {
@@ -763,7 +763,7 @@ function matchInteractive(text: string): (typeof INTERACTIVE_COMMANDS)[number] |
   return INTERACTIVE_COMMANDS.find((c) => c.name === name || c.aliases?.includes(name)) ?? null
 }
 
-/** Ditto UI 가 직접 처리하는 로컬 명령(에이전트로 보내지 않음). */
+/** Wooi UI 가 직접 처리하는 로컬 명령(에이전트로 보내지 않음). */
 type LocalCommand = 'diff' | 'copy' | 'help' | 'clear' | 'memory'
 const LOCAL_COMMANDS: readonly LocalCommand[] = ['diff', 'copy', 'help', 'clear', 'memory']
 

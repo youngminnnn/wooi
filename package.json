@@ -1,6 +1,6 @@
 {
-  "name": "ditto",
-  "version": "0.9.0",
+  "name": "wooi",
+  "version": "1.0.0",
   "description": "Orchestrate parallel AI coding agents across isolated git worktrees",
   "main": "./out/main/index.js",
   "type": "module",
@@ -8,7 +8,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/youngminnnn/ditto.git"
+    "url": "git+https://github.com/youngminnnn/wooi.git"
   },
   "scripts": {
     "dev": "electron-vite dev",
@@ -37,8 +37,8 @@
     ]
   },
   "build": {
-    "appId": "com.ditto.app",
-    "productName": "Ditto",
+    "appId": "com.wooi.app",
+    "productName": "Wooi",
     "directories": {
       "output": "release"
     },
@@ -55,7 +55,12 @@
         "zip"
       ],
       "icon": "build/icon.png",
-      "identity": "-"
+      "identity": "youngmin JI (9H577PWRAL)",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "notarize": true
     }
   },
   "devDependencies": {

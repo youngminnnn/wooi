@@ -19,7 +19,7 @@ interface Question {
 // 사용자가 직접 입력한 "Other" 항목을 selected 배열 안에서 표시하는 sentinel.
 // Other 는 모델이 준 옵션이 아니라 자동 제공되는 자유 입력이므로, 실제 옵션 라벨과
 // 한 배열에 섞여도 충돌하지 않도록, 실제 라벨로는 나올 수 없는 토큰 값을 쓴다.
-const OTHER = '__ditto_other__'
+const OTHER = '__wooi_other__'
 
 /**
  * AskUserQuestion 도구의 질문을 표시하고 사용자의 선택을 수집한다.

@@ -112,7 +112,7 @@ export default function RepoConfigModal({
           <p className="mt-1.5 text-xs text-neutral-600">
             Dev command you start/stop from the scripts panel. Each workspace gets a unique{' '}
             <span className="font-mono">$PORT</span> (also{' '}
-            <span className="font-mono">$DITTO_DEV_PORT</span>) — use it so parallel dev processes
+            <span className="font-mono">$WOOI_DEV_PORT</span>) — use it so parallel dev processes
             don&rsquo;t collide, e.g. <span className="font-mono">vite --port $PORT</span>.
           </p>
         </div>

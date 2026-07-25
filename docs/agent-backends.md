@@ -2,7 +2,7 @@
 
 **English** · [한국어](./agent-backends.ko.md)
 
-ditto keeps its AI coding agents behind an `AgentBackend` abstraction so backends can be
+wooi keeps its AI coding agents behind an `AgentBackend` abstraction so backends can be
 swapped and extended (`src/main/agent/*`). This is a living document tracking that expansion.
 
 v1.0.0 ships as **Claude Code only**; later versions add the OpenAI **Codex** backend in

@@ -18,12 +18,12 @@ export type PermissionMode = 'default' | 'acceptEdits' | 'plan' | 'auto'
 export type EffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 
 /**
- * ditto 가 저장·표시하는 effort 선택값. SDK 의 effort 레벨에 더해, Claude Code CLI 의 effort
+ * wooi 가 저장·표시하는 effort 선택값. SDK 의 effort 레벨에 더해, Claude Code CLI 의 effort
  * 선택기에서 'max' 다음에 나오는 'ultracode' 를 포함한다.
  *
  * ultracode 는 effort 레벨이 아니라 별도 모드다 — "xhigh effort + 상시 동적 워크플로우 조율".
  * 그래서 SDK 로는 effort 옵션이 아니라 settings 레이어의 ultracode: true 로 전달하며,
- * 워크플로우 활성화(ditto 는 기본 on)와 xhigh 지원 모델이 필요하다(미지원 시 CLI 가 알아서 처리).
+ * 워크플로우 활성화(wooi 는 기본 on)와 xhigh 지원 모델이 필요하다(미지원 시 CLI 가 알아서 처리).
  */
 export type EffortSetting = EffortLevel | 'ultracode'
 
@@ -115,7 +115,7 @@ export interface Workspace {
   /**
    * 이 workspace 전용 dev 서버 포트. 병렬로 여러 workspace 의 dev 스크립트를 띄울 때
    * 같은 기본 포트(3000/5173 등)를 다투지 않도록, 생성 시 고유 포트를 배정한다.
-   * setup/dev 스크립트에 `$PORT`·`$DITTO_DEV_PORT` 환경변수로 주입된다.
+   * setup/dev 스크립트에 `$PORT`·`$WOOI_DEV_PORT` 환경변수로 주입된다.
    * 레거시 workspace(배정 전)는 null 일 수 있으며, dev 실행 시 lazy 하게 배정·영속된다.
    */
   devPort: number | null

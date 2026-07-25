@@ -1,8 +1,8 @@
-import type { DittoApi } from '@shared/api'
+import type { WooiApi } from '@shared/api'
 
 declare global {
   interface Window {
-    api: DittoApi
+    api: WooiApi
   }
 }
 

@@ -82,8 +82,8 @@ function hydratePath(captured: string[] | null): void {
 /** 로그인+인터랙티브 셸에서 export 된 환경 전체를 캡처한다. 실패 시 null. */
 function resolveShellEnv(): Record<string, string> | null {
   const shell = process.env.SHELL || '/bin/zsh'
-  const start = '__DITTO_ENV_START__'
-  const end = '__DITTO_ENV_END__'
+  const start = '__WOOI_ENV_START__'
+  const end = '__WOOI_ENV_END__'
   try {
     // 인터랙티브(-i)여야 .zshrc 가 소스된다. env 출력을 sentinel 로 감싸 rc 잡음과 분리.
     const out = execFileSync(

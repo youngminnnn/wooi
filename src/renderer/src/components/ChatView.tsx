@@ -109,8 +109,8 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
     const onOpenDiff = (e: Event): void => {
       if ((e as CustomEvent<string>).detail === workspace.id) setShowDiff(true)
     }
-    window.addEventListener('ditto:open-diff', onOpenDiff)
-    return () => window.removeEventListener('ditto:open-diff', onOpenDiff)
+    window.addEventListener('wooi:open-diff', onOpenDiff)
+    return () => window.removeEventListener('wooi:open-diff', onOpenDiff)
   }, [workspace.id])
   const [editingName, setEditingName] = useState<string | null>(null)
   // 세션이 에러로 멈췄을 때 노출하는 복구 배너의 로컬 dismiss. 다시 에러 상태로 진입하면 리셋된다.
@@ -173,8 +173,8 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
     const onArchive = (e: Event): void => {
       if ((e as CustomEvent<string>).detail === workspace.id) void archiveWorkspace()
     }
-    window.addEventListener('ditto:archive-workspace', onArchive)
-    return () => window.removeEventListener('ditto:archive-workspace', onArchive)
+    window.addEventListener('wooi:archive-workspace', onArchive)
+    return () => window.removeEventListener('wooi:archive-workspace', onArchive)
     // archiveWorkspace 는 매 렌더 재생성되므로 최신 displayName 반영 위해 deps 에 포함한다.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspace.id, displayName])

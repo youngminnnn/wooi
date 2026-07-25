@@ -4,7 +4,7 @@ import { BASE_DEV_PORT } from '@shared/types'
 /**
  * 포트가 실제로 비어 있는지 OS 수준에서 확인한다. 잠깐 listen 을 시도해 보고 성공하면
  * 곧바로 닫는다 — listen 이 EADDRINUSE 로 실패하면 누군가 점유 중이다.
- * 외부 프로세스(다른 앱·이전 dev 서버)가 잡고 있는 포트는 ditto state 만으로는 알 수 없으므로,
+ * 외부 프로세스(다른 앱·이전 dev 서버)가 잡고 있는 포트는 wooi state 만으로는 알 수 없으므로,
  * dev 포트를 배정하기 전에 이 프로브로 충돌을 한 번 더 피한다.
  */
 export function isPortFree(port: number): Promise<boolean> {

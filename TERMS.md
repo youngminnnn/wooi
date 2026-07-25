@@ -7,12 +7,12 @@
 
 _Last updated: 2026-06-06 · Version 1_
 
-By installing or using Ditto ("the app"), you agree to these terms. If you do not
+By installing or using Wooi ("the app"), you agree to these terms. If you do not
 agree, do not use the app.
 
 ## 1. License
 
-Ditto is open‑source software released under the **MIT License** (see
+Wooi is open‑source software released under the **MIT License** (see
 [`LICENSE`](./LICENSE)). You are free to use, copy, modify, merge, publish,
 distribute, sublicense, and/or sell copies of the software, subject to the terms
 of that license, for personal or commercial purposes. The software is provided
@@ -20,7 +20,7 @@ of that license, for personal or commercial purposes. The software is provided
 
 ## 2. Third‑party services
 
-Ditto operates by driving third‑party tools and services on your behalf —
+Wooi operates by driving third‑party tools and services on your behalf —
 **Anthropic's Claude** (via the Claude Agent SDK / Claude Code) and, optionally,
 **GitHub** (via the `gh` CLI). Your use of those services is governed by their own
 terms:
@@ -33,7 +33,7 @@ Claude account incurs.
 
 ## 3. Your responsibility
 
-Ditto can run agents that read, write, and execute code and shell commands in the
+Wooi can run agents that read, write, and execute code and shell commands in the
 git repositories you connect, and can run setup/dev scripts you configure. **You
 are responsible** for the repositories you connect, the commands and scripts you
 allow, and the changes agents make. Review changes before committing or pushing.

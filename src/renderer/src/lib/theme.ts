@@ -2,7 +2,7 @@ import type { ThemePreference } from '@shared/types'
 
 // 권위 있는 설정은 main 의 store 에 있지만, 그 값은 비동기로 도착한다. 시작 시 다크→라이트
 // 깜빡임을 막기 위해 마지막 선호를 localStorage 에 캐시해 두고 첫 페인트 전에 적용한다.
-const CACHE_KEY = 'ditto.theme'
+const CACHE_KEY = 'wooi.theme'
 
 const media = (): MediaQueryList => window.matchMedia('(prefers-color-scheme: dark)')
 

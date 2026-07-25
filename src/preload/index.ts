@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { IPC } from '@shared/types'
-import type { DittoApi } from '@shared/api'
+import type { WooiApi } from '@shared/api'
 
 function subscribe<T>(channel: string, cb: (payload: T) => void): () => void {
   const listener = (_event: unknown, payload: T): void => cb(payload)
@@ -8,7 +8,7 @@ function subscribe<T>(channel: string, cb: (payload: T) => void): () => void {
   return () => ipcRenderer.removeListener(channel, listener as never)
 }
 
-const api: DittoApi = {
+const api: WooiApi = {
   getState: () => ipcRenderer.invoke(IPC.appGetState),
 
   repo: {

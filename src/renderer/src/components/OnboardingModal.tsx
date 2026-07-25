@@ -7,8 +7,8 @@ import { useStore } from '../store'
 import { CURRENT_TERMS_VERSION } from '@shared/types'
 
 // 배포 시 실제 공개 URL 로 교체한다(현재는 앱과 함께 제공되는 repo 문서를 가리킨다).
-const PRIVACY_URL = 'https://github.com/ditto-app/ditto/blob/main/PRIVACY.md'
-const TERMS_URL = 'https://github.com/ditto-app/ditto/blob/main/TERMS.md'
+const PRIVACY_URL = 'https://github.com/youngminnnn/wooi/blob/main/PRIVACY.md'
+const TERMS_URL = 'https://github.com/youngminnnn/wooi/blob/main/TERMS.md'
 
 /**
  * 최초 실행 온보딩. 첫 단계로 약관·개인정보처리방침 동의를 강제하고(미동의 시 진행 불가),
@@ -49,7 +49,7 @@ export default function OnboardingModal({
           <div className="mb-3 flex justify-center">
             <Logo size={56} />
           </div>
-          <h2 className="text-lg font-semibold text-neutral-100">Welcome to Ditto</h2>
+          <h2 className="text-lg font-semibold text-neutral-100">Welcome to Wooi</h2>
           <p className="mt-1.5 text-sm text-neutral-500 leading-relaxed">
             Run parallel AI coding agents, each in its own isolated git worktree.
           </p>
@@ -94,7 +94,7 @@ function ConsentStep({ onContinue }: { onContinue: () => void }): React.JSX.Elem
             <b className="text-neutral-300">locally</b> on your Mac.
           </li>
           <li>
-            Ditto has no servers and collects <b className="text-neutral-300">no analytics</b>.
+            Wooi has no servers and collects <b className="text-neutral-300">no analytics</b>.
           </li>
         </ul>
         <label className="flex items-start gap-2 pt-1.5 text-neutral-300 cursor-pointer">

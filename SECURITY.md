@@ -4,15 +4,15 @@
 
 **Please do not report security issues in public GitHub issues.**
 
-If you discover a security vulnerability in Ditto, report it privately using
-**[GitHub's private vulnerability reporting](https://github.com/youngminnnn/ditto/security/advisories/new)**
+If you discover a security vulnerability in Wooi, report it privately using
+**[GitHub's private vulnerability reporting](https://github.com/youngminnnn/wooi/security/advisories/new)**
 (Security → Advisories → *Report a vulnerability*).
 
 If that is unavailable, email **youngmin3306@gmail.com** with:
 
 - a description of the issue and its impact,
 - steps to reproduce (a minimal proof-of-concept if possible),
-- the Ditto version and your macOS version.
+- the Wooi version and your macOS version.
 
 This is a single-maintainer project, so please allow a reasonable amount of time
 for a response before any public disclosure. We aim to acknowledge reports within
@@ -20,15 +20,15 @@ a few days.
 
 ## Supported versions
 
-Ditto is pre-1.0 and ships from `main`. Only the **latest release** receives
+Wooi is pre-1.0 and ships from `main`. Only the **latest release** receives
 security fixes.
 
 ## Threat model & security posture
 
-Ditto is a local macOS desktop app with no backend of its own. Understanding what
+Wooi is a local macOS desktop app with no backend of its own. Understanding what
 it does — and does not — do helps scope reports.
 
-**What Ditto does**
+**What Wooi does**
 
 - Runs **AI coding agents** (Claude Code, via the Claude Agent SDK) that can read
   and write files inside isolated git worktrees, and execute tools/commands.
@@ -51,12 +51,12 @@ injection through unsanitized inputs are in scope.
 
 **Data & privacy**
 
-- Ditto collects **no analytics/telemetry** and has no servers of its own.
+- Wooi collects **no analytics/telemetry** and has no servers of its own.
 - Prompts and code are sent to **Anthropic** through the Claude Agent SDK; PR
   metadata is sent to **GitHub** via the `gh` CLI.
 - Settings and transcripts are stored **locally only**
-  (`~/Library/Application Support/Ditto/`).
-- Ditto reuses the credentials of your installed Claude Code and `gh` CLIs.
+  (`~/Library/Application Support/Wooi/`).
+- Wooi reuses the credentials of your installed Claude Code and `gh` CLIs.
 
 See [`PRIVACY.md`](./PRIVACY.md) for details.
 

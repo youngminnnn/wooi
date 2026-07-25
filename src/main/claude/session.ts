@@ -402,7 +402,7 @@ export class ClaudeSession {
           // 인라인 settings 레이어로 주입한다 — settingSources 가 읽는 파일 설정 "위에" 합쳐지므로
           // CLAUDE.md·MCP 로딩에는 영향이 없다. 켜두기만 하면 모델이 임의로 워크플로우를 돌리진 않고,
           // 사용자가 'ultracode' 키워드나 "워크플로우로 해줘" 같은 요청을 했을 때만 Workflow 도구를 쓴다.
-          // (Pro 등에서는 기본 off 이고 Ditto 엔 /config UI 도 없어, 이 주입이 없으면 기능을 켤 방법이 없다.)
+          // (Pro 등에서는 기본 off 이고 Wooi 엔 /config UI 도 없어, 이 주입이 없으면 기능을 켤 방법이 없다.)
           // ultracode 면 같은 settings 레이어에 ultracode: true 를 합친다(워크플로우는 이미 on).
           settings: { enableWorkflows: true, ...(ultracode ? { ultracode: true } : {}) },
           ...(Object.keys(mcpServers).length ? { mcpServers } : {}),
