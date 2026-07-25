@@ -112,7 +112,13 @@ const api: WooiApi = {
   },
 
   app: {
-    setBadgeCount: (count) => ipcRenderer.invoke(IPC.appSetBadge, count)
+    setBadgeCount: (count) => ipcRenderer.invoke(IPC.appSetBadge, count),
+    getVersion: () => ipcRenderer.invoke(IPC.appGetVersion)
+  },
+
+  update: {
+    check: () => ipcRenderer.invoke(IPC.updateCheck),
+    quitAndInstall: () => ipcRenderer.invoke(IPC.updateQuitAndInstall)
   },
 
   openExternal: (url) => ipcRenderer.invoke(IPC.openExternal, url),
@@ -143,7 +149,8 @@ const api: WooiApi = {
   onWindowFocus: (cb) => subscribe(IPC.evtWindowFocus, () => cb()),
   onWindowBlur: (cb) => subscribe(IPC.evtWindowBlur, () => cb()),
   onClaudeLogin: (cb) => subscribe(IPC.evtClaudeLogin, cb),
-  onGithubLogin: (cb) => subscribe(IPC.evtGithubLogin, cb)
+  onGithubLogin: (cb) => subscribe(IPC.evtGithubLogin, cb),
+  onUpdate: (cb) => subscribe(IPC.evtUpdate, cb)
 }
 
 contextBridge.exposeInMainWorld('api', api)

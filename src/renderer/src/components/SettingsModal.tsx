@@ -1,5 +1,6 @@
-import { useState } from 'react'
-import { Compass } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { Compass, RefreshCw } from 'lucide-react'
+import type { UpdateStatus } from '@shared/types'
 import { useStore } from '../store'
 import Modal, { inputClass, labelClass, primaryBtn, ghostBtn } from './Modal'
 import IntegrationsPanel from './IntegrationsPanel'
@@ -288,8 +289,80 @@ export default function SettingsModal({
             </span>
           </label>
         </Section>
+
+        <Section title="About">
+          <UpdatesSection />
+        </Section>
       </div>
     </Modal>
+  )
+}
+
+function UpdatesSection(): React.JSX.Element {
+  const [version, setVersion] = useState<string>('')
+  const [status, setStatus] = useState<UpdateStatus>({ state: 'idle' })
+
+  useEffect(() => {
+    window.api.app.getVersion().then(setVersion)
+    return window.api.onUpdate(setStatus)
+  }, [])
+
+  const checking = status.state === 'checking'
+  const check = (): void => {
+    setStatus({ state: 'checking' })
+    window.api.update.check().then(setStatus)
+  }
+
+  const statusText = (): string => {
+    switch (status.state) {
+      case 'checking':
+        return 'Checking for updates…'
+      case 'available':
+        return `Update available${status.version ? ` (${status.version})` : ''} — downloading…`
+      case 'downloading':
+        return `Downloading update… ${status.percent ?? 0}%`
+      case 'ready':
+        return `Version ${status.version ?? ''} downloaded — restart to install.`
+      case 'not-available':
+        return 'You’re on the latest version.'
+      case 'error':
+        return `Update check failed: ${status.error ?? 'unknown error'}`
+      default:
+        return ''
+    }
+  }
+
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <div className="min-w-0">
+        <div className="text-sm text-neutral-300">
+          Wooi <span className="text-neutral-500">v{version || '…'}</span>
+        </div>
+        {status.state !== 'idle' && (
+          <div className="text-xs text-neutral-600 mt-0.5 truncate">{statusText()}</div>
+        )}
+      </div>
+      {status.state === 'ready' ? (
+        <button
+          type="button"
+          onClick={() => window.api.update.quitAndInstall()}
+          className="shrink-0 inline-flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border border-[var(--accent-500)] bg-[var(--accent-600)]/15 text-neutral-100 hover:bg-[var(--accent-600)]/25 transition-colors"
+        >
+          <RefreshCw size={14} />
+          Restart & update
+        </button>
+      ) : (
+        <button
+          type="button"
+          onClick={check}
+          disabled={checking}
+          className="shrink-0 inline-flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border border-[var(--border)] text-neutral-300 hover:bg-[var(--surface-2)] disabled:opacity-50 transition-colors"
+        >
+          <RefreshCw size={14} className={checking ? 'animate-spin' : ''} />
+          Check for updates
+        </button>
+      )}
+    </div>
   )
 }
 

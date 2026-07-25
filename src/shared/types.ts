@@ -647,6 +647,12 @@ export const IPC = {
   terminalKillInline: 'terminal:killInline',
   // Dock 미확인 배지
   appSetBadge: 'app:setBadge',
+  // 앱 버전 / 자동 업데이트
+  appGetVersion: 'app:getVersion',
+  /** 수동으로 업데이트를 확인한다(설정의 "업데이트 확인" 버튼). */
+  updateCheck: 'update:check',
+  /** 다운로드된 업데이트를 설치하기 위해 앱을 재시작한다. */
+  updateQuitAndInstall: 'update:quitAndInstall',
 
   // 단방향 이벤트 (main.send → renderer.on)
   evtChat: 'evt:chat',
@@ -671,10 +677,23 @@ export const IPC = {
   /** 앱 내부 Claude 로그인 진행 이벤트(인증 URL 노출 / 코드 입력 요청 / 완료). */
   evtClaudeLogin: 'evt:claudeLogin',
   /** 앱 내부 GitHub 로그인 진행 이벤트(one-time 코드·디바이스 URL 노출 / 완료). */
-  evtGithubLogin: 'evt:githubLogin'
+  evtGithubLogin: 'evt:githubLogin',
+  /** 자동 업데이트 상태 변화(확인 중/최신/발견/다운로드 진행/준비됨/오류). */
+  evtUpdate: 'evt:update'
 } as const
 
 // ── IPC 페이로드 타입 ────────────────────────────────────────────────────
+
+/** 자동 업데이트 상태(main → renderer, evtUpdate 페이로드). */
+export interface UpdateStatus {
+  state: 'idle' | 'checking' | 'available' | 'downloading' | 'ready' | 'not-available' | 'error'
+  /** available/ready 일 때 새 버전. */
+  version?: string
+  /** downloading 일 때 0~100. */
+  percent?: number
+  /** error 일 때 메시지. */
+  error?: string
+}
 
 export interface CreateWorkspaceArgs {
   repoId: string
