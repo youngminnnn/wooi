@@ -1,5 +1,9 @@
 name: build
 
+# run 목록에 커밋 메시지 대신 "release: <태그>" 로 표시한다(태그 빌드 기준).
+# workflow_dispatch 등 태그가 아닌 경우엔 ref 이름이 그대로 들어간다.
+run-name: 'release: ${{ github.ref_name }}'
+
 # private repo 의 macOS 러너는 분당 과금이 크므로(무료 분량 10배 소진),
 # 일반 push 마다 돌지 않게 수동 실행과 버전 태그 push 에서만 빌드한다.
 on:
