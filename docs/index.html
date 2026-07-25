@@ -16,10 +16,21 @@
       property="og:description"
       content="Orchestrate parallel AI coding agents across isolated git worktrees. Each task = its own worktree + branch + agent session."
     />
-    <meta property="og:image" content="https://youngminnnn.github.io/wooi/og.png?v=2" />
+    <meta property="og:image" content="https://youngminnnn.github.io/wooi/og.png?v=3" />
     <meta name="theme-color" content="#0a0b0d" />
 
-    <link rel="icon" type="image/svg+xml" href="./icon.svg" />
+    <!-- 파비콘은 16px 로 줄어들어 한글 "우이"(icon.svg)가 뭉개지므로 축약형 W 마크를 쓴다. -->
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+
+    <!--
+      iOS 홈 화면 추가용. 이게 없으면 애플이 페이지 스크린샷을 대신 쓴다.
+      180px 라 한글 "우이"가 또렷하게 읽히므로 앱 아이콘 쪽을 쓴다. 단 iOS 가 자체적으로
+      둥근 모서리 마스크를 씌우므로, 모서리를 미리 깎지 않은 정사각·불투명 PNG 여야 한다
+      (icon.svg 의 rx 를 0 으로 편 버전).
+    -->
+    <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
+    <!-- 없으면 <title> 전체가 홈 화면 라벨로 잘려 들어간다. -->
+    <meta name="apple-mobile-web-app-title" content="Wooi" />
 
     <style>
       :root {
@@ -1524,7 +1535,8 @@
     <footer>
       <div class="wrap footer-row">
         <div class="brand" style="font-size: 16px">
-          <img src="./icon.svg" alt="Wooi" style="width: 24px; height: 24px" />
+          <!-- 푸터는 24px 라 한글 마크가 흐려진다. 옆에 "Wooi" 텍스트가 있으므로 축약형 W 를 쓴다. -->
+          <img src="./favicon.svg" alt="Wooi" style="width: 24px; height: 24px" />
           <span>Wooi</span>
           <span style="color: var(--text-faint); font-weight: 400; margin-left: 6px">
             © youngminnnn · Apache 2.0
