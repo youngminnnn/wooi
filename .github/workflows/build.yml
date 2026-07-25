@@ -4,8 +4,8 @@ name: build
 # workflow_dispatch 등 태그가 아닌 경우엔 ref 이름이 그대로 들어간다.
 run-name: 'release: ${{ github.ref_name }}'
 
-# private repo 의 macOS 러너는 분당 과금이 크므로(무료 분량 10배 소진),
-# 일반 push 마다 돌지 않게 수동 실행과 버전 태그 push 에서만 빌드한다.
+# 공증(notarize)이 Apple 서버 왕복으로 수 분씩 걸리므로, 일반 push 마다 돌지 않게
+# 수동 실행과 버전 태그 push 에서만 빌드한다. 코드 검증은 ci.yml 이 담당한다.
 on:
   workflow_dispatch:
   push:
@@ -27,6 +27,28 @@ jobs:
 
       - run: npm ci
 
+      # electron-builder 는 서명 자격증명이 없으면 "skipped macOS application code
+      # signing" 경고만 남기고 **성공 종료**한다. 그대로 두면 인증서 만료·시크릿 삭제 시
+      # 서명도 공증도 안 된 앱이 조용히 릴리스로 나간다. 빌드 전에 먼저 끊는다.
+      - name: Preflight — signing secrets present
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          missing=()
+          for name in CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
+            [ -n "${!name}" ] || missing+=("$name")
+          done
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::서명/공증 시크릿 누락: ${missing[*]}"
+            echo "Settings → Secrets and variables → Actions 에서 등록하세요."
+            exit 1
+          fi
+          echo "서명/공증 시크릿 5종 확인됨."
+
       - name: Build signed + notarized dmg + zip
         # Developer ID Application 인증서로 서명하고 Apple 에 공증한다.
         # - CSC_LINK: base64 로 인코딩한 .p12 (Developer ID Application) 인증서
@@ -41,6 +63,31 @@ jobs:
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: npm run dist
+
+      # electron-builder 로그만 믿지 않고 시스템 도구로 재검증한다. 서명 주체·hardened
+      # runtime·공증 티켓·Gatekeeper 평가 중 하나라도 어긋나면 릴리스 전에 실패시킨다.
+      - name: Verify signature + notarization
+        run: |
+          set -euo pipefail
+          APP="$(ls -d release/mac-arm64/*.app 2>/dev/null | head -1 || true)"
+          [ -n "$APP" ] || { echo "::error::앱 번들을 찾을 수 없습니다 (release/mac-arm64/*.app)"; exit 1; }
+          echo "검증 대상: $APP"
+
+          echo "--- codesign --verify"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+
+          echo "--- 서명 주체 + hardened runtime"
+          info="$(codesign -dv --verbose=4 "$APP" 2>&1)"
+          grep -q "Authority=Developer ID Application" <<<"$info" \
+            || { echo "::error::Developer ID Application 으로 서명되지 않았습니다."; echo "$info"; exit 1; }
+          grep -Eq "flags=.*runtime" <<<"$info" \
+            || { echo "::error::hardened runtime 이 적용되지 않았습니다."; echo "$info"; exit 1; }
+
+          echo "--- 공증 티켓(stapling)"
+          xcrun stapler validate "$APP"
+
+          echo "--- Gatekeeper 평가"
+          spctl -a -vvv -t exec "$APP"
 
       - uses: actions/upload-artifact@v7
         with:
@@ -59,7 +106,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
-            release/*.dmg release/*.zip release/*.blockmap release/latest-mac.yml \
-            --title "$GITHUB_REF_NAME" \
-            --generate-notes
+          set -euo pipefail
+          assets=(release/*.dmg release/*.zip release/*.blockmap release/latest-mac.yml)
+
+          # 빌드 재실행 시 릴리스가 이미 존재하면 create 가 실패하므로, 그 경우엔
+          # 산출물만 덮어쓴다(--clobber). 자동 업데이트가 참조하는 latest-mac.yml 이
+          # 옛 빌드에 고정되는 것을 막는다.
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "릴리스 $GITHUB_REF_NAME 가 이미 있어 산출물을 덮어씁니다."
+            gh release upload "$GITHUB_REF_NAME" "${assets[@]}" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "${assets[@]}" \
+              --title "$GITHUB_REF_NAME" \
+              --generate-notes
+          fi
