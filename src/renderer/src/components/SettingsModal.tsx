@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Compass, RefreshCw } from 'lucide-react'
+import { Compass, Download, RefreshCw } from 'lucide-react'
 import type { UpdateStatus } from '@shared/types'
 import { useStore } from '../store'
 import Modal, { inputClass, labelClass, primaryBtn, ghostBtn } from './Modal'
@@ -298,6 +298,9 @@ export default function SettingsModal({
   )
 }
 
+/** 항상 최신 릴리스의 dmg 로 리다이렉트된다(자동 업데이트가 막혔을 때의 수동 경로). */
+const DOWNLOAD_URL = 'https://github.com/youngminnnn/wooi/releases/latest/download/Wooi-arm64.dmg'
+
 function UpdatesSection(): React.JSX.Element {
   const [version, setVersion] = useState<string>('')
   const [status, setStatus] = useState<UpdateStatus>({ state: 'idle' })
@@ -325,6 +328,8 @@ function UpdatesSection(): React.JSX.Element {
         return `Version ${status.version ?? ''} downloaded — restart to install.`
       case 'not-available':
         return 'You’re on the latest version.'
+      case 'blocked':
+        return status.error ?? 'Automatic updates are unavailable from this location.'
       case 'error':
         return `Update check failed: ${status.error ?? 'unknown error'}`
       default:
@@ -339,10 +344,27 @@ function UpdatesSection(): React.JSX.Element {
           Wooi <span className="text-neutral-500">v{version || '…'}</span>
         </div>
         {status.state !== 'idle' && (
-          <div className="text-xs text-neutral-600 mt-0.5 truncate">{statusText()}</div>
+          <div
+            className={`text-xs mt-0.5 ${
+              status.state === 'blocked'
+                ? 'text-amber-500/90 leading-relaxed'
+                : 'text-neutral-600 truncate'
+            }`}
+          >
+            {statusText()}
+          </div>
         )}
       </div>
-      {status.state === 'ready' ? (
+      {status.state === 'blocked' ? (
+        <button
+          type="button"
+          onClick={() => void window.api.openExternal(DOWNLOAD_URL)}
+          className="shrink-0 inline-flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border border-[var(--border)] text-neutral-300 hover:bg-[var(--surface-2)] transition-colors"
+        >
+          <Download size={14} />
+          Download latest
+        </button>
+      ) : status.state === 'ready' ? (
         <button
           type="button"
           onClick={() => window.api.update.quitAndInstall()}
