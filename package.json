@@ -1,6 +1,6 @@
 {
   "name": "wooi",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Orchestrate parallel AI coding agents across isolated git worktrees",
   "main": "./out/main/index.js",
   "type": "module",
