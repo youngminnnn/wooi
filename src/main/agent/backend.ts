@@ -40,6 +40,11 @@ export interface AgentBackend {
   disposeAll(): void
   /** 인증 무효화 등으로 모든 세션을 한꺼번에 정리하고 진행 상태를 idle 로 되돌린다. */
   abortAll(): void
+  /**
+   * 계정이 바뀐 뒤 세션 프로세스만 버린다 — **대화 맥락(sessionId)은 유지**해, 다음 메시지가
+   * 새 자격증명으로 같은 대화를 이어가게 한다(터미널에서 CLI 재시작 + resume 과 같은 결과).
+   */
+  recycleAll(): void
 
   // ── capability-게이트 (선택 기능) ────────────────────────────────────────
   /** /btw — 메인 맥락을 건드리지 않는 1회성 사이드 질문(capabilities.sideQuestion). */

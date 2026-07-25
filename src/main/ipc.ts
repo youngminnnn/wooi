@@ -1119,7 +1119,12 @@ export function registerIpc(ctx: IpcContext): void {
 
   ipcMain.handle(IPC.authGetStatus, () => getAuthStatus())
   // 별도 Terminal 창 없이 앱 내부 PTY 에서 로그인하고, 진행 상황은 evtClaudeLogin 으로 흘려보낸다.
-  ipcMain.handle(IPC.authClaudeLoginStart, () => claudeLoginStart(dispatch))
+  // 로그인이 성공하면(= 계정이 바뀔 수 있으면) 세션 프로세스를 재활용한다 — 옛 자격증명을 들고
+  // 있는 CLI 를 남기지 않으면서 대화 맥락(sessionId)은 유지해, 다음 메시지가 새 계정으로 같은
+  // 대화를 이어간다(터미널에서 CLI 를 재시작하고 `claude --resume` 하는 것과 같은 결과).
+  ipcMain.handle(IPC.authClaudeLoginStart, () =>
+    claudeLoginStart(dispatch, () => ctx.sessions.recycleAll())
+  )
   ipcMain.handle(IPC.authClaudeLoginSubmitCode, (_e, code: string) => claudeLoginSubmitCode(code))
   ipcMain.handle(IPC.authClaudeLoginCancel, () => claudeLoginCancel())
   ipcMain.handle(IPC.authClaudeLogout, async () => {

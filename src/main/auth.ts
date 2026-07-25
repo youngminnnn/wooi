@@ -126,8 +126,11 @@ let claudeLoginSession: { proc: pty.IPty; cancelled: boolean } | null = null
  * 앱 내부 PTY 에서 `claude auth login` 을 실행한다. 출력에서 인증 URL 과 "Paste code here"
  * 프롬프트를 감지해 renderer 에 알리고(awaiting-code), 프로세스 종료 시 성공 여부를 알린다(done).
  * 코드 제출은 claudeLoginSubmitCode(), 취소는 claudeLoginCancel() 로 이어진다.
+ *
+ * onSuccess 는 로그인이 성공으로 끝난 시점에 1회 호출된다 — 호출부는 여기서 세션 프로세스를
+ * 재활용해(sessions.recycleAll) 옛 자격증명을 든 CLI 가 남지 않게 한다.
  */
-export function claudeLoginStart(dispatch: Dispatch): void {
+export function claudeLoginStart(dispatch: Dispatch, onSuccess?: () => void): void {
   // 이미 떠 있는 세션이 있으면 조용히 정리하고 새로 시작한다(재시도/중복 클릭 대비).
   claudeLoginCancel()
 
@@ -167,7 +170,17 @@ export function claudeLoginStart(dispatch: Dispatch): void {
     if (claudeLoginSession === session) claudeLoginSession = null
     // 우리가 취소(kill)한 종료는 사용자 의도이므로 실패로 보고하지 않는다.
     if (session.cancelled) return
-    dispatch(IPC.evtClaudeLogin, { phase: 'done', success: exitCode === 0 })
+    const success = exitCode === 0
+    // renderer 에 알리기 전에 세션을 재활용한다 — 계정이 바뀐 직후의 첫 메시지가 옛 자격증명을
+    // 들고 있는 CLI 프로세스로 흘러가지 않게 한다(대화 맥락은 유지된다).
+    if (success) {
+      try {
+        onSuccess?.()
+      } catch (err) {
+        log.error('auth: post-login session recycle failed', err)
+      }
+    }
+    dispatch(IPC.evtClaudeLogin, { phase: 'done', success })
   })
 }
 

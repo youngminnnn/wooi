@@ -18,6 +18,22 @@ export class AsyncQueue<T> {
     }
   }
 
+  /** 큐가 닫혔는지(= 세션이 dispose 됐는지). 죽은 query 를 자동 재시도해도 되는지 판단에 쓴다. */
+  get isClosed(): boolean {
+    return this.closed
+  }
+
+  /**
+   * 아직 소비되지 않은 값을 모두 꺼낸다. 죽은 query 를 재시도할 때 큐를 새 것으로 갈아 끼우면서
+   * 남은 입력을 이월하는 데 쓴다 — 버려진 소비자(중단된 async iterator)가 이후 push 를 가로채는
+   * 것을 막으려면 큐 자체를 교체해야 하기 때문이다.
+   */
+  drain(): T[] {
+    const rest = this.values
+    this.values = []
+    return rest
+  }
+
   /** 큐를 닫는다. 대기 중인 소비자는 done 으로 종료된다. */
   close(): void {
     this.closed = true

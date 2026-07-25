@@ -8,6 +8,7 @@ import type {
 import { AsyncQueue } from './asyncQueue'
 import { clampText, clampInput } from './clamp'
 import { resolveClaudeExecutable } from './executable'
+import { sessionTranscriptExists } from './sessionFiles'
 import { log } from '../logger'
 import { MCP_SETTING_SOURCES, resolveUserMcpServers } from './mcp'
 import type {
@@ -79,6 +80,28 @@ const AUTO_COMPACT_THRESHOLD = 92
 const CONTEXT_USAGE_TIMEOUT_MS = 5000
 
 /**
+ * `assistant.error` 만으로 실패한 턴을 프로세스 교체로 다시 돌릴 가치가 있는지 가리는 패턴.
+ *
+ * SDK 는 API 레벨 실패를 예외로 던지지 않고 두 가지 모양으로 실어 온다(관측 확인):
+ * - **result 의 비-success subtype**(예: error_during_execution) — 원인 문자열이 없다. 실제
+ *   인증 실패가 이 모양으로 오므로, 산출 없는 실패면 원인을 따지지 않고 1회 재시도한다.
+ * - **`assistant.error` + result:success**(예: model_not_found) — 원인 코드가 있다. 이쪽은
+ *   프로세스를 갈아도 대개 그대로이므로(없는 모델은 재시도해도 없다) 자격증명류만 고른다.
+ *
+ * 오탐(예: rate limit 문구에 섞인 'token')을 피하려고 인증 맥락의 표현만 좁게 잡는다. 걸려도
+ * 부작용은 없다 — 산출이 없었던 턴만 재시도하므로 중복 작업이 생기지 않는다.
+ */
+const RESTARTABLE_AUTH_ERROR =
+  /\b(?:auth\w*|unauthorized|forbidden|401|403|oauth|credentials?|api[_ -]?key|access[_ -]?token|refresh[_ -]?token|bearer|revoked|not logged in|log ?in again|sign ?in again)\b/i
+
+/**
+ * 콜드 resume preflight 의 getContextUsage 상한. 따뜻한 세션의 미터 갱신(5초)보다 넉넉히 둔다 —
+ * 이 시점의 CLI 는 방금 뜬 프로세스가 디스크 트랜스크립트를 복원하는 중이라 제어 응답이 늦다.
+ * 너무 짧으면 매번 타임아웃으로 폴백해, 압축을 먼저 하려던 preflight 자체가 무의미해진다.
+ */
+const PREFLIGHT_CONTEXT_USAGE_TIMEOUT_MS = 25_000
+
+/**
  * query 생성 후 SDK 메시지(system:init 등)가 하나도 안 오는 것을 스톨로 보고 abort 하는 상한.
  * "진짜 무한 스톨"만 걸러내는 최후 백스톱이지, 느린 startup 을 끊는 용도가 아니다.
  *
@@ -117,6 +140,15 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
  */
 export class ClaudeSession {
   private input = new AsyncQueue<SDKUserMessage>()
+  /**
+   * SDK 가 입력 큐에서 꺼내 갔지만 아직 result 로 완료되지 않은 사용자 메시지.
+   *
+   * SDK 는 streaming input 을 곧바로 끌어가 CLI stdin 으로 흘려보내므로, 프로세스가 죽는 순간
+   * 그 메시지는 이미 우리 큐에서 사라진 상태다. 그래서 죽은 query 를 재시도할 때 여기 기록해 둔
+   * 메시지를 되살려 다시 흘려보낸다 — 이게 없으면 재시도한 query 가 빈 입력으로 하염없이 대기한다.
+   * result 를 받은 만큼(1 메시지 = 1 result) 앞에서부터 비운다.
+   */
+  private inFlight: SDKUserMessage[] = []
   private q: Query | null = null
   private currentApiMsgId: string | null = null
   /** 사용자가 "always allow" 한 도구 이름. 이 세션 동안 다시 묻지 않는다. */
@@ -130,6 +162,46 @@ export class ClaudeSession {
   private sawAnyMessage = false
   /** resume 실패로 새 세션 폴백을 이미 1회 시도했는지(무한 재시도 방지). */
   private resumeRetried = false
+  /**
+   * **이번 턴**에서 모델이 실제 산출(스트리밍 델타·텍스트·사고·도구 호출)을 냈는지.
+   *
+   * 실패한 턴을 조용히 다시 돌려도 **안전한지**를 가르는 기준이다. 산출이 없었다면 도구 실행·
+   * 파일 편집 같은 부작용도 없었다는 뜻이므로, 같은 사용자 메시지를 새 프로세스에서 다시 돌려도
+   * 중복이 생기지 않는다. 산출이 이미 있었다면(부분 작업 발생) 재시도하지 않고 에러를 알린다.
+   *
+   * 주의: SDK 는 API 레벨 실패도 `assistant` 메시지로 실어 오는데(error + 설명 텍스트) 그건
+   * 모델 산출이 아니라 실패 보고이므로 여기서 세지 않는다.
+   */
+  private turnSawOutput = false
+  /** 이번 턴에서 SDK 가 보고한 API 레벨 오류(assistant.error). 재시도 판단에 쓴다. */
+  private turnError: string | null = null
+  /**
+   * 표시를 보류한 실패 카드. API 레벨 실패는 프로세스를 갈아 재시도하면 사용자에게 보일 필요가
+   * 없으므로, 재시도 여부가 정해지는 result 시점까지 붙들어 둔다(재시도하면 그대로 버린다).
+   */
+  private pendingFailureItems: ChatItem[] = []
+  /** 실패한 턴을 새 프로세스에서 다시 돌리기 위해 의도적으로 query 를 끊었는지. */
+  private restartRequested = false
+  /**
+   * 지금 살아 있는 CLI 세션의 ID(system:init 으로 확정).
+   *
+   * 프로세스를 갈아 끼울 때 이걸 resume 대상으로 삼아야 맥락이 끊기지 않는다 — deps.resumeSessionId
+   * 는 세션 생성 시점의 값이라, 이 프로세스에서 처음 만들어진 세션(새 워크스페이스에서 여러 턴을
+   * 주고받은 경우)은 그 안에 없어서 재시작 시 빈 세션으로 시작해 버린다.
+   */
+  private currentSessionId: string | null = null
+  /** 현재 query 의 abort 컨트롤러(프로세스를 갈아 끼울 때 끊는 데 쓴다). */
+  private abort: AbortController | null = null
+  /**
+   * 이번 사용자 시도에서 죽은 query 를 자동 재시도했는지. send() 마다 리셋되고, 성공 result 로도
+   * 풀린다 — "사용자 전송 1회당 자동 재시도 1회" 예산이라 무한 루프가 되지 않는다.
+   */
+  private autoRetried = false
+  /**
+   * 사용자가 이번 턴을 직접 중단했는지. 중단으로 query 가 끝난 것을 "죽었다" 고 보고 자동
+   * 재시도하면 사용자 의도를 거스르므로, 그 경로에서는 재시도를 막는다.
+   */
+  private interrupted = false
   /**
    * 턴이 진행 중인지(running 을 방출했고 아직 result/error 로 마무리되지 않았는지).
    * query 루프가 result 없이 끝났을 때 'running' 에 갇히지 않도록 finally 에서 idle 로 푸는 데 쓴다.
@@ -245,6 +317,10 @@ export class ClaudeSession {
     this.deps.persist(item)
     this.deps.emit({ type: 'item', item })
     this.active = true
+    // 새 사용자 시도다 — 턴 상태와 자동 재시도 예산, 중단 표시를 리셋한다.
+    this.beginTurn()
+    this.autoRetried = false
+    this.interrupted = false
     this.syncStatus()
 
     // /rewind 체크포인트 라벨용으로 이 메시지의 첫 줄을 큐에 둔다 — SDK 가 이 사용자 메시지를
@@ -309,7 +385,7 @@ export class ClaudeSession {
 
     let percentage: number
     try {
-      const ctx = await withTimeout(q.getContextUsage(), CONTEXT_USAGE_TIMEOUT_MS)
+      const ctx = await withTimeout(q.getContextUsage(), PREFLIGHT_CONTEXT_USAGE_TIMEOUT_MS)
       percentage = ctx.percentage
     } catch (err) {
       // 확인 실패 시 압축 없이 그대로 진행한다(기존 동작과 동일 — 큰 패스 1회는 불가피).
@@ -344,6 +420,8 @@ export class ClaudeSession {
   }
 
   async interrupt(): Promise<void> {
+    // 사용자 의도로 끝난 턴은 자동 재시도 대상이 아니다(handleQueryDeath 가 이 플래그를 본다).
+    this.interrupted = true
     await this.q?.interrupt().catch(() => {})
   }
 
@@ -361,11 +439,14 @@ export class ClaudeSession {
   // ── query 루프 ─────────────────────────────────────────────────────────
 
   private async run(): Promise<void> {
-    // resume 실패 시 새 세션으로 폴백할지. finally 이후에 재시도해 this.q 클로버를 피한다.
+    // 죽은 query 를 새 프로세스로 이어받아 재시도할지. finally 이후에 재시도해 this.q 클로버를 피한다.
     let retrying = false
+    // 새 프로세스에서 턴을 다시 시작한다 — 산출/오류 기록을 초기화한다.
+    this.beginTurn()
     // 첫 메시지가 안 오는 스톨을 감지해 abort 하기 위한 워치독. abort 하면 for-await 가
     // (throw 또는 정상 종료로) 풀리고, 아래 first-message 실패 처리로 폴백/에러가 확정된다.
     const abort = new AbortController()
+    this.abort = abort
     let stalled = false
     const watchdog = setTimeout(() => {
       if (this.sawAnyMessage) return
@@ -387,7 +468,7 @@ export class ClaudeSession {
       const sdkEffort: EffortLevel | null =
         this.deps.effort && this.deps.effort !== 'ultracode' ? this.deps.effort : null
       this.q = query({
-        prompt: this.input,
+        prompt: this.promptStream(this.input),
         options: {
           cwd: this.deps.cwd,
           includePartialMessages: true,
@@ -431,15 +512,26 @@ export class ClaudeSession {
         this.handleMessage(msg)
       }
       log.info('session: query stream ended')
-      // abort 가 예외 없이 스트림을 닫은 스톨 케이스 — catch 를 안 타므로 여기서 실패 처리한다.
-      if (stalled && !this.sawAnyMessage) {
-        retrying = this.handleFirstMessageFailure(new Error('stalled before first message'), true)
+      // 예외 없이 스트림이 닫혔는데 아직 처리할 일이 남아 있으면(워치독 abort, CLI 의 조용한 종료)
+      // catch 를 타지 않으므로 여기서 실패 처리한다.
+      if (this.diedWithWorkPending()) {
+        retrying = this.handleQueryDeath(
+          new Error(stalled ? 'stalled before first message' : 'stream ended without a result'),
+          stalled
+        )
       }
     } catch (err) {
-      retrying = this.handleFirstMessageFailure(err, stalled)
+      retrying = this.handleQueryDeath(err, stalled)
     } finally {
       clearTimeout(watchdog)
       this.q = null
+      this.abort = null
+      // 재시도하지 않는다면 보류해 둔 실패 보고를 여기서 표시한다(result 까지 못 간 경우).
+      if (!retrying) this.flushPendingFailure()
+      // preflight 버퍼가 어떤 경로로도 방출되지 못했다면 여기서 입력 큐로 옮겨 유실을 막는다.
+      // (콜드 resume 의 compact-first 턴이 result 없이 죽으면 사용자 메시지가 버퍼에 갇힌다 —
+      //  과거에는 그 메시지가 조용히 사라져, 사용자가 다시 보내야 했다.)
+      if (this.preflightPending && this.bufferedMessages.length > 0) this.flushBuffered()
       // 루프가 (예외도, 정상 result 도 없이) 끝났는데 턴이나 백그라운드 워크플로우가 진행 중으로
       // 남아 있으면 — 예: CLI 프로세스가 턴 도중 죽어 스트림이 result 없이 닫힌 경우 — 'running' 에
       // 갇히므로 idle 로 확정한다. 앱은 살아 있어 부팅 시 store 정규화가 닿지 못하는 케이스다.
@@ -453,37 +545,160 @@ export class ClaudeSession {
       }
     }
 
-    // 폴백 재시도는 finally 가 this.q 를 비운 뒤에 시작해, 새 query 핸들이 덮어써지지 않게 한다.
-    // input 큐는 그대로라 폴백 세션이 같은(아직 처리되지 않은) 사용자 메시지를 이어 처리한다.
-    if (retrying) this.run()
+    // 재시도는 finally 가 this.q 를 비운 뒤에 시작해, 새 query 핸들이 덮어써지지 않게 한다.
+    // 입력 큐를 갈아 끼워 아직 처리되지 못한 메시지를 새 query 가 이어받게 한다.
+    if (retrying) {
+      this.recycleInput()
+      this.run()
+    }
   }
 
   /**
-   * 첫 SDK 메시지가 오기 전에 query 가 끝난 경우(예외 throw 또는 워치독 abort)를 처리하고,
-   * 새 세션으로 재시도할지 여부를 돌려준다.
-   *
-   * - **진짜 resume 예외**(스톨이 아니라 예외로 죽음): 이전 세션이 사라졌거나 손상된 것이므로
-   *   맥락을 포기하고 새 세션으로 1회 폴백한다(기존 동작 유지).
-   * - **워치독 스톨**: resume 이 원인이라고 단정할 수 없고(예: MCP 서버 기동 정체) resume 은
-   *   정상 동작이므로 sessionId 를 버리지 않는다. 무한 로딩만 끊어 명확한 에러 + idle 로
-   *   떨어뜨리고, 다음 전송에서 평소처럼 다시 resume 하게 둔다.
-   * - **그 외 에러**(스트림 도중 실패 등): 에러를 표면화하고 idle 로 확정한다.
+   * query 에 넘길 입력 스트림. 큐에서 꺼낸 메시지를 inFlight 에 기록해 두고 흘려보낸다 —
+   * 프로세스가 죽었을 때 "SDK 가 이미 꺼내 갔지만 처리되지 못한" 메시지를 되살리기 위함이다.
    */
-  private handleFirstMessageFailure(err: unknown, stalled: boolean): boolean {
-    // 버퍼링해 둔 사용자 메시지가 있으면 큐로 옮긴다 — 폴백 세션이나 다음 send 가 이어받도록.
+  private async *promptStream(queue: AsyncQueue<SDKUserMessage>): AsyncGenerator<SDKUserMessage> {
+    for await (const msg of queue) {
+      this.inFlight.push(msg)
+      yield msg
+    }
+  }
+
+  /**
+   * 죽은 query 의 입력 큐를 새 것으로 갈아 끼우고, 처리되지 못한 메시지(inFlight + 미소비분)를
+   * 순서대로 되살린다.
+   *
+   * 큐를 재사용하지 않는 이유: 중단된 소비자(이전 promptStream)가 큐 안에 대기 resolver 를 남겨,
+   * 이후 push 한 값이 그 죽은 소비자에게 배달돼 조용히 사라질 수 있다. 큐를 교체하고 옛 큐를
+   * 닫으면 그 경로가 원천적으로 없어진다.
+   */
+  private recycleInput(): void {
+    const old = this.input
+    const pending = [...this.inFlight, ...old.drain()]
+    this.inFlight = []
+    old.close()
+    this.input = new AsyncQueue<SDKUserMessage>()
+    for (const msg of pending) this.input.push(msg)
+    if (pending.length) log.info(`session: requeued ${pending.length} unprocessed message(s)`)
+  }
+
+  /** 새 턴의 시작 — 산출 여부·API 오류·보류된 실패 카드를 초기화한다. */
+  private beginTurn(): void {
+    this.turnSawOutput = false
+    this.turnError = null
+    this.pendingFailureItems = []
+  }
+
+  /** 보류해 둔 실패 카드를 이제 사용자에게 표시한다(재시도하지 않기로 확정된 경우). */
+  private flushPendingFailure(): void {
+    const items = this.pendingFailureItems
+    this.pendingFailureItems = []
+    for (const item of items) this.emitItem(item)
+  }
+
+  /**
+   * 실패로 끝난 턴을 프로세스를 갈아 끼워 다시 돌려야 하는지.
+   *
+   * 원칙: **아무것도 하지 못하고 실패한 턴은 새 프로세스에서 한 번 더 돌려도 안전하다.** 산출이
+   * 없었다는 건 도구 실행·파일 편집 같은 부작용도 없었다는 뜻이라 중복이 생기지 않는다. 계정을
+   * 바꾼 직후 옛 토큰을 든 프로세스에서 죽은 첫 턴이 정확히 이 경우다.
+   */
+  private shouldRestartAfterFailedTurn(subtype: string): boolean {
+    if (this.turnSawOutput) return false
+    if (this.autoRetried || this.interrupted || this.input.isClosed) return false
+    // 되살릴 입력이 없으면 재시도해도 의미가 없다. 자동 압축 턴은 기존 로직에 맡긴다.
+    if (this.inFlight.length === 0 || this.autoCompactInFlight) return false
+    // result 자체가 실패면(원인 문자열 없음) 무조건 1회 재시도한다.
+    if (subtype !== 'success') return true
+    // result 는 성공인데 assistant.error 만 실린 경우는 자격증명류일 때만 재시도한다.
+    return this.turnError !== null && RESTARTABLE_AUTH_ERROR.test(this.turnError)
+  }
+
+  /**
+   * 지금 도는 query(옛 자격증명을 든 CLI 프로세스)를 끊고, 같은 메시지를 새 프로세스에서 다시
+   * 돌리도록 요청한다. 상태는 running 으로 유지해 사용자에게는 하나의 연속된 턴으로 보인다.
+   */
+  private requestRestart(subtype: string): void {
+    this.autoRetried = true
+    this.restartRequested = true
+    // 지금까지의 대화를 새 프로세스가 그대로 이어받게 한다 — 이 프로세스에서 처음 만들어진
+    // 세션이라도 resume 대상으로 승격해, 재시작이 맥락을 잃지 않게 한다.
+    if (this.currentSessionId) this.deps.resumeSessionId = this.currentSessionId
+    // 보류한 실패 카드는 버린다 — 재시도가 성공하면 사용자가 볼 필요가 없다.
+    this.pendingFailureItems = []
+    log.warn(
+      `session: turn failed before any output (result=${subtype}, error=${this.turnError ?? 'none'}) ` +
+        '— restarting the agent process and retrying the message once (session context kept)'
+    )
+    this.abort?.abort()
+    void this.q?.interrupt().catch(() => {})
+  }
+
+  /**
+   * query 가 끝났는데 아직 처리하지 못한 일이 남아 있는지 — 즉 "죽었다" 고 봐야 하는지.
+   *
+   * dispose 로 입력 큐를 닫아 정상 종료한 경우와, 애초에 할 일이 없어 끝난 경우(예: /mcp warm-up)는
+   * 제외한다. 남은 일이란 진행 중이던 턴(active), 아직 방출되지 않은 preflight 버퍼,
+   * 또는 우리가 의도적으로 요청한 프로세스 교체다.
+   */
+  private diedWithWorkPending(): boolean {
+    if (this.input.isClosed) return false
+    return this.active || this.bufferedMessages.length > 0 || this.restartRequested
+  }
+
+  /**
+   * query 가 할 일을 남긴 채 끝난 경우를 처리하고, 새 프로세스로 재시도할지 여부를 돌려준다.
+   *
+   * 기준은 터미널의 `claude --resume` 과 같은 감각이다 — **CLI 프로세스는 일회용이고, 대화
+   * 맥락(sessionId)은 함부로 버리지 않는다.** 처리 순서:
+   *
+   * 1. **맥락이 실제로 사라진 경우**: resume 대상 트랜스크립트가 디스크에 없음을 확인했을 때만
+   *    맥락을 포기하고 새 세션으로 폴백한다(CLI 의 cleanupPeriodDays 정리, 다른 머신 등).
+   * 2. **조용한 자동 재시도**: 모델 산출이 하나도 없었다면 부작용도 없으므로, 같은 사용자 메시지를
+   *    새 프로세스에서 1회 다시 돌린다. 입력 큐에 메시지가 그대로 남아 있어 새 query 가 이어받는다.
+   *    계정 전환 직후 옛 자격증명을 든 프로세스에서 죽은 첫 턴, 콜드 resume 실패가 여기서 흡수돼
+   *    사용자가 재전송할 일이 없어진다.
+   * 3. **최후의 새 세션 폴백**: 자동 재시도까지 했는데도 첫 메시지 전에 죽는다면 트랜스크립트가
+   *    손상됐을 수 있으니, 맥락을 포기하고 새 세션으로 1회 폴백해 사용자가 막히지 않게 한다.
+   * 4. **에러 표면화**: 그 외(부분 작업이 이미 진행됨, 워치독 스톨, 재시도 예산 소진)는 명확한
+   *    에러 + idle 로 떨어뜨린다. 이때도 sessionId 는 유지해 다음 전송에서 다시 resume 한다.
+   */
+  private handleQueryDeath(err: unknown, stalled: boolean): boolean {
+    // 버퍼링해 둔 사용자 메시지가 있으면 큐로 옮긴다 — 재시도하는 query 나 다음 send 가 이어받도록.
     if (this.preflightPending) this.flushBuffered()
 
-    if (!stalled && this.deps.resumeSessionId && !this.sawAnyMessage && !this.resumeRetried) {
-      log.warn('session: resume failed before first message — falling back to a fresh session', err)
-      this.resumeRetried = true
-      this.deps.resumeSessionId = null
-      this.emitItem({
-        id: `system:resume-fallback:${Date.now()}`,
-        type: 'system',
-        text: "Couldn't restore the previous session context — continuing in a fresh session.",
-        ts: Date.now()
-      })
+    // 우리가 실패한 턴을 다시 돌리려고 끊은 경우 — 다른 판단 없이 새 프로세스로 이어간다.
+    if (this.restartRequested) {
+      this.restartRequested = false
       return true
+    }
+
+    const resumeId = this.deps.resumeSessionId
+    // 사용자가 중단했거나 세션이 dispose 됐으면 어떤 형태로도 다시 띄우지 않는다.
+    const canRestart = !this.interrupted && !this.input.isClosed
+    // 새 세션 폴백은 "시작 자체가 실패" 한 경우에만 의미가 있다(스톨은 원인이 불확실해 제외).
+    const canFallbackFresh =
+      canRestart && !stalled && Boolean(resumeId) && !this.sawAnyMessage && !this.resumeRetried
+
+    // ① resume 대상 맥락이 디스크에서 사라진 것을 확인했을 때만 맥락을 포기한다.
+    if (canFallbackFresh && !sessionTranscriptExists(this.deps.cwd, resumeId as string)) {
+      return this.fallbackToFreshSession('transcript is gone from disk', err)
+    }
+
+    // ② 산출이 없었다면(부작용 없음) 같은 메시지로 조용히 1회 자동 재시도한다.
+    if (canRestart && !stalled && !this.turnSawOutput && !this.autoRetried) {
+      this.autoRetried = true
+      log.warn(
+        'session: query died before producing any output — restarting once with a fresh process ' +
+          '(session context kept; e.g. stale credentials after an account switch)',
+        err
+      )
+      return true
+    }
+
+    // ③ 그래도 첫 메시지 전에 죽는다면 트랜스크립트가 손상된 경우일 수 있다 — 최후의 폴백.
+    if (canFallbackFresh) {
+      return this.fallbackToFreshSession('resume kept failing before the first message', err)
     }
 
     if (stalled) {
@@ -492,6 +707,8 @@ export class ClaudeSession {
     } else {
       log.error('session: query errored', err)
     }
+    // 보류해 둔 실패 보고가 있으면 함께 표시한다(재시도하지 않기로 확정됐다).
+    this.flushPendingFailure()
     this.emitItem({
       id: `error:${Date.now()}`,
       type: 'error',
@@ -507,6 +724,24 @@ export class ClaudeSession {
     this.workflowTasks.clear()
     this.deps.emit({ type: 'status', status: 'error' })
     return false
+  }
+
+  /**
+   * 이어받을 대화 맥락을 포기하고 빈 세션으로 1회 재시도한다(맥락 손실을 사용자에게 알린다).
+   * 여기까지 오는 경로는 두 가지뿐이다 — 트랜스크립트가 디스크에서 사라진 것을 확인했거나,
+   * 자동 재시도까지 했는데도 첫 메시지 전에 계속 죽는 경우(손상 추정)다.
+   */
+  private fallbackToFreshSession(reason: string, err: unknown): boolean {
+    log.warn(`session: giving up resume (${reason}) — falling back to a fresh session`, err)
+    this.resumeRetried = true
+    this.deps.resumeSessionId = null
+    this.emitItem({
+      id: `system:resume-fallback:${Date.now()}`,
+      type: 'system',
+      text: "Couldn't restore the previous session context — continuing in a fresh session.",
+      ts: Date.now()
+    })
+    return true
   }
 
   /**
@@ -591,9 +826,15 @@ export class ClaudeSession {
     // this.active 가 false 라 사이드바가 idle 로 보인다. 모델이 산출(assistant/stream)을 시작했는데
     // 진행 중인 턴으로 표시돼 있지 않으면, 턴이 시작된 것으로 보고 running 을 켠다(뒤이을 result 가
     // this.active 를 내려 idle 로 되돌린다).
-    if (!this.active && (msg.type === 'assistant' || msg.type === 'stream_event')) {
-      this.active = true
-      this.syncStatus()
+    if (msg.type === 'assistant' || msg.type === 'stream_event') {
+      // 모델이 산출을 시작했다 — 이 지점 이후로는 도구 실행 등 부작용이 있을 수 있어 실패한 턴을
+      // 조용히 다시 돌리지 않는다. 단, error 를 실은 assistant 는 모델 산출이 아니라 API 레벨
+      // 실패 보고이므로(관측 확인) 산출로 세지 않는다 — 그래야 자격증명 실패를 재시도로 흡수한다.
+      if (msg.type === 'stream_event' || !msg.error) this.turnSawOutput = true
+      if (!this.active) {
+        this.active = true
+        this.syncStatus()
+      }
     }
 
     switch (msg.type) {
@@ -621,6 +862,7 @@ export class ClaudeSession {
   private handleSystem(msg: Extract<SDKMessage, { type: 'system' }>): void {
     if (msg.subtype === 'init') {
       log.info(`session: init received (session_id=${msg.session_id})`)
+      this.currentSessionId = msg.session_id
       this.deps.onSessionId(msg.session_id)
       this.deps.emit({ type: 'session', sessionId: msg.session_id, model: msg.model })
       // 콜드 resume 첫 턴 전에 컨텍스트를 확인해, 필요하면 사용자 턴보다 /compact 를 먼저 보낸다.
@@ -800,6 +1042,38 @@ export class ClaudeSession {
     const apiId = m.id ?? msg.uuid
     const blocks = m.content ?? []
 
+    // error 가 실린 assistant 는 모델 산출이 아니라 API 레벨 실패 보고다(설명 텍스트가 함께 온다).
+    // 프로세스를 갈아 재시도하면 사용자에게 보일 필요가 없으므로, 표시를 result 시점까지 보류한다.
+    if (msg.error) {
+      const detail = blocks
+        .filter((b) => b.type === 'text')
+        .map((b) => String(b.text ?? ''))
+        .join('\n')
+      // msg.error 는 SDK 가 아는 코드만 담고 나머지는 'unknown' 이다(관측 확인) — 실제 원인은
+      // 함께 오는 설명 텍스트("API Error: 401 …")에 있으므로, 재시도 판단은 둘을 합쳐서 한다.
+      this.turnError = `${msg.error} ${detail}`.slice(0, 500)
+      this.pendingFailureItems = [
+        ...(detail
+          ? [
+              {
+                id: `${apiId}:text`,
+                type: 'assistant' as const,
+                text: clampText(detail),
+                ts: Date.now(),
+                streaming: false
+              }
+            ]
+          : []),
+        {
+          id: `error:${apiId}`,
+          type: 'error',
+          text: clampText(`Assistant error: ${msg.error}`),
+          ts: Date.now()
+        }
+      ]
+      return
+    }
+
     for (const block of blocks) {
       if (block.type === 'text') {
         this.emitItem({
@@ -827,15 +1101,6 @@ export class ClaudeSession {
           ts: Date.now()
         })
       }
-    }
-
-    if (msg.error) {
-      this.emitItem({
-        id: `error:${apiId}`,
-        type: 'error',
-        text: clampText(`Assistant error: ${msg.error}`),
-        ts: Date.now()
-      })
     }
   }
 
@@ -875,6 +1140,22 @@ export class ClaudeSession {
 
   private handleResult(msg: Extract<SDKMessage, { type: 'result' }>): void {
     log.info(`session: result received (subtype=${msg.subtype}, turns=${msg.num_turns})`)
+
+    // 자격증명 문제로 아무것도 못 하고 끝난 턴이면, 사용자에게 오류를 보이는 대신 프로세스를
+    // 갈아 끼워 같은 메시지를 다시 돌린다(터미널에서 CLI 를 재시작하는 것과 같은 처방).
+    // inFlight 를 비우지 않고 running 도 유지해, 사용자 눈에는 하나의 연속된 턴으로 보인다.
+    if (this.shouldRestartAfterFailedTurn(msg.subtype)) {
+      this.requestRestart(msg.subtype)
+      return
+    }
+
+    // 보류해 둔 실패 보고가 있으면(재시도하지 않기로 확정) 이제 표시하고, 턴 상태를 닫는다.
+    this.flushPendingFailure()
+    this.beginTurn()
+    // 이 result 가 대응하는 입력 메시지는 처리를 마쳤다 — 재시도 시 되살릴 목록에서 뺀다.
+    this.inFlight.shift()
+    // 턴이 result 까지 도달했다 — 자동 재시도 예산을 되돌려 다음 턴이 다시 1회를 쓸 수 있게 한다.
+    if (msg.subtype === 'success') this.autoRetried = false
     this.deps.onSessionId(msg.session_id)
     this.emitItem({
       id: `result:${msg.uuid}`,
