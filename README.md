@@ -22,8 +22,7 @@ and no automatic prompt** — nothing runs until you send your first message.
   collide in a shared working tree.
 - 🚢 **PR-native** — jump straight from an agent's diff to a GitHub PR in one click.
 - 🧱 **Stacked PRs, natively** — when work has to build on work, stack one workspace on
-  another's branch and let Wooi keep the stack straight — with plain `git` + `gh`, no
-  extra stacking CLI.
+  another's branch and let Wooi keep the stack straight.
 - 🕵️ **No telemetry** — no servers of its own; transcripts stored locally only.
 
 **[Download the latest release →](https://github.com/youngminnnn/wooi/releases/latest/download/Wooi-arm64.dmg)**
