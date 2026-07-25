@@ -1,0 +1,50 @@
+<svg width="1200" height="630" viewBox="0 0 1200 630" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b0e15"/>
+      <stop offset="1" stop-color="#141a28"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.78" cy="0.42" r="0.55">
+      <stop offset="0" stop-color="#3a4a8f" stop-opacity="0.45"/>
+      <stop offset="1" stop-color="#3a4a8f" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="title" x1="0" y1="0" x2="1" y2="0.4">
+      <stop offset="0" stop-color="#6d8bfa"/>
+      <stop offset="1" stop-color="#c6a6f3"/>
+    </linearGradient>
+    <linearGradient id="card" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#8ea2fb"/>
+      <stop offset="1" stop-color="#c3a3f2"/>
+    </linearGradient>
+    <font-face font-family="ui"><font-face-src/></font-face>
+  </defs>
+
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  <rect width="1200" height="630" fill="url(#glow)"/>
+
+  <!-- stacked cards motif (right) -->
+  <g transform="translate(892,150)">
+    <rect x="0"   y="0"   width="150" height="150" rx="34" fill="url(#card)" opacity="0.16"/>
+    <rect x="60"  y="70"  width="180" height="180" rx="40" fill="url(#card)" opacity="0.34"/>
+    <rect x="130" y="160" width="215" height="215" rx="48" fill="url(#card)" opacity="0.95"/>
+  </g>
+
+  <!-- eyebrow -->
+  <g font-family="'Helvetica Neue',Arial,sans-serif">
+    <circle cx="96" cy="99" r="7" fill="#5b8cf6"/>
+    <text x="118" y="108" font-size="27" font-weight="700" letter-spacing="3"
+          fill="#8b93a4">macOS · POWERED BY CLAUDE CODE</text>
+
+    <!-- title -->
+    <text x="84" y="238" font-size="132" font-weight="800" letter-spacing="-2"
+          fill="url(#title)">Wooi</text>
+
+    <!-- headline -->
+    <text x="88" y="352" font-size="62" font-weight="800" fill="#f4f6fb">Run multiple AI coding</text>
+    <text x="88" y="424" font-size="62" font-weight="800" fill="#f4f6fb">agents <tspan fill="#9d8bf5">at once</tspan></text>
+
+    <!-- subtitle -->
+    <text x="90" y="506" font-size="28" font-weight="400" fill="#8a93a3">Each in its own git worktree · its own branch ·</text>
+    <text x="90" y="546" font-size="28" font-weight="400" fill="#8a93a3">its own PR — watched from one sidebar.</text>
+  </g>
+</svg>
