@@ -285,6 +285,16 @@
         font-size: 13px;
         color: var(--text-faint);
       }
+      /* latest-version chip — filled in by JS once the release lookup resolves */
+      .dl-version {
+        font-family: var(--mono);
+        font-weight: 600;
+        color: var(--blue);
+      }
+      .dl-version::after {
+        content: ' · ';
+        color: var(--text-faint);
+      }
 
       .demo-frame {
         margin: 52px auto 0;
@@ -768,7 +778,8 @@
       <div class="cta-row">
         <a
           class="btn btn-primary"
-          href="https://github.com/youngminnnn/wooi/releases"
+          data-download
+          href="https://github.com/youngminnnn/wooi/releases/latest"
           target="_blank"
           rel="noopener"
         >
@@ -787,6 +798,7 @@
       </div>
 
       <p class="hero-note">
+        <span class="dl-version" data-version hidden></span>
         <span class="en"
           >Free & open source (Apache 2.0) · Apple Silicon · No API key required</span
         >
@@ -1315,23 +1327,39 @@
               </h3>
               <p>
                 <span class="en"
-                  >Grab the latest <code>.dmg</code> from the
+                  >Download the
+                  <a
+                    data-download
+                    href="https://github.com/youngminnnn/wooi/releases/latest"
+                    target="_blank"
+                    rel="noopener"
+                    >latest <code>.dmg</code></a
+                  >
+                  and drag <strong>Wooi</strong> into <strong>Applications</strong>. Older builds
+                  live on the
                   <a
                     href="https://github.com/youngminnnn/wooi/releases"
                     target="_blank"
                     rel="noopener"
                     >Releases page</a
-                  >
-                  and drag <strong>Wooi</strong> into <strong>Applications</strong>.</span
+                  >.</span
                 >
                 <span class="ko"
                   ><a
+                    data-download
+                    href="https://github.com/youngminnnn/wooi/releases/latest"
+                    target="_blank"
+                    rel="noopener"
+                    >최신 <code>.dmg</code></a
+                  >
+                  를 받아 <strong>Wooi</strong> 를 <strong>Applications</strong> 로 드래그합니다.
+                  이전 빌드는
+                  <a
                     href="https://github.com/youngminnnn/wooi/releases"
                     target="_blank"
                     rel="noopener"
                     >Releases 페이지</a
-                  >에서 최신 <code>.dmg</code> 를 받아 <strong>Wooi</strong> 를
-                  <strong>Applications</strong> 로 드래그합니다.</span
+                  >에 있습니다.</span
                 >
               </p>
             </div>
@@ -1484,7 +1512,8 @@
           <div class="cta-row">
             <a
               class="btn btn-primary"
-              href="https://github.com/youngminnnn/wooi/releases"
+              data-download
+              href="https://github.com/youngminnnn/wooi/releases/latest"
               target="_blank"
               rel="noopener"
             >
@@ -1572,6 +1601,53 @@
             localStorage.setItem(KEY, next)
           } catch (e) {}
         })
+      })()
+    </script>
+
+    <!-- ---------- latest-release direct download ---------- -->
+    <script>
+      ;(function () {
+        // 릴리스 에셋 이름에 버전이 박혀 있어(Wooi-1.0.2-arm64.dmg) 고정 URL 을 쓸 수 없다.
+        // 최신 릴리스를 조회해 .dmg 주소를 버튼에 주입하고, 실패하면 마크업에 적어 둔
+        // /releases/latest 폴백 링크가 그대로 남는다.
+        var API = 'https://api.github.com/repos/youngminnnn/wooi/releases/latest'
+        var links = document.querySelectorAll('a[data-download]')
+        if (!links.length || typeof fetch !== 'function') return
+
+        fetch(API, { headers: { Accept: 'application/vnd.github+json' } })
+          .then(function (res) {
+            if (!res.ok) throw new Error('release lookup failed: ' + res.status)
+            return res.json()
+          })
+          .then(function (release) {
+            var assets = release.assets || []
+            var dmg = null
+            for (var i = 0; i < assets.length; i++) {
+              if (/\.dmg$/i.test(assets[i].name)) {
+                dmg = assets[i]
+                break
+              }
+            }
+            if (!dmg || !dmg.browser_download_url) return
+
+            for (var j = 0; j < links.length; j++) {
+              links[j].href = dmg.browser_download_url
+              // 파일 다운로드라 새 탭이 빈 창으로 남는다 — 현재 탭에서 받게 한다.
+              links[j].removeAttribute('target')
+              links[j].setAttribute('title', dmg.name)
+            }
+
+            var tag = release.tag_name || release.name
+            if (!tag) return
+            var labels = document.querySelectorAll('[data-version]')
+            for (var k = 0; k < labels.length; k++) {
+              labels[k].textContent = tag
+              labels[k].hidden = false
+            }
+          })
+          .catch(function () {
+            /* 폴백 링크 유지 */
+          })
       })()
     </script>
   </body>
