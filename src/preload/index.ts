@@ -23,8 +23,6 @@ const api: WooiApi = {
     archive: (workspaceId) => ipcRenderer.invoke(IPC.workspaceArchive, workspaceId),
     unarchive: (workspaceId) => ipcRenderer.invoke(IPC.workspaceUnarchive, workspaceId),
     restack: (workspaceId) => ipcRenderer.invoke(IPC.workspaceRestack, workspaceId),
-    splitStack: (workspaceId, name) =>
-      ipcRenderer.invoke(IPC.workspaceSplitStack, workspaceId, name),
     switchBranch: (workspaceId, branch) =>
       ipcRenderer.invoke(IPC.workspaceSwitchBranch, workspaceId, branch),
     remove: (workspaceId, deleteBranch) =>
