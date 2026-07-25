@@ -102,7 +102,7 @@ separate API key is needed.
 ### Stacked PRs
 
 Not every task is independent — sometimes step 2 has to build on step 1. Wooi manages
-those chains itself with plain `git` and `gh`; no Graphite or other stacking CLI needed.
+those chains itself with plain `git` and `gh` — no extra stacking CLI needed.
 
 - **Stack a workspace** — pick **Stack a new workspace** from a workspace's menu. The new
   workspace branches off that workspace's branch, and its PR targets that branch instead
