@@ -684,12 +684,21 @@ export const IPC = {
 
 /** 자동 업데이트 상태(main → renderer, evtUpdate 페이로드). */
 export interface UpdateStatus {
-  state: 'idle' | 'checking' | 'available' | 'downloading' | 'ready' | 'not-available' | 'error'
+  state:
+    | 'idle'
+    | 'checking'
+    | 'available'
+    | 'downloading'
+    | 'ready'
+    | 'not-available'
+    | 'error'
+    /** 읽기 전용 위치(DMG/App Translocation)에서 실행 중 — 자동 업데이트 불가. */
+    | 'blocked'
   /** available/ready 일 때 새 버전. */
   version?: string
   /** downloading 일 때 0~100. */
   percent?: number
-  /** error 일 때 메시지. */
+  /** error/blocked 일 때 메시지. */
   error?: string
 }
 
