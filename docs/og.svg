@@ -12,9 +12,15 @@
       <stop offset="0" stop-color="#6d8bfa"/>
       <stop offset="1" stop-color="#c6a6f3"/>
     </linearGradient>
-    <linearGradient id="card" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#8ea2fb"/>
-      <stop offset="1" stop-color="#c3a3f2"/>
+    <!-- 앱 아이콘과 동일한 `우`(파랑)/`이`(보라) 그라데이션. 직선 획이 사라지지 않도록 반드시
+         userSpaceOnUse 를 쓴다 — objectBoundingBox 는 폭·높이가 0 인 도형을 렌더링하지 않는다. -->
+    <linearGradient id="u" gradientUnits="userSpaceOnUse" x1="180" y1="240" x2="540" y2="780">
+      <stop offset="0" stop-color="#8fc0ff"/>
+      <stop offset="1" stop-color="#5b8cff"/>
+    </linearGradient>
+    <linearGradient id="i" gradientUnits="userSpaceOnUse" x1="500" y1="240" x2="870" y2="800">
+      <stop offset="0" stop-color="#a78bfa"/>
+      <stop offset="1" stop-color="#c9adff"/>
     </linearGradient>
     <font-face font-family="ui"><font-face-src/></font-face>
   </defs>
@@ -22,11 +28,15 @@
   <rect width="1200" height="630" fill="url(#bg)"/>
   <rect width="1200" height="630" fill="url(#glow)"/>
 
-  <!-- stacked cards motif (right) -->
-  <g transform="translate(892,150)">
-    <rect x="0"   y="0"   width="150" height="150" rx="34" fill="url(#card)" opacity="0.16"/>
-    <rect x="60"  y="70"  width="180" height="180" rx="40" fill="url(#card)" opacity="0.34"/>
-    <rect x="130" y="160" width="215" height="215" rx="48" fill="url(#card)" opacity="0.95"/>
+  <!-- 한글 "우이" 마크 (오른쪽). build/icon.svg 와 같은 1024 좌표계를 그대로 쓰고 배치만 스케일한다. -->
+  <g transform="translate(763.9,91) scale(0.4318)" fill="none" stroke-width="58" stroke-linecap="round">
+    <!-- 우 -->
+    <circle cx="322" cy="366" r="102" stroke="url(#u)"/>
+    <path d="M182 584 H 462" stroke="url(#u)"/>
+    <path d="M322 584 V 754" stroke="url(#u)"/>
+    <!-- 이 -->
+    <circle cx="650" cy="562" r="102" stroke="url(#i)"/>
+    <path d="M842 350 V 774" stroke="url(#i)"/>
   </g>
 
   <!-- eyebrow -->

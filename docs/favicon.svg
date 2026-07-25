@@ -1,0 +1,27 @@
+<!--
+  파비콘 / 소형 마크 — "wooi" 의 머리글자 W 를 커밋 그래프로 그린 모노그램.
+  앱의 Logo.tsx 와 동일한 도형이며, 앱 아이콘(icon.svg)의 축약형이다.
+
+  아이콘 타일(icon.svg)은 한글 "우이"를 쓰지만 16px 브라우저 탭에서는 두 글자가 뭉개져
+  읽히지 않으므로, 파비콘처럼 작은 자리에는 이 W 를 쓴다. 배경 타일 없이 글리프만 두어
+  16px 에서 획을 최대한 크게 확보하고, 파랑→보라 그라데이션은 밝은 탭과 어두운 탭 양쪽
+  모두에서 대비가 확보된다.
+
+  그라데이션은 userSpaceOnUse 를 쓴다 — objectBoundingBox 는 폭·높이가 0 인 도형을
+  렌더링하지 않아, 직선 획이 들어갈 경우 사라진다.
+-->
+<svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="w" gradientUnits="userSpaceOnUse" x1="7.5" y1="7.5" x2="25" y2="25">
+      <stop offset="0" stop-color="#74acff" />
+      <stop offset="1" stop-color="#b08bfa" />
+    </linearGradient>
+  </defs>
+  <!-- 브랜치 선 -->
+  <path d="M4.8 8.3 L10.8 25.3 L16 13.3 L21.2 25.3 L27.2 8.3" fill="none" stroke="url(#w)"
+        stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round" />
+  <!-- 커밋 노드 -->
+  <circle cx="4.8" cy="8.3" r="3.3" fill="url(#w)" />
+  <circle cx="16" cy="13.3" r="3.3" fill="url(#w)" />
+  <circle cx="27.2" cy="8.3" r="3.3" fill="url(#w)" />
+</svg>
