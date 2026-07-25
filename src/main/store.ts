@@ -39,6 +39,9 @@ const DEFAULT_SETTINGS: AppSettings = {
   autoCompact: true,
   manualWorkspaceSetup: false,
   onboarded: false,
+  // 아직 기본값을 고르지 않음 — 기존 사용자도 load 의 기본값 병합으로 false 가 되어,
+  // 이 필드가 없던 버전(v1.0.3 이하)에서 올라오면 다음 실행에 한 번 질문을 받는다.
+  pickedDefaults: false,
   // 미동의(null) 로 시작 — 기존 사용자도 load 의 기본값 병합으로 null 이 되어 (재)동의를 요구한다.
   acceptedTermsVersion: null
 }

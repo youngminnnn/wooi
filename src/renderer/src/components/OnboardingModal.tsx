@@ -1,45 +1,67 @@
 import { useState } from 'react'
 import IntegrationsPanel from './IntegrationsPanel'
 import FeatureTour from './FeatureTour'
+import PreferencesStep from './PreferencesStep'
 import Logo from './Logo'
 import { primaryBtn } from './Modal'
 import { useStore } from '../store'
 import { CURRENT_TERMS_VERSION } from '@shared/types'
+import type { AppSettings } from '@shared/types'
 
 // 배포 시 실제 공개 URL 로 교체한다(현재는 앱과 함께 제공되는 repo 문서를 가리킨다).
 const PRIVACY_URL = 'https://github.com/youngminnnn/wooi/blob/main/PRIVACY.md'
 const TERMS_URL = 'https://github.com/youngminnnn/wooi/blob/main/TERMS.md'
 
+type Step = 'consent' | 'integrations' | 'features' | 'preferences'
+
 /**
  * 최초 실행 온보딩. 첫 단계로 약관·개인정보처리방침 동의를 강제하고(미동의 시 진행 불가),
- * 동의가 끝나면 계정 연결(AI 제공자/GitHub) 단계로, 마지막으로 주요 기능 소개 투어로 이어진다.
- * 약관 버전이 올라가 재동의만 필요한 경우(이미 onboarded)에는 동의 단계만 보여준다.
+ * 동의가 끝나면 계정 연결(AI 제공자/GitHub) → 주요 기능 소개 투어 → 기본값 고르기로 이어진다.
+ *
+ * 각 단계는 독립적으로 필요 여부를 판단한다 — 약관 버전이 올라가 재동의만 필요한 경우엔 동의만,
+ * 기본값 고르기가 추가되기 전부터 쓰던 기존 사용자에게는 그 단계만 보여준다.
  */
 export default function OnboardingModal({
   needsConsent,
-  needsOnboarding
+  needsOnboarding,
+  needsDefaults
 }: {
   needsConsent: boolean
   needsOnboarding: boolean
+  needsDefaults: boolean
 }): React.JSX.Element {
-  const [step, setStep] = useState<'consent' | 'integrations' | 'features'>(
-    needsConsent ? 'consent' : 'integrations'
+  const [step, setStep] = useState<Step>(
+    needsConsent ? 'consent' : needsOnboarding ? 'integrations' : 'preferences'
   )
 
-  // 동의 저장 후 계정 연결이 남았으면 다음 단계로. 아니면 settings 갱신으로 모달이 닫힌다.
+  // 동의 저장 후 아직 남은 단계가 있으면 그리로. 없으면 settings 갱신으로 모달이 닫힌다.
   const acceptConsent = (): void => {
     void window.api.settings.update({ acceptedTermsVersion: CURRENT_TERMS_VERSION })
     if (needsOnboarding) setStep('integrations')
+    else if (needsDefaults) setStep('preferences')
   }
 
-  // 계정 연결까지 끝나면 마지막으로 기능 소개 투어를 보여준다.
-  const finishOnboarding = (): void => {
-    void window.api.settings.update({ onboarded: true })
+  // 투어를 마치거나 건너뛰면 기본값 고르기로. 이미 골라 둔 사용자(투어 재실행이 아닌 재동의 흐름 등)는
+  // 여기서 바로 온보딩을 끝낸다.
+  const finishTour = (): void => {
+    if (needsDefaults) setStep('preferences')
+    else void window.api.settings.update({ onboarded: true })
   }
 
-  // 기능 투어는 최초 실행 흐름을 마무리하는 단계 — 완료·건너뛰기 모두 onboarded 를 저장해 다시 뜨지 않게 한다.
+  // 마지막 단계 — 고른 기본값과 함께 온보딩 완료 플래그를 한 번에 저장해 모달을 닫는다.
+  const finishOnboarding = (patch: Partial<AppSettings>): void => {
+    void window.api.settings.update({ ...patch, pickedDefaults: true, onboarded: true })
+  }
+
+  if (step === 'preferences') {
+    return <PreferencesStep onDone={finishOnboarding} />
+  }
+
+  // 기능 투어는 실제 화면을 스포트라이트하는 전체 화면 단계라 위 모달 껍데기를 쓰지 않는다.
   if (step === 'features') {
-    return <FeatureTour firstRun onDone={finishOnboarding} />
+    return (
+      <FeatureTour firstRun onDone={finishTour} doneLabel={needsDefaults ? 'Next' : undefined} />
+    )
   }
 
   return (

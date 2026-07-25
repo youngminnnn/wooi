@@ -133,11 +133,17 @@ function tooltipStyle(rect: Box, placement: Placement): React.CSSProperties {
 
 export default function FeatureTour({
   onDone,
-  firstRun = false
+  firstRun = false,
+  doneLabel
 }: {
   onDone: () => void
   /** 최초 실행(true): 하단 Skip 으로만 종료, Escape 무시. 재실행(false): ✕/Escape 로 닫기. */
   firstRun?: boolean
+  /**
+   * 마지막 단계의 버튼 문구. 투어 뒤에 온보딩 단계가 더 남아 있을 때(기본값 고르기) 상위가
+   * 문구를 넘겨, 여기서 앱이 바로 시작되는 것처럼 보이지 않게 한다.
+   */
+  doneLabel?: string
 }): React.JSX.Element {
   const [index, setIndex] = useState(0)
   const [rect, setRect] = useState<Box | null>(null)
@@ -257,7 +263,7 @@ export default function FeatureTour({
             </button>
           )}
           <button className={primaryBtn} onClick={next}>
-            {last ? (firstRun ? 'Start using Wooi' : 'Done') : 'Next'}
+            {last ? (doneLabel ?? (firstRun ? 'Start using Wooi' : 'Done')) : 'Next'}
           </button>
         </div>
       </div>
