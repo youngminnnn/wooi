@@ -5,7 +5,7 @@
   "main": "./out/main/index.js",
   "type": "module",
   "author": "youngminnnn <youngmin3306@gmail.com>",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/youngminnnn/wooi.git"

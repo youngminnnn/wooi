@@ -5,18 +5,22 @@
 
 # Terms of Use
 
-_Last updated: 2026-06-06 · Version 1_
+_Last updated: 2026-07-25 · Version 2_
 
 By installing or using Wooi ("the app"), you agree to these terms. If you do not
 agree, do not use the app.
 
 ## 1. License
 
-Wooi is open‑source software released under the **MIT License** (see
-[`LICENSE`](./LICENSE)). You are free to use, copy, modify, merge, publish,
-distribute, sublicense, and/or sell copies of the software, subject to the terms
-of that license, for personal or commercial purposes. The software is provided
-"as is", without warranty of any kind.
+Wooi is open‑source software released under the **Apache License 2.0** (see
+[`LICENSE`](./LICENSE)). You are free to use, reproduce, modify, distribute, and
+sublicense the software, subject to the terms of that license, for personal or
+commercial purposes. The license also includes an express patent grant, and
+terminates that patent grant if you initiate patent litigation over the
+software. The software is provided "as is", without warranty of any kind.
+
+The Apache License does not grant any right to use the "Wooi" name or logo; see
+[`TRADEMARK.md`](./TRADEMARK.md).
 
 ## 2. Third‑party services
 

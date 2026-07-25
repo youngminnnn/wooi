@@ -23,6 +23,7 @@ See CONTRIBUTING.md for details.
 
 ## Checklist
 
+- [ ] I have signed the [CLA](../CLA.md) (the bot will prompt you on your first PR)
 - [ ] Branch name follows the `<type>/<description>` rule
 - [ ] `npm run typecheck` passes
 - [ ] `npm run lint` and `npm run format:check` pass

@@ -173,4 +173,9 @@ npm run dist        # macOS 배포본을 release/ 로 패키징
 
 ## 라이선스
 
-[MIT](./LICENSE) © youngminnnn. MIT 라이선스 조건에 따라 자유롭게 사용·수정·재배포할 수 있습니다.
+[Apache 2.0](./LICENSE) © youngminnnn. Apache License 2.0 조건에 따라 자유롭게
+사용·수정·재배포할 수 있으며, 명시적 특허 사용 허가 조항이 포함되어 있습니다.
+
+"Wooi" 이름과 로고는 상표로서 이 라이선스의 적용을 받지 않습니다
+([TRADEMARK.md](./TRADEMARK.md) 참고). 기여자는 첫 PR 병합 전에
+[CLA](./CLA.md) 에 서명해 주셔야 합니다.
