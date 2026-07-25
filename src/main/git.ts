@@ -400,24 +400,6 @@ export async function revParse(worktreePath: string, ref: string): Promise<strin
 }
 
 /**
- * 현재 HEAD 에서 새 브랜치를 만들어 체크아웃한다(모델 B 의 'Split here').
- * 미커밋 변경이 있으면 그대로 새 브랜치로 옮겨 가므로(다음 PR 세그먼트 작업분), clean 을 요구하지 않는다.
- * 브랜치 이름이 이미 있으면 실패를 반환한다(호출 측이 고유 이름을 만들어 넘긴다).
- */
-export async function createBranchAtHead(
-  worktreePath: string,
-  newBranch: string
-): Promise<{ error?: string }> {
-  const exists = await git(worktreePath, ['rev-parse', '--verify', '--quiet', newBranch])
-    .then(() => true)
-    .catch(() => false)
-  if (exists) return { error: `Branch "${newBranch}" already exists.` }
-  const res = await gitTry(worktreePath, ['checkout', '-b', newBranch])
-  if (!res.ok) return { error: res.stderr || `Failed to create branch "${newBranch}".` }
-  return {}
-}
-
-/**
  * worktree 를 다른(이미 존재하는) 브랜치로 체크아웃 전환한다(모델 B 스택 내 이동).
  * 미커밋 변경이 있으면 전환하지 않고 실패를 반환한다(먼저 커밋/스태시 필요).
  */

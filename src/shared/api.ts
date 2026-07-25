@@ -63,8 +63,6 @@ export interface WooiApi {
     unarchive(workspaceId: string): Promise<{ error?: string }>
     /** stacked 워크스페이스를 최신 base(부모 브랜치) 위로 rebase 하고 리모트에 force-push 한다. */
     restack(workspaceId: string): Promise<RestackResult>
-    /** 모델 B: 현재 HEAD 에서 새 상위 브랜치를 끊어(Split) worktree 내부 스택에 PR 경계를 만든다. */
-    splitStack(workspaceId: string, name?: string): Promise<{ branch?: string; error?: string }>
     /** 모델 B: worktree 내부 스택의 다른 브랜치로 체크아웃 전환한다(clean 워킹트리 필요). */
     switchBranch(workspaceId: string, branch: string): Promise<{ error?: string }>
     remove(workspaceId: string, deleteBranch: boolean): Promise<void>

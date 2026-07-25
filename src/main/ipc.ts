@@ -11,7 +11,6 @@ import {
   abortMerge,
   addWorktree,
   checkoutBranch,
-  createBranchAtHead,
   currentBranch,
   detectDefaultBranch,
   revParse,
@@ -25,7 +24,6 @@ import {
   repoNameFromPath,
   resolveUniqueWorktree,
   restackOnto,
-  sanitizeBranch,
   updateFromBase
 } from './git'
 import { generateWorkspaceName } from './names'
@@ -701,53 +699,6 @@ export function registerIpc(ctx: IpcContext): void {
       message: err instanceof Error ? err.message : String(err)
     }))
   })
-
-  // 모델 B: 현재 HEAD 에서 새 상위 브랜치를 끊어(Split) worktree 내부 스택에 PR 경계를 만든다.
-  ipcMain.handle(
-    IPC.workspaceSplitStack,
-    async (
-      _e,
-      workspaceId: string,
-      name?: string
-    ): Promise<{ branch?: string; error?: string }> => {
-      const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
-      if (!ws || ws.archived) return { error: 'Workspace not found.' }
-      const repo = repoFor(ws.repoId)
-      if (!repo) return { error: 'Repository not found.' }
-      if (ws.status === 'running') {
-        return { error: 'The agent is running — wait for it to finish before splitting a PR.' }
-      }
-      // 현재 체크아웃된 브랜치가 실제 HEAD 와 일치하는지 확인(외부 변경 방어).
-      const head = await currentBranch(ws.worktreePath)
-      if (head && head !== ws.branch) {
-        return { error: `Working tree is on "${head}", not "${ws.branch}". Refresh and retry.` }
-      }
-      // 고유한 새 브랜치 이름을 만든다: 사용자 지정 또는 <워크스페이스 이름>-<스택 크기+1>.
-      const existing = workspaceStack(ws)
-      const raw = (name ?? '').trim() || `${ws.name}-${existing.length + 1}`
-      let candidate = sanitizeBranch(raw)
-      let n = 2
-      while (await revParse(ws.worktreePath, candidate)) candidate = `${sanitizeBranch(raw)}-${n++}`
-
-      const created = await createBranchAtHead(ws.worktreePath, candidate)
-      if (created.error) return { error: created.error }
-
-      // 스택을 갱신한다: 기존 엔트리들 + 방금 만든 상위 브랜치(base=직전 브랜치). 현재 브랜치를 새 tip 으로.
-      store.update((st) => {
-        const w = st.workspaces.find((x) => x.id === workspaceId)
-        if (!w) return
-        // 새 브랜치의 base 는 split 시점에 체크아웃돼 있던 브랜치(from). 하위 브랜치에서 split 하면 거기서 분기한다.
-        const from = w.branch
-        const stack = w.stack && w.stack.length > 0 ? w.stack : workspaceStack(w)
-        w.stack = [...stack, { branch: candidate, baseBranch: from, prNumber: null }]
-        w.branch = candidate
-        w.baseBranch = from
-        w.prNumber = null
-      })
-      broadcastState()
-      return { branch: candidate }
-    }
-  )
 
   // 모델 B: worktree 내부 스택의 다른 브랜치로 체크아웃 전환한다(clean 워킹트리 필요).
   ipcMain.handle(

@@ -1,12 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import {
-  Layers,
-  GitBranch,
-  ExternalLink,
-  GitPullRequestCreate,
-  SplitSquareHorizontal,
-  Check
-} from 'lucide-react'
+import { Layers, GitBranch, ExternalLink, GitPullRequestCreate, Check } from 'lucide-react'
 import { useStore } from '../store'
 import { isBranchStack, orderByStack, workspaceDisplayName, workspaceStack } from '@shared/types'
 import type { PrState, PrStatus, Workspace } from '@shared/types'
@@ -69,14 +62,7 @@ interface Row {
  * - 모델 A(워크스페이스 스택): 멤버 워크스페이스 나열 → 클릭 시 전환, PR 없으면 Create PR.
  * 스택이 아니면(단일 브랜치·워크스페이스) 렌더하지 않는다.
  */
-export default function StackPopover({
-  workspace,
-  onSplit
-}: {
-  workspace: Workspace
-  /** 모델 B: 현재 HEAD 에서 새 상위 브랜치를 끊는다(스택에 PR 경계 추가). 팝오버 푸터에서 호출. */
-  onSplit?: () => void
-}): React.JSX.Element {
+export default function StackPopover({ workspace }: { workspace: Workspace }): React.JSX.Element {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   const workspaces = useStore((s) => s.app!.workspaces)
@@ -349,22 +335,6 @@ export default function StackPopover({
               )
             })}
           </div>
-          {branchMode && onSplit && (
-            <>
-              <div className="my-1 border-t border-[var(--border)]" />
-              <button
-                onClick={() => {
-                  setOpen(false)
-                  onSplit()
-                }}
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-neutral-200 hover:bg-[var(--surface-2)]"
-                title="Freeze current commits and start a new branch on top of the stack"
-              >
-                <SplitSquareHorizontal size={13} className="text-[var(--accent-400)]" />
-                Split a new PR on top
-              </button>
-            </>
-          )}
         </div>
       )}
     </div>
