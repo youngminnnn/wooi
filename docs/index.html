@@ -778,10 +778,7 @@
       <div class="cta-row">
         <a
           class="btn btn-primary"
-          data-download
-          href="https://github.com/youngminnnn/wooi/releases/latest"
-          target="_blank"
-          rel="noopener"
+          href="https://github.com/youngminnnn/wooi/releases/latest/download/Wooi-arm64.dmg"
         >
           <span class="en">⬇ Download for macOS</span>
           <span class="ko">⬇ macOS 다운로드</span>
@@ -1329,10 +1326,7 @@
                 <span class="en"
                   >Download the
                   <a
-                    data-download
-                    href="https://github.com/youngminnnn/wooi/releases/latest"
-                    target="_blank"
-                    rel="noopener"
+                    href="https://github.com/youngminnnn/wooi/releases/latest/download/Wooi-arm64.dmg"
                     >latest <code>.dmg</code></a
                   >
                   and drag <strong>Wooi</strong> into <strong>Applications</strong>. Older builds
@@ -1346,10 +1340,7 @@
                 >
                 <span class="ko"
                   ><a
-                    data-download
-                    href="https://github.com/youngminnnn/wooi/releases/latest"
-                    target="_blank"
-                    rel="noopener"
+                    href="https://github.com/youngminnnn/wooi/releases/latest/download/Wooi-arm64.dmg"
                     >최신 <code>.dmg</code></a
                   >
                   를 받아 <strong>Wooi</strong> 를 <strong>Applications</strong> 로 드래그합니다.
@@ -1512,10 +1503,7 @@
           <div class="cta-row">
             <a
               class="btn btn-primary"
-              data-download
-              href="https://github.com/youngminnnn/wooi/releases/latest"
-              target="_blank"
-              rel="noopener"
+              href="https://github.com/youngminnnn/wooi/releases/latest/download/Wooi-arm64.dmg"
             >
               <span class="en">⬇ Download for macOS</span><span class="ko">⬇ macOS 다운로드</span>
             </a>
@@ -1604,15 +1592,15 @@
       })()
     </script>
 
-    <!-- ---------- latest-release direct download ---------- -->
+    <!-- ---------- latest version label ---------- -->
     <script>
       ;(function () {
-        // 릴리스 에셋 이름에 버전이 박혀 있어(Wooi-1.0.2-arm64.dmg) 고정 URL 을 쓸 수 없다.
-        // 최신 릴리스를 조회해 .dmg 주소를 버튼에 주입하고, 실패하면 마크업에 적어 둔
-        // /releases/latest 폴백 링크가 그대로 남는다.
+        // 다운로드 링크 자체는 정적이다 — dmg 파일명에 버전이 없어(Wooi-arm64.dmg)
+        // /releases/latest/download/ 가 항상 최신 릴리스로 리다이렉트한다.
+        // 이 스크립트는 버전 칩 표시 전용이라, 실패하면 칩만 감춰지고 다운로드는 멀쩡하다.
         var API = 'https://api.github.com/repos/youngminnnn/wooi/releases/latest'
-        var links = document.querySelectorAll('a[data-download]')
-        if (!links.length || typeof fetch !== 'function') return
+        var labels = document.querySelectorAll('[data-version]')
+        if (!labels.length || typeof fetch !== 'function') return
 
         fetch(API, { headers: { Accept: 'application/vnd.github+json' } })
           .then(function (res) {
@@ -1620,33 +1608,15 @@
             return res.json()
           })
           .then(function (release) {
-            var assets = release.assets || []
-            var dmg = null
-            for (var i = 0; i < assets.length; i++) {
-              if (/\.dmg$/i.test(assets[i].name)) {
-                dmg = assets[i]
-                break
-              }
-            }
-            if (!dmg || !dmg.browser_download_url) return
-
-            for (var j = 0; j < links.length; j++) {
-              links[j].href = dmg.browser_download_url
-              // 파일 다운로드라 새 탭이 빈 창으로 남는다 — 현재 탭에서 받게 한다.
-              links[j].removeAttribute('target')
-              links[j].setAttribute('title', dmg.name)
-            }
-
             var tag = release.tag_name || release.name
             if (!tag) return
-            var labels = document.querySelectorAll('[data-version]')
-            for (var k = 0; k < labels.length; k++) {
-              labels[k].textContent = tag
-              labels[k].hidden = false
+            for (var i = 0; i < labels.length; i++) {
+              labels[i].textContent = tag
+              labels[i].hidden = false
             }
           })
           .catch(function () {
-            /* 폴백 링크 유지 */
+            /* 칩은 숨긴 채로 둔다 */
           })
       })()
     </script>

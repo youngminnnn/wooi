@@ -23,16 +23,17 @@ and no automatic prompt** — nothing runs until you send your first message.
 - 🚢 **PR-native** — jump straight from an agent's diff to a GitHub PR in one click.
 - 🕵️ **No telemetry** — no servers of its own; transcripts stored locally only.
 
-**[Download the latest release →](https://github.com/youngminnnn/wooi/releases)**
+**[Download the latest release →](https://github.com/youngminnnn/wooi/releases/latest/download/Wooi-arm64.dmg)**
 
 ## Installation
 
 Wooi ships as a **signed and notarized** `.dmg` (Apple Developer ID), so it opens
 without Gatekeeper warnings.
 
-1. Download the latest `.dmg` from the
-   [Releases page](https://github.com/youngminnnn/wooi/releases) and drag **Wooi**
-   into **Applications**.
+1. Download the
+   [latest `.dmg`](https://github.com/youngminnnn/wooi/releases/latest/download/Wooi-arm64.dmg)
+   and drag **Wooi** into **Applications**. Older builds live on the
+   [Releases page](https://github.com/youngminnnn/wooi/releases).
 2. Open **Wooi** from Applications.
 
 ## Updating
