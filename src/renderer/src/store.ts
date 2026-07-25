@@ -118,6 +118,8 @@ interface UIState {
   scriptStatus: Record<string, ScriptStatus[]>
   gitStatus: Record<string, GitStatus | null>
   prStatus: Record<string, PrStatus | null>
+  /** workspace 별 PR 상태 조회 진행 여부(브랜치 전환·새로고침 중 헤더에 로딩 표시). */
+  prRefreshing: Record<string, boolean>
   permissions: PermissionRequest[]
   authStatus: AuthStatus | null
   /** workspace 별 컨텍스트 윈도 사용량(마지막 턴 기준). 입력창 사용량 미터용. */
@@ -155,9 +157,11 @@ interface UIState {
   /** worktree 생성을 시작하고, 완료될 때까지 사이드바에 스피너 행을 즉시 띄운다. */
   createWorkspace: (
     repoId: string,
-    args?: { name?: string; baseBranch?: string },
+    args?: { name?: string; baseBranch?: string; parentWorkspaceId?: string | null },
     displayName?: string
   ) => Promise<void>
+  /** stacked 워크스페이스를 최신 base(부모 브랜치) 위로 rebase·force-push 한다. */
+  restackWorkspace: (workspaceId: string) => Promise<void>
   selectWorkspace: (id: string | null) => Promise<void>
   /** 아직 로드되지 않았으면 해당 workspace 의 트랜스크립트를 불러온다(대시보드 비용 집계 등에서 사용). */
   ensureHistory: (workspaceId: string) => Promise<void>
@@ -165,6 +169,8 @@ interface UIState {
   /** 진입 여부와 무관하게 모든(비아카이브) 워크스페이스의 git 상태를 한 번에 갱신한다. */
   refreshAllGit: () => Promise<void>
   refreshPr: (workspaceId: string) => Promise<void>
+  /** PR 상태를 즉시(낙관적) 설정한다. 브랜치 전환 시 캐시된 값으로 헤더를 바로 갱신할 때 쓴다. */
+  setPrStatus: (workspaceId: string, status: PrStatus | null) => void
   refreshScriptStatus: (workspaceId: string) => Promise<void>
   refreshAuth: () => Promise<void>
   dismissPermission: (requestId: string) => void
@@ -230,6 +236,7 @@ export const useStore = create<UIState>((set, get) => ({
   scriptStatus: {},
   gitStatus: {},
   prStatus: {},
+  prRefreshing: {},
   permissions: [],
   authStatus: null,
   contextUsage: {},
@@ -574,6 +581,29 @@ export const useStore = create<UIState>((set, get) => ({
     }
   },
 
+  restackWorkspace: async (workspaceId) => {
+    const res = await window.api.workspace.restack(workspaceId)
+    if (res.status === 'restacked') {
+      get().pushToast(
+        'success',
+        res.pushed ? 'Restacked onto base and pushed.' : 'Restacked onto base.'
+      )
+    } else if (res.status === 'up-to-date') {
+      get().pushToast('info', 'Already up to date with base.')
+    } else if (res.status === 'conflict') {
+      get().pushToast(
+        'error',
+        `Rebase conflict in ${res.conflictedFiles?.length ?? 0} file(s) — resolve in the worktree.`
+      )
+    } else if (res.status === 'dirty') {
+      get().pushToast('error', res.message ?? 'Commit or stash changes before restacking.')
+    } else {
+      get().pushToast('error', res.message ?? 'Failed to restack.')
+    }
+    void get().refreshGit(workspaceId)
+    void get().refreshPr(workspaceId)
+  },
+
   selectWorkspace: async (id) => {
     // 선택 시 미확인 표시 해제.
     set((s) => {
@@ -628,9 +658,17 @@ export const useStore = create<UIState>((set, get) => ({
   },
 
   refreshPr: async (workspaceId) => {
-    const status = await window.api.pr.status(workspaceId)
-    set((s) => ({ prStatus: { ...s.prStatus, [workspaceId]: status } }))
+    set((s) => ({ prRefreshing: { ...s.prRefreshing, [workspaceId]: true } }))
+    try {
+      const status = await window.api.pr.status(workspaceId)
+      set((s) => ({ prStatus: { ...s.prStatus, [workspaceId]: status } }))
+    } finally {
+      set((s) => ({ prRefreshing: { ...s.prRefreshing, [workspaceId]: false } }))
+    }
   },
+
+  setPrStatus: (workspaceId, status) =>
+    set((s) => ({ prStatus: { ...s.prStatus, [workspaceId]: status } })),
 
   refreshScriptStatus: async (workspaceId) => {
     const status = await window.api.script.getStatus(workspaceId)

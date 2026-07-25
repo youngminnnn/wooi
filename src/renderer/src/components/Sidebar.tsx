@@ -4,6 +4,7 @@ import {
   Plus,
   Settings2,
   GitBranch,
+  GitBranchPlus,
   Loader2,
   Archive,
   ArchiveRestore,
@@ -14,10 +15,11 @@ import {
   Bell,
   BellOff,
   AlertTriangle,
+  RefreshCw,
   LayoutDashboard
 } from 'lucide-react'
 import { useStore } from '../store'
-import { workspaceDisplayName } from '@shared/types'
+import { orderByStack, workspaceDisplayName } from '@shared/types'
 import { useNow } from '../lib/useNow'
 import { formatDuration } from '../lib/format'
 import type { PrState, PrStatus, Repo, Workspace } from '@shared/types'
@@ -27,9 +29,11 @@ const RUNNING_STALE_MS = 5 * 60 * 1000
 
 export default function Sidebar({
   onNewWorkspace,
+  onStackWorkspace,
   onConfigRepo
 }: {
   onNewWorkspace: (repoId: string) => void
+  onStackWorkspace: (repoId: string, parentWorkspaceId: string) => void
   onConfigRepo: (repoId: string) => void
 }): React.JSX.Element {
   const app = useStore((s) => s.app)!
@@ -147,10 +151,12 @@ export default function Sidebar({
                 {active.length === 0 && repoPending.length === 0 && (
                   <p className="px-3 py-1 text-xs text-neutral-600">No workspaces</p>
                 )}
-                {active.map((ws) => (
+                {orderByStack(active).map(({ workspace: ws, depth }) => (
                   <WorkspaceRow
                     key={ws.id}
                     workspace={ws}
+                    depth={depth}
+                    onStackWorkspace={onStackWorkspace}
                     shortcut={shortcutById.get(ws.id)}
                     now={now}
                   />
@@ -190,10 +196,15 @@ function RepoIcon({ repo }: { repo: Repo }): React.JSX.Element {
 
 function WorkspaceRow({
   workspace,
+  depth,
+  onStackWorkspace,
   shortcut,
   now
 }: {
   workspace: Workspace
+  /** stack 트리에서의 들여쓰기 깊이(뿌리=0). */
+  depth: number
+  onStackWorkspace: (repoId: string, parentWorkspaceId: string) => void
   shortcut?: number
   now: number
 }): React.JSX.Element {
@@ -204,6 +215,7 @@ function WorkspaceRow({
   const unread = useStore((s) => s.unread[workspace.id])
   const compacting = useStore((s) => s.compacting[workspace.id] ?? false)
   const runningSince = useStore((s) => s.runningSince[workspace.id])
+  const restack = useStore((s) => s.restackWorkspace)
   const confirm = useStore((s) => s.confirm)
   const awaitingPermission = useStore((s) =>
     s.permissions.some((p) => p.workspaceId === workspace.id)
@@ -251,8 +263,10 @@ function WorkspaceRow({
           void select(workspace.id)
         }
       }}
+      // stacked 워크스페이스는 깊이만큼 들여써 부모-자식 계층을 시각화한다(뿌리=기본 들여쓰기).
+      style={{ paddingLeft: 12 + depth * 14 }}
       className={
-        'group/ws relative w-full flex items-center gap-2 pl-3 pr-1.5 py-1.5 rounded-md text-left cursor-pointer focus:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-strong)] ' +
+        'group/ws relative w-full flex items-center gap-2 pr-1.5 py-1.5 rounded-md text-left cursor-pointer focus:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-strong)] ' +
         // 선택 행은 좌측에 파란 액센트 바를 띄워 현재 위치를 또렷하게 표시한다.
         (active
           ? 'bg-[var(--surface-3)] before:absolute before:left-0 before:top-1.5 before:bottom-1.5 before:w-0.5 before:rounded-full before:bg-[var(--info-500)]'
@@ -368,6 +382,38 @@ function WorkspaceRow({
           title="Completed response — unread"
         />
       )}
+      {/* stacked 워크스페이스면 restack 버튼을 노출한다. base(부모)보다 뒤처져 있으면 강조한다. */}
+      {workspace.parentWorkspaceId && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation()
+            void restack(workspace.id)
+          }}
+          className={
+            'opacity-0 group-hover/ws:opacity-100 h-5 w-5 grid place-items-center rounded shrink-0 hover:bg-[var(--surface-2)] ' +
+            (git && git.behind > 0
+              ? 'text-[var(--warning-400)] hover:text-[var(--warning-300)]'
+              : 'text-neutral-500 hover:text-neutral-200')
+          }
+          title={
+            git && git.behind > 0
+              ? `Restack onto ${workspace.baseBranch} (${git.behind} behind) — rebase & force-push`
+              : `Restack onto ${workspace.baseBranch} — rebase & force-push`
+          }
+        >
+          <RefreshCw size={12} />
+        </button>
+      )}
+      <button
+        onClick={(e) => {
+          e.stopPropagation()
+          onStackWorkspace(workspace.repoId, workspace.id)
+        }}
+        className="opacity-0 group-hover/ws:opacity-100 h-5 w-5 grid place-items-center rounded text-neutral-500 hover:bg-[var(--surface-2)] hover:text-neutral-200 shrink-0"
+        title="Stack a new workspace on top of this one"
+      >
+        <GitBranchPlus size={13} />
+      </button>
       {/* 음소거 상태는 호버하지 않아도 보이도록 상시 표시(호버 시 토글 버튼으로 대체된다). */}
       {workspace.muted && (
         <BellOff

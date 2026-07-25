@@ -7,6 +7,7 @@ import type {
   FileDiff,
   FileDiffStatus,
   GitStatus,
+  RestackResult,
   UpdateFromBaseResult,
   WorkspaceDiff
 } from '@shared/types'
@@ -292,6 +293,144 @@ export async function updateFromBase(
 /** 진행 중인 머지를 취소해 워크스페이스를 머지 직전 상태로 되돌린다(충돌 포기용). */
 export async function abortMerge(worktreePath: string): Promise<void> {
   await git(worktreePath, ['merge', '--abort']).catch(() => {})
+}
+
+// ── restack (stacked PR: 부모 브랜치 위로 rebase) ─────────────────────────
+
+/** 리모트에 같은 이름의 브랜치가 이미 있는지(origin/<branch>). force-push 대상 판단에 쓴다. */
+async function remoteBranchExists(worktreePath: string, branch: string): Promise<boolean> {
+  if (!branch) return false
+  return git(worktreePath, ['rev-parse', '--verify', '--quiet', `origin/${branch}`])
+    .then(() => true)
+    .catch(() => false)
+}
+
+/**
+ * rebase 로 히스토리를 리라이트한 뒤 리모트에 반영한다. 리모트 브랜치가 있을 때만 `--force-with-lease`
+ * 로 push 해(협업자가 그 사이 push 한 커밋을 덮어쓰지 않도록), 아직 push 되지 않은 브랜치는 건너뛴다.
+ * push 성공 여부를 돌려준다.
+ */
+async function pushForceWithLease(worktreePath: string, branch: string): Promise<boolean> {
+  if (!(await remoteBranchExists(worktreePath, branch))) return false
+  const res = await gitTry(worktreePath, ['push', '--force-with-lease', 'origin', branch])
+  return res.ok
+}
+
+/**
+ * stacked 워크스페이스 브랜치를 최신 base(부모 브랜치) 위로 rebase 한다.
+ * - 미커밋 변경이 있으면 시작하지 않는다('dirty').
+ * - oldBase 를 주면 `git rebase --onto <base> <oldBase>` 로, 이 브랜치 고유 커밋만(=oldBase..HEAD)
+ *   새 base 위로 옮긴다. 부모 PR 이 병합돼 자식을 조부모로 옮길 때(부모 커밋을 떨궈야 할 때) 쓴다.
+ * - oldBase 가 없으면 부모가 새 커밋만 얹은 일반적인 경우로, 뒤처졌을 때만 `git rebase <base>` 한다.
+ * - rebase 성공 후 리모트 브랜치가 있으면 force-with-lease 로 push 해 PR 을 갱신한다.
+ * - 충돌 시 워킹트리를 rebase 진행 상태로 남기고 충돌 파일을 돌려준다(해결 후 계속하거나 abortRebase).
+ */
+export async function restackOnto(
+  worktreePath: string,
+  baseBranch: string,
+  oldBase?: string
+): Promise<RestackResult> {
+  const dirty = (await git(worktreePath, ['status', '--porcelain']).catch(() => '')).trim()
+  if (dirty) {
+    return {
+      status: 'dirty',
+      baseBranch,
+      message: 'Commit or stash your changes before restacking.'
+    }
+  }
+
+  // 최신 origin 을 가져온 뒤 origin/<base>(없으면 로컬 base)를 rebase 대상으로 삼는다.
+  await fetchRemote(worktreePath)
+  const onto = await resolveBaseStartPoint(worktreePath, baseBranch)
+  const branch = await git(worktreePath, ['rev-parse', '--abbrev-ref', 'HEAD']).catch(() => '')
+
+  const behind = await git(worktreePath, ['rev-list', '--count', `HEAD..${onto}`])
+    .then((s) => parseInt(s, 10) || 0)
+    .catch(() => 0)
+
+  const needsRebase = oldBase ? true : behind > 0
+  if (needsRebase) {
+    const rebaseArgs = oldBase ? ['rebase', '--onto', onto, oldBase] : ['rebase', onto]
+    const rebase = await gitTry(worktreePath, rebaseArgs)
+    if (!rebase.ok) {
+      const conflicts = await git(worktreePath, ['diff', '--name-only', '--diff-filter=U']).catch(
+        () => ''
+      )
+      const conflictedFiles = conflicts
+        .split('\n')
+        .map((s) => s.trim())
+        .filter(Boolean)
+      if (conflictedFiles.length) return { status: 'conflict', baseBranch, conflictedFiles }
+      // 충돌이 아닌 다른 실패 — rebase 를 깔끔히 되돌리고 메시지를 전달한다.
+      await abortRebase(worktreePath)
+      return {
+        status: 'error',
+        baseBranch,
+        message: rebase.stderr || 'Failed to rebase onto base.'
+      }
+    }
+  }
+
+  const pushed = await pushForceWithLease(worktreePath, branch)
+  if (!needsRebase && !pushed) return { status: 'up-to-date', baseBranch }
+  return { status: 'restacked', baseBranch, pushed }
+}
+
+/** 진행 중인 rebase 를 취소해 워크스페이스를 rebase 직전 상태로 되돌린다(충돌 포기용). */
+export async function abortRebase(worktreePath: string): Promise<void> {
+  await git(worktreePath, ['rebase', '--abort']).catch(() => {})
+}
+
+// ── 모델 B: worktree 내부 브랜치 스택 (단일 worktree · N 브랜치) ────────────
+
+/** 워킹트리에 미커밋 변경이 없는지(브랜치 전환 안전 여부 판단). */
+export async function isWorktreeClean(worktreePath: string): Promise<boolean> {
+  const dirty = (await git(worktreePath, ['status', '--porcelain']).catch(() => 'x')).trim()
+  return dirty === ''
+}
+
+/** worktree 의 현재 HEAD 브랜치 이름. */
+export async function currentBranch(worktreePath: string): Promise<string> {
+  return git(worktreePath, ['rev-parse', '--abbrev-ref', 'HEAD']).catch(() => '')
+}
+
+/** ref(브랜치/커밋)의 커밋 sha. 없으면 null. 스택 restack 전 각 브랜치의 이전 tip 을 잡아 둘 때 쓴다. */
+export async function revParse(worktreePath: string, ref: string): Promise<string | null> {
+  return git(worktreePath, ['rev-parse', '--verify', '--quiet', ref]).catch(() => null)
+}
+
+/**
+ * 현재 HEAD 에서 새 브랜치를 만들어 체크아웃한다(모델 B 의 'Split here').
+ * 미커밋 변경이 있으면 그대로 새 브랜치로 옮겨 가므로(다음 PR 세그먼트 작업분), clean 을 요구하지 않는다.
+ * 브랜치 이름이 이미 있으면 실패를 반환한다(호출 측이 고유 이름을 만들어 넘긴다).
+ */
+export async function createBranchAtHead(
+  worktreePath: string,
+  newBranch: string
+): Promise<{ error?: string }> {
+  const exists = await git(worktreePath, ['rev-parse', '--verify', '--quiet', newBranch])
+    .then(() => true)
+    .catch(() => false)
+  if (exists) return { error: `Branch "${newBranch}" already exists.` }
+  const res = await gitTry(worktreePath, ['checkout', '-b', newBranch])
+  if (!res.ok) return { error: res.stderr || `Failed to create branch "${newBranch}".` }
+  return {}
+}
+
+/**
+ * worktree 를 다른(이미 존재하는) 브랜치로 체크아웃 전환한다(모델 B 스택 내 이동).
+ * 미커밋 변경이 있으면 전환하지 않고 실패를 반환한다(먼저 커밋/스태시 필요).
+ */
+export async function checkoutBranch(
+  worktreePath: string,
+  branch: string
+): Promise<{ error?: string }> {
+  if (!(await isWorktreeClean(worktreePath))) {
+    return { error: 'Commit or stash your changes before switching branches.' }
+  }
+  const res = await gitTry(worktreePath, ['checkout', branch])
+  if (!res.ok) return { error: res.stderr || `Failed to switch to "${branch}".` }
+  return {}
 }
 
 // ── diff (변경 검토용) ───────────────────────────────────────────────────

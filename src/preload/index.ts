@@ -22,6 +22,11 @@ const api: WooiApi = {
     create: (args) => ipcRenderer.invoke(IPC.workspaceCreate, args),
     archive: (workspaceId) => ipcRenderer.invoke(IPC.workspaceArchive, workspaceId),
     unarchive: (workspaceId) => ipcRenderer.invoke(IPC.workspaceUnarchive, workspaceId),
+    restack: (workspaceId) => ipcRenderer.invoke(IPC.workspaceRestack, workspaceId),
+    splitStack: (workspaceId, name) =>
+      ipcRenderer.invoke(IPC.workspaceSplitStack, workspaceId, name),
+    switchBranch: (workspaceId, branch) =>
+      ipcRenderer.invoke(IPC.workspaceSwitchBranch, workspaceId, branch),
     remove: (workspaceId, deleteBranch) =>
       ipcRenderer.invoke(IPC.workspaceRemove, workspaceId, deleteBranch),
     removeArchived: (repoId) => ipcRenderer.invoke(IPC.workspaceRemoveArchived, repoId),
@@ -66,7 +71,9 @@ const api: WooiApi = {
 
   pr: {
     status: (workspaceId) => ipcRenderer.invoke(IPC.prStatus, workspaceId),
-    create: (workspaceId) => ipcRenderer.invoke(IPC.prCreate, workspaceId),
+    statusForBranch: (workspaceId, branch) =>
+      ipcRenderer.invoke(IPC.prStatusForBranch, workspaceId, branch),
+    create: (workspaceId, branch) => ipcRenderer.invoke(IPC.prCreate, workspaceId, branch),
     merge: (workspaceId, method) => ipcRenderer.invoke(IPC.prMerge, workspaceId, method),
     close: (workspaceId) => ipcRenderer.invoke(IPC.prClose, workspaceId),
     reopen: (workspaceId) => ipcRenderer.invoke(IPC.prReopen, workspaceId),

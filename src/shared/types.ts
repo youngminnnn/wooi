@@ -82,6 +82,56 @@ export function workspaceDisplayName(
 }
 
 /**
+ * 워크스페이스의 브랜치 스택(아래→위)을 돌려준다. 모델 B 스택이 있으면 그 엔트리들을,
+ * 없으면 현재 branch/baseBranch/prNumber 로 단일 엔트리를 합성해 돌려준다(모델 A·일반 워크스페이스).
+ * 이렇게 두 모델을 같은 모양으로 다뤄, 관리 UI(Stack 팝오버)가 분기 없이 렌더한다.
+ */
+export function workspaceStack(
+  ws: Pick<Workspace, 'branch' | 'baseBranch' | 'prNumber' | 'stack'>
+): StackedBranch[] {
+  if (ws.stack && ws.stack.length > 0) return ws.stack
+  return [{ branch: ws.branch, baseBranch: ws.baseBranch, prNumber: ws.prNumber }]
+}
+
+/** 워크스페이스가 worktree 내부 브랜치 스택(모델 B, 엔트리 2개 이상)을 보유하는지. */
+export function isBranchStack(ws: Pick<Workspace, 'stack'>): boolean {
+  return !!ws.stack && ws.stack.length > 1
+}
+
+/**
+ * 워크스페이스 목록을 stack 트리 순서로 정렬한다(부모 바로 뒤에 자식이 오도록, DFS pre-order).
+ * 각 항목에 stack 들여쓰기 깊이(depth: 뿌리=0)를 함께 매겨 사이드바가 계층을 그릴 수 있게 한다.
+ * 입력 순서(생성 순 등)는 형제 사이에서 보존된다. 순환(비정상 데이터)은 방문 집합으로 방지한다.
+ */
+export function orderByStack<T extends { id: string; parentWorkspaceId: string | null }>(
+  workspaces: T[]
+): Array<{ workspace: T; depth: number }> {
+  const byParent = new Map<string | null, T[]>()
+  const ids = new Set(workspaces.map((w) => w.id))
+  for (const w of workspaces) {
+    // 부모가 이 목록에 없으면(아카이브·다른 레포 등) 뿌리로 취급한다.
+    const key = w.parentWorkspaceId && ids.has(w.parentWorkspaceId) ? w.parentWorkspaceId : null
+    const list = byParent.get(key) ?? []
+    list.push(w)
+    byParent.set(key, list)
+  }
+  const out: Array<{ workspace: T; depth: number }> = []
+  const seen = new Set<string>()
+  const walk = (parentId: string | null, depth: number): void => {
+    for (const w of byParent.get(parentId) ?? []) {
+      if (seen.has(w.id)) continue
+      seen.add(w.id)
+      out.push({ workspace: w, depth })
+      walk(w.id, depth + 1)
+    }
+  }
+  walk(null, 0)
+  // 순환 등으로 누락된 항목이 있으면 뒤에 평탄하게 덧붙여 유실을 막는다.
+  for (const w of workspaces) if (!seen.has(w.id)) out.push({ workspace: w, depth: 0 })
+  return out
+}
+
+/**
  * 이 워크스페이스를 구동하는 AI 코딩 에이전트 백엔드 식별자.
  * 현재는 'claude'(Claude Code, Claude Agent SDK) 하나뿐이지만, 백엔드 추상화 계층을 통해
  * 추후 다른 에이전트(예: Codex)를 식별자만 추가해 붙일 수 있도록 도메인에 남겨 둔다.
@@ -91,6 +141,19 @@ export type AgentBackendId = 'claude'
 
 /** 백엔드를 지정하지 않은(레거시·신규) 워크스페이스의 기본 백엔드. */
 export const DEFAULT_AGENT_BACKEND: AgentBackendId = 'claude'
+
+/**
+ * 한 워크스페이스(worktree) 안에 쌓인 stacked PR 브랜치 1개.
+ * 모델 B(단일 worktree · N 브랜치 · N PR)에서, 워크스페이스는 이런 엔트리들의 스택을 가지며
+ * worktree 는 그중 하나(=Workspace.branch)를 체크아웃한 상태다.
+ */
+export interface StackedBranch {
+  branch: string
+  /** 스택에서 바로 아래 브랜치. 맨 아래 엔트리는 리포 기본 브랜치. */
+  baseBranch: string
+  /** 이 브랜치에 연결된 PR 번호(발견되면 영속). 없으면 null. */
+  prNumber: number | null
+}
 
 /** 하나의 작업 단위. git worktree + 전용 브랜치 + 에이전트 세션 1개. */
 export interface Workspace {
@@ -108,8 +171,28 @@ export interface Workspace {
   displayName: string | null
   /** 이 workspace 전용 git 브랜치 */
   branch: string
-  /** 브랜치를 분기한 베이스 브랜치 */
+  /**
+   * 브랜치를 분기한 베이스 브랜치. stacked 워크스페이스면 부모 워크스페이스의 branch,
+   * 아니면 리포 기본 브랜치(origin/<defaultBranch>)다. git status/diff/restack 이 이 값을 기준으로 동작한다.
+   */
   baseBranch: string
+  /**
+   * stacked PR 부모. 이 워크스페이스가 다른 워크스페이스의 브랜치 위에 쌓였으면 그 부모의 id,
+   * 기본 브랜치에서 바로 분기한 스택 뿌리면 null. 자식은 parentWorkspaceId 로 역산해 트리를 만든다.
+   */
+  parentWorkspaceId: string | null
+  /**
+   * (현재 체크아웃된 브랜치의) 연결된 GitHub PR 번호(있으면). getPrStatus 로 발견되면 영속되어,
+   * 부모 브랜치가 병합·삭제된 뒤에도 stack 관계·retarget 대상을 안정적으로 식별한다. 없으면 null.
+   */
+  prNumber: number | null
+  /**
+   * 모델 B(단일 worktree 안 브랜치 스택). 아래→위 순서의 엔트리 목록으로, 이 worktree 에서
+   * 'Split here' 로 끊어 만든 stacked PR 브랜치들을 담는다. 현재 체크아웃된 브랜치는 항상
+   * Workspace.branch 이며, branch/baseBranch/prNumber 는 그 엔트리의 미러다.
+   * 없거나 길이 1 이하면 단일 브랜치 워크스페이스(=기존 동작)로 취급한다.
+   */
+  stack?: StackedBranch[]
   /** worktree 절대 경로 */
   worktreePath: string
   /**
@@ -422,6 +505,27 @@ export interface UpdateFromBaseResult {
   message?: string
 }
 
+// ── restack (stacked PR: 부모 위로 rebase) ───────────────────────────────
+
+/**
+ * restackOnto 결과.
+ * - restacked: base(부모 브랜치) 위로 rebase 함(리모트 브랜치가 있으면 force-push 까지).
+ * - up-to-date: 이미 base 위에 올라가 있어 rebase 할 것이 없음.
+ * - conflict: rebase 충돌 — 워킹트리가 rebase 진행/충돌 상태로 남음(해결 후 계속 또는 abortRebase).
+ * - dirty: 미커밋 변경이 있어 rebase 를 시작하지 않음(먼저 커밋/스태시 필요).
+ * - error: 그 밖의 실패(rebase 는 자동으로 abort 됨).
+ */
+export interface RestackResult {
+  status: 'restacked' | 'up-to-date' | 'conflict' | 'dirty' | 'error'
+  baseBranch: string
+  /** status==='conflict' 일 때 충돌난 파일 경로들. */
+  conflictedFiles?: string[]
+  /** rebase 후 리모트에 force-push 했는지(리모트 브랜치가 없으면 push 를 건너뛴다). */
+  pushed?: boolean
+  /** dirty/error 등 사용자에게 보여 줄 사유. */
+  message?: string
+}
+
 // ── git diff (변경 검토용) ───────────────────────────────────────────────
 
 export type FileDiffStatus = 'added' | 'modified' | 'deleted' | 'renamed'
@@ -483,9 +587,17 @@ export const IPC = {
   gitDiff: 'git:diff',
   /** base 브랜치를 현재 워크스페이스 브랜치로 머지해 드리프트를 해소한다. */
   gitUpdateFromBase: 'git:updateFromBase',
+  /** stacked 워크스페이스 브랜치를 최신 base(부모 브랜치) 위로 rebase 하고 리모트에 force-push 한다. */
+  workspaceRestack: 'workspace:restack',
+  /** 모델 B: 현재 HEAD 에서 새 상위 브랜치를 끊어(Split) worktree 내부 스택에 PR 경계를 만든다. */
+  workspaceSplitStack: 'workspace:splitStack',
+  /** 모델 B: worktree 내부 스택의 다른 브랜치로 체크아웃 전환한다(clean 워킹트리 필요). */
+  workspaceSwitchBranch: 'workspace:switchBranch',
   /** 진행 중인 머지를 취소한다(충돌 포기). */
   gitAbortMerge: 'git:abortMerge',
   prStatus: 'pr:status',
+  /** 지정한 브랜치(worktree 의 현재 브랜치가 아니어도)의 PR 상태를 조회한다. 모델 B 스택 조망용. */
+  prStatusForBranch: 'pr:statusForBranch',
   prCreate: 'pr:create',
   prChecks: 'pr:checks',
   /** 현재 브랜치의 PR 을 병합한다(squash/merge/rebase). */
@@ -570,6 +682,11 @@ export interface CreateWorkspaceArgs {
   name?: string
   /** @deprecated 무시됨 — 항상 origin 기본 브랜치(origin/<defaultBranch>)에서 분기한다. */
   baseBranch?: string
+  /**
+   * stacked PR 부모 워크스페이스 id. 지정하면 그 워크스페이스의 브랜치 위에 새 워크스페이스를 쌓는다
+   * (base = 부모의 branch). 없거나 null 이면 기본 브랜치에서 분기한 스택 뿌리로 만든다.
+   */
+  parentWorkspaceId?: string | null
 }
 
 // ── 외부 연동 인증 상태 (Claude / GitHub) ────────────────────────────────

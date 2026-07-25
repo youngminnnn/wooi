@@ -14,7 +14,7 @@ const DEFAULT_MODEL = CLAUDE_DEFAULT_MODEL
  * 디스크 영속 형식의 현재 스키마 버전. 영속 데이터 모양이 바뀔 때마다 1 올리고,
  * MIGRATIONS 에 직전 버전 → 새 버전 변환 함수를 추가한다.
  */
-const CURRENT_SCHEMA_VERSION = 8
+const CURRENT_SCHEMA_VERSION = 9
 
 /** 더 이상 노출하지 않는 'bypassPermissions' 등 옛 모드는 acceptEdits 로 환산한다. */
 function normalizeMode(mode: unknown): PermissionMode {
@@ -160,6 +160,16 @@ const MIGRATIONS: Array<(raw: Record<string, unknown>) => Record<string, unknown
       muted: w.muted ?? false
     }))
     return { ...raw, settings, workspaces }
+  },
+  // v8 → v9: stacked PR 지원. 기존 워크스페이스는 모두 스택 뿌리(parentWorkspaceId=null)로,
+  // PR 번호는 미발견(null)으로 초기화한다. 이후 getPrStatus 로 발견되면 prNumber 가 채워진다.
+  (raw) => {
+    const workspaces = ((raw.workspaces as Partial<Workspace>[]) ?? []).map((w) => ({
+      ...w,
+      parentWorkspaceId: w.parentWorkspaceId ?? null,
+      prNumber: w.prNumber ?? null
+    }))
+    return { ...raw, workspaces }
   }
 ]
 
