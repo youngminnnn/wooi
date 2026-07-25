@@ -89,6 +89,19 @@ jobs:
           echo "--- Gatekeeper 평가"
           spctl -a -vvv -t exec "$APP"
 
+      # 랜딩 페이지(docs/index.html)와 README 가
+      # /releases/latest/download/Wooi-arm64.dmg 로 직접 링크한다. 이 URL 은 에셋
+      # 이름이 정확히 일치할 때만 동작하므로, dmg 파일명이 바뀌면 링크가 조용히
+      # 404 가 된다. package.json build.dmg.artifactName 회귀를 여기서 잡는다.
+      - name: Verify stable dmg filename
+        run: |
+          if [ ! -f release/Wooi-arm64.dmg ]; then
+            echo "::error::release/Wooi-arm64.dmg 가 없습니다. package.json 의 build.dmg.artifactName 을 확인하세요."
+            ls -1 release
+            exit 1
+          fi
+          echo "고정 dmg 파일명 확인됨: Wooi-arm64.dmg"
+
       - uses: actions/upload-artifact@v7
         with:
           name: wooi-macos-arm64

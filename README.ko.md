@@ -20,15 +20,16 @@ macOS 데스크톱 앱입니다. 작업 1개당 전용 worktree + 브랜치 + �
 - 🚢 **PR 친화적** — 에이전트의 diff 에서 GitHub PR 까지 클릭 한 번으로 넘어갑니다.
 - 🕵️ **텔레메트리 없음** — 자체 서버 없이, 대화 기록은 로컬에만 저장됩니다.
 
-**[최신 릴리스 다운로드 →](https://github.com/youngminnnn/wooi/releases)**
+**[최신 릴리스 다운로드 →](https://github.com/youngminnnn/wooi/releases/latest/download/Wooi-arm64.dmg)**
 
 ## 설치
 
 Wooi 는 **서명 및 공증(Apple Developer ID)** 된 `.dmg` 로 배포됩니다 — macOS
 Gatekeeper 경고 없이 바로 실행됩니다.
 
-1. [Releases 페이지](https://github.com/youngminnnn/wooi/releases)에서 최신 `.dmg` 를
-   받아 **Wooi** 를 **Applications** 로 드래그합니다.
+1. [최신 `.dmg`](https://github.com/youngminnnn/wooi/releases/latest/download/Wooi-arm64.dmg) 를
+   받아 **Wooi** 를 **Applications** 로 드래그합니다. 이전 빌드는
+   [Releases 페이지](https://github.com/youngminnnn/wooi/releases)에 있습니다.
 2. **Applications** 에서 **Wooi** 를 실행합니다.
 
 ## 업데이트
