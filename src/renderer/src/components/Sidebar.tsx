@@ -16,9 +16,11 @@ import {
   BellOff,
   AlertTriangle,
   RefreshCw,
-  LayoutDashboard
+  LayoutDashboard,
+  MoreVertical
 } from 'lucide-react'
 import { useStore } from '../store'
+import RowActionsMenu, { type RowAction } from './RowActionsMenu'
 import { orderByStack, workspaceDisplayName } from '@shared/types'
 import { useNow } from '../lib/useNow'
 import { formatDuration } from '../lib/format'
@@ -222,6 +224,10 @@ function WorkspaceRow({
   )
   // null 이 아니면 표시 이름 인라인 편집 중. 초깃값은 현재 표시 이름으로 채운다.
   const [editingName, setEditingName] = useState<string | null>(null)
+  // null 이 아니면 오버플로 액션 메뉴가 열려 있고, 값은 메뉴를 띄울 화면 좌표.
+  const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null)
+  // 'right' = ⋯ 버튼 기준(우측 정렬), 'left' = 우클릭 커서 기준.
+  const [menuAlign, setMenuAlign] = useState<'left' | 'right'>('right')
 
   const active = workspace.id === selectedId
   // running 인 채로 오래 머무르면(상태 변화 없이) "멈춤일 수 있음" 으로 본다. 정확한 진입 시각은
@@ -239,8 +245,7 @@ function WorkspaceRow({
     setEditingName(null)
   }
 
-  const archive = async (e: React.MouseEvent): Promise<void> => {
-    e.stopPropagation()
+  const archive = async (): Promise<void> => {
     const ok = await confirm({
       title: `Archive "${displayName}"?`,
       body: 'Its worktree directory will be removed (branch & history kept). You can unarchive it later.',
@@ -250,6 +255,61 @@ function WorkspaceRow({
     if (!ok) return
     await window.api.workspace.archive(workspace.id)
     if (active) void select(null)
+  }
+
+  // 행당 액션이 5개까지 늘어나 아이콘을 나열하면 제목 폭을 계속 잠식한다. 그래서 1차 액션
+  // (뒤처진 stacked 워크스페이스의 restack)만 인라인으로 승격하고 나머지는 이 메뉴로 모은다.
+  const actions: RowAction[] = [
+    {
+      key: 'rename',
+      label: 'Rename…',
+      icon: <Pencil size={13} />,
+      onSelect: () => setEditingName(displayName)
+    },
+    {
+      key: 'stack',
+      label: 'Stack a new workspace',
+      icon: <GitBranchPlus size={13} />,
+      onSelect: () => onStackWorkspace(workspace.repoId, workspace.id)
+    },
+    ...(workspace.parentWorkspaceId
+      ? [
+          {
+            key: 'restack',
+            label:
+              git && git.behind > 0
+                ? `Restack onto ${workspace.baseBranch} (${git.behind} behind)`
+                : `Restack onto ${workspace.baseBranch}`,
+            icon: <RefreshCw size={13} />,
+            onSelect: () => void restack(workspace.id)
+          }
+        ]
+      : []),
+    {
+      key: 'mute',
+      label: workspace.muted ? 'Unmute notifications' : 'Mute notifications',
+      icon: workspace.muted ? <BellOff size={13} /> : <Bell size={13} />,
+      onSelect: () => void window.api.workspace.setMuted(workspace.id, !workspace.muted),
+      separatorBefore: true
+    },
+    {
+      key: 'archive',
+      label: 'Archive workspace',
+      icon: <Archive size={13} />,
+      onSelect: () => void archive(),
+      danger: true,
+      separatorBefore: true
+    }
+  ]
+
+  const toggleMenuFromButton = (e: React.MouseEvent): void => {
+    if (menuAt) {
+      setMenuAt(null)
+      return
+    }
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
+    setMenuAlign('right')
+    setMenuAt({ x: r.right, y: r.bottom + 4 })
   }
 
   return (
@@ -263,6 +323,12 @@ function WorkspaceRow({
           void select(workspace.id)
         }
       }}
+      // 우클릭은 ⋯ 버튼을 찾지 않아도 같은 메뉴에 닿는 파워 유저 경로다(폭 비용 0).
+      onContextMenu={(e) => {
+        e.preventDefault()
+        setMenuAlign('left')
+        setMenuAt({ x: e.clientX, y: e.clientY })
+      }}
       // stacked 워크스페이스는 깊이만큼 들여써 부모-자식 계층을 시각화한다(뿌리=기본 들여쓰기).
       style={{ paddingLeft: 12 + depth * 14 }}
       className={
@@ -270,7 +336,10 @@ function WorkspaceRow({
         // 선택 행은 좌측에 파란 액센트 바를 띄워 현재 위치를 또렷하게 표시한다.
         (active
           ? 'bg-[var(--surface-3)] before:absolute before:left-0 before:top-1.5 before:bottom-1.5 before:w-0.5 before:rounded-full before:bg-[var(--info-500)]'
-          : 'hover:bg-[var(--surface)]')
+          : // 키보드로 액션에 포커스가 들어오거나 메뉴가 열려 있으면, 오버레이 배경색과 어긋나지
+            // 않게 행도 같이 밝힌다(메뉴를 띄운 뒤 커서가 행을 벗어나도 대상이 유지돼 보인다).
+            'hover:bg-[var(--surface)] focus-within:bg-[var(--surface)] ' +
+            (menuAt ? 'bg-[var(--surface)]' : ''))
       }
     >
       <StatusDot
@@ -281,7 +350,7 @@ function WorkspaceRow({
         runningMs={runningMs}
         pr={pr}
       />
-      <div className="flex-1 min-w-0">
+      <div className="relative flex-1 min-w-0">
         {editingName !== null ? (
           <input
             autoFocus
@@ -298,30 +367,19 @@ function WorkspaceRow({
             className="w-full text-sm text-neutral-100 bg-[var(--surface)] border border-[var(--border-strong)] rounded px-1 py-0 outline-none"
           />
         ) : (
-          <div className="flex items-center gap-1 min-w-0">
-            <div
-              className={
-                'truncate text-sm cursor-text ' + (active ? 'text-neutral-100' : 'text-neutral-300')
-              }
-              title={`${displayName}\n(double-click to rename · clear to reset)`}
-              onDoubleClick={(e) => {
-                e.stopPropagation()
-                setEditingName(displayName)
-              }}
-            >
-              {displayName}
-            </div>
-            {/* 편집 가능 힌트: 호버 시 연필 아이콘을 띄워 이름을 바꿀 수 있음을 알린다. */}
-            <button
-              onClick={(e) => {
-                e.stopPropagation()
-                setEditingName(displayName)
-              }}
-              className="opacity-0 group-hover/ws:opacity-100 shrink-0 grid place-items-center text-neutral-500 hover:text-neutral-200"
-              title="Rename workspace"
-            >
-              <Pencil size={11} />
-            </button>
+          // 예전엔 옆에 호버용 연필 버튼이 있었지만, 그것도 opacity-0 로 폭(≈15px)을 상시
+          // 점유했다. 이름 변경은 더블클릭 · ⋯ 메뉴 · 우클릭 세 경로로 닿을 수 있어 제거했다.
+          <div
+            className={
+              'truncate text-sm cursor-text ' + (active ? 'text-neutral-100' : 'text-neutral-300')
+            }
+            title={`${displayName}\n(double-click to rename · clear to reset)`}
+            onDoubleClick={(e) => {
+              e.stopPropagation()
+              setEditingName(displayName)
+            }}
+          >
+            {displayName}
           </div>
         )}
         <div className="flex items-center gap-1 text-xs text-neutral-500 truncate">
@@ -365,80 +423,89 @@ function WorkspaceRow({
             </span>
           )}
         </div>
-      </div>
-      {shortcut !== undefined && (
-        <kbd
-          className="shrink-0 text-xs leading-none font-medium text-neutral-600 group-hover/ws:hidden tabular-nums"
-          title={`Switch with ⌘${shortcut}`}
-        >
-          ⌘{shortcut}
-        </kbd>
-      )}
-      {/* 미확인 완료는 권한 대기·실행 중과 별개의 상태이므로, 좌측 상태 점과 함께 같이 보여 준다
-          (좌측 StatusDot 이 권한 대기/실행/압축을 표시하고, 우측 파란 점이 미확인 응답을 표시). */}
-      {unread && !active && (
-        <span
-          className="h-2 w-2 rounded-full bg-[var(--info-500)] shrink-0 group-hover/ws:hidden"
-          title="Completed response — unread"
-        />
-      )}
-      {/* stacked 워크스페이스면 restack 버튼을 노출한다. base(부모)보다 뒤처져 있으면 강조한다. */}
-      {workspace.parentWorkspaceId && (
-        <button
-          onClick={(e) => {
-            e.stopPropagation()
-            void restack(workspace.id)
-          }}
+        {/* 액션 클러스터는 absolute 오버레이로 띄운다. 호버 전용 컨트롤이 평상시 레이아웃 폭을
+            점유하지 않게 해서 제목/메타가 사이드바 폭을 온전히 쓰도록 하는 것이 핵심이다.
+            display 대신 opacity 로만 감추므로 Tab 포커스 경로도 그대로 유지된다.
+            좌측 그라데이션으로 밑에 깔린 텍스트를 자연스럽게 페이드아웃시킨다. */}
+        <div
           className={
-            'opacity-0 group-hover/ws:opacity-100 h-5 w-5 grid place-items-center rounded shrink-0 hover:bg-[var(--surface-2)] ' +
-            (git && git.behind > 0
-              ? 'text-[var(--warning-400)] hover:text-[var(--warning-300)]'
-              : 'text-neutral-500 hover:text-neutral-200')
+            'absolute right-0 top-0 bottom-0 flex items-center gap-0.5 pl-8 ' +
+            // 메뉴가 열려 있는 동안은 커서가 행을 벗어나도 계속 보이게 고정한다.
+            (menuAt
+              ? 'opacity-100'
+              : 'opacity-0 group-hover/ws:opacity-100 group-focus-within/ws:opacity-100')
           }
-          title={
-            git && git.behind > 0
-              ? `Restack onto ${workspace.baseBranch} (${git.behind} behind) — rebase & force-push`
-              : `Restack onto ${workspace.baseBranch} — rebase & force-push`
-          }
+          // 페이드는 pl-8(32px) 리드인 구간에서만 일어나고 그 뒤는 완전 불투명해야 한다.
+          // Tailwind 의 via-* 는 정지점이 50% 라서 아이콘 뒤가 반투명해지고 제목이 비쳐 겹친다.
+          style={{
+            background: `linear-gradient(to right, transparent 0, ${
+              active ? 'var(--surface-3)' : 'var(--surface)'
+            } 32px)`
+          }}
         >
-          <RefreshCw size={12} />
-        </button>
+          {/* base(부모)보다 뒤처진 stacked 워크스페이스만 restack 을 1차 액션으로 승격한다.
+              (뒤처지지 않았으면 급하지 않으므로 ⋯ 메뉴 안에만 둔다.) */}
+          {workspace.parentWorkspaceId && git && git.behind > 0 && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                void restack(workspace.id)
+              }}
+              className="h-5 w-5 grid place-items-center rounded shrink-0 hover:bg-[var(--surface-2)] text-[var(--warning-400)] hover:text-[var(--warning-300)]"
+              title={`Restack onto ${workspace.baseBranch} (${git.behind} behind) — rebase & force-push`}
+            >
+              <RefreshCw size={12} />
+            </button>
+          )}
+          <button
+            data-row-actions-trigger
+            onClick={(e) => {
+              e.stopPropagation()
+              toggleMenuFromButton(e)
+            }}
+            aria-haspopup="menu"
+            aria-expanded={menuAt !== null}
+            className="h-5 w-5 grid place-items-center rounded text-neutral-500 hover:bg-[var(--surface-2)] hover:text-neutral-200 shrink-0"
+            title="More actions (or right-click the row)"
+          >
+            <MoreVertical size={14} />
+          </button>
+        </div>
+      </div>
+      {/* 상태 인디케이터는 "정보"이므로 고정 슬롯을 갖고, 액션 오버레이에 가려지지 않는다.
+          (예전에는 호버 시 group-hover:hidden 으로 사라져서, 음소거 여부를 확인하면서
+          음소거 버튼을 누를 수 없었다.) 아이콘 간 간격은 좁혀 하나의 묶음으로 읽히게 한다. */}
+      {(shortcut !== undefined || (unread && !active) || workspace.muted) && (
+        <div className="shrink-0 flex items-center gap-1.5">
+          {shortcut !== undefined && (
+            <kbd
+              className="text-xs leading-none font-medium text-neutral-600 tabular-nums"
+              title={`Switch with ⌘${shortcut}`}
+            >
+              ⌘{shortcut}
+            </kbd>
+          )}
+          {/* 미확인 완료는 권한 대기·실행 중과 별개의 상태이므로, 좌측 상태 점과 함께 같이 보여 준다
+              (좌측 StatusDot 이 권한 대기/실행/압축을 표시하고, 우측 파란 점이 미확인 응답을 표시). */}
+          {unread && !active && (
+            <span
+              className="h-2 w-2 rounded-full bg-[var(--info-500)]"
+              title="Completed response — unread"
+            />
+          )}
+          {workspace.muted && (
+            <BellOff size={12} className="text-neutral-600" aria-label="Notifications muted" />
+          )}
+        </div>
       )}
-      <button
-        onClick={(e) => {
-          e.stopPropagation()
-          onStackWorkspace(workspace.repoId, workspace.id)
-        }}
-        className="opacity-0 group-hover/ws:opacity-100 h-5 w-5 grid place-items-center rounded text-neutral-500 hover:bg-[var(--surface-2)] hover:text-neutral-200 shrink-0"
-        title="Stack a new workspace on top of this one"
-      >
-        <GitBranchPlus size={13} />
-      </button>
-      {/* 음소거 상태는 호버하지 않아도 보이도록 상시 표시(호버 시 토글 버튼으로 대체된다). */}
-      {workspace.muted && (
-        <BellOff
-          size={12}
-          className="shrink-0 text-neutral-600 group-hover/ws:hidden"
-          aria-label="Notifications muted"
+      {menuAt && (
+        <RowActionsMenu
+          at={menuAt}
+          align={menuAlign}
+          actions={actions}
+          onClose={() => setMenuAt(null)}
         />
       )}
-      <button
-        onClick={(e) => {
-          e.stopPropagation()
-          void window.api.workspace.setMuted(workspace.id, !workspace.muted)
-        }}
-        className="opacity-0 group-hover/ws:opacity-100 h-5 w-5 grid place-items-center rounded text-neutral-500 hover:bg-[var(--surface-2)] hover:text-neutral-200 shrink-0"
-        title={workspace.muted ? 'Unmute notifications' : 'Mute notifications'}
-      >
-        {workspace.muted ? <BellOff size={13} /> : <Bell size={13} />}
-      </button>
-      <button
-        onClick={archive}
-        className="opacity-0 group-hover/ws:opacity-100 h-5 w-5 grid place-items-center rounded text-neutral-500 hover:bg-[var(--surface-2)] hover:text-neutral-200 shrink-0"
-        title="Archive workspace"
-      >
-        <Archive size={13} />
-      </button>
     </div>
   )
 }
