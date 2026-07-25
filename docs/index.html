@@ -3,20 +3,20 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Wooi — Run multiple AI coding agents at once</title>
+    <title>Wooi — Run AI coding agents in parallel, and stack them</title>
     <meta
       name="description"
-      content="Wooi is a macOS app for orchestrating multiple AI coding agents in parallel — each in its own git worktree, each shipping its own PR."
+      content="Wooi is a macOS app for running AI coding agents in parallel — each in its own git worktree. When work builds on work, stack the agents and Wooi keeps the PR chain rebased and retargeted."
     />
 
     <!-- Open Graph / social -->
     <meta property="og:type" content="website" />
-    <meta property="og:title" content="Wooi — Run multiple AI coding agents at once" />
+    <meta property="og:title" content="Wooi — Run AI coding agents in parallel, and stack them" />
     <meta
       property="og:description"
-      content="Orchestrate parallel AI coding agents across isolated git worktrees. Each task = its own worktree + branch + agent session."
+      content="Independent work runs in parallel worktrees. Dependent work stacks — and Wooi keeps the stack straight for you."
     />
-    <meta property="og:image" content="https://youngminnnn.github.io/wooi/og.png?v=3" />
+    <meta property="og:image" content="https://youngminnnn.github.io/wooi/og.png?v=4" />
     <meta name="theme-color" content="#0a0b0d" />
 
     <!-- 파비콘은 16px 로 줄어들어 한글 "우이"(icon.svg)가 뭉개지므로 축약형 W 마크를 쓴다. -->
@@ -235,7 +235,7 @@
         line-height: 1.08;
         letter-spacing: -0.03em;
         margin: 0 auto 22px;
-        max-width: 16ch;
+        max-width: 20ch;
         font-weight: 800;
       }
       h1 .grad {
@@ -368,10 +368,20 @@
       }
 
       /* ---------- why grid ---------- */
+      /* 5 cards: 3 on the first row, 2 centered on the second (6-col base, each card spans 2). */
       .why-grid {
         display: grid;
-        grid-template-columns: repeat(4, 1fr);
+        grid-template-columns: repeat(6, 1fr);
         gap: 18px;
+      }
+      .why-card {
+        grid-column: span 2;
+      }
+      .why-card:nth-child(4) {
+        grid-column: 2 / span 2;
+      }
+      .why-card:nth-child(5) {
+        grid-column: 4 / span 2;
       }
       .why-card {
         background: var(--bg-card);
@@ -403,6 +413,12 @@
       @media (max-width: 900px) {
         .why-grid {
           grid-template-columns: repeat(2, 1fr);
+        }
+        /* drop the 6-col spans so cards flow normally in the 2-col / 1-col layouts */
+        .why-card,
+        .why-card:nth-child(4),
+        .why-card:nth-child(5) {
+          grid-column: auto;
         }
       }
       @media (max-width: 520px) {
@@ -769,20 +785,24 @@
       </div>
 
       <h1>
-        <span class="en">Run multiple AI coding agents <span class="grad">at once</span></span>
-        <span class="ko">여러 AI 코딩 에이전트를 <span class="grad">동시에</span></span>
+        <span class="en"
+          >Run AI coding agents in parallel — and <span class="grad">stack</span> them</span
+        >
+        <span class="ko"
+          >AI 코딩 에이전트를 병렬로 — 이어지는 작업은 <span class="grad">스택</span>으로</span
+        >
       </h1>
 
       <p class="subtitle">
         <span class="en"
-          >Wooi orchestrates parallel AI coding agents on macOS — each in its own isolated git
-          worktree, each on its own branch, each shipping its own PR. Kick off a refactor, a
-          feature, and a bugfix at the same time and watch all three from one sidebar.</span
+          >Independent work runs in parallel on macOS — each agent in its own isolated git worktree,
+          on its own branch, shipping its own PR. When work builds on work, stack the agents instead
+          and let Wooi keep the stack straight.</span
         >
         <span class="ko"
-          >Wooi 는 macOS 에서 여러 AI 코딩 에이전트를 병렬로 오케스트레이션합니다 — 각자 격리된 git
-          worktree 위에서, 각자 자기 브랜치로, 각자 자기 PR 로. 리팩터링·기능 추가·버그 수정을
-          한꺼번에 시작해 사이드바 하나에서 셋 다 지켜보세요.</span
+          >독립적인 작업은 macOS 에서 병렬로 — 에이전트마다 격리된 git worktree 위에서, 각자 자기
+          브랜치로, 각자 자기 PR 로. 이어지는 작업은 앞선 작업 위에 쌓아 두면, 스택 정리는 Wooi 가
+          맡습니다.</span
         >
       </p>
 
@@ -882,11 +902,34 @@
             </p>
           </div>
           <div class="why-card">
+            <div class="emoji">🧱</div>
+            <h3>
+              <span class="en">Stacked PRs, natively</span
+              ><span class="ko">stacked PR 기본 지원</span>
+            </h3>
+            <p>
+              <span class="en"
+                >Stack a workspace on another's branch. When a parent merges, Wooi rebases the
+                children and retargets their PR bases.</span
+              >
+              <span class="ko"
+                >워크스페이스를 다른 브랜치 위에 쌓으면, 부모가 병합될 때 자식들을 rebase 하고 PR
+                base 를 옮겨 줍니다.</span
+              >
+            </p>
+          </div>
+          <div class="why-card">
             <div class="emoji">🕵️</div>
             <h3><span class="en">No telemetry</span><span class="ko">텔레메트리 없음</span></h3>
             <p>
-              <span class="en">No servers of its own; transcripts are stored locally only.</span>
-              <span class="ko">자체 서버 없이, 대화 기록은 로컬에만 저장됩니다.</span>
+              <span class="en"
+                >No servers of its own and no analytics. Settings and transcripts stay on your
+                machine, in local storage only.</span
+              >
+              <span class="ko"
+                >자체 서버도, 분석 수집도 없습니다. 설정과 대화 기록은 내 컴퓨터 로컬에만
+                저장됩니다.</span
+              >
             </p>
           </div>
         </div>
@@ -1065,6 +1108,110 @@
           </div>
 
           <!-- Permissions -->
+          <!-- Stacked PRs -->
+          <div class="feature">
+            <div class="feature-label">
+              <div class="feature-icon">🧱</div>
+              <h3><span class="en">Stacked PRs</span><span class="ko">Stacked PR</span></h3>
+            </div>
+            <ul>
+              <li>
+                <strong
+                  ><span class="en">No extra tooling</span
+                  ><span class="ko">추가 도구 없음</span></strong
+                >
+                —
+                <span class="en"
+                  >not every task is independent — sometimes step 2 builds on step 1. Wooi manages
+                  those chains itself with plain <code>git</code> and <code>gh</code>; no Graphite
+                  or other stacking CLI needed.</span
+                >
+                <span class="ko"
+                  >모든 작업이 독립적이지는 않습니다 — 2번 작업이 1번 위에서 이어져야 할 때가 있죠.
+                  Wooi 는 그 체인을 <code>git</code> 과 <code>gh</code> 만으로 직접 관리합니다.
+                  Graphite 같은 별도 스택 도구가 필요 없습니다.</span
+                >
+              </li>
+              <li>
+                <strong
+                  ><span class="en">Stack a workspace</span
+                  ><span class="ko">워크스페이스 쌓기</span></strong
+                >
+                —
+                <span class="en"
+                  >pick <strong>Stack a new workspace</strong> from a workspace's menu; the new one
+                  branches off that workspace's branch and its PR targets that branch instead of the
+                  default branch.</span
+                >
+                <span class="ko"
+                  >워크스페이스 메뉴에서 <strong>Stack a new workspace</strong> 를 고르면 그
+                  브랜치에서 분기한 워크스페이스가 생기고, PR 도 기본 브랜치가 아닌 그 부모 브랜치를
+                  대상으로 열립니다.</span
+                >
+              </li>
+              <li>
+                <strong
+                  ><span class="en">Stack overview</span><span class="ko">스택 한눈에</span></strong
+                >
+                —
+                <span class="en"
+                  >a <strong>Stack</strong> button in the header lists every branch in the chain
+                  with its PR state, PR number, and ahead/behind counts. Click to jump, or open a PR
+                  for a branch that doesn't have one.</span
+                >
+                <span class="ko"
+                  >헤더의 <strong>Stack</strong> 버튼이 체인의 모든 브랜치를 PR 상태·PR
+                  번호·ahead/behind 와 함께 보여 줍니다. 클릭해 이동하거나, PR 이 없는 브랜치는 그
+                  자리에서 PR 을 엽니다.</span
+                >
+              </li>
+              <li>
+                <strong><span class="en">Restack</span><span class="ko">Restack</span></strong> —
+                <span class="en"
+                  >rebase a workspace onto the latest parent branch and push with
+                  <code>--force-with-lease</code>. Conflicts stop in the worktree so you can resolve
+                  them there.</span
+                >
+                <span class="ko"
+                  >최신 부모 브랜치 위로 rebase 하고 <code>--force-with-lease</code> 로 push 합니다.
+                  충돌이 나면 worktree 에 멈춰 있어 거기서 해결하면 됩니다.</span
+                >
+              </li>
+              <li>
+                <strong
+                  ><span class="en">Merge cascade</span
+                  ><span class="ko">병합 캐스케이드</span></strong
+                >
+                —
+                <span class="en"
+                  >when a parent PR merges, Wooi retargets each child PR's base to the grandparent
+                  branch and rebases the children onto it, so the rest of the stack stays
+                  valid.</span
+                >
+                <span class="ko"
+                  >부모 PR 이 병합되면 각 자식 PR 의 base 를 조부모 브랜치로 옮기고 자식 브랜치를 그
+                  위로 rebase 해, 스택 나머지가 그대로 유효하게 남습니다.</span
+                >
+              </li>
+              <li>
+                <strong
+                  ><span class="en">Detected, not just declared</span
+                  ><span class="ko">선언이 아니라 감지</span></strong
+                >
+                —
+                <span class="en"
+                  >if an agent builds a chain itself with <code>git checkout -b</code> and
+                  <code>gh pr create</code>, Wooi reconstructs the stack from the PRs' base links
+                  and shows it the same way.</span
+                >
+                <span class="ko"
+                  >에이전트가 <code>git checkout -b</code> 와 <code>gh pr create</code> 로 직접
+                  체인을 만들어도, PR 의 base 링크에서 스택을 복원해 똑같이 보여 줍니다.</span
+                >
+              </li>
+            </ul>
+          </div>
+
           <div class="feature">
             <div class="feature-label">
               <div class="feature-icon">🛡️</div>

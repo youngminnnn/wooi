@@ -1,6 +1,6 @@
 # Wooi
 
-**Run multiple AI coding agents at once — each in its own git worktree, each shipping its own PR.**
+**Run AI coding agents in parallel — and stack them when work builds on work.**
 
 **English** · [한국어](./README.ko.md)
 
@@ -21,6 +21,9 @@ and no automatic prompt** — nothing runs until you send your first message.
 - 🔒 **Isolated by default** — a separate worktree + branch per task means agents never
   collide in a shared working tree.
 - 🚢 **PR-native** — jump straight from an agent's diff to a GitHub PR in one click.
+- 🧱 **Stacked PRs, natively** — when work has to build on work, stack one workspace on
+  another's branch and let Wooi keep the stack straight — with plain `git` + `gh`, no
+  extra stacking CLI.
 - 🕵️ **No telemetry** — no servers of its own; transcripts stored locally only.
 
 **[Download the latest release →](https://github.com/youngminnnn/wooi/releases/latest/download/Wooi-arm64.dmg)**
@@ -95,6 +98,29 @@ separate API key is needed.
   changing them resumes the same conversation. Effort ranges through to **ultracode**.
 - **Sessions resume across restarts** — your conversation context is restored, so the
   next message after a restart continues where you left off.
+
+### Stacked PRs
+
+Not every task is independent — sometimes step 2 has to build on step 1. Wooi manages
+those chains itself with plain `git` and `gh`; no Graphite or other stacking CLI needed.
+
+- **Stack a workspace** — pick **Stack a new workspace** from a workspace's menu. The new
+  workspace branches off that workspace's branch, and its PR targets that branch instead
+  of the repo's default branch.
+- **Stack overview** — a **Stack** button appears in the header whenever the current
+  workspace is part of a chain. It lists every branch in the stack with its PR state
+  (draft / review required / changes requested / ready to merge / conflict / merged), PR
+  number, and ahead/behind counts. Click an entry to jump to it, or open a PR for a
+  branch that doesn't have one yet.
+- **Restack** — **Restack onto `<base>`** rebases a workspace onto the latest parent
+  branch and pushes with `--force-with-lease`. A conflict stops in the worktree so you
+  can resolve it there.
+- **Merge cascade** — when a parent PR merges, Wooi retargets each child PR's base to the
+  grandparent branch and rebases the children onto it, so the rest of the stack stays
+  valid instead of turning into a pile of conflicts.
+- **Detected, not just declared** — if an agent builds a chain on its own with
+  `git checkout -b` and `gh pr create`, Wooi reconstructs the stack from the PRs' base
+  links and shows it the same way.
 
 ### Permissions
 
