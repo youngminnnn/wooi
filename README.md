@@ -189,5 +189,10 @@ the dev setup, branch/commit conventions, and PR process, and follow the
 
 ## License
 
-[MIT](./LICENSE) © youngminnnn. You are free to use, modify, and redistribute the
-software under the terms of the MIT License.
+[Apache 2.0](./LICENSE) © youngminnnn. You are free to use, modify, and
+redistribute the software under the terms of the Apache License 2.0, which also
+includes an express patent grant.
+
+The "Wooi" name and logo are trademarks and are not covered by that license —
+see [TRADEMARK.md](./TRADEMARK.md). Contributors sign a
+[CLA](./CLA.md) before their first PR is merged.

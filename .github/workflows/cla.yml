@@ -1,0 +1,63 @@
+name: cla
+
+# 외부 기여자가 첫 PR 을 열면 CLA(CLA.md) 서명을 요구하는 게이트.
+# 서명 기록은 같은 저장소의 cla-signatures 브랜치에 signatures.json 으로 커밋된다.
+#
+# pull_request_target 을 쓰는 이유: fork 에서 온 PR 에도 서명 파일을 커밋하고
+# 상태를 갱신하려면 write 권한이 필요한데, 일반 pull_request 이벤트는 fork 에서
+# read-only 토큰만 받는다. 이 워크플로는 PR 의 코드를 절대 체크아웃하거나
+# 실행하지 않으므로 pull_request_target 사용이 안전하다.
+on:
+  issue_comment:
+    types: [created]
+  pull_request_target:
+    types: [opened, closed, synchronize]
+
+permissions:
+  actions: write
+  contents: write
+  pull-requests: write
+  statuses: write
+
+concurrency:
+  group: cla-${{ github.workflow }}-${{ github.event.pull_request.number || github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  cla:
+    # 체크런 이름을 job id 에 의존하지 않고 명시적으로 고정한다.
+    # 나중에 브랜치 보호의 required status check 로 등록할 때 이 이름을 써야 한다.
+    name: cla
+    runs-on: ubuntu-latest
+    # 서명 코멘트이거나, PR 이벤트일 때만 실행한다.
+    if: >
+      (github.event.comment.body == 'recheck' ||
+       github.event.comment.body == 'I have read the CLA Document and I hereby sign the CLA') ||
+      github.event_name == 'pull_request_target'
+    steps:
+      # contributor-assistant/github-action 은 2026-03-23 아카이브되어 더 이상
+      # 유지보수되지 않는다(기존 릴리스는 정상 동작). 저장소가 read-only 라 태그가
+      # 변경될 수 없지만, 공급망 위생을 위해 v2.6.1 커밋 SHA 로 핀 고정한다.
+      - name: CLA Assistant
+        uses: contributor-assistant/github-action@ca4a40a7d1004f18d9960b404b97e5f30a505a08 # v2.6.1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          path-to-document: 'https://github.com/youngminnnn/wooi/blob/main/CLA.md'
+          # 서명 파일은 보호되지 않은 전용 브랜치에 저장한다.
+          # main 은 브랜치 보호(PR 필수)가 걸려 있어 github-actions[bot] 이
+          # 직접 커밋할 수 없으므로, main 에 저장하면 서명이 실패한다.
+          path-to-signatures: 'signatures.json'
+          branch: 'cla-signatures'
+
+          custom-notsigned-prcomment: >
+            Thanks for your pull request! Before it can be merged, please read the
+            **[Contributor License Agreement](https://github.com/youngminnnn/wooi/blob/main/CLA.md)**
+            and sign it by posting the exact comment below. You only need to do this once.
+          custom-pr-sign-comment: 'I have read the CLA Document and I hereby sign the CLA'
+          custom-allsigned-prcomment: 'All contributors have signed the CLA. Thanks!'
+
+          # 메인테이너와 봇은 서명 대상에서 제외한다.
+          allowlist: youngminnnn,dependabot[bot],github-actions[bot],*[bot]
+
+          lock-pullrequest-aftermerge: false

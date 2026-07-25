@@ -108,7 +108,19 @@ commits use the `release:` prefix.
 Use the GitHub issue templates. For anything security-related, **do not** open a
 public issue — see [`SECURITY.md`](./SECURITY.md).
 
-## License
+## License & Contributor License Agreement
 
-By contributing, you agree that your contributions are licensed under the
-project's [MIT License](./LICENSE).
+Wooi is released under the [Apache License 2.0](./LICENSE).
+
+Before your first pull request can be merged, you'll need to sign the
+**[Contributor License Agreement](./CLA.md)**. An automated check comments on
+your PR with instructions — you sign by posting a one-line comment, and it only
+has to be done once.
+
+The short version: you keep the copyright to your work, and you grant the
+maintainer a broad license to distribute it — including the right to relicense
+it, which keeps future funding options open for the project. See [`CLA.md`](./CLA.md)
+for the full terms.
+
+Note that the Apache License does not grant rights to the "Wooi" name or logo;
+see [`TRADEMARK.md`](./TRADEMARK.md).
