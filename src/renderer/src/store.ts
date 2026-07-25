@@ -197,6 +197,7 @@ interface UIState {
   setScriptPanelOpen: (workspaceId: string, open: boolean) => void
   setRightWidth: (px: number) => void
   toggleRightPanel: () => void
+  setRightPanelOpen: (open: boolean) => void
   setTerminalRatio: (ratio: number) => void
   /** 토스트를 띄우고 그 id 를 반환한다. actions 를 주면 인라인 버튼이 붙고 자동으로 닫히지 않는다. */
   pushToast: (kind: ToastKind, message: string, actions?: ToastAction[]) => string
@@ -777,6 +778,11 @@ export const useStore = create<UIState>((set, get) => ({
 
   // 우측 패널 표시 토글 — 숨기면 대화가 전체 폭을 쓰고, 다시 켜면 마지막 너비로 복귀한다.
   toggleRightPanel: () => set((s) => ({ rightPanelOpen: !s.rightPanelOpen })),
+
+  // 패널 상태를 직접 지정한다. 온보딩에서 고른 기본값을 지금 화면에도 바로 반영하기 위한 것으로,
+  // 토글과 같은 경로를 타므로 localStorage 기억값(⌘J 기록)까지 함께 갱신된다 — 그러지 않으면
+  // 이미 토글한 적 있는 기존 사용자에게는 기억값이 새로 고른 기본값을 계속 덮어써 버린다.
+  setRightPanelOpen: (open) => set({ rightPanelOpen: open }),
 
   // 터미널 비율 — 패널/터미널 어느 쪽도 사라지지 않도록 0.15~0.85 로 클램프한다.
   setTerminalRatio: (ratio) => set({ terminalRatio: Math.max(0.15, Math.min(0.85, ratio)) }),

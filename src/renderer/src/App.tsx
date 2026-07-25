@@ -66,10 +66,13 @@ export default function App(): React.JSX.Element {
     if (theme) applyTheme(theme)
   }, [theme])
 
-  // 온보딩(약관 동의·계정 연결) 모달이 떠 있는 동안에는 전역 단축키도 막아, 동의 전 앱 조작을 차단한다.
+  // 온보딩(약관 동의·계정 연결·기본값 고르기) 모달이 떠 있는 동안에는 전역 단축키도 막아,
+  // 동의 전 앱 조작을 차단한다.
   const onboardingOpen =
     !!app &&
-    (!app.settings.onboarded || app.settings.acceptedTermsVersion !== CURRENT_TERMS_VERSION)
+    (!app.settings.onboarded ||
+      !app.settings.pickedDefaults ||
+      app.settings.acceptedTermsVersion !== CURRENT_TERMS_VERSION)
 
   // gh(GitHub CLI)는 필수다 — "설치 + 로그인"이 모두 끝나기 전에는 본 화면을 막는다(하드 게이트).
   // 온보딩(약관 동의)을 먼저 끝낸 뒤에만 게이트를 띄우고, 인증 상태가 로드되기 전에는 깜빡임을
@@ -269,8 +272,11 @@ export default function App(): React.JSX.Element {
   const effectiveRightWidth = contentW ? Math.min(rightWidth, maxRight) : rightWidth
 
   // 약관 미동의(또는 버전 불일치)면 동의 단계부터, 계정 연결이 안 끝났으면 연동 단계를 띄운다.
+  // 기본값을 아직 고른 적이 없으면(신규 설치는 물론, 이 단계가 없던 버전에서 올라온 기존 사용자도)
+  // 마지막에 "기본값 고르기"를 한 번 띄운다.
   const needsConsent = app.settings.acceptedTermsVersion !== CURRENT_TERMS_VERSION
   const needsOnboarding = !app.settings.onboarded
+  const needsDefaults = !app.settings.pickedDefaults
 
   // 새 workspace 만들기: 수동 설정이면 모달, 아니면 즉시 자동 생성.
   // 자동 생성은 사이드바에 스피너 행을 바로 띄우고 worktree 준비는 백그라운드로 진행한다.
@@ -347,8 +353,12 @@ export default function App(): React.JSX.Element {
         </div>
       </div>
 
-      {(needsConsent || needsOnboarding) && (
-        <OnboardingModal needsConsent={needsConsent} needsOnboarding={needsOnboarding} />
+      {(needsConsent || needsOnboarding || needsDefaults) && (
+        <OnboardingModal
+          needsConsent={needsConsent}
+          needsOnboarding={needsOnboarding}
+          needsDefaults={needsDefaults}
+        />
       )}
       {githubGateOpen && <GithubGate />}
       {showSettings && (
