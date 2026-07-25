@@ -10,27 +10,37 @@ import { log } from './logger'
 import {
   abortMerge,
   addWorktree,
+  checkoutBranch,
+  createBranchAtHead,
+  currentBranch,
   detectDefaultBranch,
+  revParse,
   getDiff,
   getGithubOwner,
   getStatus,
   isGitRepo,
+  isWorktreeClean,
   listBranches,
   removeWorktree,
   repoNameFromPath,
   resolveUniqueWorktree,
+  restackOnto,
+  sanitizeBranch,
   updateFromBase
 } from './git'
 import { generateWorkspaceName } from './names'
+import { buildStackFromPrs } from './stack'
 import { findFreePort, waitForPortFree } from './net'
 import {
   getPrStatus,
   getPrChecks,
   createPrWeb,
   mergePr,
+  retargetPr,
   closePr,
   reopenPr,
   markPrReady,
+  listOpenPrs,
   fetchOwnerAvatarDataUrl
 } from './github'
 import {
@@ -43,7 +53,7 @@ import {
   githubLoginCancel,
   githubLogout
 } from './auth'
-import { IPC, DEFAULT_AGENT_BACKEND } from '@shared/types'
+import { IPC, DEFAULT_AGENT_BACKEND, workspaceStack } from '@shared/types'
 import type {
   AppSettings,
   CommandPanelKind,
@@ -57,8 +67,10 @@ import type {
   PermissionMode,
   PrMergeMethod,
   Repo,
+  RestackResult,
   RewindActionResult,
   ScriptKind,
+  StackedBranch,
   UpdateFromBaseResult
 } from '@shared/types'
 import type { AgentOrchestrator } from './agent/orchestrator'
@@ -245,8 +257,20 @@ export function registerIpc(ctx: IpcContext): void {
         )
         rawName = generateWorkspaceName(existing)
       }
-      // 항상 origin 기본 브랜치(origin/<defaultBranch>)에서 분기한다 — args.baseBranch 는 무시.
-      const baseBranch = repo.defaultBranch
+      // stacked PR: parentWorkspaceId 가 주어지면 그 워크스페이스의 브랜치 위에 쌓는다(base=부모 브랜치).
+      // 없으면 기존대로 origin 기본 브랜치(origin/<defaultBranch>)에서 분기한다. args.baseBranch 는 무시.
+      const parent = args.parentWorkspaceId
+        ? store
+            .getState()
+            .workspaces.find(
+              (w) => w.id === args.parentWorkspaceId && w.repoId === repo.id && !w.archived
+            )
+        : null
+      if (args.parentWorkspaceId && !parent) {
+        return { error: 'Parent workspace not found (or archived).' }
+      }
+      const baseBranch = parent ? parent.branch : repo.defaultBranch
+      const parentWorkspaceId = parent ? parent.id : null
       // 기존 브랜치/worktree 디렉토리와 충돌하면 접미사(-2, -3 …)를 붙여 고유 이름을 만든다.
       const { branch, worktreePath } = await resolveUniqueWorktree(repo.path, rawName)
 
@@ -275,6 +299,8 @@ export function registerIpc(ctx: IpcContext): void {
           displayName: null,
           branch,
           baseBranch,
+          parentWorkspaceId,
+          prNumber: null,
           worktreePath,
           devPort,
           // setup 은 아래에서 곧 실행된다. 종료 시 onExit 훅이 success/failed 로 갱신한다.
@@ -612,20 +638,271 @@ export function registerIpc(ctx: IpcContext): void {
     await abortMerge(ws.worktreePath).catch(() => {})
   })
 
+  /**
+   * 모델 B 스택(단일 worktree · N 브랜치)을 아래→위로 순차 rebase 한다. 각 상위 브랜치를 이전
+   * tip 기준으로 `--onto` 재배치해(중복 커밋 없이) 정확히 옮긴다. 충돌/dirty 시 그 브랜치에 멈춰
+   * worktree 를 남겨 두고 결과를 돌려준다. 성공하면 원래 체크아웃 브랜치로 되돌아온다.
+   */
+  const restackWholeStack = async (
+    worktreePath: string,
+    stack: StackedBranch[],
+    returnTo: string
+  ): Promise<RestackResult> => {
+    if (!(await isWorktreeClean(worktreePath))) {
+      return {
+        status: 'dirty',
+        baseBranch: '',
+        message: 'Commit or stash your changes before restacking the stack.'
+      }
+    }
+    // rebase 시작 전, 각 스택 브랜치의 현재 tip 을 잡아 둔다(상위 브랜치의 --onto oldBase 로 쓴다).
+    const oldTip = new Map<string, string>()
+    for (const e of stack) {
+      const sha = await revParse(worktreePath, e.branch)
+      if (sha) oldTip.set(e.branch, sha)
+    }
+    let anyChanged = false
+    for (const entry of stack) {
+      const co = await checkoutBranch(worktreePath, entry.branch)
+      if (co.error) return { status: 'error', baseBranch: entry.baseBranch, message: co.error }
+      // base 가 다른 스택 멤버면(=상위 브랜치) 그 base 의 이전 tip 을 oldBase 로 넘겨 정확히 재배치한다.
+      const oldBase = oldTip.get(entry.baseBranch)
+      const res = await restackOnto(worktreePath, entry.baseBranch, oldBase).catch((err) => ({
+        status: 'error' as const,
+        baseBranch: entry.baseBranch,
+        message: err instanceof Error ? err.message : String(err)
+      }))
+      if (res.status === 'conflict' || res.status === 'error' || res.status === 'dirty') return res
+      if (res.status === 'restacked') anyChanged = true
+    }
+    await checkoutBranch(worktreePath, returnTo).catch(() => {})
+    return { status: anyChanged ? 'restacked' : 'up-to-date', baseBranch: '' }
+  }
+
+  // stacked 브랜치를 최신 base 위로 rebase·force-push 한다. 모델 B 스택이면 전체를 아래→위로 순차 처리.
+  ipcMain.handle(IPC.workspaceRestack, async (_e, workspaceId: string): Promise<RestackResult> => {
+    const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
+    if (!ws || ws.archived) {
+      return { status: 'error', baseBranch: '', message: 'Workspace not found.' }
+    }
+    if (ws.status === 'running') {
+      return {
+        status: 'error',
+        baseBranch: ws.baseBranch,
+        message: 'The agent is running — wait for it to finish before restacking.'
+      }
+    }
+    if (ws.stack && ws.stack.length > 1) {
+      return restackWholeStack(ws.worktreePath, ws.stack, ws.branch)
+    }
+    return restackOnto(ws.worktreePath, ws.baseBranch).catch((err) => ({
+      status: 'error' as const,
+      baseBranch: ws.baseBranch,
+      message: err instanceof Error ? err.message : String(err)
+    }))
+  })
+
+  // 모델 B: 현재 HEAD 에서 새 상위 브랜치를 끊어(Split) worktree 내부 스택에 PR 경계를 만든다.
+  ipcMain.handle(
+    IPC.workspaceSplitStack,
+    async (
+      _e,
+      workspaceId: string,
+      name?: string
+    ): Promise<{ branch?: string; error?: string }> => {
+      const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
+      if (!ws || ws.archived) return { error: 'Workspace not found.' }
+      const repo = repoFor(ws.repoId)
+      if (!repo) return { error: 'Repository not found.' }
+      if (ws.status === 'running') {
+        return { error: 'The agent is running — wait for it to finish before splitting a PR.' }
+      }
+      // 현재 체크아웃된 브랜치가 실제 HEAD 와 일치하는지 확인(외부 변경 방어).
+      const head = await currentBranch(ws.worktreePath)
+      if (head && head !== ws.branch) {
+        return { error: `Working tree is on "${head}", not "${ws.branch}". Refresh and retry.` }
+      }
+      // 고유한 새 브랜치 이름을 만든다: 사용자 지정 또는 <워크스페이스 이름>-<스택 크기+1>.
+      const existing = workspaceStack(ws)
+      const raw = (name ?? '').trim() || `${ws.name}-${existing.length + 1}`
+      let candidate = sanitizeBranch(raw)
+      let n = 2
+      while (await revParse(ws.worktreePath, candidate)) candidate = `${sanitizeBranch(raw)}-${n++}`
+
+      const created = await createBranchAtHead(ws.worktreePath, candidate)
+      if (created.error) return { error: created.error }
+
+      // 스택을 갱신한다: 기존 엔트리들 + 방금 만든 상위 브랜치(base=직전 브랜치). 현재 브랜치를 새 tip 으로.
+      store.update((st) => {
+        const w = st.workspaces.find((x) => x.id === workspaceId)
+        if (!w) return
+        // 새 브랜치의 base 는 split 시점에 체크아웃돼 있던 브랜치(from). 하위 브랜치에서 split 하면 거기서 분기한다.
+        const from = w.branch
+        const stack = w.stack && w.stack.length > 0 ? w.stack : workspaceStack(w)
+        w.stack = [...stack, { branch: candidate, baseBranch: from, prNumber: null }]
+        w.branch = candidate
+        w.baseBranch = from
+        w.prNumber = null
+      })
+      broadcastState()
+      return { branch: candidate }
+    }
+  )
+
+  // 모델 B: worktree 내부 스택의 다른 브랜치로 체크아웃 전환한다(clean 워킹트리 필요).
+  ipcMain.handle(
+    IPC.workspaceSwitchBranch,
+    async (_e, workspaceId: string, branch: string): Promise<{ error?: string }> => {
+      const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
+      if (!ws || ws.archived) return { error: 'Workspace not found.' }
+      if (branch === ws.branch) return {}
+      const entry = workspaceStack(ws).find((e) => e.branch === branch)
+      if (!entry) return { error: `"${branch}" is not part of this stack.` }
+      if (ws.status === 'running') {
+        return { error: 'The agent is running — wait for it to finish before switching branches.' }
+      }
+      const res = await checkoutBranch(ws.worktreePath, branch)
+      if (res.error) return res
+      store.update((st) => {
+        const w = st.workspaces.find((x) => x.id === workspaceId)
+        if (!w) return
+        w.branch = entry.branch
+        w.baseBranch = entry.baseBranch
+        w.prNumber = entry.prNumber
+      })
+      broadcastState()
+      return {}
+    }
+  )
+
+  // 발견한 PR 번호를 워크스페이스(현재 브랜치면 top-level)와, 해당 브랜치의 스택 엔트리에 영속한다.
+  // stacked 관계·병합 캐스케이드가 브랜치 이름 대신 안정적인 PR 번호로 대상을 식별할 수 있게 한다.
+  const persistPrNumber = (workspaceId: string, branch: string, prNumber: number): void => {
+    let changed = false
+    store.update((st) => {
+      const w = st.workspaces.find((x) => x.id === workspaceId)
+      if (!w) return
+      if (w.branch === branch && w.prNumber !== prNumber) {
+        w.prNumber = prNumber
+        changed = true
+      }
+      const entry = w.stack?.find((e) => e.branch === branch)
+      if (entry && entry.prNumber !== prNumber) {
+        entry.prNumber = prNumber
+        changed = true
+      }
+    })
+    if (changed) broadcastState()
+  }
+
+  /**
+   * worktree 의 실제 git/PR 상태에서 워크스페이스의 현재 브랜치와 브랜치 스택(모델 B)을 재동기화한다.
+   * 에이전트가 UI 의 Split 을 거치지 않고 직접 `git checkout -b`·`gh pr create` 로 스택을 만든 경우에도
+   * wooi 가 이를 인식하도록, HEAD 를 반영하고 열린 PR 의 base 체인에서 스택을 감지해 반영한다.
+   * git 을 변경하지 않고 상태만 갱신하므로 에이전트 실행 중에도 안전하다. 변경이 있으면 방송한다.
+   */
+  const reconcileWorkspaceStack = async (workspaceId: string): Promise<void> => {
+    const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
+    if (!ws || ws.archived) return
+    const head = await currentBranch(ws.worktreePath).catch(() => '')
+    const prs = await listOpenPrs(ws.worktreePath).catch(() => [])
+    // 다른 워크스페이스(모델 A 스택 포함)가 소유한 브랜치는 이 스택의 경계로 취급한다.
+    const exclude = new Set<string>()
+    for (const other of store.getState().workspaces) {
+      if (other.id === ws.id || other.repoId !== ws.repoId || other.archived) continue
+      for (const e of workspaceStack(other)) exclude.add(e.branch)
+    }
+    // HEAD → 원래 브랜치 순으로 anchor 를 시도해 스택을 복원한다.
+    let detected: StackedBranch[] | null = null
+    for (const anchor of [head, ws.branch].filter(Boolean)) {
+      detected = buildStackFromPrs(anchor, prs, exclude)
+      if (detected) break
+    }
+    const headPr = prs.find((p) => p.head === head)
+
+    let changed = false
+    store.update((st) => {
+      const w = st.workspaces.find((x) => x.id === workspaceId)
+      if (!w) return
+      // 실제 HEAD 로 현재 브랜치를 맞춘다(에이전트가 브랜치를 옮겼을 수 있다).
+      if (head && w.branch !== head) {
+        w.branch = head
+        changed = true
+      }
+      if (detected) {
+        // 감지한 스택이 저장값과 다르면 반영한다(브랜치·base·PR번호).
+        const same =
+          w.stack &&
+          w.stack.length === detected.length &&
+          detected.every(
+            (e, i) =>
+              w.stack![i].branch === e.branch &&
+              w.stack![i].baseBranch === e.baseBranch &&
+              w.stack![i].prNumber === e.prNumber
+          )
+        if (!same) {
+          w.stack = detected
+          changed = true
+        }
+        const cur = detected.find((e) => e.branch === w.branch)
+        if (cur) {
+          if (w.baseBranch !== cur.baseBranch) {
+            w.baseBranch = cur.baseBranch
+            changed = true
+          }
+          if (w.prNumber !== cur.prNumber) {
+            w.prNumber = cur.prNumber
+            changed = true
+          }
+        }
+      } else if (headPr && w.baseBranch !== headPr.base) {
+        // 스택은 아니지만 현재 브랜치의 PR base 가 다르면 맞춘다(ahead/behind 정확도).
+        w.baseBranch = headPr.base
+        changed = true
+      }
+    })
+    if (changed) broadcastState()
+  }
+
   ipcMain.handle(IPC.prStatus, async (_e, workspaceId: string) => {
     const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
     if (!ws || ws.archived) return null
+    // 실제 git/PR 상태에서 현재 브랜치·스택을 먼저 재동기화한다(에이전트가 직접 만든 스택도 인식).
+    await reconcileWorkspaceStack(workspaceId).catch(() => {})
     // worktree 의 현재 브랜치에 연결된 PR (gh 가 현재 브랜치로 자동 조회).
-    return getPrStatus(ws.worktreePath).catch(() => null)
+    const after = store.getState().workspaces.find((w) => w.id === workspaceId) ?? ws
+    const status = await getPrStatus(after.worktreePath).catch(() => null)
+    if (status) persistPrNumber(workspaceId, after.branch, status.number)
+    return status
   })
 
-  ipcMain.handle(IPC.prCreate, async (_e, workspaceId: string): Promise<{ error?: string }> => {
+  // 모델 B 스택 조망: 현재 체크아웃되지 않은 브랜치의 PR 상태도 조회한다.
+  ipcMain.handle(IPC.prStatusForBranch, async (_e, workspaceId: string, branch: string) => {
     const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
-    if (!ws) return { error: 'Workspace not found.' }
-    return createPrWeb(ws.worktreePath).catch((err) => ({
-      error: err instanceof Error ? err.message : String(err)
-    }))
+    if (!ws || ws.archived) return null
+    const status = await getPrStatus(ws.worktreePath, branch).catch(() => null)
+    if (status) persistPrNumber(workspaceId, branch, status.number)
+    return status
   })
+
+  ipcMain.handle(
+    IPC.prCreate,
+    async (_e, workspaceId: string, branch?: string): Promise<{ error?: string }> => {
+      const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
+      if (!ws) return { error: 'Workspace not found.' }
+      const repo = repoFor(ws.repoId)
+      // branch 를 주면(모델 B: 현재 체크아웃되지 않은 스택 브랜치) 그 엔트리를, 없으면 현재 브랜치를 대상으로 한다.
+      const entry = branch ? workspaceStack(ws).find((e) => e.branch === branch) : null
+      const targetBranch = entry ? entry.branch : ws.branch
+      const targetBase = entry ? entry.baseBranch : ws.baseBranch
+      // base 가 리포 기본 브랜치가 아니면(=stacked) --base 로 명시한다. head 는 현재 브랜치가 아닐 때만 붙인다.
+      const base = repo && targetBase !== repo.defaultBranch ? targetBase : undefined
+      const head = targetBranch !== ws.branch ? targetBranch : undefined
+      return createPrWeb(ws.worktreePath, { base, head }).catch((err) => ({
+        error: err instanceof Error ? err.message : String(err)
+      }))
+    }
+  )
 
   // PR 라이프사이클 액션(merge/close/reopen/ready). 전부 worktree 현재 브랜치의 PR 대상.
   ipcMain.handle(
@@ -633,9 +910,91 @@ export function registerIpc(ctx: IpcContext): void {
     async (_e, workspaceId: string, method: PrMergeMethod): Promise<{ error?: string }> => {
       const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
       if (!ws || ws.archived) return { error: 'Workspace not found.' }
-      return mergePr(ws.worktreePath, method).catch((err) => ({
+      const result = await mergePr(ws.worktreePath, method).catch((err) => ({
         error: err instanceof Error ? err.message : String(err)
       }))
+      if (result.error) return result
+
+      // 병합 캐스케이드: 방금 병합된 워크스페이스를 부모로 삼던 자식들을 조부모(=이 워크스페이스의 base)로
+      // 옮긴다. 각 자식 PR 의 base 를 조부모 브랜치로 retarget 하고, 로컬 링크(parent/base)를 갱신한 뒤,
+      // 조부모 위로 rebase 해 방금 병합된 부모 커밋을 떨군다(--onto <조부모> <병합된 부모 브랜치>).
+      const grandparentBranch = ws.baseBranch
+      const grandparentId = ws.parentWorkspaceId
+      const mergedBranch = ws.branch
+      const children = store
+        .getState()
+        .workspaces.filter((w) => w.parentWorkspaceId === ws.id && !w.archived)
+      for (const child of children) {
+        await retargetPr(child.worktreePath, grandparentBranch).catch(() => {})
+        store.update((st) => {
+          const c = st.workspaces.find((x) => x.id === child.id)
+          if (c) {
+            c.parentWorkspaceId = grandparentId
+            c.baseBranch = grandparentBranch
+          }
+        })
+        // 새 base 위로 rebase(충돌하면 워킹트리에 남겨 두고 UI 가 안내). best-effort.
+        await restackOnto(child.worktreePath, grandparentBranch, mergedBranch).catch(() => {})
+      }
+      if (children.length) broadcastState()
+
+      // 모델 B 캐스케이드: 병합된 브랜치(ws.branch)가 worktree 내부 스택의 엔트리면, 그 위 엔트리들의
+      // base 를 병합된 base 로 당겨 retarget + rebase(--onto 병합base, oldBase=병합브랜치)한 뒤,
+      // 스택에서 병합 엔트리를 제거한다. clean 워킹트리에서만 시도(아니면 스택 링크만 갱신).
+      const stack = ws.stack
+      if (stack && stack.length > 1 && stack.some((e) => e.branch === mergedBranch)) {
+        const idx = stack.findIndex((e) => e.branch === mergedBranch)
+        const mergedBase = stack[idx].baseBranch
+        // 병합된 브랜치를 직속 base 로 삼던 상위 PR 을 mergedBase 로 retarget(worktree 무관, 항상 시도).
+        for (const e of stack.slice(idx + 1)) {
+          if (e.baseBranch === mergedBranch) {
+            await retargetPr(ws.worktreePath, mergedBase, e.branch).catch(() => {})
+          }
+        }
+        // clean 워킹트리에서만 checkout-dance 로 상위 브랜치를 rebase 해 병합 커밋을 떨군다.
+        const clean = await isWorktreeClean(ws.worktreePath).catch(() => false)
+        if (clean) {
+          const oldTip = new Map<string, string>()
+          for (const e of stack) {
+            const sha = await revParse(ws.worktreePath, e.branch)
+            if (sha) oldTip.set(e.branch, sha)
+          }
+          for (const e of stack.slice(idx + 1)) {
+            const directChild = e.baseBranch === mergedBranch
+            const newBase = directChild ? mergedBase : e.baseBranch
+            // oldBase: 직속 자식은 병합된 브랜치, 그 위는 자기 base 의 이전 tip.
+            const oldBase = directChild ? mergedBranch : oldTip.get(e.baseBranch)
+            const co = await checkoutBranch(ws.worktreePath, e.branch)
+            if (co.error) break // dirty 등으로 전환 실패하면 남은 캐스케이드는 중단(수동 restack 유도).
+            await restackOnto(ws.worktreePath, newBase, oldBase).catch(() => {})
+          }
+        }
+        // 스택에서 병합 엔트리를 제거하고 링크를 갱신한다. 현재 체크아웃은 병합된 브랜치 아래(base)로 옮긴다.
+        store.update((st) => {
+          const w = st.workspaces.find((x) => x.id === workspaceId)
+          if (!w || !w.stack) return
+          const i = w.stack.findIndex((e) => e.branch === mergedBranch)
+          if (i < 0) return
+          const base = w.stack[i].baseBranch
+          for (const e of w.stack) if (e.baseBranch === mergedBranch) e.baseBranch = base
+          w.stack.splice(i, 1)
+          if (w.stack.length <= 1) w.stack = undefined
+        })
+        // 현재 브랜치가 방금 제거된 병합 브랜치면, 실제 HEAD 를 읽어 top-level 미러를 맞춘다.
+        const head = await currentBranch(ws.worktreePath).catch(() => '')
+        store.update((st) => {
+          const w = st.workspaces.find((x) => x.id === workspaceId)
+          if (!w) return
+          const entry = workspaceStack(w).find((e) => e.branch === head)
+          if (entry) {
+            w.branch = entry.branch
+            w.baseBranch = entry.baseBranch
+            w.prNumber = entry.prNumber
+          }
+        })
+        broadcastState()
+      }
+      return result
     }
   )
 

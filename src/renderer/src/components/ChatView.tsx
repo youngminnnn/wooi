@@ -12,6 +12,8 @@ import {
   GitPullRequestClosed,
   GitMerge,
   GitMergeConflict,
+  SplitSquareHorizontal,
+  Loader2,
   CircleCheck,
   MessageSquareWarning,
   Clock,
@@ -33,8 +35,9 @@ import PermissionPrompt from './PermissionPrompt'
 import QuestionPrompt from './QuestionPrompt'
 import DiffModal from './DiffModal'
 import PrActionsMenu from './PrActionsMenu'
+import StackPopover from './StackPopover'
 import ExportMenu from './ExportMenu'
-import { workspaceDisplayName } from '@shared/types'
+import { isBranchStack, workspaceDisplayName } from '@shared/types'
 import type { PrState, Workspace } from '@shared/types'
 
 /**
@@ -120,6 +123,8 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
   }, [workspace.status])
   const git = useStore((s) => s.gitStatus[workspace.id])
   const pr = useStore((s) => s.prStatus[workspace.id])
+  // 브랜치 전환·새로고침 중 PR 상태 조회가 진행 중이면 헤더 배지에 로딩을 표시한다.
+  const prRefreshing = useStore((s) => s.prRefreshing[workspace.id] ?? false)
   // setup 실패는 메인이 Workspace.setupState 로 영속하므로 workspace prop 에서 바로 읽는다(재시작에도 유지).
   const setupFailed = workspace.setupState === 'failed'
   const retrySetup = useStore((s) => s.retrySetup)
@@ -192,6 +197,22 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
       pushToast('info', 'Opening the PR creation page in your browser…')
       setTimeout(() => void refreshPr(workspace.id), 4000)
     }
+  }
+
+  // 모델 B 'Split here': 현재 HEAD 에서 새 상위 브랜치를 끊어 PR 경계를 만든다. 지금까지의 커밋은
+  // 현재 브랜치(=아래 PR)에 남고, 이후 커밋은 새 브랜치(=위 PR)에 쌓인다.
+  const splitPr = async (): Promise<void> => {
+    const res = await window.api.workspace.splitStack(workspace.id)
+    if (res.error) {
+      pushToast('error', res.error)
+      return
+    }
+    pushToast(
+      'success',
+      `Split — now on ${res.branch}. Commits so far stay on the branch below for its PR.`
+    )
+    void refreshGit(workspace.id)
+    void refreshPr(workspace.id)
   }
 
   // base 브랜치를 현재 브랜치로 머지해 드리프트를 해소한다. 충돌 시 워킹트리에 충돌이 남고,
@@ -380,9 +401,31 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
           <PanelRight size={15} />
         </HeaderButton>
 
-        {/* PR 상태 + 링크: 헤더 우측 끝. 상태별 색·아이콘으로 한눈에 구분. */}
-        {(pr || (git && git.ahead > 0)) && (
-          <div className="flex items-center pl-2 ml-0.5 border-l border-[var(--border)]">
+        {/* Stack 조망·전환 + Split: worktree 안에서 브랜치 스택을 만들고 관리한다(우측 패널과 무관). */}
+        <div className="flex items-center gap-1 pl-2 ml-0.5 border-l border-[var(--border)] empty:hidden empty:border-l-0 empty:pl-0">
+          {/* 아직 스택이 아니고, 자를 커밋이 있을 때만 헤더에 Split 을 노출한다. 스택이 되면 이후
+              split 은 Stack 팝오버 안으로 옮겨 헤더를 어지럽히지 않는다. */}
+          {!isBranchStack(workspace) && git && git.ahead > 0 && (
+            <button
+              onClick={splitPr}
+              className="flex items-center gap-1.5 text-xs px-2 py-1 rounded-md bg-[var(--surface)] border border-[var(--border)] text-neutral-300 hover:border-[var(--border-strong)]"
+              title="Split a stacked PR here — freeze current commits on this branch and start a new branch on top"
+            >
+              <SplitSquareHorizontal size={12} className="text-[var(--accent-400)]" />
+              Split PR
+            </button>
+          )}
+          <StackPopover workspace={workspace} onSplit={splitPr} />
+        </div>
+
+        {/* PR 상태 + 링크: 헤더 우측 끝. 상태별 색·아이콘으로 한눈에 구분. 조회 중이면 스피너를 곁들인다. */}
+        {(pr || (git && git.ahead > 0) || prRefreshing) && (
+          <div className="flex items-center gap-1 pl-2 ml-0.5 border-l border-[var(--border)]">
+            {prRefreshing && (
+              <span title="Refreshing pull request…" className="shrink-0 grid place-items-center">
+                <Loader2 size={12} className="animate-spin text-neutral-500" />
+              </span>
+            )}
             {pr
               ? (() => {
                   const { Icon, iconClass, badgeClass } = PR_STYLE[pr.state]
@@ -391,7 +434,8 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
                       onClick={() => void window.api.openExternal(pr.url)}
                       className={
                         'flex items-center gap-1.5 text-xs px-2 py-1 rounded-md border ' +
-                        badgeClass
+                        badgeClass +
+                        (prRefreshing ? ' opacity-60' : '')
                       }
                       title={`${pr.label} — open pull request #${pr.number} in browser`}
                     >
@@ -406,14 +450,17 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
             {pr ? (
               <PrActionsMenu workspaceId={workspace.id} pr={pr} />
             ) : (
-              <button
-                onClick={createPr}
-                className="flex items-center gap-1.5 text-xs px-2 py-1 rounded-md bg-[var(--surface)] border border-[var(--border)] text-neutral-300 hover:border-[var(--border-strong)]"
-                title="Open a pull request for this branch"
-              >
-                <GitPullRequestCreate size={12} className="text-[var(--accent-400)]" />
-                Create PR
-              </button>
+              // 조회 중에는 "Create PR" 을 감춰 깜빡임을 막고 스피너만 보여 준다(끝나면 실제 상태로 결정).
+              !prRefreshing && (
+                <button
+                  onClick={createPr}
+                  className="flex items-center gap-1.5 text-xs px-2 py-1 rounded-md bg-[var(--surface)] border border-[var(--border)] text-neutral-300 hover:border-[var(--border-strong)]"
+                  title="Open a pull request for this branch"
+                >
+                  <GitPullRequestCreate size={12} className="text-[var(--accent-400)]" />
+                  Create PR
+                </button>
+              )
             )}
           </div>
         )}

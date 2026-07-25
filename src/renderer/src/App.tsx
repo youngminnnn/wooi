@@ -48,7 +48,9 @@ export default function App(): React.JSX.Element {
 
   const [showSettings, setShowSettings] = useState(false)
   const [showShortcuts, setShowShortcuts] = useState(false)
-  const [newWsRepoId, setNewWsRepoId] = useState<string | null>(null)
+  const [newWs, setNewWs] = useState<{ repoId: string; parentWorkspaceId: string | null } | null>(
+    null
+  )
   const [configRepoId, setConfigRepoId] = useState<string | null>(null)
   // 설정의 "Take a tour" 로 여는 기능 투어. 실제 화면 위에서 진행하도록 앱 레벨에서 렌더한다.
   const [tourOpen, setTourOpen] = useState(false)
@@ -78,7 +80,7 @@ export default function App(): React.JSX.Element {
   const anyModalOpen =
     showSettings ||
     showShortcuts ||
-    newWsRepoId !== null ||
+    newWs !== null ||
     configRepoId !== null ||
     onboardingOpen ||
     githubGateOpen ||
@@ -273,10 +275,19 @@ export default function App(): React.JSX.Element {
   // 자동 생성은 사이드바에 스피너 행을 바로 띄우고 worktree 준비는 백그라운드로 진행한다.
   const handleNewWorkspace = (repoId: string): void => {
     if (app.settings.manualWorkspaceSetup) {
-      setNewWsRepoId(repoId)
+      setNewWs({ repoId, parentWorkspaceId: null })
       return
     }
     void useStore.getState().createWorkspace(repoId)
+  }
+
+  // stacked PR: 특정 워크스페이스 위에 새 워크스페이스를 쌓는다(base = 부모 브랜치).
+  const handleStackWorkspace = (repoId: string, parentWorkspaceId: string): void => {
+    if (app.settings.manualWorkspaceSetup) {
+      setNewWs({ repoId, parentWorkspaceId })
+      return
+    }
+    void useStore.getState().createWorkspace(repoId, { parentWorkspaceId })
   }
 
   return (
@@ -295,7 +306,11 @@ export default function App(): React.JSX.Element {
       )}
 
       <div className="flex-1 flex min-h-0">
-        <Sidebar onNewWorkspace={handleNewWorkspace} onConfigRepo={setConfigRepoId} />
+        <Sidebar
+          onNewWorkspace={handleNewWorkspace}
+          onStackWorkspace={handleStackWorkspace}
+          onConfigRepo={setConfigRepoId}
+        />
         <div ref={contentRef} className="flex-1 min-w-0 border-l border-[var(--border)] flex">
           {selected ? (
             <>
@@ -344,8 +359,12 @@ export default function App(): React.JSX.Element {
       )}
       {tourOpen && <FeatureTour onDone={() => setTourOpen(false)} />}
       {showShortcuts && <ShortcutsHelp onClose={() => setShowShortcuts(false)} />}
-      {newWsRepoId && (
-        <NewWorkspaceModal repoId={newWsRepoId} onClose={() => setNewWsRepoId(null)} />
+      {newWs && (
+        <NewWorkspaceModal
+          repoId={newWs.repoId}
+          parentWorkspaceId={newWs.parentWorkspaceId}
+          onClose={() => setNewWs(null)}
+        />
       )}
       {configRepoId && (
         <RepoConfigModal repoId={configRepoId} onClose={() => setConfigRepoId(null)} />

@@ -110,10 +110,15 @@ const PR_LABELS: Record<PrState, string> = {
   closed: 'Closed'
 }
 
-/** worktree 의 현재 브랜치에 연결된 PR 상태를 조회한다(인자 없는 `gh pr view`). */
-export async function getPrStatus(worktreePath: string): Promise<PrStatus | null> {
+/**
+ * PR 상태를 조회한다. branch 를 주면 그 브랜치의 PR 을(worktree 의 현재 브랜치가 아니어도), 없으면
+ * 현재 브랜치의 PR 을 조회한다(모델 B 스택 조망은 브랜치별로 호출). 브랜치명은 sanitize 되어 있어
+ * 안전하지만 셸 해석 방지를 위해 작은따옴표로 감싼다.
+ */
+export async function getPrStatus(worktreePath: string, branch?: string): Promise<PrStatus | null> {
+  const target = branch ? ` '${branch}'` : ''
   const { stdout, code } = await runLoginShell(
-    `gh pr view --json number,url,title,state,isDraft,reviewDecision,mergeable,mergeStateStatus`,
+    `gh pr view${target} --json number,url,title,state,isDraft,reviewDecision,mergeable,mergeStateStatus`,
     worktreePath
   )
   if (code !== 0) return null
@@ -123,6 +128,27 @@ export async function getPrStatus(worktreePath: string): Promise<PrStatus | null
     return { number: pr.number, url: pr.url, title: pr.title ?? '', state, label: PR_LABELS[state] }
   } catch {
     return null
+  }
+}
+
+/** 리포의 열린 PR 을 head/base 브랜치와 함께 나열한다. worktree 안의 브랜치 스택을 자동 감지할 때 쓴다. */
+export async function listOpenPrs(
+  worktreePath: string
+): Promise<Array<{ number: number; head: string; base: string }>> {
+  const { stdout, code } = await runLoginShell(
+    `gh pr list --state open --json number,headRefName,baseRefName --limit 200`,
+    worktreePath
+  )
+  if (code !== 0) return []
+  try {
+    const arr = JSON.parse(stdout.trim()) as Array<{
+      number: number
+      headRefName: string
+      baseRefName: string
+    }>
+    return arr.map((p) => ({ number: p.number, head: p.headRefName, base: p.baseRefName }))
+  } catch {
+    return []
   }
 }
 
@@ -219,12 +245,41 @@ export async function getPrChecks(worktreePath: string): Promise<PrChecks | null
  * 현재 브랜치가 리모트에 push 돼 있지 않거나 커밋이 없으면 gh 가 에러를 내며,
  * 그 메시지를 그대로 돌려준다.
  */
-export async function createPrWeb(worktreePath: string): Promise<{ error?: string }> {
-  const { stderr, code } = await runLoginShell('gh pr create --web --fill', worktreePath)
+export async function createPrWeb(
+  worktreePath: string,
+  opts?: { base?: string; head?: string }
+): Promise<{ error?: string }> {
+  // stacked 면 부모 브랜치를 PR base 로 명시한다(--base). 없으면 gh 가 리포 기본 브랜치를 쓴다.
+  // head 를 주면(모델 B: 현재 체크아웃되지 않은 스택 브랜치) 그 브랜치로 PR 을 연다(--head).
+  // 브랜치명은 sanitizeBranch 로 정규화돼 있어 안전하지만, 셸 해석을 막기 위해 작은따옴표로 감싼다.
+  const baseFlag = opts?.base ? ` --base '${opts.base}'` : ''
+  const headFlag = opts?.head ? ` --head '${opts.head}'` : ''
+  const { stderr, code } = await runLoginShell(
+    `gh pr create --web --fill${baseFlag}${headFlag}`,
+    worktreePath
+  )
   if (code !== 0) {
     const msg = stderr.trim().split('\n').filter(Boolean).pop()
     return { error: msg || 'Failed to open the PR creation page.' }
   }
+  return {}
+}
+
+/**
+ * PR base 를 newBase 로 바꾼다(`gh pr edit [selector] --base`). selector 를 주면 그 PR(브랜치/번호)을,
+ * 없으면 현재 브랜치의 PR 을 대상으로 한다. 부모 PR 이 병합돼 자식 PR 을 조부모로 옮길 때 쓴다.
+ */
+export async function retargetPr(
+  worktreePath: string,
+  newBase: string,
+  selector?: string
+): Promise<{ error?: string }> {
+  const target = selector ? ` '${selector}'` : ''
+  const { stderr, code } = await runLoginShell(
+    `gh pr edit${target} --base '${newBase}'`,
+    worktreePath
+  )
+  if (code !== 0) return { error: lastError(stderr, 'Failed to retarget the pull request.') }
   return {}
 }
 
