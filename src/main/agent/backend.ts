@@ -83,7 +83,7 @@ export interface AgentBackendMeta {
 }
 
 /** Claude Code 백엔드의 기본 모델. store 기본값과 백엔드 메타가 같은 출처를 보도록 여기서 정의한다. */
-export const CLAUDE_DEFAULT_MODEL = 'claude-opus-4-8[1m]'
+export const CLAUDE_DEFAULT_MODEL = 'claude-opus-5'
 
 /** Claude Code 백엔드 메타. Claude Agent SDK 의 전체 기능을 지원한다. */
 export const CLAUDE_META: AgentBackendMeta = {
