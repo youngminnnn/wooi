@@ -35,6 +35,16 @@ without Gatekeeper warnings.
    into **Applications**.
 2. Open **Wooi** from Applications.
 
+## Updating
+
+Wooi updates itself: it checks GitHub Releases on launch, downloads new versions
+in the background, and shows a **"Restart to update"** banner when ready. You can
+also check manually in **Settings → About**.
+
+> **On v1.0.0?** That build predates auto-update, so it won't update on its own —
+> download **v1.0.1 (or later) once** from the Releases page. Every version from
+> v1.0.1 onward updates automatically.
+
 ## Concept
 
 - **Repository** — connect a git repo (its main checkout).

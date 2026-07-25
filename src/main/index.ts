@@ -8,6 +8,7 @@ import { TerminalManager } from './terminal'
 import { registerIpc } from './ipc'
 import { log } from './logger'
 import { hydrateEnvFromLoginShell } from './env'
+import { initUpdater } from './updater'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -133,6 +134,7 @@ app.whenReady().then(() => {
   applyContentSecurityPolicy()
   registerIpc({ sessions, scripts, terminals, getWindow: () => mainWindow })
   createWindow()
+  initUpdater(dispatch)
   log.info('main ready')
 
   app.on('activate', () => {

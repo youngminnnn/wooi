@@ -34,6 +34,7 @@ import type {
   TerminalDataEvent,
   TerminalExitEvent,
   UpdateFromBaseResult,
+  UpdateStatus,
   WorkspaceDiff
 } from './types'
 
@@ -196,6 +197,15 @@ export interface WooiApi {
   app: {
     /** macOS Dock 의 미확인 빨간 배지 개수. 0 이면 지운다. */
     setBadgeCount(count: number): Promise<void>
+    /** 현재 앱 버전(package.json version). */
+    getVersion(): Promise<string>
+  }
+
+  update: {
+    /** 수동 업데이트 확인. 최신 상태를 반환하고 진행은 onUpdate 로 방송된다. */
+    check(): Promise<UpdateStatus>
+    /** 다운로드 완료된 업데이트를 설치하기 위해 앱을 재시작한다. */
+    quitAndInstall(): Promise<void>
   }
 
   openExternal(url: string): Promise<void>
@@ -240,4 +250,6 @@ export interface WooiApi {
   onClaudeLogin(cb: (e: ClaudeLoginEvent) => void): () => void
   /** 앱 내부 GitHub 로그인 진행 이벤트(one-time 코드·디바이스 URL / 완료) 구독. */
   onGithubLogin(cb: (e: GithubLoginEvent) => void): () => void
+  /** 자동 업데이트 상태 변화(확인 중/발견/다운로드/준비됨/오류) 구독. */
+  onUpdate(cb: (status: UpdateStatus) => void): () => void
 }

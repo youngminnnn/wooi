@@ -5,6 +5,7 @@ import { useStore } from './store'
 import { nextPermissionMode } from './lib/permission'
 import { applyTheme } from './lib/theme'
 import TitleBar from './components/TitleBar'
+import { UpdateBanner } from './components/UpdateBanner'
 import Sidebar from './components/Sidebar'
 import ChatView from './components/ChatView'
 import WorkArea from './components/WorkArea'
@@ -293,6 +294,8 @@ export default function App(): React.JSX.Element {
   return (
     <div className="h-full flex flex-col bg-[var(--bg)]">
       <TitleBar onOpenSettings={() => setShowSettings(true)} />
+
+      <UpdateBanner />
 
       {claudeMissing && (
         <button
