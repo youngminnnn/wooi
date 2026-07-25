@@ -101,6 +101,11 @@ export class AgentOrchestrator {
     for (const backend of this.backends.values()) backend.abortAll()
   }
 
+  /** 계정 전환 후 모든 백엔드의 세션 프로세스를 재활용한다(대화 맥락은 유지). */
+  recycleAll(): void {
+    for (const backend of this.backends.values()) backend.recycleAll()
+  }
+
   // ── capability-게이트 (지원 백엔드에만 위임) ──────────────────────────────
 
   sideQuestion(workspaceId: string, question: string): void {

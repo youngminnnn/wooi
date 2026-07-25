@@ -373,12 +373,49 @@ export class SessionManager implements AgentBackend {
    * 세션을 전부 정리하고 진행 중이던 workspace 상태를 idle 로 되돌린다.
    */
   abortAll(): void {
+    this.stopAll(null)
+  }
+
+  /**
+   * Claude 계정이 바뀐 뒤 호출한다 — 모든 세션의 CLI 프로세스를 버리되 **대화 맥락(sessionId)은
+   * 그대로 남긴다**. 다음 메시지에서 같은 sessionId 로 resume 하므로, 터미널에서 CLI 를 껐다 켜고
+   * `claude --resume` 하는 것과 결과가 같다(맥락 유지 + 새 자격증명 사용).
+   *
+   * 이 정리가 없으면 전환 전에 떠 있던 CLI 프로세스가 옛 토큰을 그대로 들고 있어, 전환 후 첫
+   * 메시지가 그 프로세스로 흘러가 인증 오류로 죽는다(그 다음 전송은 새 프로세스라 성공한다 —
+   * "한 번 실패하고 다시 보내면 되는" 증상의 원인이었다). 세션 핸들만 버리는 것이므로
+   * clearSession(/clear)과 달리 sessionId·트랜스크립트는 건드리지 않는다.
+   */
+  recycleAll(): void {
+    this.stopAll(
+      'Signed in with a different Claude account. This conversation is kept — send again to continue.'
+    )
+  }
+
+  /**
+   * 모든 세션을 정리하고 진행 중이던 workspace 를 idle 로 되돌린다(sessionId 는 유지).
+   * note 가 있으면 턴이 끊긴 workspace 의 트랜스크립트에 안내를 남긴다.
+   */
+  private stopAll(note: string | null): void {
     const running = getStore()
       .getState()
       .workspaces.filter((w) => w.status === 'running')
-      .map((w) => w.id)
     this.disposeAll()
-    for (const id of running) this.forceIdle(id)
+    for (const w of running) {
+      if (note) {
+        const item: ChatItem = {
+          id: `system:recycle:${Date.now()}:${w.id}`,
+          type: 'system',
+          text: note,
+          ts: Date.now()
+        }
+        getTranscripts().upsert(w.id, item)
+        this.dispatch(IPC.evtChat, { workspaceId: w.id, event: { type: 'item', item } })
+      }
+      this.forceIdle(w.id)
+    }
+    if (note)
+      log.info(`sessions: recycled all sessions (${running.length} running turn(s) stopped)`)
   }
 
   respondPermission(requestId: string, decision: PermissionDecision): void {
