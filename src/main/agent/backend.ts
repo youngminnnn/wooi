@@ -15,7 +15,7 @@ import type {
 /**
  * AI 코딩 에이전트 백엔드 추상화.
  *
- * ditto 의 나머지 코드(IPC·오케스트레이터)는 이 인터페이스에만 의존하고, 특정 에이전트 SDK
+ * wooi 의 나머지 코드(IPC·오케스트레이터)는 이 인터페이스에만 의존하고, 특정 에이전트 SDK
  * (현재 Claude Agent SDK)에는 직접 의존하지 않는다. 그래서 Claude 결합은 단일 구현
  * (claude/manager.ts 의 SessionManager)과 레지스트리(registry.ts)에만 갇혀 있고,
  * 추후 다른 백엔드는 식별자·구현·capabilities 만 추가하면 붙는다.

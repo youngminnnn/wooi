@@ -88,8 +88,8 @@ export default function App(): React.JSX.Element {
   // 커스텀 이벤트로도 열 수 있다.
   useEffect(() => {
     const onHelp = (): void => setShowShortcuts(true)
-    window.addEventListener('ditto:open-shortcuts', onHelp)
-    return () => window.removeEventListener('ditto:open-shortcuts', onHelp)
+    window.addEventListener('wooi:open-shortcuts', onHelp)
+    return () => window.removeEventListener('wooi:open-shortcuts', onHelp)
   }, [])
 
   // 키보드: ⇧⇥ 권한 모드 순환, ⌘1–9 워크스페이스 선택, ⌘[ / ⌘] 이전/다음.
@@ -189,13 +189,13 @@ export default function App(): React.JSX.Element {
         // ⇧⌘X: 대화 내보내기 메뉴 열기(ExportMenu 가 이벤트를 받아 드롭다운을 연다).
         if (e.code === 'KeyX') {
           e.preventDefault()
-          window.dispatchEvent(new CustomEvent('ditto:export-conversation', { detail: selId }))
+          window.dispatchEvent(new CustomEvent('wooi:export-conversation', { detail: selId }))
           return
         }
         // ⇧⌘⌫: workspace 아카이브(ChatView 가 확인 다이얼로그와 함께 처리).
         if (e.key === 'Backspace' || e.key === 'Delete') {
           e.preventDefault()
-          window.dispatchEvent(new CustomEvent('ditto:archive-workspace', { detail: selId }))
+          window.dispatchEvent(new CustomEvent('wooi:archive-workspace', { detail: selId }))
           return
         }
       }

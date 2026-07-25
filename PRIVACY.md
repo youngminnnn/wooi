@@ -7,13 +7,13 @@
 
 _Last updated: 2026-06-06 · Version 1_
 
-Ditto is a local macOS desktop application that orchestrates parallel AI coding
+Wooi is a local macOS desktop application that orchestrates parallel AI coding
 agents — currently [Claude Code](https://claude.com/claude-code) — over isolated
 git worktrees. This policy explains what data the app handles and where it goes.
 
 ## Summary
 
-Ditto has **no servers of its own**. It does not collect analytics or telemetry,
+Wooi has **no servers of its own**. It does not collect analytics or telemetry,
 and it does not transmit your data to the developer. Your code and conversations
 leave your machine only when sent to the third‑party services you connect
 (Anthropic and, optionally, GitHub) to make the app function.
@@ -26,31 +26,31 @@ leave your machine only when sent to the third‑party services you connect
   [Anthropic's Privacy Policy](https://www.anthropic.com/legal/privacy) and the
   terms of your Claude account.
 - **Repository metadata and pull requests** — If you use the GitHub features,
-  Ditto invokes the GitHub CLI (`gh`) on your machine, which communicates with
+  Wooi invokes the GitHub CLI (`gh`) on your machine, which communicates with
   **GitHub** under [GitHub's Privacy Statement](https://docs.github.com/site-policy/privacy-policies/github-general-privacy-statement).
-- **Authentication** — Ditto reuses the credentials of your already‑installed
+- **Authentication** — Wooi reuses the credentials of your already‑installed
   Claude Code and GitHub CLI. It does **not** store, copy, or transmit your
   access tokens itself; sign‑in flows run in your Terminal.
 
 ## What is stored locally
 
 The following are stored only on your machine, under the app's user‑data
-directory (`~/Library/Application Support/Ditto/`):
+directory (`~/Library/Application Support/Wooi/`):
 
-- App settings (connected repositories, workspaces, preferences) — `ditto.json`
+- App settings (connected repositories, workspaces, preferences) — `wooi.json`
 - Conversation transcripts — `transcripts/*.jsonl`
 - Diagnostic logs (errors and CLI detection) — `logs/main.log`
 
-Git worktrees for your workspaces are created under `~/ditto/workspaces/`, outside
+Git worktrees for your workspaces are created under `~/wooi/workspaces/`, outside
 the user‑data directory so you can browse them directly.
 
-These files are not uploaded anywhere by Ditto. You can delete a workspace from
-within the app, or remove the user‑data and `~/ditto/workspaces/` directories to
+These files are not uploaded anywhere by Wooi. You can delete a workspace from
+within the app, or remove the user‑data and `~/wooi/workspaces/` directories to
 erase all local data.
 
 ## Telemetry
 
-Ditto does not include analytics, crash reporting, or telemetry at this time. If
+Wooi does not include analytics, crash reporting, or telemetry at this time. If
 this changes, this policy will be updated and consent will be requested.
 
 ## Changes to this policy

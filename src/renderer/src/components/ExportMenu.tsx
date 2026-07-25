@@ -38,8 +38,8 @@ export default function ExportMenu({
     const onOpen = (e: Event): void => {
       if ((e as CustomEvent<string>).detail === workspaceId) setOpen(true)
     }
-    window.addEventListener('ditto:export-conversation', onOpen)
-    return () => window.removeEventListener('ditto:export-conversation', onOpen)
+    window.addEventListener('wooi:export-conversation', onOpen)
+    return () => window.removeEventListener('wooi:export-conversation', onOpen)
   }, [workspaceId])
 
   const exportAs = (kind: 'md' | 'json'): void => {

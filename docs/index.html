@@ -3,20 +3,20 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Ditto — Run multiple AI coding agents at once</title>
+    <title>Wooi — Run multiple AI coding agents at once</title>
     <meta
       name="description"
-      content="Ditto is a macOS app for orchestrating multiple AI coding agents in parallel — each in its own git worktree, each shipping its own PR."
+      content="Wooi is a macOS app for orchestrating multiple AI coding agents in parallel — each in its own git worktree, each shipping its own PR."
     />
 
     <!-- Open Graph / social -->
     <meta property="og:type" content="website" />
-    <meta property="og:title" content="Ditto — Run multiple AI coding agents at once" />
+    <meta property="og:title" content="Wooi — Run multiple AI coding agents at once" />
     <meta
       property="og:description"
       content="Orchestrate parallel AI coding agents across isolated git worktrees. Each task = its own worktree + branch + agent session."
     />
-    <meta property="og:image" content="https://youngminnnn.github.io/ditto/og.png" />
+    <meta property="og:image" content="https://youngminnnn.github.io/wooi/og.png" />
     <meta name="theme-color" content="#0a0b0d" />
 
     <link rel="icon" type="image/svg+xml" href="./icon.svg" />
@@ -719,8 +719,8 @@
     <header>
       <div class="wrap nav">
         <a class="brand" href="#top">
-          <img src="./icon.svg" alt="Ditto" />
-          Ditto
+          <img src="./icon.svg" alt="Wooi" />
+          Wooi
         </a>
         <nav class="nav-links">
           <a class="hide-sm" href="#why"><span class="en">Why</span><span class="ko">왜</span></a>
@@ -729,7 +729,7 @@
           >
           <a href="#features"><span class="en">Features</span><span class="ko">기능</span></a>
           <a href="#install"><span class="en">Install</span><span class="ko">설치</span></a>
-          <a href="https://github.com/youngminnnn/ditto" target="_blank" rel="noopener">GitHub</a>
+          <a href="https://github.com/youngminnnn/wooi" target="_blank" rel="noopener">GitHub</a>
           <button class="lang-btn" id="langToggle" aria-label="Toggle language">
             <span class="en">한국어</span><span class="ko">EN</span>
           </button>
@@ -754,12 +754,12 @@
 
       <p class="subtitle">
         <span class="en"
-          >Ditto orchestrates parallel AI coding agents on macOS — each in its own isolated git
+          >Wooi orchestrates parallel AI coding agents on macOS — each in its own isolated git
           worktree, each on its own branch, each shipping its own PR. Kick off a refactor, a
           feature, and a bugfix at the same time and watch all three from one sidebar.</span
         >
         <span class="ko"
-          >Ditto 는 macOS 에서 여러 AI 코딩 에이전트를 병렬로 오케스트레이션합니다 — 각자 격리된 git
+          >Wooi 는 macOS 에서 여러 AI 코딩 에이전트를 병렬로 오케스트레이션합니다 — 각자 격리된 git
           worktree 위에서, 각자 자기 브랜치로, 각자 자기 PR 로. 리팩터링·기능 추가·버그 수정을
           한꺼번에 시작해 사이드바 하나에서 셋 다 지켜보세요.</span
         >
@@ -768,7 +768,7 @@
       <div class="cta-row">
         <a
           class="btn btn-primary"
-          href="https://github.com/youngminnnn/ditto/releases"
+          href="https://github.com/youngminnnn/wooi/releases"
           target="_blank"
           rel="noopener"
         >
@@ -777,7 +777,7 @@
         </a>
         <a
           class="btn btn-ghost"
-          href="https://github.com/youngminnnn/ditto"
+          href="https://github.com/youngminnnn/wooi"
           target="_blank"
           rel="noopener"
         >
@@ -793,7 +793,7 @@
 
       <div class="demo-frame">
         <div class="demo-bar"><span></span><span></span><span></span></div>
-        <img src="./demo.gif" alt="Ditto in action" loading="lazy" />
+        <img src="./demo.gif" alt="Wooi in action" loading="lazy" />
       </div>
     </div>
 
@@ -802,7 +802,7 @@
       <div class="wrap">
         <div class="section-head">
           <div class="eyebrow">
-            <span class="en">Why Ditto</span><span class="ko">왜 Ditto 인가</span>
+            <span class="en">Why Wooi</span><span class="ko">왜 Wooi 인가</span>
           </div>
           <h2>
             <span class="en">One agent at a time is a bottleneck</span>
@@ -810,11 +810,11 @@
           </h2>
           <p class="section-sub">
             <span class="en"
-              >Ditto removes the wait. Every task gets its own sandbox, so agents never step on each
+              >Wooi removes the wait. Every task gets its own sandbox, so agents never step on each
               other — and you never lose track of what needs you.</span
             >
             <span class="ko"
-              >Ditto 는 그 기다림을 없앱니다. 작업마다 전용 샌드박스가 주어지므로 에이전트끼리
+              >Wooi 는 그 기다림을 없앱니다. 작업마다 전용 샌드박스가 주어지므로 에이전트끼리
               충돌하지 않고, 사용자 확인이 필요한 세션을 놓칠 일도 없습니다.</span
             >
           </p>
@@ -900,7 +900,7 @@
             <h3><span class="en">Connect a repo</span><span class="ko">리포 연결</span></h3>
             <p>
               <span class="en"
-                >Point Ditto at a git repository (its main checkout). Configure per-repo
+                >Point Wooi at a git repository (its main checkout). Configure per-repo
                 <strong>Setup / Dev / Archive</strong> scripts like <code>npm install</code>.</span
               >
               <span class="ko"
@@ -918,13 +918,13 @@
             <p>
               <span class="en"
                 >Each task gets its own worktree + branch + agent session under
-                <code>~/ditto/workspaces/&lt;repo&gt;/&lt;branch&gt;</code>, running independently
+                <code>~/wooi/workspaces/&lt;repo&gt;/&lt;branch&gt;</code>, running independently
                 and in parallel.</span
               >
               <span class="ko"
                 >작업마다 전용 worktree + 브랜치 + 세션이
-                <code>~/ditto/workspaces/&lt;repo&gt;/&lt;branch&gt;</code> 에 생성되어
-                독립적·병렬로 실행됩니다.</span
+                <code>~/wooi/workspaces/&lt;repo&gt;/&lt;branch&gt;</code> 에 생성되어 독립적·병렬로
+                실행됩니다.</span
               >
             </p>
           </div>
@@ -946,13 +946,13 @@
 
         <div class="note">
           <span class="en"
-            ><strong>Agent support:</strong> Ditto currently drives <strong>Claude Code</strong> via
+            ><strong>Agent support:</strong> Wooi currently drives <strong>Claude Code</strong> via
             the Claude Agent SDK, reusing your installed Claude Code and <code>gh</code> credentials
             — no separate API key. Support for more agents such as <strong>Codex</strong> is
             planned.</span
           >
           <span class="ko"
-            ><strong>에이전트 지원:</strong> Ditto 는 현재 Claude Agent SDK 를 통해
+            ><strong>에이전트 지원:</strong> Wooi 는 현재 Claude Agent SDK 를 통해
             <strong>Claude Code</strong> 를 구동하며, 설치된 Claude Code 와 <code>gh</code> 의
             로그인 정보를 그대로 사용합니다 — 별도 API 키가 필요 없습니다. 앞으로
             <strong>Codex</strong> 등 더 다양한 에이전트를 지원할 예정입니다.</span
@@ -1315,20 +1315,20 @@
                 <span class="en"
                   >Grab the latest <code>.dmg</code> from the
                   <a
-                    href="https://github.com/youngminnnn/ditto/releases"
+                    href="https://github.com/youngminnnn/wooi/releases"
                     target="_blank"
                     rel="noopener"
                     >Releases page</a
                   >
-                  and drag <strong>Ditto</strong> into <strong>Applications</strong>.</span
+                  and drag <strong>Wooi</strong> into <strong>Applications</strong>.</span
                 >
                 <span class="ko"
                   ><a
-                    href="https://github.com/youngminnnn/ditto/releases"
+                    href="https://github.com/youngminnnn/wooi/releases"
                     target="_blank"
                     rel="noopener"
                     >Releases 페이지</a
-                  >에서 최신 <code>.dmg</code> 를 받아 <strong>Ditto</strong> 를
+                  >에서 최신 <code>.dmg</code> 를 받아 <strong>Wooi</strong> 를
                   <strong>Applications</strong> 로 드래그합니다.</span
                 >
               </p>
@@ -1396,8 +1396,8 @@
             ><strong>소스로 빌드하시겠어요?</strong> Apple Silicon 에 Node.js 20 이
             필요합니다:</span
           >
-          <pre><span class="g">git</span> clone https://github.com/youngminnnn/ditto.git
-<span class="g">cd</span> ditto
+          <pre><span class="g">git</span> clone https://github.com/youngminnnn/wooi.git
+<span class="g">cd</span> wooi
 <span class="g">nvm</span> use          <span class="c"># optional — Node 20</span>
 <span class="g">npm</span> install      <span class="c"># deps + Electron binary</span>
 <span class="g">npm</span> run dev      <span class="c"># launch in dev mode</span></pre>
@@ -1422,9 +1422,9 @@
             <h3><span class="en">No analytics</span><span class="ko">분석 없음</span></h3>
             <p>
               <span class="en"
-                >Ditto has no servers of its own and collects no analytics or telemetry.</span
+                >Wooi has no servers of its own and collects no analytics or telemetry.</span
               >
-              <span class="ko">Ditto 는 자체 서버가 없고 분석·텔레메트리를 수집하지 않습니다.</span>
+              <span class="ko">Wooi 는 자체 서버가 없고 분석·텔레메트리를 수집하지 않습니다.</span>
             </p>
           </div>
           <div class="privacy-card">
@@ -1449,10 +1449,10 @@
             <p>
               <span class="en"
                 >Settings & transcripts are stored locally in
-                <code>~/Library/Application Support/Ditto/</code>.</span
+                <code>~/Library/Application Support/Wooi/</code>.</span
               >
               <span class="ko"
-                >설정·대화 기록은 <code>~/Library/Application Support/Ditto/</code> 에만
+                >설정·대화 기록은 <code>~/Library/Application Support/Wooi/</code> 에만
                 저장됩니다.</span
               >
             </p>
@@ -1482,7 +1482,7 @@
           <div class="cta-row">
             <a
               class="btn btn-primary"
-              href="https://github.com/youngminnnn/ditto/releases"
+              href="https://github.com/youngminnnn/wooi/releases"
               target="_blank"
               rel="noopener"
             >
@@ -1490,7 +1490,7 @@
             </a>
             <a
               class="btn btn-ghost"
-              href="https://github.com/youngminnnn/ditto"
+              href="https://github.com/youngminnnn/wooi"
               target="_blank"
               rel="noopener"
             >
@@ -1505,31 +1505,31 @@
     <footer>
       <div class="wrap footer-row">
         <div class="brand" style="font-size: 16px">
-          <img src="./icon.svg" alt="Ditto" style="width: 24px; height: 24px" />
-          <span>Ditto</span>
+          <img src="./icon.svg" alt="Wooi" style="width: 24px; height: 24px" />
+          <span>Wooi</span>
           <span style="color: var(--text-faint); font-weight: 400; margin-left: 6px">
             © youngminnnn · MIT
           </span>
         </div>
         <div class="footer-links">
-          <a href="https://github.com/youngminnnn/ditto" target="_blank" rel="noopener">GitHub</a>
-          <a href="https://github.com/youngminnnn/ditto/releases" target="_blank" rel="noopener"
+          <a href="https://github.com/youngminnnn/wooi" target="_blank" rel="noopener">GitHub</a>
+          <a href="https://github.com/youngminnnn/wooi/releases" target="_blank" rel="noopener"
             ><span class="en">Releases</span><span class="ko">릴리스</span></a
           >
           <a
-            href="https://github.com/youngminnnn/ditto/blob/main/PRIVACY.md"
+            href="https://github.com/youngminnnn/wooi/blob/main/PRIVACY.md"
             target="_blank"
             rel="noopener"
             ><span class="en">Privacy</span><span class="ko">개인정보</span></a
           >
           <a
-            href="https://github.com/youngminnnn/ditto/blob/main/TERMS.md"
+            href="https://github.com/youngminnnn/wooi/blob/main/TERMS.md"
             target="_blank"
             rel="noopener"
             ><span class="en">Terms</span><span class="ko">약관</span></a
           >
           <a
-            href="https://github.com/youngminnnn/ditto/blob/main/CONTRIBUTING.md"
+            href="https://github.com/youngminnnn/wooi/blob/main/CONTRIBUTING.md"
             target="_blank"
             rel="noopener"
             ><span class="en">Contributing</span><span class="ko">기여</span></a
@@ -1540,7 +1540,7 @@
 
     <script>
       ;(function () {
-        var KEY = 'ditto-lang'
+        var KEY = 'wooi-lang'
         var body = document.body
 
         function apply(lang) {

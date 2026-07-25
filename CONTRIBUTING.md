@@ -1,27 +1,27 @@
-# Contributing to Ditto
+# Contributing to Wooi
 
-Thanks for your interest in improving Ditto! This guide covers how to set up the
+Thanks for your interest in improving Wooi! This guide covers how to set up the
 project, the conventions we follow, and how to get a change merged.
 
-> Ditto is an early-stage, single-maintainer project. Please open an issue to
+> Wooi is an early-stage, single-maintainer project. Please open an issue to
 > discuss non-trivial changes before investing a lot of time — it saves everyone a
 > round trip.
 
 ## Prerequisites
 
-- **macOS (Apple Silicon)** — Ditto is a macOS desktop app and is currently only
+- **macOS (Apple Silicon)** — Wooi is a macOS desktop app and is currently only
   built/tested on Apple Silicon.
 - **Node.js 20** — the version pinned in [`.nvmrc`](./.nvmrc) and used in CI. If you
   use `nvm`, run `nvm use`.
 - **git** and **`gh` (GitHub CLI)** — required at runtime; `gh` must be signed in.
-- **Claude Code**, signed in — Ditto drives it through the Claude Agent SDK and
+- **Claude Code**, signed in — Wooi drives it through the Claude Agent SDK and
   reuses its credentials (no separate API key).
 
 ## Getting started
 
 ```bash
-git clone https://github.com/youngminnnn/ditto.git
-cd ditto
+git clone https://github.com/youngminnnn/wooi.git
+cd wooi
 nvm use            # optional, selects Node 20
 npm install        # installs deps + electron binary (postinstall)
 npm run dev        # launches the app in development mode (electron-vite)
@@ -73,7 +73,7 @@ npm run test:watch # watch mode
 
 ## Branch & commit conventions
 
-Ditto enforces **Conventional Commits**-style prefixes on **branch names**, both
+Wooi enforces **Conventional Commits**-style prefixes on **branch names**, both
 locally (husky pre-push) and in CI. A branch must be named:
 
 ```

@@ -2,7 +2,7 @@
 
 [English](./agent-backends.md) · **한국어**
 
-ditto 는 AI 코딩 에이전트를 `AgentBackend` 추상화 뒤에 두어, 여러 백엔드를 교체·확장할 수 있게
+wooi 는 AI 코딩 에이전트를 `AgentBackend` 추상화 뒤에 두어, 여러 백엔드를 교체·확장할 수 있게
 설계돼 있다(`src/main/agent/*`). 이 문서는 그 확장 계획을 담는 살아있는 문서다.
 
 v1.0.0 은 **Claude Code 전용**으로 출시하고, 이후 버전에서 OpenAI **Codex** 백엔드를 단계적으로

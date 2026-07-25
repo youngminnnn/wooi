@@ -23,7 +23,7 @@ export default function EmptyState(): React.JSX.Element {
         <div className="mb-5 grid h-20 w-20 place-items-center rounded-2xl bg-[var(--surface)] border border-[var(--border-2)] shadow-xl">
           <Logo size={44} />
         </div>
-        <h2 className="text-lg font-semibold tracking-tight text-neutral-100 mb-2">Ditto</h2>
+        <h2 className="text-lg font-semibold tracking-tight text-neutral-100 mb-2">Wooi</h2>
         <p className="text-base text-neutral-400 leading-relaxed">
           {hasRepo
             ? 'Create a workspace to spin up an AI coding agent in its own isolated git worktree. Each workspace runs independently and in parallel.'

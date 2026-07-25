@@ -1,5 +1,5 @@
 name: Bug report
-description: Report a problem with Ditto
+description: Report a problem with Wooi
 labels: ['bug']
 body:
   - type: markdown
@@ -29,9 +29,9 @@ body:
     validations:
       required: true
   - type: input
-    id: ditto-version
+    id: wooi-version
     attributes:
-      label: Ditto version
+      label: Wooi version
       description: Shown in the app / release you downloaded (e.g. v0.6.0).
     validations:
       required: true

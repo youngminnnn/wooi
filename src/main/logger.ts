@@ -21,14 +21,14 @@ function file(): string {
   if (logFile) return logFile
   // 이 모듈은 메인과 agent-host(유틸리티 프로세스) 양쪽에서 로드된다. 유틸리티 프로세스에는
   // electron `app` 이 없고 ESM 에서 `import { app } from 'electron'` 자체가 로드 시 throw 하므로
-  // electron 을 의존하지 않는다 — userData 는 메인이 startup 에서 설정(DITTO_USER_DATA)하고
-  // host fork 시 그 값을 env 로 물려준다. DITTO_LOG_NAME 으로 호스트는 host.log 에 따로 적어
+  // electron 을 의존하지 않는다 — userData 는 메인이 startup 에서 설정(WOOI_USER_DATA)하고
+  // host fork 시 그 값을 env 로 물려준다. WOOI_LOG_NAME 으로 호스트는 host.log 에 따로 적어
   // 메인의 main.log 와 동시 append 경합을 피한다. env 가 비는 예외 상황만 homedir 로 폴백한다.
   const userData =
-    process.env.DITTO_USER_DATA || join(homedir(), 'Library', 'Application Support', 'Ditto')
+    process.env.WOOI_USER_DATA || join(homedir(), 'Library', 'Application Support', 'Wooi')
   const dir = join(userData, 'logs')
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
-  logFile = join(dir, process.env.DITTO_LOG_NAME || 'main.log')
+  logFile = join(dir, process.env.WOOI_LOG_NAME || 'main.log')
   return logFile
 }
 

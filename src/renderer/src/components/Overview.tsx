@@ -259,7 +259,7 @@ export default function Overview(): React.JSX.Element {
         <p className="mt-6 text-xs text-neutral-600 text-center">
           ⌘1–9 to switch · ⌘[ / ⌘] to cycle ·{' '}
           <button
-            onClick={() => window.dispatchEvent(new CustomEvent('ditto:open-shortcuts'))}
+            onClick={() => window.dispatchEvent(new CustomEvent('wooi:open-shortcuts'))}
             className="underline decoration-dotted hover:text-neutral-400"
           >
             press ? for all shortcuts

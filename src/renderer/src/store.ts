@@ -85,7 +85,7 @@ let pendingSeq = 0
  * 권위 있는 기본값은 settings.defaultRightPanelOpen 이지만, 사용자가 한 번이라도 토글하면
  * 그 마지막 상태를 여기 캐시해 다음 실행에서 복원한다(테마 캐시와 같은 방식).
  */
-const RIGHT_PANEL_KEY = 'ditto.rightPanelOpen'
+const RIGHT_PANEL_KEY = 'wooi.rightPanelOpen'
 
 /** 기억된 패널 상태를 읽는다. 토글한 적이 없으면(키 없음) null 을 돌려 기본값으로 폴백하게 한다. */
 function readRememberedRightPanel(): boolean | null {
@@ -516,7 +516,7 @@ export const useStore = create<UIState>((set, get) => ({
       set({
         scriptOutput: {
           ...out,
-          [key]: (out[key] ?? '') + `\n[ditto] exited (code ${code ?? '?'})\n`
+          [key]: (out[key] ?? '') + `\n[wooi] exited (code ${code ?? '?'})\n`
         }
       })
       void get().refreshScriptStatus(workspaceId)

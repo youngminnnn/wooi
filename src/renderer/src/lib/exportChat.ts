@@ -48,7 +48,7 @@ function itemToMarkdown(it: ChatItem): string {
 
 /** 트랜스크립트를 사람이 읽는 마크다운 문서로 변환한다. */
 export function chatToMarkdown(items: ChatItem[], title: string): string {
-  const header = `# ${title}\n\n_Exported from Ditto · ${new Date().toISOString()}_\n`
+  const header = `# ${title}\n\n_Exported from Wooi · ${new Date().toISOString()}_\n`
   const body = items.map(itemToMarkdown).filter(Boolean).join('\n\n---\n\n')
   return `${header}\n${body}\n`
 }

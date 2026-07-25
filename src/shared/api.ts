@@ -40,7 +40,7 @@ import type {
  * preload 가 `window.api` 로 노출하는 표면. preload 구현과 renderer 소비가
  * 같은 타입을 보도록 shared 에 둔다(SSOT).
  */
-export interface DittoApi {
+export interface WooiApi {
   getState(): Promise<AppState>
 
   repo: {

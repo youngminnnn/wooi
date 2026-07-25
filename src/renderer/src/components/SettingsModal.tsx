@@ -106,7 +106,7 @@ export default function SettingsModal({
             <span className="text-sm">
               Take a tour
               <span className="block text-xs text-neutral-600">
-                Revisit the quick intro to Ditto&rsquo;s main features.
+                Revisit the quick intro to Wooi&rsquo;s main features.
               </span>
             </span>
           </button>

@@ -27,7 +27,7 @@ export default function ScriptPanel({
   const setupSucceeded = tab === 'setup' && ws.setupState === 'success'
   const setupFailed = tab === 'setup' && ws.setupState === 'failed'
   const out = output[scriptKey(workspaceId, tab)] ?? ''
-  // 이 workspace 에 배정된 dev 포트. 스크립트에는 $PORT/$DITTO_DEV_PORT 로 주입된다.
+  // 이 workspace 에 배정된 dev 포트. 스크립트에는 $PORT/$WOOI_DEV_PORT 로 주입된다.
   const port = ws.devPort
   // 포트 충돌(다른 프로세스가 이미 점유)을 출력에서 감지해 사용자에게 알린다 — 병렬 dev 서버에서
   // 흔하며, 그냥 두면 로그에 묻혀 "왜 안 뜨지" 로 이어진다.
@@ -102,7 +102,7 @@ export default function ScriptPanel({
             <span className="ml-auto shrink-0 flex items-center gap-2 not-italic">
               <span
                 className="text-neutral-500"
-                title="Unique port for this workspace, injected as $PORT / $DITTO_DEV_PORT"
+                title="Unique port for this workspace, injected as $PORT / $WOOI_DEV_PORT"
               >
                 PORT={port}
               </span>

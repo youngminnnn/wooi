@@ -77,7 +77,7 @@ export default function IntegrationsPanel(): React.JSX.Element {
         connected={!!github?.loggedIn}
         detail={
           !github?.installed
-            ? 'Required — install the GitHub CLI (gh) to use Ditto'
+            ? 'Required — install the GitHub CLI (gh) to use Wooi'
             : github.loggedIn
               ? `@${github.account ?? '?'}${github.protocol ? ` · ${github.protocol}` : ''}`
               : 'Sign in to GitHub to continue'

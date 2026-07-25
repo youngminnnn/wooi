@@ -4,7 +4,7 @@ import Logo from './Logo'
 import { useStore } from '../store'
 
 /**
- * gh(GitHub CLI) 하드 게이트. Ditto 는 브랜치·PR 관리에 gh 를 필수로 쓰므로,
+ * gh(GitHub CLI) 하드 게이트. Wooi 는 브랜치·PR 관리에 gh 를 필수로 쓰므로,
  * "설치 + 로그인" 이 모두 끝나기 전에는 본 화면 진입을 막는다(App 에서 전체화면 오버레이로 렌더).
  *
  * Claude 등 다른 에이전트는 막지 않는다 — 향후 Claude 외 에이전트도 지원할 예정이라
@@ -31,7 +31,7 @@ export default function GithubGate(): React.JSX.Element {
           </div>
           <h2 className="text-lg font-semibold text-neutral-100">GitHub CLI required</h2>
           <p className="mt-1.5 text-sm text-neutral-500 leading-relaxed">
-            Ditto uses the GitHub CLI (gh) to manage branches and pull requests. Install it and sign
+            Wooi uses the GitHub CLI (gh) to manage branches and pull requests. Install it and sign
             in to continue — this screen closes automatically once you&rsquo;re connected.
           </p>
         </div>

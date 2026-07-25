@@ -179,8 +179,8 @@ class Store {
   constructor() {
     const dir = app.getPath('userData')
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
-    this.filePath = join(dir, 'ditto.json')
-    this.backupPath = join(dir, 'ditto.bak.json')
+    this.filePath = join(dir, 'wooi.json')
+    this.backupPath = join(dir, 'wooi.bak.json')
     this.state = this.load()
   }
 
@@ -195,7 +195,7 @@ class Store {
 
     const fromBackup = this.tryLoad(this.backupPath)
     if (fromBackup) {
-      log.error('ditto.json 손상/누락 — 백업(ditto.bak.json)에서 복구했습니다.')
+      log.error('wooi.json 손상/누락 — 백업(wooi.bak.json)에서 복구했습니다.')
       // 복구한 상태를 곧장 주 파일로 다시 써, 다음 부팅부터 정상 파일을 읽게 한다.
       try {
         writeFileAtomic(this.filePath, JSON.stringify(fromBackup, null, 2))
@@ -206,7 +206,7 @@ class Store {
     }
 
     if (existsSync(this.filePath) || existsSync(this.backupPath)) {
-      log.error('ditto.json 과 백업 모두 읽기 실패 — 빈 상태로 시작합니다.')
+      log.error('wooi.json 과 백업 모두 읽기 실패 — 빈 상태로 시작합니다.')
     }
     return this.empty()
   }

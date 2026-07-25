@@ -1,8 +1,8 @@
 /**
- * 세션 응답 완료 알림음. 에셋 없이 Web Audio API 로 "ditto" 느낌의 2음 차임을 합성한다.
+ * 세션 응답 완료 알림음. 에셋 없이 Web Audio API 로 "wooi" 느낌의 2음 차임을 합성한다.
  *
  * "di-tto" 두 박을 같은 F#5 로 짧게 두 번 울린다 — 밝은 첫 음 뒤에 같은 음이
- * 메아리처럼 작게 이어져 "ditto = 반복" 을 표현한다.
+ * 메아리처럼 작게 이어져 "wooi = 반복" 을 표현한다.
  * 음색은 기본음 + 2·3배음을 더한 PeriodicWave 로 우드 말렛처럼 만든다.
  */
 let ctx: AudioContext | null = null

@@ -31,24 +31,24 @@ describe('sanitizeBranch', () => {
 
 describe('parseGithubOwner', () => {
   it('HTTPS URL 에서 소유자를 뽑는다', () => {
-    expect(parseGithubOwner('https://github.com/youngminnnn/ditto.git')).toBe('youngminnnn')
-    expect(parseGithubOwner('https://github.com/youngminnnn/ditto')).toBe('youngminnnn')
+    expect(parseGithubOwner('https://github.com/youngminnnn/wooi.git')).toBe('youngminnnn')
+    expect(parseGithubOwner('https://github.com/youngminnnn/wooi')).toBe('youngminnnn')
   })
 
   it('SSH(scp 형식) URL 에서 소유자를 뽑는다', () => {
-    expect(parseGithubOwner('git@github.com:youngminnnn/ditto.git')).toBe('youngminnnn')
+    expect(parseGithubOwner('git@github.com:youngminnnn/wooi.git')).toBe('youngminnnn')
   })
 
   it('ssh:// URL 에서 소유자를 뽑는다', () => {
-    expect(parseGithubOwner('ssh://git@github.com/youngminnnn/ditto')).toBe('youngminnnn')
+    expect(parseGithubOwner('ssh://git@github.com/youngminnnn/wooi')).toBe('youngminnnn')
   })
 
   it('끝의 슬래시를 허용한다', () => {
-    expect(parseGithubOwner('https://github.com/youngminnnn/ditto/')).toBe('youngminnnn')
+    expect(parseGithubOwner('https://github.com/youngminnnn/wooi/')).toBe('youngminnnn')
   })
 
   it('대소문자를 가리지 않는다', () => {
-    expect(parseGithubOwner('https://GitHub.com/Youngminnnn/Ditto.git')).toBe('Youngminnnn')
+    expect(parseGithubOwner('https://GitHub.com/Youngminnnn/Wooi.git')).toBe('Youngminnnn')
   })
 
   it('GitHub 리모트가 아니면 null 을 반환한다', () => {

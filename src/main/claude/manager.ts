@@ -71,14 +71,14 @@ export class SessionManager implements AgentBackend {
 
     const entry = join(import.meta.dirname, 'host.js')
     const host = utilityProcess.fork(entry, [], {
-      serviceName: 'ditto-agent-host',
+      serviceName: 'wooi-agent-host',
       // 메인이 로그인 셸로 보정한 PATH·토큰을 그대로 물려준다(자식 claude CLI 가 인증/설정을
       // 읽을 수 있도록). app 이 없는 유틸리티 프로세스용으로 userData·패키징 여부를 넘긴다.
       env: {
         ...process.env,
-        DITTO_USER_DATA: app.getPath('userData'),
-        DITTO_LOG_NAME: 'host.log',
-        DITTO_PACKAGED: app.isPackaged ? '1' : ''
+        WOOI_USER_DATA: app.getPath('userData'),
+        WOOI_LOG_NAME: 'host.log',
+        WOOI_PACKAGED: app.isPackaged ? '1' : ''
       }
     })
 
@@ -463,7 +463,7 @@ export class SessionManager implements AgentBackend {
     if (ws?.muted) return
     const channels = getStore().getState().settings.notifications?.[event]
     if (!channels?.osNotification) return
-    const title = ws ? `${urgent ? '⚠️ ' : ''}${workspaceDisplayName(ws)}` : 'Ditto'
+    const title = ws ? `${urgent ? '⚠️ ' : ''}${workspaceDisplayName(ws)}` : 'Wooi'
     // OS 알림 소리는 이벤트별 sound 채널을 따른다(설정에서 sound 를 끄면 무음 알림).
     const notification = new Notification({ title, body, silent: !channels.sound })
     notification.on('click', () => {

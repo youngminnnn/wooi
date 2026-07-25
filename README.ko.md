@@ -1,50 +1,41 @@
-# Ditto
+# Wooi
 
 **여러 AI 코딩 에이전트를 동시에 — 각자 자기 git worktree 위에서, 각자 자기 PR 로.**
 
 [English](./README.md) · **한국어**
 
-![Ditto 데모](docs/demo.gif)
+![Wooi 데모](docs/demo.gif)
 
-Ditto 는 여러 **AI 코딩 에이전트**를 각자 격리된 git worktree 위에서 병렬로 오케스트레이션하는
+Wooi 는 여러 **AI 코딩 에이전트**를 각자 격리된 git worktree 위에서 병렬로 오케스트레이션하는
 macOS 데스크톱 앱입니다. 작업 1개당 전용 worktree + 브랜치 + 에이전트 세션이 돌아가며, 모든 세션은
 **자동 프롬프트 없이 빈 입력창**으로 시작합니다 — 첫 메시지를 보내기 전까지 아무것도 실행되지 않습니다.
 
-> **에이전트 지원** — Ditto 는 현재 **Claude Code**(Claude Agent SDK 경유)를 구동합니다.
+> **에이전트 지원** — Wooi 는 현재 **Claude Code**(Claude Agent SDK 경유)를 구동합니다.
 > 앞으로 **Codex** 등 더 다양한 에이전트를 지원할 예정입니다.
 
-## 왜 Ditto 인가
+## 왜 Wooi 인가
 
 - 🧵 **진짜 병렬** — 리팩터링·기능 추가·버그 수정을 한꺼번에 시작하고, 사이드바 하나에서 셋 다 지켜봅니다.
 - 🔒 **기본이 격리** — 작업마다 별도 worktree + 브랜치라, 공유 작업 트리에서 에이전트끼리 충돌하지 않습니다.
 - 🚢 **PR 친화적** — 에이전트의 diff 에서 GitHub PR 까지 클릭 한 번으로 넘어갑니다.
 - 🕵️ **텔레메트리 없음** — 자체 서버 없이, 대화 기록은 로컬에만 저장됩니다.
 
-**[최신 릴리스 다운로드 →](https://github.com/youngminnnn/ditto/releases)**
+**[최신 릴리스 다운로드 →](https://github.com/youngminnnn/wooi/releases)**
 
 ## 설치
 
-Ditto 는 **ad-hoc 서명**된 `.dmg` 로 배포됩니다 — 아직 유료 Apple Developer ID 로
-**공증(notarization)** 되지 않아, macOS Gatekeeper 가 첫 실행을 막을 수 있습니다.
+Wooi 는 **서명 및 공증(Apple Developer ID)** 된 `.dmg` 로 배포됩니다 — macOS
+Gatekeeper 경고 없이 바로 실행됩니다.
 
-1. [Releases 페이지](https://github.com/youngminnnn/ditto/releases)에서 최신 `.dmg` 를
-   받아 **Ditto** 를 **Applications** 로 드래그합니다.
-2. 처음 실행할 때는 앱을 **우클릭(Control-클릭) → 열기** 한 뒤 대화상자에서 확인합니다.
-   더블클릭하면 "확인되지 않은 개발자" 경고가 뜰 수 있습니다.
-3. macOS 가 앱이 **"손상되어 열 수 없습니다"** 라고 하면, quarantine 속성을 제거하고 다시
-   엽니다:
-
-   ```bash
-   xattr -dr com.apple.quarantine /Applications/Ditto.app
-   ```
-
-정식 Developer ID 서명 + 공증은 향후 릴리스에서 지원할 예정입니다.
+1. [Releases 페이지](https://github.com/youngminnnn/wooi/releases)에서 최신 `.dmg` 를
+   받아 **Wooi** 를 **Applications** 로 드래그합니다.
+2. **Applications** 에서 **Wooi** 를 실행합니다.
 
 ## 컨셉
 
 - **Repository** — git 리포를 연결합니다(메인 체크아웃).
 - **Workspace** — 작업 1개 = 전용 git worktree + 브랜치 + 에이전트 세션 1개.
-  `~/ditto/workspaces/<repo>/<branch>` 에 생성됩니다.
+  `~/wooi/workspaces/<repo>/<branch>` 에 생성됩니다.
 - 각 workspace 는 **독립적·병렬**로 실행됩니다. 한 workspace 에서 에이전트가 돌아가는 동안
   다른 workspace 를 열어 계속 작업할 수 있습니다.
 - **Setup / Dev / Archive 스크립트** — 리포 단위로 지정합니다(`npm install`, `npm run dev` 등).
@@ -53,7 +44,7 @@ Ditto 는 **ad-hoc 서명**된 `.dmg` 로 배포됩니다 — 아직 유료 Appl
 
 ## 시작하기
 
-Ditto 를 처음 실행하면 온보딩이 다음을 안내합니다:
+Wooi 를 처음 실행하면 온보딩이 다음을 안내합니다:
 
 1. 약관·개인정보처리방침 **동의**(진행하려면 필수).
 2. Claude·GitHub **로그인**. CLI 가 설치돼 있지 않으면 설치 링크를 보여줍니다.
@@ -61,7 +52,7 @@ Ditto 를 처음 실행하면 온보딩이 다음을 안내합니다:
    진행됩니다. **GitHub CLI(`gh`)는 필수**라 `gh` 설치·로그인을 마치기 전에는 온보딩(및 앱 사용)을
    끝낼 수 없습니다. 연동 상태는 언제든 **Settings → Integrations** 에서 변경할 수 있습니다.
 
-Ditto 는 **설치된 Claude Code 와 `gh` CLI 의 로그인 정보를 그대로 사용**합니다 — 별도 API 키가
+Wooi 는 **설치된 Claude Code 와 `gh` CLI 의 로그인 정보를 그대로 사용**합니다 — 별도 API 키가
 필요 없습니다.
 
 ### 요구 사항
@@ -131,14 +122,14 @@ Ditto 는 **설치된 Claude Code 와 `gh` CLI 의 로그인 정보를 그대로
 - **Open in editor / Reveal in Finder** — 헤더 버튼으로 worktree 를 VS Code(`code`, 실패 시
   Finder 로 폴백)에서 열거나 Finder 에서 보여줍니다.
 
-> 참고: diff 뷰어는 읽기 전용이라 Ditto 안에서 스테이징·커밋·되돌리기는 할 수 없습니다.
+> 참고: diff 뷰어는 읽기 전용이라 Wooi 안에서 스테이징·커밋·되돌리기는 할 수 없습니다.
 
 ## 개인정보 / 데이터
 
-- Ditto 는 자체 서버가 없고 **분석/텔레메트리를 수집하지 않습니다**.
+- Wooi 는 자체 서버가 없고 **분석/텔레메트리를 수집하지 않습니다**.
 - 프롬프트·코드는 Claude Agent SDK 를 통해 **Anthropic** 으로 전송됩니다. PR 기능 사용 시
   메타데이터가 `gh` CLI 를 통해 **GitHub** 으로 전송됩니다.
-- 설정·대화 기록은 **로컬**(`~/Library/Application Support/Ditto/`)에만 저장됩니다.
+- 설정·대화 기록은 **로컬**(`~/Library/Application Support/Wooi/`)에만 저장됩니다.
 - 자세한 내용은 [`PRIVACY.md`](./PRIVACY.md) · [`TERMS.md`](./TERMS.md) 를 참고해 주세요.
 
 ## 소스로 빌드하기
@@ -146,8 +137,8 @@ Ditto 는 **설치된 Claude Code 와 `gh` CLI 의 로그인 정보를 그대로
 **macOS (Apple Silicon)** 와 **Node.js 20** 이 필요합니다(버전은 [`.nvmrc`](./.nvmrc) 참고).
 
 ```bash
-git clone https://github.com/youngminnnn/ditto.git
-cd ditto
+git clone https://github.com/youngminnnn/wooi.git
+cd wooi
 nvm use          # 선택 사항, Node 20 선택
 npm install      # 의존성 + Electron 바이너리 설치
 npm run dev      # 개발 모드 실행

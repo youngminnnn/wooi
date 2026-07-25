@@ -28,9 +28,9 @@ type ClaudeJson = {
  * 사용자가 `claude` CLI 용으로 등록해 둔 MCP 서버를 SDK 로 그대로 흘려보내기 위해
  * ~/.claude.json 에서 추려 병합한다.
  *
- * 왜 직접 읽나: ditto 는 worktree 경로를 cwd 로 주는데, SDK 는 그 cwd 기준으로만 project/local
+ * 왜 직접 읽나: wooi 는 worktree 경로를 cwd 로 주는데, SDK 는 그 cwd 기준으로만 project/local
  * 스코프 MCP 를 찾는다 — 새로 만든 worktree 경로는 ~/.claude.json 의 projects 에 없으니
- * 사용자가 원본 repo 에 등록한 서버가 통째로 누락된다(그래서 "CLI 에선 되는데 ditto 에선 안 됨").
+ * 사용자가 원본 repo 에 등록한 서버가 통째로 누락된다(그래서 "CLI 에선 되는데 wooi 에선 안 됨").
  * 원본 repo 경로(repoPath)의 project/local 스코프 서버를 직접 읽어 user 스코프와 합쳐
  * mcpServers 옵션으로 명시 주입하면, 스코프와 무관하게 동일하게 동작한다. stdio·http·sse 정의가
  * 모두 McpServerConfig 와 같은 형태라 변환 없이 그대로 넘긴다. claude.ai 커넥터처럼 계정에

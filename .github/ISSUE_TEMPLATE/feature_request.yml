@@ -1,5 +1,5 @@
 name: Feature request
-description: Suggest an idea or improvement for Ditto
+description: Suggest an idea or improvement for Wooi
 labels: ['enhancement']
 body:
   - type: markdown
@@ -11,7 +11,7 @@ body:
     id: problem
     attributes:
       label: What problem does this solve?
-      description: What are you trying to do, and where does Ditto get in the way today?
+      description: What are you trying to do, and where does Wooi get in the way today?
     validations:
       required: true
   - type: textarea

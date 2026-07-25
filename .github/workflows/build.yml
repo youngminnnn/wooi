@@ -23,20 +23,24 @@ jobs:
 
       - run: npm ci
 
-      - name: Build ad-hoc signed dmg + zip
-        # 서명은 package.json build.mac.identity: "-" (ad-hoc)이 담당한다.
-        # CI 러너의 keychain 에는 Apple 인증서가 없어 자동 탐색이 실제 인증서를
-        # 잘못 집을 일이 없고, CSC_IDENTITY_AUTO_DISCOVERY=false 는 오히려 서명을
-        # 통째로 건너뛰어 ad-hoc 서명까지 무력화할 수 있으므로 지정하지 않는다.
-        # ad-hoc 서명은 arm64에서 "손상됨" 대신 "확인되지 않은 개발자" 경고로 완화돼
-        # 사용자가 우클릭 → 열기 / "확인 없이 열기"로 터미널 없이 우회할 수 있다.
-        # 인증서 준비 후에는 identity 를 실제 Developer ID 로 바꾸고
-        # CSC_LINK/CSC_KEY_PASSWORD 와 공증 자격증명을 secrets 로 주입한다.
+      - name: Build signed + notarized dmg + zip
+        # Developer ID Application 인증서로 서명하고 Apple 에 공증한다.
+        # - CSC_LINK: base64 로 인코딩한 .p12 (Developer ID Application) 인증서
+        # - CSC_KEY_PASSWORD: .p12 export 시 지정한 비밀번호
+        # - APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD / APPLE_TEAM_ID: 공증 자격증명
+        # electron-builder 가 CSC_LINK 를 임시 keychain 으로 가져와 서명하고,
+        # package.json build.mac.notarize 설정에 따라 공증을 수행한다.
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: npm run dist
 
       - uses: actions/upload-artifact@v7
         with:
-          name: ditto-macos-arm64
+          name: wooi-macos-arm64
           path: |
             release/*.dmg
             release/*.zip

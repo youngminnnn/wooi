@@ -1,20 +1,20 @@
-# Ditto
+# Wooi
 
 **Run multiple AI coding agents at once — each in its own git worktree, each shipping its own PR.**
 
 **English** · [한국어](./README.ko.md)
 
-![Ditto demo](docs/demo.gif)
+![Wooi demo](docs/demo.gif)
 
-Ditto is a macOS desktop app for orchestrating multiple **AI coding agents** in
+Wooi is a macOS desktop app for orchestrating multiple **AI coding agents** in
 parallel, each on its own isolated git worktree. Each task runs in its own dedicated
 worktree + branch + agent session, and every session starts with **an empty input box
 and no automatic prompt** — nothing runs until you send your first message.
 
-> **Agent support** — Ditto currently drives **Claude Code** (via the Claude
+> **Agent support** — Wooi currently drives **Claude Code** (via the Claude
 > Agent SDK). Support for more agents such as **Codex** is planned.
 
-## Why Ditto
+## Why Wooi
 
 - 🧵 **True parallelism** — kick off a refactor, a feature, and a bugfix at the same
   time, and watch all three from one sidebar.
@@ -23,32 +23,23 @@ and no automatic prompt** — nothing runs until you send your first message.
 - 🚢 **PR-native** — jump straight from an agent's diff to a GitHub PR in one click.
 - 🕵️ **No telemetry** — no servers of its own; transcripts stored locally only.
 
-**[Download the latest release →](https://github.com/youngminnnn/ditto/releases)**
+**[Download the latest release →](https://github.com/youngminnnn/wooi/releases)**
 
 ## Installation
 
-Ditto ships as an **ad-hoc signed** `.dmg` — it is **not yet notarized** with a paid
-Apple Developer ID, so macOS Gatekeeper may block the first launch.
+Wooi ships as a **signed and notarized** `.dmg` (Apple Developer ID), so it opens
+without Gatekeeper warnings.
 
 1. Download the latest `.dmg` from the
-   [Releases page](https://github.com/youngminnnn/ditto/releases) and drag **Ditto**
+   [Releases page](https://github.com/youngminnnn/wooi/releases) and drag **Wooi**
    into **Applications**.
-2. On first launch, **right-click (Control-click) the app → Open**, then confirm in the
-   dialog. Double-clicking may show an "unidentified developer" warning.
-3. If macOS reports the app is **"damaged and can't be opened"**, clear the quarantine
-   attribute and open it again:
-
-   ```bash
-   xattr -dr com.apple.quarantine /Applications/Ditto.app
-   ```
-
-Proper Developer ID signing + notarization is planned for a future release.
+2. Open **Wooi** from Applications.
 
 ## Concept
 
 - **Repository** — connect a git repo (its main checkout).
 - **Workspace** — one task = one dedicated git worktree + branch + agent session,
-  created under `~/ditto/workspaces/<repo>/<branch>`.
+  created under `~/wooi/workspaces/<repo>/<branch>`.
 - Each workspace runs **independently and in parallel** — while an agent works in one
   workspace, you can open another and keep going.
 - **Setup / Dev / Archive scripts** — configured per repo (`npm install`, `npm run dev`,
@@ -58,7 +49,7 @@ Proper Developer ID signing + notarization is planned for a future release.
 
 ## Getting started
 
-When you first launch Ditto, onboarding walks you through:
+When you first launch Wooi, onboarding walks you through:
 
 1. **Consent** to the Terms / Privacy Policy (required to continue).
 2. **Signing in** to Claude and GitHub. If a CLI isn't installed, an install link is
@@ -67,7 +58,7 @@ When you first launch Ditto, onboarding walks you through:
    finish onboarding (or use the app) until `gh` is installed and signed in. You can
    change connections anytime under **Settings → Integrations**.
 
-Ditto **reuses the credentials of your installed Claude Code and `gh` CLIs** — no
+Wooi **reuses the credentials of your installed Claude Code and `gh` CLIs** — no
 separate API key is needed.
 
 ### Requirements
@@ -75,7 +66,7 @@ separate API key is needed.
 - macOS (Apple Silicon)
 - [Claude Code](https://claude.com/claude-code) — required, and signed in.
 - `git`
-- `gh` (GitHub CLI) — **required**. Ditto uses it for branch/PR management, and a hard
+- `gh` (GitHub CLI) — **required**. Wooi uses it for branch/PR management, and a hard
   gate blocks the app until it's installed and signed in.
 
 ## Features
@@ -146,15 +137,15 @@ A tabbed panel on top plus an interactive terminal below (resizable split):
 - **Open in editor / Reveal in Finder** — header buttons open the worktree in VS Code
   (`code`, falling back to Finder) or reveal it in Finder.
 
-> Note: the diff viewer is read-only — no staging, commit, or revert from within Ditto.
+> Note: the diff viewer is read-only — no staging, commit, or revert from within Wooi.
 
 ## Privacy / Data
 
-- Ditto has no servers of its own and **collects no analytics/telemetry**.
+- Wooi has no servers of its own and **collects no analytics/telemetry**.
 - Prompts and code are sent to **Anthropic** through the Claude Agent SDK. When you use
   the PR features, metadata is sent to **GitHub** via the `gh` CLI.
 - Settings and conversation transcripts are stored **locally only**
-  (`~/Library/Application Support/Ditto/`).
+  (`~/Library/Application Support/Wooi/`).
 - See [`PRIVACY.md`](./PRIVACY.md) and [`TERMS.md`](./TERMS.md) for details.
 
 ## Build from source
@@ -162,8 +153,8 @@ A tabbed panel on top plus an interactive terminal below (resizable split):
 Requires **Node.js 20** (see [`.nvmrc`](./.nvmrc)) on **macOS (Apple Silicon)**.
 
 ```bash
-git clone https://github.com/youngminnnn/ditto.git
-cd ditto
+git clone https://github.com/youngminnnn/wooi.git
+cd wooi
 nvm use          # optional, selects Node 20
 npm install      # installs deps + Electron binary
 npm run dev      # launch in development mode

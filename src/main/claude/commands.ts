@@ -19,7 +19,7 @@ const cache = new Map<string, Promise<SlashCommandInfo[]>>()
 /**
  * SDK supportedCommands() 가 돌려주지 않는 내장 명령을 자동완성에 보강한다.
  * /btw 와 /mcp·/context·/reload-plugins 등은 Claude Code TUI 전용(local-jsx · control-request)이라
- * SDK 목록에서 빠지지만, Ditto 는 이를 직접 처리하므로(sideQuestion.ts · control.ts) 입력창에서
+ * SDK 목록에서 빠지지만, Wooi 는 이를 직접 처리하므로(sideQuestion.ts · control.ts) 입력창에서
  * 고를 수 있어야 한다.
  */
 const BUILTIN_COMMANDS: SlashCommandInfo[] = [

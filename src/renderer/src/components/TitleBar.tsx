@@ -14,7 +14,7 @@ export default function TitleBar({
     <div className="drag h-11 shrink-0 flex items-center justify-between bg-[var(--bg)] border-b border-[var(--border)] pl-20 pr-3">
       <div className="flex items-center gap-2 text-base font-semibold tracking-tight text-neutral-200">
         <Logo size={18} />
-        Ditto
+        Wooi
         <span className="text-neutral-600 font-normal">· AI coding agent orchestrator</span>
       </div>
       <div className="flex items-center gap-2">
