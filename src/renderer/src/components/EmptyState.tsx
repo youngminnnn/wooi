@@ -50,7 +50,9 @@ export default function EmptyState(): React.JSX.Element {
             {active.length} workspace{active.length > 1 ? 's' : ''}
             {running > 0 && <span className="text-[var(--info-400)]"> · {running} running</span>}
             <br />
-            <span className="text-neutral-600">⌘1–9 to switch · ⌘[ / ⌘] to cycle</span>
+            <span className="text-neutral-600">
+              ⌘K to search · ⌘1–9 to switch · ⌘[ / ⌘] to cycle
+            </span>
           </p>
         )}
       </div>
