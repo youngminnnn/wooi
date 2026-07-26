@@ -36,6 +36,7 @@ import DiffModal from './DiffModal'
 import PrActionsMenu from './PrActionsMenu'
 import StackPopover from './StackPopover'
 import ExportMenu from './ExportMenu'
+import HeaderButton from './HeaderButton'
 import { workspaceDisplayName } from '@shared/types'
 import type { PrState, Workspace } from '@shared/types'
 
@@ -545,58 +546,6 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
           onClose={() => setShowDiff(false)}
         />
       )}
-    </div>
-  )
-}
-
-function HeaderButton({
-  children,
-  onClick,
-  title,
-  shortcut,
-  active,
-  danger,
-  indicator
-}: {
-  children: React.ReactNode
-  onClick: () => void
-  title: string
-  /** 호버 툴팁에 함께 보여줄 키보드 단축키(예: '⇧⌘E'). */
-  shortcut?: string
-  active?: boolean
-  danger?: boolean
-  /** 우상단에 실행 중 표시 점을 띄운다(예: dev 스크립트 실행 중). */
-  indicator?: boolean
-}): React.JSX.Element {
-  return (
-    <div className="no-drag group relative inline-flex">
-      <button
-        onClick={onClick}
-        aria-label={title}
-        className={
-          'h-7 w-7 grid place-items-center rounded-md active:scale-90 ' +
-          (danger
-            ? 'text-neutral-400 hover:bg-[var(--danger-500)]/15 hover:text-[var(--danger-400)]'
-            : active
-              ? 'bg-[var(--surface-2)] text-neutral-100'
-              : 'text-neutral-400 hover:bg-[var(--surface-2)] hover:text-neutral-100')
-        }
-      >
-        {children}
-      </button>
-      {/* 실행 중 표시: 패널을 닫아도 dev 스크립트가 돌고 있음을 알 수 있게 우상단에 점을 띄운다. */}
-      {indicator && (
-        <span className="pointer-events-none absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-[var(--info-400)] ring-2 ring-[var(--bg)]" />
-      )}
-      {/* 커스텀 호버 툴팁: 한 줄 설명 + 단축키. native title 은 지연이 있고 스타일이 없어 대체한다. */}
-      <div className="pointer-events-none absolute right-0 top-full z-50 mt-1.5 hidden items-center gap-1.5 whitespace-nowrap rounded-md border border-[var(--border)] bg-[var(--surface-2)] px-2 py-1 text-xs text-neutral-200 shadow-lg group-hover:flex">
-        <span>{title}</span>
-        {shortcut && (
-          <kbd className="rounded bg-black/30 px-1 py-0.5 text-[10px] leading-none font-medium tabular-nums text-neutral-400">
-            {shortcut}
-          </kbd>
-        )}
-      </div>
     </div>
   )
 }

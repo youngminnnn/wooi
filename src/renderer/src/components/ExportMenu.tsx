@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Download, FileText, FileJson } from 'lucide-react'
 import { useStore } from '../store'
 import { chatToJson, chatToMarkdown, downloadText } from '../lib/exportChat'
+import HeaderButton from './HeaderButton'
 import type { ChatItem } from '@shared/types'
 
 /** 대화 내보내기 메뉴(마크다운 / JSON). 헤더 버튼에서 열린다. */
@@ -61,15 +62,18 @@ export default function ExportMenu({
 
   return (
     <div className="relative" ref={ref}>
-      <button
+      {/* 헤더의 다른 아이콘 버튼과 같은 커스텀 호버 툴팁을 쓴다(native title 은 뜨지 않는다). */}
+      <HeaderButton
+        title="Export conversation"
+        shortcut="⇧⌘X"
         onClick={() => setOpen((v) => !v)}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        title="Export conversation — ⇧⌘X"
-        className="grid h-8 w-8 place-items-center rounded-lg text-neutral-400 hover:bg-[var(--surface-2)] hover:text-neutral-200 focus-visible:outline-2 focus-visible:outline-[var(--accent-500)]"
+        active={open}
+        hasPopup
+        expanded={open}
+        suppressTooltip={open}
       >
         <Download size={15} />
-      </button>
+      </HeaderButton>
       {open && (
         <div
           role="menu"
