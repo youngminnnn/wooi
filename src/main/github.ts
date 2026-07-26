@@ -131,6 +131,77 @@ export async function getPrStatus(worktreePath: string, branch?: string): Promis
   }
 }
 
+/**
+ * PR 1 개의 캐스케이드 판단용 메타데이터. selector 는 PR 번호 또는 브랜치명.
+ * state 는 OPEN|CLOSED|MERGED 원문 그대로 쓴다 — 캐스케이드는 "머지됨"과 "닫힘"을 구분해야 한다
+ * (닫힘 = base 브랜치 삭제로 GitHub 가 죽인 자식 → 복구 대상).
+ *
+ * baseRefOid 는 base 브랜치가 삭제된 뒤에도 GitHub 가 계속 돌려주며, 그 커밋도 API 로 접근 가능하다.
+ * 닫힌 자식 PR 을 되살릴 때 base 브랜치를 이 sha 로 복원하는 것이 유일한 경로다
+ * (닫힌 PR 은 base 변경이 거부되고, base 브랜치가 없으면 reopen 도 거부된다).
+ */
+export interface PrMeta {
+  number: number
+  state: string // OPEN | CLOSED | MERGED
+  headRefName: string
+  baseRefName: string
+  baseRefOid: string
+}
+
+export async function getPrMeta(
+  worktreePath: string,
+  selector: string | number
+): Promise<PrMeta | null> {
+  const { stdout, code } = await runLoginShell(
+    `gh pr view '${selector}' --json number,state,headRefName,baseRefName,baseRefOid`,
+    worktreePath
+  )
+  if (code !== 0) return null
+  try {
+    const pr = JSON.parse(stdout.trim()) as PrMeta
+    return pr.number ? pr : null
+  } catch {
+    return null
+  }
+}
+
+// ── 원격 브랜치 ref 조작 (닫힌 자식 PR 복구용) ────────────────────────────────
+// gh api 는 cwd 의 리포로 {owner}/{repo} 를 치환해 준다.
+
+/** 원격에 브랜치가 존재하는지. 없으면 gh 가 404 로 종료한다. */
+export async function remoteRefExists(worktreePath: string, branch: string): Promise<boolean> {
+  const { code } = await runLoginShell(
+    `gh api 'repos/{owner}/{repo}/git/ref/heads/${branch}'`,
+    worktreePath
+  )
+  return code === 0
+}
+
+/**
+ * 삭제된 브랜치를 지정 sha 로 되살린다(닫힌 자식 PR 을 reopen 하기 위한 발판).
+ * 이미 존재하면 성공으로 본다.
+ */
+export async function restoreRemoteRef(
+  worktreePath: string,
+  branch: string,
+  sha: string
+): Promise<{ error?: string }> {
+  const { stderr, code } = await runLoginShell(
+    `gh api -X POST 'repos/{owner}/{repo}/git/refs' -f 'ref=refs/heads/${branch}' -f 'sha=${sha}'`,
+    worktreePath
+  )
+  if (code !== 0) return { error: lastError(stderr, `Failed to restore branch ${branch}.`) }
+  return {}
+}
+
+/** 복구용으로 되살린 발판 브랜치를 다시 지운다(retarget 이 끝나면 더 이상 base 가 아니라 안전). */
+export async function deleteRemoteRef(worktreePath: string, branch: string): Promise<void> {
+  await runLoginShell(
+    `gh api -X DELETE 'repos/{owner}/{repo}/git/refs/heads/${branch}'`,
+    worktreePath
+  )
+}
+
 /** 리포의 열린 PR 을 head/base 브랜치와 함께 나열한다. worktree 안의 브랜치 스택을 자동 감지할 때 쓴다. */
 export async function listOpenPrs(
   worktreePath: string
@@ -293,16 +364,23 @@ function lastError(stderr: string, fallback: string): string {
 }
 
 /**
- * 현재 브랜치의 PR 을 병합한다. method 로 squash/merge/rebase 를 고른다.
+ * PR 을 병합한다. method 로 squash/merge/rebase 를 고른다.
+ * selector(PR 번호)를 주면 그 PR 을, 없으면 worktree 현재 브랜치의 PR 을 병합한다.
+ * 호출부는 UI 가 보여 준 PR 을 그대로 병합하도록 항상 번호를 넘긴다 — 모델 B 스택에서는
+ * 에이전트가 배경에서 브랜치를 옮길 수 있어, selector 없는 병합은 "지금 체크아웃된 브랜치"라는
+ * 흔들리는 대상을 집는다.
+ *
  * 로컬 브랜치는 worktree 에서 체크아웃돼 있어 삭제할 수 없으므로 --delete-branch 는 쓰지 않는다
  * (병합 후 워크스페이스를 아카이브하면 worktree·브랜치 정리는 그쪽 흐름이 담당한다).
  */
 export async function mergePr(
   worktreePath: string,
-  method: PrMergeMethod
+  method: PrMergeMethod,
+  selector?: string | number
 ): Promise<{ error?: string }> {
   const flag = method === 'merge' ? '--merge' : method === 'rebase' ? '--rebase' : '--squash'
-  const { stderr, code } = await runLoginShell(`gh pr merge ${flag}`, worktreePath)
+  const target = selector ? ` '${selector}'` : ''
+  const { stderr, code } = await runLoginShell(`gh pr merge${target} ${flag}`, worktreePath)
   if (code !== 0) return { error: lastError(stderr, 'Failed to merge the pull request.') }
   return {}
 }
@@ -314,9 +392,17 @@ export async function closePr(worktreePath: string): Promise<{ error?: string }>
   return {}
 }
 
-/** 닫힌 PR 을 다시 연다. */
-export async function reopenPr(worktreePath: string): Promise<{ error?: string }> {
-  const { stderr, code } = await runLoginShell('gh pr reopen', worktreePath)
+/**
+ * 닫힌 PR 을 다시 연다. selector 를 주면 그 PR 을, 없으면 현재 브랜치의 PR 을 대상으로 한다.
+ * base 브랜치가 삭제된 상태면 GitHub 가 reopen 을 거부하므로, 캐스케이드 복구는 먼저
+ * restoreRemoteRef 로 base 를 되살린 뒤 호출한다.
+ */
+export async function reopenPr(
+  worktreePath: string,
+  selector?: string | number
+): Promise<{ error?: string }> {
+  const target = selector ? ` '${selector}'` : ''
+  const { stderr, code } = await runLoginShell(`gh pr reopen${target}`, worktreePath)
   if (code !== 0) return { error: lastError(stderr, 'Failed to reopen the pull request.') }
   return {}
 }

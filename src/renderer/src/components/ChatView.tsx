@@ -35,6 +35,7 @@ import QuestionPrompt from './QuestionPrompt'
 import DiffModal from './DiffModal'
 import PrActionsMenu from './PrActionsMenu'
 import StackPopover from './StackPopover'
+import StackSyncBanner from './StackSyncBanner'
 import ExportMenu from './ExportMenu'
 import HeaderButton from './HeaderButton'
 import { workspaceDisplayName } from '@shared/types'
@@ -437,6 +438,9 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
           </div>
         )}
       </div>
+
+      {/* 외부 병합으로 스택이 stale 해졌을 때의 승인 배너(force-push 는 승인 후에만). */}
+      <StackSyncBanner workspace={workspace} />
 
       {/* 대화 */}
       <MessageList workspaceId={workspace.id} running={running} />

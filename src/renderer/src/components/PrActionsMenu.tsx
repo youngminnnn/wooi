@@ -9,6 +9,7 @@ import {
   Loader2
 } from 'lucide-react'
 import { useStore } from '../store'
+import { cascadeAffectedBranches } from '@shared/types'
 import type { PrMergeMethod, PrStatus } from '@shared/types'
 
 /**
@@ -30,6 +31,7 @@ export default function PrActionsMenu({
   const refreshGit = useStore((s) => s.refreshGit)
   const pushToast = useStore((s) => s.pushToast)
   const confirm = useStore((s) => s.confirm)
+  const workspaces = useStore((s) => s.app?.workspaces)
 
   useEffect(() => {
     if (!open) return
@@ -65,14 +67,25 @@ export default function PrActionsMenu({
   }
 
   const merge = async (method: PrMergeMethod): Promise<void> => {
+    const how =
+      method === 'squash'
+        ? 'Squashes all commits into one and merges into the base branch.'
+        : method === 'rebase'
+          ? 'Rebases the commits onto the base branch and merges.'
+          : 'Creates a merge commit on the base branch.'
+
+    // 스택이 걸려 있으면 병합 뒤 할 일이 남는다는 것만 알린다. 실제 리타겟·rebase·force-push 는
+    // 병합에 딸려 나가지 않고, 병합 후 뜨는 배너에서 따로 승인받는다(GitHub 웹에서 병합했을 때와 동일).
+    const ws = workspaces?.find((w) => w.id === workspaceId)
+    const affected = ws && workspaces ? cascadeAffectedBranches(ws, workspaces) : []
+    const note = affected.length
+      ? `\n\n${affected.length} stacked branch(es) sit on top of this one. ` +
+        `After merging, wooi will offer to retarget and rebase them.`
+      : ''
+
     const ok = await confirm({
       title: `Merge pull request #${pr.number}?`,
-      body:
-        method === 'squash'
-          ? 'Squashes all commits into one and merges into the base branch.'
-          : method === 'rebase'
-            ? 'Rebases the commits onto the base branch and merges.'
-            : 'Creates a merge commit on the base branch.',
+      body: how + note,
       confirmLabel: 'Merge'
     })
     if (!ok) return
