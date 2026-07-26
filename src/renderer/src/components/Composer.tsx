@@ -15,6 +15,7 @@ import {
   Bot,
   GitBranch,
   Folder,
+  FileText,
   ChevronRight,
   ArrowLeft,
   RotateCw,
@@ -31,12 +32,19 @@ import { useStore } from '../store'
 import { PERMISSION_FOOTER } from '../lib/permission'
 import { MODEL_OPTIONS, modelLabel } from '../lib/models'
 import { EFFORT_OPTIONS, effortLabel } from '../lib/effort'
-import { INTERACTIVE_COMMANDS } from '@shared/types'
+import {
+  INTERACTIVE_COMMANDS,
+  MENTION_DROP_HINT_BYTES,
+  MENTION_TRUNCATE_HINT_BYTES
+} from '@shared/types'
+import { formatBytes } from '../lib/format'
+import { appendMention, findMention, mentionToken, mentionWithRange } from '../lib/mention'
 import type {
   ChatItem,
   CommandPanelKind,
   CommandResult,
   EffortSetting,
+  FileHit,
   ImageAttachment,
   ImageMediaType,
   McpAction,
@@ -108,12 +116,30 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
   // 같은 워크스페이스 안에서 첨부 id 가 겹치지 않도록 하는 단조 카운터.
   const imgSeq = useRef(0)
 
+  // @파일 멘션 자동완성. 멘션 감지는 커서 위치 기준이라 selectionStart 를 따라간다.
+  const [caret, setCaret] = useState(0)
+  const [mentionResult, setMentionResult] = useState<{ query: string; hits: FileHit[] } | null>(
+    null
+  )
+  // Esc 로 닫은 `@` 토큰의 시작 위치. 같은 토큰을 계속 타이핑해도 메뉴가 다시 열리지 않게 한다.
+  const [mentionDismissedAt, setMentionDismissedAt] = useState<number | null>(null)
+  // 검색 응답을 현재 질의와만 맞추기 위한 단조 토큰(느린 응답이 최신 결과를 덮지 않도록).
+  const mentionSeq = useRef(0)
+
+  // 파일을 입력창 위로 끌어오는 중인지(드롭 대상임을 테두리로 알린다).
+  const [dragging, setDragging] = useState(false)
+
   // 워크스페이스를 바꾸면 이전 사이드 답변·명령 카드·대기 중 첨부를 치운다(다른 작업으로 새지 않도록).
   useEffect(() => {
     setSideAnswer(null)
     setCommandCard(null)
     setPickerCard(null)
     setImages([])
+    setMentionResult(null)
+    setMentionDismissedAt(null)
+    // 초안이 통째로 바뀌므로 이전 워크스페이스의 커서 위치는 버린다
+    // (남겨 두면 새 초안의 엉뚱한 자리를 `@` 토큰으로 오인해 메뉴가 뜬다).
+    setCaret(0)
   }, [workspace.id])
 
   /** /model·/effort 선택 카드를 연다(다른 카드는 비켜 준다). 상태줄 클릭·슬래시 명령 공용. */
@@ -125,6 +151,17 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
 
   const removeImage = (id: string): void => setImages((prev) => prev.filter((i) => i.id !== id))
 
+  /** 이미지 파일 1개를 전송 대기 첨부로 올린다(붙여넣기·드롭 공용). */
+  const addImage = (file: File, mediaType: ImageMediaType): void => {
+    const id = `img:${imgSeq.current++}`
+    const ext = mediaType.split('/')[1]
+    const name =
+      file.name && file.name !== 'image.png' ? file.name : `image-${imgSeq.current}.${ext}`
+    void readImage(file).then(({ dataBase64, dataUrl }) => {
+      setImages((prev) => [...prev, { id, name, mediaType, dataBase64, previewUrl: dataUrl }])
+    })
+  }
+
   /** 클립보드의 이미지를 첨부로 받는다. 이미지가 하나라도 있으면 기본 텍스트 붙여넣기를 막는다. */
   const onPaste = (e: React.ClipboardEvent<HTMLTextAreaElement>): void => {
     const files = Array.from(e.clipboardData.items)
@@ -134,15 +171,7 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
     if (!files.length) return // 텍스트 붙여넣기는 그대로 둔다.
 
     e.preventDefault()
-    for (const { mediaType, file } of files) {
-      const id = `img:${imgSeq.current++}`
-      const ext = mediaType.split('/')[1]
-      const name =
-        file.name && file.name !== 'image.png' ? file.name : `image-${imgSeq.current}.${ext}`
-      void readImage(file).then(({ dataBase64, dataUrl }) => {
-        setImages((prev) => [...prev, { id, name, mediaType, dataBase64, previewUrl: dataUrl }])
-      })
-    }
+    for (const { mediaType, file } of files) addImage(file, mediaType)
   }
 
   // 사이드 질문 스트림 구독. 현재 워크스페이스의 이벤트만, id 로 스트림을 구분해 반영한다.
@@ -211,14 +240,134 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
 
   const menuOpen = slashQuery !== null && (loadingCommands || matches.length > 0)
 
+  // 커서 직전의 `@토큰`. Esc 로 닫은 토큰이면 열지 않는다.
+  const mention = useMemo(() => {
+    const found = findMention(text, caret)
+    if (!found || found.at === mentionDismissedAt) return null
+    return found
+  }, [text, caret, mentionDismissedAt])
+
+  // `@` 질의가 바뀔 때마다 후보를 다시 조회한다(main 쪽에서 인덱스를 캐시하므로 매 타이핑 호출해도 싸다).
+  const mentionQuery = mention?.query ?? null
+  useEffect(() => {
+    if (mentionQuery === null) return
+    const seq = ++mentionSeq.current
+    void window.api.fs.search(workspace.id, mentionQuery).then((hits) => {
+      if (seq !== mentionSeq.current) return // 더 최신 질의가 이미 나갔다.
+      setMentionResult({ query: mentionQuery, hits })
+    })
+  }, [mentionQuery, workspace.id])
+
+  // 결과를 "어떤 질의의 결과인지"와 함께 들고 있다가 파생시킨다 — 질의가 바뀔 때마다
+  // 이펙트에서 비우고 로딩 플래그를 세우면 렌더가 연쇄로 늘어난다.
+  const mentionHits =
+    mentionResult && mentionResult.query === mentionQuery ? mentionResult.hits : EMPTY_HITS
+  const loadingMentions = mentionQuery !== null && mentionResult?.query !== mentionQuery
+
+  const mentionOpen = mention !== null && (loadingMentions || mentionHits.length > 0)
+
   useEffect(() => {
     setMenuIdx(0)
-  }, [slashQuery])
+  }, [slashQuery, mentionQuery])
+
+  /** 입력과 커서를 함께 바꾼다 — 멘션 감지가 커서 위치에 걸려 있어 둘이 어긋나면 안 된다. */
+  const setTextAt = (v: string, nextCaret: number): void => {
+    setText(v)
+    setCaret(nextCaret)
+    requestAnimationFrame(() => {
+      const ta = taRef.current
+      if (!ta) return
+      ta.focus()
+      ta.setSelectionRange(nextCaret, nextCaret)
+    })
+  }
+
+  /**
+   * 떨어뜨린 파일 처리.
+   * 이미지는 붙여넣기와 같은 base64 첨부로, 나머지는 `@경로` 멘션으로 넣는다.
+   * worktree 안의 파일은 상대경로로 줄여 CLI 가 cwd 기준으로 바로 찾게 하고,
+   * 밖의 파일은 절대경로를 그대로 쓴다(CLI 는 절대경로 멘션도 받는다).
+   */
+  const handleDroppedFiles = (files: File[]): void => {
+    if (!files.length) return
+
+    const root = workspace.worktreePath.replace(/\/+$/, '') + '/'
+    let draft = text
+    let mentioned = false
+
+    for (const file of files) {
+      const mediaType = IMAGE_TYPES[file.type]
+      if (mediaType) {
+        addImage(file, mediaType)
+        continue
+      }
+      const abs = window.api.pathForFile(file)
+      if (!abs) continue
+      draft = appendMention(
+        draft,
+        mentionWithRange(abs.startsWith(root) ? abs.slice(root.length) : abs)
+      )
+      mentioned = true
+    }
+    if (mentioned) setTextAt(draft, draft.length)
+  }
+
+  // 최신 핸들러를 ref 로 들고 있는다 — 아래 window 리스너는 한 번만 붙이므로
+  // 클로저가 첫 렌더의 text/workspace 를 계속 보게 두면 안 된다.
+  const dropRef = useRef(handleDroppedFiles)
+  useEffect(() => {
+    dropRef.current = handleDroppedFiles
+  })
+
+  /**
+   * 파일 드롭은 입력창 박스가 아니라 **창 전체**에서 받는다.
+   * 입력창에만 붙이면 사이드바나 대화 영역에 떨어뜨렸을 때 아무 반응 없이 무시된 것처럼 보인다
+   * (기본 동작인 file:// 이동은 메인의 will-navigate 가 막지만, 사용자에겐 그냥 먹통으로 보인다).
+   * dragover 에서 preventDefault 를 해 줘야 브라우저가 drop 을 허용한다.
+   */
+  useEffect(() => {
+    const hasFiles = (e: DragEvent): boolean => !!e.dataTransfer?.types.includes('Files')
+    const onDragOver = (e: DragEvent): void => {
+      if (!hasFiles(e)) return // 텍스트 선택 드래그 등은 그대로 둔다.
+      e.preventDefault()
+      setDragging(true)
+    }
+    const onDragLeave = (e: DragEvent): void => {
+      // 창 밖으로 완전히 나갔을 때만 끈다(요소 사이를 지날 때도 dragleave 가 뜬다).
+      if (!e.relatedTarget) setDragging(false)
+    }
+    const onDrop = (e: DragEvent): void => {
+      if (!hasFiles(e)) return
+      e.preventDefault()
+      setDragging(false)
+      dropRef.current(Array.from(e.dataTransfer?.files ?? []))
+    }
+    const onDragEnd = (): void => setDragging(false)
+    window.addEventListener('dragover', onDragOver)
+    window.addEventListener('dragleave', onDragLeave)
+    window.addEventListener('drop', onDrop)
+    window.addEventListener('dragend', onDragEnd)
+    return () => {
+      window.removeEventListener('dragover', onDragOver)
+      window.removeEventListener('dragleave', onDragLeave)
+      window.removeEventListener('drop', onDrop)
+      window.removeEventListener('dragend', onDragEnd)
+    }
+  }, [])
+
+  /** 고른 파일/디렉토리를 `@` 토큰 자리에 넣는다. */
+  const acceptMention = (hit: FileHit): void => {
+    if (!mention) return
+    const token = mentionToken(hit)
+    const head = text.slice(0, mention.at) + token
+    setTextAt(head + text.slice(caret), head.length)
+    historyIdx.current = -1
+  }
 
   // 명령 결과/사이드 답변 카드는 입력창 포커스가 빠져도(카드 스크롤·클릭 등) Esc 로 닫히도록
   // window 레벨에서 키를 받는다. 메뉴가 열려 있을 땐 Esc 가 메뉴 닫기에 쓰이므로 양보한다.
   useEffect(() => {
-    if (menuOpen || (!commandCard && !sideAnswer)) return
+    if (menuOpen || mentionOpen || (!commandCard && !sideAnswer)) return
     const onEsc = (e: KeyboardEvent): void => {
       if (e.key !== 'Escape') return
       e.preventDefault()
@@ -228,7 +377,7 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
     }
     window.addEventListener('keydown', onEsc)
     return () => window.removeEventListener('keydown', onEsc)
-  }, [menuOpen, commandCard, sideAnswer])
+  }, [menuOpen, mentionOpen, commandCard, sideAnswer])
 
   /**
    * "!명령" 을 1회 실행한다(Claude Code CLI bash 모드). 실행했으면 true.
@@ -407,30 +556,43 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
       .map((i) => i.text)
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
-    // 슬래시 메뉴가 열려 있으면 방향키/Enter/Tab 을 메뉴 조작에 먼저 쓴다.
-    if (menuOpen) {
+    // 자동완성 메뉴(슬래시 명령 / @파일)가 열려 있으면 방향키·Enter·Tab 을 메뉴 조작에 먼저 쓴다.
+    // ↑ 는 아래의 메시지 히스토리 순회와 겹치므로 메뉴가 우선권을 갖는다.
+    if (menuOpen || mentionOpen) {
+      const count = menuOpen ? matches.length : mentionHits.length
       if (e.key === 'ArrowDown') {
         e.preventDefault()
-        if (matches.length) setMenuIdx((i) => (i + 1) % matches.length)
+        if (count) setMenuIdx((i) => (i + 1) % count)
         return
       }
       if (e.key === 'ArrowUp') {
         e.preventDefault()
-        if (matches.length) setMenuIdx((i) => (i - 1 + matches.length) % matches.length)
+        if (count) setMenuIdx((i) => (i - 1 + count) % count)
         return
       }
       if (e.key === 'Escape') {
         e.preventDefault()
-        // 명령 입력을 비워 메뉴를 닫는다.
-        setText('')
+        // 슬래시는 명령 입력을 비워 닫고, 멘션은 입력을 남긴 채 메뉴만 닫는다
+        // (자동완성을 물리고 경로를 직접 마저 치려는 경우가 많다).
+        if (menuOpen) setText('')
+        else if (mention) setMentionDismissedAt(mention.at)
         return
       }
       if ((e.key === 'Enter' || e.key === 'Tab') && !e.nativeEvent.isComposing) {
-        const cmd = matches[menuIdx]
-        if (cmd) {
-          e.preventDefault()
-          acceptCommand(cmd)
-          return
+        if (menuOpen) {
+          const cmd = matches[menuIdx]
+          if (cmd) {
+            e.preventDefault()
+            acceptCommand(cmd)
+            return
+          }
+        } else {
+          const hit = mentionHits[menuIdx]
+          if (hit) {
+            e.preventDefault()
+            acceptMention(hit)
+            return
+          }
         }
       }
     }
@@ -476,7 +638,16 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
             onPick={acceptCommand}
           />
         )}
-        {commandCard && !menuOpen && !pickerCard && (
+        {mentionOpen && (
+          <MentionMenu
+            hits={mentionHits}
+            loading={loadingMentions && mentionHits.length === 0}
+            selectedIdx={menuIdx}
+            onHover={setMenuIdx}
+            onPick={acceptMention}
+          />
+        )}
+        {commandCard && !menuOpen && !mentionOpen && !pickerCard && (
           <CommandCard
             card={commandCard}
             workspaceId={workspace.id}
@@ -484,10 +655,10 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
             onClose={() => setCommandCard(null)}
           />
         )}
-        {sideAnswer && !menuOpen && !commandCard && !pickerCard && (
+        {sideAnswer && !menuOpen && !mentionOpen && !commandCard && !pickerCard && (
           <SideAnswerCard answer={sideAnswer} onClose={() => setSideAnswer(null)} />
         )}
-        {pickerCard && !menuOpen && (
+        {pickerCard && !menuOpen && !mentionOpen && (
           <PickerCard
             kind={pickerCard}
             workspace={workspace}
@@ -526,7 +697,15 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
             ))}
           </div>
         )}
-        <div className="bg-[var(--surface)] border border-[var(--border)] rounded-xl px-3 py-2 transition-shadow focus-within:border-[var(--border-strong)] focus-within:shadow-[0_0_0_3px_color-mix(in_srgb,var(--focus-ring)_12%,transparent)]">
+        {/* 드롭은 window 리스너가 창 전체에서 받는다. 여기서는 어디에 담기는지 보이도록 테두리만 켠다. */}
+        <div
+          className={
+            'bg-[var(--surface)] border rounded-xl px-3 py-2 transition-shadow focus-within:border-[var(--border-strong)] focus-within:shadow-[0_0_0_3px_color-mix(in_srgb,var(--focus-ring)_12%,transparent)] ' +
+            (dragging
+              ? 'border-[var(--info-500)] shadow-[0_0_0_3px_color-mix(in_srgb,var(--info-500)_18%,transparent)]'
+              : 'border-[var(--border)]')
+          }
+        >
           {images.length > 0 && (
             <div className="flex flex-wrap gap-2 mb-2">
               {images.map((img) => (
@@ -539,16 +718,20 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
               ref={taRef}
               value={text}
               onChange={(e) => {
+                // 커서를 입력과 같은 렌더에서 갱신한다 — 한 프레임이라도 어긋나면
+                // @멘션 감지가 이전 커서로 잘못된 질의를 만든다.
                 setText(e.target.value)
+                setCaret(e.target.selectionStart ?? e.target.value.length)
                 historyIdx.current = -1
               }}
+              onSelect={(e) => setCaret(e.currentTarget.selectionStart ?? 0)}
               onKeyDown={onKeyDown}
               onPaste={onPaste}
               rows={1}
               placeholder={
                 running
                   ? 'Queue a follow-up…  (Enter to send · it runs after the current turn)'
-                  : 'Message your agent…  (Enter to send · / for commands · ! to run a terminal command)'
+                  : 'Message your agent…  (Enter to send · @ for files · / for commands · ! for terminal)'
               }
               className="flex-1 bg-transparent resize-none outline-none text-base leading-relaxed text-neutral-200 placeholder:text-neutral-600 py-1"
             />
@@ -604,6 +787,103 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
           )}
         </div>
       </div>
+    </div>
+  )
+}
+
+/**
+ * `@` 파일 멘션 자동완성 메뉴. 슬래시 메뉴와 같은 위치·조작(↑↓ · Enter/Tab · Esc)을 쓴다.
+ *
+ * 파일 크기를 같이 보여 주는 게 핵심이다 — CLI 는 큰 파일을 말없이 앞부분만 넣거나 통째로
+ * 버리는데 대화창에는 아무 흔적이 남지 않는다. 고르기 전에 알려 주는 쪽이 낫다.
+ */
+function MentionMenu({
+  hits,
+  loading,
+  selectedIdx,
+  onHover,
+  onPick
+}: {
+  hits: FileHit[]
+  loading: boolean
+  selectedIdx: number
+  onHover: (i: number) => void
+  onPick: (hit: FileHit) => void
+}): React.JSX.Element {
+  const activeRef = useRef<HTMLButtonElement | null>(null)
+  useEffect(() => {
+    activeRef.current?.scrollIntoView({ block: 'nearest' })
+  }, [selectedIdx])
+
+  return (
+    <div className="absolute bottom-full mb-2 left-0 right-0 max-h-72 overflow-y-auto rounded-xl border border-[var(--border)] bg-[var(--bg-3)] shadow-2xl py-1 z-20">
+      {loading ? (
+        <div className="px-3 py-2 text-sm text-neutral-500">Searching files…</div>
+      ) : (
+        hits.map((hit, i) => {
+          const active = i === selectedIdx
+          const slash = hit.path.lastIndexOf('/')
+          const dir = slash < 0 ? '' : hit.path.slice(0, slash + 1)
+          const name = slash < 0 ? hit.path : hit.path.slice(slash + 1)
+          const size = hit.size
+          const dropped = size !== undefined && size >= MENTION_DROP_HINT_BYTES
+          const truncated = size !== undefined && size >= MENTION_TRUNCATE_HINT_BYTES
+
+          return (
+            <button
+              key={(hit.isDir ? 'd:' : 'f:') + hit.path}
+              ref={(el) => {
+                if (active) activeRef.current = el
+              }}
+              onMouseEnter={() => onHover(i)}
+              onMouseDown={(e) => {
+                // textarea 가 blur 되지 않도록 기본 동작을 막고 직접 처리.
+                e.preventDefault()
+                onPick(hit)
+              }}
+              className={
+                'w-full flex items-baseline gap-2 px-3 py-1.5 text-left ' +
+                (active ? 'bg-[var(--surface-3)]' : 'hover:bg-[var(--surface)]')
+              }
+            >
+              {hit.isDir ? (
+                <Folder size={12} className="text-[var(--brand-400)]/80 shrink-0 translate-y-0.5" />
+              ) : (
+                <FileText size={12} className="text-neutral-500 shrink-0 translate-y-0.5" />
+              )}
+              <span className="text-sm font-medium text-neutral-100 shrink-0">
+                {name}
+                {hit.isDir && '/'}
+              </span>
+              <span className="text-xs text-neutral-500 truncate flex-1" title={hit.path}>
+                {dir}
+              </span>
+              {size !== undefined && (
+                <span
+                  title={
+                    dropped
+                      ? 'Large enough that Claude Code may not attach it at all — ask the agent to Read it, or mention a line range like #L1-200.'
+                      : truncated
+                        ? 'Claude Code may attach only the first ~2000 lines of this file.'
+                        : undefined
+                  }
+                  className={
+                    'text-xs shrink-0 tabular-nums ' +
+                    (dropped
+                      ? 'text-[var(--danger-400)]'
+                      : truncated
+                        ? 'text-[var(--warning-400)]'
+                        : 'text-neutral-600')
+                  }
+                >
+                  {dropped || truncated ? '⚠ ' : ''}
+                  {formatBytes(size)}
+                </span>
+              )}
+            </button>
+          )
+        })
+      )}
     </div>
   )
 }
@@ -1740,4 +2020,6 @@ function ContextStatus({
 }
 
 const EMPTY: ChatItem[] = []
+/** 멘션 후보가 없을 때 돌려주는 고정 배열(매 렌더 새 배열을 만들지 않도록). */
+const EMPTY_HITS: FileHit[] = []
 const EMPTY_QUEUE: import('../store').QueuedMessage[] = []

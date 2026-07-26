@@ -5,7 +5,7 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { getStore } from './store'
 import { getTranscripts } from './transcripts'
-import { listDir, readFileInRoot } from './fsbrowse'
+import { listDir, readFileInRoot, searchFiles } from './fsbrowse'
 import { log } from './logger'
 import {
   abortMerge,
@@ -1033,6 +1033,12 @@ export function registerIpc(ctx: IpcContext): void {
     const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
     if (!ws || ws.archived) return null
     return readFileInRoot(ws.worktreePath, relPath).catch(() => null)
+  })
+
+  ipcMain.handle(IPC.fsSearch, (_e, workspaceId: string, query: string) => {
+    const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
+    if (!ws || ws.archived) return []
+    return searchFiles(ws.worktreePath, query ?? '').catch(() => [])
   })
 
   // ── 슬래시 명령 목록 (입력창 자동완성) ───────────────────────────────────
