@@ -1,6 +1,7 @@
 import { app, shell, BrowserWindow, session } from 'electron'
 import { join } from 'node:path'
 import { IPC } from '@shared/types'
+import { applyDevPaths, isDevIsolated, wooiHome } from './paths'
 import { AgentOrchestrator } from './agent/orchestrator'
 import { ScriptRunner } from './scripts'
 import { getStore } from './store'
@@ -11,6 +12,11 @@ import { hydrateEnvFromLoginShell } from './env'
 import { initUpdater } from './updater'
 
 let mainWindow: BrowserWindow | null = null
+
+// dev 실행이 설치된 앱의 설정·워크스페이스·트랜스크립트를 건드리지 않도록 userData 를 먼저
+// 옮긴다([[paths]]). 아래 WOOI_USER_DATA 캡처보다, 그리고 store/transcripts(lazy 싱글턴)가
+// 처음 생성되기보다 반드시 앞서야 한다.
+applyDevPaths()
 
 // logger 와 agent-host(유틸리티 프로세스)는 electron `app` 없이 userData 경로를 알아야 하므로
 // (ESM 에서 유틸리티 프로세스가 electron 을 import 하면 로드 시 throw) 가장 먼저 env 로 박아 둔다.
@@ -135,6 +141,9 @@ app.whenReady().then(() => {
   registerIpc({ sessions, scripts, terminals, getWindow: () => mainWindow })
   createWindow()
   initUpdater(dispatch)
+  if (isDevIsolated()) {
+    log.info(`dev 격리: userData=${app.getPath('userData')} worktreeRoot=${wooiHome()}`)
+  }
   log.info('main ready')
 
   app.on('activate', () => {

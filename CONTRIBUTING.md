@@ -31,6 +31,25 @@ If `node_modules` is missing or `npm run dev` fails to boot Electron, re-run
 `npm install` — the `postinstall` step installs the Electron binary and fixes the
 `node-pty` spawn-helper permissions.
 
+### Dev data isolation
+
+`npm run dev` never touches the data of an installed Wooi. Unpackaged runs use
+their own locations, so a dev build starts with an empty repo list and cannot
+create, move, or delete worktrees the installed app manages:
+
+|                          | installed app                       | `npm run dev`                             |
+| ------------------------ | ----------------------------------- | ----------------------------------------- |
+| settings / transcripts   | `~/Library/Application Support/Wooi` | `~/Library/Application Support/Wooi (dev)` |
+| worktrees                | `~/wooi/workspaces`                 | `~/wooi-dev/workspaces`                   |
+
+Both are resolved in [`src/main/paths.ts`](src/main/paths.ts). Overrides:
+
+- `WOOI_DEV_ISOLATION=0` — opt out and reproduce a bug against real data.
+- `WOOI_HOME=/some/path` — pin the worktree root explicitly.
+
+Claude CLI config (`~/.claude`) is intentionally shared so dev runs reuse your
+existing auth; session files are keyed by worktree path, so they do not collide.
+
 ## Project layout
 
 ```
