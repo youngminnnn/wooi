@@ -9,6 +9,7 @@ import type {
   CommandResult,
   CreateWorkspaceArgs,
   DirEntry,
+  DropPosition,
   EffortSetting,
   FileContent,
   GitStatus,
@@ -52,6 +53,11 @@ export interface WooiApi {
       patch: Partial<Pick<Repo, 'name' | 'setupScript' | 'devScript' | 'archiveScript'>>
     ): Promise<void>
     remove(repoId: string): Promise<void>
+    /**
+     * 사이드바에서 리포를 끌어 놓아 표시 순서를 바꾼다. 저장된 배열 순서가 곧 표시 순서다.
+     * 대상이 사라졌거나 자기 자신에 놓으면 조용히 무시된다.
+     */
+    reorder(repoId: string, targetRepoId: string, position: DropPosition): Promise<void>
     listBranches(repoId: string): Promise<string[]>
   }
 
@@ -75,6 +81,12 @@ export interface WooiApi {
     setMuted(workspaceId: string, muted: boolean): Promise<void>
     /** 표시 이름 override 를 지정한다. 빈 문자열이면 override 를 지워 기본 규칙으로 되돌린다. */
     rename(workspaceId: string, name: string): Promise<void>
+    /**
+     * 사이드바에서 워크스페이스를 끌어 놓아 표시 순서를 바꾼다.
+     * 사이드바 순서는 stack 트리의 DFS 결과이므로, 형제(같은 레포 · 같은 부모 · 같은 아카이브 상태)
+     * 끼리만 자리를 바꿀 수 있다. 그 외 조합은 main 에서 조용히 무시된다.
+     */
+    reorder(workspaceId: string, targetWorkspaceId: string, position: DropPosition): Promise<void>
     revealInFinder(workspaceId: string): Promise<void>
     openInEditor(workspaceId: string): Promise<void>
     /** /memory — worktree 의 CLAUDE.md 를 에디터로 연다(없으면 worktree 디렉토리를 연다). */

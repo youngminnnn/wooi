@@ -15,6 +15,8 @@ const api: WooiApi = {
     add: () => ipcRenderer.invoke(IPC.repoAdd),
     update: (repoId, patch) => ipcRenderer.invoke(IPC.repoUpdate, repoId, patch),
     remove: (repoId) => ipcRenderer.invoke(IPC.repoRemove, repoId),
+    reorder: (repoId, targetRepoId, position) =>
+      ipcRenderer.invoke(IPC.repoReorder, repoId, targetRepoId, position),
     listBranches: (repoId) => ipcRenderer.invoke(IPC.repoListBranches, repoId)
   },
 
@@ -35,6 +37,8 @@ const api: WooiApi = {
       ipcRenderer.invoke(IPC.workspaceSetEffort, workspaceId, effort),
     setMuted: (workspaceId, muted) => ipcRenderer.invoke(IPC.workspaceSetMuted, workspaceId, muted),
     rename: (workspaceId, name) => ipcRenderer.invoke(IPC.workspaceRename, workspaceId, name),
+    reorder: (workspaceId, targetWorkspaceId, position) =>
+      ipcRenderer.invoke(IPC.workspaceReorder, workspaceId, targetWorkspaceId, position),
     revealInFinder: (workspaceId) => ipcRenderer.invoke(IPC.workspaceRevealInFinder, workspaceId),
     openInEditor: (workspaceId) => ipcRenderer.invoke(IPC.workspaceOpenInEditor, workspaceId),
     openMemory: (workspaceId) => ipcRenderer.invoke(IPC.workspaceOpenMemory, workspaceId)

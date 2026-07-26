@@ -132,6 +132,39 @@ export function orderByStack<T extends { id: string; parentWorkspaceId: string |
 }
 
 /**
+ * 드래그한 항목을 드롭 대상의 앞에 놓을지 뒤에 놓을지.
+ * 행의 세로 중앙을 기준으로 정해진다(위쪽 절반=before, 아래쪽 절반=after).
+ */
+export type DropPosition = 'before' | 'after'
+
+/**
+ * draggedId 항목을 빼서 targetId 항목의 앞/뒤에 다시 끼워 넣은 새 배열을 돌려준다.
+ * 리포·워크스페이스 목록은 저장된 배열 순서가 곧 표시 순서라(별도 order 필드 없음),
+ * 사이드바 드래그 앤 드롭 재정렬이 이 함수 하나로 표현된다.
+ *
+ * 대상이 없거나 자기 자신에 놓으면 원본을 그대로 돌려준다(호출부가 no-op 으로 다룰 수 있게).
+ */
+export function reorderById<T extends { id: string }>(
+  items: T[],
+  draggedId: string,
+  targetId: string,
+  position: DropPosition
+): T[] {
+  if (draggedId === targetId) return items
+  const from = items.findIndex((i) => i.id === draggedId)
+  const target = items.find((i) => i.id === targetId)
+  if (from < 0 || !target) return items
+
+  const next = items.slice()
+  const [moved] = next.splice(from, 1)
+  // 대상 인덱스는 제거 후 배열에서 다시 찾는다 — 드래그 항목이 대상보다 앞에 있었다면
+  // 제거로 인해 한 칸 당겨지므로, 원본 인덱스를 그대로 쓰면 한 칸씩 어긋난다.
+  const to = next.indexOf(target)
+  next.splice(position === 'before' ? to : to + 1, 0, moved)
+  return next
+}
+
+/**
  * 이 워크스페이스를 구동하는 AI 코딩 에이전트 백엔드 식별자.
  * 현재는 'claude'(Claude Code, Claude Agent SDK) 하나뿐이지만, 백엔드 추상화 계층을 통해
  * 추후 다른 에이전트(예: Codex)를 식별자만 추가해 붙일 수 있도록 도메인에 남겨 둔다.
@@ -562,6 +595,8 @@ export const IPC = {
   repoAdd: 'repo:add',
   repoRemove: 'repo:remove',
   repoUpdate: 'repo:update',
+  /** 사이드바 드래그 앤 드롭으로 리포 표시 순서를 바꾼다. */
+  repoReorder: 'repo:reorder',
   repoListBranches: 'repo:listBranches',
   workspaceCreate: 'workspace:create',
   workspaceArchive: 'workspace:archive',
@@ -575,6 +610,8 @@ export const IPC = {
   /** 워크스페이스별 알림 음소거 토글. */
   workspaceSetMuted: 'workspace:setMuted',
   workspaceRename: 'workspace:rename',
+  /** 사이드바 드래그 앤 드롭으로 워크스페이스 표시 순서를 바꾼다(같은 레포·같은 stack 부모끼리만). */
+  workspaceReorder: 'workspace:reorder',
   workspaceOpenInEditor: 'workspace:openInEditor',
   workspaceRevealInFinder: 'workspace:revealInFinder',
   /** /memory — worktree 의 CLAUDE.md 를 에디터로 연다(없으면 worktree 를 연다). */

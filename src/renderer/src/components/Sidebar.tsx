@@ -24,10 +24,16 @@ import RowActionsMenu, { type RowAction } from './RowActionsMenu'
 import { orderByStack, workspaceDisplayName } from '@shared/types'
 import { useNow } from '../lib/useNow'
 import { formatDuration } from '../lib/format'
+import { useDragReorder, type DragReorder } from '../lib/useDragReorder'
 import type { PrState, PrStatus, Repo, Workspace } from '@shared/types'
 
 /** running 상태가 이 시간을 넘기면 사이드바에 "오래 실행 중" 힌트(멈춤일 수 있음)를 표시한다. */
 const RUNNING_STALE_MS = 5 * 60 * 1000
+
+// 리포 드래그와 워크스페이스 드래그를 구분하는 dataTransfer 타입. 워크스페이스 행은 리포 블록
+// 안에 중첩되므로, 이 타입으로 "지금 끌고 있는 게 무엇인지"를 각 드롭존이 판별한다.
+const REPO_MIME = 'application/x-wooi-repo'
+const WORKSPACE_MIME = 'application/x-wooi-workspace'
 
 export default function Sidebar({
   onNewWorkspace,
@@ -65,6 +71,31 @@ export default function Sidebar({
     const res = await window.api.repo.add()
     if (res.error) pushToast('error', res.error)
   }
+
+  const repoDnd = useDragReorder({
+    mime: REPO_MIME,
+    onReorder: (repoId, targetId, position) =>
+      void window.api.repo.reorder(repoId, targetId, position)
+  })
+
+  const workspaceDnd = useDragReorder({
+    mime: WORKSPACE_MIME,
+    // 사이드바는 워크스페이스를 stack 트리(orderByStack)로 그리므로, 배열 순서가 실제 화면 순서를
+    // 좌우하는 건 형제 사이뿐이다. 형제가 아닌 곳엔 드롭 표시선을 아예 띄우지 않아, 놓아도
+    // 아무 일도 일어나지 않는 자리를 유효한 것처럼 보이게 하지 않는다.
+    canDrop: (draggedId, targetId) => {
+      const a = app.workspaces.find((w) => w.id === draggedId)
+      const b = app.workspaces.find((w) => w.id === targetId)
+      if (!a || !b) return false
+      return (
+        a.repoId === b.repoId &&
+        (a.parentWorkspaceId ?? null) === (b.parentWorkspaceId ?? null) &&
+        a.archived === b.archived
+      )
+    },
+    onReorder: (workspaceId, targetId, position) =>
+      void window.api.workspace.reorder(workspaceId, targetId, position)
+  })
 
   return (
     <aside className="w-72 shrink-0 flex flex-col bg-[var(--bg-2)]">
@@ -115,12 +146,23 @@ export default function Sidebar({
           const repoPending = pending.filter((p) => p.repoId === repo.id)
           const runningCount = active.filter((w) => w.status === 'running').length
           return (
-            <div key={repo.id} className="mb-3">
-              <div className="group flex items-center gap-1.5 px-2 py-1.5 rounded-md">
+            <div
+              key={repo.id}
+              // 드롭은 블록 전체가 받아 리포 사이 어디에 놓아도 반응하게 하고, 드래그 시작은
+              // 헤더만 맡는다. 블록 전체를 draggable 로 만들면 안쪽 이름 편집 입력에서
+              // 텍스트를 끌어 선택할 수 없게 된다.
+              {...repoDnd.zoneProps(repo.id)}
+              style={repoDnd.visualStyle(repo.id)}
+              className="mb-3 rounded-md"
+            >
+              <div
+                {...repoDnd.handleProps(repo.id)}
+                className="group flex items-center gap-1.5 px-2 py-1.5 rounded-md cursor-grab active:cursor-grabbing"
+              >
                 <RepoIcon repo={repo} />
                 <span
                   className="flex-1 truncate text-sm font-medium text-neutral-300"
-                  title={repo.path}
+                  title={`${repo.path}\n(drag to reorder)`}
                 >
                   {repo.name}
                 </span>
@@ -161,6 +203,7 @@ export default function Sidebar({
                     onStackWorkspace={onStackWorkspace}
                     shortcut={shortcutById.get(ws.id)}
                     now={now}
+                    dnd={workspaceDnd}
                   />
                 ))}
                 {repoPending.map((p) => (
@@ -201,7 +244,8 @@ function WorkspaceRow({
   depth,
   onStackWorkspace,
   shortcut,
-  now
+  now,
+  dnd
 }: {
   workspace: Workspace
   /** stack 트리에서의 들여쓰기 깊이(뿌리=0). */
@@ -209,6 +253,8 @@ function WorkspaceRow({
   onStackWorkspace: (repoId: string, parentWorkspaceId: string) => void
   shortcut?: number
   now: number
+  /** 사이드바가 소유한 워크스페이스 재정렬 DnD 배선(형제끼리만 자리 교환). */
+  dnd: DragReorder
 }): React.JSX.Element {
   const selectedId = useStore((s) => s.selectedWorkspaceId)
   const select = useStore((s) => s.selectWorkspace)
@@ -316,6 +362,10 @@ function WorkspaceRow({
     <div
       role="button"
       tabIndex={0}
+      {...dnd.handleProps(workspace.id)}
+      {...dnd.zoneProps(workspace.id)}
+      // 이름 편집 중엔 드래그를 끈다 — draggable 조상 안에서는 입력 텍스트를 끌어 선택할 수 없다.
+      draggable={editingName === null}
       onClick={() => void select(workspace.id)}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
@@ -330,7 +380,7 @@ function WorkspaceRow({
         setMenuAt({ x: e.clientX, y: e.clientY })
       }}
       // stacked 워크스페이스는 깊이만큼 들여써 부모-자식 계층을 시각화한다(뿌리=기본 들여쓰기).
-      style={{ paddingLeft: 12 + depth * 14 }}
+      style={{ paddingLeft: 12 + depth * 14, ...dnd.visualStyle(workspace.id) }}
       className={
         'group/ws relative w-full flex items-center gap-2 pr-1.5 py-1.5 rounded-md text-left cursor-pointer focus:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-strong)] ' +
         // 선택 행은 좌측에 파란 액센트 바를 띄워 현재 위치를 또렷하게 표시한다.
