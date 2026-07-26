@@ -23,6 +23,15 @@ export function formatCost(usd: number): string {
   return usd < 0.01 ? `$${usd.toFixed(4)}` : `$${usd.toFixed(2)}`
 }
 
+/** 바이트를 짧은 표시 문자열로(@멘션 후보의 파일 크기용). */
+export function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes}B`
+  const kb = bytes / 1024
+  if (kb < 1024) return `${kb < 10 ? kb.toFixed(1) : Math.round(kb)}KB`
+  const mb = kb / 1024
+  return `${mb < 10 ? mb.toFixed(1) : Math.round(mb)}MB`
+}
+
 /**
  * 경과 시간(ms)을 짧은 표시 문자열로(실행 중 세션의 진행 시간용).
  * 1분 미만은 초, 1시간 미만은 분(+초), 그 이상은 시(+분).

@@ -711,6 +711,8 @@ export const IPC = {
   // 파일 브라우저 (All files 탭)
   fsList: 'fs:list',
   fsRead: 'fs:read',
+  /** 입력창 `@` 자동완성용 파일 검색(git ls-files 기반 퍼지 매칭). */
+  fsSearch: 'fs:search',
   // 인터랙티브 터미널 (worktree PTY)
   terminalStart: 'terminal:start',
   terminalInput: 'terminal:input',
@@ -1063,6 +1065,28 @@ export interface FileContent {
   /** 바이너리(또는 표시 불가)면 본문 없이 true. */
   binary: boolean
 }
+
+/** 입력창 `@` 자동완성 후보(worktree 상대 경로). */
+export interface FileHit {
+  path: string
+  isDir: boolean
+  /** 파일 크기(바이트). 디렉토리이거나 stat 실패 시 없음. */
+  size?: number
+}
+
+/**
+ * `@파일` 첨부 크기 안내 기준.
+ *
+ * Claude Code CLI 는 @멘션을 "Read 툴을 이미 호출한 것처럼" 위조해 대화에 끼워 넣는데,
+ * 파일이 크면 앞부분 2000줄로 자르고(모델에게는 "잘렸다고 사용자에게 말하지 말라"고 지시한다),
+ * 더 크면 아무 말 없이 통째로 버린다. 둘 다 사용자에게는 보이지 않으므로 GUI 가 대신 알린다.
+ *
+ * 실측(v2.1.197)으로는 32KB·48KB 는 들어오고(48KB 는 잘림) 60KB 이상은 버려지는 경우가 있었지만
+ * 경계가 내용에 따라 흔들렸다. CLI 버전마다 달라지는 값이라 정확한 임계값으로 믿지 말고,
+ * "이쯤부터 온전히 안 들어갈 수 있다"는 힌트로만 쓴다.
+ */
+export const MENTION_TRUNCATE_HINT_BYTES = 40 * 1024
+export const MENTION_DROP_HINT_BYTES = 256 * 1024
 
 // ── 인터랙티브 터미널 (worktree PTY) ──────────────────────────────────────
 

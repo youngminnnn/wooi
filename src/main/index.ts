@@ -120,10 +120,11 @@ function createWindow(): void {
   mainWindow.webContents.on('will-navigate', (event, url) => {
     const devUrl = process.env['ELECTRON_RENDERER_URL']
     if (devUrl && url.startsWith(devUrl)) return
-    if (/^https?:\/\//.test(url)) {
-      event.preventDefault()
-      shell.openExternal(url)
-    }
+    // 개발 서버로의 이동을 뺀 나머지는 전부 막는다(기본 거부). http(s) 만 기본 브라우저로 넘긴다.
+    // 특히 입력창 밖으로 파일을 떨어뜨리면 브라우저 기본 동작이 file:// 로 이동해 앱 화면이
+    // 그 파일로 통째로 바뀌고 되돌아올 방법이 없다 — 스킴을 가리지 않고 차단해야 한다.
+    event.preventDefault()
+    if (/^https?:\/\//.test(url)) shell.openExternal(url)
   })
 
   if (process.env['ELECTRON_RENDERER_URL']) {

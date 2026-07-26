@@ -12,6 +12,7 @@ import type {
   DropPosition,
   EffortSetting,
   FileContent,
+  FileHit,
   GitStatus,
   GithubLoginEvent,
   ImageAttachment,
@@ -149,6 +150,11 @@ export interface WooiApi {
     list(workspaceId: string, relPath: string): Promise<DirEntry[]>
     /** worktree 내 파일 1개 읽기. 바이너리/과대 파일은 본문 없이 표시 정보만. */
     read(workspaceId: string, relPath: string): Promise<FileContent | null>
+    /**
+     * 입력창 `@` 자동완성용 후보 검색. 부분 경로(파일명 조각 또는 `src/co` 같은 경로 조각)를
+     * 받아 점수순 후보를 돌려준다. 상위 결과에는 파일 크기가 붙는다.
+     */
+    search(workspaceId: string, query: string): Promise<FileHit[]>
   }
 
   commands: {
@@ -241,6 +247,12 @@ export interface WooiApi {
     githubLoginCancel(): Promise<void>
     githubLogout(): Promise<void>
   }
+
+  /**
+   * 드롭된 File 의 실제 경로. Electron 32+ 에서 `File.path` 가 사라져 webUtils 로만 얻을 수 있다.
+   * 얻지 못하면 빈 문자열(드롭 처리 쪽에서 이미지 첨부로 폴백한다).
+   */
+  pathForFile(file: File): string
 
   // 단방향 이벤트 구독. 반환값은 구독 해제 함수.
   onChat(cb: (e: ChatEnvelope) => void): () => void

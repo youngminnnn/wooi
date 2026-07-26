@@ -158,9 +158,17 @@ A tabbed panel on top plus an interactive terminal below (resizable split):
 
 - **Slash-command autocomplete** — type `/` to see the Claude Code commands/skills
   available in that worktree.
+- **File mentions** — type `@` to fuzzy-search the worktree and pull a file into your
+  message, so the agent gets its contents without hunting for it first. The menu shows
+  each file's size and warns when a file is big enough that Claude Code may truncate or
+  skip it. Directory mentions (`@src/`) attach a listing. In the **All files** viewer,
+  **Mention** adds the open file — select lines first and it narrows to just that range
+  (`@src/app.ts#L40-80`).
 - **Inline shell commands** — start a message with `!` to run it as a shell command in
   the worktree, with the output shown right in the chat.
-- **Image attachments** — paste or drop images into the input box to send them along.
+- **Drag & drop** — drop files anywhere on the window: images become attachments, everything
+  else becomes an `@` mention. Files inside the worktree are shortened to a relative path.
+- **Image attachments** — paste or drop images to send them along.
 - **Status line** — branch · directory · model · effort · context usage are always
   shown above the input box; long conversations **auto-compact** (toggleable), or run
   `/compact` manually.

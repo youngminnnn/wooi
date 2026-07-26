@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { IPC } from '@shared/types'
 import type { WooiApi } from '@shared/api'
 
@@ -85,7 +85,8 @@ const api: WooiApi = {
 
   fs: {
     list: (workspaceId, relPath) => ipcRenderer.invoke(IPC.fsList, workspaceId, relPath),
-    read: (workspaceId, relPath) => ipcRenderer.invoke(IPC.fsRead, workspaceId, relPath)
+    read: (workspaceId, relPath) => ipcRenderer.invoke(IPC.fsRead, workspaceId, relPath),
+    search: (workspaceId, query) => ipcRenderer.invoke(IPC.fsSearch, workspaceId, query)
   },
 
   commands: {
@@ -139,6 +140,14 @@ const api: WooiApi = {
     githubLoginStart: () => ipcRenderer.invoke(IPC.authGithubLoginStart),
     githubLoginCancel: () => ipcRenderer.invoke(IPC.authGithubLoginCancel),
     githubLogout: () => ipcRenderer.invoke(IPC.authGithubLogout)
+  },
+
+  pathForFile: (file) => {
+    try {
+      return webUtils.getPathForFile(file)
+    } catch {
+      return ''
+    }
   },
 
   onChat: (cb) => subscribe(IPC.evtChat, cb),
