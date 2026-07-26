@@ -10,10 +10,12 @@ import type {
   PrStatus,
   ScriptKind,
   ScriptStatus,
+  StackCascadeResult,
   UpdateStatus,
   Workspace
 } from '@shared/types'
 import type { NotificationChannel, NotificationEvent } from '@shared/types'
+import { cascadeProblems } from '@shared/types'
 import { playNotification } from './lib/sound'
 
 export const scriptKey = (workspaceId: string, kind: ScriptKind): string => `${workspaceId}:${kind}`
@@ -169,6 +171,12 @@ interface UIState {
   ) => Promise<void>
   /** stacked 워크스페이스를 최신 base(부모 브랜치) 위로 rebase·force-push 한다. */
   restackWorkspace: (workspaceId: string) => Promise<void>
+  /** 외부 병합으로 대기 중인 스택 캐스케이드를 실행한다(rebase + force-push — 사용자 승인 후). */
+  applyStackSync: (workspaceId: string) => Promise<void>
+  /** 대기 중인 스택 캐스케이드 계획을 무시한다. */
+  dismissStackSync: (workspaceId: string) => Promise<void>
+  /** 캐스케이드 단계별 결과를 토스트로 알린다(문제가 있으면 브랜치별로 나열). */
+  reportCascade: (cascade: StackCascadeResult, successMsg: string) => void
   selectWorkspace: (id: string | null) => Promise<void>
   /** 아직 로드되지 않았으면 해당 workspace 의 트랜스크립트를 불러온다(대시보드 비용 집계 등에서 사용). */
   ensureHistory: (workspaceId: string) => Promise<void>
@@ -618,6 +626,41 @@ export const useStore = create<UIState>((set, get) => ({
     }
     void get().refreshGit(workspaceId)
     void get().refreshPr(workspaceId)
+  },
+
+  applyStackSync: async (workspaceId) => {
+    const res = await window.api.stack.syncApply(workspaceId).catch((err) => ({
+      error: err instanceof Error ? err.message : String(err),
+      cascade: undefined
+    }))
+    if (res.error) get().pushToast('error', `Stack sync failed: ${res.error}`)
+    else if (res.cascade) get().reportCascade(res.cascade, 'Stack synced.')
+    void get().refreshGit(workspaceId)
+    void get().refreshPr(workspaceId)
+  },
+
+  dismissStackSync: async (workspaceId) => {
+    await window.api.stack.syncDismiss(workspaceId).catch(() => {})
+  },
+
+  reportCascade: (cascade, successMsg) => {
+    const problems = cascadeProblems(cascade)
+    if (!problems.length) {
+      // 실제로 뭔가 한 단계가 있을 때만 성공을 알린다(전부 skipped 면 조용히 넘어간다).
+      const acted = cascade.steps.some((s) => s.status === 'ok')
+      get().pushToast(acted ? 'success' : 'info', successMsg)
+      return
+    }
+    // 실패·충돌은 브랜치별로 한 줄씩 보여 준다 — 예전처럼 조용히 삼키지 않는다.
+    const lines = problems.map((p) => {
+      const who = p.prNumber ? `#${p.prNumber} (${p.branch})` : p.branch
+      if (p.status === 'conflict') {
+        const n = p.conflictedFiles?.length ?? 0
+        return `• ${who}: rebase conflict in ${n} file(s) — resolve in the worktree`
+      }
+      return `• ${who}: ${p.kind} failed — ${p.message ?? 'unknown error'}`
+    })
+    get().pushToast('error', `Stack cascade needs attention:\n${lines.join('\n')}`)
   },
 
   selectWorkspace: async (id) => {

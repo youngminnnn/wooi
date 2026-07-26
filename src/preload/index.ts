@@ -83,6 +83,11 @@ const api: WooiApi = {
     checks: (workspaceId) => ipcRenderer.invoke(IPC.prChecks, workspaceId)
   },
 
+  stack: {
+    syncApply: (workspaceId) => ipcRenderer.invoke(IPC.stackSyncApply, workspaceId),
+    syncDismiss: (workspaceId) => ipcRenderer.invoke(IPC.stackSyncDismiss, workspaceId)
+  },
+
   fs: {
     list: (workspaceId, relPath) => ipcRenderer.invoke(IPC.fsList, workspaceId, relPath),
     read: (workspaceId, relPath) => ipcRenderer.invoke(IPC.fsRead, workspaceId, relPath),

@@ -99,6 +99,27 @@ export function isBranchStack(ws: Pick<Workspace, 'stack'>): boolean {
 }
 
 /**
+ * 이 워크스페이스의 PR 을 병합했을 때 캐스케이드가 rebase 후 force-push 하게 될 브랜치들.
+ *
+ * 병합 확인 창에서 이 목록을 먼저 보여 주기 위한 것이다 — 캐스케이드는 자식 브랜치의 리모트
+ * 히스토리를 되쓰므로, "Merge" 한 번에 조용히 나가면 안 된다.
+ * 모델 A(자식 워크스페이스: 직속 자식만 rebase)와 모델 B(worktree 안 스택: 위쪽 전부 rebase)를
+ * 함께 센다.
+ */
+export function cascadeAffectedBranches(ws: Workspace, all: Workspace[]): string[] {
+  const out: string[] = []
+  for (const w of all) {
+    if (w.parentWorkspaceId === ws.id && !w.archived) out.push(w.branch)
+  }
+  const stack = ws.stack
+  if (stack && stack.length > 1) {
+    const idx = stack.findIndex((e) => e.branch === ws.branch)
+    if (idx >= 0) for (const e of stack.slice(idx + 1)) out.push(e.branch)
+  }
+  return out
+}
+
+/**
  * 워크스페이스 목록을 stack 트리 순서로 정렬한다(부모 바로 뒤에 자식이 오도록, DFS pre-order).
  * 각 항목에 stack 들여쓰기 깊이(depth: 뿌리=0)를 함께 매겨 사이드바가 계층을 그릴 수 있게 한다.
  * 입력 순서(생성 순 등)는 형제 사이에서 보존된다. 순환(비정상 데이터)은 방문 집합으로 방지한다.
@@ -261,6 +282,17 @@ export interface Workspace {
    * 없거나 길이 1 이하면 단일 브랜치 워크스페이스(=기존 동작)로 취급한다.
    */
   stack?: StackedBranch[]
+  /**
+   * 부모 PR 이 병합된 것을 감지했을 때의 대기 중 캐스케이드 계획.
+   * 실행하지 않은 상태로만 보관한다(force-push 는 사용자 승인 후에만). 승인·해소되면 지워진다.
+   * 병합을 어디서 했든(wooi·gh CLI·GitHub 웹) 같은 경로로 감지된다.
+   */
+  stackSync?: StackSyncPlan | null
+  /**
+   * 사용자가 "무시"한 계획의 병합 브랜치. 같은 병합을 재감지해 배너가 다시 뜨는 것을 막는다.
+   * 브랜치명을 기억하는 이유는, 그 위에서 또 다른 병합이 일어나면 다시 알려야 하기 때문이다.
+   */
+  stackSyncDismissed?: string | null
   /** worktree 절대 경로 */
   worktreePath: string
   /**
@@ -601,6 +633,60 @@ export interface RestackResult {
   message?: string
 }
 
+// ── stacked PR 캐스케이드 (부모 병합 후 자식 리타겟·리베이스) ──────────────
+
+/**
+ * 캐스케이드 한 단계의 종류.
+ * - retarget: 자식 PR 의 base 를 조부모로 옮김(gh pr edit --base).
+ * - recover: base 브랜치가 삭제돼 GitHub 가 닫아 버린 자식 PR 을 되살림
+ *   (base 브랜치 복원 → reopen → retarget → 발판 브랜치 정리).
+ * - restack: 새 base 위로 rebase 하고 force-push.
+ */
+export type StackCascadeStepKind = 'retarget' | 'recover' | 'restack'
+
+/** 캐스케이드 한 단계의 결과. 실패해도 다음 브랜치는 계속 시도하고, 결과를 모아 UI 로 올린다. */
+export interface StackCascadeStep {
+  branch: string
+  prNumber: number | null
+  kind: StackCascadeStepKind
+  /** skipped = 이미 원하는 상태였음(GitHub 가 자동 retarget 한 경우 등). */
+  status: 'ok' | 'skipped' | 'conflict' | 'failed'
+  /** status==='conflict' 일 때 충돌 파일들(RestackResult 와 같은 의미). */
+  conflictedFiles?: string[]
+  /** 실패·건너뜀 사유(사용자에게 그대로 보여 준다). */
+  message?: string
+}
+
+/** 캐스케이드 전체 결과. 단계별 성공/실패를 모두 담아 조용히 삼키지 않는다. */
+export interface StackCascadeResult {
+  steps: StackCascadeStep[]
+}
+
+/** 캐스케이드에서 사용자가 알아야 할(성공이 아닌) 단계만 추린다. */
+export function cascadeProblems(result: StackCascadeResult): StackCascadeStep[] {
+  return result.steps.filter((s) => s.status === 'conflict' || s.status === 'failed')
+}
+
+/**
+ * 외부(gh CLI·GitHub 웹)에서 부모 PR 이 병합돼 스택이 stale 해진 상태.
+ * 감지만 해 두고 실행하지 않는다 — 캐스케이드는 자식 브랜치를 rebase 후 force-push 하므로
+ * 사용자 모르게 자동으로 나가면 안 된다. UI 가 이 계획을 보여 주고 승인받은 뒤 실행한다.
+ */
+export interface StackSyncPlan {
+  /** 이미 병합된 부모 브랜치. */
+  mergedBranch: string
+  /** 병합된 부모의 base — 자식들이 옮겨갈 새 base. */
+  newBase: string
+  /** 옮겨야 할 자식들(아래→위). */
+  affected: Array<{
+    branch: string
+    prNumber: number | null
+    /** base 브랜치가 삭제돼 GitHub 가 PR 을 닫아 버렸는지(복구 단계 필요). */
+    prClosed: boolean
+  }>
+  detectedAt: number
+}
+
 // ── git diff (변경 검토용) ───────────────────────────────────────────────
 
 export type FileDiffStatus = 'added' | 'modified' | 'deleted' | 'renamed'
@@ -670,6 +756,10 @@ export const IPC = {
   workspaceRestack: 'workspace:restack',
   /** 모델 B: worktree 내부 스택의 다른 브랜치로 체크아웃 전환한다(clean 워킹트리 필요). */
   workspaceSwitchBranch: 'workspace:switchBranch',
+  /** 외부에서 부모 PR 이 병합돼 생긴 대기 중 캐스케이드(stackSync)를 사용자 승인 후 실행한다. */
+  stackSyncApply: 'stack:syncApply',
+  /** 대기 중 캐스케이드 계획을 무시하고 지운다. */
+  stackSyncDismiss: 'stack:syncDismiss',
   /** 진행 중인 머지를 취소한다(충돌 포기). */
   gitAbortMerge: 'git:abortMerge',
   prStatus: 'pr:status',

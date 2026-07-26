@@ -27,6 +27,7 @@ import type {
   Repo,
   RestackResult,
   RewindActionResult,
+  StackCascadeResult,
   ScriptExitEvent,
   ScriptKind,
   ScriptOutputEvent,
@@ -133,7 +134,10 @@ export interface WooiApi {
      * 없으면 현재 브랜치로 연다. 에러 시 문자열 반환.
      */
     create(workspaceId: string, branch?: string): Promise<{ error?: string }>
-    /** 현재 브랜치의 PR 을 병합한다(squash/merge/rebase). */
+    /**
+     * 현재 브랜치의 PR 을 병합한다(squash/merge/rebase). 병합만 한다 — 스택 캐스케이드는
+     * 여기 딸려 오지 않고, 병합 후 감지된 계획을 stack.syncApply 로 따로 승인받는다.
+     */
     merge(workspaceId: string, method: PrMergeMethod): Promise<{ error?: string }>
     /** 현재 브랜치의 PR 을 병합 없이 닫는다. */
     close(workspaceId: string): Promise<{ error?: string }>
@@ -143,6 +147,16 @@ export interface WooiApi {
     ready(workspaceId: string): Promise<{ error?: string }>
     /** PR 의 CI 체크 롤업(Check 탭). PR 이 없으면 null. */
     checks(workspaceId: string): Promise<PrChecks | null>
+  }
+
+  stack: {
+    /**
+     * 부모 PR 병합으로 대기 중인 캐스케이드를 실행한다(어디서 병합했든 같은 경로).
+     * 자식 브랜치를 rebase 후 force-push 하므로 반드시 사용자 승인 뒤에만 호출한다.
+     */
+    syncApply(workspaceId: string): Promise<{ error?: string; cascade?: StackCascadeResult }>
+    /** 대기 중인 캐스케이드 계획을 무시한다(같은 병합은 다시 알리지 않는다). */
+    syncDismiss(workspaceId: string): Promise<void>
   }
 
   fs: {

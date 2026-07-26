@@ -32,15 +32,16 @@ import { findFreePort, waitForPortFree } from './net'
 import {
   getPrStatus,
   getPrChecks,
+  getPrMeta,
   createPrWeb,
   mergePr,
-  retargetPr,
   closePr,
   reopenPr,
   markPrReady,
   listOpenPrs,
   fetchOwnerAvatarDataUrl
 } from './github'
+import { cascadeRetarget, cascadeRestackBranchStack, stepFromRestack } from './cascade'
 import {
   getAuthStatus,
   claudeLoginStart,
@@ -69,8 +70,12 @@ import type {
   RestackResult,
   RewindActionResult,
   ScriptKind,
+  StackCascadeResult,
+  StackCascadeStep,
   StackedBranch,
-  UpdateFromBaseResult
+  StackSyncPlan,
+  UpdateFromBaseResult,
+  Workspace
 } from '@shared/types'
 import type { AgentOrchestrator } from './agent/orchestrator'
 import type { ScriptRunner } from './scripts'
@@ -783,6 +788,111 @@ export function registerIpc(ctx: IpcContext): void {
     if (changed) broadcastState()
   }
 
+  /** 대기 중이던 동기화 계획을 지운다(캐스케이드가 실행됐거나 사용자가 무시했을 때). */
+  const clearStackSync = (workspaceId: string, alsoDismissal = false): void => {
+    let changed = false
+    store.update((st) => {
+      const w = st.workspaces.find((x) => x.id === workspaceId)
+      if (!w) return
+      if (w.stackSync) {
+        w.stackSync = null
+        changed = true
+      }
+      // 캐스케이드를 실제로 실행했으면 "무시" 기억도 지운다(다음 병합은 다시 알려야 한다).
+      if (alsoDismissal && w.stackSyncDismissed) {
+        w.stackSyncDismissed = null
+        changed = true
+      }
+    })
+    if (changed) broadcastState()
+  }
+
+  /**
+   * "이미 병합된 부모"를 찾아 캐스케이드 계획을 만든다.
+   *
+   * 병합은 wooi·`gh pr merge`·GitHub 웹 어디서든 일어날 수 있는 교체 가능한 행위라, 감지를 여기
+   * 한 곳에 모은다. 예전에는 캐스케이드가 IPC.prMerge 핸들러 안에만 있어서, wooi 로 병합할 때만
+   * 돌고 외부 병합은 통째로 놓쳤다(스택은 stale 한 채 방치). 이제는 어디서 병합했든 이 재동기화
+   * 지점이 똑같이 잡아낸다.
+   *
+   * 감지만 하고 실행은 하지 않는다. 캐스케이드는 자식 브랜치를 rebase 한 뒤 force-push 하므로,
+   * 병합 행위에 딸려 자동으로 나가면 안 된다. 계획을 워크스페이스에 얹어 UI 가 승인을 받게 한다.
+   *
+   * 비용: 후보가 있을 때만 gh 를 추가 호출하고, 계획이 이미 있으면 다시 조회하지 않는다
+   * (재동기화는 PR 상태 갱신마다 돈다).
+   */
+  const detectStackSync = async (
+    ws: Workspace,
+    prs: Array<{ number: number; head: string; base: string }>
+  ): Promise<StackSyncPlan | null> => {
+    if (ws.stackSync) return ws.stackSync // 이미 대기 중 — 사용자가 처리하거나 무시할 때까지 유지.
+    const openHeads = new Set(prs.map((p) => p.head))
+    const dismissed = ws.stackSyncDismissed ?? null
+
+    // ── 모델 B: worktree 안 브랜치 스택 ────────────────────────────────────
+    const stack = ws.stack
+    if (stack && stack.length > 1) {
+      // 맨 위 엔트리가 병합된 건 캐스케이드 대상이 아니므로 length-1 까지만 본다.
+      for (let i = 0; i < stack.length - 1; i++) {
+        const e = stack[i]
+        if (e.branch === dismissed) continue
+        if (openHeads.has(e.branch)) continue // 아직 열려 있음 → 병합되지 않았다.
+        const meta = await getPrMeta(ws.worktreePath, e.prNumber ?? e.branch).catch(() => null)
+        if (!meta || meta.state !== 'MERGED') continue
+
+        // 이 브랜치를 직속 base 로 삼던 엔트리들이 옮겨갈 대상이다.
+        // 새 base 는 병합 시점의 실제 base(meta.baseRefName)를 권위 있는 값으로 쓴다.
+        const affected: StackSyncPlan['affected'] = []
+        for (const a of stack.slice(i + 1)) {
+          if (a.baseBranch !== e.branch) continue
+          const am = await getPrMeta(ws.worktreePath, a.prNumber ?? a.branch).catch(() => null)
+          affected.push({
+            branch: a.branch,
+            prNumber: am?.number ?? a.prNumber,
+            // base 브랜치가 삭제되면 GitHub 이 자식 PR 을 닫아 버린다 — 복구 단계가 필요하다.
+            prClosed: am?.state === 'CLOSED'
+          })
+        }
+        if (!affected.length) continue
+
+        return {
+          mergedBranch: e.branch,
+          newBase: meta.baseRefName,
+          affected,
+          detectedAt: Date.now()
+        }
+      }
+    }
+
+    // ── 모델 A: 자식이 각자 별도 worktree 를 가진 스택 ──────────────────────
+    // 이 워크스페이스 자신의 PR 이 병합됐고 살아 있는 자식이 있으면, 자식들을 조부모로 옮겨야 한다.
+    const children = store
+      .getState()
+      .workspaces.filter((w) => w.parentWorkspaceId === ws.id && !w.archived)
+    if (children.length && ws.branch !== dismissed && !openHeads.has(ws.branch)) {
+      const meta = await getPrMeta(ws.worktreePath, ws.prNumber ?? ws.branch).catch(() => null)
+      if (meta && meta.state === 'MERGED') {
+        const affected: StackSyncPlan['affected'] = []
+        for (const c of children) {
+          const cm = await getPrMeta(c.worktreePath, c.prNumber ?? c.branch).catch(() => null)
+          affected.push({
+            branch: c.branch,
+            prNumber: cm?.number ?? c.prNumber,
+            prClosed: cm?.state === 'CLOSED'
+          })
+        }
+        return {
+          mergedBranch: ws.branch,
+          newBase: meta.baseRefName,
+          affected,
+          detectedAt: Date.now()
+        }
+      }
+    }
+
+    return null
+  }
+
   /**
    * worktree 의 실제 git/PR 상태에서 워크스페이스의 현재 브랜치와 브랜치 스택(모델 B)을 재동기화한다.
    * 에이전트가 UI 의 Split 을 거치지 않고 직접 `git checkout -b`·`gh pr create` 로 스택을 만든 경우에도
@@ -807,6 +917,8 @@ export function registerIpc(ctx: IpcContext): void {
       if (detected) break
     }
     const headPr = prs.find((p) => p.head === head)
+    // 외부에서 부모 PR 이 병합됐는지 감지한다(감지만 — 실행은 사용자 승인 후).
+    const plan = await detectStackSync(ws, prs).catch(() => null)
 
     let changed = false
     store.update((st) => {
@@ -817,7 +929,13 @@ export function registerIpc(ctx: IpcContext): void {
         w.branch = head
         changed = true
       }
-      if (detected) {
+      if ((w.stackSync?.mergedBranch ?? null) !== (plan?.mergedBranch ?? null)) {
+        w.stackSync = plan
+        changed = true
+      }
+      // 대기 중인 계획이 있는 동안에는 기록된 스택을 그대로 보존한다. detected 는 "열린 PR" 로만
+      // 만들어져 병합된 엔트리가 이미 빠져 있으므로, 지금 덮어쓰면 캐스케이드가 대상 브랜치를 잃는다.
+      if (!plan && detected) {
         // 감지한 스택이 저장값과 다르면 반영한다(브랜치·base·PR번호).
         const same =
           w.stack &&
@@ -892,99 +1010,182 @@ export function registerIpc(ctx: IpcContext): void {
     }
   )
 
-  // PR 라이프사이클 액션(merge/close/reopen/ready). 전부 worktree 현재 브랜치의 PR 대상.
+  // ── PR 라이프사이클 액션 (merge / close / reopen / ready) ────────────────
+  // merge 는 UI 가 보여 준 PR 번호를 명시적으로 넘기고, 나머지는 worktree 현재 브랜치의 PR 을 쓴다.
+
+  /**
+   * 병합된 브랜치를 부모로 삼던 자식들을 조부모로 옮기는 캐스케이드(모델 A + 모델 B 공통).
+   * 사용자가 배너에서 승인했을 때만 호출된다 — rebase 후 force-push 가 나가기 때문이다.
+   * 모든 단계 결과를 모아 돌려주므로 호출부는 실패를 사용자에게 노출할 수 있다.
+   *
+   * newBase 는 계획이 GitHub 에서 읽어 온 병합 시점의 실제 base 다. 저장된 ws.baseBranch 는
+   * 그 사이 리타겟 등으로 어긋나 있을 수 있어 권위 있는 값으로 쓰지 않는다.
+   */
+  const runMergeCascade = async (
+    workspaceId: string,
+    mergedBranch: string,
+    newBase: string
+  ): Promise<StackCascadeResult> => {
+    const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
+    if (!ws) return { steps: [] }
+    const steps: StackCascadeStep[] = []
+
+    // ── 모델 A: 자식이 각자 별도 worktree 를 가진 경우 ──────────────────────
+    // 병합된 워크스페이스를 부모로 삼던 자식들의 PR base 를 조부모로 옮기고, 그 위로 rebase 한다.
+    const grandparentBranch = newBase
+    const grandparentId = ws.parentWorkspaceId
+    const children = store
+      .getState()
+      .workspaces.filter((w) => w.parentWorkspaceId === ws.id && !w.archived)
+    for (const child of children) {
+      steps.push(
+        ...(await cascadeRetarget({
+          worktreePath: child.worktreePath,
+          mergedBranch,
+          newBase: grandparentBranch,
+          entries: [{ branch: child.branch, baseBranch: mergedBranch, prNumber: child.prNumber }]
+        }))
+      )
+      store.update((st) => {
+        const c = st.workspaces.find((x) => x.id === child.id)
+        if (c) {
+          c.parentWorkspaceId = grandparentId
+          c.baseBranch = grandparentBranch
+        }
+      })
+      const r = await restackOnto(child.worktreePath, grandparentBranch, mergedBranch).catch(
+        (err): RestackResult => ({
+          status: 'error',
+          baseBranch: grandparentBranch,
+          message: err instanceof Error ? err.message : String(err)
+        })
+      )
+      steps.push(stepFromRestack(child.branch, child.prNumber, r))
+    }
+    if (children.length) broadcastState()
+
+    // ── 모델 B: 단일 worktree 안 브랜치 스택 ────────────────────────────────
+    const stack = ws.stack
+    if (stack && stack.length > 1 && stack.some((e) => e.branch === mergedBranch)) {
+      const idx = stack.findIndex((e) => e.branch === mergedBranch)
+      // 기록된 base 보다 GitHub 이 알려 준 병합 시점 base 를 우선한다(기록은 어긋나 있을 수 있다).
+      const mergedBase = newBase || stack[idx].baseBranch
+      const above = stack.slice(idx + 1)
+
+      // PR 쪽(retarget·닫힌 PR 복구)은 워킹트리 상태와 무관하므로 항상 시도한다.
+      steps.push(
+        ...(await cascadeRetarget({
+          worktreePath: ws.worktreePath,
+          mergedBranch,
+          newBase: mergedBase,
+          entries: above
+        }))
+      )
+      // git 히스토리 쪽(rebase + force-push).
+      steps.push(
+        ...(await cascadeRestackBranchStack({
+          worktreePath: ws.worktreePath,
+          mergedBranch,
+          newBase: mergedBase,
+          entries: above,
+          allEntries: stack
+        }))
+      )
+
+      // 스택에서 병합 엔트리를 제거하고 링크를 갱신한다.
+      store.update((st) => {
+        const w = st.workspaces.find((x) => x.id === workspaceId)
+        if (!w || !w.stack) return
+        const i = w.stack.findIndex((e) => e.branch === mergedBranch)
+        if (i < 0) return
+        const base = w.stack[i].baseBranch
+        for (const e of w.stack) if (e.baseBranch === mergedBranch) e.baseBranch = base
+        w.stack.splice(i, 1)
+        if (w.stack.length <= 1) w.stack = undefined
+      })
+      // 현재 브랜치가 방금 제거된 병합 브랜치면, 실제 HEAD 를 읽어 top-level 미러를 맞춘다.
+      const head = await currentBranch(ws.worktreePath).catch(() => '')
+      store.update((st) => {
+        const w = st.workspaces.find((x) => x.id === workspaceId)
+        if (!w) return
+        const entry = workspaceStack(w).find((e) => e.branch === head)
+        if (entry) {
+          w.branch = entry.branch
+          w.baseBranch = entry.baseBranch
+          w.prNumber = entry.prNumber
+        }
+      })
+      broadcastState()
+    }
+
+    return { steps }
+  }
+
+  /**
+   * PR 을 병합한다. 병합만 한다 — 스택 캐스케이드(리타겟·rebase·force-push)는 여기 딸려 오지 않는다.
+   *
+   * 병합은 wooi 말고도 `gh pr merge`·GitHub 웹에서 얼마든지 일어난다. 캐스케이드를 병합 핸들러에
+   * 묶으면 "어디서 병합했느냐"에 따라 동작이 갈리고(= 원래 버그), 무엇보다 병합 승인 한 번으로
+   * 자식 브랜치의 리모트 히스토리를 되쓰는 force-push 까지 나가 버린다.
+   * 그래서 병합 후에는 재동기화만 돌려 캐스케이드 계획을 띄우고, 실행은 사용자 승인에 맡긴다.
+   */
   ipcMain.handle(
     IPC.prMerge,
     async (_e, workspaceId: string, method: PrMergeMethod): Promise<{ error?: string }> => {
       const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
       if (!ws || ws.archived) return { error: 'Workspace not found.' }
-      const result = await mergePr(ws.worktreePath, method).catch((err) => ({
-        error: err instanceof Error ? err.message : String(err)
-      }))
+      // UI 가 보여 준 PR 을 그대로 병합한다 — 번호를 알면 명시적으로 넘겨, 그 사이 에이전트가
+      // 브랜치를 옮겼더라도 엉뚱한 PR 이 병합되지 않게 한다.
+      const result = await mergePr(ws.worktreePath, method, ws.prNumber ?? undefined).catch(
+        (err) => ({ error: err instanceof Error ? err.message : String(err) })
+      )
       if (result.error) return result
-
-      // 병합 캐스케이드: 방금 병합된 워크스페이스를 부모로 삼던 자식들을 조부모(=이 워크스페이스의 base)로
-      // 옮긴다. 각 자식 PR 의 base 를 조부모 브랜치로 retarget 하고, 로컬 링크(parent/base)를 갱신한 뒤,
-      // 조부모 위로 rebase 해 방금 병합된 부모 커밋을 떨군다(--onto <조부모> <병합된 부모 브랜치>).
-      const grandparentBranch = ws.baseBranch
-      const grandparentId = ws.parentWorkspaceId
-      const mergedBranch = ws.branch
-      const children = store
-        .getState()
-        .workspaces.filter((w) => w.parentWorkspaceId === ws.id && !w.archived)
-      for (const child of children) {
-        await retargetPr(child.worktreePath, grandparentBranch).catch(() => {})
-        store.update((st) => {
-          const c = st.workspaces.find((x) => x.id === child.id)
-          if (c) {
-            c.parentWorkspaceId = grandparentId
-            c.baseBranch = grandparentBranch
-          }
-        })
-        // 새 base 위로 rebase(충돌하면 워킹트리에 남겨 두고 UI 가 안내). best-effort.
-        await restackOnto(child.worktreePath, grandparentBranch, mergedBranch).catch(() => {})
-      }
-      if (children.length) broadcastState()
-
-      // 모델 B 캐스케이드: 병합된 브랜치(ws.branch)가 worktree 내부 스택의 엔트리면, 그 위 엔트리들의
-      // base 를 병합된 base 로 당겨 retarget + rebase(--onto 병합base, oldBase=병합브랜치)한 뒤,
-      // 스택에서 병합 엔트리를 제거한다. clean 워킹트리에서만 시도(아니면 스택 링크만 갱신).
-      const stack = ws.stack
-      if (stack && stack.length > 1 && stack.some((e) => e.branch === mergedBranch)) {
-        const idx = stack.findIndex((e) => e.branch === mergedBranch)
-        const mergedBase = stack[idx].baseBranch
-        // 병합된 브랜치를 직속 base 로 삼던 상위 PR 을 mergedBase 로 retarget(worktree 무관, 항상 시도).
-        for (const e of stack.slice(idx + 1)) {
-          if (e.baseBranch === mergedBranch) {
-            await retargetPr(ws.worktreePath, mergedBase, e.branch).catch(() => {})
-          }
-        }
-        // clean 워킹트리에서만 checkout-dance 로 상위 브랜치를 rebase 해 병합 커밋을 떨군다.
-        const clean = await isWorktreeClean(ws.worktreePath).catch(() => false)
-        if (clean) {
-          const oldTip = new Map<string, string>()
-          for (const e of stack) {
-            const sha = await revParse(ws.worktreePath, e.branch)
-            if (sha) oldTip.set(e.branch, sha)
-          }
-          for (const e of stack.slice(idx + 1)) {
-            const directChild = e.baseBranch === mergedBranch
-            const newBase = directChild ? mergedBase : e.baseBranch
-            // oldBase: 직속 자식은 병합된 브랜치, 그 위는 자기 base 의 이전 tip.
-            const oldBase = directChild ? mergedBranch : oldTip.get(e.baseBranch)
-            const co = await checkoutBranch(ws.worktreePath, e.branch)
-            if (co.error) break // dirty 등으로 전환 실패하면 남은 캐스케이드는 중단(수동 restack 유도).
-            await restackOnto(ws.worktreePath, newBase, oldBase).catch(() => {})
-          }
-        }
-        // 스택에서 병합 엔트리를 제거하고 링크를 갱신한다. 현재 체크아웃은 병합된 브랜치 아래(base)로 옮긴다.
-        store.update((st) => {
-          const w = st.workspaces.find((x) => x.id === workspaceId)
-          if (!w || !w.stack) return
-          const i = w.stack.findIndex((e) => e.branch === mergedBranch)
-          if (i < 0) return
-          const base = w.stack[i].baseBranch
-          for (const e of w.stack) if (e.baseBranch === mergedBranch) e.baseBranch = base
-          w.stack.splice(i, 1)
-          if (w.stack.length <= 1) w.stack = undefined
-        })
-        // 현재 브랜치가 방금 제거된 병합 브랜치면, 실제 HEAD 를 읽어 top-level 미러를 맞춘다.
-        const head = await currentBranch(ws.worktreePath).catch(() => '')
-        store.update((st) => {
-          const w = st.workspaces.find((x) => x.id === workspaceId)
-          if (!w) return
-          const entry = workspaceStack(w).find((e) => e.branch === head)
-          if (entry) {
-            w.branch = entry.branch
-            w.baseBranch = entry.baseBranch
-            w.prNumber = entry.prNumber
-          }
-        })
-        broadcastState()
-      }
-      return result
+      // 방금 병합으로 스택이 stale 해졌으면 계획을 만들어 배너로 알린다(외부 병합과 같은 경로).
+      await reconcileWorkspaceStack(workspaceId).catch(() => {})
+      return {}
     }
   )
+
+  /**
+   * 외부(gh CLI·GitHub 웹)에서 병합된 부모를 감지해 만들어 둔 계획을 사용자 승인 후 실행한다.
+   * 이 경로에서만 force-push 가 나가므로, 승인 없이는 절대 호출되지 않는다.
+   */
+  ipcMain.handle(
+    IPC.stackSyncApply,
+    async (_e, workspaceId: string): Promise<{ error?: string; cascade?: StackCascadeResult }> => {
+      const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
+      if (!ws || ws.archived) return { error: 'Workspace not found.' }
+      const plan = ws.stackSync
+      if (!plan) return { error: 'Nothing to sync.' }
+      const cascade = await runMergeCascade(workspaceId, plan.mergedBranch, plan.newBase).catch(
+        (err): StackCascadeResult => ({
+          steps: [
+            {
+              branch: plan.mergedBranch,
+              prNumber: null,
+              kind: 'retarget',
+              status: 'failed',
+              message: err instanceof Error ? err.message : String(err)
+            }
+          ]
+        })
+      )
+      clearStackSync(workspaceId, true)
+      return { cascade }
+    }
+  )
+
+  /**
+   * 계획을 무시한다. 어떤 병합을 무시했는지 기억해 두지 않으면 다음 재동기화가 같은 병합을 다시
+   * 감지해 배너가 계속 뜬다("무시" = 이 병합은 내가 알아서 한다는 뜻).
+   */
+  ipcMain.handle(IPC.stackSyncDismiss, async (_e, workspaceId: string): Promise<void> => {
+    store.update((st) => {
+      const w = st.workspaces.find((x) => x.id === workspaceId)
+      if (w?.stackSync) w.stackSyncDismissed = w.stackSync.mergedBranch
+    })
+    clearStackSync(workspaceId)
+  })
 
   ipcMain.handle(IPC.prClose, async (_e, workspaceId: string): Promise<{ error?: string }> => {
     const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
