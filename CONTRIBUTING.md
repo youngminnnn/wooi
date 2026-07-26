@@ -94,6 +94,23 @@ docs/readme-demo-gif
 Commit messages should use the same prefixes (e.g. `fix(worktree): …`). Release
 commits use the `release:` prefix.
 
+These prefixes aren't only cosmetic — the release process reads them to decide
+which part of the version number to bump, so `feat:` vs `fix:` on your commit
+directly affects the next version. See
+[`docs/releasing.md`](./docs/releasing.md).
+
+## Versioning & releases
+
+Wooi follows Semantic Versioning syntax with user-facing semantics: a release
+containing any user-visible feature is a MINOR, everything else is a PATCH, and
+MAJOR is reserved for changes that require users to re-learn or migrate
+something. Releases are cut by the maintainer.
+
+The full policy — bump rule, release cadence, immutability of published version
+numbers, and the tag/`package.json` mismatch guard — lives in
+[`docs/releasing.md`](./docs/releasing.md)
+([한국어](./docs/releasing.ko.md)).
+
 ## Opening a pull request
 
 1. Fork the repo and create a branch following the naming rule above.
