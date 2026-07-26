@@ -87,8 +87,18 @@ export interface AgentBackendMeta {
   capabilities: AgentCapabilities
 }
 
-/** Claude Code 백엔드의 기본 모델. store 기본값과 백엔드 메타가 같은 출처를 보도록 여기서 정의한다. */
-export const CLAUDE_DEFAULT_MODEL = 'claude-opus-5'
+/**
+ * Claude Code 백엔드의 기본 모델. store 기본값과 백엔드 메타가 같은 출처를 보도록 여기서 정의한다.
+ *
+ * `[1m]` 접미사가 **반드시** 필요하다. Claude Code 는 모델 ID 별로 컨텍스트 윈도를 정하는데,
+ * opus-5 는 접미사가 없으면 200K 로 잡힌다(다른 Opus 라인과 달리 native 1M 으로 인식되지 않음):
+ *
+ *   claude-opus-5      → window 200,000   / 자동압축 167,000
+ *   claude-opus-5[1m]  → window 1,000,000 / 자동압축 967,000
+ *
+ * 접미사 없이 쓰면 예산이 5 배 좁아져 대화가 그만큼 빨리 압축된다.
+ */
+export const CLAUDE_DEFAULT_MODEL = 'claude-opus-5[1m]'
 
 /** Claude Code 백엔드 메타. Claude Agent SDK 의 전체 기능을 지원한다. */
 export const CLAUDE_META: AgentBackendMeta = {

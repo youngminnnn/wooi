@@ -69,12 +69,31 @@ interface WorkflowTaskState {
 // app.asar.unpacked 의 실제 바이너리 경로를 1회 계산해 둔다(dev 에서는 null → SDK 기본값).
 const claudeExecutable = resolveClaudeExecutable()
 
+type ContextUsage = Awaited<ReturnType<Query['getContextUsage']>>
+
 /**
- * 자동 압축을 트리거하는 컨텍스트 사용률(퍼센트). 사용자에게 노출·수정시키지 않는 내부 상수다.
- * Claude Code 가 한계 직전(다음 응답을 더 못 담는 시점, 대략 ~92~95%)에 압축하는 동작에 맞춘 근사값.
- * getContextUsage() 의 percentage(= /context 카드와 같은 기준)와 직접 비교한다.
+ * getContextUsage() 가 임계치를 알려주지 않을 때만 쓰는 폴백 사용률(퍼센트).
+ * 구 SDK 이거나 Claude Code 쪽 자동 압축이 꺼져 있어 autoCompactThreshold 가 비는 경우다.
  */
-const AUTO_COMPACT_THRESHOLD = 92
+const AUTO_COMPACT_FALLBACK_PERCENT = 92
+
+/**
+ * 지금 압축해야 하는지 — Claude Code **자신의** 자동 압축 시점과 같은 기준으로 판단한다.
+ *
+ * getContextUsage() 응답에는 Claude Code 가 실제로 쓰는 임계치가 토큰 수로 실려 온다
+ * (autoCompactThreshold = 유효 윈도 − 출력 예약 − 안전 버퍼). 이 값은 모델마다 크게 다르므로
+ * 고정 퍼센트로 근사하면 양방향으로 어긋난다 — 실측 기준:
+ *
+ *   window 200,000  → 167,000 (83.5%)   고정 92% 면 **너무 늦게** 압축
+ *   window 1,000,000 → 967,000 (96.7%)  고정 92% 면 **너무 일찍** 압축(약 47K 손해)
+ *
+ * 그래서 근사하지 않고 SDK 가 준 값을 그대로 쓴다.
+ */
+function overAutoCompactThreshold(ctx: ContextUsage): boolean {
+  const threshold = ctx.autoCompactThreshold
+  if (typeof threshold === 'number' && threshold > 0) return ctx.totalTokens >= threshold
+  return ctx.percentage >= AUTO_COMPACT_FALLBACK_PERCENT
+}
 
 /** getContextUsage 제어 요청 상한. 지연돼도 미터·자동압축 판단이 멈추지 않도록 둔다. */
 const CONTEXT_USAGE_TIMEOUT_MS = 5000
@@ -383,10 +402,9 @@ export class ClaudeSession {
       return
     }
 
-    let percentage: number
+    let ctx: ContextUsage
     try {
-      const ctx = await withTimeout(q.getContextUsage(), PREFLIGHT_CONTEXT_USAGE_TIMEOUT_MS)
-      percentage = ctx.percentage
+      ctx = await withTimeout(q.getContextUsage(), PREFLIGHT_CONTEXT_USAGE_TIMEOUT_MS)
     } catch (err) {
       // 확인 실패 시 압축 없이 그대로 진행한다(기존 동작과 동일 — 큰 패스 1회는 불가피).
       log.warn('session: resume preflight getContextUsage failed/timed out; flushing buffered', err)
@@ -394,11 +412,7 @@ export class ClaudeSession {
       return
     }
 
-    if (
-      this.deps.autoCompact &&
-      !this.autoCompactInFlight &&
-      percentage >= AUTO_COMPACT_THRESHOLD
-    ) {
+    if (this.deps.autoCompact && !this.autoCompactInFlight && overAutoCompactThreshold(ctx)) {
       // compact-first: 사용자 턴 전에 압축한다. 버퍼는 압축 result 후 flushBuffered 로 방출(preflightPending 유지).
       this.autoCompactInFlight = true
       this.emitItem({
@@ -1211,7 +1225,7 @@ export class ClaudeSession {
     const q = this.q
     if (!q) return
 
-    let ctx: Awaited<ReturnType<Query['getContextUsage']>>
+    let ctx: ContextUsage
     try {
       ctx = await withTimeout(q.getContextUsage(), CONTEXT_USAGE_TIMEOUT_MS)
     } catch {
@@ -1231,12 +1245,8 @@ export class ClaudeSession {
     })
 
     // 임계치를 넘었으면 다음 턴 전에 자동으로 압축한다(Claude Code CLI 의 auto-compact).
-    // /context 와 동일한 점유율(ctx.percentage, 0~100)을 기준으로 판단한다.
-    if (
-      opts.allowAutoCompact &&
-      this.deps.autoCompact &&
-      ctx.percentage >= AUTO_COMPACT_THRESHOLD
-    ) {
+    // 임계치는 고정 퍼센트가 아니라 Claude Code 가 알려준 값을 그대로 쓴다(overAutoCompactThreshold).
+    if (opts.allowAutoCompact && this.deps.autoCompact && overAutoCompactThreshold(ctx)) {
       this.triggerAutoCompact()
     }
   }

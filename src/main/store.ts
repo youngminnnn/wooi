@@ -14,7 +14,27 @@ const DEFAULT_MODEL = CLAUDE_DEFAULT_MODEL
  * 디스크 영속 형식의 현재 스키마 버전. 영속 데이터 모양이 바뀔 때마다 1 올리고,
  * MIGRATIONS 에 직전 버전 → 새 버전 변환 함수를 추가한다.
  */
-const CURRENT_SCHEMA_VERSION = 9
+const CURRENT_SCHEMA_VERSION = 10
+
+/**
+ * v9 → v10 에서 정리하는 모델 ID 치환표(마이그레이션 시점의 스냅샷이므로 여기 고정해 둔다).
+ *
+ * - `claude-opus-5` → `[1m]`: 목록에서 "Opus 5 (1M context)" 라벨로 노출하던 값인데, Claude Code 는
+ *   접미사가 없으면 이 모델의 윈도를 200K 로 잡는다. 사용자가 고른 라벨(1M)대로 동작하도록 승격한다.
+ * - opus-4-8/4-7 의 `[1m]`: 접미사 유무가 동작에 영향이 없어 목록에서 중복 항목을 없앴다. 남아 있는
+ *   저장값이 드롭다운에서 "선택 없음" 처럼 보이지 않도록 접미사 없는 ID 로 모은다.
+ */
+const V10_MODEL_RENAMES: Record<string, string> = {
+  'claude-opus-5': 'claude-opus-5[1m]',
+  'claude-opus-4-8[1m]': 'claude-opus-4-8',
+  'claude-opus-4-7[1m]': 'claude-opus-4-7'
+}
+
+/** 저장된 모델 ID 를 치환표로 옮긴다. null/미지정과 표에 없는 값은 그대로 둔다. */
+function renameModel<T extends string | null | undefined>(model: T): T {
+  if (typeof model !== 'string') return model
+  return (V10_MODEL_RENAMES[model] ?? model) as T
+}
 
 /** 더 이상 노출하지 않는 'bypassPermissions' 등 옛 모드는 acceptEdits 로 환산한다. */
 function normalizeMode(mode: unknown): PermissionMode {
@@ -35,7 +55,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   // 우측 작업 패널은 기본 펼침. 기존 사용자도 load 의 기본값 병합으로 펼침을 유지한다.
   defaultRightPanelOpen: true,
   // CLI 와 동일하게 자동 압축을 기본 켜둔다(autoCompactEnabled). 압축을 트리거하는 임계치는
-  // 사용자에게 노출하지 않는 내부 상수다(session.ts 의 AUTO_COMPACT_THRESHOLD).
+  // Claude Code 가 모델별로 알려주는 값을 그대로 쓴다(session.ts 의 overAutoCompactThreshold).
   autoCompact: true,
   manualWorkspaceSetup: false,
   onboarded: false,
@@ -173,6 +193,19 @@ const MIGRATIONS: Array<(raw: Record<string, unknown>) => Record<string, unknown
       prNumber: w.prNumber ?? null
     }))
     return { ...raw, workspaces }
+  },
+  // v9 → v10: 모델 ID 정리. 핵심은 `claude-opus-5` → `claude-opus-5[1m]` 승격이다 — 접미사가 없으면
+  // Claude Code 가 윈도를 200K 로 잡아(다른 Opus 라인과 다르다) 컨텍스트 예산이 5 배 좁아지고,
+  // 그만큼 대화가 빨리 자동 압축된다. 목록에서는 "Opus 5 (1M context)" 로 안내하던 값이라 승격이 맞다.
+  (raw) => {
+    const settings = { ...((raw.settings as Partial<AppSettings>) ?? {}) }
+    settings.model = renameModel(settings.model)
+    const workspaces = ((raw.workspaces as Partial<Workspace>[]) ?? []).map((w) => ({
+      ...w,
+      model: renameModel(w.model),
+      lastModel: renameModel(w.lastModel)
+    }))
+    return { ...raw, settings, workspaces }
   }
 ]
 
