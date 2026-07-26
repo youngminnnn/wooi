@@ -656,6 +656,8 @@ export const IPC = {
   appGetVersion: 'app:getVersion',
   /** 수동으로 업데이트를 확인한다(설정의 "업데이트 확인" 버튼). */
   updateCheck: 'update:check',
+  /** 확인을 새로 트리거하지 않고 마지막으로 방송된 업데이트 상태만 읽는다(렌더러 초기화용). */
+  updateGetStatus: 'update:getStatus',
   /** 다운로드된 업데이트를 설치하기 위해 앱을 재시작한다. */
   updateQuitAndInstall: 'update:quitAndInstall',
 

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Compass, Download, RefreshCw } from 'lucide-react'
-import type { UpdateStatus } from '@shared/types'
 import { useStore } from '../store'
+import { hasNewVersion, updateStatusText } from '../lib/update'
 import Modal, { inputClass, labelClass, primaryBtn, ghostBtn } from './Modal'
 import IntegrationsPanel from './IntegrationsPanel'
 import { PERMISSION_ORDER, PERMISSION_LABELS, PERMISSION_DESCRIPTIONS } from '../lib/permission'
@@ -93,6 +93,11 @@ export default function SettingsModal({
       }
     >
       <div className="space-y-5">
+        {/* 버전·업데이트를 맨 위에 둔다 — 타이틀바의 점을 보고 들어온 사용자가 바로 확인할 수 있게. */}
+        <Section title="About">
+          <UpdatesSection />
+        </Section>
+
         <Section title="Integrations">
           <IntegrationsPanel />
         </Section>
@@ -289,10 +294,6 @@ export default function SettingsModal({
             </span>
           </label>
         </Section>
-
-        <Section title="About">
-          <UpdatesSection />
-        </Section>
       </div>
     </Modal>
   )
@@ -303,45 +304,35 @@ const DOWNLOAD_URL = 'https://github.com/youngminnnn/wooi/releases/latest/downlo
 
 function UpdatesSection(): React.JSX.Element {
   const [version, setVersion] = useState<string>('')
-  const [status, setStatus] = useState<UpdateStatus>({ state: 'idle' })
+  // 상태는 store 한 곳에서 구독한다 — 모달을 늦게 열어도 이미 지나간 방송을 놓치지 않는다.
+  const status = useStore((s) => s.updateStatus)
 
   useEffect(() => {
     window.api.app.getVersion().then(setVersion)
-    return window.api.onUpdate(setStatus)
   }, [])
 
   const checking = status.state === 'checking'
-  const check = (): void => {
-    setStatus({ state: 'checking' })
-    window.api.update.check().then(setStatus)
-  }
-
-  const statusText = (): string => {
-    switch (status.state) {
-      case 'checking':
-        return 'Checking for updates…'
-      case 'available':
-        return `Update available${status.version ? ` (${status.version})` : ''} — downloading…`
-      case 'downloading':
-        return `Downloading update… ${status.percent ?? 0}%`
-      case 'ready':
-        return `Version ${status.version ?? ''} downloaded — restart to install.`
-      case 'not-available':
-        return 'You’re on the latest version.'
-      case 'blocked':
-        return status.error ?? 'Automatic updates are unavailable from this location.'
-      case 'error':
-        return `Update check failed: ${status.error ?? 'unknown error'}`
-      default:
-        return ''
-    }
-  }
+  // 확인 진행·결과는 main 이 evtUpdate 로 방송하므로 store 가 알아서 갱신된다.
+  const check = (): void => void window.api.update.check()
+  const isNew = hasNewVersion(status)
 
   return (
-    <div className="flex items-center justify-between gap-3">
+    <div
+      className={
+        'flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5 ' +
+        (isNew
+          ? 'border-[var(--accent-500)]/40 bg-[var(--accent-500)]/10'
+          : 'border-[var(--border)]')
+      }
+    >
       <div className="min-w-0">
-        <div className="text-sm text-neutral-300">
+        <div className="flex items-center gap-2 text-sm text-neutral-300">
           Wooi <span className="text-neutral-500">v{version || '…'}</span>
+          {isNew && (
+            <span className="shrink-0 text-[10px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded bg-[var(--accent-500)]/20 text-[var(--accent-300)]">
+              New version
+            </span>
+          )}
         </div>
         {status.state !== 'idle' && (
           <div
@@ -351,7 +342,7 @@ function UpdatesSection(): React.JSX.Element {
                 : 'text-neutral-600 truncate'
             }`}
           >
-            {statusText()}
+            {updateStatusText(status)}
           </div>
         )}
       </div>

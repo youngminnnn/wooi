@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Settings, Loader2, ShieldQuestion, BellDot, Square } from 'lucide-react'
 import { useStore } from '../store'
 import { summarizePermission } from '../lib/permission'
+import { hasNewVersion, newVersionLabel } from '../lib/update'
 import type { PermissionRequest } from '@shared/types'
 import Logo from './Logo'
 
@@ -10,6 +11,9 @@ export default function TitleBar({
 }: {
   onOpenSettings: () => void
 }): React.JSX.Element {
+  const updateStatus = useStore((s) => s.updateStatus)
+  const updateReady = hasNewVersion(updateStatus)
+
   return (
     <div className="drag h-11 shrink-0 flex items-center justify-between bg-[var(--bg)] border-b border-[var(--border)] pl-20 pr-3">
       <div className="flex items-center gap-2 text-base font-semibold tracking-tight text-neutral-200">
@@ -22,10 +26,17 @@ export default function TitleBar({
         <button
           data-tour="settings"
           onClick={onOpenSettings}
-          className="no-drag h-7 w-7 grid place-items-center rounded-md text-neutral-400 hover:bg-[var(--surface-2)] hover:text-neutral-200"
-          title="Settings"
+          className="no-drag relative h-7 w-7 grid place-items-center rounded-md text-neutral-400 hover:bg-[var(--surface-2)] hover:text-neutral-200"
+          title={updateReady ? `Settings · ${newVersionLabel(updateStatus)}` : 'Settings'}
         >
           <Settings size={16} />
+          {/* 새 버전이 있으면 설정 버튼 우상단에 점을 띄운다(설정 > About 에 자세한 내용). */}
+          {updateReady && (
+            <span
+              aria-label={newVersionLabel(updateStatus)}
+              className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-[var(--accent-500)] ring-2 ring-[var(--bg)]"
+            />
+          )}
         </button>
       </div>
     </div>

@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Download, RefreshCw, X } from 'lucide-react'
-import type { UpdateStatus } from '@shared/types'
+import { useStore } from '../store'
 
 /**
  * 자동 업데이트 배너. main 의 evtUpdate 를 구독해, 새 버전이 다운로드 완료(`ready`)되면
@@ -8,10 +8,8 @@ import type { UpdateStatus } from '@shared/types'
  * 사용자가 닫으면(dismiss) 이번 실행 동안은 다시 뜨지 않는다(앱 종료 시 자동 설치됨).
  */
 export function UpdateBanner(): React.JSX.Element | null {
-  const [status, setStatus] = useState<UpdateStatus>({ state: 'idle' })
+  const status = useStore((s) => s.updateStatus)
   const [dismissed, setDismissed] = useState(false)
-
-  useEffect(() => window.api.onUpdate(setStatus), [])
 
   if (dismissed) return null
 
