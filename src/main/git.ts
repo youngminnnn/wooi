@@ -1,8 +1,8 @@
-import { app } from 'electron'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { basename, join } from 'node:path'
 import { existsSync, readFileSync, statSync } from 'node:fs'
+import { wooiHome } from './paths'
 import type {
   FileDiff,
   FileDiffStatus,
@@ -92,11 +92,14 @@ export function sanitizeBranch(name: string): string {
  * worktree 경로를 사용자 홈 하위 `~/wooi/workspaces/<repo_name>/<branch>` 에 둔다.
  * 사용자 리포 부모 디렉토리를 어지럽히지 않으면서, 앱 데이터 디렉토리보다 사용자가
  * 직접 찾아 열기 쉬운 고정 위치에 workspace 들을 모은다.
+ *
+ * dev 실행은 루트가 `~/wooi-dev` 로 갈린다([[paths]]) — 설치본이 관리하는 실제 워크트리와
+ * 섞이거나 같은 경로를 두 프로세스가 동시에 조작하는 일을 막는다.
  */
 export function worktreePathFor(repoPath: string, branch: string): string {
   const repoName = basename(repoPath)
   const slug = sanitizeBranch(branch).replace(/\//g, '-')
-  return join(app.getPath('home'), 'wooi', 'workspaces', repoName, slug)
+  return join(wooiHome(), 'workspaces', repoName, slug)
 }
 
 /** 로컬 브랜치가 이미 존재하는지 확인. */
