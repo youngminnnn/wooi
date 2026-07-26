@@ -1,0 +1,151 @@
+# Versioning & Release Policy
+
+**English** · [한국어](./releasing.ko.md)
+
+How Wooi picks version numbers, when it cuts a release, and how a release gets
+published. If you only need the decision rule, read [§2](#2-which-number-to-bump).
+
+---
+
+## 1. Version format
+
+Wooi uses **Semantic Versioning syntax with user-facing semantics**:
+
+```
+MAJOR . MINOR . PATCH
+```
+
+Wooi is an end-user desktop app, not a library — there is no downstream code
+compiling against an API, so classic SemVer's "breaking change" definition does
+not map cleanly. Instead each number is defined by **what it means to the person
+using the app**:
+
+| Number | Meaning | Bumped when |
+|---|---|---|
+| **MAJOR** | You have to re-learn something, or do something by hand | Session/settings data migrates incompatibly · minimum requirements change (macOS version, required external tooling) · a core workflow is reworked so the old way no longer applies |
+| **MINOR** | There's something new | Any user-visible feature or UX change |
+| **PATCH** | Same app, fewer problems | Bug fixes, performance, internals |
+
+MAJOR is expected to stay at `1` for a long time. That is the intended
+behaviour, not a sign the policy is being ignored — see VS Code, which has
+shipped `1.x` for a decade.
+
+The version in `package.json` is the single source of truth. `app.getVersion()`,
+the DMG, `latest-mac.yml`, and the git tag all derive from it.
+
+## 2. Which number to bump
+
+> **Rule:** Look at every commit landing in this release.
+>
+> - Any `feat!:` or `BREAKING CHANGE:` footer → **MAJOR**
+> - Otherwise, any `feat:` / `feat(scope):` → **MINOR**
+> - Otherwise → **PATCH**
+
+The rule is deliberately mechanical. Version numbers stop carrying information
+the moment they become a judgement call, and the failure mode is always the
+same: everything quietly becomes a PATCH.
+
+```bash
+# List the commits in scope for the next release.
+git log --oneline $(git describe --tags --abbrev=0)..main
+```
+
+`docs:`, `ci:`, `chore:`, `style:`, `test:`, `build:`, `refactor:`, `perf:` all
+count as PATCH. They do **not**, on their own, justify cutting a release at all
+— see below.
+
+## 3. When to cut a release
+
+| Situation | Action |
+|---|---|
+| Only `docs:` / `ci:` / `chore:` accumulated | **Don't release.** Nothing in the shipped binary changed. The landing page updates through GitHub Pages independently. |
+| One or more meaningful `feat:` accumulated | Cut a **MINOR**. Roughly weekly is a good rhythm. |
+| Crash, data loss, or "can't update" bug | Cut a **PATCH** immediately. |
+| Minor `fix:` with a workaround | Let it ride along with the next MINOR. |
+
+Two constraints shape this. Notarization is an Apple server round-trip that
+takes minutes per build, and every release prompts every user to restart. Four
+releases in one day is noise, not velocity.
+
+## 4. Version numbers are immutable
+
+**A version number that has been published as a GitHub Release is never
+reused.** If a release goes out wrong:
+
+- Do **not** delete the tag and re-push it.
+- Do **not** re-run the build to overwrite the assets.
+- Ship the next PATCH.
+
+Users who already auto-updated hold the old binary. Replacing the assets under
+the same tag means two different binaries both reporting the same version, which
+makes every subsequent bug report unfalsifiable.
+
+The `--clobber` path in `build.yml` exists **only** for recovering a release
+whose assets failed to upload (e.g. notarization failed after the release object
+was created). It is not for re-cutting a release users already have.
+
+## 5. Pre-releases
+
+Reserved format, not currently in use:
+
+```
+1.1.0-beta.1
+```
+
+This is valid SemVer, sorts correctly for `electron-updater`, and lines up with
+its `allowPrerelease` flag plus GitHub's pre-release marker. The format is fixed
+now so that adopting a beta channel later doesn't require renaming anything
+retroactively. Channel separation isn't worth the overhead at the current user
+count.
+
+## 6. Update notification strength
+
+The updater surfaces new versions through a dot on the settings button. The
+version number decides how loud that is:
+
+- **MINOR** → new-feature indicator, "What's new" after updating
+- **PATCH** → silent dot only
+
+This is what makes the number do actual work rather than just increment.
+
+## 7. Release procedure
+
+1. **Decide the number** using [§2](#2-which-number-to-bump).
+2. **Open a `release/vX.Y.Z` branch**, bump `version` in `package.json`, and run
+   `npm install` so `package-lock.json` follows.
+3. **Commit as `release: vX.Y.Z`**, with a body listing user-visible changes
+   since the previous tag (this becomes the summary maintainers read later).
+4. **Merge to `main`.**
+5. **Tag the merge commit and push:**
+   ```bash
+   git checkout main && git pull
+   git tag "v$(node -p "require('./package.json').version")"
+   git push origin "v$(node -p "require('./package.json').version")"
+   ```
+   Deriving the tag from `package.json` avoids the mismatch described below.
+6. **`build.yml` takes over** — it verifies the tag matches `package.json`,
+   checks signing secrets, builds, signs, notarizes, verifies with `codesign` /
+   `stapler` / `spctl`, then creates the GitHub Release with auto-generated
+   notes.
+
+### The mismatch guard
+
+`electron-builder` builds from `package.json`, not from the tag. If you tag
+`v1.1.0` without bumping `package.json`, the build **succeeds** — but the
+release is titled `v1.1.0` while the binary and `latest-mac.yml` both say
+`1.0.4`, so no existing user ever receives the update. Nothing looks wrong until
+someone notices the install base stopped moving.
+
+`build.yml` has a preflight step that fails the build on this mismatch before
+notarization burns any time. Don't remove it.
+
+## 8. Possible future automation
+
+[release-please](https://github.com/googleapis/release-please) would fit: the
+repo already squash-merges Conventional-Commit-titled PRs, which is exactly its
+input. It would take over §2 entirely (no human picks the number), maintain a
+`CHANGELOG.md`, and open the version-bump PR and push the tag automatically —
+replacing steps 1–5 above.
+
+Worth adopting once release cadence has settled into the weekly rhythm in §3.
+Automating first would just freeze whatever the current habits are into a bot.

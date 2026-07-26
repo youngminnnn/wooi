@@ -25,6 +25,24 @@ jobs:
           node-version: '20'
           cache: 'npm'
 
+      # electron-builder 는 태그가 아니라 package.json 의 version 으로 빌드한다. 둘이
+      # 어긋나면 릴리스 제목만 새 버전이고 실제 바이너리·latest-mac.yml 은 옛 버전이
+      # 되어, 기존 사용자에게 자동 업데이트가 **영원히 도달하지 않는다**. 게다가 빌드는
+      # 성공으로 끝나 눈치채기 어렵다. 공증에 수 분 쓰기 전에 여기서 끊는다.
+      # 버전 정책: docs/releasing.md
+      - name: Preflight — tag matches package.json version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          set -euo pipefail
+          pkg="$(node -p "require('./package.json').version")"
+          tag="${GITHUB_REF_NAME#v}"
+          if [ "$pkg" != "$tag" ]; then
+            echo "::error::태그($GITHUB_REF_NAME → $tag)와 package.json version($pkg)이 다릅니다."
+            echo "release: v$tag 커밋에서 package.json 을 bump 했는지, 태그를 그 커밋에 달았는지 확인하세요."
+            exit 1
+          fi
+          echo "태그/버전 일치 확인됨: $pkg"
+
       - run: npm ci
 
       # electron-builder 는 서명 자격증명이 없으면 "skipped macOS application code
@@ -125,8 +143,13 @@ jobs:
           # 빌드 재실행 시 릴리스가 이미 존재하면 create 가 실패하므로, 그 경우엔
           # 산출물만 덮어쓴다(--clobber). 자동 업데이트가 참조하는 latest-mac.yml 이
           # 옛 빌드에 고정되는 것을 막는다.
+          #
+          # 주의: 이 경로는 "릴리스는 만들어졌는데 공증 실패 등으로 산출물이 없거나
+          # 깨진" 복구 상황 전용이다. 이미 사용자에게 배포된 버전의 바이너리를 갈아끼우면
+          # 같은 버전 번호로 서로 다른 바이너리가 돌아다니게 된다. 잘못 나간 릴리스는
+          # 덮어쓰지 말고 다음 PATCH 를 올려라 — docs/releasing.md "버전 번호 불변" 참고.
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            echo "릴리스 $GITHUB_REF_NAME 가 이미 있어 산출물을 덮어씁니다."
+            echo "::warning::릴리스 $GITHUB_REF_NAME 가 이미 있어 산출물을 덮어씁니다. 이미 배포된 버전이라면 중단하고 다음 PATCH 로 다시 내세요(docs/releasing.md)."
             gh release upload "$GITHUB_REF_NAME" "${assets[@]}" --clobber
           else
             gh release create "$GITHUB_REF_NAME" "${assets[@]}" \
