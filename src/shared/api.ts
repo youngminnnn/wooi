@@ -202,6 +202,8 @@ export interface WooiApi {
   update: {
     /** 수동 업데이트 확인. 최신 상태를 반환하고 진행은 onUpdate 로 방송된다. */
     check(): Promise<UpdateStatus>
+    /** 마지막으로 방송된 업데이트 상태(확인을 새로 트리거하지 않는다). */
+    getStatus(): Promise<UpdateStatus>
     /** 다운로드 완료된 업데이트를 설치하기 위해 앱을 재시작한다. */
     quitAndInstall(): Promise<void>
   }

@@ -59,6 +59,9 @@ export function initUpdater(dispatch: (channel: string, payload: unknown) => voi
   // 현재 앱 버전 조회(설정 화면 표시용) — 패키징 여부와 무관하게 동작.
   ipcMain.handle(IPC.appGetVersion, () => app.getVersion())
 
+  // 마지막 상태 조회 — 렌더러가 새로 뜰 때(초기 로드/리로드) 이미 지나간 방송을 놓치지 않도록.
+  ipcMain.handle(IPC.updateGetStatus, (): UpdateStatus => lastStatus)
+
   // 수동 확인 — 최신 상태를 즉시 되돌려주고, 확인을 트리거한다.
   ipcMain.handle(IPC.updateCheck, async (): Promise<UpdateStatus> => {
     if (!app.isPackaged) {

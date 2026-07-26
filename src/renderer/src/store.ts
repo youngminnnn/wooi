@@ -10,6 +10,7 @@ import type {
   PrStatus,
   ScriptKind,
   ScriptStatus,
+  UpdateStatus,
   Workspace
 } from '@shared/types'
 import type { NotificationChannel, NotificationEvent } from '@shared/types'
@@ -122,6 +123,12 @@ interface UIState {
   prRefreshing: Record<string, boolean>
   permissions: PermissionRequest[]
   authStatus: AuthStatus | null
+  /**
+   * 자동 업데이트 상태(main 의 evtUpdate). 여러 화면(타이틀바 점, 업데이트 배너, 설정)이
+   * 같은 값을 보도록 여기 한 곳에서만 구독한다. 컴포넌트가 늦게 마운트돼도 지나간 방송을
+   * 놓치지 않는다.
+   */
+  updateStatus: UpdateStatus
   /** workspace 별 컨텍스트 윈도 사용량(마지막 턴 기준). 입력창 사용량 미터용. */
   contextUsage: Record<string, ContextUsage>
   /** workspace 별 대화 압축 진행 여부(자동/수동 /compact 진행 중이면 true). */
@@ -240,6 +247,7 @@ export const useStore = create<UIState>((set, get) => ({
   prRefreshing: {},
   permissions: [],
   authStatus: null,
+  updateStatus: { state: 'idle' },
   contextUsage: {},
   compacting: {},
   unread: {},
@@ -502,6 +510,13 @@ export const useStore = create<UIState>((set, get) => ({
         set({ compacting: { ...get().compacting, [workspaceId]: event.active } })
       }
     })
+
+    // 업데이트 상태: 지금 값을 한 번 받아 두고(창이 늦게 떠서 놓친 방송 보정) 이후 변화를 구독한다.
+    void window.api.update.getStatus().then((status) => {
+      // 그 사이 방송으로 이미 더 최신 상태를 받았다면 덮어쓰지 않는다.
+      if (get().updateStatus.state === 'idle') set({ updateStatus: status })
+    })
+    window.api.onUpdate((status) => set({ updateStatus: status }))
 
     window.api.onPermission((req: PermissionRequest) => {
       if (notifyEnabled(get(), req.workspaceId, 'needsInput', 'sound')) playNotification()
