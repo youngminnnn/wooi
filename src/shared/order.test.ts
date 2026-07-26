@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { orderVisibleWorkspaces } from './types'
+import { orderVisibleWorkspaces, reorderById } from './types'
 
 type W = {
   id: string
@@ -54,5 +54,22 @@ describe('orderVisibleWorkspaces', () => {
   it('repos 목록에 없는 레포의 워크스페이스도 유실 없이 뒤에 붙는다', () => {
     const workspaces = [ws('orphan', 'gone'), ws('a', 'r1')]
     expect(ids(orderVisibleWorkspaces([{ id: 'r1' }], workspaces))).toEqual(['a', 'orphan'])
+  })
+
+  // 드래그 앤 드롭 재정렬(reorderById)은 배열 자체를 다시 끼워 넣는다. 번호는 그 배열에서
+  // 파생되므로, 사용자가 행을 끌어 옮기면 ⌘번호도 화면을 따라 같이 움직여야 한다.
+  it('워크스페이스를 형제 사이에서 끌어 옮기면 번호도 따라 움직인다', () => {
+    const repos = [{ id: 'r1' }]
+    const workspaces = [ws('a', 'r1'), ws('b', 'r1'), ws('c', 'r1')]
+    // c 를 a 앞으로 끌어다 놓으면 화면은 c, a, b 가 된다.
+    const moved = reorderById(workspaces, 'c', 'a', 'before')
+    expect(ids(orderVisibleWorkspaces(repos, moved))).toEqual(['c', 'a', 'b'])
+  })
+
+  it('레포를 끌어 옮기면 그 레포의 워크스페이스 묶음이 통째로 따라 움직인다', () => {
+    const repos = [{ id: 'r1' }, { id: 'r2' }]
+    const workspaces = [ws('a', 'r1'), ws('b', 'r2')]
+    const movedRepos = reorderById(repos, 'r2', 'r1', 'before')
+    expect(ids(orderVisibleWorkspaces(movedRepos, workspaces))).toEqual(['b', 'a'])
   })
 })
