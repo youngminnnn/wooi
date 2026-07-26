@@ -17,11 +17,14 @@ import {
   AlertTriangle,
   RefreshCw,
   LayoutDashboard,
-  MoreVertical
+  MoreVertical,
+  Search,
+  X
 } from 'lucide-react'
 import { useStore } from '../store'
 import RowActionsMenu, { type RowAction } from './RowActionsMenu'
-import { orderByStack, workspaceDisplayName } from '@shared/types'
+import { QUICK_SWITCH_HINT_DISMISSED, readUiFlag, setUiFlag } from '../lib/uiFlags'
+import { orderByStack, orderVisibleWorkspaces, workspaceDisplayName } from '@shared/types'
 import { useNow } from '../lib/useNow'
 import { formatDuration } from '../lib/format'
 import { useDragReorder, type DragReorder } from '../lib/useDragReorder'
@@ -38,11 +41,13 @@ const WORKSPACE_MIME = 'application/x-wooi-workspace'
 export default function Sidebar({
   onNewWorkspace,
   onStackWorkspace,
-  onConfigRepo
+  onConfigRepo,
+  onOpenQuickSwitch
 }: {
   onNewWorkspace: (repoId: string) => void
   onStackWorkspace: (repoId: string, parentWorkspaceId: string) => void
   onConfigRepo: (repoId: string) => void
+  onOpenQuickSwitch: () => void
 }): React.JSX.Element {
   const app = useStore((s) => s.app)!
   const pending = useStore((s) => s.pending)
@@ -50,22 +55,32 @@ export default function Sidebar({
   const selectedId = useStore((s) => s.selectedWorkspaceId)
   const select = useStore((s) => s.selectWorkspace)
 
-  // Overview 는 활성(비아카이브) 워크스페이스가 하나라도 있을 때만 의미가 있다(App.tsx 라우팅과 동일).
-  const hasActiveWorkspaces = app.workspaces.some((w) => !w.archived)
   const onOverview = selectedId === null
+
+  // 사이드바에 보이는 순서 그대로의 활성 워크스페이스 목록. 번호 배지·⌘K 힌트 조건이 모두 여기서 나온다.
+  const ordered = orderVisibleWorkspaces(app.repos, app.workspaces)
+
+  // Overview·검색은 활성(비아카이브) 워크스페이스가 하나라도 있을 때만 의미가 있다(App.tsx 라우팅과 동일).
+  const hasActiveWorkspaces = ordered.length > 0
 
   // 실행 중인 세션이 하나라도 있으면 1초마다 갱신해 경과 시간을 흐르게 하고("오래 실행 중" 힌트도
   // 같은 틱으로 갱신), 없으면 틱을 멈춰 불필요한 재렌더를 막는다.
   const anyRunning = app.workspaces.some((w) => !w.archived && w.status === 'running')
   const now = useNow(1000, anyRunning)
 
-  // ⌘1–9 단축키(App.tsx)는 archived 제외 전체 워크스페이스의 평탄한 순서에 매핑된다.
-  // 같은 순서로 앞 9개에 번호를 매겨 사이드바 행에 배지로 노출, 화면-키맵 불일치를 없앤다.
+  // ⌘1–9 단축키(App.tsx)와 똑같은 순서 함수로 번호를 매긴다 — 화면에서 위에서 n번째 행이
+  // 항상 ⌘n 이 되도록(레포가 여러 개여도 1,2,3… 순서가 위에서부터 이어진다).
   const shortcutById = new Map<string, number>()
-  app.workspaces
-    .filter((w) => !w.archived)
-    .slice(0, 9)
-    .forEach((w, i) => shortcutById.set(w.id, i + 1))
+  ordered.slice(0, 9).forEach((w, i) => shortcutById.set(w.id, i + 1))
+
+  // ⌘K 힌트는 '실제로 번호가 모자라진 순간'에만, 한 번만 띄운다. 9개 이하로 쓰는 사용자는
+  // 평생 보지 않고, 한 번 닫으면 실행 간에 기억된다(순수 화면 상태라 localStorage 로 충분).
+  const [hintDismissed, setHintDismissed] = useState(() => readUiFlag(QUICK_SWITCH_HINT_DISMISSED))
+  const showQuickSwitchHint = ordered.length > 9 && !hintDismissed
+  const dismissHint = (): void => {
+    setUiFlag(QUICK_SWITCH_HINT_DISMISSED, true)
+    setHintDismissed(true)
+  }
 
   const addRepo = async (): Promise<void> => {
     const res = await window.api.repo.add()
@@ -100,7 +115,7 @@ export default function Sidebar({
   return (
     <aside className="w-72 shrink-0 flex flex-col bg-[var(--bg-2)]">
       {hasActiveWorkspaces && (
-        <div className="px-2 pt-2 shrink-0">
+        <div className="px-2 pt-2 shrink-0 space-y-0.5">
           <button
             onClick={() => void select(null)}
             aria-current={onOverview ? 'page' : undefined}
@@ -113,6 +128,19 @@ export default function Sidebar({
           >
             <LayoutDashboard size={15} />
             <span className="font-medium">Overview</span>
+          </button>
+          {/* 퀵 스위처의 상시 진입점. 별도 안내문 없이도 ⌘K 의 존재와 용도를 알려 주고,
+              키보드 단축키를 모르거나 마우스로 쓰는 경우에도 팔레트에 닿을 수 있게 한다
+              (단축키 전용 기능은 정의상 발견 불가능하다). 익히면 자연히 눈에 안 들어오고,
+              잊으면 다시 보이므로 닫기 상태를 관리할 필요가 없다. */}
+          <button
+            onClick={onOpenQuickSwitch}
+            className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm text-neutral-400 hover:bg-[var(--surface)] hover:text-neutral-200 transition-colors"
+            title="Search workspaces by name, branch, or repo"
+          >
+            <Search size={15} />
+            <span className="flex-1 text-left font-medium">Search workspaces</span>
+            <kbd className="text-xs leading-none font-medium text-neutral-600">⌘K</kbd>
           </button>
         </div>
       )}
@@ -195,6 +223,9 @@ export default function Sidebar({
                 {active.length === 0 && repoPending.length === 0 && (
                   <p className="px-3 py-1 text-xs text-neutral-600">No workspaces</p>
                 )}
+                {/* 이 렌더 순서는 orderVisibleWorkspaces 의 정의(레포 순 → 레포 안 orderByStack)와
+                    일치해야 한다 — ⌘1–9 번호가 "위에서 n번째" 와 어긋나지 않게 하는 불변식이다.
+                    여기 정렬 방식을 바꾸면 shared/types.ts 의 orderVisibleWorkspaces 도 같이 고칠 것. */}
                 {orderByStack(active).map(({ workspace: ws, depth }) => (
                   <WorkspaceRow
                     key={ws.id}
@@ -215,6 +246,27 @@ export default function Sidebar({
             </div>
           )
         })}
+
+        {/* 목록이 9개를 넘어 ⌘번호가 없는 행이 생긴 순간에만, 그 행들 바로 아래에서 이유와
+            대안을 한 줄로 알려 준다. 앱을 처음 켤 때가 아니라 실제로 한계에 부딪힌 시점에
+            띄우는 것이 핵심 — 9개 이하로 쓰는 사용자에게는 아예 존재하지 않는 UI 다. */}
+        {showQuickSwitchHint && (
+          <div className="mx-1 mb-2 flex items-start gap-2 rounded-md bg-[var(--surface)] px-2 py-1.5 text-xs text-neutral-500">
+            <Search size={12} className="mt-0.5 shrink-0" />
+            <p className="flex-1 leading-relaxed">
+              Only the top 9 rows get a ⌘number. Press{' '}
+              <kbd className="font-medium text-neutral-300">⌘K</kbd> to search the rest.
+            </p>
+            <button
+              onClick={dismissHint}
+              aria-label="Dismiss hint"
+              title="Got it"
+              className="shrink-0 -mr-0.5 h-4 w-4 grid place-items-center rounded text-neutral-600 hover:bg-[var(--surface-2)] hover:text-neutral-300"
+            >
+              <X size={11} />
+            </button>
+          </div>
+        )}
       </div>
     </aside>
   )
@@ -689,7 +741,8 @@ const PR_DOT: Record<PrState, { dotClass: string; label: string }> = {
   closed: { dotClass: 'bg-neutral-500', label: 'Closed' }
 }
 
-function StatusDot({
+/** 상태 표시 점/아이콘. 사이드바 행과 ⌘K 퀵 스위처가 같은 시각 언어를 쓰도록 공유한다. */
+export function StatusDot({
   status,
   awaitingPermission,
   compacting,

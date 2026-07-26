@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { AlertTriangle } from 'lucide-react'
-import { CURRENT_TERMS_VERSION } from '@shared/types'
+import { CURRENT_TERMS_VERSION, orderVisibleWorkspaces } from '@shared/types'
 import { useStore } from './store'
 import { nextPermissionMode } from './lib/permission'
 import { applyTheme } from './lib/theme'
@@ -17,6 +17,7 @@ import NewWorkspaceModal from './components/NewWorkspaceModal'
 import RepoConfigModal from './components/RepoConfigModal'
 import OnboardingModal from './components/OnboardingModal'
 import ShortcutsHelp from './components/ShortcutsHelp'
+import QuickSwitcher from './components/QuickSwitcher'
 import FeatureTour from './components/FeatureTour'
 import GithubGate from './components/GithubGate'
 import Toaster from './components/Toaster'
@@ -53,6 +54,8 @@ export default function App(): React.JSX.Element {
     null
   )
   const [configRepoId, setConfigRepoId] = useState<string | null>(null)
+  // ⌘K 퀵 스위처. ⌘1–9 로 닿지 않는(10번째 이후) 워크스페이스로 이동하는 기본 경로다.
+  const [quickSwitchOpen, setQuickSwitchOpen] = useState(false)
   // 설정의 "Take a tour" 로 여는 기능 투어. 실제 화면 위에서 진행하도록 앱 레벨에서 렌더한다.
   const [tourOpen, setTourOpen] = useState(false)
 
@@ -84,6 +87,7 @@ export default function App(): React.JSX.Element {
   const anyModalOpen =
     showSettings ||
     showShortcuts ||
+    quickSwitchOpen ||
     newWs !== null ||
     configRepoId !== null ||
     onboardingOpen ||
@@ -142,6 +146,14 @@ export default function App(): React.JSX.Element {
               if (ok) useStore.getState().approveAllPermissions()
             })
         }
+        return
+      }
+
+      // ⌘K: 퀵 스위처. ⌘1–9 는 앞 9개까지만 닿으므로, 그 뒤 워크스페이스는 여기서 검색해 이동한다.
+      // 키 판별은 e.code 로 한다 — 한글 IME 에서 e.key 가 'k' 가 아닐 수 있다.
+      if (e.code === 'KeyK' && !e.shiftKey && !e.ctrlKey && !e.altKey) {
+        e.preventDefault()
+        if (st.app?.workspaces.some((w) => !w.archived)) setQuickSwitchOpen(true)
         return
       }
 
@@ -230,7 +242,9 @@ export default function App(): React.JSX.Element {
         return
       }
 
-      const list = (st.app?.workspaces ?? []).filter((w) => !w.archived)
+      // 사이드바에 보이는 순서(레포 순 → 레포 안에서는 stack 순)와 정확히 같은 목록.
+      // Sidebar 의 번호 배지도 같은 함수를 쓰므로 "위에서 n번째 = ⌘n" 이 항상 성립한다.
+      const list = orderVisibleWorkspaces(st.app?.repos ?? [], st.app?.workspaces ?? [])
       if (!list.length) return
 
       if (e.key >= '1' && e.key <= '9') {
@@ -319,6 +333,7 @@ export default function App(): React.JSX.Element {
           onNewWorkspace={handleNewWorkspace}
           onStackWorkspace={handleStackWorkspace}
           onConfigRepo={setConfigRepoId}
+          onOpenQuickSwitch={() => setQuickSwitchOpen(true)}
         />
         <div ref={contentRef} className="flex-1 min-w-0 border-l border-[var(--border)] flex">
           {selected ? (
@@ -372,6 +387,7 @@ export default function App(): React.JSX.Element {
       )}
       {tourOpen && <FeatureTour onDone={() => setTourOpen(false)} />}
       {showShortcuts && <ShortcutsHelp onClose={() => setShowShortcuts(false)} />}
+      {quickSwitchOpen && <QuickSwitcher onClose={() => setQuickSwitchOpen(false)} />}
       {newWs && (
         <NewWorkspaceModal
           repoId={newWs.repoId}

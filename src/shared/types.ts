@@ -165,6 +165,41 @@ export function reorderById<T extends { id: string }>(
 }
 
 /**
+ * 사이드바에 실제로 보이는 순서(위 → 아래) 그대로 활성 워크스페이스를 평탄하게 나열한다.
+ * 규칙: repos 배열 순서로 레포를 훑고, 레포 안에서는 orderByStack(부모 바로 뒤에 자식) 순서.
+ * 두 배열 순서가 곧 표시 순서이므로(reorderById 참조), 드래그 앤 드롭 재정렬도 그대로 반영된다.
+ *
+ * ⌘1–9 번호 배지·⌘1–9 선택·⌘[ / ⌘] 순환이 모두 이 함수 하나를 공유해야 한다.
+ * (예전에는 app.workspaces 원본 배열 순서를 그대로 썼는데, 그 배열은 레포별로 묶여 있지 않아
+ *  레포가 여러 개면 A→B→A 처럼 섞여 화면 순서와 어긋났다. 그래서 번호가 꼬였다.)
+ */
+export function orderVisibleWorkspaces<
+  R extends { id: string },
+  W extends { id: string; repoId: string; archived: boolean; parentWorkspaceId: string | null }
+>(repos: R[], workspaces: W[]): W[] {
+  const byRepo = new Map<string, W[]>()
+  for (const w of workspaces) {
+    if (w.archived) continue
+    const list = byRepo.get(w.repoId) ?? []
+    list.push(w)
+    byRepo.set(w.repoId, list)
+  }
+  const out: W[] = []
+  const push = (list: W[]): void => {
+    for (const { workspace } of orderByStack(list)) out.push(workspace)
+  }
+  for (const repo of repos) {
+    const list = byRepo.get(repo.id)
+    if (!list) continue
+    byRepo.delete(repo.id)
+    push(list)
+  }
+  // repos 에 없는 레포(삭제 직후 등)의 워크스페이스도 유실 없이 뒤에 붙인다.
+  for (const list of byRepo.values()) push(list)
+  return out
+}
+
+/**
  * 이 워크스페이스를 구동하는 AI 코딩 에이전트 백엔드 식별자.
  * 현재는 'claude'(Claude Code, Claude Agent SDK) 하나뿐이지만, 백엔드 추상화 계층을 통해
  * 추후 다른 에이전트(예: Codex)를 식별자만 추가해 붙일 수 있도록 도메인에 남겨 둔다.
