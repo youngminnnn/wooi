@@ -89,12 +89,12 @@ export default function Overview(): React.JSX.Element {
   // (구독 요금제일 때만 값이 있고, API 키 세션이면 rateLimitsAvailable=false → 달러 표기로 폴백한다.)
   const [usage, setUsage] = useState<UsageInfo | null>(null)
   // 조회는 세션 왕복이 필요해 즉답이 아니다. 응답 전까지 타일을 감추면 화면이 뒤늦게 밀려나므로
-  // 자리는 유지한 채 로딩만 표시한다(usageLoading). usageChecked 는 "한 번이라도 응답을 받았나"로,
-  // 요금제(%) 타일과 달러 타일 중 무엇을 보여줄지 정하는 데만 쓴다(대상이 바뀌어도 되돌리지 않아
-  // 재조회 중 마지막 상태를 유지한다).
+  // 자리는 유지한 채 로딩만 표시한다(usageLoading).
   const [usageLoading, setUsageLoading] = useState(true)
-  const [usageChecked, setUsageChecked] = useState(false)
   const usageTargetId = (active.find((w) => w.status === 'running') ?? active[0])?.id
+  // main 이 유지하는 계정 단위 스냅샷(재시작해도 남는다). 이번 조회가 창을 못 받았을 때의 폴백이자,
+  // 앱을 막 켠 시점에 "이 계정이 요금제인가"를 즉시 알려 주는 근거다.
+  const snapshot = app.rateLimits
 
   // SDK 는 호출할 때마다 계정 사용률을 새로 읽어오지만, 대상 세션이 바뀔 때만 물으면
   // 화면을 연 시점의 값이 그대로 굳어 claude.ai/데스크톱 앱과 어긋난다(5시간 창은 특히 빨리 움직인다).
@@ -119,7 +119,6 @@ export default function Overview(): React.JSX.Element {
     if (!usageTargetId) {
       setUsage(null)
       setUsageLoading(false)
-      setUsageChecked(true)
       return
     }
     let cancelled = false
@@ -130,12 +129,10 @@ export default function Overview(): React.JSX.Element {
       .then(({ result }) => {
         if (cancelled) return
         if (result?.kind === 'usage') setUsage(result.usage)
-        setUsageChecked(true)
         setUsageLoading(false)
       })
       .catch(() => {
         if (cancelled) return
-        setUsageChecked(true)
         setUsageLoading(false)
       })
     return () => {
@@ -143,10 +140,26 @@ export default function Overview(): React.JSX.Element {
     }
   }, [usageTargetId, usageNonce])
 
+  /**
+   * 이 계정에 요금제 한도가 적용되는가. true=구독, false=API 키(달러 표기), null=아직 모름.
+   * **창(window)이 왔는지로 판단하지 않는다** — 라이브 세션이 없을 때의 단명 조회는 available 만
+   * 주고 창은 비워서 오기 때문에, 창 유무로 고르면 앱을 켠 직후 달러 타일이 떴다가 첫 메시지
+   * 이후 % 타일로 바뀌는 깜빡임이 생긴다.
+   */
+  const planApplies: boolean | null = usage
+    ? usage.rateLimitsAvailable
+    : (snapshot?.available ?? null)
+
   // 한도 창(5시간·7일·Opus·Sonnet)을 표시용으로 정규화: 사용률·잔여율·리셋 시각.
+  // 이번 조회가 창을 못 받았으면 저장된 스냅샷(마지막으로 알던 값)으로 폴백한다.
   const planWindows = useMemo<PlanWindow[]>(() => {
-    if (!usage?.rateLimitsAvailable) return []
-    return usage.rateLimits.map((r) => {
+    const source =
+      usage?.rateLimitsAvailable && usage.rateLimits.length > 0
+        ? usage.rateLimits
+        : snapshot?.available
+          ? snapshot.windows
+          : []
+    return source.map((r) => {
       const used = r.utilization == null ? null : Math.min(100, Math.max(0, r.utilization))
       const parsed = r.resetsAt ? Date.parse(r.resetsAt) : NaN
       return {
@@ -155,7 +168,7 @@ export default function Overview(): React.JSX.Element {
         resetsAt: Number.isNaN(parsed) ? null : parsed
       }
     })
-  }, [usage])
+  }, [usage, snapshot])
 
   // 실행 중 경과 시간과 한도 리셋 카운트다운은 둘 다 "흐르는" 표시라 같은 타이머로 갱신한다.
   // 경과 시간은 초 단위라 1초가 필요하지만, 카운트다운만 남았다면 분 단위 표시라 30초면 충분하다.
@@ -173,8 +186,8 @@ export default function Overview(): React.JSX.Element {
 
   // 정액 요금제 사용자에게는 달러 표기가 와닿지 않는다 → 카드의 개별 비용도 숨긴다.
   // (rate limit 은 계정 단위라 워크스페이스별 %는 성립하지 않으므로 그냥 감춘다.)
-  const isSubscription = usage?.rateLimitsAvailable === true
-  const showCardCost = usageChecked && !isSubscription
+  // 아직 계정 종류를 모르면(null) 감춘 채로 둔다 — 나중에 사라질 값을 먼저 보여 주지 않는다.
+  const showCardCost = planApplies === false
 
   const pendingIds = new Set(permissions.map((p) => p.workspaceId))
 
@@ -244,47 +257,33 @@ export default function Overview(): React.JSX.Element {
         {/* 비용/토큰 롤업: 모든 세션의 누적 지출·턴 수를 한눈에. */}
         <div className="flex flex-wrap gap-2.5 mb-2.5">
           {/* 요금제(구독) 사용자는 정액제라 달러 금액이 와닿지 않는다 → 전체 사용량 %로 보여준다.
-              API 키 사용자는 rate limit 이 없으니(planUsage=null) 기존 누적 달러로 폴백한다.
-              첫 조회 전에는 어느 쪽인지 모르므로, 타일 자리는 잡아 두고 값만 로딩으로 표시한다. */}
-          {!usageChecked ? (
-            <StatTile
-              icon={<Gauge size={14} className="text-[var(--warning-400)]" />}
-              label="Plan usage"
-              value="—"
-              loading
-              hint="Checking plan rate limits…"
-            />
-          ) : planUsage ? (
-            <StatTile
-              icon={<Gauge size={14} className="text-[var(--warning-400)]" />}
-              label="Plan usage"
-              value={`${Math.round(planUsage.usedPct ?? 0)}%`}
-              loading={usageLoading}
-              hint={
-                `Highest plan rate-limit window used (${planUsage.label})` +
-                (totals.cost > 0 ? ` · ${formatCost(totals.cost)} spent in app` : '')
-              }
-            />
-          ) : (
+              API 키 사용자는 rate limit 이 아예 없으므로 누적 달러로 폴백한다.
+              어느 타일을 띄울지는 **계정 종류(planApplies)** 로만 정한다 — 사용률 값이 아직
+              도착하지 않았다고 달러 타일로 갈아타면, 첫 메시지 직후 타일이 통째로 바뀐다. */}
+          {planApplies === false ? (
             <StatTile
               icon={<DollarSign size={14} className="text-[var(--success-400)]" />}
               label="Total spend"
               value={formatCost(totals.cost)}
-              loading={usageLoading}
               hint="Sum of session costs across all workspaces"
             />
-          )}
-          {/* 세션 한도(5시간 창)가 언제 초기화되는지. 조회 전에도 자리를 잡아 두어야 값이 도착할 때
-              뒤 타일들이 옆으로 밀리지 않는다. 리셋 시각을 끝내 모르면(=API 키) 그때 내린다. */}
-          {!usageChecked ? (
+          ) : (
             <StatTile
-              icon={<Timer size={14} className="text-[var(--info-400)]" />}
-              label="Session resets in"
-              value="—"
-              loading
-              hint="Checking the session limit window…"
+              icon={<Gauge size={14} className="text-[var(--warning-400)]" />}
+              label="Plan usage"
+              value={planUsage ? `${Math.round(planUsage.usedPct ?? 0)}%` : '—'}
+              loading={usageLoading || !planUsage}
+              hint={
+                planUsage
+                  ? `Highest plan rate-limit window used (${planUsage.label})` +
+                    (totals.cost > 0 ? ` · ${formatCost(totals.cost)} spent in app` : '')
+                  : 'Checking plan rate limits…'
+              }
             />
-          ) : sessionWindow?.resetsAt != null ? (
+          )}
+          {/* 세션 한도(5시간 창)가 언제 초기화되는지. 값이 오기 전에도 자리를 잡아 두어야 값이 도착할 때
+              뒤 타일들이 옆으로 밀리지 않는다. 요금제 한도가 없는 계정(API 키)이면 내린다. */}
+          {sessionWindow?.resetsAt != null ? (
             <StatTile
               icon={<Timer size={14} className="text-[var(--info-400)]" />}
               label="Session resets in"
@@ -297,7 +296,15 @@ export default function Overview(): React.JSX.Element {
                   : ` · ${Math.round(sessionWindow.usedPct)}% used`)
               }
             />
-          ) : null}
+          ) : planApplies === false ? null : (
+            <StatTile
+              icon={<Timer size={14} className="text-[var(--info-400)]" />}
+              label="Session resets in"
+              value="—"
+              loading
+              hint="Checking the session limit window…"
+            />
+          )}
           <StatTile
             icon={<Repeat size={14} className="text-[var(--accent-400)]" />}
             label="Agent turns"
@@ -314,7 +321,7 @@ export default function Overview(): React.JSX.Element {
 
         {/* 모델별(Opus·Sonnet)·기간별 한도 창의 잔여량. 조회가 끝나기 전에도 자리를 지켜
             레이아웃이 뒤늦게 밀리지 않게 한다. API 키 세션이면 조회 후 조용히 사라진다. */}
-        {(!usageChecked || planWindows.length > 0) && (
+        {(planApplies !== false || planWindows.length > 0) && (
           <PlanLimits
             windows={planWindows}
             extra={usage?.extraUsage ?? null}
