@@ -11,11 +11,14 @@ import { resolveClaudeExecutable } from './executable'
 import { sessionTranscriptExists } from './sessionFiles'
 import { log } from '../logger'
 import { MCP_SETTING_SOURCES, resolveUserMcpServers } from './mcp'
+import { fastModeReasonText } from '@shared/types'
 import type {
   ChatItem,
   ChatEvent,
   EffortLevel,
   EffortSetting,
+  FastModeDisabledReason,
+  FastModeState,
   ImageAttachment,
   PermissionMode,
   PermissionRequest,
@@ -31,6 +34,11 @@ export interface SessionDeps {
   model: string | null
   /** reasoning effort 선택값(ultracode 포함). null 이면 effort 를 지정하지 않아 모델 기본 동작을 따른다. */
   effort: EffortSetting | null
+  /**
+   * fast mode(Claude Code 의 `/fast`) 사용 여부. true 면 settings 레이어로 fastMode 를 켠다.
+   * 실제 적용 여부는 CLI 가 모델·플랜·쿨다운을 보고 정하며, 그 결과는 result 의 fast_mode_state 로 온다.
+   */
+  fastMode: boolean
   permissionMode: PermissionMode
   /** true 면 컨텍스트 사용률이 임계치를 넘었을 때 턴 종료 후 /compact 를 자동 주입한다. */
   autoCompact: boolean
@@ -209,6 +217,10 @@ export class ClaudeSession {
    * 주고받은 경우)은 그 안에 없어서 재시작 시 빈 세션으로 시작해 버린다.
    */
   private currentSessionId: string | null = null
+  /** 직전에 CLI 가 보고한 fast mode 실제 상태. 바뀔 때만 이벤트·안내를 낸다. */
+  private lastFastModeState: FastModeState | null = null
+  /** "켜 뒀지만 실제로는 표준 속도" 안내를 이미 띄웠는지(세션당 1회만). */
+  private notedFastModeOff = false
   /** 현재 query 의 abort 컨트롤러(프로세스를 갈아 끼울 때 끊는 데 쓴다). */
   private abort: AbortController | null = null
   /**
@@ -499,7 +511,15 @@ export class ClaudeSession {
           // 사용자가 'ultracode' 키워드나 "워크플로우로 해줘" 같은 요청을 했을 때만 Workflow 도구를 쓴다.
           // (Pro 등에서는 기본 off 이고 Wooi 엔 /config UI 도 없어, 이 주입이 없으면 기능을 켤 방법이 없다.)
           // ultracode 면 같은 settings 레이어에 ultracode: true 를 합친다(워크플로우는 이미 on).
-          settings: { enableWorkflows: true, ...(ultracode ? { ultracode: true } : {}) },
+          // fast mode(`/fast`)도 query Options 가 아니라 이 settings 레이어로 전달한다. SDK 세션에서는
+          // 이 인라인 플래그가 있을 때만 켜진다 — 사용자의 settings.json 값만으로는 활성화되지 않는다
+          // (CLI 가 SDK 모드에서 flagSettings.fastMode 를 요구한다). 지원 모델·플랜이 아니거나 fast
+          // rate limit 쿨다운이면 CLI 가 조용히 표준 속도로 돌리고, 그 사실을 result 로 알려 준다.
+          settings: {
+            enableWorkflows: true,
+            ...(ultracode ? { ultracode: true } : {}),
+            ...(this.deps.fastMode ? { fastMode: true } : {})
+          },
           ...(Object.keys(mcpServers).length ? { mcpServers } : {}),
           ...(claudeExecutable ? { pathToClaudeCodeExecutable: claudeExecutable } : {}),
           ...(this.deps.model ? { model: this.deps.model } : {}),
@@ -1155,6 +1175,10 @@ export class ClaudeSession {
   private handleResult(msg: Extract<SDKMessage, { type: 'result' }>): void {
     log.info(`session: result received (subtype=${msg.subtype}, turns=${msg.num_turns})`)
 
+    // CLI 가 이 턴에 fast mode 를 실제로 썼는지 알려 준다(설정과 다를 수 있다 — 미지원 모델·플랜
+    // 제한이면 'off', fast 전용 rate limit 을 넘겼으면 'cooldown').
+    this.reportFastModeState(msg.fast_mode_state, msg.fast_mode_disabled_reason)
+
     // 자격증명 문제로 아무것도 못 하고 끝난 턴이면, 사용자에게 오류를 보이는 대신 프로세스를
     // 갈아 끼워 같은 메시지를 다시 돌린다(터미널에서 CLI 를 재시작하는 것과 같은 처방).
     // inFlight 를 비우지 않고 running 도 유지해, 사용자 눈에는 하나의 연속된 턴으로 보인다.
@@ -1278,6 +1302,48 @@ export class ClaudeSession {
   private emitItem(item: ChatItem): void {
     this.deps.persist(item)
     this.deps.emit({ type: 'item', item })
+  }
+
+  /**
+   * CLI 가 보고한 fast mode 실제 상태를 렌더러로 흘려보내고, 사용자가 알아야 할 전환만 안내한다.
+   *
+   * 설정(deps.fastMode)과 실제 상태는 다를 수 있다 — fast mode 는 지원 모델·유료 플랜이 필요하고,
+   * fast 전용 rate limit 을 넘기면 쿨다운 동안 표준 속도로 내려간다. 조용히 느려지면 원인을 알 수
+   * 없으므로 전환 시점에만(중복 없이) 트랜스크립트에 한 줄 남긴다.
+   */
+  private reportFastModeState(
+    state: FastModeState | undefined,
+    reason: FastModeDisabledReason | undefined
+  ): void {
+    if (!state || state === this.lastFastModeState) return
+    const prev = this.lastFastModeState
+    this.lastFastModeState = state
+    this.deps.emit({ type: 'fastMode', state, ...(reason ? { reason } : {}) })
+
+    if (state === 'cooldown') {
+      this.emitItem({
+        id: `fastmode:cooldown:${Date.now()}`,
+        type: 'system',
+        text: 'Fast mode hit its rate limit — running at standard speed until it resets.',
+        ts: Date.now()
+      })
+    } else if (state === 'on' && prev === 'cooldown') {
+      this.emitItem({
+        id: `fastmode:on:${Date.now()}`,
+        type: 'system',
+        text: 'Fast mode is available again.',
+        ts: Date.now()
+      })
+    } else if (state === 'off' && this.deps.fastMode && !this.notedFastModeOff) {
+      // 켜 두었는데 한 번도 켜지지 않는 경우(미지원 모델·플랜/크레딧 없음·서드파티 경유)는 세션당 1회만.
+      this.notedFastModeOff = true
+      this.emitItem({
+        id: `fastmode:off:${Date.now()}`,
+        type: 'system',
+        text: `Fast mode is enabled in Wooi but is not active. ${fastModeReasonText(reason)}`,
+        ts: Date.now()
+      })
+    }
   }
 }
 

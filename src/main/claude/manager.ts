@@ -199,6 +199,7 @@ export class SessionManager implements AgentBackend {
       repoPath: this.getRepoPath(ws.repoId),
       model: ws.model ?? settings.model,
       effort: ws.effort ?? settings.effort,
+      fastMode: ws.fastMode ?? settings.fastMode,
       permissionMode: ws.permissionMode,
       autoCompact: settings.autoCompact,
       resumeSessionId: ws.sessionId
@@ -349,6 +350,26 @@ export class SessionManager implements AgentBackend {
     this.dispose(workspaceId)
   }
 
+  /**
+   * fast mode 오버라이드를 바꾼다. fast mode 는 query 시작 시점의 settings 레이어로 전달되므로
+   * 모델·effort 와 마찬가지로 기존 세션을 dispose 한다 — 다음 메시지에서 새 값으로 query 를 다시
+   * 열되 resume(세션 ID)로 대화 맥락을 이어받는다.
+   *
+   * 실제 적용 여부는 CLI 가 정한다(지원 모델·플랜·쿨다운). 그래서 이전 세션이 보고했던 상태는
+   * 여기서 지워, 새 세션의 result 가 알려 줄 때까지 "미확인" 으로 둔다.
+   */
+  setFastMode(workspaceId: string, fastMode: boolean | null): void {
+    getStore().update((st) => {
+      const w = st.workspaces.find((x) => x.id === workspaceId)
+      if (w) {
+        w.fastMode = fastMode
+        w.fastModeState = null
+        w.fastModeReason = null
+      }
+    })
+    this.dispose(workspaceId)
+  }
+
   dispose(workspaceId: string): void {
     this.sendIfHost({ type: 'dispose', workspaceId })
     // 세션이 사라지면 그 세션이 기다리던 권한 요청은 응답받을 수 없으므로 거둔다.
@@ -467,6 +488,16 @@ export class SessionManager implements AgentBackend {
       getStore().update((st) => {
         const w = st.workspaces.find((x) => x.id === workspaceId)
         if (w) w.lastModel = event.model ?? w.lastModel
+      })
+    } else if (event.type === 'fastMode') {
+      // 세션이 알려 준 fast mode 실제 상태를 영속한다 — 설정을 켜 뒀어도 모델·플랜·쿨다운 때문에
+      // 꺼져 있을 수 있어, 상태줄이 "설정" 이 아니라 "실제" 를 보여 주게 한다.
+      getStore().update((st) => {
+        const w = st.workspaces.find((x) => x.id === workspaceId)
+        if (w) {
+          w.fastModeState = event.state
+          w.fastModeReason = event.reason ?? null
+        }
       })
     }
     this.dispatch(IPC.evtChat, { workspaceId, event })

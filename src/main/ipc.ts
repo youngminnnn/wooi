@@ -349,8 +349,11 @@ export function registerIpc(ctx: IpcContext): void {
           permissionMode: settings.defaultPermissionMode,
           model: null,
           effort: null,
+          fastMode: null,
           status: 'idle',
           lastModel: null,
+          fastModeState: null,
+          fastModeReason: null,
           archived: false,
           createdAt: Date.now(),
           lastActiveAt: Date.now()
@@ -504,6 +507,11 @@ export function registerIpc(ctx: IpcContext): void {
       broadcastState()
     }
   )
+
+  ipcMain.handle(IPC.workspaceSetFastMode, (_e, workspaceId: string, fastMode: boolean | null) => {
+    ctx.sessions.setFastMode(workspaceId, fastMode)
+    broadcastState()
+  })
 
   ipcMain.handle(IPC.workspaceSetMuted, (_e, workspaceId: string, muted: boolean) => {
     store.update((st) => {

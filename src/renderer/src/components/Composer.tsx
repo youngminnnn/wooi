@@ -23,6 +23,7 @@ import {
   PowerOff,
   Cpu,
   Zap,
+  Rabbit,
   Check,
   History,
   ShieldCheck,
@@ -30,8 +31,9 @@ import {
 } from 'lucide-react'
 import { useStore } from '../store'
 import { PERMISSION_FOOTER } from '../lib/permission'
-import { MODEL_OPTIONS, modelLabel } from '../lib/models'
+import { MODEL_OPTIONS, modelLabel, modelSupportsFastMode } from '../lib/models'
 import { EFFORT_OPTIONS, effortLabel } from '../lib/effort'
+import { FAST_MODE_HINT, fastModeLabel, fastModeStatus } from '../lib/fastMode'
 import {
   INTERACTIVE_COMMANDS,
   MENTION_DROP_HINT_BYTES,
@@ -106,8 +108,8 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
 
   // /mcp·/context 등 인터랙티브 명령 결과 카드(임시 표시, 닫으면 사라짐).
   const [commandCard, setCommandCard] = useState<CommandCardState | null>(null)
-  // /model·/effort 선택 카드(로컬 처리, 닫으면 사라짐).
-  const [pickerCard, setPickerCard] = useState<'model' | 'effort' | null>(null)
+  // /model·/effort·/fast 선택 카드(로컬 처리, 닫으면 사라짐).
+  const [pickerCard, setPickerCard] = useState<PickerKind | null>(null)
   // 카드 응답을 현재 요청과만 맞추기 위한 단조 토큰(워크스페이스/명령 전환 시 stale 응답 무시).
   const cmdSeq = useRef(0)
 
@@ -142,8 +144,8 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
     setCaret(0)
   }, [workspace.id])
 
-  /** /model·/effort 선택 카드를 연다(다른 카드는 비켜 준다). 상태줄 클릭·슬래시 명령 공용. */
-  const openPicker = (kind: 'model' | 'effort'): void => {
+  /** /model·/effort·/fast 선택 카드를 연다(다른 카드는 비켜 준다). 상태줄 클릭·슬래시 명령 공용. */
+  const openPicker = (kind: PickerKind): void => {
     setSideAnswer(null)
     setCommandCard(null)
     setPickerCard(kind)
@@ -402,7 +404,7 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
       return
     }
 
-    // /model·/effort 는 백엔드 왕복 없이 로컬 선택 카드로 처리한다(첨부가 있으면 일반 전송).
+    // /model·/effort·/fast 는 백엔드 왕복 없이 로컬 선택 카드로 처리한다(첨부가 있으면 일반 전송).
     const picker = images.length ? null : matchPicker(trimmed)
     if (picker) {
       openPicker(picker)
@@ -1026,10 +1028,10 @@ function SideAnswerCard({
   )
 }
 
-/** "/model"·"/effort" 면 그 종류를 돌려준다(뒤따르는 인자는 무시하고 선택 카드를 연다). */
-function matchPicker(text: string): 'model' | 'effort' | null {
-  const m = /^\/(model|effort)(?:\s.*)?$/.exec(text)
-  return m ? (m[1] as 'model' | 'effort') : null
+/** "/model"·"/effort"·"/fast" 면 그 종류를 돌려준다(뒤따르는 인자는 무시하고 선택 카드를 연다). */
+function matchPicker(text: string): PickerKind | null {
+  const m = /^\/(model|effort|fast)(?:\s.*)?$/.exec(text)
+  return m ? (m[1] as PickerKind) : null
 }
 
 /**
@@ -1762,14 +1764,15 @@ function StatusLine({
   onPick
 }: {
   workspace: Workspace
-  /** 모델/effort 항목 클릭 시 해당 선택 카드를 연다(슬래시 /model·/effort 와 동일). */
-  onPick: (kind: 'model' | 'effort') => void
+  /** 모델/effort/fast 항목 클릭 시 해당 선택 카드를 연다(슬래시 /model·/effort·/fast 와 동일). */
+  onPick: (kind: PickerKind) => void
 }): React.JSX.Element {
   const usage = useStore((s) => s.contextUsage[workspace.id])
   const compacting = useStore((s) => s.compacting[workspace.id] ?? false)
   const liveBranch = useStore((s) => s.gitStatus[workspace.id]?.branch)
   const settingsModel = useStore((s) => s.app!.settings.model)
   const settingsEffort = useStore((s) => s.app!.settings.effort)
+  const settingsFastMode = useStore((s) => s.app!.settings.fastMode)
 
   // worktree 절대 경로의 마지막 구간(디렉토리명). 비정상 경로면 전체 경로로 폴백한다.
   const dirName = workspace.worktreePath.split('/').filter(Boolean).pop() ?? workspace.worktreePath
@@ -1782,6 +1785,12 @@ function StatusLine({
   // 표시는 "유효 값" 기준: workspace 오버라이드 → (모델은 init 으로 확정된 lastModel) → 전역 설정.
   const modelText = modelLabel(workspace.model ?? workspace.lastModel ?? settingsModel)
   const effortText = effortLabel(workspace.effort ?? settingsEffort)
+  // fast mode 는 "설정" 보다 세션이 보고한 "실제 상태" 를 우선해 보여 준다(쿨다운·미지원 모델 등).
+  const fast = fastModeStatus(
+    workspace.fastMode ?? settingsFastMode,
+    workspace.fastModeState,
+    workspace.fastModeReason
+  )
 
   return (
     <div className="flex items-center gap-3 mb-1.5 px-1 text-xs text-neutral-500">
@@ -1812,6 +1821,22 @@ function StatusLine({
         <Zap size={11} className="shrink-0 text-neutral-600" />
         <span className="truncate">{effortText}</span>
       </button>
+      <button
+        onClick={() => onPick('fast')}
+        className={
+          'flex items-center gap-1 min-w-0 shrink transition-colors ' +
+          (fast.active
+            ? 'text-[var(--accent-300)] hover:text-[var(--accent-200)]'
+            : 'hover:text-neutral-300')
+        }
+        title={`${fast.title} — click or type /fast to change`}
+      >
+        <Rabbit
+          size={11}
+          className={'shrink-0 ' + (fast.active ? 'text-[var(--accent-400)]' : 'text-neutral-600')}
+        />
+        <span className="truncate">{fast.text}</span>
+      </button>
       <ContextStatus usage={usage} compacting={compacting} />
     </div>
   )
@@ -1819,6 +1844,9 @@ function StatusLine({
 
 /** 선택 카드 1개의 옵션. value '' = 전역 설정 따름(Default). */
 type PickerOption = { value: string; label: string; hint?: string }
+
+/** 상태줄 클릭·슬래시 명령으로 여는 로컬 선택 카드의 종류. */
+type PickerKind = 'model' | 'effort' | 'fast'
 
 /**
  * 입력창 위에 뜨는 /model·/effort 선택 카드. 백엔드 왕복 없이 로컬에서 값을 고른다 —
@@ -1833,15 +1861,23 @@ function PickerCard({
   running,
   onClose
 }: {
-  kind: 'model' | 'effort'
+  kind: PickerKind
   workspace: Workspace
   running: boolean
   onClose: () => void
 }): React.JSX.Element {
   const settingsModel = useStore((s) => s.app!.settings.model)
   const settingsEffort = useStore((s) => s.app!.settings.effort)
+  const settingsFastMode = useStore((s) => s.app!.settings.fastMode)
 
   const options = useMemo<PickerOption[]>(() => {
+    if (kind === 'fast') {
+      return [
+        { value: '', label: 'Default', hint: fastModeLabel(settingsFastMode) },
+        { value: 'on', label: 'On', hint: FAST_MODE_HINT },
+        { value: 'off', label: 'Off', hint: 'Standard output speed' }
+      ]
+    }
     if (kind === 'model') {
       const base: PickerOption[] = [
         { value: '', label: 'Default', hint: modelLabel(settingsModel) },
@@ -1857,9 +1893,19 @@ function PickerCard({
       { value: '', label: 'Default', hint: effortLabel(settingsEffort) },
       ...EFFORT_OPTIONS.map((e) => ({ value: e.id, label: e.label, hint: e.hint }))
     ]
-  }, [kind, settingsModel, settingsEffort, workspace.model])
+  }, [kind, settingsModel, settingsEffort, settingsFastMode, workspace.model])
 
-  const current = kind === 'model' ? (workspace.model ?? '') : (workspace.effort ?? '')
+  // 현재 값: fast 는 boolean|null 을 'on'/'off'/''(전역 따름) 문자열로 환산해 다른 카드와 같게 다룬다.
+  const current =
+    kind === 'model'
+      ? (workspace.model ?? '')
+      : kind === 'effort'
+        ? (workspace.effort ?? '')
+        : workspace.fastMode === null
+          ? ''
+          : workspace.fastMode
+            ? 'on'
+            : 'off'
   const currentIdx = Math.max(
     0,
     options.findIndex((o) => o.value === current)
@@ -1871,8 +1917,9 @@ function PickerCard({
     if (running) return // 턴 진행 중에는 세션 재시작을 막는다(안내만).
     if (value !== current) {
       if (kind === 'model') void window.api.workspace.setModel(workspace.id, value || null)
-      else
+      else if (kind === 'effort')
         void window.api.workspace.setEffort(workspace.id, (value || null) as EffortSetting | null)
+      else void window.api.workspace.setFastMode(workspace.id, value ? value === 'on' : null)
     }
     onClose()
   }
@@ -1898,12 +1945,24 @@ function PickerCard({
     activeRef.current?.scrollIntoView({ block: 'nearest' })
   }, [cursor])
 
-  const title = kind === 'model' ? '/model' : '/effort'
+  const title = kind === 'model' ? '/model' : kind === 'effort' ? '/effort' : '/fast'
+  const description =
+    kind === 'model'
+      ? 'Model for this workspace'
+      : kind === 'effort'
+        ? 'Reasoning effort for this workspace'
+        : 'Fast mode for this workspace — same model, faster output'
+  // /fast 카드에서만: 지금 쓰는 모델이 fast mode 를 지원하지 않으면 켜도 소용없으므로 미리 알린다.
+  const effectiveModel = workspace.model ?? workspace.lastModel ?? settingsModel
+  const fastUnsupported = kind === 'fast' && !modelSupportsFastMode(effectiveModel)
+  const iconProps = { size: 13, className: 'text-[var(--accent-400)] shrink-0' }
   const icon =
     kind === 'model' ? (
-      <Cpu size={13} className="text-[var(--accent-400)] shrink-0" />
+      <Cpu {...iconProps} />
+    ) : kind === 'effort' ? (
+      <Zap {...iconProps} />
     ) : (
-      <Zap size={13} className="text-[var(--accent-400)] shrink-0" />
+      <Rabbit {...iconProps} />
     )
 
   return (
@@ -1911,9 +1970,7 @@ function PickerCard({
       <div className="flex items-center gap-2 px-3 py-2 border-b border-[var(--border)] sticky top-0 bg-[var(--bg-3)]">
         {icon}
         <span className="text-sm font-medium text-[var(--accent-300)] shrink-0">{title}</span>
-        <span className="text-xs text-neutral-500 truncate">
-          {kind === 'model' ? 'Model for this workspace' : 'Reasoning effort for this workspace'}
-        </span>
+        <span className="text-xs text-neutral-500 truncate">{description}</span>
         <span className="ml-auto shrink-0 text-xs text-neutral-600 select-none">Esc to close</span>
         <button
           onClick={onClose}
@@ -1957,6 +2014,12 @@ function PickerCard({
           )
         })}
       </div>
+      {fastUnsupported && (
+        <div className="px-3 py-1.5 text-xs text-[var(--warning-400)]/90 border-t border-[var(--border)]">
+          {modelLabel(effectiveModel)} doesn’t support fast mode — switch to Opus 5 or Opus 4.8 with
+          /model.
+        </div>
+      )}
       <div className="px-3 py-1.5 text-xs text-neutral-600 border-t border-[var(--border)]">
         {running ? 'Stop the current turn to change it.' : '↑↓ navigate · ↵ select · esc close'}
       </div>

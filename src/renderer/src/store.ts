@@ -576,6 +576,13 @@ export const useStore = create<UIState>((set, get) => ({
         })
       } else if (event.type === 'compacting') {
         set({ compacting: { ...get().compacting, [workspaceId]: event.active } })
+      } else if (event.type === 'fastMode') {
+        // 세션이 알려 준 fast mode 실제 상태(main store 에도 영속된다) — 상태줄이 바로 따라가도록
+        // 로컬 사본에도 반영한다. 설정을 켜 뒀어도 미지원 모델·쿨다운이면 여기서 off/cooldown 이 온다.
+        patchWorkspace(set, get, workspaceId, (w) => {
+          w.fastModeState = event.state
+          w.fastModeReason = event.reason ?? null
+        })
       }
     })
 

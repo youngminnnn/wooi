@@ -28,9 +28,10 @@ const BUILTIN_COMMANDS: SlashCommandInfo[] = [
     description: 'Ask a quick side question without interrupting the current task',
     argumentHint: '<question>'
   },
-  // /model·/effort 는 Composer 가 로컬 선택 카드로 처리한다(백엔드 왕복 없음). 자동완성에만 보강.
+  // /model·/effort·/fast 는 Composer 가 로컬 선택 카드로 처리한다(백엔드 왕복 없음). 자동완성에만 보강.
   { name: 'model', description: 'Choose the model for this workspace' },
   { name: 'effort', description: 'Choose the reasoning effort for this workspace' },
+  { name: 'fast', description: 'Toggle fast mode for this workspace (same model, faster output)' },
   // 패스스루(메시지로 보내면 CLI 가 확장) — 자동완성에만 보강한다.
   {
     name: 'compact',
