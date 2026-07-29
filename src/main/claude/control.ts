@@ -8,6 +8,7 @@ import { resolveClaudeExecutable } from './executable'
 import { MCP_SETTING_SOURCES, resolveUserMcpServers } from './mcp'
 import { clearCommandsCache } from './commands'
 import type { SessionConfig } from './protocol'
+import { SESSION_RATE_LIMIT_LABEL } from '@shared/types'
 import type {
   CommandPanelKind,
   CommandResult,
@@ -246,7 +247,7 @@ function mapUsage(u: SdkUsage): UsageInfo {
     ): void => {
       if (w) limits.push({ label, utilization: w.utilization, resetsAt: w.resets_at })
     }
-    push('5-hour', rl.five_hour)
+    push(SESSION_RATE_LIMIT_LABEL, rl.five_hour)
     push('7-day', rl.seven_day)
     push('7-day (Opus)', rl.seven_day_opus)
     push('7-day (Sonnet)', rl.seven_day_sonnet)
