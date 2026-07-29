@@ -1066,6 +1066,12 @@ export interface ContextUsageInfo {
   categories: { name: string; tokens: number }[]
 }
 
+/**
+ * "session limit"(5시간 창)의 label. main 의 mapUsage 가 붙이고 renderer 가 이 창을 골라내는 데 쓴다.
+ * 양쪽이 어긋나면 세션 리셋 카운트다운이 조용히 사라지므로 SSOT 로 둔다.
+ */
+export const SESSION_RATE_LIMIT_LABEL = '5-hour'
+
 /** /usage — 세션 비용 + (가능하면) 요금제 사용률 창. */
 export interface UsageInfo {
   totalCostUsd: number

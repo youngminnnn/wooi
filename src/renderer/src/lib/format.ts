@@ -48,3 +48,20 @@ export function formatDuration(ms: number): string {
   const remM = m % 60
   return remM ? `${h}h ${remM}m` : `${h}h`
 }
+
+/**
+ * 남은 시간(ms)을 카운트다운 표시로(요금제 한도 창 리셋까지 등).
+ * 초 단위는 매초 값이 바뀌어 시선을 끌기만 하므로 분 이상만 노출한다.
+ */
+export function formatCountdown(ms: number): string {
+  if (ms <= 0) return 'now'
+  const m = Math.floor(ms / 60_000)
+  if (m < 1) return '<1m'
+  if (m < 60) return `${m}m`
+  const h = Math.floor(m / 60)
+  const remM = m % 60
+  if (h < 24) return remM ? `${h}h ${remM}m` : `${h}h`
+  const d = Math.floor(h / 24)
+  const remH = h % 24
+  return remH ? `${d}d ${remH}h` : `${d}d`
+}
