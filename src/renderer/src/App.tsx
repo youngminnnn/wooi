@@ -157,6 +157,29 @@ export default function App(): React.JSX.Element {
         return
       }
 
+      // ⌘,: 설정 열기(macOS 표준 Preferences 단축키).
+      if (e.code === 'Comma' && !e.shiftKey && !e.ctrlKey && !e.altKey) {
+        e.preventDefault()
+        setShowSettings(true)
+        return
+      }
+
+      // ⌘N: 현재 포커스된 repo(선택된 workspace 의 repo, 없으면 첫 repo)에 새 워크스페이스 추가.
+      // 사이드바의 + 버튼과 같은 경로를 탄다 — 수동 설정이면 모달, 아니면 즉시 자동 생성.
+      if (e.code === 'KeyN' && !e.shiftKey && !e.ctrlKey && !e.altKey) {
+        e.preventDefault()
+        const repoId =
+          st.app?.workspaces.find((w) => w.id === st.selectedWorkspaceId)?.repoId ??
+          st.app?.repos[0]?.id
+        if (!repoId) {
+          st.pushToast('info', 'Add a repository first.')
+          return
+        }
+        if (st.app?.settings.manualWorkspaceSetup) setNewWs({ repoId, parentWorkspaceId: null })
+        else void st.createWorkspace(repoId)
+        return
+      }
+
       // ⌘J: 우측 작업 패널 표시/숨김 토글.
       if (e.key === 'j') {
         e.preventDefault()

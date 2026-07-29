@@ -16,6 +16,8 @@ const GROUPS: { title: string; items: { keys: string[]; label: string }[] }[] = 
   {
     title: 'Session & panels',
     items: [
+      { keys: ['⌘N'], label: 'New workspace in the focused repository' },
+      { keys: ['⌘,'], label: 'Open settings' },
       { keys: ['⌘J'], label: 'Toggle the work panel' },
       { keys: ['⇧⌘S'], label: 'Toggle the scripts panel' },
       { keys: ['⌃⌘R'], label: 'Run / stop the dev script' },

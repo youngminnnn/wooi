@@ -27,7 +27,7 @@ export default function TitleBar({
           data-tour="settings"
           onClick={onOpenSettings}
           className="no-drag relative h-7 w-7 grid place-items-center rounded-md text-neutral-400 hover:bg-[var(--surface-2)] hover:text-neutral-200"
-          title={updateReady ? `Settings · ${newVersionLabel(updateStatus)}` : 'Settings'}
+          title={updateReady ? `Settings (⌘,) · ${newVersionLabel(updateStatus)}` : 'Settings (⌘,)'}
         >
           <Settings size={16} />
           {/* 새 버전이 있으면 설정 버튼 우상단에 점을 띄운다(설정 > About 에 자세한 내용). */}
