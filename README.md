@@ -4,7 +4,7 @@
 
 **English** · [한국어](./README.ko.md)
 
-![Wooi demo](docs/demo.gif)
+![Wooi demo](docs/demo.svg)
 
 Wooi is a macOS desktop app for orchestrating multiple **AI coding agents** in
 parallel, each on its own isolated git worktree. Each task runs in its own dedicated

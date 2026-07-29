@@ -318,10 +318,16 @@
           0 40px 90px rgba(0, 0, 0, 0.55),
           0 0 0 1px rgba(124, 155, 255, 0.06);
       }
-      .demo-frame img {
+      .demo-frame img,
+      .demo-frame object {
         width: 100%;
         display: block;
         border-radius: 10px;
+      }
+      /* 데모는 장식이므로 클릭/드래그를 가로채지 않게 한다. */
+      .demo-frame object {
+        aspect-ratio: 1280 / 800;
+        pointer-events: none;
       }
       .demo-bar {
         display: flex;
@@ -835,7 +841,10 @@
 
       <div class="demo-frame">
         <div class="demo-bar"><span></span><span></span><span></span></div>
-        <img src="./demo.gif" alt="Wooi in action" loading="lazy" />
+        <!-- 라이브 벡터 애니메이션(캡처·래스터 없음). object 로 실어 SVG 가 자체 문서로 살아 있게 한다. -->
+        <object class="demo-anim" data="./demo.svg" type="image/svg+xml">
+          <img src="./demo.svg" alt="Wooi in action" />
+        </object>
       </div>
     </div>
 
