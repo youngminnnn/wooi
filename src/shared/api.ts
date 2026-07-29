@@ -202,6 +202,17 @@ export interface WooiApi {
     ): Promise<{ result?: RewindActionResult; error?: string }>
   }
 
+  rateLimits: {
+    /**
+     * 계정 레이트리밋 스냅샷을 즉시 다시 조회한다. 갱신된 값은 반환값이 아니라 AppState
+     * (evtState 방송)로 흘러온다 — 계정 단위 전역 값이라 모든 창·워크스페이스가 같은 값을 봐야 한다.
+     *
+     * 평소 갱신(턴 종료·주기 폴링)은 main 이 알아서 하므로, 이건 stale 표시를 본 사용자가
+     * 누르는 수동 탈출구다. 라이브 세션이 없으면 단명 쿼리를 띄우므로 수 초 걸릴 수 있다.
+     */
+    refresh(): Promise<void>
+  }
+
   terminal: {
     /** workspace PTY 를 보장하고 현재 화면 버퍼를 재생한다. */
     start(workspaceId: string, cols: number, rows: number): Promise<void>

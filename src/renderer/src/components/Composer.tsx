@@ -26,7 +26,8 @@ import {
   Check,
   History,
   ShieldCheck,
-  RotateCcw
+  RotateCcw,
+  Activity
 } from 'lucide-react'
 import { useStore } from '../store'
 import { PERMISSION_FOOTER } from '../lib/permission'
@@ -37,6 +38,16 @@ import {
   MENTION_DROP_HINT_BYTES,
   MENTION_TRUNCATE_HINT_BYTES
 } from '@shared/types'
+import { useNow } from '../lib/useNow'
+import {
+  agoLabel,
+  isStale,
+  isWarning,
+  normalizeUtilization,
+  resetLabel,
+  shouldShowRateLimits,
+  tightestWindow
+} from '../lib/rateLimit'
 import { formatBytes } from '../lib/format'
 import { appendMention, findMention, mentionToken, mentionWithRange } from '../lib/mention'
 import type {
@@ -50,6 +61,7 @@ import type {
   McpAction,
   McpServerInfo,
   PermissionsInfo,
+  RateLimitSnapshot,
   RewindPoint,
   SlashCommandInfo,
   Workspace
@@ -1767,6 +1779,8 @@ function StatusLine({
 }): React.JSX.Element {
   const usage = useStore((s) => s.contextUsage[workspace.id])
   const compacting = useStore((s) => s.compacting[workspace.id] ?? false)
+  // 레이트리밋은 계정 단위 전역 값이라 workspace.id 로 색인하지 않는다(contextUsage 와 다른 점).
+  const rateLimits = useStore((s) => s.app!.rateLimits)
   const liveBranch = useStore((s) => s.gitStatus[workspace.id]?.branch)
   const settingsModel = useStore((s) => s.app!.settings.model)
   const settingsEffort = useStore((s) => s.app!.settings.effort)
@@ -1813,6 +1827,7 @@ function StatusLine({
         <span className="truncate">{effortText}</span>
       </button>
       <ContextStatus usage={usage} compacting={compacting} />
+      <RateLimitStatus snapshot={rateLimits} />
     </div>
   )
 }
@@ -2016,6 +2031,145 @@ function ContextStatus({
       </span>
       {pct}%
     </span>
+  )
+}
+
+/**
+ * 상태줄의 계정 레이트리밋 표시(요약 1개 + 클릭 시 전체 창 팝오버).
+ *
+ * 값은 워크스페이스가 아니라 **계정** 단위라 AppState 의 전역 스냅샷을 그대로 읽는다 —
+ * 어느 워크스페이스를 보고 있든 같은 값이 보인다.
+ *
+ * 표시 규칙:
+ * - 스냅샷이 없으면(첫 조회 전) 아무것도 그리지 않는다. 요금제 사용자인지 API 키 사용자인지
+ *   모르는 상태에서 자리를 잡아 두면, API 키 사용자에게 잠깐 나타났다 사라지는 깜빡임이 된다.
+ * - available=false(API 키 등 요금제 한도 미적용)면 **완전히 숨긴다**(0%·N/A 를 보여 주지 않는다).
+ * - 창이 여럿이라도 상태줄에는 가장 빡빡한 창 하나만 — 상태줄은 이미 붐빈다. 나머지는 팝오버로.
+ */
+function RateLimitStatus({ snapshot }: { snapshot?: RateLimitSnapshot }): React.JSX.Element | null {
+  const [open, setOpen] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
+  const ref = useRef<HTMLDivElement | null>(null)
+
+  // 리셋 카운트다운과 stale 표시는 둘 다 "흐르는" 값이지만 분 단위라 30 초면 충분하다.
+  // 팝오버가 닫혀 있어도 stale 전환은 보여야 하므로 스냅샷이 있는 동안에는 계속 돌린다.
+  const now = useNow(30_000, !!snapshot)
+
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent): void => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    window.addEventListener('mousedown', onDown)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('mousedown', onDown)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  // 가장 많이 소진된 창을 대표로 삼는다 — 세션을 실제로 죽이는 건 가장 먼저 차는 창이다.
+  const tightest = useMemo(() => tightestWindow(snapshot?.windows ?? []), [snapshot])
+
+  if (!shouldShowRateLimits(snapshot) || !snapshot || !tightest) return null
+
+  const pct = normalizeUtilization(tightest.utilization) ?? 0
+  const warn = isWarning(pct)
+  const stale = isStale(snapshot, now)
+
+  const tone = warn ? 'text-[var(--warning-400)]' : 'text-neutral-500'
+  const barTone = warn ? 'bg-[var(--warning-400)]' : 'bg-neutral-500'
+
+  const onRefresh = (): void => {
+    setRefreshing(true)
+    void window.api.rateLimits.refresh().finally(() => setRefreshing(false))
+  }
+
+  return (
+    <div className="relative shrink-0" ref={ref}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className={
+          'flex items-center gap-1.5 transition-colors hover:text-neutral-300 ' +
+          tone +
+          (stale ? ' opacity-50' : '')
+        }
+        title={
+          `Plan usage — ${tightest.label} at ${pct}%` +
+          (stale ? ` (last checked ${agoLabel(now - snapshot.fetchedAt)})` : '') +
+          ' — click for all windows'
+        }
+      >
+        <Activity size={11} className="shrink-0" />
+        <span className="h-1 w-16 rounded-full bg-[var(--surface-3)] overflow-hidden">
+          <span className={'block h-full rounded-full ' + barTone} style={{ width: `${pct}%` }} />
+        </span>
+        {pct}%
+      </button>
+
+      {open && (
+        <div className="absolute bottom-full right-0 z-50 mb-1.5 w-72 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-2.5 shadow-xl">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <span className="text-xs font-medium text-neutral-200">Plan usage</span>
+            {snapshot.subscriptionType && (
+              <span className="text-[10px] uppercase tracking-wide text-neutral-500">
+                {snapshot.subscriptionType}
+              </span>
+            )}
+          </div>
+
+          <div className="space-y-1.5">
+            {snapshot.windows.map((w) => {
+              const wp = normalizeUtilization(w.utilization)
+              const wWarn = isWarning(wp)
+              const reset = resetLabel(w.resetsAt, now)
+              return (
+                <div key={w.label} className="flex items-center gap-2">
+                  <span className="w-24 shrink-0 text-xs text-neutral-500">{w.label}</span>
+                  <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-[var(--surface-3)]">
+                    <div
+                      className={
+                        'h-full ' + (wWarn ? 'bg-[var(--warning-400)]' : 'bg-[var(--accent-400)]')
+                      }
+                      style={{ width: `${wp ?? 0}%` }}
+                    />
+                  </div>
+                  <span
+                    className={
+                      'w-8 shrink-0 text-right text-xs tabular-nums ' +
+                      (wWarn ? 'text-[var(--warning-400)]' : 'text-neutral-500')
+                    }
+                  >
+                    {wp == null ? '—' : `${wp}%`}
+                  </span>
+                  <span className="w-14 shrink-0 text-right text-[10px] text-neutral-600">
+                    {reset ? `in ${reset}` : ''}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+
+          <div className="mt-2 flex items-center justify-between gap-2 border-t border-[var(--border)] pt-2">
+            <span className="text-[10px] text-neutral-600">
+              Updated {agoLabel(now - snapshot.fetchedAt)}
+            </span>
+            <button
+              onClick={onRefresh}
+              disabled={refreshing}
+              className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-neutral-400 transition-colors hover:bg-[var(--surface-3)] hover:text-neutral-200 disabled:opacity-50"
+              title="Check plan rate limits now"
+            >
+              <RefreshCw size={10} className={refreshing ? 'animate-spin' : ''} />
+              Refresh
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
   )
 }
 

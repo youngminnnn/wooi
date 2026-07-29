@@ -319,7 +319,8 @@ class Store {
     return structuredClone({
       repos: this.state.repos,
       workspaces: this.state.workspaces,
-      settings: this.state.settings
+      settings: this.state.settings,
+      rateLimits: this.state.rateLimits
     })
   }
 

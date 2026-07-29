@@ -103,6 +103,10 @@ const api: WooiApi = {
       ipcRenderer.invoke(IPC.commandRewindAction, workspaceId, userMessageId)
   },
 
+  rateLimits: {
+    refresh: () => ipcRenderer.invoke(IPC.rateLimitsRefresh)
+  },
+
   terminal: {
     start: (workspaceId, cols, rows) =>
       ipcRenderer.invoke(IPC.terminalStart, workspaceId, cols, rows),

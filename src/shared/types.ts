@@ -422,6 +422,11 @@ export interface AppState {
   repos: Repo[]
   workspaces: Workspace[]
   settings: AppSettings
+  /**
+   * 계정 단위 레이트리밋 스냅샷(마지막으로 성공한 조회). 아직 한 번도 못 받았으면 없음.
+   * optional 이라 기존 저장 파일은 마이그레이션 없이 그대로 읽힌다(없으면 undefined).
+   */
+  rateLimits?: RateLimitSnapshot
 }
 
 // ── 채팅 트랜스크립트 ────────────────────────────────────────────────────
@@ -798,6 +803,11 @@ export const IPC = {
   mcpAction: 'command:mcpAction',
   /** /rewind 패널에서 고른 체크포인트로 코드를 되돌린다(SDK rewindFiles). */
   commandRewindAction: 'command:rewindAction',
+  /**
+   * 계정 레이트리밋 스냅샷을 즉시 다시 조회한다(상태줄 팝오버의 수동 갱신).
+   * 평소 갱신은 턴 종료·주기 폴링이 알아서 하므로, 이건 stale 을 본 사용자가 누르는 탈출구다.
+   */
+  rateLimitsRefresh: 'ratelimits:refresh',
   // 파일 브라우저 (All files 탭)
   fsList: 'fs:list',
   fsRead: 'fs:read',
@@ -1083,6 +1093,39 @@ export interface UsageInfo {
   rateLimitsAvailable: boolean
   /** 5시간·7일 등 사용률 창(있을 때만). */
   rateLimits: { label: string; utilization: number | null; resetsAt: string | null }[]
+}
+
+/**
+ * 레이트리밋 사용률이 이 값을 넘으면 상태줄을 경고색으로 바꾼다(%).
+ * 병렬 세션이 한도를 태우는 속도를 생각하면, 다 쓴 뒤가 아니라 여유가 남았을 때 알려야 의미가 있다.
+ */
+export const RATE_LIMIT_WARN_THRESHOLD = 80
+
+/**
+ * 스냅샷이 이 시간보다 오래되면 stale 로 본다(흐리게 + "N분 전" tooltip).
+ * 폴링 간격(5분)보다 넉넉히 잡아, 조회가 한두 번 실패했다고 곧바로 stale 로 보이지 않게 한다.
+ */
+export const RATE_LIMIT_STALE_AFTER_MS = 12 * 60_000
+
+/**
+ * 계정 단위 레이트리밋 스냅샷. **워크스페이스 단위가 아니다** — 한 계정에 하나뿐인 값이라
+ * AppState 에 전역 단일 객체로 싣고, 어느 워크스페이스에서 조회했든 모든 워크스페이스가 같은 값을 본다.
+ *
+ * AppState 에 두는 덕에 (1) 재시작 후에도 마지막 값이 남아 상태줄이 즉시 무언가를 보여줄 수 있고
+ * (2) 이미 있는 evtState 방송을 그대로 타므로 전용 이벤트 채널이 필요 없다.
+ */
+export interface RateLimitSnapshot {
+  /** 조회에 성공한 시각(epoch ms). stale 판정과 "N분 전" 표시에 쓴다. */
+  fetchedAt: number
+  /**
+   * 요금제 한도가 적용되지 않는 세션(API 키 등)이면 false — 이때 UI 는 0%/N/A 가 아니라 **완전히 숨긴다**.
+   * "아직 한 번도 못 받음"(snapshot 자체가 null)과 구분하려고 값으로 들고 있는다.
+   */
+  available: boolean
+  /** 'pro'/'max'/'team'/'enterprise' 또는 API 키 세션이면 null. */
+  subscriptionType: string | null
+  /** 5시간·7일·Opus·Sonnet 창(UsageInfo.rateLimits 와 같은 모양). */
+  windows: { label: string; utilization: number | null; resetsAt: string | null }[]
 }
 
 /** /agents — 이 세션에서 쓸 수 있는 서브에이전트 1개. */

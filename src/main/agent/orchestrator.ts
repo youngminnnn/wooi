@@ -122,6 +122,22 @@ export class AgentOrchestrator {
     return backend.runCommand(workspaceId, kind)
   }
 
+  /**
+   * 계정 레이트리밋 스냅샷 갱신. 레이트리밋은 계정에 하나뿐인 값이라 워크스페이스로 라우팅하지
+   * 않고, 해당 기능을 지원하는 백엔드 전부에 요청한다(현재는 Claude 하나).
+   * 지원하지 않는 백엔드는 조용히 건너뛴다 — 배경 갱신이 에러를 던질 이유가 없다.
+   */
+  async refreshRateLimits(allowShortLived: boolean): Promise<void> {
+    // 사용자가 명시적으로 요청한 갱신은 아직 백엔드가 하나도 없을 수도 있다(앱을 켜고 아무 세션도
+    // 돌리지 않은 상태). 이때는 기본 백엔드를 만들어서라도 답을 준다 — 배경 갱신은 그러지 않는다.
+    if (allowShortLived) this.get(DEFAULT_AGENT_BACKEND)
+    await Promise.all(
+      [...this.backends.values()]
+        .filter((b) => b.meta.capabilities.interactiveCommands)
+        .map((b) => b.refreshRateLimits(allowShortLived))
+    )
+  }
+
   mcpAction(workspaceId: string, serverName: string, action: McpAction): Promise<McpServerInfo[]> {
     const backend = this.backendFor(workspaceId)
     if (!backend.meta.capabilities.mcp) {

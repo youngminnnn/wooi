@@ -59,6 +59,14 @@ export interface AgentBackend {
   setEffort(workspaceId: string, effort: EffortSetting | null): void
   /** 입력창 자동완성용 슬래시 명령 목록(capabilities.slashCommands). */
   listCommands(cwd: string): Promise<SlashCommandInfo[]>
+  /**
+   * 계정 단위 레이트리밋 스냅샷을 갱신해 AppState 에 반영한다(capabilities.interactiveCommands).
+   * /usage 조회의 파생물이라 별도 capability 를 두지 않는다 — 같은 제어 채널을 타므로 항상 함께 켜/꺼진다.
+   *
+   * allowShortLived=true 면 라이브 세션이 없을 때 단명 쿼리(프로세스 spawn)로 폴백한다.
+   * 배경 갱신은 false, 사용자가 명시적으로 갱신을 누른 경우에만 true 를 넘긴다.
+   */
+  refreshRateLimits(allowShortLived: boolean): Promise<void>
 }
 
 /** 백엔드가 지원하는 선택 기능 집합. UI·오케스트레이터가 노출/가드 여부를 판단한다. */

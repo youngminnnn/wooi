@@ -1,0 +1,124 @@
+import { describe, expect, it } from 'vitest'
+import { RATE_LIMIT_STALE_AFTER_MS, RATE_LIMIT_WARN_THRESHOLD } from '@shared/types'
+import type { RateLimitSnapshot } from '@shared/types'
+import {
+  agoLabel,
+  isStale,
+  isWarning,
+  normalizeUtilization,
+  resetLabel,
+  shouldShowRateLimits,
+  tightestWindow
+} from './rateLimit'
+
+const win = (
+  label: string,
+  utilization: number | null,
+  resetsAt: string | null = null
+): RateLimitSnapshot['windows'][number] => ({ label, utilization, resetsAt })
+
+const snapshot = (over: Partial<RateLimitSnapshot> = {}): RateLimitSnapshot => ({
+  fetchedAt: 1_000_000,
+  available: true,
+  subscriptionType: 'max',
+  windows: [win('5-hour', 42)],
+  ...over
+})
+
+describe('tightestWindow', () => {
+  it('가장 많이 소진된 창을 고른다', () => {
+    const picked = tightestWindow([win('5-hour', 12), win('7-day', 91), win('7-day (Opus)', 40)])
+    expect(picked?.label).toBe('7-day')
+  })
+
+  it('utilization 이 null 인 창은 후보에서 제외한다', () => {
+    // null 을 0 으로 취급해 최대치 비교에 끼워 넣으면, 값이 있는 창을 가릴 수 있다.
+    const picked = tightestWindow([win('7-day (Opus)', null), win('5-hour', 3)])
+    expect(picked?.label).toBe('5-hour')
+  })
+
+  it('값이 있는 창이 하나도 없으면 null', () => {
+    expect(tightestWindow([win('5-hour', null)])).toBeNull()
+    expect(tightestWindow([])).toBeNull()
+  })
+})
+
+describe('normalizeUtilization', () => {
+  it('0–100 범위로 자르고 반올림한다', () => {
+    expect(normalizeUtilization(42.4)).toBe(42)
+    expect(normalizeUtilization(120)).toBe(100)
+    expect(normalizeUtilization(-5)).toBe(0)
+  })
+
+  it('null 은 null 로 통과시킨다(0% 로 둔갑시키지 않는다)', () => {
+    expect(normalizeUtilization(null)).toBeNull()
+  })
+})
+
+describe('isWarning', () => {
+  it('임계치 초과에서만 경고다 — 정확히 임계치면 아직 아니다', () => {
+    expect(isWarning(RATE_LIMIT_WARN_THRESHOLD)).toBe(false)
+    expect(isWarning(RATE_LIMIT_WARN_THRESHOLD + 1)).toBe(true)
+  })
+
+  it('null 은 경고가 아니다', () => {
+    expect(isWarning(null)).toBe(false)
+  })
+})
+
+describe('isStale', () => {
+  it('임계 시간을 넘겨야 stale 이다', () => {
+    const snap = snapshot({ fetchedAt: 0 })
+    expect(isStale(snap, RATE_LIMIT_STALE_AFTER_MS)).toBe(false)
+    expect(isStale(snap, RATE_LIMIT_STALE_AFTER_MS + 1)).toBe(true)
+  })
+})
+
+describe('shouldShowRateLimits', () => {
+  it('스냅샷이 없으면 숨긴다(첫 조회 전 깜빡임 방지)', () => {
+    expect(shouldShowRateLimits(undefined)).toBe(false)
+  })
+
+  it('API 키 사용자(available=false)에게는 완전히 숨긴다', () => {
+    // 0% 나 "N/A" 를 보여 주면 안 된다 — 요금제 한도 자체가 없는 사용자다.
+    expect(shouldShowRateLimits(snapshot({ available: false }))).toBe(false)
+  })
+
+  it('available 이어도 사용률 있는 창이 없으면 숨긴다', () => {
+    expect(shouldShowRateLimits(snapshot({ windows: [win('5-hour', null)] }))).toBe(false)
+    expect(shouldShowRateLimits(snapshot({ windows: [] }))).toBe(false)
+  })
+
+  it('요금제 사용자면 보여 준다', () => {
+    expect(shouldShowRateLimits(snapshot())).toBe(true)
+  })
+})
+
+describe('agoLabel', () => {
+  it('분/시/일 단위로 줄여 쓴다', () => {
+    expect(agoLabel(30_000)).toBe('just now')
+    expect(agoLabel(5 * 60_000)).toBe('5m ago')
+    expect(agoLabel(3 * 3600_000)).toBe('3h ago')
+    expect(agoLabel(2 * 24 * 3600_000)).toBe('2d ago')
+  })
+})
+
+describe('resetLabel', () => {
+  const now = Date.parse('2026-07-29T12:00:00Z')
+
+  it('남은 시간을 시/분으로 표시한다', () => {
+    expect(resetLabel('2026-07-29T14:10:00Z', now)).toBe('2h 10m')
+    expect(resetLabel('2026-07-29T12:45:00Z', now)).toBe('45m')
+    expect(resetLabel('2026-07-29T15:00:00Z', now)).toBe('3h')
+  })
+
+  it('이미 지난 리셋 시각은 표시하지 않는다', () => {
+    // 곧 새 값으로 갱신될 창이라 "-5m" 같은 음수를 보여 주면 안 된다.
+    expect(resetLabel('2026-07-29T11:00:00Z', now)).toBeNull()
+  })
+
+  it('없거나 파싱 불가한 값은 null', () => {
+    expect(resetLabel(null, now)).toBeNull()
+    expect(resetLabel('not-a-date', now)).toBeNull()
+  })
+})

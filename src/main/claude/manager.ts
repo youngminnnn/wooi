@@ -26,12 +26,26 @@ import type {
   PermissionDecision,
   PermissionMode,
   PermissionRequest,
+  RateLimitSnapshot,
   RewindActionResult,
   SlashCommandInfo,
+  UsageInfo,
   Workspace
 } from '@shared/types'
 
 type Dispatch = (channel: string, payload: unknown) => void
+
+/**
+ * 턴 종료 후 레이트리밋 조회까지의 지연. 비슷한 시각에 끝난 여러 워크스페이스의 갱신을
+ * 한 번으로 접고, result 처리 흐름과 제어 요청이 겹치지 않게 한다.
+ */
+const RATE_LIMIT_DEBOUNCE_MS = 1500
+
+/**
+ * 라이브 세션이 있는 동안의 폴링 간격. 5시간·7일 창이 움직이는 속도에 비하면 5분은 충분히 촘촘하고,
+ * 라이브 Query 위에서 도는 제어 요청이라 비용도 사실상 없다(세션이 없으면 아예 no-op).
+ */
+const RATE_LIMIT_POLL_MS = 5 * 60_000
 
 /**
  * workspace 단위 Claude 세션의 생명주기를 관리한다.
@@ -58,6 +72,13 @@ export class SessionManager implements AgentBackend {
     string,
     { resolve: (v: unknown) => void; reject: (e: Error) => void }
   >()
+
+  // 레이트리밋 조회는 계정 단위라 동시에 여러 번 돌 이유가 없다 — 진행 중인 것 하나만 들고 공유한다.
+  private rateLimitInflight: Promise<void> | null = null
+  /** 진행 중인 조회가 단명 쿼리 폴백을 허용하는(=사용자가 명시적으로 요청한) 것인지. */
+  private rateLimitInflightForced = false
+  private rateLimitDebounce: ReturnType<typeof setTimeout> | null = null
+  private rateLimitPoll: ReturnType<typeof setInterval> | null = null
 
   constructor(
     private dispatch: Dispatch,
@@ -86,6 +107,8 @@ export class SessionManager implements AgentBackend {
       this.hostReady = true
       for (const cmd of this.outbox) host.postMessage(cmd)
       this.outbox = []
+      // 호스트가 떴다 = 세션이 생길 참이다. 이때부터 주기 갱신을 건다(라이브 세션이 없으면 no-op).
+      this.startRateLimitPolling()
     })
     host.on('message', (msg: HostEvent) => this.onHostEvent(msg))
     host.on('exit', (code) => this.onHostExit(code))
@@ -113,6 +136,16 @@ export class SessionManager implements AgentBackend {
     this.host = null
     this.hostReady = false
     this.outbox = []
+
+    // 호스트가 없으면 폴링할 대상도 없다. 다음 spawn 때 다시 건다.
+    if (this.rateLimitPoll) {
+      clearInterval(this.rateLimitPoll)
+      this.rateLimitPoll = null
+    }
+    if (this.rateLimitDebounce) {
+      clearTimeout(this.rateLimitDebounce)
+      this.rateLimitDebounce = null
+    }
 
     // 대기 중이던 요청-응답은 더 올 수 없으므로 거부한다.
     for (const { reject } of this.pendingRequests.values()) {
@@ -438,6 +471,106 @@ export class SessionManager implements AgentBackend {
     this.dispatch(IPC.evtPermission, request)
   }
 
+  // ── 레이트리밋(계정 단위) ────────────────────────────────────────────────
+
+  /**
+   * 턴 종료 직후의 갱신을 살짝 미뤄 한 번으로 합친다.
+   *
+   * 두 가지를 동시에 해결한다: (1) 턴 종료 시점엔 result 처리가 아직 흐르고 있어 제어 요청을
+   * 곧바로 끼얹지 않는 편이 안전하고, (2) 워크스페이스 5~10 개가 비슷한 시각에 턴을 끝내면
+   * 타이머가 계속 뒤로 밀리며 결국 조회 한 번으로 접힌다.
+   */
+  private scheduleRateLimitRefresh(): void {
+    if (this.rateLimitDebounce) clearTimeout(this.rateLimitDebounce)
+    this.rateLimitDebounce = setTimeout(() => {
+      this.rateLimitDebounce = null
+      void this.refreshRateLimits(false)
+    }, RATE_LIMIT_DEBOUNCE_MS)
+  }
+
+  /**
+   * 라이브 세션이 하나라도 있는 동안 주기적으로 갱신한다.
+   *
+   * 타이머는 항상 돌지만 allowShortLived=false 라, 라이브 세션이 없으면 호스트가 아무것도 하지
+   * 않고 null 을 돌려준다 — 즉 유휴 상태에서는 프로세스도 네트워크도 건드리지 않는다.
+   * (호스트가 아직 안 떠 있으면 명령이 outbox 에 쌓이므로, 호스트가 없을 땐 아예 보내지 않는다.)
+   */
+  private startRateLimitPolling(): void {
+    if (this.rateLimitPoll) return
+    this.rateLimitPoll = setInterval(() => {
+      if (!this.host) return
+      void this.refreshRateLimits(false)
+    }, RATE_LIMIT_POLL_MS)
+    // 메인 프로세스가 이 타이머 때문에 살아 있을 이유는 없다.
+    this.rateLimitPoll.unref?.()
+  }
+
+  /**
+   * 계정 레이트리밋을 다시 조회해 store 에 반영하고 렌더러로 방송한다.
+   *
+   * 진행 중인 조회가 있으면 새로 걸지 않고 그 promise 를 공유한다 — 워크스페이스 여러 개가
+   * 동시에 턴을 끝내도 실제 조회는 하나뿐이다(과제 요구: in-flight 중복 요청 합치기).
+   * 단, 이미 도는 조회가 값싼 경로(allowShortLived=false)인데 사용자가 명시적 갱신을 요청했다면
+   * 그건 합치지 않는다 — 합쳤다가는 "갱신" 버튼이 null 만 받고 조용히 실패하기 때문이다.
+   */
+  refreshRateLimits(allowShortLived: boolean): Promise<void> {
+    if (this.rateLimitInflight && !(allowShortLived && !this.rateLimitInflightForced)) {
+      return this.rateLimitInflight
+    }
+    this.rateLimitInflightForced = allowShortLived
+    const run = this.doRefreshRateLimits(allowShortLived).finally(() => {
+      this.rateLimitInflight = null
+      this.rateLimitInflightForced = false
+    })
+    this.rateLimitInflight = run
+    return run
+  }
+
+  private async doRefreshRateLimits(allowShortLived: boolean): Promise<void> {
+    // 배경 갱신은 절대 호스트를 새로 띄우지 않는다. request() → send() 는 ensureHost() 를 부르므로,
+    // 이 가드가 없으면 "유휴 상태에서는 비용 0" 이라는 전제가 깨진다(아무 세션도 없는데 프로세스가 뜬다).
+    // 사용자가 명시적으로 요청한 갱신(allowShortLived)만 호스트를 띄울 수 있다.
+    if (!allowShortLived && !this.host) return
+
+    // 단명 쿼리 폴백에 쓸 작업 디렉토리. 아카이브되지 않은 워크스페이스 아무거나면 된다 —
+    // 레이트리밋은 계정 단위라 어디서 물어도 같은 값이 나온다.
+    let fallback: { cwd: string; repoPath: string | null } | null = null
+    if (allowShortLived) {
+      const ws = getStore()
+        .getState()
+        .workspaces.find((w) => !w.archived)
+      if (ws) fallback = { cwd: ws.worktreePath, repoPath: this.configFor(ws).repoPath }
+    }
+
+    let usage: UsageInfo | null
+    try {
+      usage = await this.request<UsageInfo | null>((reqId) => ({
+        type: 'refreshUsage',
+        reqId,
+        fallback
+      }))
+    } catch (err) {
+      // 조회 실패는 조용히 넘긴다 — 마지막으로 성공한 스냅샷이 stale 로 계속 보이면 충분하고,
+      // 배경 폴링 실패로 사용자에게 오류를 띄울 이유가 없다.
+      log.info(`rate limits: refresh failed (${err instanceof Error ? err.message : String(err)})`)
+      return
+    }
+    // 라이브 세션이 없어 조회 자체를 건너뛴 경우 — 기존 스냅샷을 그대로 둔다(stale 로 표시됨).
+    if (!usage) return
+
+    const snapshot: RateLimitSnapshot = {
+      fetchedAt: Date.now(),
+      available: usage.rateLimitsAvailable,
+      subscriptionType: usage.subscriptionType,
+      windows: usage.rateLimits
+    }
+    const store = getStore()
+    store.update((st) => {
+      st.rateLimits = snapshot
+    })
+    this.dispatch(IPC.evtState, store.getState())
+  }
+
   /**
    * workspace 를 idle 로 강제 확정한다(store + 렌더러). 완료 알림은 띄우지 않는다 —
    * 중단/크래시/인증 무효화로 푸는 경우라 "Response complete" 알림은 부적절하다.
@@ -461,8 +594,12 @@ export class SessionManager implements AgentBackend {
         }
       })
       // 창이 비활성일 때만 완료/에러를 OS 알림으로. (활성 창은 사이드바·알림음으로 충분)
-      if (event.status === 'idle') this.notify(workspaceId, 'completed', 'Response complete', false)
-      else if (event.status === 'error') this.notify(workspaceId, 'error', 'Session error', true)
+      if (event.status === 'idle') {
+        this.notify(workspaceId, 'completed', 'Response complete', false)
+        // 턴이 막 끝났다 = 이 세션의 라이브 Query 가 아직 살아 있다는 뜻이라, 지금이 레이트리밋을
+        // 공짜로 긁을 수 있는 가장 좋은 시점이다(프로세스 spawn 없음).
+        this.scheduleRateLimitRefresh()
+      } else if (event.status === 'error') this.notify(workspaceId, 'error', 'Session error', true)
     } else if (event.type === 'session' && event.model) {
       getStore().update((st) => {
         const w = st.workspaces.find((x) => x.id === workspaceId)

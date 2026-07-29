@@ -1304,6 +1304,19 @@ export function registerIpc(ctx: IpcContext): void {
     }
   )
 
+  /**
+   * 레이트리밋 수동 갱신(상태줄 팝오버). 라이브 세션이 없으면 단명 쿼리로 폴백하도록 허용한다 —
+   * 사용자가 직접 누른 것이라 프로세스 spawn 비용이 정당화된다.
+   * 갱신된 값은 반환값이 아니라 evtState 방송으로 흘러가므로 여기서는 아무것도 돌려주지 않는다.
+   */
+  ipcMain.handle(IPC.rateLimitsRefresh, async (): Promise<void> => {
+    try {
+      await ctx.sessions.refreshRateLimits(true)
+    } catch (err) {
+      log.error('rate limits: manual refresh failed:', err)
+    }
+  })
+
   // ── 인터랙티브 터미널 (worktree PTY) ─────────────────────────────────────
 
   ipcMain.handle(IPC.terminalStart, (_e, workspaceId: string, cols: number, rows: number) => {

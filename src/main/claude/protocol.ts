@@ -75,6 +75,20 @@ export type HostCommand =
       config: SessionConfig
       userMessageId: string
     }
+  /**
+   * 계정 레이트리밋 조회. 대상 워크스페이스를 메인이 고르지 않는 것이 핵심이다 —
+   * 어느 세션에 라이브 Query 가 있는지는 호스트의 sessions 맵만 알기 때문에, 호스트가 직접
+   * 살아 있는 세션을 골라 그 위에서 돌린다(공짜 경로).
+   *
+   * fallback 이 있으면 라이브 세션이 하나도 없을 때 단명 쿼리로 폴백한다. 이건 CLI 프로세스를
+   * 새로 띄우고 MCP 서버까지 연결하는 비싼 경로라, 사용자가 명시적으로 갱신을 누른 경우에만 넘긴다.
+   * fallback 이 null 이면 라이브 세션이 없을 때 아무것도 하지 않고 null 을 돌려준다.
+   */
+  | {
+      type: 'refreshUsage'
+      reqId: string
+      fallback: { cwd: string; repoPath: string | null } | null
+    }
   | { type: 'listCommands'; reqId: string; cwd: string }
   | {
       type: 'sideQuestion'
