@@ -19,10 +19,12 @@ import {
   Terminal as TerminalIcon,
   Search,
   X,
-  Square
+  Square,
+  ListTodo
 } from 'lucide-react'
 import { useStore } from '../store'
 import { formatTime } from '../lib/format'
+import { buildTaskCards, taskLabel, type TaskEntry } from '../lib/tasks'
 import type { ChatItem } from '@shared/types'
 
 export default function MessageList({
@@ -42,6 +44,22 @@ export default function MessageList({
   const restoredRef = useRef(false)
   const [showJump, setShowJump] = useState(false)
 
+  // 할 일 도구 호출들을 체크리스트 카드로 묶는다. 카드로 대체된 도구 행·결과는 목록 단계에서
+  // 걸러 내, 검색과 스크롤도 실제로 보이는 항목만 대상으로 삼게 한다.
+  const { visibleItems, resolved, cardByItemId, latestCardItemId } = useMemo(() => {
+    const { cardByItemId: cards, hiddenItemIds } = buildTaskCards(items)
+    const resolvedIds = new Set<string>()
+    for (const it of items) if (it.type === 'tool_result') resolvedIds.add(it.toolId)
+    return {
+      cardByItemId: cards,
+      resolved: resolvedIds,
+      // 진행 중 스피너는 마지막 카드에만 붙인다 — 앞선 카드들은 이미 지나간 스냅샷이라,
+      // 전부 돌면 어떤 것이 지금 상태인지 알 수 없게 된다.
+      latestCardItemId: cards.size ? Array.from(cards.keys())[cards.size - 1] : undefined,
+      visibleItems: hiddenItemIds.size ? items.filter((it) => !hiddenItemIds.has(it.id)) : items
+    }
+  }, [items])
+
   // ── 대화 내 검색(⌘F) ─────────────────────────────────────────────────────
   const [searchOpen, setSearchOpen] = useState(false)
   const [query, setQuery] = useState('')
@@ -51,8 +69,15 @@ export default function MessageList({
   const matches = useMemo(() => {
     const q = query.trim().toLowerCase()
     if (!q) return [] as string[]
-    return items.filter((it) => itemText(it).toLowerCase().includes(q)).map((it) => it.id)
-  }, [items, query])
+    return visibleItems
+      .filter((it) => {
+        // 체크리스트로 대체된 자리는 도구 이름 대신 화면에 실제로 뜬 항목 제목으로 검색한다.
+        const card = cardByItemId.get(it.id)
+        const text = card ? card.map(taskLabel).join('\n') : itemText(it)
+        return text.toLowerCase().includes(q)
+      })
+      .map((it) => it.id)
+  }, [visibleItems, cardByItemId, query])
 
   // 검색어가 바뀌면 첫 매치부터 다시 훑는다.
   useEffect(() => setActiveIdx(0), [query])
@@ -90,11 +115,6 @@ export default function MessageList({
     setSearchOpen(false)
     setQuery('')
   }
-
-  // 이 workspace 에서 결과가 도착한 tool_use id (진행 중 spinner 판별용).
-  const resolved = new Set(
-    items.filter((i) => i.type === 'tool_result').map((i) => (i as { toolId: string }).toolId)
-  )
 
   useEffect(() => {
     const el = containerRef.current
@@ -201,7 +221,7 @@ export default function MessageList({
       )}
       <div ref={containerRef} onScroll={onScroll} className="h-full overflow-y-auto">
         <div className="max-w-3xl mx-auto px-5 py-5 space-y-3">
-          {items.map((item) => (
+          {visibleItems.map((item) => (
             <div
               key={item.id}
               data-item-id={item.id}
@@ -211,7 +231,14 @@ export default function MessageList({
                   : undefined
               }
             >
-              <Item item={item} running={running} resolved={resolved} workspaceId={workspaceId} />
+              <Item
+                item={item}
+                running={running}
+                resolved={resolved}
+                workspaceId={workspaceId}
+                cardByItemId={cardByItemId}
+                latestCardItemId={latestCardItemId}
+              />
             </div>
           ))}
           <div ref={bottomRef} />
@@ -234,14 +261,25 @@ function Item({
   item,
   running,
   resolved,
-  workspaceId
+  workspaceId,
+  cardByItemId,
+  latestCardItemId
 }: {
   item: ChatItem
   running: boolean
   resolved: Set<string>
   workspaceId: string
+  /** 이 자리에 할 일 체크리스트를 붙일 항목이면 그 시점의 목록 스냅샷. */
+  cardByItemId: Map<string, TaskEntry[]>
+  /** 지금이 라이브 상태인 마지막 체크리스트의 항목 id(진행 중 스피너 판별용). */
+  latestCardItemId?: string
 }): React.JSX.Element | null {
   const time = formatTime(item.ts)
+
+  // 할 일 도구 호출 구간은 원래의 도구 행 대신 체크리스트 카드 한 장으로 대체한다.
+  const card = cardByItemId.get(item.id)
+  if (card) return <TaskChecklist tasks={card} live={running && item.id === latestCardItemId} />
+
   switch (item.type) {
     case 'user':
       return (
@@ -319,6 +357,82 @@ function Item({
     default:
       return null
   }
+}
+
+/**
+ * 할 일 목록 한 스냅샷을 체크리스트 카드로 그린다(Claude Code CLI 와 같은 경험).
+ *
+ * 상태 기호는 CLI 와 같은 체계를 쓴다 — 완료 ✔, 진행 중 ◼(채운 사각형), 대기 ◻(빈 사각형).
+ * 완료 항목은 지우지 않고 취소선 + 흐린 색으로 남겨 전체 계획의 흐름이 보이게 하고, 진행 중
+ * 항목은 현재진행형 라벨(activeForm)로 강조한다. 마지막(=현재) 카드이고 세션이 돌고 있으면
+ * 진행 중 항목에 스피너가 돈다.
+ */
+function TaskChecklist({
+  tasks,
+  live
+}: {
+  tasks: TaskEntry[]
+  live: boolean
+}): React.JSX.Element | null {
+  // 항목이 모두 지워진 구간은 빈 카드를 남기지 않는다.
+  if (tasks.length === 0) return null
+
+  const done = tasks.filter((t) => t.status === 'completed').length
+  const allDone = done === tasks.length
+
+  return (
+    <div className="rounded-lg border border-[var(--border-3)] bg-[var(--surface-2)] px-3 py-2 text-sm">
+      <div className="flex items-center gap-2">
+        <ListTodo size={13} className="text-[var(--accent-400)] shrink-0" />
+        <span className="font-medium text-neutral-200">Tasks</span>
+        <span
+          className={
+            'ml-auto shrink-0 text-xs tabular-nums ' +
+            (allDone ? 'text-[var(--success-400)]' : 'text-neutral-500')
+          }
+        >
+          {done}/{tasks.length}
+        </span>
+      </div>
+
+      <ul className="mt-1.5 space-y-1">
+        {tasks.map((task, i) => {
+          const completed = task.status === 'completed'
+          const active = task.status === 'in_progress'
+          return (
+            // 이미 확정된 스냅샷이라 재정렬이 없다. 번호가 아직 없는 항목도 있어 인덱스를 섞어 쓴다.
+            <li key={`${task.id}:${i}`} className="flex items-start gap-2">
+              <span className="mt-[3px] shrink-0">
+                {completed ? (
+                  <Check size={12} className="text-[var(--success-400)]" />
+                ) : active ? (
+                  live ? (
+                    <Loader2 size={12} className="text-[var(--accent-400)] animate-spin" />
+                  ) : (
+                    <Square size={12} fill="currentColor" className="text-[var(--accent-400)]" />
+                  )
+                ) : (
+                  <Square size={12} className="text-neutral-600" />
+                )}
+              </span>
+              <span
+                className={
+                  'min-w-0 whitespace-pre-wrap ' +
+                  (completed
+                    ? 'text-neutral-500 line-through decoration-neutral-600'
+                    : active
+                      ? 'text-neutral-100 font-medium'
+                      : 'text-neutral-400')
+                }
+              >
+                {taskLabel(task)}
+              </span>
+            </li>
+          )
+        })}
+      </ul>
+    </div>
+  )
 }
 
 /**
