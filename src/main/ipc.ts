@@ -26,6 +26,12 @@ import {
   restackOnto,
   updateFromBase
 } from './git'
+import {
+  applyCarryExcludes,
+  carryIntoWorktree,
+  detectCarryItems,
+  isAgentContextPath
+} from './carry'
 import { generateWorkspaceName } from './names'
 import { buildStackFromPrs } from './stack'
 import { findFreePort, waitForPortFree } from './net'
@@ -55,6 +61,7 @@ import {
 import { IPC, DEFAULT_AGENT_BACKEND, reorderById, workspaceStack } from '@shared/types'
 import type {
   AppSettings,
+  CarryFailure,
   CommandPanelKind,
   CommandResult,
   CreateWorkspaceArgs,
@@ -86,6 +93,31 @@ interface IpcContext {
   scripts: ScriptRunner
   terminals: TerminalManager
   getWindow: () => BrowserWindow | null
+}
+
+/**
+ * 새로 만든 worktree 에 리포의 전달 목록(gitignore 되어 딸려오지 않는 파일들)을 옮긴다.
+ *
+ * 반드시 **셋업 스크립트 실행 전에** 끝나야 한다 — 셋업이 `.env` 를 읽거나, 심링크된
+ * `node_modules` 를 보고 설치를 건너뛸 수 있어야 하기 때문. 전달이 실패해도 워크스페이스
+ * 생성 자체는 성공시키고, 실패 목록만 돌려 호출 측이 사용자에게 알리게 한다.
+ */
+async function carryIntoNewWorktree(repo: Repo, worktreePath: string): Promise<CarryFailure[]> {
+  if (repo.carryItems.length === 0) return []
+  try {
+    const { carried, failures } = carryIntoWorktree(repo.path, worktreePath, repo.carryItems)
+    await applyCarryExcludes(worktreePath, carried)
+    for (const f of failures) log.warn(`worktree 전달 실패: ${f.path} — ${f.reason}`)
+    return failures
+  } catch (err) {
+    // 전달 단계 전체가 터져도 워크스페이스는 살린다(요구사항: 생성은 성공해야 한다).
+    log.error('worktree 전달 단계 실패', err)
+    return repo.carryItems.map((i) => ({
+      path: i.path,
+      reason: err instanceof Error ? err.message : String(err),
+      agentContext: isAgentContextPath(i.path)
+    }))
+  }
 }
 
 export function registerIpc(ctx: IpcContext): void {
@@ -192,6 +224,10 @@ export function registerIpc(ctx: IpcContext): void {
       setupScript: '',
       devScript: '',
       archiveScript: '',
+      // 흔한 에이전트 컨텍스트·런타임 설정 파일이 실제로 있으면 미리 채워 둔다. 빈 목록으로
+      // 시작하면 사용자가 이 기능을 모른 채, worktree 에 지침 파일이 없어 에이전트가 조용히
+      // 다르게 동작하는 문제를 계속 겪게 된다. 안전한 copy 모드로만 넣는다.
+      carryItems: detectCarryItems(path),
       addedAt: Date.now()
     }
     store.update((st) => st.repos.push(repo))
@@ -206,7 +242,9 @@ export function registerIpc(ctx: IpcContext): void {
     (
       _e,
       repoId: string,
-      patch: Partial<Pick<Repo, 'name' | 'setupScript' | 'devScript' | 'archiveScript'>>
+      patch: Partial<
+        Pick<Repo, 'name' | 'setupScript' | 'devScript' | 'archiveScript' | 'carryItems'>
+      >
     ) => {
       store.update((st) => {
         const repo = st.repos.find((r) => r.id === repoId)
@@ -282,7 +320,13 @@ export function registerIpc(ctx: IpcContext): void {
     async (
       _e,
       args: CreateWorkspaceArgs
-    ): Promise<{ workspaceId?: string; name?: string; branch?: string; error?: string }> => {
+    ): Promise<{
+      workspaceId?: string
+      name?: string
+      branch?: string
+      error?: string
+      carryFailures?: CarryFailure[]
+    }> => {
       const repo = repoFor(args.repoId)
       if (!repo) return { error: 'Repository not found.' }
 
@@ -319,6 +363,9 @@ export function registerIpc(ctx: IpcContext): void {
       } catch (err) {
         return { error: err instanceof Error ? err.message : String(err) }
       }
+
+      // 셋업 스크립트보다 먼저 — 셋업이 전달된 .env·node_modules 를 볼 수 있어야 한다.
+      const carryFailures = await carryIntoNewWorktree(repo, worktreePath)
 
       const settings = store.getState().settings
       const id = randomUUID()
@@ -367,7 +414,9 @@ export function registerIpc(ctx: IpcContext): void {
       }
 
       // name·branch 를 함께 반환해 호출 측이 별도 getState 왕복 없이 토스트를 만들 수 있게 한다.
-      return { workspaceId: id, name: rawName, branch }
+      // carryFailures 는 렌더러가 별도 토스트로 알린다 — 특히 에이전트 컨텍스트 파일이 빠지면
+      // 에러 없이 에이전트만 다르게 동작하므로 조용히 넘기면 안 된다.
+      return { workspaceId: id, name: rawName, branch, carryFailures }
     }
   )
 
@@ -408,7 +457,10 @@ export function registerIpc(ctx: IpcContext): void {
   // 언아카이브: 브랜치로부터 worktree 를 복원한다.
   ipcMain.handle(
     IPC.workspaceUnarchive,
-    async (_e, workspaceId: string): Promise<{ error?: string }> => {
+    async (
+      _e,
+      workspaceId: string
+    ): Promise<{ error?: string; carryFailures?: CarryFailure[] }> => {
       const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
       if (!ws) return { error: 'Workspace not found.' }
       const repo = repoFor(ws.repoId)
@@ -419,6 +471,9 @@ export function registerIpc(ctx: IpcContext): void {
       } catch (err) {
         return { error: err instanceof Error ? err.message : String(err) }
       }
+      // 언아카이브도 worktree 를 새로 만드는 경로다 — 전달을 빠뜨리면 복원된 워크스페이스만
+      // 지침 파일 없이 동작하게 된다.
+      const carryFailures = await carryIntoNewWorktree(repo, ws.worktreePath)
       // worktree 가 복원됐으니 PR 조회가 다시 가능하다. 보존했던 표시 이름이 현재 PR 제목과
       // 같다면(= 아카이브 시 자동 스냅샷한 값) override 를 지워 기본 규칙을 되살린다.
       // 사용자가 직접 지정한 이름은 PR 제목과 다르므로 그대로 유지된다.
@@ -436,7 +491,7 @@ export function registerIpc(ctx: IpcContext): void {
         if (w) w.archived = false
       })
       broadcastState()
-      return {}
+      return { carryFailures }
     }
   )
 

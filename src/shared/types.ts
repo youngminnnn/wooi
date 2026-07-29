@@ -90,6 +90,34 @@ export function fastModeReasonText(reason: FastModeDisabledReason | null | undef
 
 // ── 도메인 엔티티 ────────────────────────────────────────────────────────
 
+/**
+ * 전달 항목을 워크트리에 놓는 방식.
+ *  - copy: 워크트리마다 독립된 사본. 워크스페이스별로 값이 달라야 하는 `.env`(포트 등)에 맞다.
+ *  - link: 메인 체크아웃의 원본을 심링크로 공유. 원본을 고치면 모든 워크스페이스에 반영된다.
+ *
+ * 기본은 copy 다 — link 는 여러 워크스페이스가 같은 파일을 보게 되므로, 병렬 에이전트가
+ * 동시에 쓰는 파일(MEMORY.md 같은 누적 학습 노트)에서는 서로의 내용을 덮어쓸 수 있다.
+ */
+export type CarryMode = 'copy' | 'link'
+
+/** 워크트리 생성 시 메인 체크아웃에서 함께 가져올 항목 하나. */
+export interface CarryItem {
+  /** 리포 루트 기준 상대 경로. 절대 경로·`..`·`.git` 은 저장 시점에 거부된다. */
+  path: string
+  mode: CarryMode
+}
+
+/**
+ * 전달에 실패한 항목. 전달 실패가 워크스페이스 생성 자체를 막지는 않지만,
+ * 에이전트 컨텍스트 파일(agentContext=true)이 빠지면 에이전트가 **조용히 다르게 동작**하므로
+ * 이 기능이 막으려던 상황 그 자체가 된다 — 렌더러가 토스트로 눈에 띄게 알린다.
+ */
+export interface CarryFailure {
+  path: string
+  reason: string
+  agentContext: boolean
+}
+
 /** 연결된 git 리포지토리(메인 체크아웃). 모든 workspace 의 부모. */
 export interface Repo {
   id: string
@@ -104,6 +132,15 @@ export interface Repo {
   devScript: string
   /** workspace 아카이브 시 worktree 에서 실행하는 정리 명령. 비어 있으면 미실행. */
   archiveScript: string
+  /**
+   * worktree 생성 시 메인 체크아웃에서 함께 가져올 항목들.
+   *
+   * `git worktree add` 는 git 이 추적하는 파일만 채우므로, gitignore 된 파일
+   * (`CLAUDE.local.md`, `.env`, `.claude/settings.local.json` …)은 아무것도 딸려오지 않는다.
+   * 그 결과가 에러가 아니라 **조용한 오작동**이라 — 에이전트가 프로젝트 지침을 못 읽고
+   * 메인 체크아웃과 다르게 행동한다 — 리포별로 전달 목록을 지정할 수 있게 한다.
+   */
+  carryItems: CarryItem[]
   /**
    * GitHub 소유자(owner) 아바타 이미지를 담은 data: URL. origin 리모트가 GitHub 일 때만 채워진다.
    * 원격 URL 대신 data URL 로 저장하는 이유: 렌더러 CSP(img-src 'self' data:)가 외부 이미지를

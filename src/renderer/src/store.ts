@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import type {
   AppState,
   AuthStatus,
+  CarryFailure,
   ChatEnvelope,
   ChatItem,
   GitStatus,
@@ -233,6 +234,8 @@ interface UIState {
   /** 토스트를 띄우고 그 id 를 반환한다. actions 를 주면 인라인 버튼이 붙고 자동으로 닫히지 않는다. */
   pushToast: (kind: ToastKind, message: string, actions?: ToastAction[]) => string
   dismissToast: (id: string) => void
+  /** worktree 전달 실패를 사용자에게 알린다. 에이전트 컨텍스트 실패는 error 로 구분해 띄운다. */
+  reportCarryFailures: (failures?: CarryFailure[]) => void
   /** setup 스크립트를 다시 실행한다(스크립트 패널을 함께 연다). 결과는 메인이 setupState 로 영속. */
   retrySetup: (workspaceId: string) => void
   confirm: (opts: ConfirmOptions) => Promise<boolean>
@@ -651,7 +654,13 @@ export const useStore = create<UIState>((set, get) => ({
       pending: [...s.pending, { id: placeholderId, repoId, name: displayName ?? '' }]
     }))
 
-    let res: { workspaceId?: string; name?: string; branch?: string; error?: string }
+    let res: {
+      workspaceId?: string
+      name?: string
+      branch?: string
+      error?: string
+      carryFailures?: CarryFailure[]
+    }
     try {
       res = await window.api.workspace.create({ repoId, ...args })
     } catch (err) {
@@ -669,6 +678,32 @@ export const useStore = create<UIState>((set, get) => ({
       if (res.name && res.branch) {
         get().pushToast('success', `Created workspace “${res.name}” on ${res.branch}`)
       }
+      get().reportCarryFailures(res.carryFailures)
+    }
+  },
+
+  // 전달 실패는 워크스페이스 생성을 막지 않지만, 조용히 넘기면 에이전트가 프로젝트 지침을
+  // 못 읽은 채 다르게 동작하는 — 이 기능이 애초에 막으려던 — 상황이 그대로 재현된다.
+  // 그래서 에이전트 컨텍스트 파일 실패는 error 로 확실히 띄우고, 나머지는 info 로 알린다.
+  reportCarryFailures: (failures) => {
+    if (!failures || failures.length === 0) return
+    const context = failures.filter((f) => f.agentContext)
+    const rest = failures.filter((f) => !f.agentContext)
+    if (context.length > 0) {
+      get().pushToast(
+        'error',
+        `Agent context files were not carried into the worktree — the agent may not follow your project rules:\n${context
+          .map((f) => `${f.path}: ${f.reason}`)
+          .join('\n')}`
+      )
+    }
+    if (rest.length > 0) {
+      get().pushToast(
+        'info',
+        `Some files were not carried into the worktree:\n${rest
+          .map((f) => `${f.path}: ${f.reason}`)
+          .join('\n')}`
+      )
     }
   },
 
