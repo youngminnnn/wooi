@@ -1522,14 +1522,16 @@
               </h3>
               <p>
                 <span class="en"
-                  >Consent to the Terms/Privacy, then sign in to Claude (finishes in-app via your
-                  browser) and GitHub (opens your Terminal). The <code>gh</code> CLI is required — a
-                  hard gate blocks the app until it's installed and signed in.</span
+                  >Consent to the Terms/Privacy, then sign in to Claude — it finishes in-app via
+                  your browser. GitHub is optional at this point: skip it and start working, and
+                  Wooi will ask the first time you open a PR, merge, stack a branch or check CI,
+                  then resume what you were doing.</span
                 >
                 <span class="ko"
-                  >약관·개인정보처리방침에 동의한 뒤 Claude(앱 안에서 브라우저로 마무리)와
-                  GitHub(Terminal 에서 진행)에 로그인합니다. <code>gh</code> CLI 는 필수라,
-                  설치·로그인 전에는 하드 게이트가 앱 진입을 막습니다.</span
+                  >약관·개인정보처리방침에 동의한 뒤 Claude 에 로그인합니다(앱 안에서 브라우저로
+                  마무리). GitHub 은 이 단계에서 건너뛸 수 있습니다 — 바로 작업을 시작하면, PR
+                  생성·머지·스택·Check 를 처음 쓰는 순간 Wooi 가 연결을 요청하고 연결 후 원래 하려던
+                  동작을 이어서 실행합니다.</span
                 >
               </p>
             </div>
@@ -1552,10 +1554,14 @@
             </p>
           </div>
           <div class="req">
-            <h4><code>gh</code> CLI <span class="tag req-req">req</span></h4>
+            <h4><code>gh</code> CLI <span class="tag req-opt">opt</span></h4>
             <p>
-              <span class="en">GitHub CLI for branch/PR management.</span
-              ><span class="ko">브랜치·PR 관리용 GitHub CLI.</span>
+              <span class="en"
+                >Needed for the PR &amp; stacking features. Everything that's pure git works without
+                it.</span
+              ><span class="ko"
+                >PR·스택 기능에 필요합니다. git 만으로 되는 기능은 없어도 모두 동작합니다.</span
+              >
             </p>
           </div>
           <div class="req">

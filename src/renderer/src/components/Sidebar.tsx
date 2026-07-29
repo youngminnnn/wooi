@@ -23,8 +23,10 @@ import {
 } from 'lucide-react'
 import { useStore } from '../store'
 import RowActionsMenu, { type RowAction } from './RowActionsMenu'
+import { GithubMark } from './BrandIcons'
 import { QUICK_SWITCH_HINT_DISMISSED, readUiFlag, setUiFlag } from '../lib/uiFlags'
 import { orderByStack, orderVisibleWorkspaces, workspaceDisplayName } from '@shared/types'
+import { useGithubDisconnected } from '../lib/github'
 import { useNow } from '../lib/useNow'
 import { formatDuration } from '../lib/format'
 import { useDragReorder, type DragReorder } from '../lib/useDragReorder'
@@ -317,6 +319,8 @@ function WorkspaceRow({
   const runningSince = useStore((s) => s.runningSince[workspace.id])
   const restack = useStore((s) => s.restackWorkspace)
   const confirm = useStore((s) => s.confirm)
+  const requireGithub = useStore((s) => s.requireGithub)
+  const githubDisconnected = useGithubDisconnected()
   const awaitingPermission = useStore((s) =>
     s.permissions.some((p) => p.workspaceId === workspace.id)
   )
@@ -364,22 +368,33 @@ function WorkspaceRow({
       icon: <Pencil size={13} />,
       onSelect: () => setEditingName(displayName)
     },
+    // 스택은 stacked PR 을 전제로 한 기능이라 gh 가 필요하다 — 미연결이면 라벨을 "Connect GitHub"
+    // 로 바꿔 노출하고(숨기지 않는다), 눌렀을 때 연결 모달을 띄운 뒤 이어서 실행한다.
     {
       key: 'stack',
-      label: 'Stack a new workspace',
-      icon: <GitBranchPlus size={13} />,
-      onSelect: () => onStackWorkspace(workspace.repoId, workspace.id)
+      label: githubDisconnected
+        ? 'Stack a new workspace — Connect GitHub'
+        : 'Stack a new workspace',
+      icon: githubDisconnected ? <GithubMark size={12} /> : <GitBranchPlus size={13} />,
+      onSelect: () =>
+        void requireGithub('Stacked workspaces track their pull requests on GitHub.', () =>
+          onStackWorkspace(workspace.repoId, workspace.id)
+        )
     },
     ...(workspace.parentWorkspaceId
       ? [
           {
             key: 'restack',
-            label:
-              git && git.behind > 0
+            label: githubDisconnected
+              ? `Restack onto ${workspace.baseBranch} — Connect GitHub`
+              : git && git.behind > 0
                 ? `Restack onto ${workspace.baseBranch} (${git.behind} behind)`
                 : `Restack onto ${workspace.baseBranch}`,
-            icon: <RefreshCw size={13} />,
-            onSelect: () => void restack(workspace.id)
+            icon: githubDisconnected ? <GithubMark size={12} /> : <RefreshCw size={13} />,
+            onSelect: () =>
+              void requireGithub('Restacking updates the branch and its pull request.', () =>
+                restack(workspace.id)
+              )
           }
         ]
       : []),
@@ -551,10 +566,16 @@ function WorkspaceRow({
             <button
               onClick={(e) => {
                 e.stopPropagation()
-                void restack(workspace.id)
+                void requireGithub('Restacking updates the branch and its pull request.', () =>
+                  restack(workspace.id)
+                )
               }}
               className="h-5 w-5 grid place-items-center rounded shrink-0 hover:bg-[var(--surface-2)] text-[var(--warning-400)] hover:text-[var(--warning-300)]"
-              title={`Restack onto ${workspace.baseBranch} (${git.behind} behind) — rebase & force-push`}
+              title={
+                githubDisconnected
+                  ? `Connect GitHub to restack onto ${workspace.baseBranch} (${git.behind} behind)`
+                  : `Restack onto ${workspace.baseBranch} (${git.behind} behind) — rebase & force-push`
+              }
             >
               <RefreshCw size={12} />
             </button>

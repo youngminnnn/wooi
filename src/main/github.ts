@@ -53,6 +53,55 @@ function runLoginShell(
   })
 }
 
+// ── gh 연결 여부 ────────────────────────────────────────────────────────────
+// gh 는 선택 연동이다 — 없어도 리포 연결·워크스페이스 생성·에이전트 실행 등 git 만으로 되는
+// 기능은 전부 동작해야 한다. 그래서 여기서 한 번 걸러, 미연결이면 gh 를 아예 실행하지 않는다.
+// 읽기 계열은 조용히 빈 값(null/[])을 돌려주고(에러 토스트·로그 스팸 없음), 쓰기 계열은
+// 사용자에게 보여줄 수 있는 에러 메시지를 돌려준다(렌더러가 먼저 막지만 최후 방어선).
+
+/** null = 아직 확인 전. auth.ts 의 상태 조회가 매번 최신 값으로 갱신한다. */
+let ghConnected: boolean | null = null
+
+/** 인증 상태 조회(auth.ts)가 확인한 gh 연결 여부를 캐시에 반영한다. */
+export function setGithubConnected(connected: boolean): void {
+  ghConnected = connected
+}
+
+/**
+ * gh 가 설치·로그인돼 있는지 직접 확인한다(캐시 갱신 포함).
+ * 앱 기동 직후에는 모든 워크스페이스의 PR 조회가 한꺼번에 몰리므로, 진행 중인 확인이 있으면
+ * 그 결과를 함께 기다려 로그인 셸을 워크스페이스 수만큼 띄우지 않는다.
+ */
+let probing: Promise<boolean> | null = null
+function probeGithub(): Promise<boolean> {
+  probing ??= runLoginShell('command -v gh >/dev/null 2>&1 && gh auth status')
+    .then(({ code }) => {
+      ghConnected = code === 0
+      return ghConnected
+    })
+    .finally(() => {
+      probing = null
+    })
+  return probing
+}
+
+/** 읽기 계열용 — 캐시가 있으면 그대로 쓴다(폴링마다 셸을 띄우지 않기 위함). */
+async function connected(): Promise<boolean> {
+  return ghConnected ?? (await probeGithub())
+}
+
+/**
+ * 쓰기 계열용 — 캐시가 "미연결" 이면 한 번 더 확인한다. 사용자가 앱 밖(터미널)에서 방금
+ * 로그인해 캐시만 낡은 경우에 액션을 헛되이 막지 않기 위함이다.
+ */
+async function connectedFresh(): Promise<boolean> {
+  if (ghConnected) return true
+  return probeGithub()
+}
+
+const NOT_CONNECTED =
+  'GitHub is not connected. Connect the GitHub CLI (gh) in Settings → Integrations.'
+
 /**
  * PR 의 세분화된 상태를 도출한다.
  * 종결 상태(merged/closed) → draft 순으로 먼저 거르고, 열린 PR 중에서는 병합 충돌을
@@ -116,6 +165,7 @@ const PR_LABELS: Record<PrState, string> = {
  * 안전하지만 셸 해석 방지를 위해 작은따옴표로 감싼다.
  */
 export async function getPrStatus(worktreePath: string, branch?: string): Promise<PrStatus | null> {
+  if (!(await connected())) return null
   const target = branch ? ` '${branch}'` : ''
   const { stdout, code } = await runLoginShell(
     `gh pr view${target} --json number,url,title,state,isDraft,reviewDecision,mergeable,mergeStateStatus`,
@@ -152,6 +202,7 @@ export async function getPrMeta(
   worktreePath: string,
   selector: string | number
 ): Promise<PrMeta | null> {
+  if (!(await connected())) return null
   const { stdout, code } = await runLoginShell(
     `gh pr view '${selector}' --json number,state,headRefName,baseRefName,baseRefOid`,
     worktreePath
@@ -170,6 +221,7 @@ export async function getPrMeta(
 
 /** 원격에 브랜치가 존재하는지. 없으면 gh 가 404 로 종료한다. */
 export async function remoteRefExists(worktreePath: string, branch: string): Promise<boolean> {
+  if (!(await connected())) return false
   const { code } = await runLoginShell(
     `gh api 'repos/{owner}/{repo}/git/ref/heads/${branch}'`,
     worktreePath
@@ -186,6 +238,7 @@ export async function restoreRemoteRef(
   branch: string,
   sha: string
 ): Promise<{ error?: string }> {
+  if (!(await connectedFresh())) return { error: NOT_CONNECTED }
   const { stderr, code } = await runLoginShell(
     `gh api -X POST 'repos/{owner}/{repo}/git/refs' -f 'ref=refs/heads/${branch}' -f 'sha=${sha}'`,
     worktreePath
@@ -196,6 +249,7 @@ export async function restoreRemoteRef(
 
 /** 복구용으로 되살린 발판 브랜치를 다시 지운다(retarget 이 끝나면 더 이상 base 가 아니라 안전). */
 export async function deleteRemoteRef(worktreePath: string, branch: string): Promise<void> {
+  if (!(await connectedFresh())) return
   await runLoginShell(
     `gh api -X DELETE 'repos/{owner}/{repo}/git/refs/heads/${branch}'`,
     worktreePath
@@ -206,6 +260,7 @@ export async function deleteRemoteRef(worktreePath: string, branch: string): Pro
 export async function listOpenPrs(
   worktreePath: string
 ): Promise<Array<{ number: number; head: string; base: string }>> {
+  if (!(await connected())) return []
   const { stdout, code } = await runLoginShell(
     `gh pr list --state open --json number,headRefName,baseRefName --limit 200`,
     worktreePath
@@ -292,6 +347,7 @@ function toCheck(item: RollupItem): PrCheck | null {
  * `gh pr view --json statusCheckRollup` 한 번으로 PR 번호·URL·체크 목록을 함께 받는다.
  */
 export async function getPrChecks(worktreePath: string): Promise<PrChecks | null> {
+  if (!(await connected())) return null
   const { stdout, code } = await runLoginShell(
     `gh pr view --json number,url,statusCheckRollup`,
     worktreePath
@@ -320,6 +376,7 @@ export async function createPrWeb(
   worktreePath: string,
   opts?: { base?: string; head?: string }
 ): Promise<{ error?: string }> {
+  if (!(await connectedFresh())) return { error: NOT_CONNECTED }
   // stacked 면 부모 브랜치를 PR base 로 명시한다(--base). 없으면 gh 가 리포 기본 브랜치를 쓴다.
   // head 를 주면(모델 B: 현재 체크아웃되지 않은 스택 브랜치) 그 브랜치로 PR 을 연다(--head).
   // 브랜치명은 sanitizeBranch 로 정규화돼 있어 안전하지만, 셸 해석을 막기 위해 작은따옴표로 감싼다.
@@ -345,6 +402,7 @@ export async function retargetPr(
   newBase: string,
   selector?: string
 ): Promise<{ error?: string }> {
+  if (!(await connectedFresh())) return { error: NOT_CONNECTED }
   const target = selector ? ` '${selector}'` : ''
   const { stderr, code } = await runLoginShell(
     `gh pr edit${target} --base '${newBase}'`,
@@ -378,6 +436,7 @@ export async function mergePr(
   method: PrMergeMethod,
   selector?: string | number
 ): Promise<{ error?: string }> {
+  if (!(await connectedFresh())) return { error: NOT_CONNECTED }
   const flag = method === 'merge' ? '--merge' : method === 'rebase' ? '--rebase' : '--squash'
   const target = selector ? ` '${selector}'` : ''
   const { stderr, code } = await runLoginShell(`gh pr merge${target} ${flag}`, worktreePath)
@@ -387,6 +446,7 @@ export async function mergePr(
 
 /** 현재 브랜치의 PR 을 닫는다(병합하지 않고 종료). */
 export async function closePr(worktreePath: string): Promise<{ error?: string }> {
+  if (!(await connectedFresh())) return { error: NOT_CONNECTED }
   const { stderr, code } = await runLoginShell('gh pr close', worktreePath)
   if (code !== 0) return { error: lastError(stderr, 'Failed to close the pull request.') }
   return {}
@@ -401,6 +461,7 @@ export async function reopenPr(
   worktreePath: string,
   selector?: string | number
 ): Promise<{ error?: string }> {
+  if (!(await connectedFresh())) return { error: NOT_CONNECTED }
   const target = selector ? ` '${selector}'` : ''
   const { stderr, code } = await runLoginShell(`gh pr reopen${target}`, worktreePath)
   if (code !== 0) return { error: lastError(stderr, 'Failed to reopen the pull request.') }
@@ -409,6 +470,7 @@ export async function reopenPr(
 
 /** Draft PR 을 리뷰 가능 상태로 전환한다(gh pr ready). */
 export async function markPrReady(worktreePath: string): Promise<{ error?: string }> {
+  if (!(await connectedFresh())) return { error: NOT_CONNECTED }
   const { stderr, code } = await runLoginShell('gh pr ready', worktreePath)
   if (code !== 0) return { error: lastError(stderr, 'Failed to mark the pull request as ready.') }
   return {}

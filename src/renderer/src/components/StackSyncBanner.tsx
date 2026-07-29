@@ -20,6 +20,7 @@ export default function StackSyncBanner({
 }): React.JSX.Element | null {
   const applyStackSync = useStore((s) => s.applyStackSync)
   const dismissStackSync = useStore((s) => s.dismissStackSync)
+  const requireGithub = useStore((s) => s.requireGithub)
   const [busy, setBusy] = useState(false)
 
   const plan = workspace.stackSync
@@ -53,9 +54,13 @@ export default function StackSyncBanner({
         <div className="flex shrink-0 items-center gap-1.5">
           <button
             disabled={busy}
+            // 캐스케이드는 PR retarget·reopen 을 거치므로 gh 가 필요하다. 배너는 gh 로 감지한
+            // 계획이 workspace 에 남아 있으면(연결이 끊긴 뒤에도) 계속 뜨므로 실행 직전에 요구한다.
             onClick={() => {
-              setBusy(true)
-              void applyStackSync(workspace.id).finally(() => setBusy(false))
+              void requireGithub('Syncing a stack retargets its pull requests on GitHub.', () => {
+                setBusy(true)
+                return applyStackSync(workspace.id).finally(() => setBusy(false))
+              })
             }}
             className="flex items-center gap-1.5 h-7 px-2.5 rounded-md bg-[var(--warning-500)]/90 text-black text-xs font-medium hover:bg-[var(--warning-400)] disabled:opacity-60"
             title={`Retarget onto ${plan.newBase}, rebase, and force-push`}

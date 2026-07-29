@@ -19,7 +19,7 @@ import OnboardingModal from './components/OnboardingModal'
 import ShortcutsHelp from './components/ShortcutsHelp'
 import QuickSwitcher from './components/QuickSwitcher'
 import FeatureTour from './components/FeatureTour'
-import GithubGate from './components/GithubGate'
+import GithubConnectModal from './components/GithubConnectModal'
 import Toaster from './components/Toaster'
 import ConfirmDialog from './components/ConfirmDialog'
 import Logo from './components/Logo'
@@ -77,12 +77,10 @@ export default function App(): React.JSX.Element {
       !app.settings.pickedDefaults ||
       app.settings.acceptedTermsVersion !== CURRENT_TERMS_VERSION)
 
-  // gh(GitHub CLI)는 필수다 — "설치 + 로그인"이 모두 끝나기 전에는 본 화면을 막는다(하드 게이트).
-  // 온보딩(약관 동의)을 먼저 끝낸 뒤에만 게이트를 띄우고, 인증 상태가 로드되기 전에는 깜빡임을
-  // 피하려 띄우지 않는다. gh 가 제거·로그아웃되면 다음 갱신에서 다시 게이트가 뜬다.
-  const githubReady =
-    authStatus !== null && authStatus.github.installed && authStatus.github.loggedIn
-  const githubGateOpen = !!app && !onboardingOpen && authStatus !== null && !githubReady
+  // gh(GitHub CLI)는 하드 게이트가 아니다 — 없어도 리포 연결·워크스페이스 생성·에이전트 실행 등
+  // git 만으로 되는 일은 전부 할 수 있고, PR·스택처럼 gh 가 실제로 필요한 액션을 누른 순간에만
+  // 연결 모달(GithubConnectModal)이 뜬다. 연결이 끝나면 원래 하려던 액션이 이어서 실행된다.
+  const githubGateOpen = useStore((s) => s.githubGate !== null)
 
   const anyModalOpen =
     showSettings ||
@@ -398,7 +396,7 @@ export default function App(): React.JSX.Element {
           needsDefaults={needsDefaults}
         />
       )}
-      {githubGateOpen && <GithubGate />}
+      {githubGateOpen && <GithubConnectModal />}
       {showSettings && (
         <SettingsModal
           onClose={() => setShowSettings(false)}

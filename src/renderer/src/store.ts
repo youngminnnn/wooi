@@ -126,6 +126,12 @@ interface UIState {
   permissions: PermissionRequest[]
   authStatus: AuthStatus | null
   /**
+   * gh 연결을 요구하는 액션이 대기 중이면(=연결 모달이 떠 있으면) 그 사유. null 이면 닫힘.
+   * gh 는 하드 게이트가 아니라 지연 게이트다 — PR·스택처럼 gh 가 실제로 필요한 액션을 누른
+   * 그 순간에만 이 모달이 뜨고, 연결이 끝나면 원래 하려던 액션이 이어서 실행된다.
+   */
+  githubGate: { reason: string } | null
+  /**
    * 자동 업데이트 상태(main 의 evtUpdate). 여러 화면(타이틀바 점, 업데이트 배너, 설정)이
    * 같은 값을 보도록 여기 한 곳에서만 구독한다. 컴포넌트가 늦게 마운트돼도 지나간 방송을
    * 놓치지 않는다.
@@ -188,6 +194,16 @@ interface UIState {
   setPrStatus: (workspaceId: string, status: PrStatus | null) => void
   refreshScriptStatus: (workspaceId: string) => Promise<void>
   refreshAuth: () => Promise<void>
+  /**
+   * gh 가 필요한 액션을 실행한다. 이미 연결돼 있으면 그대로 실행하고, 아니면 연결 모달을 띄운 뒤
+   * 연결이 끝나는 즉시 action 을 이어서 수행한다(사용자가 닫으면 그냥 버린다).
+   * reason 은 모달에 "왜 지금 연결이 필요한지" 로 노출된다.
+   */
+  requireGithub: (reason: string, action: () => void | Promise<void>) => Promise<void>
+  /** 연결이 확인돼 대기 중이던 액션을 실행하고 모달을 닫는다. */
+  resolveGithubGate: () => void
+  /** 사용자가 모달을 닫았다 — 대기 중이던 액션은 버린다. */
+  dismissGithubGate: () => void
   dismissPermission: (requestId: string) => void
   /**
    * 대기 중인 모든 권한 요청을 한 번에 허용한다(병렬 세션의 권한 피로 완화).
@@ -234,6 +250,15 @@ let windowFocused = true
 let statusPollTimer: ReturnType<typeof setInterval> | null = null
 const STATUS_POLL_INTERVAL_MS = 15_000
 
+// gh 연결 모달이 닫힐 때까지 붙들어 두는, 사용자가 원래 하려던 액션. 상태에 담지 않는 이유는
+// 함수라 비교·직렬화 대상이 아니고, 렌더에 영향을 주지 않기 때문이다.
+let pendingGithubAction: (() => void | Promise<void>) | null = null
+
+/** gh(GitHub CLI)가 설치·로그인돼 PR·스택 기능을 쓸 수 있는 상태인가. */
+function githubConnected(auth: AuthStatus | null): boolean {
+  return !!auth && auth.github.installed && auth.github.loggedIn
+}
+
 function upsertItem(items: ChatItem[], item: ChatItem): ChatItem[] {
   const idx = items.findIndex((i) => i.id === item.id)
   if (idx === -1) return [...items, item]
@@ -255,6 +280,7 @@ export const useStore = create<UIState>((set, get) => ({
   prRefreshing: {},
   permissions: [],
   authStatus: null,
+  githubGate: null,
   updateStatus: { state: 'idle' },
   contextUsage: {},
   compacting: {},
@@ -309,6 +335,23 @@ export const useStore = create<UIState>((set, get) => ({
     // 패널을 토글할 때마다(키보드 ⌘J·버튼·Composer 등 경로 무관) 마지막 상태를 기억해 둔다.
     useStore.subscribe((state, prev) => {
       if (state.rightPanelOpen !== prev.rightPanelOpen) rememberRightPanel(state.rightPanelOpen)
+    })
+
+    // gh 가 연결되는 순간(미연결 → 연결) PR 상태를 한 번 훑어 헤더·사이드바의 PR 칩을 즉시 살린다.
+    // 미연결 동안에는 PR 조회가 조용히 no-op 이라 캐시가 전부 null 로 남아 있기 때문이다.
+    // 반대로 연결이 끊기면(로그아웃·삭제) 캐시를 비워 미연결 UI 로 되돌린다.
+    useStore.subscribe((state, prev) => {
+      // 최초 로드(null → 값)는 위에서 이미 전체 갱신을 돌렸으므로 건너뛴다.
+      if (prev.authStatus === null) return
+      const now = githubConnected(state.authStatus)
+      if (now === githubConnected(prev.authStatus)) return
+      if (!now) {
+        set({ prStatus: {} })
+        return
+      }
+      for (const w of state.app?.workspaces ?? []) {
+        if (!w.archived) void get().refreshPr(w.id)
+      }
     })
 
     window.api.onState((next) => {
@@ -746,6 +789,30 @@ export const useStore = create<UIState>((set, get) => ({
         }
       })
     }
+  },
+
+  requireGithub: async (reason, action) => {
+    // 인증 상태를 아직 한 번도 못 받았으면(앱 기동 직후) 먼저 확인한다 — 실제로는 연결돼 있는데
+    // 모달부터 띄우는 오탐을 막기 위함이다.
+    if (get().authStatus === null) await get().refreshAuth()
+    if (githubConnected(get().authStatus)) {
+      await action()
+      return
+    }
+    pendingGithubAction = action
+    set({ githubGate: { reason } })
+  },
+
+  resolveGithubGate: () => {
+    const action = pendingGithubAction
+    pendingGithubAction = null
+    set({ githubGate: null })
+    if (action) void action()
+  },
+
+  dismissGithubGate: () => {
+    pendingGithubAction = null
+    set({ githubGate: null })
   },
 
   dismissPermission: (requestId) => {

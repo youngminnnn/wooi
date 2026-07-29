@@ -66,10 +66,11 @@ When you first launch Wooi, onboarding walks you through:
 
 1. **Consent** to the Terms / Privacy Policy (required to continue).
 2. **Signing in** to Claude and GitHub. If a CLI isn't installed, an install link is
-   shown. **Claude sign-in finishes in-app** through your browser, while **GitHub
-   sign-in opens your Terminal**. The **GitHub CLI (`gh`) is required** — you can't
-   finish onboarding (or use the app) until `gh` is installed and signed in. You can
-   change connections anytime under **Settings → Integrations**.
+   shown, and sign-in finishes in-app through your browser. **GitHub is optional here —
+   you can skip it** and start working right away. Wooi asks for it the first time you
+   reach a feature that needs it (opening a PR, merging, stacking, CI checks), then
+   resumes whatever you were doing once you're connected. You can change connections
+   anytime under **Settings → Integrations**.
 
 Wooi **reuses the credentials of your installed Claude Code and `gh` CLIs** — no
 separate API key is needed.
@@ -79,8 +80,10 @@ separate API key is needed.
 - macOS (Apple Silicon)
 - [Claude Code](https://claude.com/claude-code) — required, and signed in.
 - `git`
-- `gh` (GitHub CLI) — **required**. Wooi uses it for branch/PR management, and a hard
-  gate blocks the app until it's installed and signed in.
+- `gh` (GitHub CLI) — **needed for the PR and stacking features**: creating/merging/
+  closing PRs, stacked branches, and the Check tab. Everything that's pure `git` —
+  connecting repos, creating workspaces, running agents, diffs, terminal, scripts —
+  works without it.
 
 ## Features
 

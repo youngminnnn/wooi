@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Layers, GitBranch, ExternalLink, GitPullRequestCreate, Check } from 'lucide-react'
 import { useStore } from '../store'
+import { GithubMark } from './BrandIcons'
+import { useGithubDisconnected } from '../lib/github'
 import { isBranchStack, orderByStack, workspaceDisplayName, workspaceStack } from '@shared/types'
 import type { PrState, PrStatus, Workspace } from '@shared/types'
 
@@ -73,6 +75,8 @@ export default function StackPopover({ workspace }: { workspace: Workspace }): R
   const refreshPr = useStore((s) => s.refreshPr)
   const setPrStatus = useStore((s) => s.setPrStatus)
   const pushToast = useStore((s) => s.pushToast)
+  const requireGithub = useStore((s) => s.requireGithub)
+  const githubDisconnected = useGithubDisconnected()
 
   const branchMode = isBranchStack(workspace)
   const entries = useMemo(
@@ -138,22 +142,25 @@ export default function StackPopover({ workspace }: { workspace: Workspace }): R
     void refreshPr(workspace.id)
   }
 
-  const createPrFor = async (id: string, branch?: string): Promise<void> => {
-    const res = await window.api.pr.create(id, branch)
-    if (res.error) {
-      pushToast('error', res.error)
-      return
-    }
-    pushToast('info', 'Opened the PR page in your browser…')
-    if (branch) {
-      setTimeout(() => {
-        void window.api.pr
-          .statusForBranch(id, branch)
-          .then((st) => setBranchPr((prev) => ({ ...prev, [branch]: st })))
-      }, 4000)
-    } else {
-      setTimeout(() => void refreshPr(id), 4000)
-    }
+  // PR 생성은 gh 를 쓴다 — 미연결이면 연결 모달을 띄우고, 연결이 끝나면 그대로 이어서 연다.
+  const createPrFor = (id: string, branch?: string): void => {
+    void requireGithub('Opening a pull request needs GitHub.', async () => {
+      const res = await window.api.pr.create(id, branch)
+      if (res.error) {
+        pushToast('error', res.error)
+        return
+      }
+      pushToast('info', 'Opened the PR page in your browser…')
+      if (branch) {
+        setTimeout(() => {
+          void window.api.pr
+            .statusForBranch(id, branch)
+            .then((st) => setBranchPr((prev) => ({ ...prev, [branch]: st })))
+        }, 4000)
+      } else {
+        setTimeout(() => void refreshPr(id), 4000)
+      }
+    })
   }
 
   // 두 모델을 같은 모양의 행 배열로 정규화한다.
@@ -179,7 +186,7 @@ export default function StackPopover({ workspace }: { workspace: Workspace }): R
         isCurrent: e.branch === workspace.branch,
         pr: branchPr[e.branch] ?? null,
         onActivate: () => void switchTo(e.branch),
-        onCreatePr: () => void createPrFor(workspace.id, e.branch)
+        onCreatePr: () => createPrFor(workspace.id, e.branch)
       }))
     }
     return orderByStack(members).map(({ workspace: m, depth }) => {
@@ -198,7 +205,7 @@ export default function StackPopover({ workspace }: { workspace: Workspace }): R
           if (m.id !== workspace.id) void select(m.id)
           setOpen(false)
         },
-        onCreatePr: () => void createPrFor(m.id)
+        onCreatePr: () => createPrFor(m.id)
       }
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -322,13 +329,31 @@ export default function StackPopover({ workspace }: { workspace: Workspace }): R
                       <ExternalLink size={13} />
                     </button>
                   ) : (
+                    // gh 미연결이면 버튼을 숨기지 않고 "Connect" 로 바꿔 노출한다 — 누르면 연결
+                    // 모달이 뜨고, 연결이 끝나면 원래대로 PR 페이지가 열린다.
                     <button
                       onClick={r.onCreatePr}
-                      className="shrink-0 flex items-center gap-1 text-[11px] px-1.5 py-1 rounded text-[var(--accent-300)] hover:bg-[var(--surface-3)]"
-                      title="Open a pull request for this branch"
+                      className={
+                        'shrink-0 flex items-center gap-1 text-[11px] px-1.5 py-1 rounded hover:bg-[var(--surface-3)] ' +
+                        (githubDisconnected ? 'text-neutral-400' : 'text-[var(--accent-300)]')
+                      }
+                      title={
+                        githubDisconnected
+                          ? 'Connect GitHub to open a pull request for this branch'
+                          : 'Open a pull request for this branch'
+                      }
                     >
-                      <GitPullRequestCreate size={12} />
-                      PR
+                      {githubDisconnected ? (
+                        <>
+                          <GithubMark size={11} />
+                          Connect
+                        </>
+                      ) : (
+                        <>
+                          <GitPullRequestCreate size={12} />
+                          PR
+                        </>
+                      )}
                     </button>
                   )}
                 </div>
