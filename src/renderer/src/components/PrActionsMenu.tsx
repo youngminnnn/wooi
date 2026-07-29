@@ -17,6 +17,8 @@ import type { PrMergeMethod, PrStatus } from '@shared/types'
  * 헤더의 PR 배지 옆 캐럿으로 열리며, 현재 PR 상태에 따라 가능한 동작만 노출한다.
  * 모든 동작은 gh CLI 를 거쳐 실행되고, 끝나면 PR 상태를 새로고침한다.
  */
+const MERGE_REASON = 'Merging a pull request needs GitHub.'
+
 export default function PrActionsMenu({
   workspaceId,
   pr
@@ -32,6 +34,7 @@ export default function PrActionsMenu({
   const pushToast = useStore((s) => s.pushToast)
   const confirm = useStore((s) => s.confirm)
   const workspaces = useStore((s) => s.app?.workspaces)
+  const requireGithub = useStore((s) => s.requireGithub)
 
   useEffect(() => {
     if (!open) return
@@ -64,6 +67,16 @@ export default function PrActionsMenu({
     if (res.error) pushToast('error', `${label} failed: ${res.error}`)
     else pushToast('success', successMsg)
     await Promise.all([refreshPr(workspaceId), refreshGit(workspaceId)])
+  }
+
+  /**
+   * 메뉴의 모든 항목은 gh 를 거친다. PR 배지가 남아 있어도 gh 연결이 끊겨 있을 수 있으므로
+   * (앱 밖 로그아웃·토큰 만료 후 아직 인증 상태를 다시 못 받은 경우) 실행 직전에 연결을 요구한다.
+   * 미연결이면 연결 모달을 띄우고, 연결이 끝나면 원래 하려던 동작을 이어서 수행한다.
+   */
+  const gated = (reason: string, fn: () => Promise<void>): void => {
+    setOpen(false)
+    void requireGithub(reason, fn)
   }
 
   const merge = async (method: PrMergeMethod): Promise<void> => {
@@ -144,10 +157,8 @@ export default function PrActionsMenu({
               role="menuitem"
               className={itemCls}
               onClick={() =>
-                void run(
-                  'Reopen',
-                  () => window.api.pr.reopen(workspaceId),
-                  `Reopened #${pr.number}.`
+                gated('Reopening a pull request needs GitHub.', () =>
+                  run('Reopen', () => window.api.pr.reopen(workspaceId), `Reopened #${pr.number}.`)
                 )
               }
             >
@@ -161,10 +172,12 @@ export default function PrActionsMenu({
                   role="menuitem"
                   className={itemCls}
                   onClick={() =>
-                    void run(
-                      'Mark ready',
-                      () => window.api.pr.ready(workspaceId),
-                      `#${pr.number} marked ready for review.`
+                    gated('Marking a pull request ready needs GitHub.', () =>
+                      run(
+                        'Mark ready',
+                        () => window.api.pr.ready(workspaceId),
+                        `#${pr.number} marked ready for review.`
+                      )
                     )
                   }
                 >
@@ -177,7 +190,7 @@ export default function PrActionsMenu({
                 className={itemCls}
                 disabled={mergeDisabled}
                 title={mergeTitle}
-                onClick={() => void merge('squash')}
+                onClick={() => gated(MERGE_REASON, () => merge('squash'))}
               >
                 <GitMerge size={13} className="text-purple-400" />
                 Squash &amp; merge
@@ -187,7 +200,7 @@ export default function PrActionsMenu({
                 className={itemCls}
                 disabled={mergeDisabled}
                 title={mergeTitle}
-                onClick={() => void merge('merge')}
+                onClick={() => gated(MERGE_REASON, () => merge('merge'))}
               >
                 <GitMerge size={13} className="text-purple-400" />
                 Create a merge commit
@@ -197,13 +210,17 @@ export default function PrActionsMenu({
                 className={itemCls}
                 disabled={mergeDisabled}
                 title={mergeTitle}
-                onClick={() => void merge('rebase')}
+                onClick={() => gated(MERGE_REASON, () => merge('rebase'))}
               >
                 <GitMerge size={13} className="text-purple-400" />
                 Rebase &amp; merge
               </button>
               <div className="my-1 border-t border-[var(--border)]" />
-              <button role="menuitem" className={itemCls} onClick={() => void closePr()}>
+              <button
+                role="menuitem"
+                className={itemCls}
+                onClick={() => gated('Closing a pull request needs GitHub.', closePr)}
+              >
                 <GitPullRequestClosed size={13} className="text-neutral-400" />
                 Close pull request
               </button>

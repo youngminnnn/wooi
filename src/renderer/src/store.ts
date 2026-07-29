@@ -250,6 +250,13 @@ let windowFocused = true
 let statusPollTimer: ReturnType<typeof setInterval> | null = null
 const STATUS_POLL_INTERVAL_MS = 15_000
 
+// gh 가 미연결로 보이는 동안에만 도는 인증 상태 폴링. 예전 하드 게이트가 3초마다 돌던 폴링을
+// 대체한다 — 게이트가 사라졌다고 폴링까지 없애면, `gh auth status` 가 일시적으로 실패했을 때
+// (네트워크 순단·SSO 재인증) PR 조회가 조용히 멈춘 채 창 포커스가 바뀔 때까지 회복되지 않는다.
+// 연결돼 있으면 아예 돌지 않으므로 기존 사용자에게 추가 비용이 없다.
+let authPollTimer: ReturnType<typeof setInterval> | null = null
+const AUTH_POLL_INTERVAL_MS = 30_000
+
 // gh 연결 모달이 닫힐 때까지 붙들어 두는, 사용자가 원래 하려던 액션. 상태에 담지 않는 이유는
 // 함수라 비교·직렬화 대상이 아니고, 렌더에 영향을 주지 않기 때문이다.
 let pendingGithubAction: (() => void | Promise<void>) | null = null
@@ -323,6 +330,16 @@ export const useStore = create<UIState>((set, get) => ({
         // 다시 포커스되는 순간 onWindowFocus 에서 즉시 한 번 갱신한다.
         if (windowFocused) void get().refreshAllGit()
       }, STATUS_POLL_INTERVAL_MS)
+    }
+
+    // gh 미연결로 보이는 동안에만 인증 상태를 다시 확인한다. 앱 밖(터미널)에서 로그인한 경우와
+    // `gh auth status` 가 일시적으로 실패했다가 회복된 경우를 모두 스스로 따라잡는다.
+    if (!authPollTimer) {
+      authPollTimer = setInterval(() => {
+        if (!windowFocused) return
+        if (githubConnected(get().authStatus)) return
+        void get().refreshAuth()
+      }, AUTH_POLL_INTERVAL_MS)
     }
 
     // git 상태와 마찬가지로, 최초 진입 시 모든 활성 workspace 의 PR 상태도 미리 갱신한다.
