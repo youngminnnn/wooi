@@ -703,11 +703,16 @@ function ArchivedRow({ workspace }: { workspace: Workspace }): React.JSX.Element
   const select = useStore((s) => s.selectWorkspace)
   const confirm = useStore((s) => s.confirm)
   const pushToast = useStore((s) => s.pushToast)
+  const reportCarryFailures = useStore((s) => s.reportCarryFailures)
 
   const unarchive = async (): Promise<void> => {
     const res = await window.api.workspace.unarchive(workspace.id)
     if (res.error) pushToast('error', res.error)
-    else void select(workspace.id)
+    else {
+      void select(workspace.id)
+      // 언아카이브도 worktree 를 새로 만들므로 전달이 다시 일어난다 — 실패는 동일하게 알린다.
+      reportCarryFailures(res.carryFailures)
+    }
   }
 
   // 아카이브 시 표시 이름(PR 제목 등)을 displayName 에 보존하므로, PR 정보 없이도 같은 이름을 보여 준다.

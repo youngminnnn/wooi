@@ -14,7 +14,7 @@ const DEFAULT_MODEL = CLAUDE_DEFAULT_MODEL
  * 디스크 영속 형식의 현재 스키마 버전. 영속 데이터 모양이 바뀔 때마다 1 올리고,
  * MIGRATIONS 에 직전 버전 → 새 버전 변환 함수를 추가한다.
  */
-const CURRENT_SCHEMA_VERSION = 11
+const CURRENT_SCHEMA_VERSION = 12
 
 /**
  * v9 → v10 에서 정리하는 모델 ID 치환표(마이그레이션 시점의 스냅샷이므로 여기 고정해 둔다).
@@ -228,6 +228,17 @@ const MIGRATIONS: Array<(raw: Record<string, unknown>) => Record<string, unknown
       fastModeReason: w.fastModeReason ?? null
     }))
     return { ...raw, settings, workspaces }
+  },
+  // v11 → v12: worktree 전달 목록(carryItems) 도입. 기존 리포는 빈 목록으로 둔다 —
+  // 지금까지 수동으로 파일을 복사해 쓰던 워크스페이스가 있을 수 있어, 자동 탐지로 목록을
+  // 채워 놓고 다음 워크스페이스 생성 때 예상 밖의 심링크·덮어쓰기가 생기는 편보다
+  // 사용자가 설정 모달에서 직접 켜게 하는 쪽이 안전하다(신규 리포는 추가 시 자동 탐지된다).
+  (raw) => {
+    const repos = ((raw.repos as Partial<Repo>[]) ?? []).map((r) => ({
+      ...r,
+      carryItems: r.carryItems ?? []
+    }))
+    return { ...raw, repos }
   }
 ]
 

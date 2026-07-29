@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import type { CarryItem, CarryMode } from '@shared/types'
 import { useStore } from '../store'
 import Modal, { inputClass, labelClass, primaryBtn, ghostBtn } from './Modal'
 
@@ -18,6 +19,7 @@ export default function RepoConfigModal({
   const [setupScript, setSetup] = useState(repo?.setupScript ?? '')
   const [devScript, setDev] = useState(repo?.devScript ?? '')
   const [archiveScript, setArchive] = useState(repo?.archiveScript ?? '')
+  const [carryItems, setCarryItems] = useState<CarryItem[]>(repo?.carryItems ?? [])
 
   const confirm = useStore((s) => s.confirm)
 
@@ -34,10 +36,17 @@ export default function RepoConfigModal({
       name: name.trim() || repo.name,
       setupScript,
       devScript,
-      archiveScript
+      archiveScript,
+      // 빈 줄은 저장하지 않는다 — 편집 중 잠깐 비워 둔 행이 그대로 남지 않도록.
+      carryItems: carryItems
+        .filter((i) => i.path.trim())
+        .map((i) => ({ ...i, path: i.path.trim() }))
     })
     onClose()
   }
+
+  const updateCarry = (index: number, patch: Partial<CarryItem>): void =>
+    setCarryItems((items) => items.map((it, i) => (i === index ? { ...it, ...patch } : it)))
 
   const removeRepo = async (): Promise<void> => {
     const wsCount = app.workspaces.filter((w) => w.repoId === repoId).length
@@ -128,6 +137,69 @@ export default function RepoConfigModal({
           <p className="mt-1.5 text-xs text-neutral-600">
             Runs in the worktree when a workspace is archived (before the worktree is removed).
           </p>
+        </div>
+
+        <div>
+          <label className={labelClass}>Carry into new workspaces</label>
+          <p className="mb-2 text-xs text-neutral-600">
+            New worktrees only contain git-tracked files, so ignored ones (
+            <span className="font-mono">CLAUDE.local.md</span>,{' '}
+            <span className="font-mono">.env</span>, …) are missing unless listed here. Paths are
+            relative to the repo root and are skipped if they don&rsquo;t exist.
+          </p>
+
+          <div className="space-y-1.5">
+            {carryItems.map((item, i) => (
+              <div key={i} className="flex items-center gap-1.5">
+                <input
+                  className={inputClass + ' font-mono flex-1'}
+                  value={item.path}
+                  onChange={(e) => updateCarry(i, { path: e.target.value })}
+                  placeholder="e.g. CLAUDE.local.md"
+                  spellCheck={false}
+                />
+                <select
+                  className={inputClass + ' w-[5.5rem] shrink-0'}
+                  value={item.mode}
+                  onChange={(e) => updateCarry(i, { mode: e.target.value as CarryMode })}
+                >
+                  <option value="copy">Copy</option>
+                  <option value="link">Link</option>
+                </select>
+                <button
+                  className={ghostBtn + ' shrink-0 px-2'}
+                  onClick={() => setCarryItems((items) => items.filter((_, x) => x !== i))}
+                  title="Remove"
+                  aria-label={`Remove ${item.path || 'entry'}`}
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+          </div>
+
+          <button
+            className={ghostBtn + ' mt-1.5 text-xs'}
+            onClick={() => setCarryItems((items) => [...items, { path: '', mode: 'copy' }])}
+          >
+            + Add path
+          </button>
+
+          <p className="mt-2 text-xs text-neutral-600">
+            <span className="font-mono">Copy</span> gives each workspace its own independent copy —
+            right for <span className="font-mono">.env</span>, where values like{' '}
+            <span className="font-mono">$PORT</span> differ per workspace.{' '}
+            <span className="font-mono">Link</span> symlinks the original, so edits are shared
+            across every workspace.
+          </p>
+          {/* 동시 쓰기 레이스는 해결하지 않고 경고만 남긴다 — link 는 원본 하나를 N 개가 공유한다. */}
+          {carryItems.some((i) => i.mode === 'link') && (
+            <p className="mt-1.5 text-xs text-[var(--warning-400,#d9a441)]">
+              Heads-up: linked files are shared. If parallel agents write to the same one (e.g. an
+              accumulating <span className="font-mono">MEMORY.md</span>), they can overwrite each
+              other. Use Copy if the agent is expected to write to it.
+            </p>
+          )}
         </div>
       </div>
     </Modal>

@@ -2,6 +2,7 @@ import type {
   AppState,
   AppSettings,
   AuthStatus,
+  CarryFailure,
   ChatItem,
   ChatEnvelope,
   ClaudeLoginEvent,
@@ -52,7 +53,9 @@ export interface WooiApi {
     add(): Promise<{ repo?: Repo; error?: string }>
     update(
       repoId: string,
-      patch: Partial<Pick<Repo, 'name' | 'setupScript' | 'devScript' | 'archiveScript'>>
+      patch: Partial<
+        Pick<Repo, 'name' | 'setupScript' | 'devScript' | 'archiveScript' | 'carryItems'>
+      >
     ): Promise<void>
     remove(repoId: string): Promise<void>
     /**
@@ -64,11 +67,16 @@ export interface WooiApi {
   }
 
   workspace: {
-    create(
-      args: CreateWorkspaceArgs
-    ): Promise<{ workspaceId?: string; name?: string; branch?: string; error?: string }>
+    create(args: CreateWorkspaceArgs): Promise<{
+      workspaceId?: string
+      name?: string
+      branch?: string
+      error?: string
+      /** worktree 전달에 실패한 항목들. 생성 자체는 성공했지만 사용자에게 알려야 한다. */
+      carryFailures?: CarryFailure[]
+    }>
     archive(workspaceId: string): Promise<void>
-    unarchive(workspaceId: string): Promise<{ error?: string }>
+    unarchive(workspaceId: string): Promise<{ error?: string; carryFailures?: CarryFailure[] }>
     /** stacked 워크스페이스를 최신 base(부모 브랜치) 위로 rebase 하고 리모트에 force-push 한다. */
     restack(workspaceId: string): Promise<RestackResult>
     /** 모델 B: worktree 내부 스택의 다른 브랜치로 체크아웃 전환한다(clean 워킹트리 필요). */
