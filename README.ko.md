@@ -4,7 +4,7 @@
 
 [English](./README.md) · **한국어**
 
-![Wooi 데모](docs/demo.gif)
+![Wooi 데모](docs/demo.svg)
 
 Wooi 는 여러 **AI 코딩 에이전트**를 각자 격리된 git worktree 위에서 병렬로 오케스트레이션하는
 macOS 데스크톱 앱입니다. 작업 1개당 전용 worktree + 브랜치 + 에이전트 세션이 돌아가며, 모든 세션은
