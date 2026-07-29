@@ -213,7 +213,7 @@ export default function Sidebar({
                 <button
                   onClick={() => onNewWorkspace(repo.id)}
                   className="h-5 w-5 grid place-items-center rounded text-neutral-400 hover:bg-[var(--surface-2)] hover:text-neutral-100"
-                  title="New workspace"
+                  title="New workspace (⌘N)"
                 >
                   <Plus size={14} />
                 </button>
