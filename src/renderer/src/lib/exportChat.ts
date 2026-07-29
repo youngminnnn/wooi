@@ -1,4 +1,5 @@
 import type { ChatItem } from '@shared/types'
+import { buildTaskCards, taskLabel, type TaskEntry } from './tasks'
 
 /** 파일명에 쓸 수 있도록 공백·특수문자를 정리한다. */
 function slug(name: string): string {
@@ -9,6 +10,16 @@ function slug(name: string): string {
       .replace(/^-+|-+$/g, '')
       .slice(0, 60) || 'conversation'
   )
+}
+
+/** 할 일 체크리스트를 GFM task list 로 옮긴다(화면에 보이는 것과 같은 내용). */
+function tasksToMarkdown(tasks: TaskEntry[]): string {
+  const rows = tasks.map((t) => {
+    const label = taskLabel(t)
+    if (t.status === 'completed') return `- [x] ~~${label}~~`
+    return `- [ ] ${t.status === 'in_progress' ? `**${label}**` : label}`
+  })
+  return `\`📋 Tasks\`\n\n${rows.join('\n')}`
 }
 
 /** 한 트랜스크립트 항목을 마크다운 조각으로 변환한다(표시되지 않는 항목은 빈 문자열). */
@@ -49,7 +60,16 @@ function itemToMarkdown(it: ChatItem): string {
 /** 트랜스크립트를 사람이 읽는 마크다운 문서로 변환한다. */
 export function chatToMarkdown(items: ChatItem[], title: string): string {
   const header = `# ${title}\n\n_Exported from Wooi · ${new Date().toISOString()}_\n`
-  const body = items.map(itemToMarkdown).filter(Boolean).join('\n\n---\n\n')
+  // 화면과 같은 규칙으로 할 일 도구 호출 구간을 체크리스트 한 덩어리로 접는다.
+  const { cardByItemId, hiddenItemIds } = buildTaskCards(items)
+  const body = items
+    .filter((it) => !hiddenItemIds.has(it.id))
+    .map((it) => {
+      const card = cardByItemId.get(it.id)
+      return card ? tasksToMarkdown(card) : itemToMarkdown(it)
+    })
+    .filter(Boolean)
+    .join('\n\n---\n\n')
   return `${header}\n${body}\n`
 }
 
