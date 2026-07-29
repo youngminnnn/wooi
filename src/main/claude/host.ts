@@ -162,6 +162,23 @@ async function handle(msg: HostCommand): Promise<void> {
       })
       break
 
+    case 'refreshUsage':
+      await respond(msg.reqId, async () => {
+        // 라이브 Query 를 가진 세션을 호스트가 직접 고른다. 있으면 제어 채널 왕복 한 번으로 끝나
+        // 사실상 공짜다 — 그래서 이 경로만으로 도는 주기 폴링은 아무 세션도 안 돌 때 비용이 0 이다.
+        for (const session of sessions.values()) {
+          const live = session.liveQuery
+          if (!live) continue
+          const result = await runCommandOn('usage', live)
+          return result.kind === 'usage' ? result.usage : null
+        }
+        // 라이브 세션이 없다. 사용자가 명시적으로 갱신을 눌렀을 때만(fallback 제공) 단명 쿼리를 띄운다.
+        if (!msg.fallback) return null
+        const result = await runCommandShortLived('usage', msg.fallback.cwd, msg.fallback.repoPath)
+        return result.kind === 'usage' ? result.usage : null
+      })
+      break
+
     case 'listCommands':
       await respond(msg.reqId, () => listSlashCommands(msg.cwd))
       break
