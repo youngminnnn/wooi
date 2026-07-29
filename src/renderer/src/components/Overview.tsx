@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   GitBranch,
   Loader2,
@@ -17,13 +17,16 @@ import { formatCost, formatCountdown, formatDuration, formatTime } from '../lib/
 import { SESSION_RATE_LIMIT_LABEL, workspaceDisplayName } from '@shared/types'
 import type { ChatItem, UsageInfo, Workspace } from '@shared/types'
 
+/** 요금제 사용률 재조회 주기. 5시간 창이 눈에 띄게 움직이는 단위가 분이라 1분이면 충분하다. */
+const USAGE_REFRESH_MS = 60_000
+/** 창 포커스로 인한 재조회의 최소 간격(왕복이 ~1.1s 라 alt-tab 연타에 딸려가지 않게 한다). */
+const USAGE_FOCUS_MIN_GAP_MS = 15_000
+
 /** 요금제 한도 창 하나를 표시용으로 정규화한 값. utilization 이 없는 창은 null 로 남긴다. */
 type PlanWindow = {
   label: string
-  /** 0–100 사용률. */
+  /** 0–100 사용률. 표기·정렬 모두 이 값 기준이다(claude.ai 와 동일). */
   usedPct: number | null
-  /** 0–100 잔여율(= 100 - usedPct). */
-  leftPct: number | null
   /** 리셋 시각(epoch ms). 알 수 없으면 null. */
   resetsAt: number | null
 }
@@ -92,6 +95,26 @@ export default function Overview(): React.JSX.Element {
   const [usageLoading, setUsageLoading] = useState(true)
   const [usageChecked, setUsageChecked] = useState(false)
   const usageTargetId = (active.find((w) => w.status === 'running') ?? active[0])?.id
+
+  // SDK 는 호출할 때마다 계정 사용률을 새로 읽어오지만, 대상 세션이 바뀔 때만 물으면
+  // 화면을 연 시점의 값이 그대로 굳어 claude.ai/데스크톱 앱과 어긋난다(5시간 창은 특히 빨리 움직인다).
+  // 주기적으로, 그리고 창으로 돌아올 때 다시 물어 그 격차를 없앤다.
+  const [usageNonce, setUsageNonce] = useState(0)
+  const lastUsageFetch = useRef(0)
+  useEffect(() => {
+    const bump = (): void => setUsageNonce((n) => n + 1)
+    const id = window.setInterval(bump, USAGE_REFRESH_MS)
+    // 창 전환을 반복해도 매번 왕복하지 않도록 최소 간격을 둔다.
+    const onFocus = (): void => {
+      if (Date.now() - lastUsageFetch.current >= USAGE_FOCUS_MIN_GAP_MS) bump()
+    }
+    window.addEventListener('focus', onFocus)
+    return () => {
+      window.clearInterval(id)
+      window.removeEventListener('focus', onFocus)
+    }
+  }, [])
+
   useEffect(() => {
     if (!usageTargetId) {
       setUsage(null)
@@ -101,6 +124,7 @@ export default function Overview(): React.JSX.Element {
     }
     let cancelled = false
     setUsageLoading(true)
+    lastUsageFetch.current = Date.now()
     void window.api.commands
       .run(usageTargetId, 'usage')
       .then(({ result }) => {
@@ -117,7 +141,7 @@ export default function Overview(): React.JSX.Element {
     return () => {
       cancelled = true
     }
-  }, [usageTargetId])
+  }, [usageTargetId, usageNonce])
 
   // 한도 창(5시간·7일·Opus·Sonnet)을 표시용으로 정규화: 사용률·잔여율·리셋 시각.
   const planWindows = useMemo<PlanWindow[]>(() => {
@@ -128,7 +152,6 @@ export default function Overview(): React.JSX.Element {
       return {
         label: r.label,
         usedPct: used,
-        leftPct: used == null ? null : 100 - used,
         resetsAt: Number.isNaN(parsed) ? null : parsed
       }
     })
@@ -269,9 +292,9 @@ export default function Overview(): React.JSX.Element {
               hint={
                 `The ${SESSION_RATE_LIMIT_LABEL} session limit resets at ` +
                 formatTime(sessionWindow.resetsAt) +
-                (sessionWindow.leftPct == null
+                (sessionWindow.usedPct == null
                   ? ''
-                  : ` · ${Math.round(sessionWindow.leftPct)}% left`)
+                  : ` · ${Math.round(sessionWindow.usedPct)}% used`)
               }
             />
           ) : null}
@@ -292,7 +315,12 @@ export default function Overview(): React.JSX.Element {
         {/* 모델별(Opus·Sonnet)·기간별 한도 창의 잔여량. 조회가 끝나기 전에도 자리를 지켜
             레이아웃이 뒤늦게 밀리지 않게 한다. API 키 세션이면 조회 후 조용히 사라진다. */}
         {(!usageChecked || planWindows.length > 0) && (
-          <PlanLimits windows={planWindows} loading={usageLoading} now={now} />
+          <PlanLimits
+            windows={planWindows}
+            extra={usage?.extraUsage ?? null}
+            loading={usageLoading}
+            now={now}
+          />
         )}
 
         <div className="flex flex-wrap items-center gap-1.5 mb-5">
@@ -381,36 +409,39 @@ function StatTile({
   )
 }
 
-/** 잔여량이 적을수록 눈에 띄게. 25%/10% 아래에서 경고·위험 색으로 바뀐다. */
-function leftTone(leftPct: number | null): string {
-  if (leftPct == null) return 'bg-[var(--surface-3)]'
-  if (leftPct <= 10) return 'bg-[var(--danger-400)]'
-  if (leftPct <= 25) return 'bg-[var(--warning-400)]'
+/** 많이 쓸수록 눈에 띄게. 75%/90% 위에서 경고·위험 색으로 바뀐다. */
+function usedTone(usedPct: number | null): string {
+  if (usedPct == null) return 'bg-[var(--surface-3)]'
+  if (usedPct >= 90) return 'bg-[var(--danger-400)]'
+  if (usedPct >= 75) return 'bg-[var(--warning-400)]'
   return 'bg-[var(--accent-400)]'
 }
 
 /**
- * 요금제 한도 창별(5시간·7일·모델별) 잔여 사용량과 리셋까지 남은 시간.
+ * 요금제 한도 창별(5시간·7일·모델별) 사용량과 리셋까지 남은 시간.
  * rate limit 은 계정 단위 값이라 워크스페이스와 무관하게 계정 전체 기준으로 동일하다.
+ *
+ * 표기는 claude.ai·데스크톱 앱과 같은 "쓴 %" 기준이다. 위쪽 Plan usage 타일도 쓴 %라
+ * 여기만 "남은 %"로 두면 같은 화면에서 8% 와 92% 가 나란히 보여 서로 어긋난 값처럼 읽힌다.
  */
 function PlanLimits({
   windows,
+  extra,
   loading,
   now
 }: {
   windows: PlanWindow[]
+  extra: UsageInfo['extraUsage']
   loading: boolean
   now: number
 }): React.JSX.Element {
   return (
     <div className="rounded-xl border border-[var(--surface-2)] bg-[var(--bg-2)] px-3.5 py-3 mb-5">
       <div className="flex items-center gap-2 mb-2">
-        <span className="text-[11px] uppercase tracking-wide text-neutral-500">
-          Remaining plan usage
-        </span>
+        <span className="text-[11px] uppercase tracking-wide text-neutral-500">Plan usage</span>
         {loading && <Loader2 size={11} className="animate-spin text-neutral-500" />}
         {/* 모델별 창(Opus·Sonnet)은 계정에 있을 때만 행으로 나타나므로 헤더에서 약속하지 않는다. */}
-        <span className="text-[11px] text-neutral-600">account-wide</span>
+        <span className="text-[11px] text-neutral-600">account-wide · used</span>
       </div>
       {windows.length === 0 ? (
         // 조회 중: 실제 행과 같은 높이의 자리표시자를 둬 결과가 와도 화면이 밀리지 않는다.
@@ -426,12 +457,12 @@ function PlanLimits({
               <span className="w-28 shrink-0 truncate text-neutral-400">{w.label}</span>
               <div className="flex-1 h-1.5 rounded-full bg-[var(--surface-3)] overflow-hidden">
                 <div
-                  className={'h-full ' + leftTone(w.leftPct)}
-                  style={{ width: `${w.leftPct ?? 0}%` }}
+                  className={'h-full ' + usedTone(w.usedPct)}
+                  style={{ width: `${w.usedPct ?? 0}%` }}
                 />
               </div>
               <span className="w-16 shrink-0 text-right tabular-nums text-neutral-200">
-                {w.leftPct == null ? '—' : `${Math.round(w.leftPct)}% left`}
+                {w.usedPct == null ? '—' : `${Math.round(w.usedPct)}% used`}
               </span>
               <span
                 className="w-24 shrink-0 text-right tabular-nums text-neutral-500 whitespace-nowrap"
@@ -445,10 +476,37 @@ function PlanLimits({
               </span>
             </li>
           ))}
+          {/* 추가 크레딧은 한도 "창"이 아니라 월 단위 지갑이라 리셋 카운트다운이 없고,
+              위 타일의 최대 사용률 롤업에도 참여하지 않는다. 계정에 켜진 적이 있을 때만 보인다. */}
+          {extra && (
+            <li className="flex items-center gap-2.5 text-xs border-t border-[var(--surface-2)] pt-2">
+              <span className="w-28 shrink-0 truncate text-neutral-400">Extra usage</span>
+              <div className="flex-1 h-1.5 rounded-full bg-[var(--surface-3)] overflow-hidden">
+                <div
+                  className={'h-full ' + usedTone(extra.utilization)}
+                  style={{ width: `${Math.min(100, Math.max(0, extra.utilization ?? 0))}%` }}
+                />
+              </div>
+              <span className="w-16 shrink-0 text-right tabular-nums text-neutral-200">
+                {extra.utilization == null ? '—' : `${Math.round(extra.utilization)}% used`}
+              </span>
+              <span className="w-24 shrink-0 text-right tabular-nums text-neutral-500 whitespace-nowrap">
+                {extra.isEnabled ? formatCredits(extra) : 'off'}
+              </span>
+            </li>
+          )}
         </ul>
       )}
     </div>
   )
+}
+
+/** 크레딧은 최소 단위(센트)로 오므로 통화 금액으로 되돌려 "$21 / $30" 처럼 보여준다. */
+function formatCredits(extra: NonNullable<UsageInfo['extraUsage']>): string {
+  const { usedCredits, monthlyLimit, currency } = extra
+  if (usedCredits == null || monthlyLimit == null) return ''
+  const sign = currency === 'USD' || currency == null ? '$' : `${currency} `
+  return `${sign}${Math.round(usedCredits / 100)} / ${sign}${Math.round(monthlyLimit / 100)}`
 }
 
 function OverviewCard({
