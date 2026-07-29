@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Play, Square, X, ExternalLink, AlertTriangle, Check } from 'lucide-react'
 import { useStore, scriptKey } from '../store'
 import type { ScriptKind } from '@shared/types'
@@ -32,6 +32,27 @@ export default function ScriptPanel({
   // 포트 충돌(다른 프로세스가 이미 점유)을 출력에서 감지해 사용자에게 알린다 — 병렬 dev 서버에서
   // 흔하며, 그냥 두면 로그에 묻혀 "왜 안 뜨지" 로 이어진다.
   const portInUse = /EADDRINUSE|address already in use|port .* is already in use/i.test(out)
+
+  // Esc 로도 패널을 닫는다. 패널 안에 포커스가 없어도(출력 스크롤·다른 곳 클릭) 먹히도록 window
+  // 레벨에서 받되, Esc 를 이미 쓰고 있는 UI 가 떠 있으면 양보한다 — 그쪽이 닫히면서 뒤의 패널까지
+  // 같이 사라지면 "왜 두 개가 닫히지" 가 된다.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== 'Escape' || e.defaultPrevented) return
+      const s = useStore.getState()
+      // 확인 대화상자 / 권한·질문 프롬프트(둘 다 permissions 에 쌓인다)가 우선.
+      if (s.confirmState || s.permissions.some((p) => p.workspaceId === workspaceId)) return
+      // 모달(QuickSwitcher 포함)·팝오버 메뉴가 열려 있으면 그쪽이 Esc 의 주인이다.
+      if (document.querySelector('[role="dialog"], [role="menu"]')) return
+      // 대화 검색창·이름 편집처럼 Esc 로 자기 UI 를 물리는 input 도 양보한다. 메시지 입력창
+      // (textarea)은 메뉴가 없을 때 Esc 를 쓰지 않으므로 그대로 닫는다.
+      const target = e.target as HTMLElement | null
+      if (target && (target.tagName === 'INPUT' || target.isContentEditable)) return
+      onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose, workspaceId])
 
   const run = (): void => {
     void window.api.script.run(workspaceId, tab).then(() => refreshStatus(workspaceId))
