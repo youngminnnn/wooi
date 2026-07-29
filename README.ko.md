@@ -60,10 +60,11 @@ Wooi 는 스스로 업데이트합니다: 실행 시 GitHub Releases 를 확인�
 Wooi 를 처음 실행하면 온보딩이 다음을 안내합니다:
 
 1. 약관·개인정보처리방침 **동의**(진행하려면 필수).
-2. Claude·GitHub **로그인**. CLI 가 설치돼 있지 않으면 설치 링크를 보여줍니다.
-   **Claude 로그인은 앱 안에서 브라우저로** 마무리되고, **GitHub 로그인은 Terminal** 에서
-   진행됩니다. **GitHub CLI(`gh`)는 필수**라 `gh` 설치·로그인을 마치기 전에는 온보딩(및 앱 사용)을
-   끝낼 수 없습니다. 연동 상태는 언제든 **Settings → Integrations** 에서 변경할 수 있습니다.
+2. Claude·GitHub **로그인**. CLI 가 설치돼 있지 않으면 설치 링크를 보여주며, 로그인은 앱 안에서
+   브라우저로 마무리됩니다. **GitHub 은 이 단계에서 건너뛸 수 있습니다** — 바로 작업을 시작하고,
+   PR 생성·머지·스택·Check 처럼 GitHub 이 필요한 기능에 처음 닿는 순간에 연결을 요청합니다.
+   연결이 끝나면 원래 하려던 동작이 이어서 실행됩니다. 연동 상태는 언제든
+   **Settings → Integrations** 에서 변경할 수 있습니다.
 
 Wooi 는 **설치된 Claude Code 와 `gh` CLI 의 로그인 정보를 그대로 사용**합니다 — 별도 API 키가
 필요 없습니다.
@@ -73,8 +74,9 @@ Wooi 는 **설치된 Claude Code 와 `gh` CLI 의 로그인 정보를 그대로 
 - macOS(Apple Silicon)
 - [Claude Code](https://claude.com/claude-code) — 필수, 로그인된 상태.
 - `git`
-- `gh`(GitHub CLI) — **필수**. 브랜치·PR 관리에 쓰며, 설치·로그인 전에는 하드 게이트가 앱 진입을
-  막습니다.
+- `gh`(GitHub CLI) — **PR·스택 기능에 필요**합니다(PR 생성·머지·닫기, stacked 브랜치, Check 탭).
+  리포 연결·워크스페이스 생성·에이전트 실행·diff·터미널·스크립트 등 `git` 만으로 되는 기능은
+  `gh` 없이도 모두 동작합니다.
 
 ## 기능
 

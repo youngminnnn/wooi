@@ -3,6 +3,7 @@ import * as pty from 'node-pty'
 import { IPC } from '@shared/types'
 import type { AuthStatus, ClaudeAuthStatus, GithubAuthStatus } from '@shared/types'
 import { log } from './logger'
+import { setGithubConnected } from './github'
 
 /**
  * Claude / GitHub CLI 연동 상태를 조회하고 로그인·로그아웃을 트리거한다.
@@ -101,10 +102,19 @@ async function getClaudeStatus(): Promise<ClaudeAuthStatus> {
 }
 
 async function getGithubStatus(): Promise<GithubAuthStatus> {
-  if (!(await isInstalled('gh'))) return { installed: false, loggedIn: false }
+  if (!(await isInstalled('gh'))) {
+    setGithubConnected(false)
+    return { installed: false, loggedIn: false }
+  }
 
   const { stdout, stderr, code } = await runLoginShell('gh auth status')
-  if (code !== 0) return { installed: true, loggedIn: false }
+  if (code !== 0) {
+    setGithubConnected(false)
+    return { installed: true, loggedIn: false }
+  }
+  // gh 는 선택 연동이라 main 의 PR 조회·액션이 "미연결이면 조용히 건너뛰기" 판단에 이 값을 쓴다.
+  // 상태 조회는 렌더러가 앱 시작·창 포커스·연동 패널에서 호출하므로 캐시가 자연히 최신으로 유지된다.
+  setGithubConnected(true)
   const out = `${stdout}\n${stderr}`
   const account = out.match(/Logged in to \S+ account (\S+)/)?.[1]
   const protocol = out.match(/Git operations protocol:\s*(\S+)/)?.[1]

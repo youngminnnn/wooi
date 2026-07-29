@@ -162,7 +162,8 @@ function ConsentStep({ onContinue }: { onContinue: () => void }): React.JSX.Elem
 }
 
 function IntegrationsStep({ onDone }: { onDone: () => void }): React.JSX.Element {
-  // gh(GitHub CLI)는 필수다 — 설치 + 로그인이 모두 끝나기 전에는 온보딩을 마칠 수 없게 막는다.
+  // gh(GitHub CLI)는 선택이다 — 없어도 리포 연결·워크스페이스 생성·에이전트 실행은 전부 되고,
+  // PR·스택 기능을 처음 쓰는 순간에만 연결을 요구한다. 그래서 이 단계는 건너뛸 수 있다.
   const auth = useStore((s) => s.authStatus)
   const githubReady = !!auth && auth.github.installed && auth.github.loggedIn
 
@@ -170,22 +171,20 @@ function IntegrationsStep({ onDone }: { onDone: () => void }): React.JSX.Element
     <>
       <div className="px-6 py-4">
         <p className="mb-3 text-sm text-neutral-500 text-center leading-relaxed">
-          Connect your accounts to get started — the GitHub CLI (gh) is required. You can change
-          these later in Settings.
+          Connect your accounts to get started. GitHub is optional — you only need it for pull
+          requests and stacked branches. You can change these anytime in Settings → Integrations.
         </p>
         <IntegrationsPanel />
       </div>
 
       <div className="px-6 py-4 border-t border-[var(--border)] flex items-center justify-end gap-3">
         {!githubReady && (
-          <span className="text-xs text-neutral-500">Sign in to GitHub to continue</span>
+          <span className="text-xs text-neutral-500">
+            You can connect GitHub later — we&rsquo;ll ask when a PR needs it.
+          </span>
         )}
-        <button
-          className={primaryBtn + ' disabled:opacity-40 disabled:cursor-not-allowed'}
-          disabled={!githubReady}
-          onClick={onDone}
-        >
-          Get started
+        <button className={primaryBtn} onClick={onDone}>
+          {githubReady ? 'Get started' : 'Skip for now'}
         </button>
       </div>
     </>

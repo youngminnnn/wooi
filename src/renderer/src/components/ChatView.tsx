@@ -38,6 +38,8 @@ import StackPopover from './StackPopover'
 import StackSyncBanner from './StackSyncBanner'
 import ExportMenu from './ExportMenu'
 import HeaderButton from './HeaderButton'
+import { GithubMark } from './BrandIcons'
+import { useGithubDisconnected } from '../lib/github'
 import { workspaceDisplayName } from '@shared/types'
 import type { PrState, Workspace } from '@shared/types'
 
@@ -135,6 +137,9 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
   const pending = permissions.find((p) => p.workspaceId === workspace.id) ?? null
   const confirm = useStore((s) => s.confirm)
   const pushToast = useStore((s) => s.pushToast)
+  const requireGithub = useStore((s) => s.requireGithub)
+  // gh 미연결이 확인된 상태면 "Create PR" 대신 "Connect GitHub" 를 노출한다(숨기지 않는다).
+  const githubDisconnected = useGithubDisconnected()
 
   const unread = useStore((s) => s.unread)
   const nextUnreadId = useStore((s) => s.nextUnreadId)
@@ -191,13 +196,16 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
     setRefreshing(false)
   }
 
-  const createPr = async (): Promise<void> => {
-    const res = await window.api.pr.create(workspace.id)
-    if (res.error) pushToast('error', `Couldn't open PR page: ${res.error}`)
-    else {
-      pushToast('info', 'Opening the PR creation page in your browser…')
-      setTimeout(() => void refreshPr(workspace.id), 4000)
-    }
+  // PR 생성은 gh 를 쓴다 — 미연결이면 여기서 연결 모달을 띄우고, 연결이 끝나면 그대로 이어서 연다.
+  const createPr = (): void => {
+    void requireGithub('Opening a pull request needs GitHub.', async () => {
+      const res = await window.api.pr.create(workspace.id)
+      if (res.error) pushToast('error', `Couldn't open PR page: ${res.error}`)
+      else {
+        pushToast('info', 'Opening the PR creation page in your browser…')
+        setTimeout(() => void refreshPr(workspace.id), 4000)
+      }
+    })
   }
 
   // base 브랜치를 현재 브랜치로 머지해 드리프트를 해소한다. 충돌 시 워킹트리에 충돌이 남고,
@@ -424,14 +432,28 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
               <PrActionsMenu workspaceId={workspace.id} pr={pr} />
             ) : (
               // 조회 중에는 "Create PR" 을 감춰 깜빡임을 막고 스피너만 보여 준다(끝나면 실제 상태로 결정).
+              // gh 미연결이면 버튼을 숨기지 않고 "Connect GitHub" 로 바꿔 기능의 존재를 알린다.
               !prRefreshing && (
                 <button
                   onClick={createPr}
                   className="flex items-center gap-1.5 text-xs px-2 py-1 rounded-md bg-[var(--surface)] border border-[var(--border)] text-neutral-300 hover:border-[var(--border-strong)]"
-                  title="Open a pull request for this branch"
+                  title={
+                    githubDisconnected
+                      ? 'Connect GitHub to open a pull request for this branch'
+                      : 'Open a pull request for this branch'
+                  }
                 >
-                  <GitPullRequestCreate size={12} className="text-[var(--accent-400)]" />
-                  Create PR
+                  {githubDisconnected ? (
+                    <>
+                      <GithubMark size={12} />
+                      Connect GitHub
+                    </>
+                  ) : (
+                    <>
+                      <GitPullRequestCreate size={12} className="text-[var(--accent-400)]" />
+                      Create PR
+                    </>
+                  )}
                 </button>
               )
             )}

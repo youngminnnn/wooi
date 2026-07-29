@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { CheckCircle2, XCircle, Loader2, MinusCircle, CircleDot, ExternalLink } from 'lucide-react'
 import { useStore } from '../store'
 import { PanelToolbar } from './ChangesPanel'
+import { GithubMark } from './BrandIcons'
+import { useGithubDisconnected } from '../lib/github'
 import type { PrCheck, PrCheckState, PrChecks } from '@shared/types'
 
 /**
@@ -13,8 +15,12 @@ export default function ChecksPanel({ workspaceId }: { workspaceId: string }): R
   const [loading, setLoading] = useState(true)
   // PR 번호가 바뀌면(생성/연결) 다시 가져오는 트리거.
   const prNumber = useStore((s) => s.prStatus[workspaceId]?.number ?? 0)
+  // 체크는 gh 로만 조회할 수 있다 — 미연결이면 탭을 숨기지 않고 연결 안내로 바꿔 노출한다.
+  const githubDisconnected = useGithubDisconnected()
+  const requireGithub = useStore((s) => s.requireGithub)
 
   const load = (): void => {
+    if (githubDisconnected) return
     setLoading(true)
     void window.api.pr.checks(workspaceId).then((c) => {
       setChecks(c)
@@ -23,6 +29,12 @@ export default function ChecksPanel({ workspaceId }: { workspaceId: string }): R
   }
 
   useEffect(() => {
+    // 미연결이면 조회 자체를 하지 않는다(조용한 no-op — 에러도 스피너도 남기지 않는다).
+    if (githubDisconnected) {
+      setChecks(null)
+      setLoading(false)
+      return
+    }
     let alive = true
     setLoading(true)
     void window.api.pr.checks(workspaceId).then((c) => {
@@ -34,7 +46,7 @@ export default function ChecksPanel({ workspaceId }: { workspaceId: string }): R
     return () => {
       alive = false
     }
-  }, [workspaceId, prNumber])
+  }, [workspaceId, prNumber, githubDisconnected])
 
   return (
     <div className="h-full flex flex-col min-h-0">
@@ -44,7 +56,24 @@ export default function ChecksPanel({ workspaceId }: { workspaceId: string }): R
         spinning={loading}
       />
       <div className="flex-1 overflow-y-auto px-3 py-3">
-        {loading ? (
+        {githubDisconnected ? (
+          <div className="py-14 text-center">
+            <p className="text-base text-neutral-500 leading-relaxed">
+              CI checks come from GitHub.
+              <br />
+              Connect the GitHub CLI to see them here.
+            </p>
+            <button
+              onClick={() =>
+                void requireGithub('Pull request checks are read from GitHub.', () => {})
+              }
+              className="mt-4 inline-flex items-center gap-2 text-sm px-3 py-1.5 rounded-lg bg-[var(--surface-2)] text-neutral-200 font-medium hover:bg-[var(--border)]"
+            >
+              <GithubMark size={14} />
+              Connect GitHub
+            </button>
+          </div>
+        ) : loading ? (
           <div className="grid place-items-center py-16 text-neutral-500">
             <Loader2 size={20} className="animate-spin" />
           </div>

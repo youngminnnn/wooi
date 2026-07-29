@@ -5,7 +5,16 @@ import { ClaudeMark, GithubMark } from './BrandIcons'
 import ClaudeLoginModal from './ClaudeLoginModal'
 import GithubLoginModal from './GithubLoginModal'
 
-export default function IntegrationsPanel(): React.JSX.Element {
+/**
+ * 연동(Claude · GitHub) 상태 + 로그인/로그아웃 패널. 설정·온보딩·gh 연결 모달이 함께 쓴다.
+ * `only` 를 주면 해당 연동 행만 렌더한다 — "Connect GitHub" 모달처럼 한 가지 연동만 다루는
+ * 화면에서 관계없는 행이 끼어들지 않게 하기 위함이다.
+ */
+export default function IntegrationsPanel({
+  only
+}: {
+  only?: 'claude' | 'github'
+} = {}): React.JSX.Element {
   const auth = useStore((s) => s.authStatus)
   const refreshAuth = useStore((s) => s.refreshAuth)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -45,54 +54,58 @@ export default function IntegrationsPanel(): React.JSX.Element {
 
   return (
     <div className="space-y-3">
-      <IntegrationRow
-        name="Claude Code"
-        icon={<ClaudeMark size={18} />}
-        loading={!auth}
-        installed={!!claude?.installed}
-        installUrl="https://claude.com/claude-code"
-        connected={!!claude?.loggedIn}
-        detail={
-          !claude?.installed
-            ? 'Not installed — install Claude Code to continue'
-            : claude.loggedIn
-              ? [claude.email, claude.orgName].filter(Boolean).join(' · ') || 'Signed in'
-              : 'Sign in to run Claude Code agents'
-        }
-        warning={
-          claude?.apiKeyInEnv
-            ? 'ANTHROPIC_API_KEY is set in your environment — agents authenticate and bill via that key, not the account here.'
-            : undefined
-        }
-        onConnect={() => setClaudeLoginOpen(true)}
-        onDisconnect={() => window.api.auth.claudeLogout().then(() => refreshAuth())}
-      />
+      {only !== 'github' && (
+        <IntegrationRow
+          name="Claude Code"
+          icon={<ClaudeMark size={18} />}
+          loading={!auth}
+          installed={!!claude?.installed}
+          installUrl="https://claude.com/claude-code"
+          connected={!!claude?.loggedIn}
+          detail={
+            !claude?.installed
+              ? 'Not installed — install Claude Code to continue'
+              : claude.loggedIn
+                ? [claude.email, claude.orgName].filter(Boolean).join(' · ') || 'Signed in'
+                : 'Sign in to run Claude Code agents'
+          }
+          warning={
+            claude?.apiKeyInEnv
+              ? 'ANTHROPIC_API_KEY is set in your environment — agents authenticate and bill via that key, not the account here.'
+              : undefined
+          }
+          onConnect={() => setClaudeLoginOpen(true)}
+          onDisconnect={() => window.api.auth.claudeLogout().then(() => refreshAuth())}
+        />
+      )}
 
-      <IntegrationRow
-        name="GitHub"
-        icon={<GithubMark size={17} />}
-        loading={!auth}
-        installed={!!github?.installed}
-        installUrl="https://cli.github.com"
-        connected={!!github?.loggedIn}
-        detail={
-          !github?.installed
-            ? 'Required — install the GitHub CLI (gh) to use Wooi'
-            : github.loggedIn
-              ? `@${github.account ?? '?'}${github.protocol ? ` · ${github.protocol}` : ''}`
-              : 'Sign in to GitHub to continue'
-        }
-        onConnect={() => setGithubLoginOpen(true)}
-        onDisconnect={() => {
-          void window.api.auth.githubLogout()
-          pollUntilChange()
-        }}
-      />
+      {only !== 'claude' && (
+        <IntegrationRow
+          name="GitHub"
+          icon={<GithubMark size={17} />}
+          loading={!auth}
+          installed={!!github?.installed}
+          installUrl="https://cli.github.com"
+          connected={!!github?.loggedIn}
+          detail={
+            !github?.installed
+              ? 'Install the GitHub CLI (gh) for pull requests and stacked branches'
+              : github.loggedIn
+                ? `@${github.account ?? '?'}${github.protocol ? ` · ${github.protocol}` : ''}`
+                : 'Sign in to open PRs, run checks and stack branches'
+          }
+          onConnect={() => setGithubLoginOpen(true)}
+          onDisconnect={() => {
+            void window.api.auth.githubLogout()
+            pollUntilChange()
+          }}
+        />
+      )}
 
       <div className="flex items-center justify-between pt-1">
         <p className="text-xs text-neutral-500 leading-relaxed pr-3">
-          Claude and GitHub sign-in finish in-app via your browser. Status refreshes automatically —
-          or click Refresh.
+          Sign-in finishes in-app via your browser. Status refreshes automatically — or click
+          Refresh.
         </p>
         <button
           onClick={() => void refreshAuth()}
