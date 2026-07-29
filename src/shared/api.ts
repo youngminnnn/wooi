@@ -79,6 +79,8 @@ export interface WooiApi {
     setPermissionMode(workspaceId: string, mode: PermissionMode): Promise<void>
     setModel(workspaceId: string, model: string | null): Promise<void>
     setEffort(workspaceId: string, effort: EffortSetting | null): Promise<void>
+    /** fast mode(`/fast`) 오버라이드. null 이면 전역 설정(settings.fastMode)을 따른다. */
+    setFastMode(workspaceId: string, fastMode: boolean | null): Promise<void>
     /** 워크스페이스별 알림 음소거를 설정한다. */
     setMuted(workspaceId: string, muted: boolean): Promise<void>
     /** 표시 이름 override 를 지정한다. 빈 문자열이면 override 를 지워 기본 규칙으로 되돌린다. */

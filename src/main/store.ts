@@ -14,7 +14,7 @@ const DEFAULT_MODEL = CLAUDE_DEFAULT_MODEL
  * 디스크 영속 형식의 현재 스키마 버전. 영속 데이터 모양이 바뀔 때마다 1 올리고,
  * MIGRATIONS 에 직전 버전 → 새 버전 변환 함수를 추가한다.
  */
-const CURRENT_SCHEMA_VERSION = 10
+const CURRENT_SCHEMA_VERSION = 11
 
 /**
  * v9 → v10 에서 정리하는 모델 ID 치환표(마이그레이션 시점의 스냅샷이므로 여기 고정해 둔다).
@@ -48,6 +48,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   model: DEFAULT_MODEL,
   // null = effort 를 지정하지 않음(모델 기본 동작). 사용자가 Settings 에서 단계를 고르면 그 값으로.
   effort: null,
+  // fast mode 는 CLI 와 동일하게 기본 off — 유료 플랜/크레딧과 지원 모델이 필요한 옵트인 기능이다.
+  fastMode: false,
   // 기본 다크 — 기존 사용자도 load 의 기본값 병합으로 다크를 유지한다.
   theme: 'dark',
   soundOnComplete: true,
@@ -194,9 +196,10 @@ const MIGRATIONS: Array<(raw: Record<string, unknown>) => Record<string, unknown
     }))
     return { ...raw, workspaces }
   },
-  // v9 → v10: 모델 ID 정리. 핵심은 `claude-opus-5` → `claude-opus-5[1m]` 승격이다 — 접미사가 없으면
-  // Claude Code 가 윈도를 200K 로 잡아(다른 Opus 라인과 다르다) 컨텍스트 예산이 5 배 좁아지고,
-  // 그만큼 대화가 빨리 자동 압축된다. 목록에서는 "Opus 5 (1M context)" 로 안내하던 값이라 승격이 맞다.
+  // v9 → v10: 모델 ID 정리. 핵심은 `claude-opus-5` → `claude-opus-5[1m]` 승격이다 — 당시 CLI 는
+  // 접미사가 없으면 opus-5 의 윈도를 200K 로 잡아(레지스트리 미등재라 기본값을 썼다) 컨텍스트
+  // 예산이 5 배 좁아졌다. (CLI 2.1.220 부터는 opus-5 가 native_1m 으로 등재돼 접미사 없이도 1M 이다.
+  // 그래도 접미사는 무해하므로(supports_1m_suffix) 저장값을 되돌리지는 않는다.)
   (raw) => {
     const settings = { ...((raw.settings as Partial<AppSettings>) ?? {}) }
     settings.model = renameModel(settings.model)
@@ -204,6 +207,25 @@ const MIGRATIONS: Array<(raw: Record<string, unknown>) => Record<string, unknown
       ...w,
       model: renameModel(w.model),
       lastModel: renameModel(w.lastModel)
+    }))
+    return { ...raw, settings, workspaces }
+  },
+  // v10 → v11: fast mode(`/fast`) 도입. 기존 workspace 는 오버라이드 없음(null)으로 두어 전역
+  // 설정(settings.fastMode)을 따르고, 그 전역 기본값은 load 의 기본값 병합으로 false 가 된다 —
+  // 유료 플랜·크레딧을 쓰는 옵트인 기능이라 기존 사용자에게 조용히 켜지지 않도록.
+  //
+  // 함께: 모델 목록의 Opus 5 를 한 항목(`claude-opus-5[1m]`)으로 합쳤으므로, 접미사 없는 값을 골라
+  // 둔 설정이 있으면 그 항목으로 다시 모은다. 두 ID 는 CLI 2.1.220 기준 동작이 같아(둘 다 1M) 실제
+  // 변화는 없고, 목록에 없는 값이 남아 설정 드롭다운이 "선택 없음" 처럼 보이는 것만 막는다.
+  (raw) => {
+    const settings = { ...((raw.settings as Partial<AppSettings>) ?? {}) }
+    settings.model = renameModel(settings.model)
+    const workspaces = ((raw.workspaces as Partial<Workspace>[]) ?? []).map((w) => ({
+      ...w,
+      model: renameModel(w.model),
+      fastMode: w.fastMode ?? null,
+      fastModeState: w.fastModeState ?? null,
+      fastModeReason: w.fastModeReason ?? null
     }))
     return { ...raw, settings, workspaces }
   }

@@ -43,6 +43,7 @@ function ensure(workspaceId: string, config: SessionConfig): ClaudeSession {
     repoPath: config.repoPath,
     model: config.model,
     effort: config.effort,
+    fastMode: config.fastMode,
     permissionMode: config.permissionMode,
     autoCompact: config.autoCompact,
     resumeSessionId: config.resumeSessionId,

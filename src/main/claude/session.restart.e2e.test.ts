@@ -47,6 +47,7 @@ describe.skipIf(!process.env.WOOI_E2E)('ClaudeSession failed-turn restart', () =
       repoPath: null,
       model: null,
       effort: null,
+      fastMode: false,
       permissionMode: 'default',
       autoCompact: false,
       resumeSessionId: null,

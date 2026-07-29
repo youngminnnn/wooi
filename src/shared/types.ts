@@ -27,6 +27,67 @@ export type EffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
  */
 export type EffortSetting = EffortLevel | 'ultracode'
 
+/**
+ * Claude Code 의 fast mode(터미널 CLI 의 `/fast`) — **같은 모델을 더 빠른 출력 속도로** 돌린다
+ * (작은 모델로 낮추는 것이 아니다). Agent SDK 로는 query 옵션이 아니라 settings 레이어의
+ * `fastMode: true` 로 전달한다(ultracode 와 같은 경로). SDK 세션에서는 이 플래그가 있어야만
+ * 켜진다 — 파일 settings.json 값만으로는 SDK 모드에서 활성화되지 않는다.
+ *
+ * 전제 조건(못 갖추면 CLI 가 조용히 표준 속도로 돌린다):
+ * - Anthropic API 를 직접 쓰는 로그인이어야 한다(Bedrock/Vertex 등 서드파티 경유는 불가).
+ * - fast mode 를 지원하는 모델이어야 한다(모델 레지스트리의 fast_mode capability — Opus 5·4.8 계열).
+ * - 유료 플랜/크레딧이 필요하고, fast 전용 rate limit 을 넘기면 쿨다운 동안 표준 속도로 돌아간다.
+ *
+ * 그래서 "설정값"과 "실제 상태"는 다를 수 있다 — 실제 상태는 세션이 알려 주는 FastModeState 로 본다.
+ */
+export type FastModeState = 'off' | 'cooldown' | 'on'
+
+/**
+ * fast mode 가 지금 켜질 수 없는 이유(CLI 가 알려 준다). 원인이 세션 단위로 특정되지 않는 경우
+ * (예: 현재 모델이 지원하지 않음)에는 값이 오지 않으므로, 없을 때를 위한 일반 안내도 함께 둔다.
+ */
+export type FastModeDisabledReason =
+  | 'free'
+  | 'preference'
+  | 'extra_usage_disabled'
+  | 'network_error'
+  | 'unknown'
+  | 'not_first_party'
+  | 'disabled_by_env'
+  | 'model_not_allowed'
+  | 'sdk_opt_in_required'
+  | 'pending'
+
+/**
+ * fast mode 가 꺼진 이유를 사람이 읽을 문장으로. 이유가 없으면(모델이 지원하지 않는 경우 등)
+ * 일반 안내를 돌려준다 — main(트랜스크립트 안내)과 renderer(상태줄 툴팁)가 같은 문구를 쓴다.
+ */
+export function fastModeReasonText(reason: FastModeDisabledReason | null | undefined): string {
+  switch (reason) {
+    case 'free':
+      return 'Fast mode requires a paid Claude plan.'
+    case 'extra_usage_disabled':
+      return 'Fast mode needs usage credits — enable them in your Anthropic account.'
+    case 'not_first_party':
+      return 'Fast mode only works when Claude Code talks to the Anthropic API directly (not Bedrock/Vertex).'
+    case 'disabled_by_env':
+      return 'Fast mode is disabled by the CLAUDE_CODE_DISABLE_FAST_MODE environment variable.'
+    case 'model_not_allowed':
+      return 'The current model is not allowed to use fast mode in your organization.'
+    case 'preference':
+      return 'Fast mode is turned off for your account or organization.'
+    case 'network_error':
+      return 'Fast mode availability could not be checked (network issue).'
+    case 'pending':
+      return 'Still checking whether fast mode is available…'
+    case 'sdk_opt_in_required':
+      return 'Fast mode was not enabled for this session.'
+    default:
+      // 모델별 미지원은 이유 없이 state='off' 로만 온다 — 가장 흔한 경우라 여기서 안내한다.
+      return 'This session runs at standard speed — fast mode needs a fast-capable model (Opus 5 or Opus 4.8) on a paid plan.'
+  }
+}
+
 // ── 도메인 엔티티 ────────────────────────────────────────────────────────
 
 /** 연결된 git 리포지토리(메인 체크아웃). 모든 workspace 의 부모. */
@@ -317,8 +378,17 @@ export interface Workspace {
   model: string | null
   /** 이 workspace 전용 reasoning effort 오버라이드. null 이면 전역 설정(AppSettings.effort) 을 따른다. */
   effort: EffortSetting | null
+  /** 이 workspace 전용 fast mode 오버라이드. null 이면 전역 설정(AppSettings.fastMode) 을 따른다. */
+  fastMode: boolean | null
   /** init 메시지에서 확인된 실제 모델명(예: "claude-opus-4-8[1m]"). 표시용. */
   lastModel: string | null
+  /**
+   * 세션이 보고한 fast mode 실제 상태(표시용). 아직 턴을 돌리지 않아 모르면 null.
+   * 설정을 켜 뒀어도 모델·플랜·쿨다운 때문에 'off'/'cooldown' 일 수 있다.
+   */
+  fastModeState: FastModeState | null
+  /** fast mode 가 꺼져 있는 이유(CLI 보고). 이유를 특정할 수 없거나 켜져 있으면 null. */
+  fastModeReason: FastModeDisabledReason | null
   /** 아카이브되면 사이드바 기본 목록에서 숨기고 worktree 를 제거한다(브랜치·기록은 유지). */
   archived: boolean
   /** 이 워크스페이스의 모든 알림(OS 알림·소리·Dock 배지)을 음소거한다. 레거시는 undefined=false. */
@@ -376,6 +446,11 @@ export interface AppSettings {
    * (대략 'high' + adaptive thinking)을 따른다. workspace 가 자체 effort 를 지정하면 그 값이 우선한다.
    */
   effort: EffortSetting | null
+  /**
+   * 새 세션에 적용할 기본 fast mode(Claude Code 의 `/fast`). true 면 같은 모델을 더 빠른 출력
+   * 속도로 돌린다(지원 모델·유료 플랜 필요). workspace 가 자체 값을 지정하면 그 값이 우선한다.
+   */
+  fastMode: boolean
   /** UI 색상 테마(다크 기본). */
   theme: ThemePreference
   /**
@@ -529,6 +604,11 @@ export type ChatEvent =
   | { type: 'context'; usedTokens: number; maxTokens: number; percentage: number }
   /** 대화 압축(/compact) 진행 상태. auto = 임계치 초과로 앱이 트리거한 자동 압축. */
   | { type: 'compacting'; active: boolean; trigger?: 'auto' | 'manual' }
+  /**
+   * 세션이 보고한 fast mode 실제 상태(턴 result 기준). 설정을 켜 뒀어도 미지원 모델·플랜 제한·
+   * 쿨다운이면 'off'/'cooldown' 으로 온다 — 상태줄이 "설정" 이 아니라 "실제" 를 보여 주게 한다.
+   */
+  | { type: 'fastMode'; state: FastModeState; reason?: FastModeDisabledReason }
 
 // ── 권한 프롬프트 (canUseTool → UI) ──────────────────────────────────────
 
@@ -733,6 +813,8 @@ export const IPC = {
   workspaceSetPermissionMode: 'workspace:setPermissionMode',
   workspaceSetModel: 'workspace:setModel',
   workspaceSetEffort: 'workspace:setEffort',
+  /** fast mode(`/fast`) 오버라이드 — null 이면 전역 설정을 따른다. */
+  workspaceSetFastMode: 'workspace:setFastMode',
   /** 워크스페이스별 알림 음소거 토글. */
   workspaceSetMuted: 'workspace:setMuted',
   workspaceRename: 'workspace:rename',

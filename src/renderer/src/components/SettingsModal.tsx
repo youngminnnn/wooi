@@ -48,6 +48,7 @@ export default function SettingsModal({
   const [defaultRightPanelOpen, setDefaultRightPanelOpen] = useState(settings.defaultRightPanelOpen)
   const [model, setModel] = useState(settings.model ?? MODEL_OPTIONS[0].id)
   const [effort, setEffort] = useState<EffortSetting | null>(settings.effort)
+  const [fastMode, setFastMode] = useState(settings.fastMode)
   const [theme, setTheme] = useState<ThemePreference>(settings.theme)
 
   // 테마는 즉시 미리보기로 적용한다. 저장 없이 닫으면 저장된 테마로 되돌린다.
@@ -71,6 +72,7 @@ export default function SettingsModal({
       defaultRightPanelOpen,
       model,
       effort,
+      fastMode,
       theme
     })
     onClose()
@@ -277,6 +279,24 @@ export default function SettingsModal({
               workspace can override this from its header dropdown.
             </p>
           </div>
+
+          <label className="flex items-start gap-2.5 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={fastMode}
+              onChange={(e) => setFastMode(e.target.checked)}
+              className="accent-blue-600 h-3.5 w-3.5 mt-0.5"
+            />
+            <span className="text-sm text-neutral-300">
+              Fast mode
+              <span className="block text-xs text-neutral-600">
+                Runs the same model with faster output (Claude Code’s <code>/fast</code>). Needs a
+                fast-capable model (Opus 5 or Opus 4.8) on a paid Anthropic plan, and has its own
+                rate limit — sessions fall back to standard speed when it isn’t available. Each
+                workspace can override this with <code>/fast</code>.
+              </span>
+            </span>
+          </label>
 
           <label className="flex items-start gap-2.5 cursor-pointer">
             <input

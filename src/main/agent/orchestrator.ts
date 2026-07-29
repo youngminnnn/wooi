@@ -79,6 +79,10 @@ export class AgentOrchestrator {
     this.backendFor(workspaceId).setEffort(workspaceId, effort)
   }
 
+  setFastMode(workspaceId: string, fastMode: boolean | null): void {
+    this.backendFor(workspaceId).setFastMode(workspaceId, fastMode)
+  }
+
   clearSession(workspaceId: string): void {
     this.backendFor(workspaceId).clearSession(workspaceId)
   }

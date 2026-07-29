@@ -57,6 +57,8 @@ export interface AgentBackend {
   rewindAction(workspaceId: string, userMessageId: string): Promise<RewindActionResult>
   /** reasoning effort / ultracode 오버라이드(capabilities.effort). */
   setEffort(workspaceId: string, effort: EffortSetting | null): void
+  /** fast mode(`/fast`) 오버라이드(capabilities.fastMode). null 이면 전역 설정을 따른다. */
+  setFastMode(workspaceId: string, fastMode: boolean | null): void
   /** 입력창 자동완성용 슬래시 명령 목록(capabilities.slashCommands). */
   listCommands(cwd: string): Promise<SlashCommandInfo[]>
   /**
@@ -79,6 +81,8 @@ export interface AgentCapabilities {
   mcp: boolean
   /** reasoning effort / ultracode 단계 */
   effort: boolean
+  /** fast mode(`/fast`) — 같은 모델을 더 빠른 출력 속도로 돌린다 */
+  fastMode: boolean
   /** /context·/usage·/agents 등 인터랙티브 명령 패널 */
   interactiveCommands: boolean
   /** 슬래시 명령 자동완성 */
@@ -98,13 +102,14 @@ export interface AgentBackendMeta {
 /**
  * Claude Code 백엔드의 기본 모델. store 기본값과 백엔드 메타가 같은 출처를 보도록 여기서 정의한다.
  *
- * `[1m]` 접미사가 **반드시** 필요하다. Claude Code 는 모델 ID 별로 컨텍스트 윈도를 정하는데,
- * opus-5 는 접미사가 없으면 200K 로 잡힌다(다른 Opus 라인과 달리 native 1M 으로 인식되지 않음):
+ * `[1m]` 접미사는 예전 CLI 와의 호환 때문에 남겨 둔다. 도입 당시에는 접미사가 **반드시** 필요했다 —
+ * opus-5 가 모델 레지스트리에 없어 접미사가 빠지면 윈도가 200K 로 잡혔다(다른 Opus 라인은 1M):
  *
- *   claude-opus-5      → window 200,000   / 자동압축 167,000
+ *   claude-opus-5      → window 200,000   / 자동압축 167,000   (CLI 2.1.220 이전)
  *   claude-opus-5[1m]  → window 1,000,000 / 자동압축 967,000
  *
- * 접미사 없이 쓰면 예산이 5 배 좁아져 대화가 그만큼 빨리 압축된다.
+ * CLI 2.1.220 부터는 opus-5 가 `native_1m` 으로 등재돼 접미사 없이도 1M 이다(실측 확인). 접미사는
+ * 계속 유효하므로(supports_1m_suffix) 굳이 값을 바꿔 저장된 설정을 다시 마이그레이션하지 않는다.
  */
 export const CLAUDE_DEFAULT_MODEL = 'claude-opus-5[1m]'
 
@@ -118,6 +123,7 @@ export const CLAUDE_META: AgentBackendMeta = {
     rewind: true,
     mcp: true,
     effort: true,
+    fastMode: true,
     interactiveCommands: true,
     slashCommands: true
   }
