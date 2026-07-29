@@ -1083,6 +1083,21 @@ export interface UsageInfo {
   rateLimitsAvailable: boolean
   /** 5시간·7일 등 사용률 창(있을 때만). */
   rateLimits: { label: string; utilization: number | null; resetsAt: string | null }[]
+  /**
+   * 요금제 한도를 넘겼을 때 쓰는 추가 크레딧 풀. rateLimits 와 달리 "창"이 아니라 월 단위 지갑이라
+   * 최대 사용률 롤업(Plan usage 타일)에 섞이면 안 되므로 별도 필드로 둔다. 없으면 null.
+   */
+  extraUsage: {
+    /** 0–100 사용률. */
+    utilization: number | null
+    /** 사용한 크레딧(최소 단위, 예: 센트). */
+    usedCredits: number | null
+    /** 월 한도(최소 단위). */
+    monthlyLimit: number | null
+    currency: string | null
+    /** 꺼져 있으면(크레딧 소진·사용자 비활성화) 한도를 넘겨도 실제로 쓰이지 않는다. */
+    isEnabled: boolean
+  } | null
 }
 
 /** /agents — 이 세션에서 쓸 수 있는 서브에이전트 1개. */

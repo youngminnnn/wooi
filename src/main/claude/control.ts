@@ -241,23 +241,42 @@ function mapUsage(u: SdkUsage): UsageInfo {
   const limits: UsageInfo['rateLimits'] = []
   const rl = u.rate_limits
   if (rl) {
+    // 레거시 seven_day_opus/sonnet 과 신형 model_scoped 는 같은 모델 창을 가리킬 수 있다.
+    // 라벨이 곧 renderer 의 React key 이므로 먼저 들어온 쪽만 남겨 중복 행을 막는다.
     const push = (
       label: string,
       w?: { utilization: number | null; resets_at: string | null } | null
     ): void => {
-      if (w) limits.push({ label, utilization: w.utilization, resetsAt: w.resets_at })
+      if (!w) return
+      if (limits.some((l) => l.label === label)) return
+      limits.push({ label, utilization: w.utilization, resetsAt: w.resets_at })
     }
     push(SESSION_RATE_LIMIT_LABEL, rl.five_hour)
     push('7-day', rl.seven_day)
     push('7-day (Opus)', rl.seven_day_opus)
     push('7-day (Sonnet)', rl.seven_day_sonnet)
+    // 요즘 계정은 모델별 주간 창이 seven_day_* 대신 서버가 채우는 model_scoped[] 로 온다.
+    // 여기를 빼면 Opus/Fable 창이 통째로 사라져 최대 사용률 롤업이 실제보다 낮게 나온다.
+    for (const m of rl.model_scoped ?? []) {
+      push(`7-day (${m.display_name})`, { utilization: m.utilization, resets_at: m.resets_at })
+    }
   }
+  const extra = rl?.extra_usage
   return {
     totalCostUsd: u.session.total_cost_usd,
     linesAdded: u.session.total_lines_added,
     linesRemoved: u.session.total_lines_removed,
     subscriptionType: u.subscription_type,
     rateLimitsAvailable: u.rate_limits_available,
-    rateLimits: limits
+    rateLimits: limits,
+    extraUsage: extra
+      ? {
+          utilization: extra.utilization,
+          usedCredits: extra.used_credits,
+          monthlyLimit: extra.monthly_limit,
+          currency: extra.currency ?? null,
+          isEnabled: extra.is_enabled
+        }
+      : null
   }
 }
