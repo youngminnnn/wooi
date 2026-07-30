@@ -1,7 +1,23 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { CarryItem, CarryMode } from '@shared/types'
 import { useStore } from '../store'
 import Modal, { inputClass, labelClass, primaryBtn, ghostBtn } from './Modal'
+
+// Carry 경로 행 전용 클래스.
+// inputClass/ghostBtn 에 w-[…]·px-[…] 를 덧붙여 덮어쓰려 하면 안 된다 — Tailwind 는 충돌하는
+// 유틸리티를 "클래스 문자열 순서"가 아니라 "생성된 CSS 순서"로 해결한다. 실제로 inputClass 의
+// w-full 이 w-[5.5rem] 을 이겨서 select 가 행 전체(486px)를 차지하고, shrink-0 때문에 줄지도
+// 않아 경로 입력창이 26px 로 찌그러졌다(ghostBtn 의 px-3.5 도 px-2 를 이겼다).
+// 그래서 여기서는 공용 상수를 조합하지 않고 필요한 유틸리티만 직접 쓴다.
+const carryFieldBase =
+  'bg-[var(--bg-2)] border border-[var(--border)] rounded-lg text-neutral-100 focus:outline-none focus:border-[var(--border-strong)] transition-colors'
+// 경로가 주인공이므로 남는 공간을 전부 가져간다(min-w-0 없으면 긴 경로가 행을 밀어낸다).
+const carryPathClass =
+  carryFieldBase + ' flex-1 min-w-0 px-3 py-2 font-mono text-base placeholder:text-neutral-600'
+// mode 와 삭제 버튼은 내용에 딱 맞게 좁게. self-stretch 로 높이는 입력창과 맞춘다.
+const carryModeClass = carryFieldBase + ' shrink-0 self-stretch w-16 px-1.5 text-xs'
+const carryRemoveClass =
+  'shrink-0 self-stretch grid w-7 place-items-center rounded-lg border border-[var(--border-2)] text-xs text-neutral-400 hover:bg-[var(--surface-2)] hover:text-neutral-100'
 
 export default function RepoConfigModal({
   repoId,
@@ -27,6 +43,11 @@ export default function RepoConfigModal({
     if (!repo) onClose()
   }, [repo, onClose])
 
+  // '+ Add path' 로 만든 빈 행에 포커스를 옮기기 위한 것들. 버튼에 포커스가 남으면 이어서 친
+  // 글자가 아무 입력창에도 들어가지 않아 "입력이 안 된다"로 보인다(행은 늘었는데 타이핑만 무반응).
+  const pathInputs = useRef<(HTMLInputElement | null)[]>([])
+  const focusOnMount = useRef<number | null>(null)
+
   // 모든 훅 호출 뒤에서 가드한다(훅 규칙). repo 가 사라진 프레임에서는 아무것도 렌더하지 않고,
   // 위 useEffect 가 onClose 로 모달을 정리한다.
   if (!repo) return null
@@ -47,6 +68,18 @@ export default function RepoConfigModal({
 
   const updateCarry = (index: number, patch: Partial<CarryItem>): void =>
     setCarryItems((items) => items.map((it, i) => (i === index ? { ...it, ...patch } : it)))
+
+  const addCarryRow = (): void => {
+    const lastIdx = carryItems.length - 1
+    // 마지막 행이 아직 비어 있으면 빈 행을 또 만들지 않고 그 행으로 포커스만 옮긴다.
+    if (lastIdx >= 0 && !carryItems[lastIdx].path.trim()) {
+      pathInputs.current[lastIdx]?.focus()
+      return
+    }
+    // 새 행의 input 은 아직 없으므로, 붙는 순간 ref 콜백에서 포커스한다.
+    focusOnMount.current = carryItems.length
+    setCarryItems((items) => [...items, { path: '', mode: 'copy' }])
+  }
 
   const removeRepo = async (): Promise<void> => {
     const wsCount = app.workspaces.filter((w) => w.repoId === repoId).length
@@ -152,14 +185,28 @@ export default function RepoConfigModal({
             {carryItems.map((item, i) => (
               <div key={i} className="flex items-center gap-1.5">
                 <input
-                  className={inputClass + ' font-mono flex-1'}
+                  ref={(el) => {
+                    pathInputs.current[i] = el
+                    if (el && focusOnMount.current === i) {
+                      focusOnMount.current = null
+                      el.focus()
+                    }
+                  }}
+                  className={carryPathClass}
                   value={item.path}
                   onChange={(e) => updateCarry(i, { path: e.target.value })}
                   placeholder="e.g. CLAUDE.local.md"
                   spellCheck={false}
+                  // Enter 로 다음 행을 이어서 추가한다(여러 경로를 손 안 떼고 입력).
+                  onKeyDown={(e) => {
+                    if (e.key !== 'Enter' || e.nativeEvent.isComposing) return
+                    e.preventDefault()
+                    if (!item.path.trim()) return
+                    addCarryRow()
+                  }}
                 />
                 <select
-                  className={inputClass + ' w-[5.5rem] shrink-0'}
+                  className={carryModeClass}
                   value={item.mode}
                   onChange={(e) => updateCarry(i, { mode: e.target.value as CarryMode })}
                 >
@@ -167,7 +214,7 @@ export default function RepoConfigModal({
                   <option value="link">Link</option>
                 </select>
                 <button
-                  className={ghostBtn + ' shrink-0 px-2'}
+                  className={carryRemoveClass}
                   onClick={() => setCarryItems((items) => items.filter((_, x) => x !== i))}
                   title="Remove"
                   aria-label={`Remove ${item.path || 'entry'}`}
@@ -178,10 +225,7 @@ export default function RepoConfigModal({
             ))}
           </div>
 
-          <button
-            className={ghostBtn + ' mt-1.5 text-xs'}
-            onClick={() => setCarryItems((items) => [...items, { path: '', mode: 'copy' }])}
-          >
+          <button className={ghostBtn + ' mt-1.5 text-xs'} onClick={addCarryRow}>
             + Add path
           </button>
 
