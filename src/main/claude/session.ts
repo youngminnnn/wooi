@@ -239,6 +239,12 @@ export class ClaudeSession {
    */
   private active = false
   /**
+   * active 가 false→true 로 바뀔 때마다 오르는 카운터. settleTurn 이 컨텍스트 확인을 기다리는
+   * 동안 새 일감(사용자 메시지·압축)이 들어왔는지 가리는 데 쓴다 — 확인을 마치고 뒤늦게 idle 을
+   * 방출하면 그 사이 시작된 턴이 idle 로 보이기 때문이다.
+   */
+  private activeSeq = 0
+  /**
    * 마지막으로 방출한 상태가 'running'(true) 인지 'idle'(false) 인지. running/idle 전환을 이 한
    * 곳(syncStatus)으로 모아, 실제 상태 변화가 있을 때만 방출하고 중복/역행 방출을 막는다.
    */
@@ -347,12 +353,11 @@ export class ClaudeSession {
     }
     this.deps.persist(item)
     this.deps.emit({ type: 'item', item })
-    this.active = true
     // 새 사용자 시도다 — 턴 상태와 자동 재시도 예산, 중단 표시를 리셋한다.
     this.beginTurn()
     this.autoRetried = false
     this.interrupted = false
-    this.syncStatus()
+    this.markActive()
 
     // /rewind 체크포인트 라벨용으로 이 메시지의 첫 줄을 큐에 둔다 — SDK 가 이 사용자 메시지를
     // echo 하며 부여하는 uuid 와 handleUser 에서 짝지어 체크포인트로 확정한다.
@@ -577,6 +582,13 @@ export class ClaudeSession {
         this.workflowTasks.clear()
         this.deps.settleIdle()
       }
+      // 압축 도중 query 가 죽었다면 진행 배지를 반드시 내린다 — 배지가 켜진 채 남으면 렌더러가
+      // 입력창을 잠근 상태로 굳는다(압축 중에는 입력을 막기 때문). 재시도 중이면 압축 턴이 새
+      // 프로세스에서 이어지므로 그대로 둔다.
+      if (!retrying && this.autoCompactInFlight) {
+        this.autoCompactInFlight = false
+        this.deps.emit({ type: 'compacting', active: false, trigger: 'auto' })
+      }
     }
 
     // 재시도는 finally 가 this.q 를 비운 뒤에 시작해, 새 query 핸들이 덮어써지지 않게 한다.
@@ -791,6 +803,13 @@ export class ClaudeSession {
     if (shouldRun === this.busy) return
     this.busy = shouldRun
     this.deps.emit({ type: 'status', status: shouldRun ? 'running' : 'idle' })
+  }
+
+  /** 새 일감이 시작됐음을 표시하고 running 을 방출한다(settleTurn 의 뒤늦은 idle 을 무효화한다). */
+  private markActive(): void {
+    this.active = true
+    this.activeSeq++
+    this.syncStatus()
   }
 
   // ── 권한 콜백 ──────────────────────────────────────────────────────────
@@ -1222,17 +1241,50 @@ export class ClaudeSession {
       return
     }
 
+    // 턴을 닫는다 — 자동 압축이 필요한지 먼저 확인하고, 압축을 시작하지 않을 때만 idle 로 간다.
+    // 미터는 성공 턴마다 갱신하되(압축 직후의 줄어든 수치도 반영해야 한다), 압축 트리거는 압축
+    // 턴 직후엔 건너뛴다 — 그 result 의 토큰은 요약 생성분이라 다시 임계치를 넘겨 루프가 된다.
+    void this.settleTurn({
+      refreshUsage: msg.subtype === 'success',
+      allowAutoCompact: !wasAutoCompact
+    })
+  }
+
+  /**
+   * 턴 종료를 확정한다 — **자동 압축 여부를 정한 뒤에** idle 을 방출한다.
+   *
+   * idle 을 먼저 방출하면 안 되는 이유: 렌더러는 idle 을 보는 즉시 대기 큐(사용자가 턴 도중 보낸
+   * 후속 메시지)를 흘려보낸다. 예전처럼 idle → (비동기) 컨텍스트 확인 → /compact 순서면 그 사이에
+   * 후속 메시지가 **압축 전(거의 가득 찬) 맥락 위에서** 새 턴을 열어 버린다. 자동 압축이 막으려던
+   * 바로 그 상황이고, 게다가 autoCompactInFlight 가 사용자 턴과 겹쳐 배지·플래그가 어긋난다.
+   *
+   * 그래서 압축이 필요하면 active 를 유지한 채(=running) /compact 만 흘려보낸다. 대기 큐는 압축
+   * 턴의 result 로 진짜 idle 이 될 때까지 그대로 남아 있다가, 압축된 맥락 위에서 이어서 실행된다
+   * (Claude Code CLI 와 같은 순서). 확인이 실패/타임아웃이면 압축 없이 idle 로 폴백한다.
+   *
+   * 압축이 일어날 수 없는 턴(실패 턴·압축 턴 직후·autoCompact off)은 미터 갱신을 기다리지 않고
+   * 곧바로 idle 로 가므로 지연이 없다.
+   */
+  private async settleTurn(opts: {
+    refreshUsage: boolean
+    allowAutoCompact: boolean
+  }): Promise<void> {
+    const mayCompact = opts.refreshUsage && opts.allowAutoCompact && this.deps.autoCompact
+    if (mayCompact) {
+      const seq = this.activeSeq
+      if (await this.refreshContextUsage({ allowAutoCompact: true })) return
+      // 확인을 기다리는 동안 새 턴이 시작됐다면(사용자 메시지·재시작) 그 턴이 상태를 소유한다.
+      if (this.activeSeq !== seq) return
+    } else if (opts.refreshUsage) {
+      // 압축으로 이어질 수 없는 갱신이라 idle 을 붙잡아 둘 이유가 없다 — 미터는 뒤늦게 따라온다.
+      void this.refreshContextUsage({ allowAutoCompact: false })
+    }
+
     // 메인 턴은 끝났지만, Workflow 도구로 띄운 백그라운드 워크플로우가 아직 돌고 있으면 idle 로
     // 가지 않고 running 을 유지한다(syncStatus 가 판단). 마지막 워크플로우가 끝나는 시점에 idle 로
     // 확정된다. 백그라운드 작업이 없으면 평소처럼 곧바로 idle.
     this.active = false
     this.syncStatus()
-
-    // 컨텍스트 미터를 갱신한다. 압축 턴 직후가 아니면 임계치 초과 시 자동 압축도 트리거한다.
-    // (성공 턴에만 사용량이 의미 있다.)
-    if (msg.subtype === 'success') {
-      void this.refreshContextUsage({ allowAutoCompact: !wasAutoCompact })
-    }
   }
 
   /**
@@ -1244,20 +1296,22 @@ export class ClaudeSession {
    * 퍼센트를 내므로 둘이 크게 어긋났다(미터가 /context 보다 한참 낮게 표시).
    *
    * 라이브 쿼리가 없거나 제어 응답이 실패하면 미터는 이전 값을 유지한다.
+   *
+   * @returns 자동 압축을 시작했으면 true(호출부는 턴을 idle 로 내리지 말고 running 을 유지해야 한다).
    */
-  private async refreshContextUsage(opts: { allowAutoCompact: boolean }): Promise<void> {
+  private async refreshContextUsage(opts: { allowAutoCompact: boolean }): Promise<boolean> {
     const q = this.q
-    if (!q) return
+    if (!q) return false
 
     let ctx: ContextUsage
     try {
       ctx = await withTimeout(q.getContextUsage(), CONTEXT_USAGE_TIMEOUT_MS)
     } catch {
-      return
+      return false
     }
 
     const max = ctx.maxTokens || 0
-    if (max <= 0) return
+    if (max <= 0) return false
 
     // getContextUsage 의 percentage 는 0~100 스케일. 미터/스토어는 0~1 fraction 을 기대한다.
     const fraction = Math.min(1, Math.max(0, ctx.percentage / 100))
@@ -1271,13 +1325,19 @@ export class ClaudeSession {
     // 임계치를 넘었으면 다음 턴 전에 자동으로 압축한다(Claude Code CLI 의 auto-compact).
     // 임계치는 고정 퍼센트가 아니라 Claude Code 가 알려준 값을 그대로 쓴다(overAutoCompactThreshold).
     if (opts.allowAutoCompact && this.deps.autoCompact && overAutoCompactThreshold(ctx)) {
-      this.triggerAutoCompact()
+      return this.triggerAutoCompact()
     }
+    return false
   }
 
-  /** 입력 큐에 /compact 를 흘려보내 대화를 압축한다. idle 상태(턴 종료 직후)에서만 호출한다. */
-  private triggerAutoCompact(): void {
-    if (this.autoCompactInFlight || !this.q) return
+  /**
+   * 입력 큐에 /compact 를 흘려보내 대화를 압축한다. 턴 종료 직후(아직 idle 을 방출하기 전)에만
+   * 호출한다 — 상태는 running 을 유지해, 렌더러의 대기 큐가 압축 전 맥락으로 새 턴을 열지 못하게 한다.
+   *
+   * @returns 압축을 시작했으면 true.
+   */
+  private triggerAutoCompact(): boolean {
+    if (this.autoCompactInFlight || !this.q) return false
     this.autoCompactInFlight = true
 
     // 임계치 수치를 드러내지 않도록 퍼센트 없이 일반 문구로 안내한다.
@@ -1288,14 +1348,14 @@ export class ClaudeSession {
       ts: Date.now()
     })
     this.deps.emit({ type: 'compacting', active: true, trigger: 'auto' })
-    this.active = true
-    this.syncStatus()
+    this.markActive()
 
     this.input.push({
       type: 'user',
       message: { role: 'user', content: '/compact' },
       parent_tool_use_id: null
     })
+    return true
   }
 
   /** 항목을 영속화하고 renderer 로 보낸다. */

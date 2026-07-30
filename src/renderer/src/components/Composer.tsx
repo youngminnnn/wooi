@@ -109,6 +109,11 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
   // ↑ 로 이전 사용자 메시지를 불러올 때의 커서(끝에서부터). -1 = 미사용.
   const historyIdx = useRef(-1)
   const running = workspace.status === 'running'
+  // 대화 압축(자동/수동 /compact)이 도는 동안은 입력을 잠근다 — 압축 중에 보낸 메시지는 압축
+  // 전 맥락에 끼어들어 방금 압축한 결과를 무의미하게 만든다(Claude Code CLI 도 같은 동안 막는다).
+  // running 을 함께 보는 건 안전장치다: 배지가 어떤 이유로 남더라도 턴이 끝나면 입력이 풀린다.
+  const compacting = useStore((s) => s.compacting[workspace.id] ?? false)
+  const locked = compacting && running
 
   // 슬래시 명령 자동완성: 명령 목록(워크스페이스당 1회 조회)과 메뉴 선택 인덱스.
   const [commands, setCommands] = useState<SlashCommandInfo[] | null>(null)
@@ -378,6 +383,14 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
     historyIdx.current = -1
   }
 
+  // 압축이 끝나 입력창이 풀리면 포커스를 돌려준다 — disabled 가 되는 순간 브라우저가 포커스를
+  // 떼므로, 그대로 두면 사용자가 입력창을 다시 클릭해야 한다(초안은 그대로 남아 있다).
+  const wasLocked = useRef(false)
+  useEffect(() => {
+    if (wasLocked.current && !locked) taRef.current?.focus()
+    wasLocked.current = locked
+  }, [locked])
+
   // 명령 결과/사이드 답변 카드는 입력창 포커스가 빠져도(카드 스크롤·클릭 등) Esc 로 닫히도록
   // window 레벨에서 키를 받는다. 메뉴가 열려 있을 땐 Esc 가 메뉴 닫기에 쓰이므로 양보한다.
   useEffect(() => {
@@ -406,6 +419,9 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
   }
 
   const send = (): void => {
+    // 압축 중에는 전송(및 로컬 명령·bash)을 모두 막는다 — 초안은 그대로 두고, 압축이 끝나면
+    // 사용자가 그대로 다시 Enter 를 누르면 된다.
+    if (locked) return
     const trimmed = text.trim()
     if (!trimmed && !images.length) return // 텍스트도 첨부도 없으면 무시.
 
@@ -742,12 +758,15 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
               onKeyDown={onKeyDown}
               onPaste={onPaste}
               rows={1}
+              disabled={locked}
               placeholder={
-                running
-                  ? 'Queue a follow-up…  (Enter to send · it runs after the current turn)'
-                  : 'Message your agent…  (Enter to send · @ for files · / for commands · ! for terminal)'
+                locked
+                  ? 'Compacting the conversation…  (input resumes when it finishes)'
+                  : running
+                    ? 'Queue a follow-up…  (Enter to send · it runs after the current turn)'
+                    : 'Message your agent…  (Enter to send · @ for files · / for commands · ! for terminal)'
               }
-              className="flex-1 bg-transparent resize-none outline-none text-base leading-relaxed text-neutral-200 placeholder:text-neutral-600 py-1"
+              className="flex-1 bg-transparent resize-none outline-none text-base leading-relaxed text-neutral-200 placeholder:text-neutral-600 py-1 disabled:cursor-not-allowed"
             />
             {running && (
               <button
@@ -760,8 +779,16 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
             )}
             <button
               onClick={send}
-              disabled={!text.trim() && images.length === 0}
-              title={bashMode ? 'Run in terminal' : running ? 'Queue message' : 'Send'}
+              disabled={locked || (!text.trim() && images.length === 0)}
+              title={
+                locked
+                  ? 'Compacting the conversation…'
+                  : bashMode
+                    ? 'Run in terminal'
+                    : running
+                      ? 'Queue message'
+                      : 'Send'
+              }
               className={
                 'h-8 w-8 grid place-items-center rounded-lg text-white shadow-sm active:scale-95 disabled:bg-[var(--border)] disabled:text-neutral-600 disabled:shadow-none disabled:cursor-not-allowed ' +
                 (bashMode

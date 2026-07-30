@@ -536,6 +536,17 @@ export const useStore = create<UIState>((set, get) => ({
             return { unread }
           })
         }
+        // 턴이 끝났으면 압축 진행 배지는 반드시 내린다 — 쉬고 있는 workspace 가 압축 중일 수는
+        // 없다. 압축 중에는 입력창을 잠그므로, 배지가 켜진 채 남으면 입력이 굳어 버린다(세션이
+        // 압축 도중 죽는 등으로 compacting:false 를 놓치는 경로에 대한 안전망).
+        if (event.type === 'status' && event.status !== 'running') {
+          set((s) => {
+            if (!s.compacting[workspaceId]) return {}
+            const compacting = { ...s.compacting }
+            delete compacting[workspaceId]
+            return { compacting }
+          })
+        }
         // 턴이 정상 종료되면 대기 큐에 쌓인 후속 메시지를 순서대로 전송한다(취소 기회는 여기서 끝).
         // 에러 종료 시에는 자동 전송하지 않고 큐를 남겨, 사용자가 검토/취소하도록 둔다.
         if (event.type === 'status' && event.status === 'idle') {
