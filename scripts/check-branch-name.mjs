@@ -24,6 +24,12 @@ const TYPES = [
 // 규칙에서 제외하는 보호/특수 브랜치.
 const EXEMPT = new Set(['main', 'HEAD'])
 
+// 봇이 브랜치 이름을 정하는 경로. 이름을 우리가 통제할 수 없으므로 규칙에서 제외한다.
+// 제외하지 않으면 해당 PR 은 CI 를 **구조적으로 통과할 수 없고**(브랜치를 바꿀 방법이
+// 없다), 의존성·보안 업데이트가 조용히 막힌다. 실제로 Dependabot PR 4건이 이 잡
+// 하나 때문에 전부 빨간불이었다.
+const EXEMPT_PREFIXES = ['dependabot/']
+
 // 예) feat/inline-login, fix/first-message-stall, chore/deps/bump-electron
 const PATTERN = new RegExp(`^(${TYPES.join('|')})\\/[A-Za-z0-9._/-]+$`)
 
@@ -34,7 +40,11 @@ if (!branch) {
   process.exit(2)
 }
 
-if (EXEMPT.has(branch) || PATTERN.test(branch)) {
+if (
+  EXEMPT.has(branch) ||
+  EXEMPT_PREFIXES.some((prefix) => branch.startsWith(prefix)) ||
+  PATTERN.test(branch)
+) {
   process.exit(0)
 }
 
