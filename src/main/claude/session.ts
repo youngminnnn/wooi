@@ -185,7 +185,11 @@ export class ClaudeSession {
    * 압축 턴의 result·boundary 가 다시 임계치를 넘겨 무한 압축 루프를 도는 것을 막는다.
    */
   private autoCompactInFlight = false
-  /** 이번 query 에서 SDK 메시지를 하나라도 받았는지(= 세션이 정상 시작됐는지). resume 폴백 판단용. */
+  /**
+   * 이번 query 에서 SDK 메시지를 하나라도 받았는지(= 세션이 정상 시작됐는지). 워치독과 resume
+   * 폴백 판단에 쓴다. **query 단위 상태이므로 run() 시작마다 false 로 리셋한다** — 세션 단위로
+   * 누적되면 재시도 query 가 스톨 보호·폴백을 모두 잃는다.
+   */
   private sawAnyMessage = false
   /** resume 실패로 새 세션 폴백을 이미 1회 시도했는지(무한 재시도 방지). */
   private resumeRetried = false
@@ -474,6 +478,12 @@ export class ClaudeSession {
     let retrying = false
     // 새 프로세스에서 턴을 다시 시작한다 — 산출/오류 기록을 초기화한다.
     this.beginTurn()
+    // sawAnyMessage 는 **이 query 한 개**의 상태다(run() 한 번 = query 한 개). 여기서 리셋하지
+    // 않으면 첫 query 가 메시지를 받은 뒤로 영원히 true 로 남아, 이어지는 재시도 query 는
+    // (1) 워치독이 즉시 return 해 스톨 보호를 못 받고(무한 로딩),
+    // (2) handleQueryDeath 의 새 세션 폴백(!sawAnyMessage)이 영영 성립하지 않는다.
+    // 재시도 횟수는 autoRetried·resumeRetried 가 따로 막으므로 리셋해도 루프가 생기지 않는다.
+    this.sawAnyMessage = false
     // 첫 메시지가 안 오는 스톨을 감지해 abort 하기 위한 워치독. abort 하면 for-await 가
     // (throw 또는 정상 종료로) 풀리고, 아래 first-message 실패 처리로 폴백/에러가 확정된다.
     const abort = new AbortController()
@@ -541,6 +551,13 @@ export class ClaudeSession {
         `session: query created (resume=${this.deps.resumeSessionId ? 'yes' : 'no'}, ` +
           `mcp=${Object.keys(mcpServers).length}, preflight=${this.preflightPending}) — awaiting first message…`
       )
+
+      // preflight 는 **query 생성 직후** 돌린다 — system:init 을 기다리면 데드락이다.
+      // CLI 는 입력 스트림에서 사용자 메시지를 하나라도 받아야 init 을 내보내는데, preflight 중에는
+      // enqueue 가 그 메시지를 버퍼에 잡아 둔다. 즉 "init 을 기다리는 preflight" 와 "입력을 기다리는
+      // init" 이 서로를 기다려, 워치독이 끊을 때까지 무응답이 된다(실측: 45초간 메시지 0건).
+      // getContextUsage 는 입력 스트림과 무관한 제어 채널을 쓰므로 입력 없이도 응답한다(실측 ~2초).
+      if (this.preflightPending) void this.runResumePreflight()
 
       for await (const msg of this.q) {
         if (!this.sawAnyMessage) {
@@ -918,9 +935,8 @@ export class ClaudeSession {
       this.currentSessionId = msg.session_id
       this.deps.onSessionId(msg.session_id)
       this.deps.emit({ type: 'session', sessionId: msg.session_id, model: msg.model })
-      // 콜드 resume 첫 턴 전에 컨텍스트를 확인해, 필요하면 사용자 턴보다 /compact 를 먼저 보낸다.
-      // (세션이 정상 시작된 지금 시점에서 getContextUsage 제어 채널이 준비된다.)
-      if (this.preflightPending) void this.runResumePreflight()
+      // preflight 는 여기서 돌리지 않는다 — init 은 입력 메시지를 받아야 오는데 preflight 는 그
+      // 입력을 붙들고 있어 서로를 기다리게 된다. query 생성 직후(run)로 옮겼다.
     } else if (msg.subtype === 'permission_denied') {
       this.emitItem({
         id: `denied:${msg.tool_use_id}`,
