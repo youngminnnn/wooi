@@ -330,6 +330,16 @@ export type AgentBackendId = 'claude'
 export const DEFAULT_AGENT_BACKEND: AgentBackendId = 'claude'
 
 /**
+ * 백엔드의 사람이 읽는 이름. 브랜드 마크(SVG)는 렌더러가 갖지만 이름은 도메인 메타데이터라
+ * 여기 둔다(main 의 로그·알림에서도 같은 표기를 쓸 수 있다).
+ *
+ * Record<AgentBackendId, string> 이므로 유니온에 백엔드를 추가하면 컴파일 에러로 잡힌다.
+ */
+export const AGENT_BACKEND_LABELS: Record<AgentBackendId, string> = {
+  claude: 'Claude Code'
+}
+
+/**
  * 한 워크스페이스(worktree) 안에 쌓인 stacked PR 브랜치 1개.
  * 모델 B(단일 worktree · N 브랜치 · N PR)에서, 워크스페이스는 이런 엔트리들의 스택을 가지며
  * worktree 는 그중 하나(=Workspace.branch)를 체크아웃한 상태다.
@@ -504,6 +514,13 @@ export interface AppSettings {
    */
   defaultRightPanelOpen: boolean
   /**
+   * 사이드바에서 워크스페이스 행 아래에 "지금 돌고 있는 서브에이전트" 목록을 보여 준다(기본 켜짐).
+   *
+   * 표시 전용 설정이다 — 끄더라도 main 의 추적은 계속된다. 그래서 토글이 세션 재시작 없이 즉시
+   * 반영되고, 다시 켜면 지금 돌고 있는 것이 바로 나타난다(추적을 껐다면 다음 턴까지 빈 목록이 된다).
+   */
+  showRunningAgents: boolean
+  /**
    * Claude Code CLI 처럼, 한 턴이 끝났을 때 컨텍스트 사용량이 임계치를 넘으면 대화를
    * 자동으로 압축(/compact)한다. 끄면 사용량만 표시하고 압축은 수동(/compact)으로만.
    * 임계치는 Claude Code 가 모델별로 알려주는 값을 그대로 쓴다(session.ts 의 overAutoCompactThreshold).
@@ -624,6 +641,30 @@ export type ChatItem =
       ts: number
     }
 
+/**
+ * 지금 살아 있는 서브에이전트 1건의 표시용 스냅샷(사이드바 "Running agents" 패널).
+ *
+ * 트랜스크립트 ChatItem 이 아니라 **휘발성 상태**다 — 영속하지 않고, 세션이 끝나면 사라진다.
+ * 서브에이전트는 이미 부모 턴의 tool_use/tool_result 카드로 트랜스크립트에 남으므로, 여기서
+ * 다시 기록하면 이중 표시가 된다. 패널은 "지금 무엇이 돌고 있나"만 답한다.
+ */
+export interface RunningAgent {
+  /** SDK task_id. 이 워크스페이스 안에서 유일하며, 갱신·종료를 이 값으로 병합한다. */
+  taskId: string
+  /** 서브에이전트 타입(SDK subagent_type). 예: 'Explore', 'code-reviewer'. */
+  agentType: string
+  /** 현재 수행 중인 일의 설명. task_progress 로 갱신된다. */
+  description: string
+  /** 시작 시각(epoch ms). 경과 시간 표시용. */
+  startedAt: number
+  /** 누적 토큰 사용량(진행 메시지가 오면). */
+  totalTokens?: number
+  /** 누적 도구 호출 수(진행 메시지가 오면). */
+  toolUses?: number
+  /** 마지막으로 호출한 도구 이름(진행 메시지가 오면). */
+  lastToolName?: string
+}
+
 /** main → renderer 스트리밍 이벤트. renderer 는 이를 트랜스크립트에 반영한다. */
 export type ChatEvent =
   /** id 기준 append-or-replace. 권위 있는 완성 항목. */
@@ -646,6 +687,14 @@ export type ChatEvent =
    * 쿨다운이면 'off'/'cooldown' 으로 온다 — 상태줄이 "설정" 이 아니라 "실제" 를 보여 주게 한다.
    */
   | { type: 'fastMode'; state: FastModeState; reason?: FastModeDisabledReason }
+  /**
+   * 이 워크스페이스에서 지금 살아 있는 서브에이전트 **전체 목록**.
+   *
+   * REPLACE 시맨틱이다 — 렌더러는 목록을 병합하지 말고 통째로 갈아끼운다. 시작/종료 엣지를
+   * 짝지어 맞추는 방식이면 알림 하나만 유실돼도 스피너가 영구히 남는데, 매번 전량을 보내면
+   * 다음 갱신에서 저절로 복구된다. 빈 배열 = 실행 중인 서브에이전트 없음.
+   */
+  | { type: 'agents'; agents: RunningAgent[] }
 
 // ── 권한 프롬프트 (canUseTool → UI) ──────────────────────────────────────
 

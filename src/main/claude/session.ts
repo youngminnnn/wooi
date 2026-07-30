@@ -24,7 +24,8 @@ import type {
   PermissionRequest,
   PermissionDecision,
   RewindPoint,
-  RewindActionResult
+  RewindActionResult,
+  RunningAgent
 } from '@shared/types'
 
 export interface SessionDeps {
@@ -255,6 +256,12 @@ export class ClaudeSession {
    * 워크플로우로 등록한 실행만 여기 모아 두고 갱신을 병합한다(서브에이전트 등 비워크플로우 task 는 무시).
    */
   private workflowTasks = new Map<string, WorkflowTaskState>()
+  /**
+   * 지금 살아 있는 서브에이전트(Task 도구)의 상태(task_id 기준). 워크플로우와 같은 task_* 스트림을
+   * 쓰지만 표시 경로가 다르다 — 워크플로우는 트랜스크립트 카드, 서브에이전트는 사이드바 패널.
+   * 서브에이전트는 부모 턴의 tool_use/tool_result 로 이미 트랜스크립트에 남으므로 영속하지 않는다.
+   */
+  private agentTasks = new Map<string, RunningAgent>()
   /**
    * resume 콜드스타트의 "이중 패스"를 피하기 위한 상태.
    *
@@ -576,10 +583,11 @@ export class ClaudeSession {
       // 갇히므로 idle 로 확정한다. 앱은 살아 있어 부팅 시 store 정규화가 닿지 못하는 케이스다.
       // query 가 사라지면 딸린 워크플로우도 더 진행될 수 없으므로 추적 상태를 비운다.
       // 단, resume 폴백으로 재시도하는 경우는 턴이 새 세션에서 계속되므로 idle 로 풀지 않는다.
-      if (!retrying && (this.active || this.workflowTasks.size > 0)) {
+      if (!retrying && (this.active || this.workflowTasks.size > 0 || this.agentTasks.size > 0)) {
         this.active = false
         this.busy = false
         this.workflowTasks.clear()
+        this.clearAgents()
         this.deps.settleIdle()
       }
       // 압축 도중 query 가 죽었다면 진행 배지를 반드시 내린다 — 배지가 켜진 채 남으면 렌더러가
@@ -768,6 +776,7 @@ export class ClaudeSession {
     this.active = false
     this.busy = false
     this.workflowTasks.clear()
+    this.clearAgents()
     this.deps.emit({ type: 'status', status: 'error' })
     return false
   }
@@ -797,9 +806,14 @@ export class ClaudeSession {
    * 있는 중**(this.workflowTasks 에 종료되지 않은 실행이 남아 있음)이다. Workflow 도구는 즉시
    * 반환하고 백그라운드로 도므로, 메인 턴이 result 로 끝나 idle 로 가더라도 워크플로우가 계속
    * 돌 수 있다 — 이때 사이드바가 idle 로 보이지 않도록 워크플로우 활동을 상태에 반영한다.
+   *
+   * 백그라운드로 돌려진 서브에이전트(Ctrl+B)도 같은 이유로 포함한다. 포그라운드 서브에이전트는
+   * 애초에 부모 턴을 붙잡고 있어 this.active 가 true 이므로 이 항이 상태를 바꾸지 않는다.
+   * 이 불변식 덕분에 "idle 이면 살아 있는 서브에이전트가 없다"가 성립해, 렌더러는 idle 을 보면
+   * 목록을 안심하고 비울 수 있다(호스트가 죽어 종료 알림이 아예 오지 않는 경우의 안전망).
    */
   private syncStatus(): void {
-    const shouldRun = this.active || this.workflowTasks.size > 0
+    const shouldRun = this.active || this.workflowTasks.size > 0 || this.agentTasks.size > 0
     if (shouldRun === this.busy) return
     this.busy = shouldRun
     this.deps.emit({ type: 'status', status: shouldRun ? 'running' : 'idle' })
@@ -967,8 +981,25 @@ export class ClaudeSession {
     msg: Extract<SDKMessage, { type: 'system'; subtype: 'task_started' }>
   ): void {
     const isWorkflow = msg.task_type === 'local_workflow' || typeof msg.workflow_name === 'string'
-    // ambient/housekeeping task(skip_transcript)나 비워크플로우 task 는 트랜스크립트에 노출하지 않는다.
-    if (!isWorkflow || msg.skip_transcript) return
+    if (!isWorkflow) {
+      // 서브에이전트는 트랜스크립트 카드를 만들지 않는다(부모 턴의 tool_use/tool_result 가 이미
+      // 남는다) — 사이드바 패널용 휘발성 상태로만 등록한다. skip_transcript 여도 등록한다:
+      // 그 플래그는 "인라인 트랜스크립트에서 숨겨라"는 뜻이고, task 패널은 그 대상이 아니다.
+      if (typeof msg.subagent_type === 'string') {
+        this.agentTasks.set(msg.task_id, {
+          taskId: msg.task_id,
+          agentType: msg.subagent_type,
+          description: msg.description || msg.subagent_type,
+          startedAt: Date.now()
+        })
+        this.emitAgents()
+        // 백그라운드로 돌려진 서브에이전트는 메인 턴이 끝난 뒤에도 계속 도므로 running 을 유지한다.
+        this.syncStatus()
+      }
+      return
+    }
+    // ambient/housekeeping 워크플로우(skip_transcript)는 트랜스크립트에 노출하지 않는다.
+    if (msg.skip_transcript) return
 
     const state: WorkflowTaskState = {
       taskId: msg.task_id,
@@ -987,8 +1018,17 @@ export class ClaudeSession {
   private handleTaskProgress(
     msg: Extract<SDKMessage, { type: 'system'; subtype: 'task_progress' }>
   ): void {
+    const agent = this.agentTasks.get(msg.task_id)
+    if (agent) {
+      if (msg.description) agent.description = msg.description
+      agent.totalTokens = msg.usage.total_tokens
+      agent.toolUses = msg.usage.tool_uses
+      if (msg.last_tool_name) agent.lastToolName = msg.last_tool_name
+      this.emitAgents()
+      return
+    }
     const state = this.workflowTasks.get(msg.task_id)
-    if (!state) return // 우리가 추적 중인 워크플로우가 아니면 무시(서브에이전트 진행 등).
+    if (!state) return // 우리가 추적 중인 워크플로우가 아니면 무시.
     if (msg.description) state.description = msg.description
     if (msg.summary) state.summary = msg.summary
     state.totalTokens = msg.usage.total_tokens
@@ -1000,6 +1040,18 @@ export class ClaudeSession {
   private handleTaskUpdated(
     msg: Extract<SDKMessage, { type: 'system'; subtype: 'task_updated' }>
   ): void {
+    const agent = this.agentTasks.get(msg.task_id)
+    if (agent) {
+      const p = msg.patch
+      if (p.description) agent.description = p.description
+      // 'pending'(시작 전)·'paused' 는 아직 살아 있다. 그 외 종료 상태면 목록에서 뺀다.
+      const st = p.status
+      const terminal = !!st && st !== 'running' && st !== 'pending' && st !== 'paused'
+      if (terminal) this.agentTasks.delete(msg.task_id)
+      this.emitAgents()
+      if (terminal) this.syncStatus()
+      return
+    }
     const state = this.workflowTasks.get(msg.task_id)
     if (!state) return
     const p = msg.patch
@@ -1022,8 +1074,13 @@ export class ClaudeSession {
   private handleTaskNotification(
     msg: Extract<SDKMessage, { type: 'system'; subtype: 'task_notification' }>
   ): void {
+    if (this.agentTasks.delete(msg.task_id)) {
+      this.emitAgents()
+      this.syncStatus()
+      return
+    }
     const state = this.workflowTasks.get(msg.task_id)
-    if (!state) return // task_notification 은 서브에이전트에도 오므로, 추적 중인 워크플로우만 종료 처리.
+    if (!state) return // 추적 중이 아닌 task 의 알림은 무시.
     state.status = msg.status // 'completed' | 'failed' | 'stopped'
     if (msg.summary) state.summary = msg.summary
     if (msg.usage) {
@@ -1035,6 +1092,23 @@ export class ClaudeSession {
     this.workflowTasks.delete(msg.task_id)
     // 워크플로우 종료 알림 — 남은 백그라운드 작업이 없고 메인 턴도 끝났으면 idle 로 확정한다.
     this.syncStatus()
+  }
+
+  /**
+   * 현재 서브에이전트 목록 전량을 방출한다(REPLACE 시맨틱).
+   *
+   * 델타가 아니라 매번 전량을 보내는 게 핵심이다 — 종료 알림 하나가 유실돼도 다음 갱신이나
+   * 세션 정리에서 저절로 바로잡히고, 렌더러에 스피너가 영구히 남지 않는다.
+   */
+  private emitAgents(): void {
+    this.deps.emit({ type: 'agents', agents: [...this.agentTasks.values()] })
+  }
+
+  /** 추적 중인 서브에이전트를 모두 비우고 빈 목록을 방출한다(query 가 사라진 경로에서 호출). */
+  private clearAgents(): void {
+    if (this.agentTasks.size === 0) return
+    this.agentTasks.clear()
+    this.emitAgents()
   }
 
   /** 워크플로우 진행 상태를 ChatItem 으로 만들어 (선택적으로) 영속화하고 renderer 로 보낸다. */

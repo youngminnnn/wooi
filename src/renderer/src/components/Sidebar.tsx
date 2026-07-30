@@ -27,6 +27,7 @@ import { GithubMark } from './BrandIcons'
 import { QUICK_SWITCH_HINT_DISMISSED, readUiFlag, setUiFlag } from '../lib/uiFlags'
 import { orderByStack, orderVisibleWorkspaces, workspaceDisplayName } from '@shared/types'
 import { useGithubDisconnected } from '../lib/github'
+import { WorkspaceAgents } from './WorkspaceAgents'
 import { useNow } from '../lib/useNow'
 import { formatDuration } from '../lib/format'
 import { useDragReorder, type DragReorder } from '../lib/useDragReorder'
@@ -426,210 +427,220 @@ function WorkspaceRow({
   }
 
   return (
-    <div
-      role="button"
-      tabIndex={0}
-      {...dnd.handleProps(workspace.id)}
-      {...dnd.zoneProps(workspace.id)}
-      // 이름 편집 중엔 드래그를 끈다 — draggable 조상 안에서는 입력 텍스트를 끌어 선택할 수 없다.
-      draggable={editingName === null}
-      onClick={() => void select(workspace.id)}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
+    <>
+      <div
+        role="button"
+        tabIndex={0}
+        {...dnd.handleProps(workspace.id)}
+        {...dnd.zoneProps(workspace.id)}
+        // 이름 편집 중엔 드래그를 끈다 — draggable 조상 안에서는 입력 텍스트를 끌어 선택할 수 없다.
+        draggable={editingName === null}
+        onClick={() => void select(workspace.id)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            void select(workspace.id)
+          }
+        }}
+        // 우클릭은 ⋯ 버튼을 찾지 않아도 같은 메뉴에 닿는 파워 유저 경로다(폭 비용 0).
+        onContextMenu={(e) => {
           e.preventDefault()
-          void select(workspace.id)
+          setMenuAlign('left')
+          setMenuAt({ x: e.clientX, y: e.clientY })
+        }}
+        // stacked 워크스페이스는 깊이만큼 들여써 부모-자식 계층을 시각화한다(뿌리=기본 들여쓰기).
+        style={{ paddingLeft: 12 + depth * 14, ...dnd.visualStyle(workspace.id) }}
+        className={
+          'group/ws relative w-full flex items-center gap-2 pr-1.5 py-1.5 rounded-md text-left cursor-pointer focus:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-strong)] ' +
+          // 선택 행은 좌측에 파란 액센트 바를 띄워 현재 위치를 또렷하게 표시한다.
+          (active
+            ? 'bg-[var(--surface-3)] before:absolute before:left-0 before:top-1.5 before:bottom-1.5 before:w-0.5 before:rounded-full before:bg-[var(--info-500)]'
+            : // 키보드로 액션에 포커스가 들어오거나 메뉴가 열려 있으면, 오버레이 배경색과 어긋나지
+              // 않게 행도 같이 밝힌다(메뉴를 띄운 뒤 커서가 행을 벗어나도 대상이 유지돼 보인다).
+              'hover:bg-[var(--surface)] focus-within:bg-[var(--surface)] ' +
+              (menuAt ? 'bg-[var(--surface)]' : ''))
         }
-      }}
-      // 우클릭은 ⋯ 버튼을 찾지 않아도 같은 메뉴에 닿는 파워 유저 경로다(폭 비용 0).
-      onContextMenu={(e) => {
-        e.preventDefault()
-        setMenuAlign('left')
-        setMenuAt({ x: e.clientX, y: e.clientY })
-      }}
-      // stacked 워크스페이스는 깊이만큼 들여써 부모-자식 계층을 시각화한다(뿌리=기본 들여쓰기).
-      style={{ paddingLeft: 12 + depth * 14, ...dnd.visualStyle(workspace.id) }}
-      className={
-        'group/ws relative w-full flex items-center gap-2 pr-1.5 py-1.5 rounded-md text-left cursor-pointer focus:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-strong)] ' +
-        // 선택 행은 좌측에 파란 액센트 바를 띄워 현재 위치를 또렷하게 표시한다.
-        (active
-          ? 'bg-[var(--surface-3)] before:absolute before:left-0 before:top-1.5 before:bottom-1.5 before:w-0.5 before:rounded-full before:bg-[var(--info-500)]'
-          : // 키보드로 액션에 포커스가 들어오거나 메뉴가 열려 있으면, 오버레이 배경색과 어긋나지
-            // 않게 행도 같이 밝힌다(메뉴를 띄운 뒤 커서가 행을 벗어나도 대상이 유지돼 보인다).
-            'hover:bg-[var(--surface)] focus-within:bg-[var(--surface)] ' +
-            (menuAt ? 'bg-[var(--surface)]' : ''))
-      }
-    >
-      <StatusDot
-        status={workspace.status}
-        awaitingPermission={awaitingPermission}
-        compacting={compacting}
-        stale={stale}
-        runningMs={runningMs}
-        pr={pr}
-      />
-      <div className="relative flex-1 min-w-0">
-        {editingName !== null ? (
-          <input
-            autoFocus
-            value={editingName}
-            onClick={(e) => e.stopPropagation()}
-            onChange={(e) => setEditingName(e.target.value)}
-            onBlur={commitName}
-            onKeyDown={(e) => {
-              // 행의 Enter/Space=선택 핸들러로 전파되지 않게 막는다.
-              e.stopPropagation()
-              if (e.key === 'Enter') commitName()
-              else if (e.key === 'Escape') setEditingName(null)
-            }}
-            className="w-full text-sm text-neutral-100 bg-[var(--surface)] border border-[var(--border-strong)] rounded px-1 py-0 outline-none"
-          />
-        ) : (
-          // 예전엔 옆에 호버용 연필 버튼이 있었지만, 그것도 opacity-0 로 폭(≈15px)을 상시
-          // 점유했다. 이름 변경은 더블클릭 · ⋯ 메뉴 · 우클릭 세 경로로 닿을 수 있어 제거했다.
-          <div
-            className={
-              'truncate text-sm cursor-text ' + (active ? 'text-neutral-100' : 'text-neutral-300')
-            }
-            title={`${displayName}\n(double-click to rename · clear to reset)`}
-            onDoubleClick={(e) => {
-              e.stopPropagation()
-              setEditingName(displayName)
-            }}
-          >
-            {displayName}
+      >
+        <StatusDot
+          status={workspace.status}
+          awaitingPermission={awaitingPermission}
+          compacting={compacting}
+          stale={stale}
+          runningMs={runningMs}
+          pr={pr}
+        />
+        <div className="relative flex-1 min-w-0">
+          {editingName !== null ? (
+            <input
+              autoFocus
+              value={editingName}
+              onClick={(e) => e.stopPropagation()}
+              onChange={(e) => setEditingName(e.target.value)}
+              onBlur={commitName}
+              onKeyDown={(e) => {
+                // 행의 Enter/Space=선택 핸들러로 전파되지 않게 막는다.
+                e.stopPropagation()
+                if (e.key === 'Enter') commitName()
+                else if (e.key === 'Escape') setEditingName(null)
+              }}
+              className="w-full text-sm text-neutral-100 bg-[var(--surface)] border border-[var(--border-strong)] rounded px-1 py-0 outline-none"
+            />
+          ) : (
+            // 예전엔 옆에 호버용 연필 버튼이 있었지만, 그것도 opacity-0 로 폭(≈15px)을 상시
+            // 점유했다. 이름 변경은 더블클릭 · ⋯ 메뉴 · 우클릭 세 경로로 닿을 수 있어 제거했다.
+            <div
+              className={
+                'truncate text-sm cursor-text ' + (active ? 'text-neutral-100' : 'text-neutral-300')
+              }
+              title={`${displayName}\n(double-click to rename · clear to reset)`}
+              onDoubleClick={(e) => {
+                e.stopPropagation()
+                setEditingName(displayName)
+              }}
+            >
+              {displayName}
+            </div>
+          )}
+          <div className="flex items-center gap-1 text-xs text-neutral-500 truncate">
+            <GitBranch size={10} className="shrink-0" />
+            <span className="truncate">{workspace.branch}</span>
+            {git && git.changedFiles > 0 && (
+              <span
+                className="text-[var(--warning-500)]/80 shrink-0"
+                title={`${git.changedFiles} changed file(s)`}
+              >
+                ·{git.changedFiles}
+              </span>
+            )}
+            {git && git.behind > 0 && (
+              <span
+                className="text-neutral-500 shrink-0 tabular-nums"
+                title={`${git.behind} commit(s) behind ${workspace.baseBranch}`}
+              >
+                ↓{git.behind}
+              </span>
+            )}
+            {git && git.ahead > 0 && (
+              <span
+                className="text-neutral-500 shrink-0 tabular-nums"
+                title={`${git.ahead} commit(s) ahead of ${workspace.baseBranch}`}
+              >
+                ↑{git.ahead}
+              </span>
+            )}
+            {git && git.conflicted && (
+              <span className="text-[var(--danger-fg)] shrink-0" title="Merge conflicts">
+                ⚠
+              </span>
+            )}
+            {workspace.status === 'running' && runningSince && (
+              <span
+                className="text-[var(--info-400)]/80 shrink-0 tabular-nums"
+                title="Running time of the current turn"
+              >
+                · {formatDuration(now - runningSince)}
+              </span>
+            )}
           </div>
-        )}
-        <div className="flex items-center gap-1 text-xs text-neutral-500 truncate">
-          <GitBranch size={10} className="shrink-0" />
-          <span className="truncate">{workspace.branch}</span>
-          {git && git.changedFiles > 0 && (
-            <span
-              className="text-[var(--warning-500)]/80 shrink-0"
-              title={`${git.changedFiles} changed file(s)`}
-            >
-              ·{git.changedFiles}
-            </span>
-          )}
-          {git && git.behind > 0 && (
-            <span
-              className="text-neutral-500 shrink-0 tabular-nums"
-              title={`${git.behind} commit(s) behind ${workspace.baseBranch}`}
-            >
-              ↓{git.behind}
-            </span>
-          )}
-          {git && git.ahead > 0 && (
-            <span
-              className="text-neutral-500 shrink-0 tabular-nums"
-              title={`${git.ahead} commit(s) ahead of ${workspace.baseBranch}`}
-            >
-              ↑{git.ahead}
-            </span>
-          )}
-          {git && git.conflicted && (
-            <span className="text-[var(--danger-fg)] shrink-0" title="Merge conflicts">
-              ⚠
-            </span>
-          )}
-          {workspace.status === 'running' && runningSince && (
-            <span
-              className="text-[var(--info-400)]/80 shrink-0 tabular-nums"
-              title="Running time of the current turn"
-            >
-              · {formatDuration(now - runningSince)}
-            </span>
-          )}
-        </div>
-        {/* 액션 클러스터는 absolute 오버레이로 띄운다. 호버 전용 컨트롤이 평상시 레이아웃 폭을
+          {/* 액션 클러스터는 absolute 오버레이로 띄운다. 호버 전용 컨트롤이 평상시 레이아웃 폭을
             점유하지 않게 해서 제목/메타가 사이드바 폭을 온전히 쓰도록 하는 것이 핵심이다.
             display 대신 opacity 로만 감추므로 Tab 포커스 경로도 그대로 유지된다.
             좌측 그라데이션으로 밑에 깔린 텍스트를 자연스럽게 페이드아웃시킨다. */}
-        <div
-          className={
-            'absolute right-0 top-0 bottom-0 flex items-center gap-0.5 pl-8 ' +
-            // 메뉴가 열려 있는 동안은 커서가 행을 벗어나도 계속 보이게 고정한다.
-            (menuAt
-              ? 'opacity-100'
-              : 'opacity-0 group-hover/ws:opacity-100 group-focus-within/ws:opacity-100')
-          }
-          // 페이드는 pl-8(32px) 리드인 구간에서만 일어나고 그 뒤는 완전 불투명해야 한다.
-          // Tailwind 의 via-* 는 정지점이 50% 라서 아이콘 뒤가 반투명해지고 제목이 비쳐 겹친다.
-          style={{
-            background: `linear-gradient(to right, transparent 0, ${
-              active ? 'var(--surface-3)' : 'var(--surface)'
-            } 32px)`
-          }}
-        >
-          {/* base(부모)보다 뒤처진 stacked 워크스페이스만 restack 을 1차 액션으로 승격한다.
+          <div
+            className={
+              'absolute right-0 top-0 bottom-0 flex items-center gap-0.5 pl-8 ' +
+              // 메뉴가 열려 있는 동안은 커서가 행을 벗어나도 계속 보이게 고정한다.
+              (menuAt
+                ? 'opacity-100'
+                : 'opacity-0 group-hover/ws:opacity-100 group-focus-within/ws:opacity-100')
+            }
+            // 페이드는 pl-8(32px) 리드인 구간에서만 일어나고 그 뒤는 완전 불투명해야 한다.
+            // Tailwind 의 via-* 는 정지점이 50% 라서 아이콘 뒤가 반투명해지고 제목이 비쳐 겹친다.
+            style={{
+              background: `linear-gradient(to right, transparent 0, ${
+                active ? 'var(--surface-3)' : 'var(--surface)'
+              } 32px)`
+            }}
+          >
+            {/* base(부모)보다 뒤처진 stacked 워크스페이스만 restack 을 1차 액션으로 승격한다.
               (뒤처지지 않았으면 급하지 않으므로 ⋯ 메뉴 안에만 둔다.) */}
-          {workspace.parentWorkspaceId && git && git.behind > 0 && (
+            {workspace.parentWorkspaceId && git && git.behind > 0 && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  void requireGithub('Restacking updates the branch and its pull request.', () =>
+                    restack(workspace.id)
+                  )
+                }}
+                className="h-5 w-5 grid place-items-center rounded shrink-0 hover:bg-[var(--surface-2)] text-[var(--warning-400)] hover:text-[var(--warning-300)]"
+                title={
+                  githubDisconnected
+                    ? `Connect GitHub to restack onto ${workspace.baseBranch} (${git.behind} behind)`
+                    : `Restack onto ${workspace.baseBranch} (${git.behind} behind) — rebase & force-push`
+                }
+              >
+                <RefreshCw size={12} />
+              </button>
+            )}
             <button
+              data-row-actions-trigger
               onClick={(e) => {
                 e.stopPropagation()
-                void requireGithub('Restacking updates the branch and its pull request.', () =>
-                  restack(workspace.id)
-                )
+                toggleMenuFromButton(e)
               }}
-              className="h-5 w-5 grid place-items-center rounded shrink-0 hover:bg-[var(--surface-2)] text-[var(--warning-400)] hover:text-[var(--warning-300)]"
-              title={
-                githubDisconnected
-                  ? `Connect GitHub to restack onto ${workspace.baseBranch} (${git.behind} behind)`
-                  : `Restack onto ${workspace.baseBranch} (${git.behind} behind) — rebase & force-push`
-              }
+              aria-haspopup="menu"
+              aria-expanded={menuAt !== null}
+              className="h-5 w-5 grid place-items-center rounded text-neutral-500 hover:bg-[var(--surface-2)] hover:text-neutral-200 shrink-0"
+              title="More actions (or right-click the row)"
             >
-              <RefreshCw size={12} />
+              <MoreVertical size={14} />
             </button>
-          )}
-          <button
-            data-row-actions-trigger
-            onClick={(e) => {
-              e.stopPropagation()
-              toggleMenuFromButton(e)
-            }}
-            aria-haspopup="menu"
-            aria-expanded={menuAt !== null}
-            className="h-5 w-5 grid place-items-center rounded text-neutral-500 hover:bg-[var(--surface-2)] hover:text-neutral-200 shrink-0"
-            title="More actions (or right-click the row)"
-          >
-            <MoreVertical size={14} />
-          </button>
+          </div>
         </div>
-      </div>
-      {/* 상태 인디케이터는 "정보"이므로 고정 슬롯을 갖고, 액션 오버레이에 가려지지 않는다.
+        {/* 상태 인디케이터는 "정보"이므로 고정 슬롯을 갖고, 액션 오버레이에 가려지지 않는다.
           (예전에는 호버 시 group-hover:hidden 으로 사라져서, 음소거 여부를 확인하면서
           음소거 버튼을 누를 수 없었다.) 아이콘 간 간격은 좁혀 하나의 묶음으로 읽히게 한다. */}
-      {(shortcut !== undefined || (unread && !active) || workspace.muted) && (
-        <div className="shrink-0 flex items-center gap-1.5">
-          {shortcut !== undefined && (
-            <kbd
-              className="text-xs leading-none font-medium text-neutral-600 tabular-nums"
-              title={`Switch with ⌘${shortcut}`}
-            >
-              ⌘{shortcut}
-            </kbd>
-          )}
-          {/* 미확인 완료는 권한 대기·실행 중과 별개의 상태이므로, 좌측 상태 점과 함께 같이 보여 준다
+        {(shortcut !== undefined || (unread && !active) || workspace.muted) && (
+          <div className="shrink-0 flex items-center gap-1.5">
+            {shortcut !== undefined && (
+              <kbd
+                className="text-xs leading-none font-medium text-neutral-600 tabular-nums"
+                title={`Switch with ⌘${shortcut}`}
+              >
+                ⌘{shortcut}
+              </kbd>
+            )}
+            {/* 미확인 완료는 권한 대기·실행 중과 별개의 상태이므로, 좌측 상태 점과 함께 같이 보여 준다
               (좌측 StatusDot 이 권한 대기/실행/압축을 표시하고, 우측 파란 점이 미확인 응답을 표시). */}
-          {unread && !active && (
-            <span
-              className="h-2 w-2 rounded-full bg-[var(--info-500)]"
-              title="Completed response — unread"
-            />
-          )}
-          {workspace.muted && (
-            <BellOff size={12} className="text-neutral-600" aria-label="Notifications muted" />
-          )}
-        </div>
-      )}
-      {menuAt && (
-        <RowActionsMenu
-          at={menuAt}
-          align={menuAlign}
-          actions={actions}
-          onClose={() => setMenuAt(null)}
-        />
-      )}
-    </div>
+            {unread && !active && (
+              <span
+                className="h-2 w-2 rounded-full bg-[var(--info-500)]"
+                title="Completed response — unread"
+              />
+            )}
+            {workspace.muted && (
+              <BellOff size={12} className="text-neutral-600" aria-label="Notifications muted" />
+            )}
+          </div>
+        )}
+        {menuAt && (
+          <RowActionsMenu
+            at={menuAt}
+            align={menuAlign}
+            actions={actions}
+            onClose={() => setMenuAt(null)}
+          />
+        )}
+      </div>
+      {/* 행 안이 아니라 형제로 둔다 — 행은 role="button" 인 클릭·드래그 영역이라, 그 안에 접기
+          버튼을 중첩하면 클릭이 워크스페이스 선택으로 새고 드래그 정렬과도 충돌한다. */}
+      <WorkspaceAgents
+        workspaceId={workspace.id}
+        depth={depth}
+        backend={workspace.agentBackend}
+        now={now}
+      />
+    </>
   )
 }
 
