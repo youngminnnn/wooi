@@ -476,10 +476,13 @@ function mapTokenUsage(params: TokenUsageParams): Mapped {
   const maxTokens = usage?.modelContextWindow
   if (!usage || !maxTokens) return NOTHING
 
-  // 컨텍스트 점유는 **마지막 요청**이 실어 보낸 입력이 기준이다(캐시된 입력도 창을 차지한다).
-  // total 은 세션 누적이라 윈도 점유와 무관하다 — 그걸 쓰면 미터가 금세 100% 로 보인다.
-  const last = usage.last
-  const usedTokens = (last?.inputTokens ?? 0) + (last?.cachedInputTokens ?? 0)
+  // 컨텍스트 점유는 **마지막 요청**이 실어 보낸 입력 토큰이다.
+  //
+  // cachedInputTokens 를 더하지 않는 것이 중요하다 — 실측으로 확인한 바
+  // totalTokens = inputTokens + outputTokens 이고, cachedInputTokens 는 그중 캐시로 처리된
+  // **부분집합**이다(예: input 17100 중 cached 11008). 더하면 사용량이 크게 부풀려진다.
+  // total 은 세션 누적이라 윈도 점유와 무관하므로 쓰지 않는다.
+  const usedTokens = usage.last?.inputTokens ?? 0
   if (!usedTokens) return NOTHING
 
   return {
@@ -539,8 +542,24 @@ const DEFAULT_DECISIONS: CodexDecision[] = ['accept', 'acceptForSession', 'decli
 const DECISION_LABELS: Record<string, string> = {
   accept: 'Approve',
   acceptForSession: 'Approve for session',
+  acceptWithExecpolicyAmendment: 'Always allow this command',
+  applyNetworkPolicyAmendment: 'Allow this host',
   decline: 'Reject',
   cancel: 'Cancel'
+}
+
+/**
+ * 결정 하나의 식별자.
+ *
+ * 서버가 주는 `availableDecisions` 에는 **문자열과 객체가 섞여 온다**(실측):
+ *   ["accept", {"acceptWithExecpolicyAmendment": {...}}, "cancel"]
+ * 객체 형태는 "이 명령을 앞으로 허용" 처럼 payload 를 함께 되돌려 줘야 하는 결정이다.
+ * 우리는 바깥 키를 id 로 쓰고, 응답할 때 원본 값을 그대로 되돌린다.
+ */
+function decisionId(decision: unknown): string {
+  if (typeof decision === 'string') return decision
+  if (decision && typeof decision === 'object') return Object.keys(decision)[0] ?? ''
+  return ''
 }
 
 /** 결정 id 를 Wooi 의 allow/deny 성격으로 분류한다. */
@@ -548,14 +567,17 @@ function decisionBehavior(id: string): 'allow' | 'deny' {
   return id === 'decline' || id === 'cancel' ? 'deny' : 'allow'
 }
 
-function decisionOptions(available: string[] | undefined): PermissionRequest['options'] {
-  const ids = available?.length ? available : DEFAULT_DECISIONS
-  return ids.map((id) => ({
-    id,
-    label: DECISION_LABELS[id] ?? id,
-    behavior: decisionBehavior(id),
-    ...(id === 'acceptForSession' ? { rememberForSession: true } : {})
-  }))
+function decisionOptions(available: unknown[] | undefined): PermissionRequest['options'] {
+  const list = available?.length ? available : DEFAULT_DECISIONS
+  return list
+    .map((raw) => decisionId(raw))
+    .filter(Boolean)
+    .map((id) => ({
+      id,
+      label: DECISION_LABELS[id] ?? id,
+      behavior: decisionBehavior(id),
+      ...(id === 'acceptForSession' ? { rememberForSession: true } : {})
+    }))
 }
 
 /** 명령 실행 승인 요청 → Wooi 권한 프롬프트. */
@@ -679,14 +701,22 @@ export function answersFor(
   return out
 }
 
-/** Wooi 의 권한 결정 → codex 가 받는 decision 문자열. */
-export function toCodexDecision(decision: {
-  behavior: 'allow' | 'deny'
-  rememberForSession?: boolean
-  optionId?: string
-}): CodexDecision {
-  // 사용자가 고른 선택지가 있으면 그대로 돌려준다(서버가 제시한 값이 정본).
-  if (decision.optionId && isDecision(decision.optionId)) return decision.optionId
+/**
+ * Wooi 의 권한 결정 → codex 가 받는 decision 값.
+ *
+ * 서버가 제시한 결정이 객체였다면(payload 를 요구하는 결정) **그 객체를 통째로** 되돌려야 한다 —
+ * 바깥 키만 문자열로 보내면 서버가 거절한다. 그래서 원본 목록을 함께 받아 대조한다.
+ */
+export function toCodexDecision(
+  decision: { behavior: 'allow' | 'deny'; rememberForSession?: boolean; optionId?: string },
+  available?: unknown[]
+): CodexDecision | object {
+  if (decision.optionId) {
+    const original = available?.find((raw) => decisionId(raw) === decision.optionId)
+    // 객체 결정은 원본 그대로, 문자열 결정은 그 문자열로.
+    if (original !== undefined) return original as CodexDecision | object
+    if (isDecision(decision.optionId)) return decision.optionId
+  }
   if (decision.behavior === 'deny') return 'decline'
   return decision.rememberForSession ? 'acceptForSession' : 'accept'
 }

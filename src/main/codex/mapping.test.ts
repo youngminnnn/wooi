@@ -292,7 +292,7 @@ describe('플랜 스냅샷', () => {
 })
 
 describe('컨텍스트 사용량', () => {
-  it('마지막 요청의 입력 + 캐시 입력을 창 크기 대비로 환산한다', () => {
+  it('마지막 요청의 입력 토큰을 창 크기 대비로 환산한다', () => {
     const r = map(NOTIFY.tokenUsage, {
       tokenUsage: {
         // 누적(total)이 아니라 last 를 봐야 한다 — 누적을 쓰면 미터가 금세 100% 가 된다.
@@ -303,10 +303,27 @@ describe('컨텍스트 사용량', () => {
     })
     expect(r.events[0]).toEqual({
       type: 'context',
-      usedTokens: 250,
+      usedTokens: 200,
       maxTokens: 1000,
-      percentage: 0.25
+      percentage: 0.2
     })
+  })
+
+  // 실측: totalTokens(17105) = inputTokens(17100) + outputTokens(5) 이므로 cachedInputTokens 는
+  // inputTokens 의 부분집합이다. 더하면 사용량이 크게 부풀려진다.
+  it('캐시된 입력을 중복으로 더하지 않는다', () => {
+    const r = map(NOTIFY.tokenUsage, {
+      tokenUsage: {
+        last: {
+          totalTokens: 17105,
+          inputTokens: 17100,
+          cachedInputTokens: 11008,
+          outputTokens: 5
+        },
+        modelContextWindow: 258400
+      }
+    })
+    expect(r.events[0]).toMatchObject({ usedTokens: 17100, maxTokens: 258400 })
   })
 
   it('창 크기를 모르면 아무것도 내지 않는다', () => {
@@ -389,6 +406,24 @@ describe('승인 요청 매핑', () => {
     const req = mapCommandApproval({ command: 'x', availableDecisions: ['accept', 'cancel'] })
     expect(req.options?.map((o) => o.id)).toEqual(['accept', 'cancel'])
     expect(req.options?.find((o) => o.id === 'cancel')?.behavior).toBe('deny')
+  })
+
+  // 실측: availableDecisions 에는 문자열과 객체가 섞여 온다. 객체를 문자열로 다루면 버튼
+  // 라벨이 "[object Object]" 가 되고, 응답도 서버가 거절한다.
+  it('객체 형태의 결정지도 사람이 읽는 버튼으로 만든다', () => {
+    const amendment = { acceptWithExecpolicyAmendment: { execpolicy_amendment: ['/bin/zsh'] } }
+    const req = mapCommandApproval({
+      command: 'x',
+      availableDecisions: ['accept', amendment, 'cancel']
+    })
+    expect(req.options?.map((o) => o.id)).toEqual([
+      'accept',
+      'acceptWithExecpolicyAmendment',
+      'cancel'
+    ])
+    const opt = req.options?.find((o) => o.id === 'acceptWithExecpolicyAmendment')
+    expect(opt?.label).not.toContain('object')
+    expect(opt?.behavior).toBe('allow')
   })
 
   it('acceptForSession 은 세션 기억 플래그를 단다', () => {
@@ -514,5 +549,20 @@ describe('권한 결정 → codex decision', () => {
   it('모르는 선택지 id 는 behavior 로 폴백한다(엉뚱한 값을 서버로 보내지 않도록)', () => {
     expect(toCodexDecision({ behavior: 'allow', optionId: 'bogus' })).toBe('accept')
     expect(toCodexDecision({ behavior: 'deny', optionId: 'bogus' })).toBe('decline')
+  })
+
+  // 객체 결정은 payload 를 요구한다 — 바깥 키만 문자열로 보내면 서버가 거절한다.
+  it('객체 결정은 원본을 통째로 되돌린다', () => {
+    const amendment = { acceptWithExecpolicyAmendment: { execpolicy_amendment: ['/bin/zsh'] } }
+    const available = ['accept', amendment, 'cancel']
+    expect(
+      toCodexDecision({ behavior: 'allow', optionId: 'acceptWithExecpolicyAmendment' }, available)
+    ).toBe(amendment)
+  })
+
+  it('원본 목록이 있으면 문자열 결정도 그 목록에서 고른다', () => {
+    expect(toCodexDecision({ behavior: 'deny', optionId: 'cancel' }, ['accept', 'cancel'])).toBe(
+      'cancel'
+    )
   })
 })

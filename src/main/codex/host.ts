@@ -128,16 +128,18 @@ type ApprovalMapper = (params: never) => Omit<PermissionRequest, 'requestId' | '
  * 이 Promise 가 풀리기 전까지 codex 쪽 턴은 멈춰 있다. 그래서 어떤 경로로든 **반드시** 결정이
  * 나야 한다 — 정리·호스트 종료 시 대기 중인 요청을 전부 거절로 푸는 이유다.
  */
-async function approve(params: unknown, toRequest: ApprovalMapper): Promise<{ decision: string }> {
+async function approve(params: unknown, toRequest: ApprovalMapper): Promise<{ decision: unknown }> {
   const decision = await prompt(params, toRequest(params as never))
-  return { decision: toCodexDecision(decision) }
+  // 서버가 준 원본 목록을 함께 넘긴다 — 객체 형태의 결정은 그 객체를 통째로 되돌려야 한다.
+  const available = (params as { availableDecisions?: unknown[] })?.availableDecisions
+  return { decision: toCodexDecision(decision, available) }
 }
 
 /**
  * 파일 변경 승인 — 요청에 diff 가 없으므로, 같은 itemId 의 fileChange 아이템에서 꺼내 붙인다.
  * 그래야 사용자가 무엇을 승인하는지 보고 결정할 수 있다.
  */
-async function approveFileChange(params: unknown): Promise<{ decision: string }> {
+async function approveFileChange(params: unknown): Promise<{ decision: unknown }> {
   const p = params as { threadId?: string; itemId?: string }
   const changes = p.itemId ? (threadFor(p.threadId ?? '')?.fileChanges(p.itemId) ?? []) : []
   const decision = await prompt(params, mapFileChangeApproval(p as never, changes))
