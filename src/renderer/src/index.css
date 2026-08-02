@@ -121,10 +121,33 @@
   /* 포커스 링 */
   --focus-ring: #5a93f7;
 
-  /* 코드 블록은 두 테마 모두 어두운 표면을 유지한다(highlight.js github-dark 토큰과 맞추기 위함). */
+  /* 코드 표면 — 코드 글자색은 반드시 --code-fg 로 명시한다(본문 색을 상속하면 안 됨). */
   --code-bg: #1a1d23;
   --code-border: #2f333b;
+  --code-fg: #c9d1d9;
   --code-inline-bg: #262a31;
+
+  /* 문법 하이라이트 토큰 (GitHub Dark) — 아래 .hljs-* 규칙이 참조한다. */
+  --hl-keyword: #ff7b72;
+  --hl-entity: #d2a8ff;
+  --hl-constant: #79c0ff;
+  --hl-string: #a5d6ff;
+  --hl-variable: #ffa657;
+  --hl-comment: #8b949e;
+  --hl-tag: #7ee787;
+  --hl-heading: #1f6feb;
+  --hl-list: #f2cc60;
+  --hl-add-fg: #aff5b4;
+  --hl-add-bg: #033a16;
+  --hl-del-fg: #ffdcd7;
+  --hl-del-bg: #67060c;
+
+  /* diff 뷰 — 코드 표면 위에서 읽히도록 테마별로 대비를 맞춘다. */
+  --diff-add: var(--success-300);
+  --diff-del: var(--danger-300);
+  --diff-hunk: #22d3ee;
+  --diff-context: #737373;
+  --diff-meta: #525252;
 }
 
 html[data-theme='light'] {
@@ -154,10 +177,32 @@ html[data-theme='light'] {
 
   --focus-ring: #2563eb;
 
-  /* 코드 블록은 라이트 모드에서도 어둡게 유지(가독성 높은 대비, 의도된 디자인). */
-  --code-bg: #1a1d23;
-  --code-border: #2a2e36;
+  /* 코드 표면도 라이트로 — 페이지 배경(--bg)보다 밝은 흰 면 + 경계선으로 구분한다. */
+  --code-bg: #ffffff;
+  --code-border: #e3e3e6;
+  --code-fg: #24292e;
   --code-inline-bg: #ececef;
+
+  /* 문법 하이라이트 토큰 (GitHub Light) */
+  --hl-keyword: #d73a49;
+  --hl-entity: #6f42c1;
+  --hl-constant: #005cc5;
+  --hl-string: #032f62;
+  --hl-variable: #e36209;
+  --hl-comment: #6a737d;
+  --hl-tag: #22863a;
+  --hl-heading: #005cc5;
+  --hl-list: #735c0f;
+  --hl-add-fg: #22863a;
+  --hl-add-bg: #f0fff4;
+  --hl-del-fg: #b31d28;
+  --hl-del-bg: #ffeef0;
+
+  --diff-add: var(--success-600);
+  --diff-del: var(--danger-600);
+  --diff-hunk: #0e7490;
+  --diff-context: #52525b;
+  --diff-meta: #8e8e97;
 
   /*
     이 앱은 다크 우선으로 작성되어 텍스트가 neutral 스케일(밝을수록 작은 숫자)을 쓴다.
@@ -246,6 +291,100 @@ a:focus-visible {
   background: transparent;
 }
 
+/*
+  문법 하이라이트 규칙 — 예전엔 main.tsx 가 'highlight.js/styles/github-dark.css' 를 통째로
+  import 했지만, 그 색은 하드코딩이라 라이트 모드의 밝은 코드 표면에서 읽히지 않았다.
+  github-dark 와 github(light) 는 규칙(선택자 그룹) 구조가 완전히 동일하므로, 규칙은 한 번만
+  두고 색만 --hl-* 토큰으로 테마별로 바꾼다. 배경은 .hljs 가 아니라 컨테이너의 --code-bg 가
+  담당한다(예전 github-dark 의 .hljs 배경 #0d1117 은 --code-bg 와 미묘하게 어긋났다).
+  이 블록은 반드시 .md 규칙보다 앞에 둔다 — .md pre code 의 padding 재정의가 이기도록.
+*/
+pre code.hljs {
+  display: block;
+  overflow-x: auto;
+  padding: 1em;
+}
+code.hljs {
+  padding: 3px 5px;
+}
+.hljs {
+  color: var(--code-fg);
+  background: transparent;
+}
+.hljs-doctag,
+.hljs-keyword,
+.hljs-meta .hljs-keyword,
+.hljs-template-tag,
+.hljs-template-variable,
+.hljs-type,
+.hljs-variable.language_ {
+  color: var(--hl-keyword);
+}
+.hljs-title,
+.hljs-title.class_,
+.hljs-title.class_.inherited__,
+.hljs-title.function_ {
+  color: var(--hl-entity);
+}
+.hljs-attr,
+.hljs-attribute,
+.hljs-literal,
+.hljs-meta,
+.hljs-number,
+.hljs-operator,
+.hljs-variable,
+.hljs-selector-attr,
+.hljs-selector-class,
+.hljs-selector-id {
+  color: var(--hl-constant);
+}
+.hljs-regexp,
+.hljs-string,
+.hljs-meta .hljs-string {
+  color: var(--hl-string);
+}
+.hljs-built_in,
+.hljs-symbol {
+  color: var(--hl-variable);
+}
+.hljs-comment,
+.hljs-code,
+.hljs-formula {
+  color: var(--hl-comment);
+}
+.hljs-name,
+.hljs-quote,
+.hljs-selector-tag,
+.hljs-selector-pseudo {
+  color: var(--hl-tag);
+}
+.hljs-subst {
+  color: var(--code-fg);
+}
+.hljs-section {
+  color: var(--hl-heading);
+  font-weight: bold;
+}
+.hljs-bullet {
+  color: var(--hl-list);
+}
+.hljs-emphasis {
+  color: var(--code-fg);
+  font-style: italic;
+}
+.hljs-strong {
+  color: var(--code-fg);
+  font-weight: bold;
+}
+.hljs-addition {
+  color: var(--hl-add-fg);
+  background-color: var(--hl-add-bg);
+}
+.hljs-deletion {
+  color: var(--hl-del-fg);
+  background-color: var(--hl-del-bg);
+}
+
 /* 마크다운 본문 */
 .md {
   line-height: 1.6;
@@ -295,6 +434,7 @@ a:focus-visible {
 }
 .md pre {
   background: var(--code-bg);
+  color: var(--code-fg);
   border: 1px solid var(--code-border);
   border-radius: 8px;
   padding: 10px 12px;
