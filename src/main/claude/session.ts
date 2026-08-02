@@ -13,6 +13,7 @@ import { sessionTranscriptExists } from './sessionFiles'
 import { CLAUDE_CODE_SYSTEM_PROMPT } from './systemPrompt'
 import { log } from '../logger'
 import { MCP_SETTING_SOURCES, resolveUserMcpServers } from './mcp'
+import { hasUserAutoCompactWindow } from './userSettings'
 import { fastModeReasonText } from '@shared/types'
 import type {
   ChatItem,
@@ -87,6 +88,24 @@ type ContextUsage = Awaited<ReturnType<Query['getContextUsage']>>
  * 구 SDK 이거나 Claude Code 쪽 자동 압축이 꺼져 있어 autoCompactThreshold 가 비는 경우다.
  */
 const AUTO_COMPACT_FALLBACK_PERCENT = 92
+
+/**
+ * 자동 압축 윈도(토큰). Claude Code 의 `autoCompactWindow` 설정으로 전달하며, 모델의 물리적
+ * 컨텍스트 윈도와 무관하게 "이 크기를 넘으면 압축한다" 는 상한이 된다.
+ *
+ * 왜 두는가: 요즘 Opus/Sonnet 라인은 윈도가 1M 이라 자동 압축이 **967,000 토큰**에서야 걸린다.
+ * 매 턴 대화 전체를 다시 보내므로, 압축 임계치가 곧 정상 상태의 턴당 입력 비용이다 — 967K 로
+ * 두면 200K 대비 턴당 입력이 대략 5~6 배가 된다. 실측(로컬 트랜스크립트)에서도 GUI 세션의
+ * 최대 컨텍스트 p90 이 250~266K 로, 대부분의 코딩 세션이 필요로 하는 것보다 훨씬 크게 자랐다.
+ *
+ * 200K 는 Claude Code CLI 자신이 권장하는 값이다(내장 팁: "Each turn is re-sending more context
+ * than most coding sessions need … Set \"autoCompactWindow\": 200000"). 압축은 요약이라 맥락이
+ * 사라지는 게 아니라 접히는 것이고, 임계치를 넘긴 뒤에야 동작하므로 짧은 세션에는 영향이 없다.
+ *
+ * 사용자가 자기 settings.json 에 이 키를 직접 적어 뒀다면 주입하지 않는다(userSettings.ts).
+ * CLI 스키마 허용 범위는 100,000 ~ 1,000,000 이다.
+ */
+const DEFAULT_AUTO_COMPACT_WINDOW = 200_000
 
 /**
  * 지금 압축해야 하는지 — Claude Code **자신의** 자동 압축 시점과 같은 기준으로 판단한다.
@@ -519,6 +538,12 @@ export class ClaudeSession {
       const ultracode = this.deps.effort === 'ultracode'
       const sdkEffort: EffortLevel | null =
         this.deps.effort && this.deps.effort !== 'ultracode' ? this.deps.effort : null
+      // 자동 압축이 켜져 있고, 사용자가 settings.json 에 직접 값을 적어 두지 않았을 때만 윈도
+      // 상한을 제안한다(자동 압축이 꺼져 있으면 압축 자체를 안 하므로 넣을 이유가 없다).
+      const autoCompactWindow =
+        this.deps.autoCompact && !hasUserAutoCompactWindow(this.deps.cwd, this.deps.repoPath)
+          ? DEFAULT_AUTO_COMPACT_WINDOW
+          : null
       this.q = query({
         prompt: this.promptStream(this.input),
         options: {
@@ -533,21 +558,26 @@ export class ClaudeSession {
           permissionMode: this.deps.permissionMode,
           // CLI 와 동일하게 파일시스템 설정(settings.json·CLAUDE.md·.mcp.json)을 로드.
           settingSources: MCP_SETTING_SOURCES,
-          // 동적 워크플로우(서브에이전트 대규모 조율)를 이 SDK 세션에서 사용 가능하게 한다.
-          // enableWorkflows 는 query Options 가 아니라 settings.json 스키마(Settings) 소속이라
-          // 인라인 settings 레이어로 주입한다 — settingSources 가 읽는 파일 설정 "위에" 합쳐지므로
-          // CLAUDE.md·MCP 로딩에는 영향이 없다. 켜두기만 하면 모델이 임의로 워크플로우를 돌리진 않고,
-          // 사용자가 'ultracode' 키워드나 "워크플로우로 해줘" 같은 요청을 했을 때만 Workflow 도구를 쓴다.
-          // (Pro 등에서는 기본 off 이고 Wooi 엔 /config UI 도 없어, 이 주입이 없으면 기능을 켤 방법이 없다.)
-          // ultracode 면 같은 settings 레이어에 ultracode: true 를 합친다(워크플로우는 이미 on).
-          // fast mode(`/fast`)도 query Options 가 아니라 이 settings 레이어로 전달한다. SDK 세션에서는
-          // 이 인라인 플래그가 있을 때만 켜진다 — 사용자의 settings.json 값만으로는 활성화되지 않는다
-          // (CLI 가 SDK 모드에서 flagSettings.fastMode 를 요구한다). 지원 모델·플랜이 아니거나 fast
-          // rate limit 쿨다운이면 CLI 가 조용히 표준 속도로 돌리고, 그 사실을 result 로 알려 준다.
+          // 인라인 settings 레이어 — query Options 가 아니라 settings.json 스키마(Settings) 소속인
+          // 플래그를 여기로 전달한다. settingSources 가 읽는 파일 설정 "위에" 합쳐지므로 CLAUDE.md·
+          // MCP 로딩에는 영향이 없지만, 같은 이유로 **사용자가 직접 적어 둔 값을 조용히 덮어쓴다**.
+          // 그래서 무조건 주입하지 않고, 키마다 "지금 이 값이어야 하는 이유" 가 있을 때만 넣는다.
+          //
+          // enableWorkflows — ultracode 일 때만 켠다. 예전에는 무조건 true 였는데 두 가지가 문제였다:
+          // (1) 플랜 기본값이 off 인 Pro 사용자에게도 Workflow 도구 정의가 매 요청 시스템 프롬프트에
+          // 실리고, (2) 사용자가 settings.json 에서 명시적으로 꺼 둔 설정까지 되살아난다. CLI 의 기본값은
+          // `defaultOn = 플랜 !== 'pro'` 이므로, 주입을 빼면 Max 는 그대로 켜지고 Pro 는 플랜 정책을 따른다.
+          // ultracode 는 정의상 "xhigh + 상시 워크플로우 조율" 이라 이때만 함께 켠다.
+          //
+          // fastMode — SDK 세션에서는 이 인라인 플래그가 있을 때만 켜진다. 사용자의 settings.json 값만
+          // 으로는 활성화되지 않는다(CLI 가 SDK 모드에서 flagSettings.fastMode 를 요구한다). 지원 모델·
+          // 플랜이 아니거나 fast rate limit 쿨다운이면 CLI 가 조용히 표준 속도로 돌리고 result 로 알려 준다.
+          //
+          // autoCompactWindow — 1M 윈도 모델의 967K 임계치를 200K 로 낮춘다(상수 주석 참고).
           settings: {
-            enableWorkflows: true,
-            ...(ultracode ? { ultracode: true } : {}),
-            ...(this.deps.fastMode ? { fastMode: true } : {})
+            ...(ultracode ? { enableWorkflows: true, ultracode: true } : {}),
+            ...(this.deps.fastMode ? { fastMode: true } : {}),
+            ...(autoCompactWindow !== null ? { autoCompactWindow } : {})
           },
           ...(Object.keys(mcpServers).length ? { mcpServers } : {}),
           ...(claudeExecutable ? { pathToClaudeCodeExecutable: claudeExecutable } : {}),

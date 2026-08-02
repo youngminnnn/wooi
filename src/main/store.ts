@@ -45,6 +45,9 @@ function normalizeMode(mode: unknown): PermissionMode {
 
 const DEFAULT_SETTINGS: AppSettings = {
   defaultPermissionMode: 'default',
+  // null = 모델 오버라이드 없음 → CLI 의 계정 기본 모델 + 사용량 인지 라우팅(터미널의 "Default
+  // (recommended)" 와 동일). 왜 하드코딩된 Opus 5 를 걷어냈는지는 agent/backend.ts 주석 참고.
+  // 이미 model 을 저장해 둔 사용자는 load 의 기본값 병합에서 자기 값을 유지한다(마이그레이션 없음).
   model: DEFAULT_MODEL,
   // null = effort 를 지정하지 않음(모델 기본 동작). 사용자가 Settings 에서 단계를 고르면 그 값으로.
   effort: null,
@@ -93,8 +96,8 @@ const MIGRATIONS: Array<(raw: Record<string, unknown>) => Record<string, unknown
   (raw) => {
     const settings = { ...DEFAULT_SETTINGS, ...((raw.settings as Partial<AppSettings>) ?? {}) }
     settings.defaultPermissionMode = normalizeMode(settings.defaultPermissionMode)
-    // model=null('default') 은 더 이상 노출하지 않으므로 기본 모델로 환산.
-    settings.model = settings.model ?? DEFAULT_MODEL
+    // model=null 은 다시 유효한 값이다 — "오버라이드 없음"(터미널의 "Default (recommended)")을
+    // 뜻하므로 그대로 둔다. 예전에는 이 선택지를 노출하지 않아 여기서 기본 모델로 환산했었다.
 
     const workspaces = ((raw.workspaces as Partial<Workspace>[]) ?? []).map((w) => ({
       ...w,

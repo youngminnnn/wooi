@@ -6,7 +6,7 @@ import { DOWNLOAD_URL, hasNewVersion, updateStatusText } from '../lib/update'
 import Modal, { inputClass, labelClass, primaryBtn, ghostBtn } from './Modal'
 import IntegrationsPanel from './IntegrationsPanel'
 import { PERMISSION_ORDER, PERMISSION_LABELS, PERMISSION_DESCRIPTIONS } from '../lib/permission'
-import { MODEL_OPTIONS } from '../lib/models'
+import { MODEL_OPTIONS, DEFAULT_MODEL_LABEL, DEFAULT_MODEL_HINT } from '../lib/models'
 import { EFFORT_OPTIONS } from '../lib/effort'
 import { applyTheme } from '../lib/theme'
 import { NOTIFICATION_CHANNEL_LABELS, NOTIFICATION_EVENT_LABELS } from '@shared/types'
@@ -63,7 +63,8 @@ export default function SettingsModal({
     }))
   const [defaultRightPanelOpen, setDefaultRightPanelOpen] = useState(settings.defaultRightPanelOpen)
   const [showRunningAgents, setShowRunningAgents] = useState(settings.showRunningAgents)
-  const [model, setModel] = useState(settings.model ?? MODEL_OPTIONS[0].id)
+  // ''(빈 문자열) = 오버라이드 없음. 저장할 때 null 로 되돌린다.
+  const [model, setModel] = useState(settings.model ?? '')
   const [effort, setEffort] = useState<EffortSetting | null>(settings.effort)
   const [fastMode, setFastMode] = useState(settings.fastMode)
   const [theme, setTheme] = useState<ThemePreference>(settings.theme)
@@ -88,7 +89,8 @@ export default function SettingsModal({
       autoCompact,
       defaultRightPanelOpen,
       showRunningAgents,
-      model,
+      // ''(Default) 는 null 로 저장해 model 옵션 자체를 넘기지 않게 한다.
+      model: model || null,
       effort,
       fastMode,
       theme
@@ -319,15 +321,22 @@ export default function SettingsModal({
           <div>
             <label className={labelClass}>Model</label>
             <select className={inputClass} value={model} onChange={(e) => setModel(e.target.value)}>
+              <option value="">
+                {DEFAULT_MODEL_LABEL} (recommended) — {DEFAULT_MODEL_HINT}
+              </option>
               {MODEL_OPTIONS.map((m) => (
                 <option key={m.id} value={m.id}>
                   {m.label}
                 </option>
               ))}
-              {!MODEL_OPTIONS.some((m) => m.id === model) && <option value={model}>{model}</option>}
+              {model !== '' && !MODEL_OPTIONS.some((m) => m.id === model) && (
+                <option value={model}>{model}</option>
+              )}
             </select>
             <p className="mt-1.5 text-xs text-neutral-600">
               Default for new workspaces. Each workspace can override this from its header dropdown.
+              Leaving this on {DEFAULT_MODEL_LABEL} lets Claude Code pick — pinning Opus keeps every
+              turn on the most expensive model and burns your usage limits faster.
             </p>
           </div>
 
@@ -365,6 +374,9 @@ export default function SettingsModal({
                 fast-capable model (Opus 5 or Opus 4.8) on a paid Anthropic plan, and has its own
                 rate limit — sessions fall back to standard speed when it isn’t available. Each
                 workspace can override this with <code>/fast</code>.
+                <strong className="block mt-1 text-[var(--warning-400)]/90">
+                  Billed at roughly 2× the standard token rate — speed only, no quality change.
+                </strong>
               </span>
             </span>
           </label>
