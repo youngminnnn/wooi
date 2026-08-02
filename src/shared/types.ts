@@ -1045,9 +1045,13 @@ export interface UpdateStatus {
     | 'ready'
     | 'not-available'
     | 'error'
-    /** 읽기 전용 위치(DMG/App Translocation)에서 실행 중 — 자동 업데이트 불가. */
+    /** 읽기 전용 위치(DMG/App Translocation)에서 실행 중 — 자동 설치 불가(확인은 계속한다). */
     | 'blocked'
-  /** available/ready 일 때 새 버전. */
+  /**
+   * available/ready 일 때 새 버전.
+   * blocked 일 때도 채워질 수 있다 — 설치는 못 해도 새 릴리스 존재 여부는 확인하기 때문.
+   * 이 경우 version 이 있으면 "수동으로 내려받을 새 버전이 있다"는 뜻이다.
+   */
   version?: string
   /** downloading 일 때 0~100. */
   percent?: number

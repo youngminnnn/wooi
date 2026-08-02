@@ -100,13 +100,30 @@ count.
 
 ## 6. Update notification strength
 
-The updater surfaces new versions through a dot on the settings button. The
-version number decides how loud that is:
+A release has to reach users **without them opening Settings to look for it**.
+`src/main/updater.ts` does the checking and surfaces results through three
+channels.
 
-- **MINOR** → new-feature indicator, "What's new" after updating
-- **PATCH** → silent dot only
+**When it checks** — once 8s after launch, then every 2 hours, plus on window
+focus and on wake from sleep (throttled to at most one check per 30 minutes).
+`setInterval` drifts while the Mac sleeps, so the event triggers cover the gap.
 
-This is what makes the number do actual work rather than just increment.
+**How it tells you**
+
+- **Top banner** — appears as soon as a new version is found (`available`).
+  Dismissing it is "not now", not "never": it comes back when the state or
+  version changes, or after 8 hours. (This app stays open for days — a banner
+  that hides permanently on first dismiss may as well not exist.)
+- **OS notification** — only when the window isn't focused. Once when the
+  download is `ready`, then once every 24 hours while it's still ignored. This
+  is the only channel that reaches someone who isn't looking at the app.
+- **Title-bar dot** — the persistent marker on the settings button.
+
+**Read-only install locations** (running from the DMG, App Translocation) keep
+checking too. Only the *install* is impossible there, so auto-download is
+turned off and the check still runs — the banner and OS notification then say
+"a new version is out, download it manually". This was the case where users
+were most likely to never learn about a release.
 
 ## 7. Release procedure
 

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Compass, Download, RefreshCw, Settings2 } from 'lucide-react'
 import { useStore } from '../store'
 import { openRepoSettings } from '../lib/repoSettings'
-import { hasNewVersion, updateStatusText } from '../lib/update'
+import { DOWNLOAD_URL, hasNewVersion, updateStatusText } from '../lib/update'
 import Modal, { inputClass, labelClass, primaryBtn, ghostBtn } from './Modal'
 import IntegrationsPanel from './IntegrationsPanel'
 import { PERMISSION_ORDER, PERMISSION_LABELS, PERMISSION_DESCRIPTIONS } from '../lib/permission'
@@ -389,9 +389,6 @@ export default function SettingsModal({
     </Modal>
   )
 }
-
-/** 항상 최신 릴리스의 dmg 로 리다이렉트된다(자동 업데이트가 막혔을 때의 수동 경로). */
-const DOWNLOAD_URL = 'https://github.com/youngminnnn/wooi/releases/latest/download/Wooi-arm64.dmg'
 
 function UpdatesSection(): React.JSX.Element {
   const [version, setVersion] = useState<string>('')
