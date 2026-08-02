@@ -177,7 +177,13 @@ export interface CommandApprovalParams {
   cwd?: string
   reason?: string
   /** 서버가 제시하는 결정 목록. 있으면 이걸 그대로 버튼으로 노출한다. */
-  availableDecisions?: string[]
+  /**
+   * 서버가 제시하는 결정 목록.
+   *
+   * **문자열과 객체가 섞여 온다**(실측): ["accept", {"acceptWithExecpolicyAmendment": {…}}, "cancel"].
+   * 객체 결정은 응답할 때 그 객체를 통째로 되돌려 줘야 하므로 원본 타입을 열어 둔다.
+   */
+  availableDecisions?: unknown[]
 }
 
 /**

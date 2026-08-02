@@ -1845,6 +1845,8 @@ function StatusLine({
   const backend = useWorkspaceBackend(workspace)
   const models = useModels(workspace.agentBackend)
   const defaults = useAgentSettings(workspace.agentBackend)
+  // fast mode 는 Claude Code 전용이라, 지원하지 않는 백엔드에서는 상태줄에서도 감춘다.
+  const supportsFastMode = backend?.capabilities.fastMode ?? false
 
   // worktree 절대 경로의 마지막 구간(디렉토리명). 비정상 경로면 전체 경로로 폴백한다.
   const dirName = workspace.worktreePath.split('/').filter(Boolean).pop() ?? workspace.worktreePath
