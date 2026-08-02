@@ -19,6 +19,7 @@ import {
   LayoutDashboard,
   MoreVertical,
   Search,
+  ArrowUpDown,
   X
 } from 'lucide-react'
 import { useStore } from '../store'
@@ -26,9 +27,15 @@ import RowActionsMenu, { type RowAction } from './RowActionsMenu'
 import { GithubMark } from './BrandIcons'
 import {
   QUICK_SWITCH_HINT_DISMISSED,
+  SWITCH_HINT_DONE,
+  SWITCH_HINT_THRESHOLD,
+  finishSwitchHint,
+  noteMouseSwitch,
+  onSwitchHintChange,
   readUiFlag,
   repoSettingsSeenFlag,
-  setUiFlag
+  setUiFlag,
+  switchClickCount
 } from '../lib/uiFlags'
 import { OPEN_REPO_SETTINGS_EVENT, openRepoSettings } from '../lib/repoSettings'
 import { orderByStack, orderVisibleWorkspaces, workspaceDisplayName } from '@shared/types'
@@ -108,6 +115,28 @@ export default function Sidebar({
     window.addEventListener(OPEN_REPO_SETTINGS_EVENT, onOpen)
     return () => window.removeEventListener(OPEN_REPO_SETTINGS_EVENT, onOpen)
   }, [])
+
+  // ⌘↑/⌘↓ 힌트. "행을 여러 번 마우스로 눌러 전환했는데 아직 단축키는 안 써 본" 사용자에게만,
+  // 즉 실제로 손해를 보고 있는 게 증명된 순간에만 뜬다. 온보딩에서 미리 가르치지 않는 이유가
+  // 이것 — 그때는 워크스페이스가 하나뿐이라 전환할 대상 자체가 없고, 배워도 쓸 데가 없어 잊힌다.
+  // 단축키를 한 번이라도 쓰면(App.tsx) 그 즉시 영구히 사라진다.
+  const [switchHint, setSwitchHint] = useState(() => ({
+    done: readUiFlag(SWITCH_HINT_DONE),
+    clicks: switchClickCount()
+  }))
+  useEffect(
+    () =>
+      onSwitchHintChange(() =>
+        setSwitchHint({ done: readUiFlag(SWITCH_HINT_DONE), clicks: switchClickCount() })
+      ),
+    []
+  )
+  // 전환할 곳이 둘 이상일 때만 의미가 있다. ⌘K 힌트와 동시에 뜨면 잔소리가 되므로 양보한다.
+  const showSwitchHint =
+    !switchHint.done &&
+    switchHint.clicks >= SWITCH_HINT_THRESHOLD &&
+    ordered.length > 1 &&
+    !showQuickSwitchHint
 
   const addRepo = async (): Promise<void> => {
     const res = await window.api.repo.add()
@@ -326,6 +355,28 @@ export default function Sidebar({
             </button>
           </div>
         )}
+
+        {/* ⌘↑/⌘↓ 안내. ⌘K 힌트와 같은 자리·같은 톤(작고 흐린 한 줄)이라 새로운 UI 종류를
+            늘리지 않는다. 모달·토스트·코치마크처럼 시선을 뺏는 수단을 일부러 피했다 —
+            이건 몰라도 앱을 쓰는 데 지장이 없는 정보라서, 그만큼의 방해가 정당화되지 않는다. */}
+        {showSwitchHint && (
+          <div className="mx-1 mb-2 flex items-start gap-2 rounded-md bg-[var(--surface)] px-2 py-1.5 text-xs text-neutral-500">
+            <ArrowUpDown size={12} className="mt-0.5 shrink-0" />
+            <p className="flex-1 leading-relaxed">
+              Switch workspaces without leaving the keyboard —{' '}
+              <kbd className="font-medium text-neutral-300">⌘↑</kbd>{' '}
+              <kbd className="font-medium text-neutral-300">⌘↓</kbd>
+            </p>
+            <button
+              onClick={finishSwitchHint}
+              aria-label="Dismiss hint"
+              title="Got it"
+              className="shrink-0 -mr-0.5 h-4 w-4 grid place-items-center rounded text-neutral-600 hover:bg-[var(--surface-2)] hover:text-neutral-300"
+            >
+              <X size={11} />
+            </button>
+          </div>
+        )}
       </div>
     </aside>
   )
@@ -491,7 +542,11 @@ function WorkspaceRow({
         {...dnd.zoneProps(workspace.id)}
         // 이름 편집 중엔 드래그를 끈다 — draggable 조상 안에서는 입력 텍스트를 끌어 선택할 수 없다.
         draggable={editingName === null}
-        onClick={() => void select(workspace.id)}
+        onClick={() => {
+          void select(workspace.id)
+          // 마우스로만 전환하는 사용자에게만 ⌘↑/⌘↓ 힌트를 띄우기 위한 신호.
+          noteMouseSwitch()
+        }}
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault()

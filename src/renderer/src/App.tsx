@@ -5,6 +5,7 @@ import { useStore } from './store'
 import { nextPermissionMode } from './lib/permission'
 import { OPEN_REPO_SETTINGS_EVENT, openRepoSettings } from './lib/repoSettings'
 import { applyTheme } from './lib/theme'
+import { finishSwitchHint } from './lib/uiFlags'
 import TitleBar from './components/TitleBar'
 import { UpdateBanner } from './components/UpdateBanner'
 import Sidebar from './components/Sidebar'
@@ -112,7 +113,7 @@ export default function App(): React.JSX.Element {
     return () => window.removeEventListener(OPEN_REPO_SETTINGS_EVENT, onOpen)
   }, [])
 
-  // 키보드: ⇧⇥ 권한 모드 순환, ⌘1–9 워크스페이스 선택, ⌘[ / ⌘] 이전/다음.
+  // 키보드: ⇧⇥ 권한 모드 순환, ⌘1–9 워크스페이스 선택, ⌘[ / ⌘] · ⌘↑ / ⌘↓ 이전/다음.
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       const st = useStore.getState()
@@ -294,12 +295,17 @@ export default function App(): React.JSX.Element {
           e.preventDefault()
           void st.selectWorkspace(list[idx].id)
         }
-      } else if (e.key === '[' || e.key === ']') {
+      } else if (e.key === '[' || e.key === ']' || e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+        // ⌘↑/⌘↓ 는 ⌘[ / ⌘] 와 완전히 같은 동작의 별칭이다. 사이드바가 세로 목록이라
+        // 위/아래 방향키 쪽이 공간적으로 직관적이고, 괄호 키와 달리 키보드 레이아웃을 타지 않는다.
+        // (Composer 의 ↑/↓ 메시지 히스토리는 ⌘ 없는 경우만 처리하도록 막아 뒀다.)
         e.preventDefault()
         const cur = list.findIndex((w) => w.id === st.selectedWorkspaceId)
-        const delta = e.key === ']' ? 1 : -1
+        const delta = e.key === ']' || e.key === 'ArrowDown' ? 1 : -1
         const next = cur < 0 ? 0 : (cur + delta + list.length) % list.length
         void st.selectWorkspace(list[next].id)
+        // 단축키를 쓸 줄 아는 사용자에게 안내 힌트는 소음이다 — 첫 사용 시점에 영구히 끈다.
+        finishSwitchHint()
       }
     }
     window.addEventListener('keydown', onKey)

@@ -86,7 +86,7 @@ const STEPS: Step[] = [
     ),
     shortcuts: [
       { keys: '⌘1–9', label: 'Jump to a workspace' },
-      { keys: '⌘[ / ⌘]', label: 'Previous / next' }
+      { keys: '⌘↑ / ⌘↓', label: 'Previous / next' }
     ]
   },
   {

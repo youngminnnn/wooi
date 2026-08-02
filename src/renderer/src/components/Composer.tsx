@@ -586,6 +586,11 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
       .map((i) => i.text)
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
+    // ⌘ 조합은 입력창이 처리하지 않고 전역 단축키(App.tsx)로 흘려보낸다. 특히 ⌘↑/⌘↓ 는
+    // 워크스페이스 전환이라, 입력창에 포커스가 있어도(=대부분의 시간) 아래의 ↑/↓ 메시지 히스토리나
+    // 자동완성 메뉴 이동에 먹히면 안 된다.
+    if (e.metaKey) return
+
     // 자동완성 메뉴(슬래시 명령 / @파일)가 열려 있으면 방향키·Enter·Tab 을 메뉴 조작에 먼저 쓴다.
     // ↑ 는 아래의 메시지 히스토리 순회와 겹치므로 메뉴가 우선권을 갖는다.
     if (menuOpen || mentionOpen) {
@@ -1206,6 +1211,8 @@ function McpPanel({
   // 최신 상태를 보는 키 핸들러를 매 렌더 갱신하고, 리스너는 한 번만 바인딩한다(stale closure 방지).
   const handlerRef = useRef<(e: KeyboardEvent) => void>(() => {})
   handlerRef.current = (e: KeyboardEvent): void => {
+    // ⌘ 조합은 가로채지 않는다 — ⌘↑/⌘↓(워크스페이스 전환) 같은 전역 단축키가 카드 때문에 죽으면 안 된다.
+    if (e.metaKey) return
     if (!servers.length || !MCP_NAV_KEYS.includes(e.key)) return
     const stop = (): void => {
       e.preventDefault()
@@ -1969,6 +1976,8 @@ function PickerCard({
   // 최신 상태를 보는 키 핸들러를 매 렌더 갱신하고 리스너는 한 번만 바인딩한다(stale closure 방지).
   const handlerRef = useRef<(e: KeyboardEvent) => void>(() => {})
   handlerRef.current = (e: KeyboardEvent): void => {
+    // ⌘ 조합은 가로채지 않는다 — ⌘↑/⌘↓(워크스페이스 전환) 같은 전역 단축키가 카드 때문에 죽으면 안 된다.
+    if (e.metaKey) return
     if (!['ArrowUp', 'ArrowDown', 'Enter', 'Escape'].includes(e.key)) return
     e.preventDefault()
     e.stopPropagation()
