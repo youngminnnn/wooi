@@ -20,8 +20,7 @@ a few days.
 
 ## Supported versions
 
-Wooi is pre-1.0 and ships from `main`. Only the **latest release** receives
-security fixes.
+Only the **latest release** receives security fixes.
 
 ## Threat model & security posture
 
@@ -30,8 +29,9 @@ it does — and does not — do helps scope reports.
 
 **What Wooi does**
 
-- Runs **AI coding agents** (Claude Code, via the Claude Agent SDK) that can read
-  and write files inside isolated git worktrees, and execute tools/commands.
+- Runs **AI coding agents** (Claude Code via the Claude Agent SDK, or Codex via
+  the Codex CLI) that can read and write files inside isolated git worktrees,
+  and execute tools/commands.
 - Executes **git** and **`gh`** commands, per-workspace **login-shell terminals**,
   and user-provided **Setup / Dev / Archive scripts**.
 - Supports **inline shell commands** (messages starting with `!`) run in the
@@ -52,11 +52,12 @@ injection through unsanitized inputs are in scope.
 **Data & privacy**
 
 - Wooi collects **no analytics/telemetry** and has no servers of its own.
-- Prompts and code are sent to **Anthropic** through the Claude Agent SDK; PR
-  metadata is sent to **GitHub** via the `gh` CLI.
+- Prompts and code are sent to the provider for the selected agent: **Anthropic**
+  through the Claude Agent SDK, or **OpenAI** through the Codex CLI. PR metadata
+  is sent to **GitHub** via the `gh` CLI.
 - Settings and transcripts are stored **locally only**
   (`~/Library/Application Support/Wooi/`).
-- Wooi reuses the credentials of your installed Claude Code and `gh` CLIs.
+- Wooi reuses credentials managed by the installed Claude Code, Codex, and `gh` CLIs.
 
 See [`PRIVACY.md`](./PRIVACY.md) for details.
 
@@ -73,7 +74,6 @@ See [`PRIVACY.md`](./PRIVACY.md) for details.
 
 - Arbitrary code execution that results from a user intentionally running an
   agent, script, or `!` shell command.
-- Vulnerabilities in third-party CLIs (`git`, `gh`, Claude Code) or the models
+- Vulnerabilities in third-party CLIs (`git`, `gh`, Claude Code, Codex) or the models
   themselves — report those upstream.
-- The unsigned/ad-hoc-signed macOS build warning ("손상됨" / "damaged"); code
-  signing & notarization are planned for the 1.0 release.
+- Gatekeeper behavior caused by modifying or repackaging the signed and notarized app.

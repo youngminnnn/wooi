@@ -11,8 +11,9 @@ parallel, each on its own isolated git worktree. Each task runs in its own dedic
 worktree + branch + agent session, and every session starts with **an empty input box
 and no automatic prompt** — nothing runs until you send your first message.
 
-> **Agent support** — Wooi currently drives **Claude Code** (via the Claude
-> Agent SDK). Support for more agents such as **Codex** is planned.
+> **Agent support** — Since v1.4.0, Wooi supports both **Claude Code** (via the
+> Claude Agent SDK) and **OpenAI Codex** (via the Codex CLI). Choose an agent when
+> creating a workspace; that workspace keeps the selected agent for its lifetime.
 
 ## Why Wooi
 
@@ -65,20 +66,25 @@ also check manually in **Settings → About**.
 When you first launch Wooi, onboarding walks you through:
 
 1. **Consent** to the Terms / Privacy Policy (required to continue).
-2. **Signing in** to Claude and GitHub. If a CLI isn't installed, an install link is
-   shown, and sign-in finishes in-app through your browser. **GitHub is optional here —
+2. **Connecting** Claude Code or Codex, plus GitHub. You only need one coding agent.
+   If a CLI isn't installed, an install link is shown; Claude and Codex sign-in finish
+   in-app through your browser. Codex supports either a ChatGPT account or an OpenAI
+   API key. **GitHub is optional here —
    you can skip it** and start working right away. Wooi asks for it the first time you
    reach a feature that needs it (opening a PR, merging, stacking, CI checks), then
    resumes whatever you were doing once you're connected. You can change connections
    anytime under **Settings → Integrations**.
 
-Wooi **reuses the credentials of your installed Claude Code and `gh` CLIs** — no
-separate API key is needed.
+Wooi reuses the credentials of your installed Claude Code, Codex, and `gh` CLIs.
+An API key is not required when you sign in with a Claude or ChatGPT account.
 
 ### Requirements
 
 - macOS (Apple Silicon)
-- [Claude Code](https://claude.com/claude-code) — required, and signed in.
+- At least one supported coding agent, installed and signed in:
+  - [Claude Code](https://claude.com/claude-code)
+  - [OpenAI Codex CLI](https://developers.openai.com/codex) v0.128.0 or newer
+    (`npm i -g @openai/codex`)
 - `git`
 - `gh` (GitHub CLI) — **needed for the PR and stacking features**: creating/merging/
   closing PRs, stacked branches, and the Check tab. Everything that's pure `git` —
@@ -95,9 +101,13 @@ separate API key is needed.
   `witty-otter`) and branch off the repo's default branch. Turn on **manual setup** in
   Settings to choose the name and base branch yourself. Rename a workspace by
   double-clicking its name in the header.
+- **Choose Claude Code or Codex** when creating a workspace. Agent-specific models,
+  reasoning levels, permission modes, commands, and account usage are shown
+  automatically. The selected agent cannot be changed after creation.
 - **Per-workspace model & reasoning effort** — set from the status line above the input
   box, or by typing `/model` and `/effort`. When unset they follow the global settings;
-  changing them resumes the same conversation. Effort ranges through to **ultracode**.
+  changing them resumes the same conversation. Available models and effort levels
+  depend on the selected agent and model.
 - **Sessions resume across restarts** — your conversation context is restored, so the
   next message after a restart continues where you left off.
 
@@ -126,8 +136,9 @@ those chains itself with plain `git` and `gh` — no extra stacking CLI needed.
 
 ### Permissions
 
-- **Cycle permission modes with Shift+Tab** (same as Claude Code): default → accept
-  edits → plan → auto. The current mode is shown below the input box.
+- **Cycle permission modes with Shift+Tab.** Claude Code offers default, accept edits,
+  plan, and auto; Codex offers read only, auto, full access, and plan. The current mode
+  is shown below the input box.
 - Permission prompts offer **"Always allow"** (auto-approve that tool for the rest of
   the session) alongside Allow/Deny — Enter = Allow, Esc = Deny.
 
@@ -159,11 +170,11 @@ A tabbed panel on top plus an interactive terminal below (resizable split):
 
 ### Composing messages
 
-- **Slash-command autocomplete** — type `/` to see the Claude Code commands/skills
-  available in that worktree.
+- **Slash-command autocomplete** — type `/` to see the commands available for the
+  workspace's selected agent.
 - **File mentions** — type `@` to fuzzy-search the worktree and pull a file into your
   message, so the agent gets its contents without hunting for it first. The menu shows
-  each file's size and warns when a file is big enough that Claude Code may truncate or
+  each file's size and warns when a file is big enough that the agent may truncate or
   skip it. Directory mentions (`@src/`) attach a listing. In the **All files** viewer,
   **Mention** adds the open file — select lines first and it narrows to just that range
   (`@src/app.ts#L40-80`).
@@ -189,8 +200,9 @@ A tabbed panel on top plus an interactive terminal below (resizable split):
 ## Privacy / Data
 
 - Wooi has no servers of its own and **collects no analytics/telemetry**.
-- Prompts and code are sent to **Anthropic** through the Claude Agent SDK. When you use
-  the PR features, metadata is sent to **GitHub** via the `gh` CLI.
+- Prompts and code are sent to the provider for the agent you select: **Anthropic**
+  through the Claude Agent SDK, or **OpenAI** through the Codex CLI. When you use the
+  PR features, metadata is sent to **GitHub** via the `gh` CLI.
 - Settings and conversation transcripts are stored **locally only**
   (`~/Library/Application Support/Wooi/`).
 - See [`PRIVACY.md`](./PRIVACY.md) and [`TERMS.md`](./TERMS.md) for details.

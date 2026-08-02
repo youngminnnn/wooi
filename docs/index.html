@@ -16,7 +16,7 @@
       property="og:description"
       content="Independent work runs in parallel worktrees. Dependent work stacks — and Wooi keeps the stack straight for you."
     />
-    <meta property="og:image" content="https://youngminnnn.github.io/wooi/og.png?v=4" />
+    <meta property="og:image" content="https://youngminnnn.github.io/wooi/og.png?v=5" />
     <meta name="theme-color" content="#0a0b0d" />
 
     <!-- 파비콘은 16px 로 줄어들어 한글 "우이"(icon.svg)가 뭉개지므로 축약형 W 마크를 쓴다. -->
@@ -786,8 +786,8 @@
     <div class="hero wrap">
       <div class="badge">
         <span class="dot"></span>
-        <span class="en">macOS · Powered by Claude Code</span>
-        <span class="ko">macOS · Claude Code 기반</span>
+        <span class="en">macOS · Claude Code + Codex</span>
+        <span class="ko">macOS · Claude Code + Codex 지원</span>
       </div>
 
       <h1>
@@ -1020,16 +1020,15 @@
 
         <div class="note">
           <span class="en"
-            ><strong>Agent support:</strong> Wooi currently drives <strong>Claude Code</strong> via
-            the Claude Agent SDK, reusing your installed Claude Code and <code>gh</code> credentials
-            — no separate API key. Support for more agents such as <strong>Codex</strong> is
-            planned.</span
+            ><strong>Agent support:</strong> Since v1.4.0, Wooi supports both
+            <strong>Claude Code</strong> and <strong>OpenAI Codex</strong>. Choose an agent when you
+            create a workspace; models, reasoning effort, permissions, and commands adapt to that
+            backend.</span
           >
           <span class="ko"
-            ><strong>에이전트 지원:</strong> Wooi 는 현재 Claude Agent SDK 를 통해
-            <strong>Claude Code</strong> 를 구동하며, 설치된 Claude Code 와 <code>gh</code> 의
-            로그인 정보를 그대로 사용합니다 — 별도 API 키가 필요 없습니다. 앞으로
-            <strong>Codex</strong> 등 더 다양한 에이전트를 지원할 예정입니다.</span
+            ><strong>에이전트 지원:</strong> v1.4.0부터 <strong>Claude Code</strong>와
+            <strong>OpenAI Codex</strong>를 모두 지원합니다. 워크스페이스를 만들 때 에이전트를
+            선택하면 모델·reasoning effort·권한·명령이 해당 백엔드에 맞게 표시됩니다.</span
           >
         </div>
       </div>
@@ -1086,17 +1085,32 @@
               </li>
               <li>
                 <strong
+                  ><span class="en">Choose Claude Code or Codex</span
+                  ><span class="ko">Claude Code 또는 Codex 선택</span></strong
+                >
+                —
+                <span class="en"
+                  >pick the coding agent when creating a workspace. The workspace keeps that agent
+                  for its lifetime.</span
+                >
+                <span class="ko"
+                  >워크스페이스를 만들 때 코딩 에이전트를 고릅니다. 선택한 에이전트는 생성 후에도
+                  유지됩니다.</span
+                >
+              </li>
+              <li>
+                <strong
                   ><span class="en">Per-workspace model & effort</span
                   ><span class="ko">워크스페이스별 모델·effort</span></strong
                 >
                 —
                 <span class="en"
                   >set from the status line or by typing <code>/model</code> and
-                  <code>/effort</code>. Effort ranges through to <strong>ultracode</strong>.</span
+                  <code>/effort</code>. Options depend on the selected agent and model.</span
                 >
                 <span class="ko"
-                  >상태줄에서 고르거나 <code>/model</code>·<code>/effort</code> 로 바꿉니다. effort
-                  는 <strong>ultracode</strong> 까지 단계가 있습니다.</span
+                  >상태줄에서 고르거나 <code>/model</code>·<code>/effort</code> 로 바꿉니다.
+                  선택지는 에이전트와 모델에 따라 달라집니다.</span
                 >
               </li>
               <li>
@@ -1234,12 +1248,12 @@
                 >
                 —
                 <span class="en"
-                  >same as Claude Code: default → accept edits → plan → auto. The current mode is
-                  shown below the input box.</span
+                  >Claude Code offers default, accept edits, plan, and auto; Codex offers read only,
+                  auto, full access, and plan.</span
                 >
                 <span class="ko"
-                  >Claude Code 와 동일: default → accept edits → plan → auto. 현재 모드는 입력창
-                  아래에 표시됩니다.</span
+                  >Claude Code는 default·accept edits·plan·auto를, Codex는 read only·auto·full
+                  access·plan을 제공합니다.</span
                 >
               </li>
               <li>
@@ -1394,11 +1408,11 @@
                 >
                 —
                 <span class="en"
-                  >type <code>/</code> to see the Claude Code commands/skills available in that
-                  worktree.</span
+                  >type <code>/</code> to see the commands available for the workspace's selected
+                  agent.</span
                 >
                 <span class="ko"
-                  ><code>/</code> 를 치면 해당 worktree 에서 쓸 수 있는 명령/스킬 목록이
+                  ><code>/</code> 를 치면 워크스페이스에서 선택한 에이전트가 지원하는 명령 목록이
                   뜹니다.</span
                 >
               </li>
@@ -1531,14 +1545,16 @@
               </h3>
               <p>
                 <span class="en"
-                  >Consent to the Terms/Privacy, then sign in to Claude — it finishes in-app via
-                  your browser. GitHub is optional at this point: skip it and start working, and
-                  Wooi will ask the first time you open a PR, merge, stack a branch or check CI,
-                  then resume what you were doing.</span
+                  >Consent to the Terms/Privacy, then connect Claude Code or Codex — you only need
+                  one. Sign-in finishes in-app; Codex accepts ChatGPT or an OpenAI API key. GitHub
+                  is optional at this point: skip it and start working, and Wooi will ask the first
+                  time you open a PR, merge, stack a branch or check CI, then resume what you were
+                  doing.</span
                 >
                 <span class="ko"
-                  >약관·개인정보처리방침에 동의한 뒤 Claude 에 로그인합니다(앱 안에서 브라우저로
-                  마무리). GitHub 은 이 단계에서 건너뛸 수 있습니다 — 바로 작업을 시작하면, PR
+                  >약관·개인정보처리방침에 동의한 뒤 Claude Code 또는 Codex를 연결합니다. 둘 중
+                  하나만 있으면 되며, Codex는 ChatGPT 또는 OpenAI API 키로 연결할 수 있습니다.
+                  GitHub 은 이 단계에서 건너뛸 수 있습니다 — 바로 작업을 시작하면, PR
                   생성·머지·스택·Check 를 처음 쓰는 순간 Wooi 가 연결을 요청하고 연결 후 원래 하려던
                   동작을 이어서 실행합니다.</span
                 >
@@ -1556,10 +1572,10 @@
             <p><span class="en">Apple Silicon.</span><span class="ko">Apple Silicon.</span></p>
           </div>
           <div class="req">
-            <h4>Claude Code <span class="tag req-req">req</span></h4>
+            <h4>Coding agent <span class="tag req-req">req</span></h4>
             <p>
-              <span class="en">Installed and signed in.</span
-              ><span class="ko">설치·로그인된 상태.</span>
+              <span class="en">Claude Code, or Codex CLI v0.128.0+.</span
+              ><span class="ko">Claude Code 또는 Codex CLI v0.128.0 이상.</span>
             </p>
           </div>
           <div class="req">
@@ -1628,12 +1644,13 @@
             </h3>
             <p>
               <span class="en"
-                >Prompts & code go to Anthropic via the Claude Agent SDK; PR metadata goes to GitHub
-                via the <code>gh</code> CLI.</span
+                >Prompts & code go to the selected agent's provider — Anthropic for Claude Code or
+                OpenAI for Codex. PR metadata goes to GitHub via the <code>gh</code> CLI.</span
               >
               <span class="ko"
-                >프롬프트·코드는 Claude Agent SDK 로 Anthropic 에, PR 메타데이터는
-                <code>gh</code> CLI 로 GitHub 에 전송됩니다.</span
+                >프롬프트·코드는 선택한 에이전트의 제공자(Claude Code는 Anthropic, Codex는
+                OpenAI)에게 전송됩니다. PR 메타데이터는 <code>gh</code> CLI로 GitHub에
+                전송됩니다.</span
               >
             </p>
           </div>
