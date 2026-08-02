@@ -1,4 +1,5 @@
 import type {
+  AppNotice,
   AppState,
   AppSettings,
   AuthStatus,
@@ -284,6 +285,17 @@ export interface WooiApi {
     quitAndInstall(): Promise<void>
   }
 
+  /**
+   * 원격 공지(상단 배너). 앱 버전과 무관하게 메시지를 띄우기 위해 main 이 원격 JSON 을
+   * 주기적으로 가져온다. "닫음" 기록은 기기 로컬(uiFlags)이라 여기엔 없다.
+   */
+  notice: {
+    /** 마지막으로 가져온 공지 목록(새로 받아오지 않는다 — 렌더러 초기화용). */
+    getActive(): Promise<AppNotice[]>
+    /** 지금 즉시 다시 가져온다. 실패하면 직전 목록이 그대로 돌아온다. */
+    refresh(): Promise<AppNotice[]>
+  }
+
   openExternal(url: string): Promise<void>
 
   settings: {
@@ -334,4 +346,5 @@ export interface WooiApi {
   onGithubLogin(cb: (e: GithubLoginEvent) => void): () => void
   /** 자동 업데이트 상태 변화(확인 중/발견/다운로드/준비됨/오류) 구독. */
   onUpdate(cb: (status: UpdateStatus) => void): () => void
+  onNotice(cb: (notices: AppNotice[]) => void): () => void
 }

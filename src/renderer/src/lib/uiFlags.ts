@@ -7,6 +7,15 @@
  * 한 번 더 보이는 정도의 비용이다.
  */
 
+/**
+ * 이 원격 공지를 사용자가 닫았는지. 닫으면 그 id 는 다시 뜨지 않는다.
+ *
+ * 기기 로컬로 두는 이유는 이 파일의 원칙 그대로다 — main 이 알아야 할 도메인 상태가 아니고,
+ * 실패해도 "공지가 한 번 더 보인다" 정도의 비용이다. 대신 **공지 id 는 재사용하면 안 된다**:
+ * 이미 닫은 사람에겐 새 내용이 영영 안 보이기 때문이다.
+ */
+export const noticeDismissedFlag = (id: string): string => `noticeDismissed.${id}`
+
 /** 사이드바 ⌘K 힌트를 사용자가 닫았는지. */
 export const QUICK_SWITCH_HINT_DISMISSED = 'quickSwitchHintDismissed'
 

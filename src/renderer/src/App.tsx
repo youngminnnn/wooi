@@ -8,6 +8,7 @@ import { applyTheme } from './lib/theme'
 import { finishSwitchHint } from './lib/uiFlags'
 import TitleBar from './components/TitleBar'
 import { UpdateBanner } from './components/UpdateBanner'
+import { NoticeBanner } from './components/NoticeBanner'
 import Sidebar from './components/Sidebar'
 import ChatView from './components/ChatView'
 import WorkArea from './components/WorkArea'
@@ -361,6 +362,8 @@ export default function App(): React.JSX.Element {
   return (
     <div className="h-full flex flex-col bg-[var(--bg)]">
       <TitleBar onOpenSettings={() => setShowSettings(true)} />
+
+      <NoticeBanner />
 
       <UpdateBanner />
 

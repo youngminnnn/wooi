@@ -1004,6 +1004,11 @@ export const IPC = {
   updateGetStatus: 'update:getStatus',
   /** 다운로드된 업데이트를 설치하기 위해 앱을 재시작한다. */
   updateQuitAndInstall: 'update:quitAndInstall',
+  // 원격 공지(앱 재배포 없이 상단 배너로 알리는 메시지)
+  /** 마지막으로 가져온 공지 목록을 읽는다(렌더러 초기화용 — 새로 받아오지 않는다). */
+  noticeGetActive: 'notice:getActive',
+  /** 지금 즉시 원격 공지를 다시 가져온다(설정 화면 등에서 수동 확인). */
+  noticeRefresh: 'notice:refresh',
 
   // 단방향 이벤트 (main.send → renderer.on)
   evtChat: 'evt:chat',
@@ -1030,7 +1035,9 @@ export const IPC = {
   /** 앱 내부 GitHub 로그인 진행 이벤트(one-time 코드·디바이스 URL 노출 / 완료). */
   evtGithubLogin: 'evt:githubLogin',
   /** 자동 업데이트 상태 변화(확인 중/최신/발견/다운로드 진행/준비됨/오류). */
-  evtUpdate: 'evt:update'
+  evtUpdate: 'evt:update',
+  /** 원격 공지 목록이 갱신됨(main 이 주기적으로 가져온 결과). */
+  evtNotice: 'evt:notice'
 } as const
 
 // ── IPC 페이로드 타입 ────────────────────────────────────────────────────
@@ -1053,6 +1060,25 @@ export interface UpdateStatus {
   percent?: number
   /** error/blocked 일 때 메시지. */
   error?: string
+}
+
+/** 공지의 심각도. 배너 색과 아이콘을 고른다. */
+export type NoticeLevel = 'info' | 'warn' | 'critical'
+
+/**
+ * 원격 공지 한 건(main → renderer, evtNotice 페이로드의 원소).
+ *
+ * 앱 버전과 무관하게 띄우기 위해 원격 JSON 에서 가져오므로, 필드는 **모두 방어적으로 파싱**된다
+ * (`parseNotices` 참고). 여기 도달한 값은 이미 검증·정규화가 끝난 것만 담긴다.
+ */
+export interface AppNotice {
+  /** 공지 식별자. 사용자가 닫은 기록은 이 id 로 기억되므로 **한 번 쓴 id 는 재사용하지 않는다**. */
+  id: string
+  level: NoticeLevel
+  /** 배너에 그대로 보이는 한 줄 메시지(플레인 텍스트). */
+  message: string
+  /** 오른쪽에 붙는 링크 버튼. 외부 브라우저로 열린다(http/https 만 허용). */
+  link?: { label: string; url: string }
 }
 
 export interface CreateWorkspaceArgs {
