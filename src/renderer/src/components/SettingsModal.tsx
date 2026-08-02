@@ -46,6 +46,7 @@ export default function SettingsModal({
       [event]: { ...n[event], [channel]: !n[event][channel] }
     }))
   const [defaultRightPanelOpen, setDefaultRightPanelOpen] = useState(settings.defaultRightPanelOpen)
+  const [showRunningAgents, setShowRunningAgents] = useState(settings.showRunningAgents)
   const [model, setModel] = useState(settings.model ?? MODEL_OPTIONS[0].id)
   const [effort, setEffort] = useState<EffortSetting | null>(settings.effort)
   const [fastMode, setFastMode] = useState(settings.fastMode)
@@ -70,6 +71,7 @@ export default function SettingsModal({
       soundOnComplete: notifications.completed.sound,
       autoCompact,
       defaultRightPanelOpen,
+      showRunningAgents,
       model,
       effort,
       fastMode,
@@ -160,6 +162,22 @@ export default function SettingsModal({
               <span className="block text-xs text-neutral-600">
                 Starting state for the right-side work panel (files, changes, terminal). Toggling it
                 with ⌘J is remembered and takes over from here.
+              </span>
+            </span>
+          </label>
+
+          <label className="flex items-start gap-2.5 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={showRunningAgents}
+              onChange={(e) => setShowRunningAgents(e.target.checked)}
+              className="accent-blue-600 h-3.5 w-3.5 mt-0.5"
+            />
+            <span className="text-sm text-neutral-300">
+              Show running agents in the sidebar
+              <span className="block text-xs text-neutral-600">
+                Lists the subagents each workspace is running right now, under its sidebar row. Each
+                list can also be collapsed individually.
               </span>
             </span>
           </label>

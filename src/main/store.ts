@@ -56,6 +56,10 @@ const DEFAULT_SETTINGS: AppSettings = {
   notifications: DEFAULT_NOTIFICATION_SETTINGS,
   // 우측 작업 패널은 기본 펼침. 기존 사용자도 load 의 기본값 병합으로 펼침을 유지한다.
   defaultRightPanelOpen: true,
+  // 실행 중인 서브에이전트 목록은 기본 켜짐 — 병렬로 도는 작업을 보여 주는 것이 이 앱의 본령이라
+  // 옵트인으로 숨겨 둘 이유가 없다. 기존 사용자도 load 의 기본값 병합으로 켜진 상태가 되므로
+  // schemaVersion 을 올릴 필요가 없다.
+  showRunningAgents: true,
   // CLI 와 동일하게 자동 압축을 기본 켜둔다(autoCompactEnabled). 압축을 트리거하는 임계치는
   // Claude Code 가 모델별로 알려주는 값을 그대로 쓴다(session.ts 의 overAutoCompactThreshold).
   autoCompact: true,

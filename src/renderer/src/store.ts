@@ -9,6 +9,7 @@ import type {
   ImageAttachment,
   PermissionRequest,
   PrStatus,
+  RunningAgent,
   ScriptKind,
   ScriptStatus,
   StackCascadeResult,
@@ -146,6 +147,19 @@ interface UIState {
   unread: Record<string, boolean>
   /** workspace 가 실행(running) 상태로 진입한 시각(epoch ms). 경과 시간 표시용. */
   runningSince: Record<string, number>
+  /**
+   * workspace 별로 지금 살아 있는 서브에이전트 목록(사이드바 "Running agents" 패널).
+   * 'agents' 이벤트가 전량을 실어 오므로 병합하지 않고 통째로 교체한다. 영속되지 않는 휘발성
+   * 상태이므로, 앱을 다시 띄우면 비어 있는 것이 정상이다(그 시점엔 세션도 죽어 있다).
+   */
+  runningAgents: Record<string, RunningAgent[]>
+  /**
+   * workspace 별 에이전트 목록 접힘 상태(true = 접힘). 기본값은 펼침이다.
+   *
+   * 영속하지 않는다 — 에이전트 자체가 휘발성이라(세션이 끝나면 사라진다) 접힘 상태만 디스크에
+   * 남으면 다음 실행에서 "왜 안 보이지"가 되기 쉽다. 지금 시끄러운 워크트리를 잠시 접는 용도다.
+   */
+  agentsCollapsed: Record<string, boolean>
   /** workspace 전환에도 살아남아야 하는 입력창 초안. */
   drafts: Record<string, string>
   /**
@@ -227,6 +241,8 @@ interface UIState {
   resetTranscript: (workspaceId: string) => void
   setScrollPosition: (workspaceId: string, top: number) => void
   setScriptPanelOpen: (workspaceId: string, open: boolean) => void
+  /** 해당 workspace 의 에이전트 목록 접힘 상태를 뒤집는다. */
+  toggleAgentsCollapsed: (workspaceId: string) => void
   setRightWidth: (px: number) => void
   toggleRightPanel: () => void
   setRightPanelOpen: (open: boolean) => void
@@ -296,6 +312,8 @@ export const useStore = create<UIState>((set, get) => ({
   compacting: {},
   unread: {},
   runningSince: {},
+  runningAgents: {},
+  agentsCollapsed: {},
   drafts: {},
   messageQueue: {},
   scrollPositions: {},
@@ -547,6 +565,17 @@ export const useStore = create<UIState>((set, get) => ({
             return { compacting }
           })
         }
+        // 실행 중이 아닌 workspace 에 살아 있는 서브에이전트가 있을 수는 없다(세션의 syncStatus 는
+        // 서브에이전트가 남아 있으면 running 을 유지한다). 그래서 idle/error 를 보면 목록을 비운다 —
+        // 호스트가 죽어 종료 알림이 아예 오지 않는 경로에서 스피너가 영구히 남는 것을 막는 안전망.
+        if (event.type === 'status' && event.status !== 'running') {
+          set((s) => {
+            if (!s.runningAgents[workspaceId]) return {}
+            const runningAgents = { ...s.runningAgents }
+            delete runningAgents[workspaceId]
+            return { runningAgents }
+          })
+        }
         // 턴이 정상 종료되면 대기 큐에 쌓인 후속 메시지를 순서대로 전송한다(취소 기회는 여기서 끝).
         // 에러 종료 시에는 자동 전송하지 않고 큐를 남겨, 사용자가 검토/취소하도록 둔다.
         if (event.type === 'status' && event.status === 'idle') {
@@ -596,6 +625,15 @@ export const useStore = create<UIState>((set, get) => ({
         patchWorkspace(set, get, workspaceId, (w) => {
           w.fastModeState = event.state
           w.fastModeReason = event.reason ?? null
+        })
+      } else if (event.type === 'agents') {
+        // REPLACE 시맨틱 — 전량이 실려 오므로 병합하지 않는다. 빈 배열이면 키를 지워, 사이드바가
+        // 워크스페이스를 세는 자리에서 "빈 배열이 있는 키"를 따로 걸러내지 않아도 되게 한다.
+        set((s) => {
+          const runningAgents = { ...s.runningAgents }
+          if (event.agents.length === 0) delete runningAgents[workspaceId]
+          else runningAgents[workspaceId] = event.agents
+          return { runningAgents }
         })
       }
     })
@@ -967,6 +1005,11 @@ export const useStore = create<UIState>((set, get) => ({
 
   setScriptPanelOpen: (workspaceId, open) =>
     set((s) => ({ scriptPanelOpen: { ...s.scriptPanelOpen, [workspaceId]: open } })),
+
+  toggleAgentsCollapsed: (workspaceId) =>
+    set((s) => ({
+      agentsCollapsed: { ...s.agentsCollapsed, [workspaceId]: !s.agentsCollapsed[workspaceId] }
+    })),
 
   // 우측 패널 너비 — 대화/터미널이 너무 좁아지지 않도록 양끝을 클램프한다.
   setRightWidth: (px) => set({ rightWidth: Math.max(320, Math.min(900, Math.round(px))) }),
