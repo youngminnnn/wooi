@@ -2,6 +2,7 @@ import { query } from '@anthropic-ai/claude-agent-sdk'
 import type { SDKMessage, SDKUserMessage, PermissionResult } from '@anthropic-ai/claude-agent-sdk'
 import { resolveClaudeExecutable } from './executable'
 import { MCP_SETTING_SOURCES } from './mcp'
+import { CLAUDE_CODE_SYSTEM_PROMPT } from './systemPrompt'
 import type { EffortSetting } from '@shared/types'
 
 // session.ts 와 동일 — 패키징 빌드에서 app.asar 내부 경로로 CLI 를 spawn 해 ENOTDIR 로
@@ -41,6 +42,9 @@ export async function askSideQuestion(opts: SideQuestionOptions): Promise<void> 
     options: {
       cwd: opts.cwd,
       includePartialMessages: true,
+      // 메인 세션과 같은 프롬프트 위에서 답하도록 preset 을 명시한다 — 생략하면 SDK 가 빈
+      // 프롬프트로 덮어써 답변 톤·형식이 본 대화와 어긋난다(자세한 이유는 systemPrompt.ts).
+      systemPrompt: CLAUDE_CODE_SYSTEM_PROMPT,
       maxTurns: 1,
       allowedTools: [],
       canUseTool: denyAllTools,

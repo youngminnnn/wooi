@@ -9,6 +9,7 @@ import { AsyncQueue } from './asyncQueue'
 import { clampText, clampInput } from './clamp'
 import { resolveClaudeExecutable } from './executable'
 import { sessionTranscriptExists } from './sessionFiles'
+import { CLAUDE_CODE_SYSTEM_PROMPT } from './systemPrompt'
 import { log } from '../logger'
 import { MCP_SETTING_SOURCES, resolveUserMcpServers } from './mcp'
 import { fastModeReasonText } from '@shared/types'
@@ -520,6 +521,9 @@ export class ClaudeSession {
         options: {
           cwd: this.deps.cwd,
           includePartialMessages: true,
+          // Claude Code 의 기본 시스템 프롬프트를 그대로 쓴다 — 생략하면 SDK 가 빈 프롬프트로
+          // 덮어써 행동 지침이 통째로 빠진다(자세한 이유는 systemPrompt.ts 주석).
+          systemPrompt: CLAUDE_CODE_SYSTEM_PROMPT,
           // /rewind 가 동작하도록 편집 전 파일 스냅샷을 남긴다(세션 단위). resume 옵션과는
           // 호환되며(sessionStore 와 달리), 켜두기만 하면 추적 비용은 무시할 만하다.
           enableFileCheckpointing: true,
