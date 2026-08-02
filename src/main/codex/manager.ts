@@ -257,7 +257,7 @@ export class CodexSessionManager implements AgentBackend {
     // Claude Code 는 `/compact` 를 CLI 가 직접 해석하지만, Codex 로는 그냥 모델에게 가는 텍스트가
     // 된다("압축해 줘"라고 말을 거는 셈). 전용 RPC 로 돌려 실제로 압축되게 한다.
     if (!images?.length && text.trim() === '/compact') {
-      this.sendIfHost({ type: 'compact', workspaceId })
+      this.send({ type: 'compact', workspaceId, config: this.configFor(ws) })
       return
     }
 
@@ -474,7 +474,8 @@ export class CodexSessionManager implements AgentBackend {
 
   /** /compact — 대화 압축을 시작한다. 진행 상황은 일반 턴 이벤트로 흘러온다. */
   compact(workspaceId: string): void {
-    this.sendIfHost({ type: 'compact', workspaceId })
+    const ws = this.getWorkspace(workspaceId)
+    if (ws) this.send({ type: 'compact', workspaceId, config: this.configFor(ws) })
   }
 
   mcpAction(): Promise<McpServerInfo[]> {

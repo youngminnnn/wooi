@@ -489,10 +489,11 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
       mediaType,
       dataBase64
     }))
-    // 실행 중이면 백엔드로 바로 보내지 않고 대기 큐에 넣는다 — 칩으로 표시되고 취소할 수 있으며,
-    // 현재 턴이 끝나면(idle) 순서대로 자동 전송된다. 실행 중이 아니면 즉시 전송.
+    // steering 미지원 백엔드만 실행 중 메시지를 대기 큐에 넣는다. Codex 같이
+    // steering 지원 시에는 즉시 전송해 현재 턴에 반영한다.
     setPickerCard(null)
-    if (running) enqueueMessage(workspace.id, trimmed, payload.length ? payload : undefined)
+    if (running && !backend?.capabilities.steering)
+      enqueueMessage(workspace.id, trimmed, payload.length ? payload : undefined)
     else void window.api.chat.send(workspace.id, trimmed, payload.length ? payload : undefined)
     setText('')
     setImages([])

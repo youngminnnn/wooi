@@ -355,8 +355,32 @@ describe('압축', () => {
 // 이 그룹이 이 파일에서 가장 중요하다 — codex 는 우리가 고정할 수 없는 사용자 설치본이라,
 // 모르는 입력에 throw 하면 대화가 통째로 멈춘다.
 describe('알 수 없는 입력에 견디기', () => {
-  it('사용자 메시지는 무시한다(Wooi 가 이미 로컬에서 에코했다)', () => {
-    expect(map(NOTIFY.itemCompleted, { item: { type: 'userMessage' } }).events).toHaveLength(0)
+  it('확정된 사용자 메시지와 이미지를 표시·영속화한다', () => {
+    const r = map(NOTIFY.itemCompleted, {
+      item: {
+        id: 'u1',
+        type: 'userMessage',
+        content: [
+          { type: 'text', text: 'hello' },
+          { type: 'localImage', path: '/tmp/screenshot.webp' }
+        ]
+      }
+    })
+    expect(items(r)[0]).toMatchObject({
+      id: 'codex:u1',
+      type: 'user',
+      text: 'hello',
+      attachments: [{ name: 'screenshot.webp', mediaType: 'image/webp' }]
+    })
+    expect(r.persist).toHaveLength(1)
+  })
+
+  it('진행 중인 사용자 메시지는 중복 표시하지 않는다', () => {
+    expect(
+      map(NOTIFY.itemStarted, {
+        item: { id: 'u1', type: 'userMessage', content: [{ type: 'text', text: 'hello' }] }
+      }).events
+    ).toHaveLength(0)
   })
 
   it('모르는 아이템 타입은 조용히 넘긴다', () => {

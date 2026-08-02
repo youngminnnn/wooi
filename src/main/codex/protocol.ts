@@ -49,7 +49,7 @@ export type CodexCommand =
   /** /context·/usage·/permissions 카드용 데이터 조회. */
   | { type: 'runCommand'; reqId: string; workspaceId: string; kind: CommandPanelKind }
   /** /compact — 대화 압축을 시작한다(진행 상황은 일반 턴 알림으로 흐른다). */
-  | { type: 'compact'; workspaceId: string }
+  | { type: 'compact'; workspaceId: string; config: CodexConfig }
   // ── 계정 (app-server 의 account/* 를 호스트 경유로 호출) ──────────────────
   // app-server 프로세스를 하나로 유지하기 위해 계정 조회도 같은 호스트를 지난다 —
   // 별도 연결을 두면 로그인 상태의 출처가 둘로 갈라진다.

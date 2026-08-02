@@ -1,4 +1,5 @@
 import type { ChatEvent, ChatItem, PermissionRequest } from '@shared/types'
+import { basename, extname } from 'node:path'
 import { clampText } from '../claude/clamp'
 import { NOTIFY, type CodexDecision, type FileUpdateChange, type ThreadItem } from './wire'
 import type {
@@ -210,9 +211,38 @@ function mapItem(
   const id = itemId(item.id, `${item.type}:${ts}`)
 
   switch (item.type) {
-    // 사용자 메시지는 Wooi 가 이미 로컬에서 에코했다 — 다시 넣으면 중복으로 보인다.
-    case 'userMessage':
-      return NOTHING
+    case 'userMessage': {
+      // Claude SDK 경로와 달리 Codex 전송 경로는 renderer 로컬 에코가 없다.
+      // app-server가 확정한 UserInput을 정본으로 삼아 표시·영속화한다.
+      if (!done) return NOTHING
+      const content = item.content ?? []
+      const text = content
+        .filter((part) => part.type === 'text' && typeof part.text === 'string')
+        .map((part) => part.text)
+        .join('\n')
+      const attachments = content.flatMap((part) => {
+        if (part.type !== 'localImage' && part.type !== 'image') return []
+        const source = part.path ?? part.url ?? part.name ?? 'image.png'
+        const ext = extname(source).toLowerCase()
+        const mediaType =
+          ext === '.jpg' || ext === '.jpeg'
+            ? ('image/jpeg' as const)
+            : ext === '.gif'
+              ? ('image/gif' as const)
+              : ext === '.webp'
+                ? ('image/webp' as const)
+                : ('image/png' as const)
+        return [{ name: basename(source) || 'image.png', mediaType }]
+      })
+      const chat: ChatItem = {
+        id,
+        type: 'user',
+        text,
+        ts,
+        ...(attachments.length ? { attachments } : {})
+      }
+      return { events: [{ type: 'item', item: chat }], persist: [chat] }
+    }
 
     case 'agentMessage': {
       const chat: ChatItem = {

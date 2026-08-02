@@ -282,7 +282,7 @@ async function handle(msg: CodexCommand): Promise<void> {
       break
 
     case 'compact':
-      await threads.get(msg.workspaceId)?.compact()
+      await ensure(msg.workspaceId, msg.config).compact()
       break
 
     case 'accountStatus':

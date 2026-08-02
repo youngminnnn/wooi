@@ -59,13 +59,20 @@ export interface ThreadItem {
 
   /** agentMessage · plan · error */
   text?: string
+  /** userMessage — app-server v2 UserInput 목록. */
+  content?: Array<{
+    type?: string
+    text?: string
+    path?: string
+    url?: string
+    name?: string
+  }>
   /** error */
   message?: string
 
   /** reasoning — 스트리밍되는 추론 요약(대부분의 OpenAI 모델) */
   summary?: string[] | string
   /** reasoning — 원시 추론 블록(일부 오픈소스 모델) */
-  content?: unknown
 
   /** commandExecution */
   command?: string

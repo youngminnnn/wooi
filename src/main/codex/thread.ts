@@ -139,13 +139,13 @@ export class CodexThread {
 
   /**
    * 대화 압축을 시작한다(/compact). 진행 상황과 결과는 일반 턴/아이템 알림으로 흘러오므로
-   * 여기서는 요청만 보낸다. 스레드가 아직 없으면 압축할 것도 없다.
+   * 여기서는 요청만 보낸다. 앱 재시작 직후라면 저장된 threadId 로 먼저 재개한다.
    */
   async compact(): Promise<void> {
-    if (!this.threadId) return
     try {
       const rpc = await this.deps.rpc()
-      await rpc.request(RPC.threadCompact, { threadId: this.threadId })
+      const threadId = await this.ensureThread(rpc)
+      await rpc.request(RPC.threadCompact, { threadId })
     } catch (err) {
       this.fail(err)
     }
