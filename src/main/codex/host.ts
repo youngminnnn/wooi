@@ -65,7 +65,7 @@ async function rpc(): Promise<RpcClient> {
       onNotification: routeNotification,
       requestHandlers: {
         [SERVER_REQUEST.commandApproval]: (params) => approve(params, mapCommandApproval),
-        [SERVER_REQUEST.fileChangeApproval]: (params) => approve(params, mapFileChangeApproval),
+        [SERVER_REQUEST.fileChangeApproval]: (params) => approveFileChange(params),
         [SERVER_REQUEST.requestUserInput]: (params) => answer(params)
       },
       onExit: onServerExit
@@ -134,14 +134,27 @@ async function approve(params: unknown, toRequest: ApprovalMapper): Promise<{ de
 }
 
 /**
+ * 파일 변경 승인 — 요청에 diff 가 없으므로, 같은 itemId 의 fileChange 아이템에서 꺼내 붙인다.
+ * 그래야 사용자가 무엇을 승인하는지 보고 결정할 수 있다.
+ */
+async function approveFileChange(params: unknown): Promise<{ decision: string }> {
+  const p = params as { threadId?: string; itemId?: string }
+  const changes = p.itemId ? (threadFor(p.threadId ?? '')?.fileChanges(p.itemId) ?? []) : []
+  const decision = await prompt(params, mapFileChangeApproval(p as never, changes))
+  return { decision: toCodexDecision(decision) }
+}
+
+/**
  * 질문 요청 — 기존 AskUserQuestion UI 를 그대로 쓴다.
  *
  * 그 UI 는 답을 "질문문 → 답" 객체로 돌려주는데 codex 는 질문 순서대로의 배열을 기대하므로,
  * answersFor 가 변환한다. 거절(취소)이면 빈 배열을 보내 codex 가 진행을 결정하게 한다.
  */
-async function answer(params: unknown): Promise<{ answers: string[] }> {
+async function answer(
+  params: unknown
+): Promise<{ answers: Record<string, { answers: string[] }> }> {
   const decision = await prompt(params, mapUserInputRequest(params as never))
-  if (decision.behavior !== 'allow') return { answers: [] }
+  if (decision.behavior !== 'allow') return { answers: {} }
   return { answers: answersFor(params as never, decision.updatedInput) }
 }
 

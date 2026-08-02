@@ -10,9 +10,10 @@ import type {
   PermissionMode
 } from '@shared/types'
 import type { RpcClient } from './jsonrpc'
-import { RPC, type ThreadResult } from './wire'
+import { NOTIFY, RPC, type FileUpdateChange, type ThreadResult } from './wire'
 import { turnPolicyFor } from './modes'
 import { createMapperState, mapNotification, type MapperState } from './mapping'
+import type { ItemParams } from './wire'
 import type { CodexConfig } from './protocol'
 
 /**
@@ -51,6 +52,8 @@ export class CodexThread {
    * /context 카드가 언제든 답할 수 있도록 흘러가는 값을 여기 붙잡아 둔다.
    */
   private lastUsage: { usedTokens: number; maxTokens: number; percentage: number } | null = null
+  /** 승인 대기 중인 패치의 변경 목록(itemId 기준). 승인 요청이 diff 를 싣지 않아 필요하다. */
+  private pendingPatches = new Map<string, FileUpdateChange[]>()
   private disposed = false
 
   constructor(
@@ -103,7 +106,13 @@ export class CodexThread {
         model: this.config.model ?? undefined,
         effort: codexEffort(this.config.effort),
         cwd: this.config.cwd,
-        ...policy
+        sandboxPolicy: policy.sandboxPolicy,
+        approvalPolicy: policy.approvalPolicy,
+        // collaborationMode 는 실험 API 라 initialize 에서 opt-in 해야 전달된다. 서버가 무시하면
+        // Plan 모드는 읽기 전용 샌드박스만으로 동작한다(계획 지침 없이도 실행은 막힌다).
+        ...(policy.collaborationMode
+          ? { collaborationMode: { mode: policy.collaborationMode } }
+          : {})
       })
       this.activeTurnId = turn?.turn?.id ?? null
     } catch (err) {
@@ -181,10 +190,14 @@ export class CodexThread {
 
   private async openThread(rpc: RpcClient): Promise<string> {
     const policy = turnPolicyFor(this.config.permissionMode, this.config.cwd)
+    // thread/start 는 상세 정책 객체가 아니라 `sandbox` 문자열만 받는다. 여기에 sandboxPolicy 를
+    // 보내면 서버가 모르는 필드로 조용히 버리고 설정 기본값으로 스레드를 연다 — 실제 정책은
+    // 매 턴의 turn/start 가 싣지만, 스레드 기준선도 맞춰 둔다.
     const params = {
       cwd: this.config.cwd,
       model: this.config.model ?? undefined,
-      ...policy
+      sandbox: policy.sandboxMode,
+      approvalPolicy: policy.approvalPolicy
     }
 
     const resume = this.config.resumeThreadId
@@ -220,8 +233,21 @@ export class CodexThread {
 
   // ── 알림 수신 ───────────────────────────────────────────────────────
 
+  /** itemId → 그 패치의 변경 목록. 승인 요청에는 diff 가 없어 여기서 꺼내 쓴다. */
+  fileChanges(itemId: string): FileUpdateChange[] {
+    return this.pendingPatches.get(itemId) ?? []
+  }
+
   /** 호스트가 이 스레드 앞으로 라우팅한 알림을 처리한다. */
   handleNotification(method: string, params: unknown): void {
+    // 파일 변경 승인 요청에는 diff 가 실려 오지 않는다 — 같은 itemId 의 fileChange 아이템이
+    // 먼저 도착하므로 그때 붙잡아 둔다. 아이템이 확정되면 더 필요 없으니 버린다.
+    const item = (params as ItemParams)?.item
+    if (item?.type === 'fileChange' && item.id) {
+      if (method === NOTIFY.itemCompleted) this.pendingPatches.delete(item.id)
+      else this.pendingPatches.set(item.id, item.changes ?? [])
+    }
+
     // 턴 id 추적 — steer 대상과 interrupt 대상을 알기 위해 필요하다.
     const turn = (params as { turn?: { id?: string; status?: string } })?.turn
     if (method === 'turn/started' && turn?.id) this.activeTurnId = turn.id

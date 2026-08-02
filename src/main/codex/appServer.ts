@@ -88,7 +88,10 @@ export class AppServer {
 
     // 핸드셰이크: initialize 요청 → initialized 알림. 이 순서를 지키기 전의 다른 요청은 거절된다.
     const result = await client.request<InitializeResult>(RPC.initialize, {
-      clientInfo: CLIENT_INFO
+      clientInfo: CLIENT_INFO,
+      // Plan 모드(collaborationMode)가 실험 API 표면에만 있어 opt-in 한다. 안정 필드는 그대로
+      // 동작하고, 실험 필드는 서버가 모르면 조용히 무시되므로 최악의 경우 Plan 모드만 degrade 된다.
+      capabilities: { experimentalApi: true }
     })
     client.notify(RPC.initialized)
     log.info(

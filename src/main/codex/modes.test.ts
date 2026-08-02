@@ -12,6 +12,7 @@ describe('turnPolicyFor', () => {
   it('readOnly — 읽기 전용 샌드박스 + 매번 승인', () => {
     expect(turnPolicyFor('readOnly', WORKTREE)).toEqual({
       sandboxPolicy: { type: 'readOnly' },
+      sandboxMode: 'read-only',
       approvalPolicy: 'on-request'
     })
   })
@@ -23,6 +24,7 @@ describe('turnPolicyFor', () => {
         writableRoots: [WORKTREE],
         networkAccess: false
       },
+      sandboxMode: 'workspace-write',
       approvalPolicy: 'on-request'
     })
   })
@@ -30,6 +32,7 @@ describe('turnPolicyFor', () => {
   it('fullAccess — 샌드박스·승인 모두 해제', () => {
     expect(turnPolicyFor('fullAccess', WORKTREE)).toEqual({
       sandboxPolicy: { type: 'dangerFullAccess' },
+      sandboxMode: 'danger-full-access',
       approvalPolicy: 'never'
     })
   })
@@ -37,6 +40,7 @@ describe('turnPolicyFor', () => {
   it('plan — 읽기 전용 + Plan 협업 모드', () => {
     expect(turnPolicyFor('plan', WORKTREE)).toEqual({
       sandboxPolicy: { type: 'readOnly' },
+      sandboxMode: 'read-only',
       approvalPolicy: 'on-request',
       collaborationMode: 'plan'
     })
@@ -61,6 +65,22 @@ describe('turnPolicyFor', () => {
   it('null/undefined 도 기본(Auto)으로 떨어진다', () => {
     expect(turnPolicyFor(null, WORKTREE).sandboxPolicy.type).toBe('workspaceWrite')
     expect(turnPolicyFor(undefined, WORKTREE).sandboxPolicy.type).toBe('workspaceWrite')
+  })
+})
+
+// thread/start 는 문자열 모드만, turn/start 는 정책 객체만 받는다. 둘이 어긋나면 스레드 기준선과
+// 실제 턴 정책이 달라져 추적하기 어려운 권한 사고가 난다.
+describe('sandboxMode 와 sandboxPolicy 의 일관성', () => {
+  const EQUIV: Record<string, string> = {
+    readOnly: 'read-only',
+    workspaceWrite: 'workspace-write',
+    dangerFullAccess: 'danger-full-access'
+  }
+  it('모든 모드에서 두 표현이 같은 것을 가리킨다', () => {
+    for (const mode of ['readOnly', 'default', 'fullAccess', 'plan'] as const) {
+      const p = turnPolicyFor(mode, WORKTREE)
+      expect(p.sandboxMode).toBe(EQUIV[p.sandboxPolicy.type])
+    }
   })
 })
 

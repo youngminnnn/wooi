@@ -1,6 +1,6 @@
 import type { ChatEvent, ChatItem, PermissionRequest } from '@shared/types'
 import { clampText } from '../claude/clamp'
-import { NOTIFY, type CodexDecision, type ThreadItem } from './wire'
+import { NOTIFY, type CodexDecision, type FileUpdateChange, type ThreadItem } from './wire'
 import type {
   CommandApprovalParams,
   DeltaParams,
@@ -79,8 +79,8 @@ export function mapNotification(
     case NOTIFY.turnStarted:
       return { events: [{ type: 'status', status: 'running' }], persist: [] }
 
+    // 실패한 턴도 여기로 온다(turn.status === 'failed'). 별도 turn/failed 알림은 없다.
     case NOTIFY.turnCompleted:
-    case NOTIFY.turnFailed:
       return mapTurnEnd(params as TurnParams, ts)
 
     case NOTIFY.itemStarted:
@@ -256,12 +256,13 @@ function mapItem(
 
     /**
      * Codex 의 서브에이전트 조율(spawn_agent·send_input·wait·close_agent 등).
+     * 실제 아이템 타입 이름은 `collabAgentToolCall` 이다(스키마로 확인).
      *
      * 사이드바의 "실행 중 에이전트" 패널까지 채우려면 수명주기 의미(agentStatus 값 등)를 알아야
      * 하는데 확인하지 못했다 — 추측해 넣기보다 대화에 도구 호출로만 보여 준다. 그것만으로도
      * "지금 서브에이전트를 돌리고 있다"는 사실은 드러나고, 조용히 사라지지는 않는다.
      */
-    case 'collabToolCall':
+    case 'collabAgentToolCall':
       return mapTool(id, item.tool ?? 'agent', { prompt: item.prompt }, item, done, ts)
 
     case 'webSearch':
@@ -471,12 +472,14 @@ function describeResult(result: unknown): string {
 // ── 사용량 · 플랜 ───────────────────────────────────────────────────────
 
 function mapTokenUsage(params: TokenUsageParams): Mapped {
-  const usage = params?.usage
-  const maxTokens = params?.contextWindow ?? params?.modelContextWindow
+  const usage = params?.tokenUsage
+  const maxTokens = usage?.modelContextWindow
   if (!usage || !maxTokens) return NOTHING
 
-  // 컨텍스트 점유는 "이번 요청이 실어 보낸 입력"이 기준이다(캐시된 입력도 창을 차지한다).
-  const usedTokens = usage.totalTokens ?? (usage.inputTokens ?? 0) + (usage.cachedInputTokens ?? 0)
+  // 컨텍스트 점유는 **마지막 요청**이 실어 보낸 입력이 기준이다(캐시된 입력도 창을 차지한다).
+  // total 은 세션 누적이라 윈도 점유와 무관하다 — 그걸 쓰면 미터가 금세 100% 로 보인다.
+  const last = usage.last
+  const usedTokens = (last?.inputTokens ?? 0) + (last?.cachedInputTokens ?? 0)
   if (!usedTokens) return NOTHING
 
   return {
@@ -571,28 +574,38 @@ export function mapCommandApproval(
   }
 }
 
-/** 파일 변경 승인 요청 → Wooi 권한 프롬프트(diff 포함). */
+/**
+ * 파일 변경 승인 요청 → Wooi 권한 프롬프트.
+ *
+ * 승인 요청 자체에는 diff 가 없다(itemId 만 온다). 같은 itemId 의 `fileChange` 아이템이
+ * `item/started` 로 먼저 도착하므로, 호출부가 그때 붙잡아 둔 changes 를 여기로 넘겨 준다 —
+ * 그러지 않으면 사용자가 무엇을 승인하는지 못 보고 결정하게 된다.
+ */
 export function mapFileChangeApproval(
-  params: FileChangeApprovalParams
+  params: FileChangeApprovalParams,
+  changes: FileUpdateChange[] = []
 ): Omit<PermissionRequest, 'requestId' | 'workspaceId'> {
-  const changes = params?.changes ?? []
   const paths = changes.map((c) => c.path).filter(Boolean) as string[]
   const diff = changes
     .map((c) => c.diff)
     .filter(Boolean)
     .join('\n')
+  const title =
+    paths.length === 1
+      ? `Codex wants to edit ${paths[0]}`
+      : paths.length > 1
+        ? `Codex wants to edit ${paths.length} files`
+        : 'Codex wants to apply a patch'
   return {
     kind: 'fileChange',
     toolName: 'Apply patch',
     displayName: 'Apply changes',
-    title:
-      paths.length === 1
-        ? `Codex wants to edit ${paths[0]}`
-        : `Codex wants to edit ${paths.length} files`,
+    title,
     input: { paths },
     diff: diff ? clampText(diff) : undefined,
-    decisionReason: params?.reason,
-    options: decisionOptions(params?.availableDecisions)
+    decisionReason: params?.reason ?? undefined,
+    // 파일 변경은 명령과 달리 execpolicy/네트워크 수정 선택지가 없다(스키마로 확인).
+    options: decisionOptions(['accept', 'acceptForSession', 'decline'])
   }
 }
 
@@ -605,13 +618,18 @@ export function mapFileChangeApproval(
 export function mapUserInputRequest(
   params: RequestUserInputParams
 ): Omit<PermissionRequest, 'requestId' | 'workspaceId'> {
-  // QuestionPrompt 가 기대하는 모양에 정확히 맞춘다:
-  // { question, header, options: [{label, description}], multiSelect? }
-  // codex 는 선택지를 평범한 문자열 배열로 주므로 label 로 승격하고 설명은 비운다.
+  // codex 의 옵션은 이미 {label, description} 이라 QuestionPrompt 가 기대하는 모양 그대로다.
+  // 질문마다 id 가 있고, 답변은 **그 id 로** 되돌려 줘야 한다(질문문이 아니다).
   const questions = (params?.questions ?? []).map((q) => ({
+    id: q.id ?? '',
     question: q.question ?? '',
-    header: shortHeader(q.question ?? ''),
-    options: (q.options ?? []).map((label) => ({ label, description: '' }))
+    header: q.header || shortHeader(q.question ?? ''),
+    options: (q.options ?? []).map((o) => ({
+      label: o.label ?? '',
+      description: o.description ?? ''
+    })),
+    // isOther 인 질문은 자유 입력을 받아야 하므로 다중 선택 UI 의 "Other" 경로를 연다.
+    ...(q.isOther ? { multiSelect: false } : {})
   }))
   return {
     kind: 'question',
@@ -635,16 +653,30 @@ function shortHeader(question: string): string {
  * AskUserQuestion 규약), codex 의 `tool/requestUserInput` 은 질문 순서에 맞춘 배열을 기대한다.
  * 그 간극을 여기서 메운다 — 답이 없는 질문은 빈 문자열로 자리를 지켜 순서가 밀리지 않게 한다.
  */
-export function answersFor(params: RequestUserInputParams, updatedInput: unknown): string[] {
-  const answers = (updatedInput as { answers?: unknown } | undefined)?.answers
+export function answersFor(
+  params: RequestUserInputParams,
+  updatedInput: unknown
+): Record<string, { answers: string[] }> {
+  const raw = (updatedInput as { answers?: unknown } | undefined)?.answers
   const questions = params?.questions ?? []
+  const out: Record<string, { answers: string[] }> = {}
+  if (!raw || typeof raw !== 'object') return out
 
-  // 이미 배열이면 그대로 쓴다(다른 경로로 채워진 경우 대비).
-  if (Array.isArray(answers)) return answers.map((a) => String(a ?? ''))
-  if (!answers || typeof answers !== 'object') return []
-
-  const byQuestion = answers as Record<string, unknown>
-  return questions.map((q) => String(byQuestion[q.question ?? ''] ?? ''))
+  const byQuestion = raw as Record<string, unknown>
+  for (const q of questions) {
+    const id = q.id
+    if (!id) continue
+    // QuestionPrompt 는 질문문을 키로 답을 돌려준다 — 그걸 질문 id 키로 옮긴다.
+    const answer = byQuestion[q.question ?? '']
+    if (answer === undefined || answer === null || answer === '') continue
+    // 다중 선택은 ", " 로 이어 붙여 오므로 다시 나눠 배열로 만든다.
+    const values = String(answer)
+      .split(', ')
+      .map((v) => v.trim())
+      .filter(Boolean)
+    if (values.length) out[id] = { answers: values }
+  }
+  return out
 }
 
 /** Wooi 의 권한 결정 → codex 가 받는 decision 문자열. */

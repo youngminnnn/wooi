@@ -125,18 +125,29 @@ export interface DeltaParams {
   chunk?: string
 }
 
-/** 누적 토큰 사용량. 입력창 컨텍스트 미터의 근거. */
+/** 한 번의 요청/누적에 대한 토큰 내역. */
+export interface TokenUsageBreakdown {
+  totalTokens?: number
+  inputTokens?: number
+  cachedInputTokens?: number
+  cacheWriteInputTokens?: number
+  outputTokens?: number
+  reasoningOutputTokens?: number
+}
+
+/**
+ * 토큰 사용량 알림(`thread/tokenUsage/updated`).
+ *
+ * 컨텍스트 미터는 **마지막 요청(last)** 의 입력 토큰을 본다 — 그게 지금 윈도를 차지하고 있는 양이다.
+ * total 은 세션 누적이라 윈도 점유와 무관하다(누적을 쓰면 미터가 금방 100% 로 보인다).
+ */
 export interface TokenUsageParams {
   threadId?: ThreadId
-  /** 컨텍스트 윈도 크기. 이름이 버전에 따라 달라 여러 후보를 받는다. */
-  contextWindow?: number
-  modelContextWindow?: number
-  usage?: {
-    inputTokens?: number
-    cachedInputTokens?: number
-    outputTokens?: number
-    reasoningOutputTokens?: number
-    totalTokens?: number
+  turnId?: string
+  tokenUsage?: {
+    total?: TokenUsageBreakdown
+    last?: TokenUsageBreakdown
+    modelContextWindow?: number | null
   }
 }
 
@@ -169,14 +180,20 @@ export interface CommandApprovalParams {
   availableDecisions?: string[]
 }
 
-/** 파일 변경(패치) 승인 요청. */
+/**
+ * 파일 변경(패치) 승인 요청.
+ *
+ * **diff 가 들어 있지 않다.** 같은 itemId 의 `fileChange` 아이템이 `item/started` 로 먼저 오므로,
+ * 호출부가 그걸 붙잡아 두었다가 승인 프롬프트에 실어 줘야 한다(그러지 않으면 사용자가 내용을
+ * 못 보고 승인하게 된다).
+ */
 export interface FileChangeApprovalParams {
   threadId?: ThreadId
   turnId?: string
   itemId?: string
   reason?: string
-  changes?: FileUpdateChange[]
-  availableDecisions?: string[]
+  /** 세션 동안 이 루트 아래 쓰기를 허용해 달라는 요청(있을 때만). */
+  grantRoot?: string | null
 }
 
 /** 사용자에게 1~3개의 짧은 질문을 던지는 도구 요청. */
@@ -184,8 +201,18 @@ export interface RequestUserInputParams {
   threadId?: ThreadId
   turnId?: string
   itemId?: string
-  requestId?: string
-  questions?: { question?: string; options?: string[] }[]
+  questions?: {
+    /** 답변 맵의 키. 질문문이 아니라 **이 id** 로 답을 되돌려 줘야 한다. */
+    id?: string
+    /** 짧은 라벨(칩 표시용). */
+    header?: string
+    question?: string
+    /** 자유 입력을 허용하는 질문인지. */
+    isOther?: boolean
+    isSecret?: boolean
+    options?: { label?: string; description?: string }[] | null
+  }[]
+  autoResolutionMs?: number | null
 }
 
 /** 승인 응답에 실어 보내는 결정값. */
@@ -258,8 +285,8 @@ export const RPC = {
 export const NOTIFY = {
   threadStarted: 'thread/started',
   turnStarted: 'turn/started',
+  // 실패한 턴도 turn/completed 로 온다(status:'failed'). `turn/failed` 알림은 존재하지 않는다.
   turnCompleted: 'turn/completed',
-  turnFailed: 'turn/failed',
   turnPlanUpdated: 'turn/plan/updated',
   itemStarted: 'item/started',
   itemCompleted: 'item/completed',

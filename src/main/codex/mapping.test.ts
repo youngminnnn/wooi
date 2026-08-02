@@ -53,7 +53,7 @@ describe('스레드·턴 수명주기', () => {
   })
 
   it('실패한 턴은 에러 카드 + error 상태를 낸다', () => {
-    const r = map(NOTIFY.turnFailed, {
+    const r = map(NOTIFY.turnCompleted, {
       turn: { status: 'failed', error: { message: 'upstream exploded' } }
     })
     expect(items(r)[0]).toMatchObject({ type: 'error', text: 'upstream exploded' })
@@ -61,7 +61,7 @@ describe('스레드·턴 수명주기', () => {
   })
 
   it('분류된 오류에는 실행 가능한 안내를 덧붙인다', () => {
-    const r = map(NOTIFY.turnFailed, {
+    const r = map(NOTIFY.turnCompleted, {
       turn: {
         status: 'failed',
         error: { message: 'limit', codexErrorInfo: 'UsageLimitExceeded' }
@@ -71,7 +71,7 @@ describe('스레드·턴 수명주기', () => {
   })
 
   it('모르는 오류 분류는 원문만 보여 준다', () => {
-    const r = map(NOTIFY.turnFailed, {
+    const r = map(NOTIFY.turnCompleted, {
       turn: { status: 'failed', error: { message: 'weird', codexErrorInfo: 'SomethingNew' } }
     })
     expect((items(r)[0] as { text: string }).text).toBe('weird')
@@ -209,13 +209,13 @@ describe('명령 실행', () => {
   })
 })
 
-describe('서브에이전트 조율 (collabToolCall)', () => {
+describe('서브에이전트 조율 (collabAgentToolCall)', () => {
   // 매핑이 없으면 조용히 버려져, 서브에이전트를 돌리는 동안 대화가 텅 빈 것처럼 보인다.
   it('도구 호출 카드로 남긴다', () => {
     const r = map(NOTIFY.itemCompleted, {
       item: {
         id: 'a1',
-        type: 'collabToolCall',
+        type: 'collabAgentToolCall',
         tool: 'spawn_agent',
         status: 'completed',
         prompt: 'Review the diff'
@@ -229,7 +229,7 @@ describe('서브에이전트 조율 (collabToolCall)', () => {
 
   it('도구 이름이 없어도 터지지 않는다', () => {
     expect(() =>
-      map(NOTIFY.itemCompleted, { item: { id: 'a1', type: 'collabToolCall' } })
+      map(NOTIFY.itemCompleted, { item: { id: 'a1', type: 'collabAgentToolCall' } })
     ).not.toThrow()
   })
 })
@@ -292,10 +292,14 @@ describe('플랜 스냅샷', () => {
 })
 
 describe('컨텍스트 사용량', () => {
-  it('입력 + 캐시 입력을 창 크기 대비로 환산한다', () => {
+  it('마지막 요청의 입력 + 캐시 입력을 창 크기 대비로 환산한다', () => {
     const r = map(NOTIFY.tokenUsage, {
-      contextWindow: 1000,
-      usage: { inputTokens: 200, cachedInputTokens: 50 }
+      tokenUsage: {
+        // 누적(total)이 아니라 last 를 봐야 한다 — 누적을 쓰면 미터가 금세 100% 가 된다.
+        total: { inputTokens: 9999, cachedInputTokens: 9999 },
+        last: { inputTokens: 200, cachedInputTokens: 50 },
+        modelContextWindow: 1000
+      }
     })
     expect(r.events[0]).toEqual({
       type: 'context',
@@ -306,11 +310,16 @@ describe('컨텍스트 사용량', () => {
   })
 
   it('창 크기를 모르면 아무것도 내지 않는다', () => {
-    expect(map(NOTIFY.tokenUsage, { usage: { inputTokens: 10 } }).events).toHaveLength(0)
+    const r = map(NOTIFY.tokenUsage, {
+      tokenUsage: { last: { inputTokens: 10 }, modelContextWindow: null }
+    })
+    expect(r.events).toHaveLength(0)
   })
 
   it('비율은 1 을 넘지 않는다', () => {
-    const r = map(NOTIFY.tokenUsage, { contextWindow: 100, usage: { totalTokens: 500 } })
+    const r = map(NOTIFY.tokenUsage, {
+      tokenUsage: { last: { inputTokens: 500 }, modelContextWindow: 100 }
+    })
     expect(r.events[0]).toMatchObject({ percentage: 1 })
   })
 })
@@ -388,12 +397,10 @@ describe('승인 요청 매핑', () => {
   })
 
   it('파일 변경 승인은 diff 를 실어 DiffView 로 보여 줄 수 있게 한다', () => {
-    const req = mapFileChangeApproval({
-      changes: [
-        { path: 'a.ts', diff: '@@ a @@' },
-        { path: 'b.ts', diff: '@@ b @@' }
-      ]
-    })
+    const req = mapFileChangeApproval({}, [
+      { path: 'a.ts', kind: 'update', diff: '@@ a @@' },
+      { path: 'b.ts', kind: 'update', diff: '@@ b @@' }
+    ])
     expect(req.kind).toBe('fileChange')
     expect(req.title).toContain('2 files')
     expect(req.diff).toContain('@@ a @@')
@@ -401,7 +408,7 @@ describe('승인 요청 매핑', () => {
   })
 
   it('파일이 하나면 제목에 경로를 그대로 쓴다', () => {
-    const req = mapFileChangeApproval({ changes: [{ path: 'src/x.ts', diff: 'd' }] })
+    const req = mapFileChangeApproval({}, [{ path: 'src/x.ts', kind: 'update', diff: 'd' }])
     expect(req.title).toContain('src/x.ts')
   })
 
@@ -409,15 +416,26 @@ describe('승인 요청 매핑', () => {
   // 문자열 배열을 그대로 넘기면 선택지가 통째로 안 그려진다.
   it('질문 요청을 QuestionPrompt 가 읽는 모양으로 옮긴다', () => {
     const req = mapUserInputRequest({
-      questions: [{ question: 'Which port?', options: ['3000', '8080'] }]
+      questions: [
+        {
+          id: 'q1',
+          header: 'Port',
+          question: 'Which port?',
+          options: [
+            { label: '3000', description: 'dev' },
+            { label: '8080', description: '' }
+          ]
+        }
+      ]
     })
     expect(req).toMatchObject({ kind: 'question', toolName: 'AskUserQuestion' })
     expect(req.input.questions).toEqual([
       {
+        id: 'q1',
         question: 'Which port?',
-        header: 'Which port',
+        header: 'Port',
         options: [
-          { label: '3000', description: '' },
+          { label: '3000', description: 'dev' },
           { label: '8080', description: '' }
         ]
       }
@@ -426,41 +444,54 @@ describe('승인 요청 매핑', () => {
 
   it('긴 질문문은 칩 라벨용으로 줄인다', () => {
     const long = 'Which of these deployment targets should we use for the staging rollout?'
-    const req = mapUserInputRequest({ questions: [{ question: long, options: ['a'] }] })
+    const req = mapUserInputRequest({ questions: [{ id: 'q', question: long }] })
     const header = (req.input.questions as { header: string }[])[0].header
     expect(header.length).toBeLessThanOrEqual(24)
     expect(header.endsWith('…')).toBe(true)
   })
 
   it('선택지가 없는 질문도 터지지 않는다', () => {
-    expect(() => mapUserInputRequest({ questions: [{ question: 'Free text?' }] })).not.toThrow()
+    expect(() =>
+      mapUserInputRequest({ questions: [{ id: 'q', question: 'Free text?', isOther: true }] })
+    ).not.toThrow()
   })
 })
 
 // QuestionPrompt 는 답을 "질문문 → 답" 객체로 돌려주는데 codex 는 질문 **순서대로의 배열**을
 // 기대한다. 이 변환이 틀리면 답이 엉뚱한 질문에 붙는다.
-describe('질문 답변 → codex answers 배열', () => {
+describe('질문 답변 → codex answers 맵', () => {
   const params = {
-    questions: [{ question: 'Which port?' }, { question: 'Which env?' }]
+    questions: [
+      { id: 'q1', question: 'Which port?' },
+      { id: 'q2', question: 'Which env?' }
+    ]
   }
 
-  it('질문 순서대로 배열을 만든다', () => {
+  // codex 는 **질문 id** 를 키로 하는 맵을 기대한다(질문문이 아니다). 여기가 틀리면 답이
+  // 통째로 버려지거나 엉뚱한 질문에 붙는다.
+  it('질문문 키 답변을 질문 id 키 맵으로 옮긴다', () => {
     expect(
       answersFor(params, { answers: { 'Which env?': 'prod', 'Which port?': '3000' } })
-    ).toEqual(['3000', 'prod'])
+    ).toEqual({ q1: { answers: ['3000'] }, q2: { answers: ['prod'] } })
   })
 
-  it('답이 없는 질문은 빈 문자열로 자리를 지킨다(순서가 밀리지 않도록)', () => {
-    expect(answersFor(params, { answers: { 'Which port?': '3000' } })).toEqual(['3000', ''])
+  it('다중 선택은 배열로 되돌린다', () => {
+    expect(answersFor(params, { answers: { 'Which port?': '3000, 8080' } })).toEqual({
+      q1: { answers: ['3000', '8080'] }
+    })
   })
 
-  it('이미 배열이면 그대로 쓴다', () => {
-    expect(answersFor(params, { answers: ['a', 'b'] })).toEqual(['a', 'b'])
+  it('답이 없는 질문은 아예 빼놓는다', () => {
+    expect(answersFor(params, { answers: { 'Which port?': '' } })).toEqual({})
   })
 
-  it('답이 없거나 모양이 어긋나면 빈 배열', () => {
-    expect(answersFor(params, undefined)).toEqual([])
-    expect(answersFor(params, { answers: 'nope' })).toEqual([])
+  it('답이 없거나 모양이 어긋나면 빈 맵', () => {
+    expect(answersFor(params, undefined)).toEqual({})
+    expect(answersFor(params, { answers: 'nope' })).toEqual({})
+  })
+
+  it('id 가 없는 질문은 건너뛴다(키를 만들 수 없다)', () => {
+    expect(answersFor({ questions: [{ question: 'x' }] }, { answers: { x: 'y' } })).toEqual({})
   })
 })
 

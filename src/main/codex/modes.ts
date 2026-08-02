@@ -22,8 +22,18 @@ export type SandboxPolicy =
 /** app-server 의 approvalPolicy(AskForApproval) 파라미터. */
 export type ApprovalPolicy = 'never' | 'untrusted' | 'on-failure' | 'on-request'
 
+/**
+ * `thread/start` 가 받는 단순 샌드박스 모드.
+ *
+ * 턴은 상세한 `sandboxPolicy` 객체를 받지만 **스레드 생성은 이 문자열만 받는다** — 스레드에
+ * sandboxPolicy 를 보내면 서버가 모르는 필드로 조용히 무시하고 설정 기본값으로 스레드를 연다.
+ */
+export type SandboxMode = 'read-only' | 'workspace-write' | 'danger-full-access'
+
 export interface CodexTurnPolicy {
   sandboxPolicy: SandboxPolicy
+  /** thread/start 용. 같은 의도를 문자열 모드로 표현한 것. */
+  sandboxMode: SandboxMode
   approvalPolicy: ApprovalPolicy
   /**
    * 협업 모드 이름. 'plan' 은 Codex 의 Plan 프리셋(읽기 전용 + 계획 수립 지침)을 켠다.
@@ -46,19 +56,28 @@ export function turnPolicyFor(
   switch (normalizePermissionMode(CODEX_META, mode)) {
     // 읽기만 허용. 쓰기·실행은 매번 승인을 받는다.
     case 'readOnly':
-      return { sandboxPolicy: { type: 'readOnly' }, approvalPolicy: 'on-request' }
+      return {
+        sandboxPolicy: { type: 'readOnly' },
+        sandboxMode: 'read-only',
+        approvalPolicy: 'on-request'
+      }
 
     // Plan 모드 — 읽기 전용은 같고, 협업 모드가 "실행하지 말고 계획하라"는 지침을 얹는다.
     case 'plan':
       return {
         sandboxPolicy: { type: 'readOnly' },
+        sandboxMode: 'read-only',
         approvalPolicy: 'on-request',
         collaborationMode: 'plan'
       }
 
     // 승인·샌드박스 모두 해제. 네트워크까지 열린다.
     case 'fullAccess':
-      return { sandboxPolicy: { type: 'dangerFullAccess' }, approvalPolicy: 'never' }
+      return {
+        sandboxPolicy: { type: 'dangerFullAccess' },
+        sandboxMode: 'danger-full-access',
+        approvalPolicy: 'never'
+      }
 
     // 기본(Auto): worktree 안에서는 자유롭게, 벗어나거나 네트워크가 필요하면 승인.
     // networkAccess 를 false 로 두는 것이 중요하다 — 켜면 샌드박스 안이라도 외부로 나갈 수 있다.
@@ -70,6 +89,7 @@ export function turnPolicyFor(
           writableRoots: [worktreePath],
           networkAccess: false
         },
+        sandboxMode: 'workspace-write',
         approvalPolicy: 'on-request'
       }
   }
