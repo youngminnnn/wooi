@@ -450,8 +450,8 @@ export default function SettingsModal({
                 Fast mode
                 <span className="block text-xs text-neutral-600">
                   Runs the same model through the backend’s faster service tier. Availability and
-                  billing depend on the selected agent and account. Each workspace can override
-                  this with <code>/fast</code>.
+                  billing depend on the selected agent and account. Each workspace can override this
+                  with <code>/fast</code>.
                 </span>
               </span>
             </label>

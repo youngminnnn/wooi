@@ -98,6 +98,11 @@ const api: WooiApi = {
     search: (workspaceId, query) => ipcRenderer.invoke(IPC.fsSearch, workspaceId, query)
   },
 
+  agent: {
+    listBackends: () => ipcRenderer.invoke(IPC.agentListBackends),
+    listModels: (backendId) => ipcRenderer.invoke(IPC.agentListModels, backendId)
+  },
+
   commands: {
     list: (workspaceId) => ipcRenderer.invoke(IPC.commandsList, workspaceId),
     run: (workspaceId, kind) => ipcRenderer.invoke(IPC.commandRun, workspaceId, kind),
@@ -155,6 +160,11 @@ const api: WooiApi = {
     claudeLoginSubmitCode: (code) => ipcRenderer.invoke(IPC.authClaudeLoginSubmitCode, code),
     claudeLoginCancel: () => ipcRenderer.invoke(IPC.authClaudeLoginCancel),
     claudeLogout: () => ipcRenderer.invoke(IPC.authClaudeLogout),
+    codexLoginStart: (method, apiKey) =>
+      ipcRenderer.invoke(IPC.authCodexLoginStart, method, apiKey),
+    codexLoginCancel: () => ipcRenderer.invoke(IPC.authCodexLoginCancel),
+    codexLogout: () => ipcRenderer.invoke(IPC.authCodexLogout),
+    codexRateLimits: () => ipcRenderer.invoke(IPC.authCodexRateLimits),
     githubLoginStart: () => ipcRenderer.invoke(IPC.authGithubLoginStart),
     githubLoginCancel: () => ipcRenderer.invoke(IPC.authGithubLoginCancel),
     githubLogout: () => ipcRenderer.invoke(IPC.authGithubLogout)
