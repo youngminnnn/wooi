@@ -45,10 +45,12 @@ export interface MapperState {
   output: Map<string, string>
   /** codex itemId → 그 명령 카드의 마지막 스냅샷(출력 외 필드 보존용). */
   command: Map<string, { command: string; cwd?: string }>
+  /** 실행 중 Codex 서브에이전트. subAgentActivity 스냅샷을 sidebar 이벤트로 만든다. */
+  agents: Map<string, { taskId: string; agentType: string; description: string; startedAt: number }>
 }
 
 export function createMapperState(): MapperState {
-  return { output: new Map(), command: new Map() }
+  return { output: new Map(), command: new Map(), agents: new Map() }
 }
 
 /** Wooi 아이템 id. codex id 와 충돌하지 않도록 접두사를 붙인다. */
@@ -99,6 +101,17 @@ export function mapNotification(
       }
     }
 
+    case NOTIFY.planDelta: {
+      const p = params as DeltaParams
+      if (!p?.delta) return NOTHING
+      return {
+        events: [
+          { type: 'delta', id: itemId(p.itemId, 'plan'), itemType: 'assistant', text: p.delta }
+        ],
+        persist: []
+      }
+    }
+
     case NOTIFY.reasoningSummaryDelta:
     case NOTIFY.reasoningTextDelta: {
       const p = params as DeltaParams
@@ -135,6 +148,26 @@ export function mapNotification(
       const item: ChatItem = { id: `codex:warn:${ts}`, type: 'system', text, ts }
       return { events: [{ type: 'item', item }], persist: [item] }
     }
+
+    case NOTIFY.modelRerouted:
+    case NOTIFY.deprecationNotice: {
+      const p = (params ?? {}) as {
+        message?: string
+        reason?: string
+        fromModel?: string
+        toModel?: string
+      }
+      const text =
+        p.message ??
+        p.reason ??
+        (p.fromModel && p.toModel ? `Model rerouted: ${p.fromModel} → ${p.toModel}` : undefined)
+      if (!text) return NOTHING
+      const item: ChatItem = { id: `codex:notice:${ts}`, type: 'system', text, ts }
+      return { events: [{ type: 'item', item }], persist: [item] }
+    }
+
+    case NOTIFY.threadCompacted:
+      return { events: [{ type: 'compacting', active: false, trigger: 'auto' }], persist: [] }
 
     default:
       // 구독하지 않는 알림(계정·rate limit·MCP 상태 등)은 상위 계층이 따로 처리한다.
@@ -284,6 +317,20 @@ function mapItem(
         ts
       )
 
+    case 'dynamicToolCall':
+      return mapTool(
+        id,
+        `${item.namespace ? `${item.namespace}/` : ''}${item.tool ?? 'tool'}`,
+        item.arguments,
+        {
+          ...item,
+          result: item.contentItems,
+          status: item.success === false ? 'failed' : item.status
+        },
+        done,
+        ts
+      )
+
     /**
      * Codex 의 서브에이전트 조율(spawn_agent·send_input·wait·close_agent 등).
      * 실제 아이템 타입 이름은 `collabAgentToolCall` 이다(스키마로 확인).
@@ -295,11 +342,46 @@ function mapItem(
     case 'collabAgentToolCall':
       return mapTool(id, item.tool ?? 'agent', { prompt: item.prompt }, item, done, ts)
 
+    case 'subAgentActivity': {
+      const agentId = item.agentThreadId ?? item.id ?? id
+      if (item.kind === 'interrupted') state.agents.delete(agentId)
+      else {
+        const previous = state.agents.get(agentId)
+        state.agents.set(agentId, {
+          taskId: agentId,
+          agentType: item.agentPath ?? 'Codex agent',
+          description: item.kind === 'interacted' ? 'Working with the parent agent' : 'Running',
+          startedAt: previous?.startedAt ?? ts
+        })
+      }
+      return { events: [{ type: 'agents', agents: [...state.agents.values()] }], persist: [] }
+    }
+
+    case 'hookPrompt': {
+      const text = (item.fragments ?? []).map((fragment) => fragment.text ?? '').join('\n')
+      if (!text) return NOTHING
+      const chat: ChatItem = { id, type: 'system', text: `Hook feedback\n\n${text}`, ts }
+      return { events: [{ type: 'item', item: chat }], persist: done ? [chat] : [] }
+    }
+
     case 'webSearch':
       return mapTool(id, 'WebSearch', { query: item.query }, item, done, ts)
 
     case 'imageView':
       return mapTool(id, 'ViewImage', { path: (item as { path?: string }).path }, item, done, ts)
+
+    case 'imageGeneration':
+      return mapTool(
+        id,
+        'ImageGeneration',
+        { prompt: item.revisedPrompt },
+        { ...item, result: item.savedPath ?? item.result },
+        done,
+        ts
+      )
+
+    case 'sleep':
+      return mapTool(id, 'Sleep', { durationMs: item.durationMs }, item, done, ts)
 
     case 'plan': {
       // 플랜 모드의 산출물 — 본문 그대로 어시스턴트 메시지로 보여 준다.
@@ -321,7 +403,9 @@ function mapItem(
     case 'enteredReviewMode':
     case 'exitedReviewMode': {
       const text =
-        item.text ?? (item.type === 'enteredReviewMode' ? 'Review started' : 'Review finished')
+        item.review ??
+        item.text ??
+        (item.type === 'enteredReviewMode' ? 'Review started' : 'Review finished')
       const chat: ChatItem = { id, type: 'system', text, ts }
       return { events: [{ type: 'item', item: chat }], persist: done ? [chat] : [] }
     }

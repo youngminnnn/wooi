@@ -104,6 +104,7 @@ export class CodexThread {
         threadId,
         input,
         model: this.config.model ?? undefined,
+        serviceTier: this.config.fastMode ? 'fast' : undefined,
         effort: codexEffort(this.config.effort),
         cwd: this.config.cwd,
         sandboxPolicy: policy.sandboxPolicy,
@@ -146,6 +147,47 @@ export class CodexThread {
       const rpc = await this.deps.rpc()
       const threadId = await this.ensureThread(rpc)
       await rpc.request(RPC.threadCompact, { threadId })
+    } catch (err) {
+      this.fail(err)
+    }
+  }
+
+  /** CLI `/review` 와 같은 현재 worktree 미커밋 변경 리뷰를 현재 대화에서 실행한다. */
+  async review(): Promise<void> {
+    try {
+      const rpc = await this.deps.rpc()
+      const threadId = await this.ensureThread(rpc)
+      await rpc.request(RPC.reviewStart, {
+        threadId,
+        target: { type: 'uncommittedChanges' },
+        delivery: 'inline'
+      })
+    } catch (err) {
+      this.fail(err)
+    }
+  }
+
+  /** Codex TUI 의 `!` bash mode. app-server가 같은 thread shell과 기록을 소유한다. */
+  async shell(command: string): Promise<void> {
+    try {
+      const rpc = await this.deps.rpc()
+      const threadId = await this.ensureThread(rpc)
+      await rpc.request(RPC.threadShellCommand, { threadId, command })
+    } catch (err) {
+      this.fail(err)
+    }
+  }
+
+  /** 현재 대화를 같은 워크스페이스의 새 Codex thread 로 분기한다. */
+  async fork(): Promise<void> {
+    try {
+      const rpc = await this.deps.rpc()
+      const threadId = await this.ensureThread(rpc)
+      const result = await rpc.request<ThreadResult>(RPC.threadFork, { threadId })
+      const forkedId = result?.thread?.id
+      if (!forkedId) throw new Error('Codex did not return a forked thread id')
+      this.adoptThread(forkedId)
+      this.notice('Forked this conversation into a new Codex thread.')
     } catch (err) {
       this.fail(err)
     }

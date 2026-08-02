@@ -29,6 +29,7 @@ import type {
   CommandResult,
   EffortSetting,
   ImageAttachment,
+  McpAction,
   McpServerInfo,
   ModelOption,
   NotificationEvent,
@@ -234,6 +235,7 @@ export class CodexSessionManager implements AgentBackend {
       cwd: ws.worktreePath,
       model: ws.model ?? defaults.model,
       effort: ws.effort ?? defaults.effort,
+      fastMode: ws.fastMode ?? defaults.fastMode,
       // 다른 백엔드에서 넘어온 모드가 정책 변환으로 새지 않도록 여기서 걸러 낸다.
       permissionMode: normalizePermissionMode(CODEX_META, ws.permissionMode),
       resumeThreadId: ws.sessionId
@@ -258,6 +260,19 @@ export class CodexSessionManager implements AgentBackend {
     // 된다("압축해 줘"라고 말을 거는 셈). 전용 RPC 로 돌려 실제로 압축되게 한다.
     if (!images?.length && text.trim() === '/compact') {
       this.send({ type: 'compact', workspaceId, config: this.configFor(ws) })
+      return
+    }
+    if (!images?.length && text.trim() === '/review') {
+      this.send({ type: 'review', workspaceId, config: this.configFor(ws) })
+      return
+    }
+    if (!images?.length && text.trim() === '/fork') {
+      this.send({ type: 'fork', workspaceId, config: this.configFor(ws) })
+      return
+    }
+    if (!images?.length && text.trim().startsWith('!')) {
+      const command = text.trim().slice(1).trim()
+      if (command) this.send({ type: 'shell', workspaceId, config: this.configFor(ws), command })
       return
     }
 
@@ -297,15 +312,14 @@ export class CodexSessionManager implements AgentBackend {
     })
   }
 
-  /**
-   * fast mode 는 Claude Code 전용 개념이라 Codex 에는 대응이 없다(capabilities.fastMode=false).
-   * 저장은 해 둔다 — 사용자가 워크스페이스를 Claude 로 만들었다가 값이 남는 경우처럼, 상태를
-   * 조용히 버리는 것보다 그대로 두는 편이 예측 가능하다. 턴 파라미터로는 나가지 않는다.
-   */
   setFastMode(workspaceId: string, fastMode: boolean | null): void {
     getStore().update((st) => {
       const w = st.workspaces.find((x) => x.id === workspaceId)
       if (w) w.fastMode = fastMode
+    })
+    this.dispatch(IPC.evtChat, {
+      workspaceId,
+      event: { type: 'fastMode', state: fastMode ? 'on' : 'off' }
     })
   }
 
@@ -478,8 +492,13 @@ export class CodexSessionManager implements AgentBackend {
     if (ws) this.send({ type: 'compact', workspaceId, config: this.configFor(ws) })
   }
 
-  mcpAction(): Promise<McpServerInfo[]> {
-    return Promise.reject(new Error('Codex MCP panel is not wired up yet.'))
+  mcpAction(_workspaceId: string, serverName: string, action: McpAction): Promise<McpServerInfo[]> {
+    return this.request<McpServerInfo[]>((reqId) => ({
+      type: 'mcpAction',
+      reqId,
+      serverName,
+      action
+    }))
   }
 
   rewindAction(): Promise<RewindActionResult> {
@@ -487,7 +506,18 @@ export class CodexSessionManager implements AgentBackend {
   }
 
   listCommands(): Promise<SlashCommandInfo[]> {
-    return Promise.resolve([])
+    return Promise.resolve([
+      { name: 'model', description: 'Choose the model' },
+      { name: 'effort', description: 'Choose reasoning effort' },
+      { name: 'fast', description: 'Toggle Fast service tier' },
+      { name: 'mcp', description: 'Show MCP servers and tools' },
+      { name: 'context', description: 'Show context usage' },
+      { name: 'usage', description: 'Show plan usage' },
+      { name: 'permissions', description: 'Show active permissions' },
+      { name: 'compact', description: 'Compact the conversation' },
+      { name: 'review', description: 'Review uncommitted changes' },
+      { name: 'fork', description: 'Fork the current Codex conversation' }
+    ])
   }
 
   // ── 내부 ───────────────────────────────────────────────────────────────

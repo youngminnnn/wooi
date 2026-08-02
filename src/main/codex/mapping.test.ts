@@ -234,6 +234,69 @@ describe('서브에이전트 조율 (collabAgentToolCall)', () => {
   })
 })
 
+describe('최신 Codex 활동 아이템', () => {
+  it('dynamicToolCall을 일반 도구 카드로 남긴다', () => {
+    const r = map(NOTIFY.itemCompleted, {
+      item: {
+        id: 'd1',
+        type: 'dynamicToolCall',
+        namespace: 'apps',
+        tool: 'lookup',
+        arguments: { q: 'x' },
+        success: true,
+        contentItems: [{ type: 'inputText', text: 'ok' }]
+      }
+    })
+    expect(items(r)[0]).toMatchObject({ type: 'tool_use', name: 'apps/lookup' })
+    expect(r.persist).toHaveLength(2)
+  })
+
+  it('subAgentActivity를 실행 중 에이전트 스냅샷으로 옮긴다', () => {
+    const state = createMapperState()
+    const started = map(
+      NOTIFY.itemCompleted,
+      {
+        item: {
+          id: 'a1',
+          type: 'subAgentActivity',
+          kind: 'started',
+          agentThreadId: 'thr-child',
+          agentPath: 'reviewer'
+        }
+      },
+      state
+    )
+    expect(started.events[0]).toMatchObject({
+      type: 'agents',
+      agents: [{ taskId: 'thr-child', agentType: 'reviewer' }]
+    })
+
+    const stopped = map(
+      NOTIFY.itemCompleted,
+      {
+        item: {
+          id: 'a2',
+          type: 'subAgentActivity',
+          kind: 'interrupted',
+          agentThreadId: 'thr-child'
+        }
+      },
+      state
+    )
+    expect(stopped.events[0]).toEqual({ type: 'agents', agents: [] })
+  })
+
+  it('hookPrompt를 시스템 메시지로 보여 준다', () => {
+    const r = map(NOTIFY.itemCompleted, {
+      item: { id: 'h1', type: 'hookPrompt', fragments: [{ text: 'run formatter' }] }
+    })
+    expect(items(r)[0]).toMatchObject({
+      type: 'system',
+      text: expect.stringContaining('formatter')
+    })
+  })
+})
+
 describe('파일 변경', () => {
   it('완료 시 tool_use + tool_result 를 남긴다', () => {
     const r = map(NOTIFY.itemCompleted, {

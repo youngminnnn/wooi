@@ -86,16 +86,30 @@ export interface ThreadItem {
 
   /** mcpToolCall */
   server?: string
+  namespace?: string | null
   tool?: string
   arguments?: unknown
   result?: unknown
   error?: unknown
+  contentItems?: unknown
+  success?: boolean | null
 
   /** webSearch */
   query?: string
 
   /** collabToolCall — 서브에이전트 조율 시 모델이 넘긴 지시문. */
   prompt?: string
+  /** hookPrompt */
+  fragments?: Array<{ text?: string; hookRunId?: string }>
+  /** subAgentActivity */
+  kind?: string
+  agentThreadId?: string
+  agentPath?: string
+  /** entered/exitedReviewMode */
+  review?: string
+  /** imageGeneration */
+  revisedPrompt?: string | null
+  savedPath?: string
 }
 
 // ── 알림 (서버 → 클라이언트, 응답 불필요) ───────────────────────────────
@@ -250,6 +264,7 @@ export interface ModelListResult {
     displayName?: string
     defaultReasoningEffort?: string
     supportedReasoningEfforts?: { reasoningEffort?: string; description?: string }[]
+    serviceTiers?: { id?: string; name?: string; description?: string }[]
     isDefault?: boolean
     hidden?: boolean
   }[]
@@ -281,8 +296,10 @@ export const RPC = {
   initialized: 'initialized',
   threadStart: 'thread/start',
   threadResume: 'thread/resume',
+  threadFork: 'thread/fork',
   threadCompact: 'thread/compact/start',
   threadShellCommand: 'thread/shellCommand',
+  reviewStart: 'review/start',
   turnStart: 'turn/start',
   turnSteer: 'turn/steer',
   turnInterrupt: 'turn/interrupt',
@@ -291,7 +308,11 @@ export const RPC = {
   accountLoginStart: 'account/login/start',
   accountLoginCancel: 'account/login/cancel',
   accountLogout: 'account/logout',
-  rateLimitsRead: 'account/rateLimits/read'
+  rateLimitsRead: 'account/rateLimits/read',
+  mcpStatusList: 'mcpServerStatus/list',
+  mcpReload: 'config/mcpServer/reload',
+  configValueWrite: 'config/value/write',
+  configRead: 'config/read'
 } as const
 
 /** 서버가 보내오는 알림 메서드. */
@@ -304,6 +325,7 @@ export const NOTIFY = {
   itemStarted: 'item/started',
   itemCompleted: 'item/completed',
   agentMessageDelta: 'item/agentMessage/delta',
+  planDelta: 'item/plan/delta',
   reasoningSummaryDelta: 'item/reasoning/summaryTextDelta',
   reasoningTextDelta: 'item/reasoning/textDelta',
   commandOutputDelta: 'item/commandExecution/outputDelta',
@@ -314,7 +336,10 @@ export const NOTIFY = {
   serverRequestResolved: 'serverRequest/resolved',
   accountUpdated: 'account/updated',
   accountLoginCompleted: 'account/login/completed',
-  rateLimitsUpdated: 'account/rateLimits/updated'
+  rateLimitsUpdated: 'account/rateLimits/updated',
+  threadCompacted: 'thread/compacted',
+  modelRerouted: 'model/rerouted',
+  deprecationNotice: 'deprecationNotice'
 } as const
 
 /** 서버가 우리에게 보내는 **요청** 메서드(응답 필수). */
@@ -323,5 +348,6 @@ export const SERVER_REQUEST = {
   fileChangeApproval: 'item/fileChange/requestApproval',
   permissionsApproval: 'item/permissions/requestApproval',
   requestUserInput: 'item/tool/requestUserInput',
-  elicitation: 'mcpServer/elicitation/request'
+  elicitation: 'mcpServer/elicitation/request',
+  dynamicToolCall: 'item/tool/call'
 } as const

@@ -422,7 +422,8 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
     if (images.length || !trimmed.startsWith('!')) return false
     const command = trimmed.slice(1).trim()
     if (!command) return true // "!" 만 입력 — 메시지로 새지 않도록 삼키되 아무것도 실행 안 함.
-    void window.api.terminal.exec(workspace.id, command)
+    if (workspace.agentBackend === 'codex') void window.api.chat.send(workspace.id, trimmed)
+    else void window.api.terminal.exec(workspace.id, command)
     return true
   }
 

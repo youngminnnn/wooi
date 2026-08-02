@@ -270,9 +270,8 @@ export const CODEX_EFFORTS: EffortOptionInfo[] = [
 /**
  * Codex 백엔드 메타.
  *
- * 미지원으로 둔 기능은 프로토콜에 없어서가 아니라 아직 붙이지 않아서다 — app-server 는 MCP
- * (`mcpServerStatus/list`)·skills·`thread/fork` 를 모두 제공하므로, 후속 작업에서 capability 만
- * 켜면 된다. `defaultModel: null` 은 Codex 의 설정/카탈로그 기본 모델을 그대로 따른다는 뜻이다.
+ * `defaultModel: null` 은 Codex 의 설정/카탈로그 기본 모델을 그대로 따른다는 뜻이다.
+ * capability 는 Wooi UI 와 app-server 연결이 모두 준비된 기능만 노출한다.
  */
 export const CODEX_META: AgentBackendMeta = {
   id: 'codex',
@@ -284,14 +283,12 @@ export const CODEX_META: AgentBackendMeta = {
   capabilities: {
     sideQuestion: false,
     rewind: false,
-    mcp: false,
+    mcp: true,
     effort: true,
-    // Codex 에는 fast mode 에 해당하는 개념이 없다.
-    fastMode: false,
-    // app-server 로 답할 수 있는 것만. /rewind·/agents 는 대응 개념이 없고,
-    // /mcp 는 프로토콜에는 있지만 아직 붙이지 않았다.
-    interactiveCommands: ['context', 'usage', 'permissions'],
-    slashCommands: false,
+    fastMode: true,
+    // app-server 로 답할 수 있는 것만. /rewind·/agents 는 대응 개념이 없다.
+    interactiveCommands: ['mcp', 'context', 'usage', 'permissions'],
+    slashCommands: true,
     // app-server 의 turn/steer — 턴이 도는 중에도 입력을 밀어 넣을 수 있다.
     steering: true,
     // account/login/start 가 OAuth 콜백까지 호스팅해 PTY 없이 앱 안에서 로그인이 끝난다.

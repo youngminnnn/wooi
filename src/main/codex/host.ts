@@ -26,6 +26,8 @@ import type {
   ChatItem,
   CommandPanelKind,
   CommandResult,
+  McpAction,
+  McpServerInfo,
   ModelOption,
   PermissionDecision,
   PermissionRequest
@@ -66,7 +68,10 @@ async function rpc(): Promise<RpcClient> {
       requestHandlers: {
         [SERVER_REQUEST.commandApproval]: (params) => approve(params, mapCommandApproval),
         [SERVER_REQUEST.fileChangeApproval]: (params) => approveFileChange(params),
-        [SERVER_REQUEST.requestUserInput]: (params) => answer(params)
+        [SERVER_REQUEST.requestUserInput]: (params) => answer(params),
+        [SERVER_REQUEST.permissionsApproval]: (params) => approvePermissions(params),
+        [SERVER_REQUEST.elicitation]: (params) => answerElicitation(params),
+        [SERVER_REQUEST.dynamicToolCall]: (params) => rejectDynamicTool(params)
       },
       onExit: onServerExit
     })
@@ -158,6 +163,102 @@ async function answer(
   const decision = await prompt(params, mapUserInputRequest(params as never))
   if (decision.behavior !== 'allow') return { answers: {} }
   return { answers: answersFor(params as never, decision.updatedInput) }
+}
+
+/** Codex 의 세분화된 파일시스템/네트워크 권한 요청. 요청된 범위보다 넓게 허용하지 않는다. */
+async function approvePermissions(params: unknown): Promise<{
+  permissions: Record<string, unknown>
+  scope: 'turn' | 'session'
+}> {
+  const p = params as {
+    reason?: string | null
+    cwd?: string
+    permissions?: Record<string, unknown>
+  }
+  const decision = await prompt(params, {
+    kind: 'tool',
+    toolName: 'RequestPermissions',
+    title: p.reason?.trim() || 'Codex requests additional permissions',
+    displayName: 'Grant permissions',
+    input: { cwd: p.cwd, permissions: p.permissions ?? {} },
+    decisionReason: p.reason ?? undefined,
+    options: [
+      { id: 'turn', label: 'Allow for turn', behavior: 'allow' },
+      {
+        id: 'session',
+        label: 'Allow for session',
+        behavior: 'allow',
+        rememberForSession: true
+      },
+      { id: 'decline', label: 'Reject', behavior: 'deny' }
+    ]
+  })
+  return {
+    permissions: decision.behavior === 'allow' ? (p.permissions ?? {}) : {},
+    scope: decision.optionId === 'session' ? 'session' : 'turn'
+  }
+}
+
+/** MCP elicitation 을 기존 질문 UI 로 옮긴다. form 필드는 자유 입력 가능한 질문으로 표시한다. */
+async function answerElicitation(params: unknown): Promise<{
+  action: 'accept' | 'decline'
+  content: Record<string, string> | null
+  _meta: null
+}> {
+  const p = params as {
+    mode?: string
+    serverName?: string
+    message?: string
+    url?: string
+    requestedSchema?: {
+      properties?: Record<string, { title?: string; description?: string; enum?: unknown[] }>
+      required?: string[]
+    }
+  }
+  const properties = p.requestedSchema?.properties ?? {}
+  const questions = Object.entries(properties).map(([name, schema]) => ({
+    question: schema.description || schema.title || name,
+    header: name,
+    options: (schema.enum ?? []).map((value) => ({ label: String(value), description: '' }))
+  }))
+  if (p.mode === 'url') {
+    questions.push({
+      question: p.message || `Open the URL requested by ${p.serverName ?? 'the MCP server'}`,
+      header: 'URL',
+      options: [{ label: p.url ?? '', description: p.url ?? '' }]
+    })
+  }
+  const decision = await prompt(params, {
+    kind: 'question',
+    toolName: 'McpElicitation',
+    title: p.message || `${p.serverName ?? 'MCP server'} requests input`,
+    input: { questions }
+  })
+  if (decision.behavior !== 'allow') return { action: 'decline', content: null, _meta: null }
+  const raw = (decision.updatedInput?.answers ?? {}) as Record<string, string>
+  const content: Record<string, string> = {}
+  for (const [name, schema] of Object.entries(properties)) {
+    const question = schema.description || schema.title || name
+    if (raw[question] !== undefined) content[name] = raw[question]
+  }
+  return { action: 'accept', content, _meta: null }
+}
+
+/** 클라이언트 확장 도구는 Wooi 에 등록된 실행기가 없으므로 명시적인 도구 실패로 되돌린다. */
+async function rejectDynamicTool(params: unknown): Promise<{
+  contentItems: Array<{ type: 'inputText'; text: string }>
+  success: false
+}> {
+  const p = params as { namespace?: string | null; tool?: string }
+  return {
+    contentItems: [
+      {
+        type: 'inputText',
+        text: `Wooi has no client executor for ${p.namespace ? `${p.namespace}/` : ''}${p.tool ?? 'this dynamic tool'}.`
+      }
+    ],
+    success: false
+  }
 }
 
 function prompt(
@@ -281,8 +382,24 @@ async function handle(msg: CodexCommand): Promise<void> {
       await respond(msg.reqId, () => runCommand(msg.workspaceId, msg.kind))
       break
 
+    case 'mcpAction':
+      await respond(msg.reqId, () => mcpAction(msg.serverName, msg.action))
+      break
+
     case 'compact':
       await ensure(msg.workspaceId, msg.config).compact()
+      break
+
+    case 'review':
+      await ensure(msg.workspaceId, msg.config).review()
+      break
+
+    case 'shell':
+      await ensure(msg.workspaceId, msg.config).shell(msg.command)
+      break
+
+    case 'fork':
+      await ensure(msg.workspaceId, msg.config).fork()
       break
 
     case 'accountStatus':
@@ -432,18 +549,21 @@ async function logout(): Promise<void> {
 async function runCommand(workspaceId: string, kind: CommandPanelKind): Promise<CommandResult> {
   const thread = threads.get(workspaceId)
 
+  if (kind === 'mcp') return { kind: 'mcp', servers: await listMcpServers() }
+
   if (kind === 'context') {
     const usage = thread?.contextUsage()
     if (!usage) {
       throw new Error('No context usage yet — send a message first.')
     }
+    const effective = await readEffectiveConfig(thread?.currentCwd())
     return {
       kind: 'context',
       context: {
         totalTokens: usage.usedTokens,
         maxTokens: usage.maxTokens,
         percentage: Math.round(usage.percentage * 100),
-        model: thread?.currentModel() ?? 'default',
+        model: thread?.currentModel() ?? effective.model ?? 'default',
         // Codex 는 카테고리별 분해를 주지 않는다 — 합계만 한 항목으로 보여 준다.
         categories: [{ name: 'Conversation', tokens: usage.usedTokens }]
       }
@@ -473,20 +593,85 @@ async function runCommand(workspaceId: string, kind: CommandPanelKind): Promise<
     }
   }
 
-  // permissions — 현재 모드와 그 모드가 실제로 무엇을 허용하는지 보여 준다.
+  // permissions — Wooi 의 turn override 와 Codex 의 effective config 를 함께 보여 준다.
   const mode = thread?.currentMode() ?? 'default'
   const policy = turnPolicyFor(mode, thread?.currentCwd() ?? '')
+  const effective = await readEffectiveConfig(thread?.currentCwd())
   return {
     kind: 'permissions',
     permissions: {
       mode,
       allow: describeSandbox(policy.sandboxPolicy),
-      ask: policy.approvalPolicy === 'never' ? [] : ['Anything outside the sandbox'],
+      ask:
+        policy.approvalPolicy === 'never'
+          ? []
+          : [
+              `Anything outside the sandbox (${effective.approval_policy ?? policy.approvalPolicy})`
+            ],
       deny: [],
-      // Codex 는 규칙을 config.toml 에서 읽는다 — 출처를 알려 준다.
-      sources: ['~/.codex/config.toml']
+      sources: effective.sources
     }
   }
+}
+
+async function readEffectiveConfig(cwd?: string): Promise<{
+  model?: string | null
+  approval_policy?: string | null
+  sources: string[]
+}> {
+  const client = await rpc()
+  const result = await client.request<{
+    config?: { model?: string | null; approval_policy?: string | null }
+    layers?: Array<{ source?: unknown; filePath?: string | null }>
+  }>(RPC.configRead, { cwd: cwd || undefined, includeLayers: true })
+  const sources = (result.layers ?? [])
+    .map((layer) => layer.filePath ?? (layer.source ? JSON.stringify(layer.source) : ''))
+    .filter(Boolean) as string[]
+  return { ...result.config, sources }
+}
+
+async function listMcpServers(): Promise<McpServerInfo[]> {
+  const client = await rpc()
+  const result = await client.request<{
+    data?: Array<{
+      name?: string
+      serverInfo?: { version?: string | null }
+      tools?: Record<string, { description?: string }>
+      authStatus?: string
+    }>
+  }>(RPC.mcpStatusList, { limit: 100 })
+  return (result.data ?? []).map((server) => {
+    const tools = Object.entries(server.tools ?? {}).map(([name, tool]) => ({
+      name,
+      description: tool.description
+    }))
+    return {
+      name: server.name ?? 'mcp',
+      status:
+        server.authStatus === 'notLoggedIn'
+          ? ('needs-auth' as const)
+          : server.serverInfo
+            ? ('connected' as const)
+            : ('failed' as const),
+      toolCount: tools.length,
+      tools,
+      version: server.serverInfo?.version ?? undefined,
+      error: server.serverInfo ? undefined : 'Server did not initialize.'
+    }
+  })
+}
+
+async function mcpAction(serverName: string, action: McpAction): Promise<McpServerInfo[]> {
+  const client = await rpc()
+  if (action === 'enable' || action === 'disable') {
+    await client.request(RPC.configValueWrite, {
+      keyPath: `mcp_servers.${serverName}.enabled`,
+      value: action === 'enable',
+      mergeStrategy: 'replace'
+    })
+  }
+  await client.request(RPC.mcpReload, {})
+  return listMcpServers()
 }
 
 /** rate limit 창 하나를 UsageInfo 모양으로. 데이터가 없으면 null. */
@@ -527,7 +712,8 @@ async function listModels(): Promise<ModelOption[]> {
       label: m.displayName || m.id,
       efforts: m.supportedReasoningEfforts
         ?.map((e) => e.reasoningEffort)
-        .filter((e): e is string => !!e) as ModelOption['efforts']
+        .filter((e): e is string => !!e) as ModelOption['efforts'],
+      ...(m.serviceTiers?.some((tier) => tier.id === 'fast') ? { fastMode: true as const } : {})
     }))
 }
 

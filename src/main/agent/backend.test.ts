@@ -72,10 +72,10 @@ describe('백엔드 간 관계', () => {
     expect(CODEX_META.capabilities.interactiveCommands).not.toContain('agents')
   })
 
-  // fast mode 는 Claude Code 전용이다. 켜 두면 /fast 카드와 상태줄이 아무 일도 못 하면서 뜬다.
-  it('fast mode 는 Claude 만 지원한다', () => {
+  // 두 백엔드 모두 같은 UI 를 쓰지만, Codex 는 Fast service tier 로 전달한다.
+  it('fast mode 는 Claude 와 Codex 모두 지원한다', () => {
     expect(CLAUDE_META.capabilities.fastMode).toBe(true)
-    expect(CODEX_META.capabilities.fastMode).toBe(false)
+    expect(CODEX_META.capabilities.fastMode).toBe(true)
   })
 
   // 두 백엔드 모두 계정 사용량을 알려 준다 — 상태줄·Overview 가 백엔드와 무관하게 동작해야 한다.

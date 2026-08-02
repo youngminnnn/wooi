@@ -408,7 +408,7 @@ export interface AgentCapabilities {
   mcp: boolean
   /** reasoning effort 단계 선택 */
   effort: boolean
-  /** fast mode(`/fast`) — 같은 모델을 더 빠른 출력 속도로 돌린다(Claude Code 전용). */
+  /** fast mode(`/fast`) — 지원 모델의 빠른 service tier 를 사용한다. */
   fastMode: boolean
   /**
    * 이 백엔드가 실제로 답할 수 있는 인터랙티브 명령 패널의 종류(/context·/usage·/mcp 등).

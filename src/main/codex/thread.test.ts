@@ -18,7 +18,14 @@ function makeThread() {
   const persisted: ChatItem[] = []
   const thread = new CodexThread(
     'ws1',
-    { cwd: '/tmp/wt', model: null, effort: null, permissionMode: 'default', resumeThreadId: null },
+    {
+      cwd: '/tmp/wt',
+      model: null,
+      effort: null,
+      fastMode: false,
+      permissionMode: 'default',
+      resumeThreadId: null
+    },
     {
       rpc: () => Promise.reject(new Error('not used')),
       emit: (e) => events.push(e),
