@@ -43,7 +43,7 @@
   <g font-family="'Helvetica Neue',Arial,sans-serif">
     <circle cx="96" cy="99" r="7" fill="#5b8cf6"/>
     <text x="118" y="108" font-size="27" font-weight="700" letter-spacing="3"
-          fill="#8b93a4">macOS · POWERED BY CLAUDE CODE</text>
+          fill="#8b93a4">macOS · CLAUDE CODE + CODEX</text>
 
     <!-- title -->
     <text x="84" y="238" font-size="132" font-weight="800" letter-spacing="-2"
