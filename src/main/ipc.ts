@@ -1057,7 +1057,9 @@ export function registerIpc(ctx: IpcContext): void {
     const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
     if (!ws || ws.archived) return
     const head = await currentBranch(ws.worktreePath).catch(() => '')
-    const prs = await listOpenPrs(ws.worktreePath).catch(() => [])
+    // 리포 단위로 묶어 조회한다 — 같은 리포의 워크스페이스를 연달아 재동기화할 때(PR 상태 전체
+    // 훑기) 완전히 같은 목록을 워크스페이스 수만큼 다시 받아오지 않는다.
+    const prs = await listOpenPrs(ws.worktreePath, ws.repoId).catch(() => [])
     // 다른 워크스페이스(모델 A 스택 포함)가 소유한 브랜치는 이 스택의 경계로 취급한다.
     const exclude = new Set<string>()
     for (const other of store.getState().workspaces) {

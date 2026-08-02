@@ -206,7 +206,14 @@ interface UIState {
   refreshGit: (workspaceId: string) => Promise<void>
   /** 진입 여부와 무관하게 모든(비아카이브) 워크스페이스의 git 상태를 한 번에 갱신한다. */
   refreshAllGit: () => Promise<void>
-  refreshPr: (workspaceId: string) => Promise<void>
+  /**
+   * 해당 workspace 의 PR 상태를 갱신한다.
+   * silent 면 새로고침 스피너(prRefreshing)를 띄우지 않는다 — 사용자가 요청하지 않은 백그라운드
+   * 폴링이 헤더에서 계속 깜빡이지 않도록.
+   */
+  refreshPr: (workspaceId: string, opts?: { silent?: boolean }) => Promise<void>
+  /** 진입 여부와 무관하게 모든(비아카이브) 워크스페이스의 PR 상태를 한 번에 갱신한다. */
+  refreshAllPr: () => Promise<void>
   /** PR 상태를 즉시(낙관적) 설정한다. 브랜치 전환 시 캐시된 값으로 헤더를 바로 갱신할 때 쓴다. */
   setPrStatus: (workspaceId: string, status: PrStatus | null) => void
   refreshScriptStatus: (workspaceId: string) => Promise<void>
@@ -282,6 +289,20 @@ const STATUS_POLL_INTERVAL_MS = 15_000
 // 연결돼 있으면 아예 돌지 않으므로 기존 사용자에게 추가 비용이 없다.
 let authPollTimer: ReturnType<typeof setInterval> | null = null
 const AUTH_POLL_INTERVAL_MS = 30_000
+
+// PR 상태 폴링. 예전에는 폴링이 아예 없어서, 리뷰 승인·병합·CI 결과처럼 앱 밖(GitHub)에서 일어난
+// 변화가 워크스페이스를 다시 선택하거나 에이전트 턴이 끝나기 전까지 칩에 반영되지 않았다.
+// 다만 PR 조회 한 번은 git 상태와 비교가 안 되게 비싸다 — 로그인 셸을 띄워 gh 를 돌리고 네트워크
+// 왕복까지 한다(리포 단위인 열린 PR 목록은 main 에서 리포별로 묶어 한 번만 받아온다 —
+// github.ts 의 listOpenPrs 참고). 그래서 두 단으로 나눈다: 전체 훑기 사이에 지금 보고 있는
+// 워크스페이스만 한 번 더 끼워 넣어, 헤더 PR 칩은 사이드바 PR 점보다 촘촘하게 따라가게 한다.
+let prPollTimer: ReturnType<typeof setInterval> | null = null
+let prPollInFlight = false
+const PR_POLL_INTERVAL_MS = 20_000
+const PR_ALL_INTERVAL_MS = 40_000
+/** 마지막 전체 갱신 시각. 포커스 복귀가 잦아도 gh 호출이 몰리지 않게 하한(아래)을 두는 기준. */
+let lastPrAllAt = 0
+const PR_ALL_MIN_GAP_MS = 15_000
 
 // gh 연결 모달이 닫힐 때까지 붙들어 두는, 사용자가 원래 하려던 액션. 상태에 담지 않는 이유는
 // 함수라 비교·직렬화 대상이 아니고, 렌더에 영향을 주지 않기 때문이다.
@@ -373,8 +394,26 @@ export const useStore = create<UIState>((set, get) => ({
     // git 상태와 마찬가지로, 최초 진입 시 모든 활성 workspace 의 PR 상태도 미리 갱신한다.
     // 그러지 않으면 prStatus 가 비어 있어, 해당 세션에 직접 들어가 selectWorkspace 의
     // refreshPr 가 실행되기 전까지 사이드바에 PR 칩이 뜨지 않는다.
-    for (const w of app.workspaces) {
-      if (!w.archived) void get().refreshPr(w.id)
+    void get().refreshAllPr()
+
+    // 이후로는 주기적으로 따라잡는다. 창이 가려져 있으면 건너뛰고(포커스 복귀 시 아래에서 즉시
+    // 한 번 갱신), gh 미연결이면 어차피 조용히 null 만 돌아오므로 아예 돌지 않는다.
+    if (!prPollTimer) {
+      prPollTimer = setInterval(() => {
+        if (!windowFocused) return
+        if (!githubConnected(get().authStatus)) return
+        // 앞선 폴링이 아직 안 끝났으면(느린 네트워크·많은 워크스페이스) 이번 틱은 건너뛴다.
+        if (prPollInFlight) return
+        const selected = get().selectedWorkspaceId
+        const full = Date.now() - lastPrAllAt >= PR_ALL_INTERVAL_MS
+        if (!full && !selected) return
+        prPollInFlight = true
+        const done = (): void => {
+          prPollInFlight = false
+        }
+        if (full) void get().refreshAllPr().then(done, done)
+        else void get().refreshPr(selected!, { silent: true }).then(done, done)
+      }, PR_POLL_INTERVAL_MS)
     }
 
     // 패널을 토글할 때마다(키보드 ⌘J·버튼·Composer 등 경로 무관) 마지막 상태를 기억해 둔다.
@@ -394,9 +433,7 @@ export const useStore = create<UIState>((set, get) => ({
         set({ prStatus: {} })
         return
       }
-      for (const w of state.app?.workspaces ?? []) {
-        if (!w.archived) void get().refreshPr(w.id)
-      }
+      void get().refreshAllPr()
     })
 
     window.api.onState((next) => {
@@ -442,6 +479,11 @@ export const useStore = create<UIState>((set, get) => ({
       clearSelectedUnread()
       // 자리를 비운 사이 바뀌었을 수 있으니 모든 워크트리 상태를 즉시 한 번 갱신한다.
       void get().refreshAllGit()
+      // PR 도 같이 훑되(자리를 비운 사이 리뷰·병합이 일어났을 수 있다), gh 호출이 비싼 만큼
+      // 앱을 자주 오갈 때 매번 돌지 않도록 최소 간격을 둔다.
+      if (githubConnected(get().authStatus) && Date.now() - lastPrAllAt >= PR_ALL_MIN_GAP_MS) {
+        void get().refreshAllPr()
+      }
     })
     window.api.onWindowBlur(() => {
       windowFocused = false
@@ -919,14 +961,39 @@ export const useStore = create<UIState>((set, get) => ({
     })
   },
 
-  refreshPr: async (workspaceId) => {
-    set((s) => ({ prRefreshing: { ...s.prRefreshing, [workspaceId]: true } }))
+  refreshPr: async (workspaceId, opts) => {
+    const silent = opts?.silent === true
+    if (!silent) set((s) => ({ prRefreshing: { ...s.prRefreshing, [workspaceId]: true } }))
     try {
       const status = await window.api.pr.status(workspaceId)
       set((s) => ({ prStatus: { ...s.prStatus, [workspaceId]: status } }))
     } finally {
-      set((s) => ({ prRefreshing: { ...s.prRefreshing, [workspaceId]: false } }))
+      if (!silent) set((s) => ({ prRefreshing: { ...s.prRefreshing, [workspaceId]: false } }))
     }
+  },
+
+  refreshAllPr: async () => {
+    const workspaces = get().app?.workspaces.filter((w) => !w.archived) ?? []
+    // 다음 전체 갱신까지의 간격은 "시작 시각" 기준으로 잰다. 조회가 오래 걸릴 때 끝난 시각으로
+    // 재면 전체 훑기가 계속 뒤로 밀린다.
+    lastPrAllAt = Date.now()
+    if (!workspaces.length) return
+    // git 과 같은 방식 — 병렬로 받아 한 번만 반영해 워크스페이스 수만큼 리렌더가 나지 않게 한다.
+    const entries = await Promise.all(
+      workspaces.map(async (w) => {
+        // undefined = 조회 자체가 실패 → 기존 값을 지우지 않는다(일시적 실패에 칩이 사라졌다
+        // 다시 나타나는 깜빡임 방지). null = 조회 성공했고 PR 이 없음 → 그대로 반영한다.
+        const status = await window.api.pr.status(w.id).catch(() => undefined)
+        return [w.id, status] as const
+      })
+    )
+    set((s) => {
+      const prStatus = { ...s.prStatus }
+      for (const [id, status] of entries) {
+        if (status !== undefined) prStatus[id] = status
+      }
+      return { prStatus }
+    })
   },
 
   setPrStatus: (workspaceId, status) =>

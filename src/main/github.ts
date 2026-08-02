@@ -256,11 +256,31 @@ export async function deleteRemoteRef(worktreePath: string, branch: string): Pro
   )
 }
 
-/** 리포의 열린 PR 을 head/base 브랜치와 함께 나열한다. worktree 안의 브랜치 스택을 자동 감지할 때 쓴다. */
-export async function listOpenPrs(
-  worktreePath: string
-): Promise<Array<{ number: number; head: string; base: string }>> {
-  if (!(await connected())) return []
+export interface OpenPr {
+  number: number
+  head: string
+  base: string
+}
+
+// ── 열린 PR 목록 캐시 ──────────────────────────────────────────────────────
+// `gh pr list` 는 worktree 가 아니라 리포 단위 질의라, 같은 리포의 워크스페이스마다 돌리면 완전히
+// 똑같은 응답을 N 번 받아온다. PR 상태 갱신은 워크스페이스별로 스택을 재동기화하며 이 목록을 쓰므로,
+// 전체 훑기 한 번에 중복 로그인 셸이 워크스페이스 수만큼 뜬다 — 폴링 주기를 줄이려면 여기부터
+// 걷어내야 한다. 그래서 리포 단위로 짧게 캐시하고, 진행 중인 요청에는 뒤따르는 호출을 붙인다
+// (probeGithub 와 같은 방식). TTL 은 훑기 한 번을 덮되 사람이 낡음을 느끼지 못할 만큼만 잡는다.
+const OPEN_PRS_TTL_MS = 10_000
+const openPrsCache = new Map<string, { at: number; prs: OpenPr[] }>()
+const openPrsInFlight = new Map<string, { epoch: number; promise: Promise<OpenPr[]> }>()
+/** 무효화 세대. 무효화 시점에 이미 날아간 요청의 낡은 응답이 캐시에 눌러앉지 않게 한다. */
+let openPrsEpoch = 0
+
+/** PR 을 바꾸는 액션 뒤에는 캐시가 낡는다 — 즉시 버려 다음 조회가 실제 상태를 받게 한다. */
+export function invalidateOpenPrs(): void {
+  openPrsCache.clear()
+  openPrsEpoch++
+}
+
+async function fetchOpenPrs(worktreePath: string): Promise<OpenPr[]> {
   const { stdout, code } = await runLoginShell(
     `gh pr list --state open --json number,headRefName,baseRefName --limit 200`,
     worktreePath
@@ -276,6 +296,35 @@ export async function listOpenPrs(
   } catch {
     return []
   }
+}
+
+/**
+ * 리포의 열린 PR 을 head/base 브랜치와 함께 나열한다. worktree 안의 브랜치 스택을 자동 감지할 때 쓴다.
+ * cacheKey(리포 식별자)를 주면 그 키로 묶어 캐시·합류한다 — 같은 리포의 워크스페이스들이 잇따라
+ * 부르는 경우가 이에 해당한다. 생략하면 캐시 없이 매번 새로 조회한다.
+ */
+export async function listOpenPrs(worktreePath: string, cacheKey?: string): Promise<OpenPr[]> {
+  if (!(await connected())) return []
+  if (cacheKey === undefined) return fetchOpenPrs(worktreePath)
+
+  const hit = openPrsCache.get(cacheKey)
+  if (hit && Date.now() - hit.at < OPEN_PRS_TTL_MS) return hit.prs
+  // 같은 세대의 진행 중인 요청이 있으면 결과를 함께 기다린다(무효화 이전 요청에는 붙지 않는다).
+  const inFlight = openPrsInFlight.get(cacheKey)
+  if (inFlight && inFlight.epoch === openPrsEpoch) return inFlight.promise
+
+  const epoch = openPrsEpoch
+  const promise = fetchOpenPrs(worktreePath)
+    .then((prs) => {
+      // 조회 도중 무효화됐다면(그 사이 PR 을 만들었거나 병합했다) 이 응답은 이미 낡았다.
+      if (epoch === openPrsEpoch) openPrsCache.set(cacheKey, { at: Date.now(), prs })
+      return prs
+    })
+    .finally(() => {
+      if (openPrsInFlight.get(cacheKey)?.promise === promise) openPrsInFlight.delete(cacheKey)
+    })
+  openPrsInFlight.set(cacheKey, { epoch, promise })
+  return promise
 }
 
 // ── PR/CI 체크 (Check 탭) ──────────────────────────────────────────────────
@@ -382,7 +431,7 @@ export async function createPrWeb(
   // 브랜치명은 sanitizeBranch 로 정규화돼 있어 안전하지만, 셸 해석을 막기 위해 작은따옴표로 감싼다.
   const baseFlag = opts?.base ? ` --base '${opts.base}'` : ''
   const headFlag = opts?.head ? ` --head '${opts.head}'` : ''
-  const { stderr, code } = await runLoginShell(
+  const { stderr, code } = await runGhWrite(
     `gh pr create --web --fill${baseFlag}${headFlag}`,
     worktreePath
   )
@@ -404,10 +453,7 @@ export async function retargetPr(
 ): Promise<{ error?: string }> {
   if (!(await connectedFresh())) return { error: NOT_CONNECTED }
   const target = selector ? ` '${selector}'` : ''
-  const { stderr, code } = await runLoginShell(
-    `gh pr edit${target} --base '${newBase}'`,
-    worktreePath
-  )
+  const { stderr, code } = await runGhWrite(`gh pr edit${target} --base '${newBase}'`, worktreePath)
   if (code !== 0) return { error: lastError(stderr, 'Failed to retarget the pull request.') }
   return {}
 }
@@ -419,6 +465,19 @@ export async function retargetPr(
 /** gh 명령의 마지막 의미 있는 오류 줄을 추린다. */
 function lastError(stderr: string, fallback: string): string {
   return stderr.trim().split('\n').filter(Boolean).pop() || fallback
+}
+
+/**
+ * PR 을 바꾸는 gh 명령 실행기. 실행 뒤 열린 PR 목록 캐시를 버린다 — 방금 만들거나 병합·종료한 PR 이
+ * 다음 상태 갱신에 곧바로 반영돼야 한다. 실패했더라도 버린다(한 번 더 조회할 뿐, 잘못될 여지가 없다).
+ */
+async function runGhWrite(
+  command: string,
+  cwd: string
+): Promise<{ stdout: string; stderr: string; code: number | null }> {
+  const res = await runLoginShell(command, cwd)
+  invalidateOpenPrs()
+  return res
 }
 
 /**
@@ -439,7 +498,7 @@ export async function mergePr(
   if (!(await connectedFresh())) return { error: NOT_CONNECTED }
   const flag = method === 'merge' ? '--merge' : method === 'rebase' ? '--rebase' : '--squash'
   const target = selector ? ` '${selector}'` : ''
-  const { stderr, code } = await runLoginShell(`gh pr merge${target} ${flag}`, worktreePath)
+  const { stderr, code } = await runGhWrite(`gh pr merge${target} ${flag}`, worktreePath)
   if (code !== 0) return { error: lastError(stderr, 'Failed to merge the pull request.') }
   return {}
 }
@@ -447,7 +506,7 @@ export async function mergePr(
 /** 현재 브랜치의 PR 을 닫는다(병합하지 않고 종료). */
 export async function closePr(worktreePath: string): Promise<{ error?: string }> {
   if (!(await connectedFresh())) return { error: NOT_CONNECTED }
-  const { stderr, code } = await runLoginShell('gh pr close', worktreePath)
+  const { stderr, code } = await runGhWrite('gh pr close', worktreePath)
   if (code !== 0) return { error: lastError(stderr, 'Failed to close the pull request.') }
   return {}
 }
@@ -463,7 +522,7 @@ export async function reopenPr(
 ): Promise<{ error?: string }> {
   if (!(await connectedFresh())) return { error: NOT_CONNECTED }
   const target = selector ? ` '${selector}'` : ''
-  const { stderr, code } = await runLoginShell(`gh pr reopen${target}`, worktreePath)
+  const { stderr, code } = await runGhWrite(`gh pr reopen${target}`, worktreePath)
   if (code !== 0) return { error: lastError(stderr, 'Failed to reopen the pull request.') }
   return {}
 }
@@ -471,7 +530,7 @@ export async function reopenPr(
 /** Draft PR 을 리뷰 가능 상태로 전환한다(gh pr ready). */
 export async function markPrReady(worktreePath: string): Promise<{ error?: string }> {
   if (!(await connectedFresh())) return { error: NOT_CONNECTED }
-  const { stderr, code } = await runLoginShell('gh pr ready', worktreePath)
+  const { stderr, code } = await runGhWrite('gh pr ready', worktreePath)
   if (code !== 0) return { error: lastError(stderr, 'Failed to mark the pull request as ready.') }
   return {}
 }
