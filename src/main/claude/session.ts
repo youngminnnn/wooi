@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { query } from '@anthropic-ai/claude-agent-sdk'
 import type {
   Query,
@@ -353,7 +354,9 @@ export class ClaudeSession {
   send(text: string, images?: ImageAttachment[]): void {
     const imgs = images ?? []
     const item: ChatItem = {
-      id: `user:${Date.now()}:${Math.round(performance.now())}`,
+      // 큐에 쌓인 N개를 한 번에 보내면 같은 ms 안에서 여러 번 호출된다 — 시간 기반 id 는
+      // 충돌해서 upsert(last-wins) 로 합쳐지고 마지막 메시지만 화면에 남는다. uuid 로 보장한다.
+      id: `user:${randomUUID()}`,
       type: 'user',
       text,
       ts: Date.now(),
