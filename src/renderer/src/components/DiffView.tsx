@@ -79,23 +79,25 @@ function FileBlock({ file }: { file: FileDiff }): React.JSX.Element {
 }
 
 function DiffLine({ line }: { line: string }): React.JSX.Element {
-  let cls = 'text-neutral-500'
+  // 색은 --diff-* 토큰으로 — diff 는 코드 표면(--code-bg) 위에 그려지고, 그 표면은
+  // 테마마다 밝기가 달라서 고정 색으로는 한쪽 테마에서 대비가 무너진다.
+  let cls = 'text-[var(--diff-context)]'
   let bg = ''
   if (line.startsWith('+') && !line.startsWith('+++')) {
-    cls = 'text-[var(--success-300)]'
+    cls = 'text-[var(--diff-add)]'
     bg = 'bg-[var(--success-500)]/10'
   } else if (line.startsWith('-') && !line.startsWith('---')) {
-    cls = 'text-[var(--danger-300)]'
+    cls = 'text-[var(--diff-del)]'
     bg = 'bg-[var(--danger-500)]/10'
   } else if (line.startsWith('@@')) {
-    cls = 'text-cyan-400'
+    cls = 'text-[var(--diff-hunk)]'
   } else if (
     line.startsWith('diff --git') ||
     line.startsWith('index ') ||
     line.startsWith('+++') ||
     line.startsWith('---')
   ) {
-    cls = 'text-neutral-600'
+    cls = 'text-[var(--diff-meta)]'
   }
   return <div className={`px-3 ${cls} ${bg}`}>{line || ' '}</div>
 }

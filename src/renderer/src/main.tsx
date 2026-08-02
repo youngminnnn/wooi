@@ -1,6 +1,6 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
-import 'highlight.js/styles/github-dark.css'
+// highlight.js 토큰 색은 index.css 가 --hl-* 토큰으로 테마별(github-dark/github)로 정의한다.
 import './index.css'
 import App from './App'
 import { bootstrapTheme } from './lib/theme'
