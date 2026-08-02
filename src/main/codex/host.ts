@@ -33,6 +33,7 @@ import type {
   PermissionRequest
 } from '@shared/types'
 import type { RpcClient } from './jsonrpc'
+import { durationLabel } from './rateLimits'
 
 /**
  * codex-host: `codex app-server` 를 소유하는 유틸리티 프로세스의 진입점.
@@ -573,8 +574,8 @@ async function runCommand(workspaceId: string, kind: CommandPanelKind): Promise<
   if (kind === 'usage') {
     const limits = await rateLimits()
     const windows = [
-      toWindow('5-hour', limits?.primary),
-      toWindow('Weekly', limits?.secondary)
+      toWindow('Primary', limits?.primary),
+      toWindow('Secondary', limits?.secondary)
     ].filter((w): w is NonNullable<typeof w> => w !== null)
     const account = await accountStatus()
     return {
@@ -676,12 +677,13 @@ async function mcpAction(serverName: string, action: McpAction): Promise<McpServ
 
 /** rate limit 창 하나를 UsageInfo 모양으로. 데이터가 없으면 null. */
 function toWindow(
-  label: string,
-  window: { usedPercent?: number; resetsAt?: number } | null | undefined
+  fallbackLabel: string,
+  window:
+    { usedPercent?: number; resetsAt?: number; windowDurationMins?: number } | null | undefined
 ): { label: string; utilization: number | null; resetsAt: string | null } | null {
   if (!window || window.usedPercent === undefined) return null
   return {
-    label,
+    label: durationLabel(window.windowDurationMins, fallbackLabel),
     utilization: window.usedPercent,
     resetsAt: window.resetsAt ? new Date(window.resetsAt * 1000).toISOString() : null
   }

@@ -10,14 +10,9 @@ import {
 import { getStore } from '../store'
 import { getTranscripts } from '../transcripts'
 import { log } from '../logger'
-import {
-  IPC,
-  SESSION_RATE_LIMIT_LABEL,
-  agentSettingsFor,
-  normalizePermissionMode,
-  workspaceDisplayName
-} from '@shared/types'
+import { IPC, agentSettingsFor, normalizePermissionMode, workspaceDisplayName } from '@shared/types'
 import { CODEX_META, type AgentBackend } from '../agent/backend'
+import { durationLabel } from './rateLimits'
 import type { CodexCommand, CodexConfig, CodexEvent } from './protocol'
 import type {
   AgentAuthStatus,
@@ -53,12 +48,13 @@ function describe(err: unknown): string {
  * 0% 로 채우면 "한도를 안 썼다"로 잘못 읽힌다.
  */
 function rateLimitWindow(
-  label: string,
-  window: { usedPercent?: number; resetsAt?: number } | null | undefined
+  fallbackLabel: string,
+  window:
+    { usedPercent?: number; resetsAt?: number; windowDurationMins?: number } | null | undefined
 ): RateLimitSnapshot['windows'][number] | null {
   if (!window || window.usedPercent === undefined) return null
   return {
-    label,
+    label: durationLabel(window.windowDurationMins, fallbackLabel),
     utilization: window.usedPercent,
     resetsAt: window.resetsAt ? new Date(window.resetsAt * 1000).toISOString() : null
   }
@@ -343,8 +339,8 @@ export class CodexSessionManager implements AgentBackend {
     }
 
     const windows = [
-      rateLimitWindow(SESSION_RATE_LIMIT_LABEL, limits?.primary),
-      rateLimitWindow('Weekly', limits?.secondary)
+      rateLimitWindow('Primary', limits?.primary),
+      rateLimitWindow('Secondary', limits?.secondary)
     ].filter((w): w is RateLimitSnapshot['windows'][number] => w !== null)
 
     const store = getStore()

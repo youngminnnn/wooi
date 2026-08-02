@@ -5,16 +5,14 @@ import {
   ShieldQuestion,
   GitPullRequest,
   Square,
-  DollarSign,
   Gauge,
-  Repeat,
   Timer,
   AlertTriangle
 } from 'lucide-react'
 import { useStore } from '../store'
 import { useNow } from '../lib/useNow'
 import { formatCost, formatCountdown, formatDuration, formatTime } from '../lib/format'
-import { SESSION_RATE_LIMIT_LABEL, workspaceDisplayName } from '@shared/types'
+import { workspaceDisplayName } from '@shared/types'
 import type {
   AgentBackendId,
   ChatItem,
@@ -38,18 +36,15 @@ type PlanWindow = {
   resetsAt: number | null
 }
 
-/** 트랜스크립트의 result 아이템에서 누적 비용(USD)과 턴 수를 합산한다. */
-function sessionStats(items: ChatItem[]): { cost: number; turns: number } {
+/** 트랜스크립트에서 backend가 실제로 제공한 누적 비용(USD)만 합산한다. */
+function sessionCost(items: ChatItem[]): number {
   let cost = 0
-  let turns = 0
   for (const it of items) {
     if (it.type === 'result') {
-      // 원가를 알려 주지 않는 백엔드(Codex)는 합계에 기여하지 않는다.
       cost += it.costUsd ?? 0
-      turns += it.numTurns
     }
   }
-  return { cost, turns }
+  return cost
 }
 
 type FilterKey = 'all' | 'running' | 'attention' | 'unread' | 'idle'
@@ -71,26 +66,17 @@ export default function Overview(): React.JSX.Element {
   const active = useMemo(() => app.workspaces.filter((w) => !w.archived), [app.workspaces])
   const anyRunning = active.some((w) => w.status === 'running')
 
-  // 비용/토큰 롤업: 모든 활성 세션의 트랜스크립트를 (없으면) 불러와 result 아이템에서 집계한다.
+  // workspace 카드의 Claude 비용을 위해 트랜스크립트를 불러온다. Codex는 원가를 제공하지 않는다.
   const transcripts = useStore((s) => s.transcripts)
   const ensureHistory = useStore((s) => s.ensureHistory)
   useEffect(() => {
     for (const w of active) void ensureHistory(w.id)
   }, [active, ensureHistory])
-  const perWorkspace = useMemo(() => {
-    const map: Record<string, { cost: number; turns: number }> = {}
-    for (const w of active) map[w.id] = sessionStats(transcripts[w.id] ?? [])
+  const costByWorkspace = useMemo(() => {
+    const map: Record<string, number> = {}
+    for (const w of active) map[w.id] = sessionCost(transcripts[w.id] ?? [])
     return map
   }, [active, transcripts])
-  const totals = useMemo(() => {
-    let cost = 0
-    let turns = 0
-    for (const w of active) {
-      cost += perWorkspace[w.id]?.cost ?? 0
-      turns += perWorkspace[w.id]?.turns ?? 0
-    }
-    return { cost, turns }
-  }, [active, perWorkspace])
 
   const auth = useStore((s) => s.authStatus)
   const connectedAgents = (['claude', 'codex'] as const).filter((id) => auth?.agents[id]?.loggedIn)
@@ -184,22 +170,8 @@ export default function Overview(): React.JSX.Element {
           )}
         </div>
 
-        {/* 비용/토큰 롤업: 모든 세션의 누적 지출·턴 수를 한눈에. */}
+        {/* backend와 무관하게 같은 의미를 갖는 전역 상태만 합산한다. */}
         <div className="flex flex-wrap gap-2.5 mb-2.5">
-          {totals.cost > 0 && (
-            <StatTile
-              icon={<DollarSign size={14} className="text-[var(--success-400)]" />}
-              label="Total spend"
-              value={formatCost(totals.cost)}
-              hint="Sum of session costs across all workspaces"
-            />
-          )}
-          <StatTile
-            icon={<Repeat size={14} className="text-[var(--accent-400)]" />}
-            label="Agent turns"
-            value={totals.turns.toLocaleString()}
-            hint="Total assistant turns across all workspaces"
-          />
           <StatTile
             icon={<Loader2 size={14} className="text-[var(--info-400)]" />}
             label="Active now"
@@ -264,7 +236,7 @@ export default function Overview(): React.JSX.Element {
                 repoName={repoName(w.repoId)}
                 flags={flagsOf(w)}
                 now={now}
-                cost={perWorkspace[w.id]?.cost ?? 0}
+                cost={costByWorkspace[w.id] ?? 0}
                 showCost={showCardCost}
                 onOpen={() => void selectWorkspace(w.id)}
               />
@@ -346,7 +318,7 @@ function AgentUsagePanel({
       !current || (window.usedPct ?? 0) > (current.usedPct ?? 0) ? window : current,
     null
   )
-  const session = windows.find((window) => window.label === SESSION_RATE_LIMIT_LABEL)
+  const primary = windows[0]
 
   return (
     <section className="rounded-xl border border-[var(--surface-2)] bg-[var(--bg-2)] p-3.5">
@@ -375,13 +347,13 @@ function AgentUsagePanel({
             />
             <StatTile
               icon={<Timer size={14} className="text-[var(--info-400)]" />}
-              label="Session resets in"
-              value={session?.resetsAt == null ? '—' : formatCountdown(session.resetsAt - now)}
-              loading={loading && session?.resetsAt == null}
+              label={primary ? `${primary.label} resets in` : 'Primary limit resets in'}
+              value={primary?.resetsAt == null ? '—' : formatCountdown(primary.resetsAt - now)}
+              loading={loading && primary?.resetsAt == null}
               hint={
-                session?.resetsAt == null
-                  ? `Checking the ${label} session window…`
-                  : `Resets at ${formatTime(session.resetsAt)}`
+                primary?.resetsAt == null
+                  ? `Checking the ${label} primary usage window…`
+                  : `${primary.label} usage window resets at ${formatTime(primary.resetsAt)}`
               }
             />
           </div>
