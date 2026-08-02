@@ -30,8 +30,16 @@ vi.mock('node:child_process', () => ({
   }
 }))
 
-const { setGithubConnected, getPrStatus, listOpenPrs, getPrChecks, createPrWeb, mergePr, closePr } =
-  await import('./github')
+const {
+  setGithubConnected,
+  getPrStatus,
+  listOpenPrs,
+  invalidateOpenPrs,
+  getPrChecks,
+  createPrWeb,
+  mergePr,
+  closePr
+} = await import('./github')
 
 /** 연결 확인(probe)은 `command -v gh … && gh auth status` 한 줄이다. */
 const isProbe = (c: string): boolean => c.startsWith('command -v gh')
@@ -118,6 +126,71 @@ describe('gh 연결됨 (무회귀)', () => {
     reply = () => ({ code: 0, stdout: '' })
     await expect(closePr('/tmp/wt')).resolves.toEqual({})
     expect(commands).toEqual(['gh pr close'])
+  })
+})
+
+/**
+ * `gh pr list` 는 리포 단위 질의라, 같은 리포의 워크스페이스마다 돌리면 같은 응답을 N 번 받는다.
+ * PR 상태 전체 훑기가 이 경로를 타므로, 중복이 살아나면 폴링 주기만큼 로그인 셸이 배로 뜬다.
+ */
+describe('열린 PR 목록 캐시', () => {
+  const PR_LIST = JSON.stringify([{ number: 1, headRefName: 'feat', baseRefName: 'main' }])
+  const listed = [{ number: 1, head: 'feat', base: 'main' }]
+
+  beforeEach(() => {
+    setGithubConnected(true)
+    invalidateOpenPrs()
+    reply = () => ({ code: 0, stdout: PR_LIST })
+  })
+
+  it('같은 리포의 동시 조회는 gh 를 한 번만 실행한다', async () => {
+    const results = await Promise.all([
+      listOpenPrs('/tmp/a', 'repo-1'),
+      listOpenPrs('/tmp/b', 'repo-1'),
+      listOpenPrs('/tmp/c', 'repo-1')
+    ])
+    expect(results).toEqual([listed, listed, listed])
+    expect(ghCalls()).toHaveLength(1)
+  })
+
+  it('TTL 안의 이어지는 조회는 캐시로 답한다', async () => {
+    await listOpenPrs('/tmp/a', 'repo-1')
+    await expect(listOpenPrs('/tmp/b', 'repo-1')).resolves.toEqual(listed)
+    expect(ghCalls()).toHaveLength(1)
+  })
+
+  it('리포가 다르면 각각 조회한다', async () => {
+    await Promise.all([listOpenPrs('/tmp/a', 'repo-1'), listOpenPrs('/tmp/b', 'repo-2')])
+    expect(ghCalls()).toHaveLength(2)
+  })
+
+  it('PR 을 바꾸는 액션 뒤에는 캐시를 버린다', async () => {
+    await listOpenPrs('/tmp/a', 'repo-1')
+    await closePr('/tmp/a')
+    await listOpenPrs('/tmp/a', 'repo-1')
+    expect(ghCalls()).toEqual([
+      'gh pr list --state open --json number,headRefName,baseRefName --limit 200',
+      'gh pr close',
+      'gh pr list --state open --json number,headRefName,baseRefName --limit 200'
+    ])
+  })
+
+  it('조회 도중 무효화되면 그 응답을 캐시에 남기지 않는다', async () => {
+    // gh 가 도는 동안 PR 이 바뀐 상황 — 받아 든 목록은 이미 낡았으므로 캐시에 눌러앉으면 안 된다.
+    reply = (c) => {
+      if (c.startsWith('gh pr list')) invalidateOpenPrs()
+      return { code: 0, stdout: PR_LIST }
+    }
+    await listOpenPrs('/tmp/a', 'repo-1')
+    reply = () => ({ code: 0, stdout: PR_LIST })
+    await listOpenPrs('/tmp/a', 'repo-1')
+    expect(ghCalls()).toHaveLength(2)
+  })
+
+  it('캐시 키가 없으면 매번 새로 조회한다(기존 호출부 무회귀)', async () => {
+    await listOpenPrs('/tmp/a')
+    await listOpenPrs('/tmp/a')
+    expect(ghCalls()).toHaveLength(2)
   })
 })
 
