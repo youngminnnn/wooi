@@ -34,6 +34,10 @@ import type {
   PrStatus,
   Repo,
   RestackResult,
+  ReviewBundle,
+  ReviewEnvelope,
+  ReviewPrCandidate,
+  ReviewVerdict,
   RewindActionResult,
   StackCascadeResult,
   ScriptExitEvent,
@@ -187,6 +191,69 @@ export interface WooiApi {
     ready(workspaceId: string): Promise<{ error?: string }>
     /** PR 의 CI 체크 롤업(Check 탭). PR 이 없으면 null. */
     checks(workspaceId: string): Promise<PrChecks | null>
+  }
+
+  /**
+   * PR 리뷰 모드. 다른 네임스페이스와 달리 workspaceId 가 아니라 repoId + PR 번호로 동작한다 —
+   * 리뷰 대상은 내가 만든 PR 이 아니라 임의의 PR 이기 때문이다.
+   */
+  review: {
+    /** 시작 모달의 열린 PR 드롭다운. */
+    listOpenPrs(repoId: string): Promise<ReviewPrCandidate[]>
+    /**
+     * 리뷰를 시작한다. PR 조회까지만 기다렸다가 reviewId 를 돌려주고, 워크트리 준비·에이전트
+     * 실행·결과는 onReview 스트림으로 흘린다.
+     */
+    start(args: {
+      repoId: string
+      prNumber: number
+      prompt: string
+      /** 생략하면 전역 기본 에이전트로 돈다. */
+      agentBackend?: AgentBackendId
+      model?: string | null
+      effort?: EffortSetting | null
+    }): Promise<{ reviewId?: string; error?: string }>
+    /** 실행 중인 리뷰를 중단한다. */
+    cancel(reviewId: string): Promise<void>
+    /**
+     * 지적 1건을 실제 PR 에 게시한다. body 는 사용자가 인라인 편집한 최종 본문이다.
+     * 앵커가 있으면 해당 줄의 인라인 코멘트로, 없으면 PR 일반 코멘트로 간다.
+     */
+    post(
+      reviewId: string,
+      findingId: string,
+      body: string
+    ): Promise<{ url?: string; error?: string }>
+    /**
+     * 안 달기로 한 지적을 목록에서 버린다. 이미 게시한 것은 거부한다
+     * (GitHub 에 남은 코멘트를 우리만 잊는 상태가 되기 때문).
+     */
+    dismiss(reviewId: string, findingId: string): Promise<{ error?: string }>
+    /** 리뷰를 완전히 삭제한다(워크트리·ref·결과 기록 모두). */
+    close(reviewId: string): Promise<void>
+    /** 리뷰 화면 진입 시 diff·지적·활동을 한 번에 읽어온다. */
+    load(reviewId: string): Promise<ReviewBundle>
+    /** 워크트리만 지우고 결과·ref 는 남긴다(되살리기 가능). */
+    archive(reviewId: string): Promise<void>
+    /** 아카이브된 리뷰의 워크트리를 다시 만든다. */
+    unarchive(reviewId: string): Promise<{ error?: string }>
+    /**
+     * PR 리뷰를 제출한다. 개별 코멘트와 별개의 행위로, PR 전체에 대한 판정을 남긴다.
+     * request-changes·comment 는 본문이 필수다.
+     */
+    submit(reviewId: string, verdict: ReviewVerdict, body: string): Promise<{ error?: string }>
+    /** 답글·새 커밋을 한 번 확인한다. 새 활동은 onReview 로 흘러온다. */
+    poll(reviewId: string): Promise<void>
+    /** 사용자가 리뷰를 확인했다 — 미확인 표시를 끈다. */
+    markSeen(reviewId: string): Promise<void>
+    /** 인라인 스레드에 답장한다(새 코멘트가 아니라 기존 대화에 붙는다). */
+    reply(
+      reviewId: string,
+      commentId: number,
+      body: string
+    ): Promise<{ url?: string; error?: string }>
+    /** 앞선 리뷰 맥락 위에서 추가 지시를 보낸다. */
+    followUp(reviewId: string, text: string): Promise<{ error?: string }>
   }
 
   stack: {
@@ -356,6 +423,8 @@ export interface WooiApi {
   onScriptOutput(cb: (e: ScriptOutputEvent) => void): () => void
   onScriptExit(cb: (e: ScriptExitEvent) => void): () => void
   onState(cb: (state: AppState) => void): () => void
+  /** PR 리뷰 진행 상황·결과 스트림. */
+  onReview(cb: (e: ReviewEnvelope) => void): () => void
   /** OS 알림 클릭 시 main 이 보내는 workspace 선택 요청. */
   onSelectWorkspace(cb: (workspaceId: string) => void): () => void
   /** main 창이 포커스를 얻었을 때의 알림(미확인 표시 해제 트리거). */

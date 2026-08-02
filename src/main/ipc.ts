@@ -46,8 +46,11 @@ import {
   reopenPr,
   markPrReady,
   listOpenPrs,
+  listOpenPrsForReview,
   fetchOwnerAvatarDataUrl
 } from './github'
+import { ReviewManager } from './review/manager'
+import type { ReviewVerdict } from '@shared/types'
 import { cascadeRetarget, cascadeRestackBranchStack, stepFromRestack } from './cascade'
 import {
   getAuthStatus,
@@ -1393,6 +1396,115 @@ export function registerIpc(ctx: IpcContext): void {
     const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
     if (!ws || ws.archived) return null
     return getPrChecks(ws.worktreePath).catch(() => null)
+  })
+
+  // ── PR 리뷰 모드 ─────────────────────────────────────────────────────────
+  // 워크스페이스가 아니라 repo + PR 번호로 동작한다 — 리뷰 대상은 임의의 PR 이다.
+
+  const reviewManager = new ReviewManager(
+    (envelope) => dispatch(IPC.evtReview, envelope),
+    broadcastState
+  )
+
+  // 앱을 닫을 때는 **워크트리만** 정리한다. 리뷰 레코드·ref·사이드카를 지우면 다음 실행에
+  // 리뷰가 통째로 사라져 영속화가 무의미해진다(ref 를 남겨야 오프라인에서도 복원된다).
+  app.on('before-quit', () => {
+    void reviewManager.disposeWorktreesOnQuit()
+  })
+
+  ipcMain.handle(IPC.reviewListOpenPrs, async (_e, repoId: string) => {
+    const repo = repoFor(repoId)
+    if (!repo) return []
+    return listOpenPrsForReview(repo.path).catch(() => [])
+  })
+
+  ipcMain.handle(
+    IPC.reviewStart,
+    async (
+      _e,
+      args: {
+        repoId: string
+        prNumber: number
+        prompt: string
+        agentBackend?: AgentBackendId
+        model?: string | null
+        effort?: EffortSetting | null
+      }
+    ) => {
+      const repo = repoFor(args.repoId)
+      if (!repo) return { error: '리포를 찾을 수 없습니다.' }
+      const settings = store.getState().settings
+      const agentBackend = args.agentBackend ?? settings.defaultAgentBackend
+      // 모델·effort 는 고른 에이전트의 전역 기본값을 따른다(백엔드마다 모델 ID 가 다르므로
+      // 다른 백엔드의 값을 흘리면 CLI 가 거부한다).
+      const defaults = agentSettingsFor(settings, agentBackend)
+      return reviewManager.start({
+        repo,
+        prNumber: args.prNumber,
+        prompt: args.prompt,
+        agentBackend,
+        // 워크스페이스처럼 개별 오버라이드가 없으므로 전역 설정을 따른다.
+        model: args.model === undefined ? defaults.model : args.model,
+        effort: args.effort === undefined ? defaults.effort : args.effort
+      })
+    }
+  )
+
+  ipcMain.handle(IPC.reviewCancel, (_e, reviewId: string) => {
+    reviewManager.cancel(reviewId)
+  })
+
+  ipcMain.handle(IPC.reviewPost, async (_e, reviewId: string, findingId: string, body: string) =>
+    reviewManager.post(reviewId, findingId, body)
+  )
+
+  ipcMain.handle(IPC.reviewDismiss, (_e, reviewId: string, findingId: string) =>
+    reviewManager.dismissFinding(reviewId, findingId)
+  )
+
+  ipcMain.handle(IPC.reviewClose, async (_e, reviewId: string) => {
+    await reviewManager.remove(reviewId)
+  })
+
+  ipcMain.handle(IPC.reviewLoad, (_e, reviewId: string) => reviewManager.loadBundle(reviewId))
+
+  ipcMain.handle(IPC.reviewArchive, async (_e, reviewId: string) => {
+    await reviewManager.archive(reviewId)
+  })
+
+  ipcMain.handle(IPC.reviewUnarchive, async (_e, reviewId: string) =>
+    reviewManager.unarchive(reviewId)
+  )
+
+  ipcMain.handle(
+    IPC.reviewSubmit,
+    async (_e, reviewId: string, verdict: ReviewVerdict, body: string) =>
+      reviewManager.submitReview(reviewId, verdict, body)
+  )
+
+  ipcMain.handle(IPC.reviewPoll, async (_e, reviewId: string) => {
+    await reviewManager.pollActivity(reviewId)
+  })
+
+  ipcMain.handle(IPC.reviewMarkSeen, (_e, reviewId: string) => {
+    reviewManager.markSeen(reviewId)
+  })
+
+  ipcMain.handle(IPC.reviewReply, async (_e, reviewId: string, commentId: number, body: string) =>
+    reviewManager.replyToThread(reviewId, commentId, body)
+  )
+
+  ipcMain.handle(IPC.reviewFollowUp, async (_e, reviewId: string, text: string) => {
+    const state = store.getState()
+    // 후속 턴은 리뷰를 시작한 그 에이전트로 이어진다 — 세션 id 가 그 백엔드에서만 유효하다.
+    const backend =
+      state.reviews.find((r) => r.id === reviewId)?.agentBackend ??
+      state.settings.defaultAgentBackend
+    const defaults = agentSettingsFor(state.settings, backend)
+    return reviewManager.followUp(reviewId, text, {
+      model: defaults.model,
+      effort: defaults.effort
+    })
   })
 
   ipcMain.handle(IPC.openExternal, (_e, url: string) => {

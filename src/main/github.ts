@@ -1,11 +1,14 @@
 import { spawn } from 'node:child_process'
 import type {
+  DiffSide,
   PrCheck,
   PrCheckState,
   PrChecks,
   PrMergeMethod,
   PrState,
-  PrStatus
+  PrStatus,
+  ReviewPrCandidate,
+  ReviewVerdict
 } from '@shared/types'
 
 /**
@@ -31,7 +34,8 @@ interface GhPr {
 
 function runLoginShell(
   command: string,
-  cwd?: string
+  cwd?: string,
+  opts?: { stdin?: string }
 ): Promise<{ stdout: string; stderr: string; code: number | null }> {
   return new Promise((resolve) => {
     const shell = process.env.SHELL || '/bin/zsh'
@@ -44,6 +48,16 @@ function runLoginShell(
     delete env.GITHUB_TOKEN
     delete env.GH_TOKEN
     const proc = spawn(shell, ['-lc', command], { ...(cwd ? { cwd } : {}), env })
+
+    // 본문을 stdin 으로 넘기는 통로. 코멘트 본문처럼 사용자가 편집한 임의의 마크다운을
+    // 명령 문자열에 끼워 넣으면 따옴표 하나로 셸 이스케이프가 뚫린다($(...)·백틱 실행까지).
+    // JSON 을 stdin 으로 흘려보내면 인용 문제가 아예 사라진다.
+    // stdin 을 항상 닫는 것도 중요하다 — 열어둔 채로 두면 입력을 기다리는 명령이 영원히 멈춘다.
+    proc.stdin.on('error', () => {
+      // 자식이 stdin 을 읽기 전에 끝나면 EPIPE 가 난다. 종료 코드로 판단하면 되므로 무시한다.
+    })
+    proc.stdin.end(opts?.stdin ?? '')
+
     let stdout = ''
     let stderr = ''
     proc.stdout.on('data', (d: Buffer) => (stdout += d.toString()))
@@ -532,6 +546,410 @@ export async function markPrReady(worktreePath: string): Promise<{ error?: strin
   if (!(await connectedFresh())) return { error: NOT_CONNECTED }
   const { stderr, code } = await runGhWrite('gh pr ready', worktreePath)
   if (code !== 0) return { error: lastError(stderr, 'Failed to mark the pull request as ready.') }
+  return {}
+}
+
+// ── PR 리뷰 모드 ────────────────────────────────────────────────────────────
+// 위 함수들이 "내 worktree 의 현재 브랜치에 달린 PR" 을 다루는 것과 달리, 여기는 **임의의 PR**
+// 을 번호로 지목한다. 그래서 cwd 는 항상 원본 repo 경로이고 PR 번호를 명시적으로 넘긴다.
+
+/** 셸에 숫자만 들어가도록 강제한다. PR 번호는 사용자 입력에서 오므로 반드시 통과시킨다. */
+function safePrNumber(prNumber: number): number | null {
+  return Number.isInteger(prNumber) && prNumber > 0 ? prNumber : null
+}
+
+/** 리뷰 화면 헤더 + 인라인 코멘트의 commit_id 에 필요한 PR 메타데이터. */
+export interface PrReviewMeta {
+  number: number
+  title: string
+  url: string
+  state: string
+  isDraft: boolean
+  headRefName: string
+  baseRefName: string
+  /** 인라인 코멘트는 이 커밋을 기준으로 달린다. */
+  headSha: string
+  /** PR 작성자 로그인. 내 PR 이면 GitHub 이 승인·변경 요청을 거부하므로 미리 알아야 한다. */
+  author: string
+}
+
+export async function getPrReviewMeta(
+  repoPath: string,
+  prNumber: number
+): Promise<PrReviewMeta | null> {
+  if (!(await connected())) return null
+  const n = safePrNumber(prNumber)
+  if (n === null) return null
+  const { stdout, code } = await runLoginShell(
+    `gh pr view ${n} --json number,title,url,state,isDraft,headRefName,baseRefName,headRefOid,author`,
+    repoPath
+  )
+  if (code !== 0) return null
+  try {
+    const pr = JSON.parse(stdout.trim()) as {
+      number: number
+      title: string
+      url: string
+      state: string
+      isDraft: boolean
+      headRefName: string
+      baseRefName: string
+      headRefOid: string
+      author?: { login?: string }
+    }
+    if (!pr.number || !pr.headRefOid) return null
+    return {
+      number: pr.number,
+      title: pr.title ?? '',
+      url: pr.url,
+      state: pr.state,
+      isDraft: pr.isDraft,
+      headRefName: pr.headRefName,
+      baseRefName: pr.baseRefName,
+      headSha: pr.headRefOid,
+      author: pr.author?.login ?? ''
+    }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * PR diff 원문을 가져온다.
+ *
+ * 로컬 `git diff base...head` 가 아니라 `gh pr diff` 를 쓰는 이유: GitHub 이 직접 계산한
+ * diff 여야 "코멘트를 걸 수 있는 줄" 집합이 서버와 정확히 일치한다. 로컬 base ref 가 낡았거나
+ * merge-base 가 다르면 조용히 어긋나서, 멀쩡해 보이는 코멘트가 게시 시점에 422 로 튕긴다.
+ */
+export async function getPrDiffRaw(repoPath: string, prNumber: number): Promise<string | null> {
+  if (!(await connected())) return null
+  const n = safePrNumber(prNumber)
+  if (n === null) return null
+  const { stdout, code } = await runLoginShell(`gh pr diff ${n}`, repoPath)
+  if (code !== 0) return null
+  return stdout
+}
+
+/** 리뷰 시작 모달의 열린 PR 드롭다운용. listOpenPrs 와 달리 제목·작성자까지 가져온다. */
+export async function listOpenPrsForReview(repoPath: string): Promise<ReviewPrCandidate[]> {
+  if (!(await connected())) return []
+  const { stdout, code } = await runLoginShell(
+    `gh pr list --state open --json number,title,headRefName,baseRefName,author --limit 100`,
+    repoPath
+  )
+  if (code !== 0) return []
+  try {
+    const arr = JSON.parse(stdout.trim()) as Array<{
+      number: number
+      title: string
+      headRefName: string
+      baseRefName: string
+      author?: { login?: string }
+    }>
+    return arr.map((p) => ({
+      number: p.number,
+      title: p.title ?? '',
+      head: p.headRefName,
+      base: p.baseRefName,
+      author: p.author?.login ?? ''
+    }))
+  } catch {
+    return []
+  }
+}
+
+/**
+ * gh api 로 POST 한다. 본문은 전부 stdin(JSON)으로 넘어가므로 사용자가 무엇을 쓰든 안전하다.
+ *
+ * 오류 메시지는 stdout 을 먼저 본다 — gh 는 GitHub 이 돌려준 오류 본문(JSON)을 stdout 에
+ * 찍는데, 사용자에게 실제로 필요한 문장("line must be part of the diff" 같은)이 거기 있다.
+ */
+export interface PostedCommentResult {
+  /** GitHub 코멘트 id. 인라인 답글이 in_reply_to_id 로 가리키는 값이라, 답글 추적의 조인 키다. */
+  id?: number
+  url?: string
+  /** ISO 8601. 이 시각 이후의 남의 코멘트만 새 활동으로 본다. */
+  createdAt?: string
+  error?: string
+}
+
+async function ghApiPost(
+  repoPath: string,
+  endpoint: string,
+  payload: Record<string, unknown>
+): Promise<PostedCommentResult> {
+  if (!(await connectedFresh())) return { error: NOT_CONNECTED }
+  const { stdout, stderr, code } = await runLoginShell(
+    `gh api --method POST ${endpoint} --input -`,
+    repoPath,
+    { stdin: JSON.stringify(payload) }
+  )
+  if (code !== 0) {
+    let message: string | null = null
+    try {
+      const body = JSON.parse(stdout.trim()) as { message?: string; errors?: Array<unknown> }
+      if (body.message) {
+        const detail =
+          Array.isArray(body.errors) && body.errors.length ? describeErrors(body.errors) : ''
+        message = detail ? `${body.message} (${detail})` : body.message
+      }
+    } catch {
+      // stdout 이 JSON 이 아니면 stderr 로 넘어간다.
+    }
+    return { error: message || lastError(stderr, 'Failed to post the comment.') }
+  }
+  try {
+    const created = JSON.parse(stdout.trim()) as {
+      id?: number
+      html_url?: string
+      created_at?: string
+    }
+    return { id: created.id, url: created.html_url, createdAt: created.created_at }
+  } catch {
+    // 게시 자체는 성공했으므로 식별자만 비운다.
+    return {}
+  }
+}
+
+function describeErrors(errors: Array<unknown>): string {
+  return errors
+    .map((e) => {
+      if (typeof e === 'string') return e
+      const o = e as { field?: string; message?: string; code?: string }
+      return o.message || [o.field, o.code].filter(Boolean).join(' ')
+    })
+    .filter(Boolean)
+    .join('; ')
+}
+
+export interface InlineCommentInput {
+  body: string
+  /** PR head 커밋 sha. */
+  commitId: string
+  path: string
+  line: number
+  side: DiffSide
+  /** 여러 줄 코멘트의 시작 줄. line 보다 작아야 한다. */
+  startLine?: number | null
+}
+
+/** diff 의 특정 줄에 인라인 코멘트를 단다(리뷰로 묶지 않고 즉시 게시). */
+export async function postInlineComment(
+  repoPath: string,
+  prNumber: number,
+  input: InlineCommentInput
+): Promise<PostedCommentResult> {
+  const n = safePrNumber(prNumber)
+  if (n === null) return { error: 'Invalid pull request number.' }
+  if (!/^[0-9a-f]{7,40}$/i.test(input.commitId)) return { error: 'Invalid commit sha.' }
+
+  const payload: Record<string, unknown> = {
+    body: input.body,
+    commit_id: input.commitId,
+    path: input.path,
+    line: input.line,
+    side: input.side
+  }
+  // start_line 을 줄 때는 start_side 도 같이 줘야 GitHub 이 받는다.
+  if (typeof input.startLine === 'number' && input.startLine < input.line) {
+    payload.start_line = input.startLine
+    payload.start_side = input.side
+  }
+  return ghApiPost(repoPath, `repos/{owner}/{repo}/pulls/${n}/comments`, payload)
+}
+
+/** PR 타임라인에 일반 코멘트를 단다(전반적인 지적용). */
+export async function postIssueComment(
+  repoPath: string,
+  prNumber: number,
+  body: string
+): Promise<PostedCommentResult> {
+  const n = safePrNumber(prNumber)
+  if (n === null) return { error: 'Invalid pull request number.' }
+  return ghApiPost(repoPath, `repos/{owner}/{repo}/issues/${n}/comments`, { body })
+}
+
+/** PR 인라인 리뷰 코멘트(스레드 루트 또는 답글). */
+export interface GhReviewComment {
+  id: number
+  /** 답글이면 **스레드 루트**의 id. 최상위 코멘트면 없음/null. */
+  in_reply_to_id?: number | null
+  user?: { login?: string }
+  body: string
+  created_at: string
+  path?: string
+  /** 코멘트가 붙은 줄. diff 에서 밀려나면 null 이 온다 → original_line 으로 폴백. */
+  line?: number | null
+  original_line?: number | null
+  html_url: string
+}
+
+/** PR 타임라인(issue) 코멘트. 스레딩이 없다. */
+export interface GhIssueComment {
+  id: number
+  user?: { login?: string }
+  body: string
+  created_at: string
+  html_url: string
+}
+
+/**
+ * gh api 로 GET 한다. 읽기 계열이므로 조용한 캐시 게이트(connected)를 쓴다 —
+ * connectedFresh 는 매번 로그인 셸을 하나 더 띄우므로 폴링에 쓰면 안 된다.
+ *
+ * `--paginate` 는 JSON 문서를 연달아 뱉어 JSON.parse 하나로 못 읽으므로 쓰지 않는다.
+ * 대신 per_page=100 으로 받고, 꽉 찼으면 다음 페이지를 이어 받는다.
+ */
+async function ghApiGetAll<T>(repoPath: string, path: string): Promise<T[] | null> {
+  if (!(await connected())) return null
+  const out: T[] = []
+  for (let page = 1; page <= 10; page++) {
+    const sep = path.includes('?') ? '&' : '?'
+    const { stdout, code } = await runLoginShell(
+      `gh api "${path}${sep}per_page=100&page=${page}"`,
+      repoPath
+    )
+    if (code !== 0) return out.length ? out : null
+    let batch: T[]
+    try {
+      batch = JSON.parse(stdout.trim()) as T[]
+    } catch {
+      return out.length ? out : null
+    }
+    if (!Array.isArray(batch)) return out
+    out.push(...batch)
+    if (batch.length < 100) break
+  }
+  return out
+}
+
+/** PR 의 인라인 리뷰 코멘트 전체(스레드 루트 + 답글). */
+export async function listReviewComments(
+  repoPath: string,
+  prNumber: number
+): Promise<GhReviewComment[] | null> {
+  const n = safePrNumber(prNumber)
+  if (n === null) return null
+  return ghApiGetAll<GhReviewComment>(repoPath, `repos/{owner}/{repo}/pulls/${n}/comments`)
+}
+
+/** PR 타임라인 코멘트 전체. */
+export async function listIssueComments(
+  repoPath: string,
+  prNumber: number
+): Promise<GhIssueComment[] | null> {
+  const n = safePrNumber(prNumber)
+  if (n === null) return null
+  return ghApiGetAll<GhIssueComment>(repoPath, `repos/{owner}/{repo}/issues/${n}/comments`)
+}
+
+/** 현재 PR head sha. 달라졌으면 새 커밋이 올라온 것이다. */
+export async function getPrHeadSha(repoPath: string, prNumber: number): Promise<string | null> {
+  if (!(await connected())) return null
+  const n = safePrNumber(prNumber)
+  if (n === null) return null
+  const { stdout, code } = await runLoginShell(
+    `gh pr view ${n} --json headRefOid --jq .headRefOid`,
+    repoPath
+  )
+  if (code !== 0) return null
+  const sha = stdout.trim()
+  return /^[0-9a-f]{7,40}$/i.test(sha) ? sha : null
+}
+
+/**
+ * 로그인한 계정의 이름. 내가 단 답장이 "새 활동" 으로 잡히지 않게 거르는 데 쓴다.
+ * 실행 중 바뀌지 않으므로 한 번만 조회해 캐시한다.
+ */
+let viewerLogin: string | null | undefined
+export async function getViewerLogin(repoPath: string): Promise<string | null> {
+  if (viewerLogin !== undefined) return viewerLogin
+  if (!(await connected())) return null
+  const { stdout, code } = await runLoginShell('gh api user --jq .login', repoPath)
+  viewerLogin = code === 0 && stdout.trim() ? stdout.trim() : null
+  return viewerLogin
+}
+
+/**
+ * 인라인 코멘트 스레드에 답글을 단다.
+ *
+ * 새 최상위 코멘트가 아니라 **기존 스레드에 붙는** 전용 엔드포인트다 — 그냥 코멘트를 새로
+ * 만들면 대화가 이어지지 않고 별도 스레드로 흩어진다.
+ */
+export async function replyToReviewComment(
+  repoPath: string,
+  prNumber: number,
+  commentId: number,
+  body: string
+): Promise<PostedCommentResult> {
+  const n = safePrNumber(prNumber)
+  if (n === null) return { error: 'Invalid pull request number.' }
+  if (!Number.isInteger(commentId) || commentId <= 0) return { error: 'Invalid comment id.' }
+  const text = body.trim()
+  if (!text) return { error: 'The reply body is empty.' }
+
+  const res = await ghApiPost(
+    repoPath,
+    `repos/{owner}/{repo}/pulls/${n}/comments/${commentId}/replies`,
+    { body: text }
+  )
+  if (!res.error) return res
+
+  // 전용 /replies 엔드포인트가 막히면 생성 엔드포인트의 in_reply_to 로 떨어진다.
+  // 둘 다 공식 경로이고 결과(같은 스레드에 붙는 답글)도 같다 — 한쪽이 막혔다고 답장을
+  // 통째로 못 하게 둘 이유가 없다.
+  const fallback = await ghApiPost(repoPath, `repos/{owner}/{repo}/pulls/${n}/comments`, {
+    body: text,
+    in_reply_to: commentId
+  })
+  // 폴백도 실패하면 원래(더 구체적인) 오류를 보여 준다.
+  return fallback.error ? res : fallback
+}
+
+/**
+ * PR 리뷰를 제출한다(Approve / Request changes / Comment).
+ *
+ * 개별 인라인 코멘트와는 별개의 행위다 — 코멘트는 "여기 이게 문제다" 이고, 이건 PR 전체에
+ * 대한 판정이라 GitHub 에서도 다른 엔드포인트다.
+ *
+ * 본문은 `--body-file -` 로 stdin 에 흘린다(코멘트 게시와 같은 이유 — 사용자가 쓴 임의의
+ * 마크다운을 명령 문자열에 끼워 넣으면 따옴표 하나로 셸 인용이 뚫린다).
+ */
+export async function submitPrReview(
+  repoPath: string,
+  prNumber: number,
+  verdict: ReviewVerdict,
+  body: string
+): Promise<{ error?: string }> {
+  if (!(await connectedFresh())) return { error: NOT_CONNECTED }
+  const n = safePrNumber(prNumber)
+  if (n === null) return { error: 'Invalid pull request number.' }
+
+  const text = body.trim()
+  // GitHub 은 request-changes·comment 에 본문을 요구한다. 빈 채로 보내면 422 가 나므로 먼저 막는다.
+  if (!text && verdict !== 'approve') {
+    return { error: 'A message is required to request changes or comment.' }
+  }
+
+  const flag =
+    verdict === 'approve'
+      ? '--approve'
+      : verdict === 'request-changes'
+        ? '--request-changes'
+        : '--comment'
+  // approve 는 본문이 없어도 되므로, 비었으면 --body-file 자체를 빼서 빈 본문을 보내지 않는다.
+  const bodyFlag = text ? ' --body-file -' : ''
+
+  const { stdout, stderr, code } = await runLoginShell(
+    `gh pr review ${n} ${flag}${bodyFlag}`,
+    repoPath,
+    text ? { stdin: text } : undefined
+  )
+  if (code !== 0) {
+    // gh 는 GitHub 오류 본문을 stdout 에 찍기도 한다("Can not approve your own pull request" 등).
+    const detail = stdout.trim().split('\n').filter(Boolean).pop()
+    return { error: lastError(stderr, detail || 'Failed to submit the review.') }
+  }
   return {}
 }
 

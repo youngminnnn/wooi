@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { X } from 'lucide-react'
 import { primaryBtn, ghostBtn } from './Modal'
 import TourDemo from './TourDemo'
@@ -116,6 +116,18 @@ const STEPS: Step[] = [
     shortcuts: [{ keys: '⌘J', label: 'Toggle the work panel' }]
   },
   {
+    target: 'review-pr',
+    placement: 'bottom',
+    title: 'Review a pull request',
+    body: (
+      <>
+        Point Wooi at any pull request and an agent reviews it the way you ask. Its suggestions land
+        on the exact diff lines, you edit them, and post the ones you want — then approve or request
+        changes without leaving the app.
+      </>
+    )
+  },
+  {
     target: 'settings',
     placement: 'bottom',
     title: 'Settings & integrations',
@@ -180,8 +192,14 @@ export default function FeatureTour({
   // 최초 실행에서는 예시(데모) 화면을 배경으로 깔고, 그 안의 마커를 대상으로 삼는다
   // (실제 앱에도 같은 data-tour 가 있으므로 데모 subtree 로 조회 범위를 한정한다).
   const demoRef = useRef<HTMLDivElement>(null)
-  const step = STEPS[index]
-  const last = index === STEPS.length - 1
+  // 첫 실행 투어에서는 PR 리뷰 단계를 뺀다 — 데모 배경에는 그 버튼이 없어 가운데 카드로
+  // 떨어지고, 아직 리포도 없는 사용자에게 남의 PR 리뷰부터 설명하는 건 순서가 맞지 않는다.
+  const steps = useMemo(
+    () => (firstRun ? STEPS.filter((s) => s.target !== 'review-pr') : STEPS),
+    [firstRun]
+  )
+  const step = steps[index]
+  const last = index === steps.length - 1
 
   // 현재 단계의 대상 요소 위치를 측정한다(단계 변경·창 크기 변화에 반응).
   useLayoutEffect(() => {
@@ -242,7 +260,7 @@ export default function FeatureTour({
           </button>
         )}
         <div className="text-xs font-medium text-[var(--info-400)] mb-1.5">
-          {index + 1} / {STEPS.length}
+          {index + 1} / {steps.length}
         </div>
         <h2 className="text-base font-semibold text-neutral-100">{step.title}</h2>
         <div className="mt-1.5 text-sm text-neutral-400 leading-relaxed">{step.body}</div>

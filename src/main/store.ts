@@ -10,7 +10,7 @@ import {
   migrate,
   type PersistedState
 } from './storeSchema'
-import type { AppSettings, AppState, Repo, Workspace } from '@shared/types'
+import type { AppSettings, AppState, Repo, ReviewSession, Workspace } from '@shared/types'
 
 /**
  * 앱 설정(리포·workspace·세팅)을 userData 아래 단일 JSON 파일로 영속화한다.
@@ -81,6 +81,14 @@ class Store {
         w.status === 'running' ? { ...w, status: 'idle' as const } : w
       )
 
+      // 리뷰도 같은 이유로 씻어낸다 — 실행 중이던 query 프로세스는 종료와 함께 사라졌으므로,
+      // 'preparing'/'running' 으로 남은 세션은 재시작 후 영원히 스피너에 갇힌다.
+      const reviews = ((migrated.reviews as ReviewSession[]) ?? []).map((r) =>
+        r.status === 'running' || r.status === 'preparing'
+          ? { ...r, status: 'cancelled' as const }
+          : r
+      )
+
       // 미래 버전 파일(다운그레이드 상황)은 버전을 깎지 않고 보존해, 신버전으로 되돌렸을 때
       // 마이그레이션이 재실행되거나 데이터가 손상되지 않게 한다. 알려진 필드만 읽는다.
       // 마이그레이션 후에도 누락 필드가 없도록 settings 는 기본값과 최종 병합한다.
@@ -89,6 +97,7 @@ class Store {
         schemaVersion: version,
         repos: (migrated.repos as Repo[]) ?? [],
         workspaces,
+        reviews,
         settings: {
           ...DEFAULT_SETTINGS,
           ...saved,
@@ -125,6 +134,7 @@ class Store {
     return structuredClone({
       repos: this.state.repos,
       workspaces: this.state.workspaces,
+      reviews: this.state.reviews,
       settings: this.state.settings,
       rateLimits: this.state.rateLimits,
       rateLimitsByAgent: this.state.rateLimitsByAgent

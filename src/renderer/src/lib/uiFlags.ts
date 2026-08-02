@@ -52,6 +52,21 @@ export const SWITCH_HINT_THRESHOLD = 3
 /** 힌트 표시 조건이 바뀌었음을 사이드바에 알리는 이벤트(다른 컴포넌트에서 갱신되므로 필요). */
 const SWITCH_HINT_EVENT = 'wooi:switch-hint-changed'
 
+/** 사용자가 마지막으로 본 "새 기능" 안내 번호. */
+export const FEATURE_TIP_SEEN = 'featureTipSeen'
+
+/**
+ * 지금 알릴 새 기능의 번호. **새로 알릴 것이 생겼을 때만** 올린다(패치 릴리즈마다가 아니라).
+ *
+ * 앱 버전을 직접 비교하지 않는 이유: 사용자가 여러 버전을 건너뛰고 업데이트하는 일이 흔해서
+ * "직전 버전과 다른가" 로는 무엇을 알려야 할지 알 수 없다. 안내 자체에 번호를 매기면 몇
+ * 버전을 건너뛰었든 못 본 안내만 정확히 한 번 보여 줄 수 있다.
+ * (CURRENT_TERMS_VERSION 과 같은 방식이다.)
+ *
+ * 1 = PR 리뷰 모드
+ */
+export const CURRENT_FEATURE_TIP = 1
+
 const key = (name: string): string => `wooi.${name}`
 
 export function readUiFlag(name: string): boolean {
@@ -70,7 +85,8 @@ export function setUiFlag(name: string, value: boolean): void {
   }
 }
 
-function readUiNumber(name: string): number {
+/** 숫자 값을 읽는다. 없거나 깨졌으면 0(=아무것도 못 봄). */
+export function readUiNumber(name: string): number {
   try {
     const n = Number(localStorage.getItem(key(name)))
     return Number.isFinite(n) ? n : 0
@@ -112,4 +128,12 @@ export function finishSwitchHint(): void {
 export function onSwitchHintChange(fn: () => void): () => void {
   window.addEventListener(SWITCH_HINT_EVENT, fn)
   return () => window.removeEventListener(SWITCH_HINT_EVENT, fn)
+}
+
+export function setUiNumber(name: string, value: number): void {
+  try {
+    localStorage.setItem(key(name), String(value))
+  } catch {
+    /* 무시 */
+  }
 }

@@ -12,6 +12,9 @@ const commands: string[] = []
 /** 다음에 실행될 명령이 돌려줄 종료 코드·stdout. 명령 문자열의 접두사로 매칭한다. */
 let reply: (command: string) => { code: number; stdout: string }
 
+/** 명령별로 stdin 에 흘려보낸 본문. 코멘트 게시가 셸 인용 대신 stdin 을 쓰는지 확인용. */
+let stdinWrites: string[] = []
+
 vi.mock('node:child_process', () => ({
   spawn: (_shell: string, args: string[]) => {
     const command = args[1] ?? ''
@@ -19,7 +22,14 @@ vi.mock('node:child_process', () => ({
     const { code, stdout } = reply(command)
     const proc = Object.assign(new EventEmitter(), {
       stdout: new EventEmitter(),
-      stderr: new EventEmitter()
+      stderr: new EventEmitter(),
+      // 실제 child process 는 항상 쓰기 가능한 stdin 을 갖는다. 목이 이를 빠뜨리면
+      // stdin 을 쓰는 코드 경로가 테스트에서만 터진다.
+      stdin: Object.assign(new EventEmitter(), {
+        end: (chunk?: string) => {
+          if (chunk) stdinWrites.push(chunk)
+        }
+      })
     })
     // 실제 spawn 처럼 비동기로 출력·종료를 알린다.
     setImmediate(() => {
@@ -38,7 +48,10 @@ const {
   getPrChecks,
   createPrWeb,
   mergePr,
-  closePr
+  closePr,
+  postInlineComment,
+  postIssueComment,
+  submitPrReview
 } = await import('./github')
 
 /** 연결 확인(probe)은 `command -v gh … && gh auth status` 한 줄이다. */
@@ -47,6 +60,7 @@ const ghCalls = (): string[] => commands.filter((c) => !isProbe(c))
 
 beforeEach(() => {
   commands.length = 0
+  stdinWrites = []
 })
 
 describe('gh 미연결', () => {
@@ -191,6 +205,182 @@ describe('열린 PR 목록 캐시', () => {
     await listOpenPrs('/tmp/a')
     await listOpenPrs('/tmp/a')
     expect(ghCalls()).toHaveLength(2)
+  })
+})
+
+describe('리뷰 코멘트 게시', () => {
+  beforeEach(() => {
+    setGithubConnected(true)
+  })
+
+  /**
+   * 코멘트 본문은 사용자가 직접 편집한 임의의 마크다운이다. 명령 문자열에 끼워 넣으면
+   * 작은따옴표 하나로 셸 인용이 깨지고 `$(...)`·백틱이 실행된다. 본문은 반드시 stdin 으로만
+   * 나가야 하며, 명령줄에는 흔적조차 없어야 한다.
+   */
+  it('본문을 명령줄이 아니라 stdin 으로 넘긴다', async () => {
+    reply = () => ({ code: 0, stdout: JSON.stringify({ html_url: 'https://gh/c/1' }) })
+    const body = `'; rm -rf /; echo '` + '`whoami`' + ' $(id)\n둘째 줄 "따옴표"'
+
+    const res = await postInlineComment('/tmp/repo', 42, {
+      body,
+      commitId: 'abc1234def5678',
+      path: 'src/a.ts',
+      line: 10,
+      side: 'RIGHT'
+    })
+
+    expect(res).toEqual({ url: 'https://gh/c/1' })
+    expect(ghCalls()).toEqual([
+      'gh api --method POST repos/{owner}/{repo}/pulls/42/comments --input -'
+    ])
+    // 본문의 어떤 조각도 명령줄에 새어 나가면 안 된다.
+    expect(ghCalls()[0]).not.toContain('rm -rf')
+    expect(ghCalls()[0]).not.toContain('whoami')
+    expect(JSON.parse(stdinWrites[0])).toEqual({
+      body,
+      commit_id: 'abc1234def5678',
+      path: 'src/a.ts',
+      line: 10,
+      side: 'RIGHT'
+    })
+  })
+
+  it('멀티라인 지적은 start_line 과 start_side 를 함께 보낸다', async () => {
+    reply = () => ({ code: 0, stdout: '{}' })
+    await postInlineComment('/tmp/repo', 42, {
+      body: 'b',
+      commitId: 'abc1234',
+      path: 'src/a.ts',
+      line: 10,
+      side: 'RIGHT',
+      startLine: 7
+    })
+    expect(JSON.parse(stdinWrites[0])).toMatchObject({ start_line: 7, start_side: 'RIGHT' })
+  })
+
+  it('startLine 이 line 보다 뒤면 한 줄 코멘트로 보낸다', async () => {
+    reply = () => ({ code: 0, stdout: '{}' })
+    await postInlineComment('/tmp/repo', 42, {
+      body: 'b',
+      commitId: 'abc1234',
+      path: 'src/a.ts',
+      line: 10,
+      side: 'RIGHT',
+      startLine: 12
+    })
+    expect(JSON.parse(stdinWrites[0])).not.toHaveProperty('start_line')
+  })
+
+  it('전반 코멘트는 issues 엔드포인트로 간다', async () => {
+    reply = () => ({ code: 0, stdout: '{}' })
+    await postIssueComment('/tmp/repo', 42, '총평입니다')
+    expect(ghCalls()).toEqual([
+      'gh api --method POST repos/{owner}/{repo}/issues/42/comments --input -'
+    ])
+    expect(JSON.parse(stdinWrites[0])).toEqual({ body: '총평입니다' })
+  })
+
+  /** gh 는 GitHub 이 돌려준 오류 본문을 stdout 에 찍는다 — 사용자에게 필요한 문장이 거기 있다. */
+  it('GitHub 오류 메시지를 그대로 사용자에게 전달한다', async () => {
+    reply = () => ({
+      code: 1,
+      stdout: JSON.stringify({
+        message: 'Validation Failed',
+        errors: [{ message: 'line must be part of the diff' }]
+      })
+    })
+    const res = await postInlineComment('/tmp/repo', 42, {
+      body: 'b',
+      commitId: 'abc1234',
+      path: 'src/a.ts',
+      line: 999,
+      side: 'RIGHT'
+    })
+    expect(res.error).toContain('Validation Failed')
+    expect(res.error).toContain('line must be part of the diff')
+  })
+
+  it('잘못된 PR 번호·커밋 sha 는 gh 를 실행하지 않고 거른다', async () => {
+    reply = () => ({ code: 0, stdout: '{}' })
+    const badPr = await postInlineComment('/tmp/repo', 0, {
+      body: 'b',
+      commitId: 'abc1234',
+      path: 'a.ts',
+      line: 1,
+      side: 'RIGHT'
+    })
+    expect(badPr.error).toBeTruthy()
+
+    const badSha = await postInlineComment('/tmp/repo', 42, {
+      body: 'b',
+      commitId: 'not a sha',
+      path: 'a.ts',
+      line: 1,
+      side: 'RIGHT'
+    })
+    expect(badSha.error).toBeTruthy()
+    expect(ghCalls()).toEqual([])
+  })
+})
+
+describe('PR 리뷰 제출', () => {
+  beforeEach(() => {
+    setGithubConnected(true)
+  })
+
+  it('승인은 본문 없이도 보낼 수 있고 --body-file 을 붙이지 않는다', async () => {
+    reply = () => ({ code: 0, stdout: '' })
+    await expect(submitPrReview('/tmp/repo', 42, 'approve', '  ')).resolves.toEqual({})
+    expect(ghCalls()).toEqual(['gh pr review 42 --approve'])
+    expect(stdinWrites).toEqual([])
+  })
+
+  it('본문이 있으면 stdin 으로 넘긴다', async () => {
+    reply = () => ({ code: 0, stdout: '' })
+    const body = `'; rm -rf /; echo '` + '`whoami`' + '\n둘째 줄'
+    await submitPrReview('/tmp/repo', 42, 'approve', body)
+    expect(ghCalls()).toEqual(['gh pr review 42 --approve --body-file -'])
+    // 본문이 명령줄로 새면 셸이 실행해 버린다.
+    expect(ghCalls()[0]).not.toContain('rm -rf')
+    expect(stdinWrites[0]).toBe(body)
+  })
+
+  /** GitHub 이 422 를 주기 전에 우리가 먼저 막는다 — 눌러 보고 실패하는 UX 를 피한다. */
+  it('변경 요청·코멘트는 본문이 없으면 gh 를 실행하지 않는다', async () => {
+    reply = () => ({ code: 0, stdout: '' })
+    for (const verdict of ['request-changes', 'comment'] as const) {
+      const res = await submitPrReview('/tmp/repo', 42, verdict, '   ')
+      expect(res.error).toMatch(/required/i)
+    }
+    expect(ghCalls()).toEqual([])
+  })
+
+  it('변경 요청은 --request-changes 로 나간다', async () => {
+    reply = () => ({ code: 0, stdout: '' })
+    await submitPrReview('/tmp/repo', 42, 'request-changes', 'needs work')
+    expect(ghCalls()).toEqual(['gh pr review 42 --request-changes --body-file -'])
+    expect(stdinWrites[0]).toBe('needs work')
+  })
+
+  it('코멘트는 --comment 로 나간다', async () => {
+    reply = () => ({ code: 0, stdout: '' })
+    await submitPrReview('/tmp/repo', 42, 'comment', 'looks fine')
+    expect(ghCalls()).toEqual(['gh pr review 42 --comment --body-file -'])
+  })
+
+  /** 자기 PR 승인 같은 거절은 gh 가 stdout 으로 알려 준다 — 그 문장이 사용자에게 필요한 정보다. */
+  it('GitHub 거절 사유를 그대로 전달한다', async () => {
+    reply = () => ({ code: 1, stdout: 'Can not approve your own pull request' })
+    const res = await submitPrReview('/tmp/repo', 42, 'approve', '')
+    expect(res.error).toContain('Can not approve your own pull request')
+  })
+
+  it('잘못된 PR 번호는 gh 를 실행하지 않는다', async () => {
+    reply = () => ({ code: 0, stdout: '' })
+    const res = await submitPrReview('/tmp/repo', 0, 'approve', '')
+    expect(res.error).toBeTruthy()
+    expect(ghCalls()).toEqual([])
   })
 })
 

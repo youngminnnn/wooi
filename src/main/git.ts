@@ -187,6 +187,79 @@ export async function removeWorktree(
   }
 }
 
+// ── PR 리뷰용 worktree ──────────────────────────────────────────────────────
+//
+// 리뷰 대상은 남의 PR 이라 브랜치를 만들면 안 된다. 같은 브랜치가 이미 다른 worktree 에
+// 체크아웃돼 있으면 git 이 거부하고(워크스페이스와 충돌), 로컬에 찌꺼기 브랜치도 남는다.
+// 그래서 **detached HEAD** 로만 붙인다.
+
+// 경로·ref 는 **리뷰 id** 로 키를 잡는다. PR 번호로 잡으면 같은 PR 을 두 번 리뷰할 때
+// (예: 예전 리뷰를 아카이브해 두고 새로 시작) 두 세션이 같은 디렉토리와 ref 를 가리켜,
+// 한쪽을 닫는 순간 다른 쪽의 워크트리와 ref 까지 지워진다.
+// 경로에 PR 번호를 남기는 건 디렉토리를 눈으로 훑을 때 알아보기 위함이다.
+
+/** 리뷰 worktree 경로. 워크스페이스 트리(`workspaces/`)와 완전히 분리한다. */
+export function reviewWorktreePathFor(
+  repoPath: string,
+  prNumber: number,
+  reviewId: string
+): string {
+  return join(wooiHome(), 'reviews', basename(repoPath), `pr-${prNumber}-${shortId(reviewId)}`)
+}
+
+/** 이 리뷰가 붙잡아 둘 로컬 ref 이름. refs/heads 밖이라 브랜치 목록을 어지럽히지 않는다. */
+export function reviewRefFor(reviewId: string): string {
+  return `refs/wooi/review/${reviewId}`
+}
+
+/** UUID 를 경로에 쓸 만한 길이로 줄인다(구분에는 충분하다). */
+function shortId(reviewId: string): string {
+  return reviewId.replace(/[^a-zA-Z0-9]/g, '').slice(0, 8) || 'review'
+}
+
+/**
+ * PR head 를 이 리뷰 전용 로컬 ref 로 가져온다.
+ *
+ * GitHub 은 **fork 에서 온 PR 도** base 저장소의 `refs/pull/<n>/head` 로 공개한다. 덕분에
+ * fork 리모트를 추가하지 않고도 origin 하나로 모든 PR 을 받을 수 있다.
+ */
+export async function fetchPrHead(
+  repoPath: string,
+  prNumber: number,
+  reviewId: string
+): Promise<boolean> {
+  const ref = reviewRefFor(reviewId)
+  const r = await gitTry(repoPath, [
+    'fetch',
+    '--no-tags',
+    '--force',
+    'origin',
+    `+refs/pull/${prNumber}/head:${ref}`
+  ])
+  return r.ok
+}
+
+/** detached HEAD 로 worktree 를 추가한다. */
+export async function addDetachedWorktree(
+  repoPath: string,
+  worktreePath: string,
+  ref: string
+): Promise<void> {
+  await git(repoPath, ['worktree', 'add', '--detach', worktreePath, ref])
+}
+
+/** 이미 있는 리뷰 worktree 를 새 ref 로 강제 이동시킨다(PR 에 새 커밋이 올라온 경우). */
+export async function resetDetachedWorktree(worktreePath: string, ref: string): Promise<void> {
+  await git(worktreePath, ['checkout', '--detach', '--force', ref])
+  // 이전 리뷰에서 남은 잔여물을 지운다 — 리뷰 대상은 PR 상태 그대로여야 한다.
+  await gitTry(worktreePath, ['clean', '-fd'])
+}
+
+/** 리뷰용 임시 ref 를 지운다. 이걸 지워야 해당 커밋이 GC 대상이 된다. */
+export async function deleteRef(repoPath: string, ref: string): Promise<void> {
+  await gitTry(repoPath, ['update-ref', '-d', ref])
+}
+
 /** 사이드바 배지용 경량 상태 (브랜치, base 대비 ahead/behind, 변경 파일 수). */
 export async function getStatus(worktreePath: string, baseBranch: string): Promise<GitStatus> {
   const branch = await git(worktreePath, ['rev-parse', '--abbrev-ref', 'HEAD']).catch(() => '?')
