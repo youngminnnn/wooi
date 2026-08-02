@@ -36,6 +36,7 @@ export interface CodexConfig {
 
 /** 메인 → 호스트 명령. */
 export type CodexCommand =
+  | { type: 'prewarm' }
   | {
       type: 'send'
       workspaceId: string

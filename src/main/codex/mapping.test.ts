@@ -6,6 +6,7 @@ import {
   mapFileChangeApproval,
   mapNotification,
   mapUserInputRequest,
+  rememberOptimisticUser,
   toCodexDecision,
   PLAN_SNAPSHOT_TOOL,
   type MapperState
@@ -444,6 +445,29 @@ describe('알 수 없는 입력에 견디기', () => {
         item: { id: 'u1', type: 'userMessage', content: [{ type: 'text', text: 'hello' }] }
       }).events
     ).toHaveLength(0)
+  })
+
+  it('로컬에 즉시 표시한 사용자 메시지의 서버 echo는 중복 표시하지 않는다', () => {
+    const state = createMapperState()
+    rememberOptimisticUser(state, 'hello', ['screenshot.webp'])
+
+    const r = map(
+      NOTIFY.itemCompleted,
+      {
+        item: {
+          id: 'u1',
+          type: 'userMessage',
+          content: [
+            { type: 'text', text: 'hello' },
+            { type: 'localImage', path: '/tmp/screenshot.webp' }
+          ]
+        }
+      },
+      state
+    )
+
+    expect(r).toEqual({ events: [], persist: [] })
+    expect(state.pendingUserEchoes).toEqual([])
   })
 
   it('모르는 아이템 타입은 조용히 넘긴다', () => {

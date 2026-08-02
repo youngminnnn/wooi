@@ -47,10 +47,21 @@ export interface MapperState {
   command: Map<string, { command: string; cwd?: string }>
   /** 실행 중 Codex 서브에이전트. subAgentActivity 스냅샷을 sidebar 이벤트로 만든다. */
   agents: Map<string, { taskId: string; agentType: string; description: string; startedAt: number }>
+  /** 로컬에 즉시 표시한 사용자 입력. app-server echo 를 중복 표시하지 않기 위한 서명. */
+  pendingUserEchoes: string[]
 }
 
 export function createMapperState(): MapperState {
-  return { output: new Map(), command: new Map(), agents: new Map() }
+  return { output: new Map(), command: new Map(), agents: new Map(), pendingUserEchoes: [] }
+}
+
+/** CodexThread 가 낙관적으로 표시한 입력을 서버 echo 와 짝짓는다. */
+export function rememberOptimisticUser(
+  state: MapperState,
+  text: string,
+  attachmentNames: string[]
+): void {
+  state.pendingUserEchoes.push(userSignature(text, attachmentNames))
 }
 
 /** Wooi 아이템 id. codex id 와 충돌하지 않도록 접두사를 붙인다. */
@@ -245,8 +256,6 @@ function mapItem(
 
   switch (item.type) {
     case 'userMessage': {
-      // Claude SDK 경로와 달리 Codex 전송 경로는 renderer 로컬 에코가 없다.
-      // app-server가 확정한 UserInput을 정본으로 삼아 표시·영속화한다.
       if (!done) return NOTHING
       const content = item.content ?? []
       const text = content
@@ -267,6 +276,16 @@ function mapItem(
                 : ('image/png' as const)
         return [{ name: basename(source) || 'image.png', mediaType }]
       })
+      // Enter 직후 CodexThread 가 이미 표시한 입력이면 서버가 돌려준 echo 만 소비한다.
+      const signature = userSignature(
+        text,
+        attachments.map((attachment) => attachment.name)
+      )
+      const optimisticIndex = state.pendingUserEchoes.indexOf(signature)
+      if (optimisticIndex >= 0) {
+        state.pendingUserEchoes.splice(optimisticIndex, 1)
+        return NOTHING
+      }
       const chat: ChatItem = {
         id,
         type: 'user',
@@ -415,6 +434,10 @@ function mapItem(
       onUnknown?.(`item type "${item.type}"`)
       return NOTHING
   }
+}
+
+function userSignature(text: string, attachmentNames: string[]): string {
+  return JSON.stringify([text, attachmentNames])
 }
 
 /** reasoning 아이템의 텍스트. summary 는 배열로 오기도 하고 문자열로 오기도 한다. */
