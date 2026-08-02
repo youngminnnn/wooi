@@ -120,7 +120,8 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
   // 이 백엔드가 답할 수 있는 인터랙티브 명령만 가로챈다. 카탈로그를 아직 못 읽었으면 빈 목록이라
   // 전부 일반 텍스트로 나가는데, 그게 "에러 토스트"보다 나은 폴백이다.
   const supportedCommands = backend?.capabilities.interactiveCommands ?? EMPTY_COMMANDS
-  // fast mode 는 Claude Code 전용이다 — 지원하지 않는 백엔드에서는 /fast 도 상태줄 표시도 감춘다.
+  const supportsSideQuestion = backend?.capabilities.sideQuestion ?? false
+  // 지원하지 않는 백엔드에서는 /fast 도 상태줄 표시도 감춘다.
   const supportsFastMode = backend?.capabilities.fastMode ?? false
 
   // 슬래시 명령 자동완성: 명령 목록(워크스페이스당 1회 조회)과 메뉴 선택 인덱스.
@@ -463,7 +464,7 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
     // /diff·/copy·/help·/clear·/memory 는 Wooi UI 에서 직접 처리한다(에이전트로 보내지 않는다).
     // runLocal 이 입력창 텍스트를 알맞게 정리하므로(대부분 비우고, /help 만 '/' 로 메뉴를 띄움)
     // 여기서는 setText 를 호출하지 않는다.
-    const local = images.length ? null : matchLocal(trimmed)
+    const local = images.length ? null : matchLocal(trimmed, workspace.agentBackend === 'claude')
     if (local) {
       runLocal(local)
       historyIdx.current = -1
@@ -473,7 +474,7 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
     // /btw 는 사이드 질문으로 분기한다 — 일반 메시지로 보내면 현재 턴 뒤에 큐잉되어 메인 대화에
     // 쌓이므로(=오염), 맥락만 공유하는 임시 질의로 처리하고 답변은 별도 카드로 보여 준다.
     // (사이드 질문은 텍스트 전용 — 첨부가 있으면 일반 메시지로 보낸다.)
-    const sideQ = images.length ? null : /^\/btw(?:\s+([\s\S]+))?$/.exec(trimmed)
+    const sideQ = images.length ? null : matchSideQuestion(trimmed, supportsSideQuestion)
     if (sideQ) {
       const question = (sideQ[1] ?? '').trim()
       if (!question) return // 질문 없이 "/btw" 만 보낸 경우는 무시.
@@ -1119,11 +1120,20 @@ function matchInteractive(
 type LocalCommand = 'diff' | 'copy' | 'help' | 'clear' | 'memory'
 const LOCAL_COMMANDS: readonly LocalCommand[] = ['diff', 'copy', 'help', 'clear', 'memory']
 
-/** "/diff" 처럼 로컬에서 처리하는 명령이면 그 종류를 돌려준다(뒤따르는 인자는 무시). */
-function matchLocal(text: string): LocalCommand | null {
+/**
+ * "/diff" 처럼 로컬에서 처리하는 명령이면 그 종류를 돌려준다(뒤따르는 인자는 무시).
+ * `/memory` 는 CLAUDE.md 를 여는 Claude 전용 기능이라 Codex 입력을 가로채지 않는다.
+ */
+export function matchLocal(text: string, allowClaudeMemory: boolean): LocalCommand | null {
   const m = /^\/([\w-]+)(?:\s[\s\S]*)?$/.exec(text)
   if (!m) return null
-  return (LOCAL_COMMANDS as readonly string[]).includes(m[1]) ? (m[1] as LocalCommand) : null
+  if (!(LOCAL_COMMANDS as readonly string[]).includes(m[1])) return null
+  return m[1] === 'memory' && !allowClaudeMemory ? null : (m[1] as LocalCommand)
+}
+
+/** Claude side-question capability 가 있는 워크스페이스에서만 `/btw` 를 로컬 처리한다. */
+export function matchSideQuestion(text: string, supported: boolean): RegExpExecArray | null {
+  return supported ? /^\/btw(?:\s+([\s\S]+))?$/.exec(text) : null
 }
 
 /** 인터랙티브 명령 결과 카드의 임시 상태(트랜스크립트에 저장되지 않음). */
