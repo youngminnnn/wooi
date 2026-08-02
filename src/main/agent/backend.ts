@@ -33,6 +33,8 @@ import type {
 export interface AgentBackend {
   /** 이 백엔드의 식별·표시·기능 메타데이터. */
   readonly meta: AgentBackendMeta
+  /** 앱 시작 뒤 첫 사용자 턴의 프로세스 초기화 비용을 백그라운드로 옮긴다. */
+  prewarm?(): void
 
   // ── 핵심 (모든 백엔드 필수) ──────────────────────────────────────────────
   sendMessage(workspaceId: string, text: string, images?: ImageAttachment[]): void

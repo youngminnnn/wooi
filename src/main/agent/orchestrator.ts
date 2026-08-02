@@ -116,6 +116,14 @@ export class AgentOrchestrator {
 
   // ── 핵심 (모든 백엔드 위임) ──────────────────────────────────────────────
 
+  /** 저장된 Codex 워크스페이스가 있으면 app-server 를 백그라운드에서 미리 준비한다. */
+  prewarm(): void {
+    const hasCodexWorkspace = getStore()
+      .getState()
+      .workspaces.some((workspace) => workspace.agentBackend === 'codex' && !workspace.archived)
+    if (hasCodexWorkspace) this.get('codex').prewarm?.()
+  }
+
   sendMessage(workspaceId: string, text: string, images?: ImageAttachment[]): void {
     this.backendFor(workspaceId).sendMessage(workspaceId, text, images)
   }

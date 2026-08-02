@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { writeFileSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -12,7 +13,12 @@ import type {
 import type { RpcClient } from './jsonrpc'
 import { NOTIFY, RPC, type FileUpdateChange, type ThreadResult } from './wire'
 import { turnPolicyFor } from './modes'
-import { createMapperState, mapNotification, type MapperState } from './mapping'
+import {
+  createMapperState,
+  mapNotification,
+  rememberOptimisticUser,
+  type MapperState
+} from './mapping'
 import type { ItemParams } from './wire'
 import type { CodexConfig } from './protocol'
 
@@ -85,6 +91,25 @@ export class CodexThread {
 
   async send(text: string, images?: ImageAttachment[]): Promise<void> {
     if (this.disposed) return
+    const attachments = (images ?? []).map((image) => ({
+      name: image.name,
+      mediaType: image.mediaType
+    }))
+    const item: ChatItem = {
+      id: `user:${randomUUID()}`,
+      type: 'user',
+      text,
+      ts: Date.now(),
+      ...(attachments.length ? { attachments } : {})
+    }
+    // CLI 탐지·app-server 초기화보다 먼저 반응한다. 이후 userMessage 알림은 mapper 가 소비한다.
+    rememberOptimisticUser(
+      this.state,
+      text,
+      attachments.map((attachment) => attachment.name)
+    )
+    this.deps.persist(item)
+    this.deps.emit({ type: 'item', item })
     try {
       const rpc = await this.deps.rpc()
       const threadId = await this.ensureThread(rpc)

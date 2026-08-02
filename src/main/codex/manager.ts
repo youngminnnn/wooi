@@ -248,6 +248,10 @@ export class CodexSessionManager implements AgentBackend {
 
   // ── 핵심 API ─────────────────────────────────────────────────────────────
 
+  prewarm(): void {
+    this.send({ type: 'prewarm' })
+  }
+
   sendMessage(workspaceId: string, text: string, images?: ImageAttachment[]): void {
     const ws = this.getWorkspace(workspaceId)
     if (!ws) return

@@ -342,6 +342,12 @@ function onServerExit(code: number | null): void {
 
 async function handle(msg: CodexCommand): Promise<void> {
   switch (msg.type) {
+    case 'prewarm':
+      await rpc().catch((err) =>
+        log.warn(`codex: prewarm failed: ${err instanceof Error ? err.message : String(err)}`)
+      )
+      break
+
     case 'send':
       await ensure(msg.workspaceId, msg.config).send(msg.text, msg.images)
       break

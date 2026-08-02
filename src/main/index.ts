@@ -159,6 +159,7 @@ app.whenReady().then(() => {
   applyContentSecurityPolicy()
   registerIpc({ sessions, scripts, terminals, getWindow: () => mainWindow })
   createWindow()
+  sessions.prewarm()
   initUpdater(dispatch)
   initNotice(dispatch)
   if (isDevIsolated()) {
