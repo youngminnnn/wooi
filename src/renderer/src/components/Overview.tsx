@@ -170,16 +170,6 @@ export default function Overview(): React.JSX.Element {
           )}
         </div>
 
-        {/* backend와 무관하게 같은 의미를 갖는 전역 상태만 합산한다. */}
-        <div className="flex flex-wrap gap-2.5 mb-2.5">
-          <StatTile
-            icon={<Loader2 size={14} className="text-[var(--info-400)]" />}
-            label="Active now"
-            value={String(counts.running)}
-            hint="Sessions currently running"
-          />
-        </div>
-
         <div
           className={`grid gap-2.5 mb-5 ${connectedAgents.length > 1 ? 'lg:grid-cols-2' : 'grid-cols-1'}`}
         >
