@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { AlertTriangle } from 'lucide-react'
 import { CURRENT_TERMS_VERSION, hasAnyAgent, orderVisibleWorkspaces } from '@shared/types'
+import type { AgentBackendId } from '@shared/types'
 import { useStore } from './store'
 import { nextPermissionMode } from './lib/permission'
 import { OPEN_REPO_SETTINGS_EVENT, openRepoSettings } from './lib/repoSettings'
@@ -352,21 +353,28 @@ export default function App(): React.JSX.Element {
 
   // 새 workspace 만들기: 수동 설정이면 모달, 아니면 즉시 자동 생성.
   // 자동 생성은 사이드바에 스피너 행을 바로 띄우고 worktree 준비는 백그라운드로 진행한다.
-  const handleNewWorkspace = (repoId: string): void => {
+  //
+  // agentBackend 는 사이드바의 에이전트 선택에서 온다(에이전트가 둘 이상일 때만). 생략하면
+  // main 이 전역 기본 백엔드를 쓴다 — ⌘N 은 그래서 묻지 않고 바로 만든다.
+  const handleNewWorkspace = (repoId: string, agentBackend?: AgentBackendId): void => {
     if (app.settings.manualWorkspaceSetup) {
       setNewWs({ repoId, parentWorkspaceId: null })
       return
     }
-    void useStore.getState().createWorkspace(repoId)
+    void useStore.getState().createWorkspace(repoId, { agentBackend })
   }
 
   // stacked PR: 특정 워크스페이스 위에 새 워크스페이스를 쌓는다(base = 부모 브랜치).
-  const handleStackWorkspace = (repoId: string, parentWorkspaceId: string): void => {
+  const handleStackWorkspace = (
+    repoId: string,
+    parentWorkspaceId: string,
+    agentBackend?: AgentBackendId
+  ): void => {
     if (app.settings.manualWorkspaceSetup) {
       setNewWs({ repoId, parentWorkspaceId })
       return
     }
-    void useStore.getState().createWorkspace(repoId, { parentWorkspaceId })
+    void useStore.getState().createWorkspace(repoId, { parentWorkspaceId, agentBackend })
   }
 
   return (
