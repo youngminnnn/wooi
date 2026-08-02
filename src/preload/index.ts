@@ -113,7 +113,7 @@ const api: WooiApi = {
   },
 
   rateLimits: {
-    refresh: () => ipcRenderer.invoke(IPC.rateLimitsRefresh)
+    refresh: (agentId) => ipcRenderer.invoke(IPC.rateLimitsRefresh, agentId)
   },
 
   terminal: {

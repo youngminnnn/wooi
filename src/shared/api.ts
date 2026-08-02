@@ -254,13 +254,13 @@ export interface WooiApi {
 
   rateLimits: {
     /**
-     * 계정 레이트리밋 스냅샷을 즉시 다시 조회한다. 갱신된 값은 반환값이 아니라 AppState
-     * (evtState 방송)로 흘러온다 — 계정 단위 전역 값이라 모든 창·워크스페이스가 같은 값을 봐야 한다.
+     * 계정 레이트리밋 스냅샷을 즉시 다시 조회한다. agentId를 주면 해당 backend만 갱신한다.
+     * 최신 AppState를 직접 반환하고, 다른 창에는 evtState 방송도 함께 흘려보낸다.
      *
      * 평소 갱신(턴 종료·주기 폴링)은 main 이 알아서 하므로, 이건 stale 표시를 본 사용자가
      * 누르는 수동 탈출구다. 라이브 세션이 없으면 단명 쿼리를 띄우므로 수 초 걸릴 수 있다.
      */
-    refresh(): Promise<void>
+    refresh(agentId?: AgentBackendId): Promise<AppState>
   }
 
   terminal: {

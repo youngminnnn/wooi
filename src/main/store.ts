@@ -126,7 +126,8 @@ class Store {
       repos: this.state.repos,
       workspaces: this.state.workspaces,
       settings: this.state.settings,
-      rateLimits: this.state.rateLimits
+      rateLimits: this.state.rateLimits,
+      rateLimitsByAgent: this.state.rateLimitsByAgent
     })
   }
 
