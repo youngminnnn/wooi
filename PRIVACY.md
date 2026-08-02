@@ -27,10 +27,13 @@ leave your machine only when sent to the third‑party services you connect
   CLI. Processing is governed by the provider's privacy policy and the terms of your
   Claude, ChatGPT, or OpenAI API account:
   [Anthropic Privacy Policy](https://www.anthropic.com/legal/privacy) ·
-  [OpenAI Privacy Policy](https://openai.com/policies/privacy-policy/).
+  [OpenAI Privacy Policy](https://openai.com/policies/privacy-policy/). When you
+  review a pull request, the same applies to its diff and to the files the agent
+  reads in the review worktree.
 - **Repository metadata and pull requests** — If you use the GitHub features,
   Wooi invokes the GitHub CLI (`gh`) on your machine, which communicates with
   **GitHub** under [GitHub's Privacy Statement](https://docs.github.com/site-policy/privacy-policies/github-general-privacy-statement).
+  This includes review comments and verdicts you choose to post.
 - **Authentication** — Wooi uses credentials managed by your installed Claude Code,
   Codex, and GitHub CLIs. Claude and Codex can be connected through an in-app browser
   flow; Codex also accepts an OpenAI API key. Wooi passes credentials to the relevant
@@ -43,6 +46,7 @@ directory (`~/Library/Application Support/Wooi/`):
 
 - App settings (connected repositories, workspaces, preferences) — `wooi.json`
 - Conversation transcripts — `transcripts/*.jsonl`
+- PR review sessions (diff, findings, activity) — `reviews/*.jsonl`
 - Diagnostic logs (errors and CLI detection) — `logs/main.log`
 
 Git worktrees for your workspaces are created under `~/wooi/workspaces/`, outside

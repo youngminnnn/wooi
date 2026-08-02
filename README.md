@@ -22,6 +22,8 @@ and no automatic prompt** — nothing runs until you send your first message.
 - 🔒 **Isolated by default** — a separate worktree + branch per task means agents never
   collide in a shared working tree.
 - 🚢 **PR-native** — jump straight from an agent's diff to a GitHub PR in one click.
+- 🔍 **Review PRs in place** — point an agent at a pull request, edit its findings, and post
+  them without leaving the app.
 - 🧱 **Stacked PRs, natively** — when work has to build on work, stack one workspace on
   another's branch and let Wooi keep the stack straight.
 - 🕵️ **No telemetry** — no servers of its own; transcripts stored locally only.
@@ -86,10 +88,10 @@ An API key is not required when you sign in with a Claude or ChatGPT account.
   - [OpenAI Codex CLI](https://developers.openai.com/codex) v0.128.0 or newer
     (`npm i -g @openai/codex`)
 - `git`
-- `gh` (GitHub CLI) — **needed for the PR and stacking features**: creating/merging/
-  closing PRs, stacked branches, and the Check tab. Everything that's pure `git` —
-  connecting repos, creating workspaces, running agents, diffs, terminal, scripts —
-  works without it.
+- `gh` (GitHub CLI) — **needed for the PR, review, and stacking features**: creating/
+  merging/closing PRs, PR review, stacked branches, and the Check tab. Everything that's
+  pure `git` — connecting repos, creating workspaces, running agents, diffs, terminal,
+  scripts — works without it.
 
 ## Features
 
@@ -133,6 +135,33 @@ those chains itself with plain `git` and `gh` — no extra stacking CLI needed.
 - **Detected, not just declared** — if an agent builds a chain on its own with
   `git checkout -b` and `gh pr create`, Wooi reconstructs the stack from the PRs' base
   links and shows it the same way.
+
+### PR review
+
+Review a pull request without leaving Wooi. A review gets its own row in the sidebar and
+runs alongside your workspaces instead of taking one over.
+
+- **Start a review** — **Review PR** on the Overview board. Pick a repo, choose one of its
+  open PRs (or type a number / URL), and say what you want looked at.
+- **Claude or Codex** — pick the agent when you start. A review stays on the agent it was
+  started with, and follow-up turns resume that same session.
+- **Its own worktree** — the PR head is checked out under
+  `~/wooi/reviews/<repo>/pr-<number>-<id>`, a worktree dedicated to that review, so the
+  agent can read code outside the changed hunks and grep the rest of the tree without
+  touching the checkout you're working in.
+- **Findings land on the diff** — each suggestion is anchored to the lines it's about. Edit
+  the wording before it goes out, discard the ones you don't want, and post them
+  individually or all at once.
+- **Activity timeline** — replies to comments you posted and new commits on the PR are
+  polled automatically and land in the timeline. Ask a follow-up and the review picks up
+  from there.
+- **Verdicts** — comment, approve, or request changes. If findings are still unposted, Wooi
+  offers to send them along and posts them first; if any fail, the verdict is held back
+  rather than going out unsupported. Approve / request changes are hidden on your own PR
+  (GitHub rejects those), and repeating the same verdict on a PR that hasn't moved is
+  blocked.
+- **Persistent** — reviews survive restarts and can be archived, restored, or deleted;
+  deleting cleans up the review worktree too.
 
 ### Permissions
 
