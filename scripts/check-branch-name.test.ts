@@ -15,6 +15,27 @@ function run(...args: string[]): number {
   }
 }
 
+const ZERO = '0'.repeat(40)
+const SHA = 'a'.repeat(40)
+
+/** git 이 pre-push 훅에 넘기는 stdin 한 줄. */
+function refLine(localRef: string, remoteRef: string, localSha = SHA): string {
+  return `${localRef} ${localSha} ${remoteRef} ${SHA}`
+}
+
+/** 훅 모드를 stdin 과 함께 실행한다. */
+function runPrePush(...lines: string[]): number {
+  try {
+    execFileSync(process.execPath, [SCRIPT, '--pre-push'], {
+      input: lines.join('\n') + '\n',
+      stdio: 'pipe'
+    })
+    return 0
+  } catch (err) {
+    return (err as { status: number }).status
+  }
+}
+
 describe('check-branch-name', () => {
   it('타입 prefix 규칙을 지키는 브랜치는 통과한다', () => {
     for (const branch of [
@@ -61,5 +82,51 @@ describe('check-branch-name', () => {
   it('인자가 없으면 잘못된 호출로 구분한다', () => {
     expect(run()).toBe(2)
     expect(run('   ')).toBe(2)
+  })
+})
+
+describe('check-branch-name --pre-push', () => {
+  it('규칙을 지키는 push 는 통과한다', () => {
+    expect(runPrePush(refLine('refs/heads/feat/x', 'refs/heads/feat/x'))).toBe(0)
+  })
+
+  it('규칙을 어긴 push 는 막는다', () => {
+    expect(runPrePush(refLine('refs/heads/my-change', 'refs/heads/my-change'))).toBe(1)
+  })
+
+  // 이 훅이 통제하려는 건 저장소에 만들어지는 이름이므로 **원격 ref** 를 봐야 한다.
+  // 로컬 이름을 보면 아래 두 케이스가 정확히 거꾸로 판정된다.
+  it('로컬과 원격 이름이 다르면 원격 이름으로 판정한다', () => {
+    // 로컬은 규칙 위반이지만 원격은 예외 대상 — 통과해야 한다.
+    // (실제로 dependabot 브랜치에 리베이스 결과를 push 하다 막혔던 케이스)
+    expect(
+      runPrePush(
+        refLine('refs/heads/rebase-145', 'refs/heads/dependabot/npm_and_yarn/minor-and-patch')
+      )
+    ).toBe(0)
+
+    // 로컬은 규칙을 지키지만 원격이 위반 — 막아야 한다.
+    expect(runPrePush(refLine('refs/heads/feat/x', 'refs/heads/my-change'))).toBe(1)
+  })
+
+  it('브랜치 삭제 push 는 건너뛴다', () => {
+    expect(runPrePush(refLine('(delete)', 'refs/heads/my-change', ZERO))).toBe(0)
+  })
+
+  it('태그 등 브랜치가 아닌 ref 는 건너뛴다', () => {
+    expect(runPrePush(refLine('refs/tags/v1.2.0', 'refs/tags/v1.2.0'))).toBe(0)
+  })
+
+  it('여러 ref 중 하나라도 위반이면 막는다', () => {
+    expect(
+      runPrePush(
+        refLine('refs/heads/feat/ok', 'refs/heads/feat/ok'),
+        refLine('refs/heads/bad-name', 'refs/heads/bad-name')
+      )
+    ).toBe(1)
+  })
+
+  it('푸시할 ref 가 없으면 통과한다', () => {
+    expect(runPrePush()).toBe(0)
   })
 })
