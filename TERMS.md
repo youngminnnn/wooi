@@ -5,7 +5,7 @@
 
 # Terms of Use
 
-_Last updated: 2026-07-25 · Version 2_
+_Last updated: 2026-08-02 · Version 2_
 
 By installing or using Wooi ("the app"), you agree to these terms. If you do not
 agree, do not use the app.
@@ -25,15 +25,16 @@ The Apache License does not grant any right to use the "Wooi" name or logo; see
 ## 2. Third‑party services
 
 Wooi operates by driving third‑party tools and services on your behalf —
-**Anthropic's Claude** (via the Claude Agent SDK / Claude Code) and, optionally,
-**GitHub** (via the `gh` CLI). Your use of those services is governed by their own
-terms:
+**Anthropic's Claude** (via the Claude Agent SDK / Claude Code), **OpenAI Codex**
+(via the Codex CLI), and, optionally, **GitHub** (via the `gh` CLI). Your use of
+those services is governed by their own terms:
 
 - Anthropic — <https://www.anthropic.com/legal/consumer-terms>
+- OpenAI — <https://openai.com/policies/terms-of-use/>
 - GitHub — <https://docs.github.com/site-policy/github-terms/github-terms-of-service>
 
 You are responsible for complying with those terms and for any usage costs your
-Claude account incurs.
+Claude, ChatGPT, or OpenAI API account incurs.
 
 ## 3. Your responsibility
 

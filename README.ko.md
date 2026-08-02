@@ -10,8 +10,9 @@ Wooi 는 여러 **AI 코딩 에이전트**를 각자 격리된 git worktree 위�
 macOS 데스크톱 앱입니다. 작업 1개당 전용 worktree + 브랜치 + 에이전트 세션이 돌아가며, 모든 세션은
 **자동 프롬프트 없이 빈 입력창**으로 시작합니다 — 첫 메시지를 보내기 전까지 아무것도 실행되지 않습니다.
 
-> **에이전트 지원** — Wooi 는 현재 **Claude Code**(Claude Agent SDK 경유)를 구동합니다.
-> 앞으로 **Codex** 등 더 다양한 에이전트를 지원할 예정입니다.
+> **에이전트 지원** — v1.4.0부터 **Claude Code**(Claude Agent SDK 경유)와
+> **OpenAI Codex**(Codex CLI 경유)를 모두 지원합니다. 워크스페이스를 만들 때 에이전트를
+> 선택하며, 해당 워크스페이스는 이후에도 선택한 에이전트를 유지합니다.
 
 ## 왜 Wooi 인가
 
@@ -60,19 +61,24 @@ Wooi 는 스스로 업데이트합니다: 실행 시 GitHub Releases 를 확인�
 Wooi 를 처음 실행하면 온보딩이 다음을 안내합니다:
 
 1. 약관·개인정보처리방침 **동의**(진행하려면 필수).
-2. Claude·GitHub **로그인**. CLI 가 설치돼 있지 않으면 설치 링크를 보여주며, 로그인은 앱 안에서
-   브라우저로 마무리됩니다. **GitHub 은 이 단계에서 건너뛸 수 있습니다** — 바로 작업을 시작하고,
+2. Claude Code 또는 Codex와 GitHub을 **연결**합니다. 코딩 에이전트는 둘 중 하나만 있으면 됩니다.
+   CLI가 없으면 설치 링크를 보여주고, Claude와 Codex 로그인은 앱 안에서 브라우저로 마무리됩니다.
+   Codex는 ChatGPT 계정 또는 OpenAI API 키로 연결할 수 있습니다. **GitHub 은 이 단계에서
+   건너뛸 수 있습니다** — 바로 작업을 시작하고,
    PR 생성·머지·스택·Check 처럼 GitHub 이 필요한 기능에 처음 닿는 순간에 연결을 요청합니다.
    연결이 끝나면 원래 하려던 동작이 이어서 실행됩니다. 연동 상태는 언제든
    **Settings → Integrations** 에서 변경할 수 있습니다.
 
-Wooi 는 **설치된 Claude Code 와 `gh` CLI 의 로그인 정보를 그대로 사용**합니다 — 별도 API 키가
-필요 없습니다.
+Wooi 는 설치된 Claude Code·Codex·`gh` CLI의 로그인 정보를 그대로 사용합니다. Claude 또는
+ChatGPT 계정으로 로그인하면 별도 API 키가 필요 없습니다.
 
 ### 요구 사항
 
 - macOS(Apple Silicon)
-- [Claude Code](https://claude.com/claude-code) — 필수, 로그인된 상태.
+- 다음 중 하나 이상의 코딩 에이전트가 설치되고 로그인된 상태:
+  - [Claude Code](https://claude.com/claude-code)
+  - [OpenAI Codex CLI](https://developers.openai.com/codex) v0.128.0 이상
+    (`npm i -g @openai/codex`)
 - `git`
 - `gh`(GitHub CLI) — **PR·스택 기능에 필요**합니다(PR 생성·머지·닫기, stacked 브랜치, Check 탭).
   리포 연결·워크스페이스 생성·에이전트 실행·diff·터미널·스크립트 등 `git` 만으로 되는 기능은
@@ -86,9 +92,11 @@ Wooi 는 **설치된 Claude Code 와 `gh` CLI 의 로그인 정보를 그대로 
 - **자동 생성** — workspace 는 자동으로 생성된 이름(`witty-otter` 등)을 받고 리포 기본 브랜치에서
   분기됩니다. Settings 에서 **직접 입력**을 켜면 이름·베이스 브랜치를 직접 고를 수 있습니다. 헤더에서
   이름을 더블클릭하면 바꿀 수 있습니다.
+- 워크스페이스를 만들 때 **Claude Code 또는 Codex를 선택**합니다. 에이전트별 모델·reasoning
+  effort·권한 모드·명령·계정 사용량이 자동으로 표시됩니다. 생성 후에는 에이전트를 바꿀 수 없습니다.
 - **모델·reasoning effort 는 workspace 별로 따로 지정**할 수 있습니다. 입력창 위 상태줄에서 고르거나
   `/model`·`/effort` 를 입력해 바꿉니다. 미지정 시 전역 설정을 따르며, 바꿔도 같은 대화를 이어받습니다.
-  effort 는 **ultracode** 까지 단계가 있습니다.
+  선택 가능한 모델과 effort 단계는 에이전트와 모델에 따라 달라집니다.
 - **앱 재시작 간 세션 resume** — 대화 맥락이 복원되어, 재시작 후 첫 메시지에서 하던 작업을 이어갑니다.
 
 ### Stacked PR
@@ -114,8 +122,8 @@ Wooi 는 **설치된 Claude Code 와 `gh` CLI 의 로그인 정보를 그대로 
 
 ### 권한
 
-- **Shift+Tab 으로 권한 모드 순환** (Claude Code 와 동일): default → accept edits → plan → auto.
-  현재 모드는 입력창 아래에 표시됩니다.
+- **Shift+Tab 으로 권한 모드를 순환**합니다. Claude Code는 default·accept edits·plan·auto를,
+  Codex는 read only·auto·full access·plan을 제공합니다. 현재 모드는 입력창 아래에 표시됩니다.
 - 권한 프롬프트는 Allow/Deny 외에 **"Always allow"**(이 세션 동안 해당 도구 자동 허용)를 제공합니다 —
   Enter=Allow / Esc=Deny.
 
@@ -142,10 +150,10 @@ Wooi 는 **설치된 Claude Code 와 `gh` CLI 의 로그인 정보를 그대로 
 
 ### 메시지 작성
 
-- **슬래시 명령 자동완성** — 입력창에 `/` 를 치면 해당 worktree 에서 사용 가능한 Claude Code
-  명령/스킬 목록이 뜹니다.
+- **슬래시 명령 자동완성** — 입력창에 `/` 를 치면 해당 워크스페이스에서 선택한 에이전트가
+  지원하는 명령 목록이 뜹니다.
 - **파일 멘션** — 입력창에 `@` 를 치면 worktree 를 퍼지 검색해 파일을 메시지에 넣습니다. 에이전트가
-  파일을 따로 찾지 않고 바로 내용을 받습니다. 목록에 파일 크기가 함께 뜨고, Claude Code 가 잘라
+  파일을 따로 찾지 않고 바로 내용을 받습니다. 목록에 파일 크기가 함께 뜨고, 에이전트가 잘라
   넣거나 건너뛸 만큼 큰 파일은 경고를 표시합니다. 디렉토리(`@src/`)는 파일 목록이 첨부됩니다.
   **All files** 뷰어의 **Mention** 버튼은 열어 둔 파일을 넣고, 본문을 드래그해 두면 그 구간만
   좁혀서 넣습니다(`@src/app.ts#L40-80`).
@@ -170,8 +178,9 @@ Wooi 는 **설치된 Claude Code 와 `gh` CLI 의 로그인 정보를 그대로 
 ## 개인정보 / 데이터
 
 - Wooi 는 자체 서버가 없고 **분석/텔레메트리를 수집하지 않습니다**.
-- 프롬프트·코드는 Claude Agent SDK 를 통해 **Anthropic** 으로 전송됩니다. PR 기능 사용 시
-  메타데이터가 `gh` CLI 를 통해 **GitHub** 으로 전송됩니다.
+- 프롬프트·코드는 선택한 에이전트의 제공자에게 전송됩니다: Claude Agent SDK를 통한
+  **Anthropic**, 또는 Codex CLI를 통한 **OpenAI**입니다. PR 기능 사용 시 메타데이터는
+  `gh` CLI를 통해 **GitHub**으로 전송됩니다.
 - 설정·대화 기록은 **로컬**(`~/Library/Application Support/Wooi/`)에만 저장됩니다.
 - 자세한 내용은 [`PRIVACY.md`](./PRIVACY.md) · [`TERMS.md`](./TERMS.md) 를 참고해 주세요.
 

@@ -5,10 +5,11 @@
 
 # Privacy Policy
 
-_Last updated: 2026-06-06 · Version 1_
+_Last updated: 2026-08-02 · Version 1_
 
 Wooi is a local macOS desktop application that orchestrates parallel AI coding
-agents — currently [Claude Code](https://claude.com/claude-code) — over isolated
+agents — [Claude Code](https://claude.com/claude-code) and
+[OpenAI Codex](https://developers.openai.com/codex) — over isolated
 git worktrees. This policy explains what data the app handles and where it goes.
 
 ## Summary
@@ -16,21 +17,24 @@ git worktrees. This policy explains what data the app handles and where it goes.
 Wooi has **no servers of its own**. It does not collect analytics or telemetry,
 and it does not transmit your data to the developer. Your code and conversations
 leave your machine only when sent to the third‑party services you connect
-(Anthropic and, optionally, GitHub) to make the app function.
+(Anthropic or OpenAI, and optionally GitHub) to make the app function.
 
 ## What data is processed, and where it goes
 
 - **Prompts, code, and file contents** — When you send a message or an agent reads
-  or edits files, that content is sent to **Anthropic** through the Claude Agent
-  SDK (the bundled Claude Code CLI) to be processed by Claude. This is governed by
-  [Anthropic's Privacy Policy](https://www.anthropic.com/legal/privacy) and the
-  terms of your Claude account.
+  or edits files, that content is sent to the provider for the workspace's selected
+  agent: **Anthropic** through the Claude Agent SDK, or **OpenAI** through the Codex
+  CLI. Processing is governed by the provider's privacy policy and the terms of your
+  Claude, ChatGPT, or OpenAI API account:
+  [Anthropic Privacy Policy](https://www.anthropic.com/legal/privacy) ·
+  [OpenAI Privacy Policy](https://openai.com/policies/privacy-policy/).
 - **Repository metadata and pull requests** — If you use the GitHub features,
   Wooi invokes the GitHub CLI (`gh`) on your machine, which communicates with
   **GitHub** under [GitHub's Privacy Statement](https://docs.github.com/site-policy/privacy-policies/github-general-privacy-statement).
-- **Authentication** — Wooi reuses the credentials of your already‑installed
-  Claude Code and GitHub CLI. It does **not** store, copy, or transmit your
-  access tokens itself; sign‑in flows run in your Terminal.
+- **Authentication** — Wooi uses credentials managed by your installed Claude Code,
+  Codex, and GitHub CLIs. Claude and Codex can be connected through an in-app browser
+  flow; Codex also accepts an OpenAI API key. Wooi passes credentials to the relevant
+  CLI and does **not** include them in conversation transcripts.
 
 ## What is stored locally
 

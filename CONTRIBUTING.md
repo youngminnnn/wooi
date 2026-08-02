@@ -13,9 +13,11 @@ project, the conventions we follow, and how to get a change merged.
   built/tested on Apple Silicon.
 - **Node.js 20** — the version pinned in [`.nvmrc`](./.nvmrc) and used in CI. If you
   use `nvm`, run `nvm use`.
-- **git** and **`gh` (GitHub CLI)** — required at runtime; `gh` must be signed in.
-- **Claude Code**, signed in — Wooi drives it through the Claude Agent SDK and
-  reuses its credentials (no separate API key).
+- **git** — required at runtime. **`gh` (GitHub CLI)** is optional for local agent
+  sessions, but must be installed and signed in to test PR, stack, and CI-check features.
+- At least one coding agent, installed and signed in: **Claude Code**, or **Codex CLI
+  v0.128.0+** (`npm i -g @openai/codex`). Wooi supports ChatGPT sign-in or an OpenAI
+  API key for Codex.
 
 ## Getting started
 
@@ -47,16 +49,18 @@ Both are resolved in [`src/main/paths.ts`](src/main/paths.ts). Overrides:
 - `WOOI_DEV_ISOLATION=0` — opt out and reproduce a bug against real data.
 - `WOOI_HOME=/some/path` — pin the worktree root explicitly.
 
-Claude CLI config (`~/.claude`) is intentionally shared so dev runs reuse your
-existing auth; session files are keyed by worktree path, so they do not collide.
+Claude (`~/.claude`) and Codex (`~/.codex`) CLI configuration is intentionally shared
+so dev runs reuse your existing auth; session files are keyed by worktree path, so
+they do not collide.
 
 ## Project layout
 
 ```
 src/
-  main/       Electron main process — IPC, git/worktree, Claude session, terminal
+  main/       Electron main process — IPC, git/worktree, agent sessions, terminal
     claude/   Claude Agent SDK session + manager
-    agent/    agent orchestration
+    codex/    Codex app-server session + manager
+    agent/    backend abstraction + agent orchestration
   preload/    contextBridge API exposed to the renderer
   renderer/   React UI (components, zustand store)
   shared/     types shared across processes
