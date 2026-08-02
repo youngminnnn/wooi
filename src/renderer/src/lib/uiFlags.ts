@@ -28,6 +28,21 @@ export const repoSettingsSeenFlag = (repoId: string): string => `repoSettingsSee
  */
 export const carrySuggestShownFlag = (repoId: string): string => `carrySuggestShown.${repoId}`
 
+/**
+ * ⌘↑/⌘↓ 힌트가 제 역할을 끝냈는지. 사용자가 직접 닫았거나, 실제로 단축키를 써서
+ * 이미 알고 있음이 증명된 경우 true — 어느 쪽이든 다시는 띄우지 않는다.
+ */
+export const SWITCH_HINT_DONE = 'switchHintDone'
+
+/** 마우스로만 워크스페이스를 전환한 누적 횟수. 단축키를 아직 모르는 사용자를 골라내는 신호다. */
+const SWITCH_CLICK_COUNT = 'switchClickCount'
+
+/** 힌트를 띄우기 시작하는 마우스 전환 횟수. 한두 번은 우연이고, 이 정도면 습관이다. */
+export const SWITCH_HINT_THRESHOLD = 3
+
+/** 힌트 표시 조건이 바뀌었음을 사이드바에 알리는 이벤트(다른 컴포넌트에서 갱신되므로 필요). */
+const SWITCH_HINT_EVENT = 'wooi:switch-hint-changed'
+
 const key = (name: string): string => `wooi.${name}`
 
 export function readUiFlag(name: string): boolean {
@@ -44,4 +59,48 @@ export function setUiFlag(name: string, value: boolean): void {
   } catch {
     /* 무시 */
   }
+}
+
+function readUiNumber(name: string): number {
+  try {
+    const n = Number(localStorage.getItem(key(name)))
+    return Number.isFinite(n) ? n : 0
+  } catch {
+    return 0
+  }
+}
+
+/** 현재까지의 마우스 전환 횟수. 힌트 노출 조건 계산에 쓴다. */
+export function switchClickCount(): number {
+  return readUiNumber(SWITCH_CLICK_COUNT)
+}
+
+/**
+ * 사이드바 행을 마우스로 눌러 워크스페이스를 전환했을 때 호출. 이미 힌트가 끝난 사용자는
+ * 세지 않는다(불필요한 쓰기도, 되살아날 여지도 없게).
+ */
+export function noteMouseSwitch(): void {
+  if (readUiFlag(SWITCH_HINT_DONE)) return
+  try {
+    localStorage.setItem(key(SWITCH_CLICK_COUNT), String(switchClickCount() + 1))
+  } catch {
+    /* 무시 */
+  }
+  window.dispatchEvent(new Event(SWITCH_HINT_EVENT))
+}
+
+/**
+ * 힌트를 영구히 끈다. 사용자가 X 로 닫았을 때, 그리고 ⌘↑/⌘↓ 를 실제로 썼을 때 모두
+ * 호출한다 — 후자가 핵심이다. 단축키를 쓰는 순간 힌트는 목적을 달성했으므로 조용히 사라진다.
+ */
+export function finishSwitchHint(): void {
+  if (readUiFlag(SWITCH_HINT_DONE)) return
+  setUiFlag(SWITCH_HINT_DONE, true)
+  window.dispatchEvent(new Event(SWITCH_HINT_EVENT))
+}
+
+/** 힌트 조건 변화 구독(마우스 전환 누적·학습 완료). 해제 함수를 돌려준다. */
+export function onSwitchHintChange(fn: () => void): () => void {
+  window.addEventListener(SWITCH_HINT_EVENT, fn)
+  return () => window.removeEventListener(SWITCH_HINT_EVENT, fn)
 }
