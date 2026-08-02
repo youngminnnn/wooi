@@ -201,6 +201,13 @@ export class AgentOrchestrator {
     )
   }
 
+  /** 한 backend의 계정 사용량만 갱신한다. Overview가 느린 다른 backend를 기다리지 않게 한다. */
+  async refreshRateLimitsFor(id: AgentBackendId, allowShortLived: boolean): Promise<void> {
+    const backend = this.get(id)
+    if (!backend.meta.capabilities.rateLimits) return
+    await backend.refreshRateLimits(allowShortLived)
+  }
+
   mcpAction(workspaceId: string, serverName: string, action: McpAction): Promise<McpServerInfo[]> {
     const backend = this.backendFor(workspaceId)
     if (!backend.meta.capabilities.mcp) {

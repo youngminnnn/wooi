@@ -70,6 +70,7 @@ import {
 import { backendMeta } from './agent/registry'
 import type {
   AgentBackendId,
+  AppState,
   AppSettings,
   CarryFailure,
   CarryItem,
@@ -1493,15 +1494,23 @@ export function registerIpc(ctx: IpcContext): void {
   /**
    * 레이트리밋 수동 갱신(상태줄 팝오버). 라이브 세션이 없으면 단명 쿼리로 폴백하도록 허용한다 —
    * 사용자가 직접 누른 것이라 프로세스 spawn 비용이 정당화된다.
-   * 갱신된 값은 반환값이 아니라 evtState 방송으로 흘러가므로 여기서는 아무것도 돌려주지 않는다.
+   * agentId가 있으면 해당 backend만 갱신하고, 호출한 renderer가 방송 유실 없이 반영하도록
+   * 최신 AppState를 직접 반환한다.
    */
-  ipcMain.handle(IPC.rateLimitsRefresh, async (): Promise<void> => {
-    try {
-      await ctx.sessions.refreshRateLimits(true)
-    } catch (err) {
-      log.error('rate limits: manual refresh failed:', err)
+  ipcMain.handle(
+    IPC.rateLimitsRefresh,
+    async (_event, agentId?: AgentBackendId): Promise<AppState> => {
+      try {
+        if (agentId) await ctx.sessions.refreshRateLimitsFor(agentId, true)
+        else await ctx.sessions.refreshRateLimits(true)
+      } catch (err) {
+        log.error('rate limits: manual refresh failed:', err)
+      }
+      // 방송은 다른 창을 위한 push 경로로 유지하되, 요청한 renderer에는 최신 상태를 직접
+      // 반환한다. 그래야 초기 구독 전 이벤트 유실이나 동시 갱신 순서와 무관하게 화면이 따라온다.
+      return store.getState()
     }
-  })
+  )
 
   // ── 인터랙티브 터미널 (worktree PTY) ─────────────────────────────────────
 

@@ -55,27 +55,38 @@ const threads = new Map<string, CodexThread>()
 const pendingApprovals = new Map<string, (d: PermissionDecision) => void>()
 
 let server: AppServer | null = null
+/** detectCodex() await 중 겹쳐 들어온 요청이 AppServer를 각각 만드는 것을 막는 단일 초기화 Promise. */
+let openingServer: Promise<AppServer> | null = null
+
+async function openServer(): Promise<AppServer> {
+  const install = await detectCodex()
+  if (!install.path || !install.usable) {
+    throw new Error(install.reason ?? 'Codex CLI is not available')
+  }
+  return new AppServer({
+    executable: install.path,
+    onNotification: routeNotification,
+    requestHandlers: {
+      [SERVER_REQUEST.commandApproval]: (params) => approve(params, mapCommandApproval),
+      [SERVER_REQUEST.fileChangeApproval]: (params) => approveFileChange(params),
+      [SERVER_REQUEST.requestUserInput]: (params) => answer(params),
+      [SERVER_REQUEST.permissionsApproval]: (params) => approvePermissions(params),
+      [SERVER_REQUEST.elicitation]: (params) => answerElicitation(params),
+      [SERVER_REQUEST.dynamicToolCall]: (params) => rejectDynamicTool(params)
+    },
+    onExit: onServerExit
+  })
+}
 
 /** 공유 app-server 연결. 처음 필요할 때 codex 를 찾아 띄운다. */
 async function rpc(): Promise<RpcClient> {
   if (!server) {
-    const install = await detectCodex()
-    if (!install.path || !install.usable) {
-      throw new Error(install.reason ?? 'Codex CLI is not available')
+    if (!openingServer) openingServer = openServer()
+    try {
+      server = await openingServer
+    } finally {
+      openingServer = null
     }
-    server = new AppServer({
-      executable: install.path,
-      onNotification: routeNotification,
-      requestHandlers: {
-        [SERVER_REQUEST.commandApproval]: (params) => approve(params, mapCommandApproval),
-        [SERVER_REQUEST.fileChangeApproval]: (params) => approveFileChange(params),
-        [SERVER_REQUEST.requestUserInput]: (params) => answer(params),
-        [SERVER_REQUEST.permissionsApproval]: (params) => approvePermissions(params),
-        [SERVER_REQUEST.elicitation]: (params) => answerElicitation(params),
-        [SERVER_REQUEST.dynamicToolCall]: (params) => rejectDynamicTool(params)
-      },
-      onExit: onServerExit
-    })
   }
   return server.rpc()
 }

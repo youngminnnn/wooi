@@ -28,6 +28,19 @@ import { openRepoSettings } from './lib/repoSettings'
 
 export const scriptKey = (workspaceId: string, kind: ScriptKind): string => `${workspaceId}:${kind}`
 
+/** 앱 초기화와 Overview가 겹쳐도 backend별 account usage RPC는 하나만 실행한다. */
+const accountUsageRefreshes: Partial<Record<AgentBackendId, Promise<AppState>>> = {}
+
+export function refreshAccountUsage(agentId: AgentBackendId): Promise<AppState> {
+  const active = accountUsageRefreshes[agentId]
+  if (active) return active
+  const request = window.api.rateLimits.refresh(agentId).finally(() => {
+    if (accountUsageRefreshes[agentId] === request) delete accountUsageRefreshes[agentId]
+  })
+  accountUsageRefreshes[agentId] = request
+  return request
+}
+
 /**
  * 특정 워크스페이스에서 (event, channel) 알림이 켜져 있는지. 워크스페이스가 음소거면 항상 false.
  * 알림 설정이 아직 없으면(초기화 전) 보수적으로 false.
@@ -380,6 +393,15 @@ export const useStore = create<UIState>((set, get) => ({
     const remembered = readRememberedRightPanel()
     const rightPanelOpen = remembered ?? app.settings.defaultRightPanelOpen
     set({ app, ready: true, runningSince: seededRunningSince, rightPanelOpen })
+
+    // Overview에 들어간 뒤에야 Codex usage 조회를 시작하면 첫 화면에서 RPC 시간만큼 기다리게 된다.
+    // workspace 또는 저장된 스냅샷이 있으면 renderer 초기화와 동시에 미리 갱신한다.
+    const hasCodex =
+      app.workspaces.some((w) => !w.archived && w.agentBackend === 'codex') ||
+      !!app.rateLimitsByAgent?.codex
+    if (hasCodex) {
+      void refreshAccountUsage('codex').then((next) => set({ app: next }))
+    }
     void get().refreshAuth()
     void get().refreshAgents()
 

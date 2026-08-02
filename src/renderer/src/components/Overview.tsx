@@ -9,7 +9,7 @@ import {
   Timer,
   AlertTriangle
 } from 'lucide-react'
-import { useStore } from '../store'
+import { refreshAccountUsage, useStore } from '../store'
 import { useNow } from '../lib/useNow'
 import { formatCost, formatCountdown, formatDuration, formatTime } from '../lib/format'
 import { workspaceDisplayName } from '@shared/types'
@@ -79,7 +79,17 @@ export default function Overview(): React.JSX.Element {
   }, [active, transcripts])
 
   const auth = useStore((s) => s.authStatus)
-  const connectedAgents = (['claude', 'codex'] as const).filter((id) => auth?.agents[id]?.loggedIn)
+  const connectedAgents = (['claude', 'codex'] as const).filter((id) => {
+    const hasActiveWorkspace = active.some((w) => w.agentBackend === id)
+    const hasSnapshot =
+      id === 'claude'
+        ? !!(app.rateLimitsByAgent?.claude ?? app.rateLimits)
+        : !!app.rateLimitsByAgent?.codex
+    // 인증 조회는 앱 시작·focus 때 여러 번 겹칠 수 있고 일시 실패도 가능하다. 이미 이 backend를
+    // 쓰는 workspace나 account snapshot이 있는데 loggedIn 하나만 보고 패널을 제거하지 않는다.
+    return !!auth?.agents[id]?.loggedIn || hasActiveWorkspace || hasSnapshot
+  })
+  const codexConnected = connectedAgents.includes('codex')
 
   // backend별 사용량을 주기적으로, 그리고 창으로 돌아올 때 다시 조회한다.
   const [usageNonce, setUsageNonce] = useState(0)
@@ -100,6 +110,27 @@ export default function Overview(): React.JSX.Element {
       window.removeEventListener('focus', onFocus)
     }
   }, [])
+
+  // Codex account usage 는 이미 AppState 의 backend별 스냅샷으로 관리된다. Overview 에서
+  // workspace /usage 를 다시 실행하면 같은 rate-limit RPC를 중복 호출하므로, 전용 갱신 경로만
+  // 한 번 호출하고 저장된 스냅샷은 갱신이 끝나기 전에도 그대로 표시한다.
+  const lastCodexRefreshNonce = useRef<number | null>(null)
+  const [codexUsageLoading, setCodexUsageLoading] = useState(false)
+  const [codexSnapshot, setCodexSnapshot] = useState<RateLimitSnapshot | undefined>(
+    app.rateLimitsByAgent?.codex
+  )
+  useEffect(() => {
+    if (!codexConnected || lastCodexRefreshNonce.current === usageNonce) return
+    lastCodexRefreshNonce.current = usageNonce
+    setCodexUsageLoading(true)
+    void refreshAccountUsage('codex')
+      .then((next) => {
+        // refresh 응답 자체가 최신 상태의 정본이다. evtState 방송 수신 여부에 화면 갱신을 의존하지 않는다.
+        setCodexSnapshot(next.rateLimitsByAgent?.codex)
+        useStore.setState({ app: next })
+      })
+      .finally(() => setCodexUsageLoading(false))
+  }, [codexConnected, usageNonce])
 
   const now = useNow(anyRunning ? 1000 : 30_000, anyRunning || connectedAgents.length > 0)
   const claudeSnapshot = app.rateLimitsByAgent ? app.rateLimitsByAgent.claude : app.rateLimits
@@ -182,13 +213,16 @@ export default function Overview(): React.JSX.Element {
                 agentId={agentId}
                 targetId={target?.id}
                 snapshot={
-                  app.rateLimitsByAgent
-                    ? app.rateLimitsByAgent[agentId]
-                    : agentId === 'claude'
-                      ? app.rateLimits
-                      : undefined
+                  agentId === 'codex'
+                    ? (codexSnapshot ?? app.rateLimitsByAgent?.codex)
+                    : app.rateLimitsByAgent
+                      ? app.rateLimitsByAgent[agentId]
+                      : agentId === 'claude'
+                        ? app.rateLimits
+                        : undefined
                 }
                 refreshNonce={usageNonce}
+                refreshing={agentId === 'codex' && codexUsageLoading}
                 now={now}
               />
             )
@@ -254,21 +288,31 @@ function AgentUsagePanel({
   targetId,
   snapshot,
   refreshNonce,
+  refreshing,
   now
 }: {
   agentId: AgentBackendId
   targetId?: string
   snapshot?: RateLimitSnapshot
   refreshNonce: number
+  refreshing: boolean
   now: number
 }): React.JSX.Element {
   const [usage, setUsage] = useState<UsageInfo | null>(null)
-  const [loading, setLoading] = useState(!!targetId)
+  const [loading, setLoading] = useState(agentId === 'claude' && !!targetId)
   const label = agentId === 'claude' ? 'Claude Code' : 'Codex'
+  const panelLoading = loading || refreshing
 
   useEffect(() => {
+    // Codex 는 상위 Overview 가 rateLimits.refresh()로 갱신한 AppState 스냅샷을 사용한다.
+    // 여기서 /usage 를 호출하면 account/rateLimits/read와 account/read가 다시 직렬 실행된다.
+    if (agentId === 'codex') {
+      setLoading(false)
+      return
+    }
     if (!targetId) return
     let cancelled = false
+    setLoading(true)
     void window.api.commands
       .run(targetId, 'usage')
       .then(({ result }) => {
@@ -281,7 +325,7 @@ function AgentUsagePanel({
     return () => {
       cancelled = true
     }
-  }, [targetId, refreshNonce])
+  }, [agentId, targetId, refreshNonce])
 
   const planApplies = usage ? usage.rateLimitsAvailable : (snapshot?.available ?? null)
   const windows = useMemo<PlanWindow[]>(() => {
@@ -316,7 +360,7 @@ function AgentUsagePanel({
         {agentId === 'claude' ? <ClaudeMark size={16} /> : <CodexMark size={16} />}
         {label}
         <span className="text-[11px] font-normal text-neutral-600">account usage</span>
-        {loading && <Loader2 size={11} className="ml-auto animate-spin text-neutral-500" />}
+        {panelLoading && <Loader2 size={11} className="ml-auto animate-spin text-neutral-500" />}
       </div>
 
       {planApplies === false ? (
@@ -330,7 +374,7 @@ function AgentUsagePanel({
               icon={<Gauge size={14} className="text-[var(--warning-400)]" />}
               label="Plan usage"
               value={highest ? `${Math.round(highest.usedPct ?? 0)}%` : '—'}
-              loading={loading && !highest}
+              loading={panelLoading && !highest}
               hint={
                 highest ? `Highest window used (${highest.label})` : `Checking ${label} limits…`
               }
@@ -339,7 +383,7 @@ function AgentUsagePanel({
               icon={<Timer size={14} className="text-[var(--info-400)]" />}
               label={primary ? `${primary.label} resets in` : 'Primary limit resets in'}
               value={primary?.resetsAt == null ? '—' : formatCountdown(primary.resetsAt - now)}
-              loading={loading && primary?.resetsAt == null}
+              loading={panelLoading && primary?.resetsAt == null}
               hint={
                 primary?.resetsAt == null
                   ? `Checking the ${label} primary usage window…`
@@ -351,7 +395,7 @@ function AgentUsagePanel({
             accountLabel={label}
             windows={windows}
             extra={usage?.extraUsage ?? null}
-            loading={loading}
+            loading={panelLoading}
             now={now}
             embedded
           />
