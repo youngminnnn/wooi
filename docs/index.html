@@ -928,6 +928,22 @@
             </p>
           </div>
           <div class="why-card">
+            <div class="emoji">🔍</div>
+            <h3>
+              <span class="en">Review PRs in place</span><span class="ko">PR 리뷰도 이 안에서</span>
+            </h3>
+            <p>
+              <span class="en"
+                >Point an agent at a pull request, edit the findings it lands on the diff, and post
+                them without leaving the app.</span
+              >
+              <span class="ko"
+                >에이전트에게 PR 을 맡기고, diff 위에 붙은 지적을 다듬어 앱을 벗어나지 않고
+                게시합니다.</span
+              >
+            </p>
+          </div>
+          <div class="why-card">
             <div class="emoji">🕵️</div>
             <h3><span class="en">No telemetry</span><span class="ko">텔레메트리 없음</span></h3>
             <p>
@@ -1230,6 +1246,120 @@
                 <span class="ko"
                   >에이전트가 <code>git checkout -b</code> 와 <code>gh pr create</code> 로 직접
                   체인을 만들어도, PR 의 base 링크에서 스택을 복원해 똑같이 보여 줍니다.</span
+                >
+              </li>
+            </ul>
+          </div>
+
+          <!-- PR review -->
+          <div class="feature">
+            <div class="feature-label">
+              <div class="feature-icon">🔍</div>
+              <h3><span class="en">PR review</span><span class="ko">PR 리뷰</span></h3>
+            </div>
+            <ul>
+              <li>
+                <strong
+                  ><span class="en">Start a review</span><span class="ko">리뷰 시작</span></strong
+                >
+                —
+                <span class="en"
+                  >hit <strong>Review PR</strong> on the Overview board, pick a repo and one of its
+                  open PRs (or type a number), and say what you want looked at. A review gets its
+                  own row in the sidebar and runs alongside your workspaces.</span
+                >
+                <span class="ko"
+                  >Overview 보드의 <strong>Review PR</strong> 을 누르고 리포와 열린 PR 을 고른
+                  뒤(번호 직접 입력도 됩니다) 무엇을 봐 주면 좋을지 적습니다. 리뷰는 사이드바에 자기
+                  행을 갖고 워크스페이스 옆에서 나란히 돕니다.</span
+                >
+              </li>
+              <li>
+                <strong
+                  ><span class="en">Claude or Codex</span
+                  ><span class="ko">Claude 또는 Codex</span></strong
+                >
+                —
+                <span class="en"
+                  >pick the agent when you start; the review stays on it, and follow-up turns resume
+                  the same session.</span
+                >
+                <span class="ko"
+                  >시작할 때 에이전트를 고르면 리뷰는 끝까지 그 에이전트로 돌고, 후속 질문도 같은
+                  세션을 이어받습니다.</span
+                >
+              </li>
+              <li>
+                <strong
+                  ><span class="en">Its own worktree</span
+                  ><span class="ko">전용 worktree</span></strong
+                >
+                —
+                <span class="en"
+                  >the PR head is checked out into a dedicated review worktree, so the agent can
+                  read code outside the changed hunks without touching the checkout you're working
+                  in.</span
+                >
+                <span class="ko"
+                  >PR head 를 별도 리뷰 worktree 에 체크아웃해, 지금 작업 중인 체크아웃은 건드리지
+                  않으면서 변경된 hunk 바깥의 코드까지 읽게 합니다.</span
+                >
+              </li>
+              <li>
+                <strong
+                  ><span class="en">Findings land on the diff</span
+                  ><span class="ko">지적은 diff 위에</span></strong
+                >
+                —
+                <span class="en"
+                  >each suggestion is anchored to the lines it's about. Edit the wording before it
+                  goes out, discard the ones you don't want, and post them one at a time or all at
+                  once.</span
+                >
+                <span class="ko"
+                  >각 지적이 해당하는 코드 줄에 붙습니다. 게시 전에 문장을 고치고, 안 달 것은
+                  버리고, 하나씩 또는 한꺼번에 올립니다.</span
+                >
+              </li>
+              <li>
+                <strong
+                  ><span class="en">Activity timeline</span
+                  ><span class="ko">활동 타임라인</span></strong
+                >
+                —
+                <span class="en"
+                  >replies to comments you posted and new commits on the PR are polled automatically
+                  and land in the timeline; ask a follow-up and the review picks up from
+                  there.</span
+                >
+                <span class="ko"
+                  >게시한 코멘트의 답글과 PR 의 새 커밋을 주기적으로 가져와 타임라인에 쌓습니다.
+                  이어서 질문하면 그 지점부터 다시 이어집니다.</span
+                >
+              </li>
+              <li>
+                <strong><span class="en">Verdicts</span><span class="ko">판정</span></strong> —
+                <span class="en"
+                  >comment, approve, or request changes. Unposted findings can go up with the
+                  verdict — comments first, and the verdict is held back if any of them fail.
+                  Approve / request changes are hidden on your own PR, which GitHub rejects
+                  anyway.</span
+                >
+                <span class="ko"
+                  >comment · approve · request changes 를 제출합니다. 안 올린 지적은 판정과 함께
+                  올릴 수 있고 — 코멘트가 먼저 올라가며, 하나라도 실패하면 판정은 보류됩니다. 내 PR
+                  에서는 approve/request changes 를 숨깁니다(GitHub 이 거부하므로).</span
+                >
+              </li>
+              <li>
+                <strong><span class="en">Persistent</span><span class="ko">영속</span></strong> —
+                <span class="en"
+                  >reviews survive restarts and can be archived, restored, or deleted; deleting
+                  cleans up the review worktree too.</span
+                >
+                <span class="ko"
+                  >앱을 껐다 켜도 남고 아카이브·복원·삭제할 수 있습니다. 삭제하면 리뷰 worktree 도
+                  함께 정리됩니다.</span
                 >
               </li>
             </ul>
