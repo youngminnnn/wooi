@@ -601,7 +601,8 @@ export class SessionManager implements AgentBackend {
     // 실제 API 왕복이 없었으니 서버가 사용률을 실어 줄 기회가 없었던 것뿐이다. 이걸 그대로 저장하면
     // 마지막으로 알던 사용률이 앱을 켤 때마다 날아가, 상태줄과 Overview 가 "요금제 한도 없음"처럼 보인다.
     // 창이 빈 응답은 계정 종류(available·subscriptionType)만 갱신하고 창은 이전 값을 유지한다.
-    const prev = store.getState().rateLimits
+    const state = store.getState()
+    const prev = state.rateLimitsByAgent ? state.rateLimitsByAgent.claude : state.rateLimits
     const keepPrevWindows = usage.rateLimits.length === 0 && (prev?.windows.length ?? 0) > 0
     const snapshot: RateLimitSnapshot = {
       // 창을 물려받았으면 조회 시각도 물려받는다 — 그래야 stale 표시가 실제 데이터 나이를 말한다.
@@ -611,6 +612,8 @@ export class SessionManager implements AgentBackend {
       windows: keepPrevWindows ? (prev?.windows ?? []) : usage.rateLimits
     }
     store.update((st) => {
+      st.rateLimitsByAgent = { ...st.rateLimitsByAgent, claude: snapshot }
+      // 구버전 renderer/저장 데이터와의 호환: 단일 필드는 Claude 값을 뜻한다.
       st.rateLimits = snapshot
     })
     this.dispatch(IPC.evtState, store.getState())

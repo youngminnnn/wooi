@@ -727,10 +727,12 @@ export interface AppState {
   workspaces: Workspace[]
   settings: AppSettings
   /**
-   * 계정 단위 레이트리밋 스냅샷(마지막으로 성공한 조회). 아직 한 번도 못 받았으면 없음.
-   * optional 이라 기존 저장 파일은 마이그레이션 없이 그대로 읽힌다(없으면 undefined).
+   * 레거시 Claude 계정 레이트리밋 스냅샷. 새 코드는 rateLimitsByAgent를 우선 사용한다.
+   * 기존 저장 파일과의 호환을 위해 유지한다.
    */
   rateLimits?: RateLimitSnapshot
+  /** backend별 계정 사용량. rateLimits는 이전 버전의 Claude 스냅샷 호환 필드로 유지한다. */
+  rateLimitsByAgent?: Partial<Record<AgentBackendId, RateLimitSnapshot>>
 }
 
 // ── 채팅 트랜스크립트 ────────────────────────────────────────────────────
@@ -1582,8 +1584,8 @@ export const RATE_LIMIT_WARN_THRESHOLD = 80
 export const RATE_LIMIT_STALE_AFTER_MS = 12 * 60_000
 
 /**
- * 계정 단위 레이트리밋 스냅샷. **워크스페이스 단위가 아니다** — 한 계정에 하나뿐인 값이라
- * AppState 에 전역 단일 객체로 싣고, 어느 워크스페이스에서 조회했든 모든 워크스페이스가 같은 값을 본다.
+ * backend 계정 하나의 레이트리밋 스냅샷. **워크스페이스 단위가 아니다** — backend별 계정에
+ * 하나뿐인 값이며 AppState.rateLimitsByAgent에서 Claude/Codex를 분리해 보관한다.
  *
  * AppState 에 두는 덕에 (1) 재시작 후에도 마지막 값이 남아 상태줄이 즉시 무언가를 보여줄 수 있고
  * (2) 이미 있는 evtState 방송을 그대로 타므로 전용 이벤트 채널이 필요 없다.

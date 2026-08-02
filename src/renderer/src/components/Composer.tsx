@@ -1852,7 +1852,11 @@ function StatusLine({
   const usage = useStore((s) => s.contextUsage[workspace.id])
   const compacting = useStore((s) => s.compacting[workspace.id] ?? false)
   // 레이트리밋은 계정 단위 전역 값이라 workspace.id 로 색인하지 않는다(contextUsage 와 다른 점).
-  const rateLimits = useStore((s) => s.app!.rateLimits)
+  const rateLimits = useStore((s) => {
+    const app = s.app!
+    if (app.rateLimitsByAgent) return app.rateLimitsByAgent[workspace.agentBackend]
+    return workspace.agentBackend === 'claude' ? app.rateLimits : undefined
+  })
   const liveBranch = useStore((s) => s.gitStatus[workspace.id]?.branch)
   const backend = useWorkspaceBackend(workspace)
   const models = useModels(workspace.agentBackend)

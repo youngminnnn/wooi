@@ -71,7 +71,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
     // Claude 는 검증된 기본 모델을 지정한다(1M 윈도를 잡는 `[1m]` 접미사 포함).
     claude: { model: DEFAULT_MODEL, effort: null, permissionMode: 'default', fastMode: false },
     // Codex 는 카탈로그 기본 모델·기본 effort 를 그대로 따른다(null = 백엔드 기본).
-    // fast mode 는 Claude 전용 개념이라 항상 false 다.
+    // 모델과 effort는 Codex 카탈로그 기본값을 따르고 fast tier는 기본적으로 끈다.
     codex: { model: null, effort: null, permissionMode: null, fastMode: false }
   },
   // 기본 다크 — 기존 사용자도 load 의 기본값 병합으로 다크를 유지한다.

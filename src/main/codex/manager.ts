@@ -349,7 +349,7 @@ export class CodexSessionManager implements AgentBackend {
 
     const store = getStore()
     // 창이 빈 응답으로 마지막으로 알던 사용률을 날리지 않는다(Claude 경로와 같은 이유).
-    const prev = store.getState().rateLimits
+    const prev = store.getState().rateLimitsByAgent?.codex
     const keepPrev = windows.length === 0 && (prev?.windows.length ?? 0) > 0
     const snapshot: RateLimitSnapshot = {
       fetchedAt: keepPrev ? (prev?.fetchedAt ?? Date.now()) : Date.now(),
@@ -359,7 +359,7 @@ export class CodexSessionManager implements AgentBackend {
       windows: keepPrev ? (prev?.windows ?? []) : windows
     }
     store.update((st) => {
-      st.rateLimits = snapshot
+      st.rateLimitsByAgent = { ...st.rateLimitsByAgent, codex: snapshot }
     })
     this.dispatch(IPC.evtState, store.getState())
   }

@@ -15,7 +15,14 @@ import { useStore } from '../store'
 import { useNow } from '../lib/useNow'
 import { formatCost, formatCountdown, formatDuration, formatTime } from '../lib/format'
 import { SESSION_RATE_LIMIT_LABEL, workspaceDisplayName } from '@shared/types'
-import type { ChatItem, UsageInfo, Workspace } from '@shared/types'
+import type {
+  AgentBackendId,
+  ChatItem,
+  RateLimitSnapshot,
+  UsageInfo,
+  Workspace
+} from '@shared/types'
+import { ClaudeMark, CodexMark } from './BrandIcons'
 
 /** 요금제 사용률 재조회 주기. 5시간 창이 눈에 띄게 움직이는 단위가 분이라 1분이면 충분하다. */
 const USAGE_REFRESH_MS = 60_000
@@ -85,25 +92,17 @@ export default function Overview(): React.JSX.Element {
     return { cost, turns }
   }, [active, perWorkspace])
 
-  // 요금제 사용률(rate-limit) 롤업: Claude 처럼 "전체 사용량의 %"를 함께 보여준다.
-  // rate limit 은 계정 단위 값이라 활성 세션 하나에 /usage 를 물으면 계정 전체가 반영된다.
-  // (구독 요금제일 때만 값이 있고, API 키 세션이면 rateLimitsAvailable=false → 달러 표기로 폴백한다.)
-  const [usage, setUsage] = useState<UsageInfo | null>(null)
-  // 조회는 세션 왕복이 필요해 즉답이 아니다. 응답 전까지 타일을 감추면 화면이 뒤늦게 밀려나므로
-  // 자리는 유지한 채 로딩만 표시한다(usageLoading).
-  const [usageLoading, setUsageLoading] = useState(true)
-  const usageTargetId = (active.find((w) => w.status === 'running') ?? active[0])?.id
-  // main 이 유지하는 계정 단위 스냅샷(재시작해도 남는다). 이번 조회가 창을 못 받았을 때의 폴백이자,
-  // 앱을 막 켠 시점에 "이 계정이 요금제인가"를 즉시 알려 주는 근거다.
-  const snapshot = app.rateLimits
+  const auth = useStore((s) => s.authStatus)
+  const connectedAgents = (['claude', 'codex'] as const).filter((id) => auth?.agents[id]?.loggedIn)
 
-  // SDK 는 호출할 때마다 계정 사용률을 새로 읽어오지만, 대상 세션이 바뀔 때만 물으면
-  // 화면을 연 시점의 값이 그대로 굳어 claude.ai/데스크톱 앱과 어긋난다(5시간 창은 특히 빨리 움직인다).
-  // 주기적으로, 그리고 창으로 돌아올 때 다시 물어 그 격차를 없앤다.
+  // backend별 사용량을 주기적으로, 그리고 창으로 돌아올 때 다시 조회한다.
   const [usageNonce, setUsageNonce] = useState(0)
   const lastUsageFetch = useRef(0)
   useEffect(() => {
-    const bump = (): void => setUsageNonce((n) => n + 1)
+    const bump = (): void => {
+      lastUsageFetch.current = Date.now()
+      setUsageNonce((n) => n + 1)
+    }
     const id = window.setInterval(bump, USAGE_REFRESH_MS)
     // 창 전환을 반복해도 매번 왕복하지 않도록 최소 간격을 둔다.
     const onFocus = (): void => {
@@ -116,79 +115,9 @@ export default function Overview(): React.JSX.Element {
     }
   }, [])
 
-  useEffect(() => {
-    if (!usageTargetId) {
-      setUsage(null)
-      setUsageLoading(false)
-      return
-    }
-    let cancelled = false
-    setUsageLoading(true)
-    lastUsageFetch.current = Date.now()
-    void window.api.commands
-      .run(usageTargetId, 'usage')
-      .then(({ result }) => {
-        if (cancelled) return
-        if (result?.kind === 'usage') setUsage(result.usage)
-        setUsageLoading(false)
-      })
-      .catch(() => {
-        if (cancelled) return
-        setUsageLoading(false)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [usageTargetId, usageNonce])
-
-  /**
-   * 이 계정에 요금제 한도가 적용되는가. true=구독, false=API 키(달러 표기), null=아직 모름.
-   * **창(window)이 왔는지로 판단하지 않는다** — 라이브 세션이 없을 때의 단명 조회는 available 만
-   * 주고 창은 비워서 오기 때문에, 창 유무로 고르면 앱을 켠 직후 달러 타일이 떴다가 첫 메시지
-   * 이후 % 타일로 바뀌는 깜빡임이 생긴다.
-   */
-  const planApplies: boolean | null = usage
-    ? usage.rateLimitsAvailable
-    : (snapshot?.available ?? null)
-
-  // 한도 창(5시간·7일·Opus·Sonnet)을 표시용으로 정규화: 사용률·잔여율·리셋 시각.
-  // 이번 조회가 창을 못 받았으면 저장된 스냅샷(마지막으로 알던 값)으로 폴백한다.
-  const planWindows = useMemo<PlanWindow[]>(() => {
-    const source =
-      usage?.rateLimitsAvailable && usage.rateLimits.length > 0
-        ? usage.rateLimits
-        : snapshot?.available
-          ? snapshot.windows
-          : []
-    return source.map((r) => {
-      const used = r.utilization == null ? null : Math.min(100, Math.max(0, r.utilization))
-      const parsed = r.resetsAt ? Date.parse(r.resetsAt) : NaN
-      return {
-        label: r.label,
-        usedPct: used,
-        resetsAt: Number.isNaN(parsed) ? null : parsed
-      }
-    })
-  }, [usage, snapshot])
-
-  // 실행 중 경과 시간과 한도 리셋 카운트다운은 둘 다 "흐르는" 표시라 같은 타이머로 갱신한다.
-  // 경과 시간은 초 단위라 1초가 필요하지만, 카운트다운만 남았다면 분 단위 표시라 30초면 충분하다.
-  const now = useNow(anyRunning ? 1000 : 30_000, anyRunning || planWindows.length > 0)
-
-  // 여러 창 중 가장 많이 소진된 창을 대표값으로 노출한다.
-  const planUsage = useMemo(() => {
-    const withVals = planWindows.filter((w) => w.usedPct != null)
-    if (withVals.length === 0) return null
-    return withVals.reduce((a, b) => ((b.usedPct ?? 0) > (a.usedPct ?? 0) ? b : a))
-  }, [planWindows])
-
-  // "session limit" = 5시간 창. 언제 초기화되는지가 가장 자주 확인하는 값이라 타일로 승격한다.
-  const sessionWindow = planWindows.find((w) => w.label === SESSION_RATE_LIMIT_LABEL)
-
-  // 정액 요금제 사용자에게는 달러 표기가 와닿지 않는다 → 카드의 개별 비용도 숨긴다.
-  // (rate limit 은 계정 단위라 워크스페이스별 %는 성립하지 않으므로 그냥 감춘다.)
-  // 아직 계정 종류를 모르면(null) 감춘 채로 둔다 — 나중에 사라질 값을 먼저 보여 주지 않는다.
-  const showCardCost = planApplies === false
+  const now = useNow(anyRunning ? 1000 : 30_000, anyRunning || connectedAgents.length > 0)
+  const claudeSnapshot = app.rateLimitsByAgent ? app.rateLimitsByAgent.claude : app.rateLimits
+  const showCardCost = claudeSnapshot?.available === false
 
   const pendingIds = new Set(permissions.map((p) => p.workspaceId))
 
@@ -257,53 +186,12 @@ export default function Overview(): React.JSX.Element {
 
         {/* 비용/토큰 롤업: 모든 세션의 누적 지출·턴 수를 한눈에. */}
         <div className="flex flex-wrap gap-2.5 mb-2.5">
-          {/* 요금제(구독) 사용자는 정액제라 달러 금액이 와닿지 않는다 → 전체 사용량 %로 보여준다.
-              API 키 사용자는 rate limit 이 아예 없으므로 누적 달러로 폴백한다.
-              어느 타일을 띄울지는 **계정 종류(planApplies)** 로만 정한다 — 사용률 값이 아직
-              도착하지 않았다고 달러 타일로 갈아타면, 첫 메시지 직후 타일이 통째로 바뀐다. */}
-          {planApplies === false ? (
+          {totals.cost > 0 && (
             <StatTile
               icon={<DollarSign size={14} className="text-[var(--success-400)]" />}
               label="Total spend"
               value={formatCost(totals.cost)}
               hint="Sum of session costs across all workspaces"
-            />
-          ) : (
-            <StatTile
-              icon={<Gauge size={14} className="text-[var(--warning-400)]" />}
-              label="Plan usage"
-              value={planUsage ? `${Math.round(planUsage.usedPct ?? 0)}%` : '—'}
-              loading={usageLoading || !planUsage}
-              hint={
-                planUsage
-                  ? `Highest plan rate-limit window used (${planUsage.label})` +
-                    (totals.cost > 0 ? ` · ${formatCost(totals.cost)} spent in app` : '')
-                  : 'Checking plan rate limits…'
-              }
-            />
-          )}
-          {/* 세션 한도(5시간 창)가 언제 초기화되는지. 값이 오기 전에도 자리를 잡아 두어야 값이 도착할 때
-              뒤 타일들이 옆으로 밀리지 않는다. 요금제 한도가 없는 계정(API 키)이면 내린다. */}
-          {sessionWindow?.resetsAt != null ? (
-            <StatTile
-              icon={<Timer size={14} className="text-[var(--info-400)]" />}
-              label="Session resets in"
-              value={formatCountdown(sessionWindow.resetsAt - now)}
-              hint={
-                `The ${SESSION_RATE_LIMIT_LABEL} session limit resets at ` +
-                formatTime(sessionWindow.resetsAt) +
-                (sessionWindow.usedPct == null
-                  ? ''
-                  : ` · ${Math.round(sessionWindow.usedPct)}% used`)
-              }
-            />
-          ) : planApplies === false ? null : (
-            <StatTile
-              icon={<Timer size={14} className="text-[var(--info-400)]" />}
-              label="Session resets in"
-              value="—"
-              loading
-              hint="Checking the session limit window…"
             />
           )}
           <StatTile
@@ -320,16 +208,30 @@ export default function Overview(): React.JSX.Element {
           />
         </div>
 
-        {/* 모델별(Opus·Sonnet)·기간별 한도 창의 잔여량. 조회가 끝나기 전에도 자리를 지켜
-            레이아웃이 뒤늦게 밀리지 않게 한다. API 키 세션이면 조회 후 조용히 사라진다. */}
-        {(planApplies !== false || planWindows.length > 0) && (
-          <PlanLimits
-            windows={planWindows}
-            extra={usage?.extraUsage ?? null}
-            loading={usageLoading}
-            now={now}
-          />
-        )}
+        <div
+          className={`grid gap-2.5 mb-5 ${connectedAgents.length > 1 ? 'lg:grid-cols-2' : 'grid-cols-1'}`}
+        >
+          {connectedAgents.map((agentId) => {
+            const candidates = active.filter((w) => w.agentBackend === agentId)
+            const target = candidates.find((w) => w.status === 'running') ?? candidates[0]
+            return (
+              <AgentUsagePanel
+                key={agentId}
+                agentId={agentId}
+                targetId={target?.id}
+                snapshot={
+                  app.rateLimitsByAgent
+                    ? app.rateLimitsByAgent[agentId]
+                    : agentId === 'claude'
+                      ? app.rateLimits
+                      : undefined
+                }
+                refreshNonce={usageNonce}
+                now={now}
+              />
+            )
+          })}
+        </div>
 
         <div className="flex flex-wrap items-center gap-1.5 mb-5">
           {FILTERS.map((f) => (
@@ -384,6 +286,119 @@ export default function Overview(): React.JSX.Element {
   )
 }
 
+/** 연결된 에이전트 계정 하나의 플랜 사용량. 두 계정이 연결되면 같은 모양으로 나란히 보인다. */
+function AgentUsagePanel({
+  agentId,
+  targetId,
+  snapshot,
+  refreshNonce,
+  now
+}: {
+  agentId: AgentBackendId
+  targetId?: string
+  snapshot?: RateLimitSnapshot
+  refreshNonce: number
+  now: number
+}): React.JSX.Element {
+  const [usage, setUsage] = useState<UsageInfo | null>(null)
+  const [loading, setLoading] = useState(!!targetId)
+  const label = agentId === 'claude' ? 'Claude Code' : 'Codex'
+
+  useEffect(() => {
+    if (!targetId) return
+    let cancelled = false
+    void window.api.commands
+      .run(targetId, 'usage')
+      .then(({ result }) => {
+        if (cancelled) return
+        if (result?.kind === 'usage') setUsage(result.usage)
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [targetId, refreshNonce])
+
+  const planApplies = usage ? usage.rateLimitsAvailable : (snapshot?.available ?? null)
+  const windows = useMemo<PlanWindow[]>(() => {
+    const source =
+      usage?.rateLimitsAvailable && usage.rateLimits.length > 0
+        ? usage.rateLimits
+        : snapshot?.available
+          ? snapshot.windows
+          : []
+    return source.map((window) => {
+      const used =
+        window.utilization == null ? null : Math.min(100, Math.max(0, window.utilization))
+      const parsed = window.resetsAt ? Date.parse(window.resetsAt) : NaN
+      return {
+        label: window.label,
+        usedPct: used,
+        resetsAt: Number.isNaN(parsed) ? null : parsed
+      }
+    })
+  }, [usage, snapshot])
+  const withValues = windows.filter((window) => window.usedPct != null)
+  const highest = withValues.reduce<PlanWindow | null>(
+    (current, window) =>
+      !current || (window.usedPct ?? 0) > (current.usedPct ?? 0) ? window : current,
+    null
+  )
+  const session = windows.find((window) => window.label === SESSION_RATE_LIMIT_LABEL)
+
+  return (
+    <section className="rounded-xl border border-[var(--surface-2)] bg-[var(--bg-2)] p-3.5">
+      <div className="flex items-center gap-2 mb-3 text-sm font-medium text-neutral-200">
+        {agentId === 'claude' ? <ClaudeMark size={16} /> : <CodexMark size={16} />}
+        {label}
+        <span className="text-[11px] font-normal text-neutral-600">account usage</span>
+        {loading && <Loader2 size={11} className="ml-auto animate-spin text-neutral-500" />}
+      </div>
+
+      {planApplies === false ? (
+        <p className="text-xs text-neutral-500">
+          Plan rate limits are not available for this authentication method.
+        </p>
+      ) : (
+        <>
+          <div className="flex flex-wrap gap-2.5 mb-3">
+            <StatTile
+              icon={<Gauge size={14} className="text-[var(--warning-400)]" />}
+              label="Plan usage"
+              value={highest ? `${Math.round(highest.usedPct ?? 0)}%` : '—'}
+              loading={loading && !highest}
+              hint={
+                highest ? `Highest window used (${highest.label})` : `Checking ${label} limits…`
+              }
+            />
+            <StatTile
+              icon={<Timer size={14} className="text-[var(--info-400)]" />}
+              label="Session resets in"
+              value={session?.resetsAt == null ? '—' : formatCountdown(session.resetsAt - now)}
+              loading={loading && session?.resetsAt == null}
+              hint={
+                session?.resetsAt == null
+                  ? `Checking the ${label} session window…`
+                  : `Resets at ${formatTime(session.resetsAt)}`
+              }
+            />
+          </div>
+          <PlanLimits
+            accountLabel={label}
+            windows={windows}
+            extra={usage?.extraUsage ?? null}
+            loading={loading}
+            now={now}
+            embedded
+          />
+        </>
+      )}
+    </section>
+  )
+}
+
 function StatTile({
   icon,
   label,
@@ -433,23 +448,33 @@ function usedTone(usedPct: number | null): string {
  * 여기만 "남은 %"로 두면 같은 화면에서 8% 와 92% 가 나란히 보여 서로 어긋난 값처럼 읽힌다.
  */
 function PlanLimits({
+  accountLabel,
   windows,
   extra,
   loading,
-  now
+  now,
+  embedded = false
 }: {
+  accountLabel: string
   windows: PlanWindow[]
   extra: UsageInfo['extraUsage']
   loading: boolean
   now: number
+  embedded?: boolean
 }): React.JSX.Element {
   return (
-    <div className="rounded-xl border border-[var(--surface-2)] bg-[var(--bg-2)] px-3.5 py-3 mb-5">
+    <div
+      className={
+        embedded
+          ? 'border-t border-[var(--surface-2)] pt-3'
+          : 'rounded-xl border border-[var(--surface-2)] bg-[var(--bg-2)] px-3.5 py-3 mb-5'
+      }
+    >
       <div className="flex items-center gap-2 mb-2">
         <span className="text-[11px] uppercase tracking-wide text-neutral-500">Plan usage</span>
         {loading && <Loader2 size={11} className="animate-spin text-neutral-500" />}
         {/* 모델별 창(Opus·Sonnet)은 계정에 있을 때만 행으로 나타나므로 헤더에서 약속하지 않는다. */}
-        <span className="text-[11px] text-neutral-600">account-wide · used</span>
+        <span className="text-[11px] text-neutral-600">{accountLabel} · account-wide · used</span>
       </div>
       {windows.length === 0 ? (
         // 조회 중: 실제 행과 같은 높이의 자리표시자를 둬 결과가 와도 화면이 밀리지 않는다.
