@@ -7,7 +7,7 @@ import { TerminalSquare, RotateCw } from 'lucide-react'
 
 // xterm 은 CSS 변수를 못 읽으므로 테마별 색을 직접 정의한다. 라이트는 패널 배경(--bg-2)에
 // 맞춘 밝은 바탕 + 흰 배경에서도 읽히는 ANSI 팔레트를 쓴다(다크는 xterm 기본 ANSI 로 충분).
-const DARK_TERMINAL: ITheme = { background: '#0d0e11', foreground: '#d4d4d8', cursor: '#d4d4d8' }
+const DARK_TERMINAL: ITheme = { background: '#171a1e', foreground: '#d4d4d8', cursor: '#d4d4d8' }
 const LIGHT_TERMINAL: ITheme = {
   background: '#ffffff',
   foreground: '#27272a',
