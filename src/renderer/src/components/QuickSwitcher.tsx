@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { GitBranch, LayoutDashboard, Search } from 'lucide-react'
+import { GitBranch, LayoutDashboard, Search, Settings2 } from 'lucide-react'
 import { useStore } from '../store'
+import { openRepoSettings } from '../lib/repoSettings'
 import { StatusDot } from './Sidebar'
 import { orderVisibleWorkspaces, workspaceDisplayName } from '@shared/types'
 import type { Workspace } from '@shared/types'
@@ -10,7 +11,13 @@ import type { Workspace } from '@shared/types'
  * shortcut 은 사이드바와 동일한 ⌘1–9 번호(상위 9개에만 부여).
  */
 type Entry = {
+  /** React key 겸 커서 식별자. 워크스페이스 id 는 리포 설정 행과 겹칠 수 있어 종류를 접두사로 붙인다. */
+  key: string
+  kind: 'overview' | 'workspace' | 'repoSettings'
+  /** 워크스페이스 id(Overview 는 null). repoSettings 행에서는 쓰지 않는다. */
   id: string | null
+  /** repoSettings 행이 열 리포. */
+  repoId?: string
   label: string
   repoName: string
   branch: string | null
@@ -56,6 +63,8 @@ export default function QuickSwitcher({ onClose }: { onClose: () => void }): Rea
       const label = workspaceDisplayName(ws, prStatus[ws.id]?.title)
       const repo = repoName.get(ws.repoId) ?? ''
       return {
+        key: `ws:${ws.id}`,
+        kind: 'workspace' as const,
         id: ws.id,
         label,
         repoName: repo,
@@ -68,12 +77,32 @@ export default function QuickSwitcher({ onClose }: { onClose: () => void }): Rea
     // Overview 도 같은 팔레트에서 닿게 해 둔다(활성 워크스페이스가 있을 때만 의미가 있다).
     if (rows.length > 0) {
       rows.unshift({
+        key: '__overview',
+        kind: 'overview',
         id: null,
         label: 'Overview',
         repoName: '',
         branch: null,
         workspace: null,
         haystack: 'overview all sessions'
+      })
+    }
+    // 리포 설정은 그동안 사이드바 톱니 하나로만 닿을 수 있었다 — 단축키도, 메뉴도, 팔레트 항목도
+    // 없었다. 목록 끝에 붙여 두면 이동 목적으로 팔레트를 여는 사람도 존재를 스쳐 보게 되고,
+    // 아는 사람은 "⌘K → 리포명 → Enter" 로 곧장 닿는다. 워크스페이스 이동이 이 팔레트의 1차
+    // 목적이므로 순서상 뒤에 둔다.
+    for (const repo of app.repos) {
+      rows.push({
+        key: `repo:${repo.id}`,
+        kind: 'repoSettings',
+        id: null,
+        repoId: repo.id,
+        label: `Repo settings — ${repo.name}`,
+        repoName: '',
+        branch: null,
+        workspace: null,
+        haystack:
+          `repo settings ${repo.name} setup dev archive script carry env claude.local.md`.toLowerCase()
       })
     }
     return rows
@@ -106,6 +135,11 @@ export default function QuickSwitcher({ onClose }: { onClose: () => void }): Rea
 
   const commit = (entry: Entry | undefined): void => {
     if (!entry) return
+    if (entry.kind === 'repoSettings') {
+      if (entry.repoId) openRepoSettings(entry.repoId)
+      onClose()
+      return
+    }
     void select(entry.id)
     onClose()
   }
@@ -157,22 +191,22 @@ export default function QuickSwitcher({ onClose }: { onClose: () => void }): Rea
               setQuery(e.target.value)
               setCursor(0)
             }}
-            placeholder="Search workspaces by name, branch, or repo…"
-            aria-label="Search workspaces"
+            placeholder="Search workspaces, or type a repo name for its settings…"
+            aria-label="Search workspaces and repo settings"
             className="flex-1 bg-transparent text-base text-neutral-100 placeholder:text-neutral-600 outline-none"
           />
         </div>
 
         <div ref={listRef} className="max-h-[52vh] overflow-y-auto py-1">
           {filtered.length === 0 && (
-            <p className="px-4 py-6 text-sm text-neutral-500 text-center">No matching workspace.</p>
+            <p className="px-4 py-6 text-sm text-neutral-500 text-center">No matching result.</p>
           )}
           {filtered.map((entry, i) => {
             const ws = entry.workspace
             const isCursor = i === active
             return (
               <div
-                key={entry.id ?? '__overview'}
+                key={entry.key}
                 data-idx={i}
                 role="button"
                 tabIndex={-1}
@@ -192,6 +226,8 @@ export default function QuickSwitcher({ onClose }: { onClose: () => void }): Rea
                     runningMs={0}
                     pr={prStatus[ws.id]}
                   />
+                ) : entry.kind === 'repoSettings' ? (
+                  <Settings2 size={13} className="text-neutral-500 shrink-0" />
                 ) : (
                   <LayoutDashboard size={13} className="text-neutral-500 shrink-0" />
                 )}
@@ -217,7 +253,9 @@ export default function QuickSwitcher({ onClose }: { onClose: () => void }): Rea
                   )}
                 </div>
 
-                {entry.id === selectedId && (
+                {/* repoSettings 행은 id 가 null 이라, kind 로 걸러 주지 않으면 Overview 가
+                    선택된 상태(selectedId === null)에서 모든 리포 행에 "current" 가 붙는다. */}
+                {entry.kind !== 'repoSettings' && entry.id === selectedId && (
                   <span className="text-xs text-neutral-500 shrink-0">current</span>
                 )}
                 {entry.shortcut !== undefined && (

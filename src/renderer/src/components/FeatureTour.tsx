@@ -40,7 +40,37 @@ const STEPS: Step[] = [
     body: (
       <>
         Start here — add a git repository with the <b className="text-neutral-200">+</b> button.
-        Each repo can define setup / dev / archive scripts from its settings icon.
+        Every workspace you create later branches off one of these repos.
+      </>
+    )
+  },
+  // 리포별 설정은 예전엔 앞 단계의 마지막 한 문장으로만 스쳐 지나갔고, 그나마 가리키던
+  // "settings icon" 은 데모 화면에 그려져 있지도 않았다. 진입점이 사이드바 톱니 하나뿐인
+  // 기능이므로 독립 단계로 올려 그 아이콘을 직접 스포트라이트한다.
+  {
+    target: 'repo-settings',
+    placement: 'right',
+    title: 'Configure each repo once',
+    body: (
+      <>
+        The gear on a repo row opens settings that apply to every workspace of that repo:
+        <ul className="mt-1.5 list-disc pl-5 space-y-0.5 text-neutral-400">
+          <li>
+            <b className="text-neutral-200">Setup</b> — runs once after each workspace is created
+            (e.g. <span className="font-mono">npm install</span>)
+          </li>
+          <li>
+            <b className="text-neutral-200">Dev</b> — start/stop a dev server, each workspace on its
+            own <span className="font-mono">$PORT</span>
+          </li>
+          <li>
+            <b className="text-neutral-200">Carry</b> — git-ignored files (
+            <span className="font-mono">.env</span>,{' '}
+            <span className="font-mono">CLAUDE.local.md</span> …) to copy into new worktrees
+          </li>
+        </ul>
+        New worktrees contain only git-tracked files, so anything ignored is missing unless you list
+        it here — which is why agents can otherwise behave differently than in your main checkout.
       </>
     )
   },

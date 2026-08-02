@@ -51,12 +51,25 @@ export interface WooiApi {
 
   repo: {
     add(): Promise<{ repo?: Repo; error?: string }>
+    /**
+     * carryItems 는 파일시스템 작업에 그대로 들어가므로 main 이 저장 **직전에** 검증한다.
+     * 하나라도 리포 밖을 가리키면 패치 전체가 거부되고 error 가 돌아온다(부분 저장 없음).
+     */
     update(
       repoId: string,
       patch: Partial<
         Pick<Repo, 'name' | 'setupScript' | 'devScript' | 'archiveScript' | 'carryItems'>
       >
-    ): Promise<void>
+    ): Promise<{ error?: string }>
+    /**
+     * 전달 목록이 비어 있는 리포에, 지금 실제로 존재하는 흔한 파일들(.env·CLAUDE.local.md …)을
+     * 한 번에 등록한다. workspaceId 를 주면 이미 만들어진 그 worktree 로도 즉시 전달한다
+     * (구버전부터 쓰던 리포는 마이그레이션이 목록을 비워 둬서 이 경로로 구제된다).
+     */
+    adoptCarrySuggestions(
+      repoId: string,
+      workspaceId?: string
+    ): Promise<{ error?: string; added: string[]; carryFailures?: CarryFailure[] }>
     remove(repoId: string): Promise<void>
     /**
      * 사이드바에서 리포를 끌어 놓아 표시 순서를 바꾼다. 저장된 배열 순서가 곧 표시 순서다.
@@ -74,9 +87,19 @@ export interface WooiApi {
       error?: string
       /** worktree 전달에 실패한 항목들. 생성 자체는 성공했지만 사용자에게 알려야 한다. */
       carryFailures?: CarryFailure[]
+      /**
+       * 리포의 전달 목록이 **비어 있을 때만** 채워지는, 지금 리포에 실제로 존재하는 후보 경로들.
+       * 이 경우 새 worktree 는 `.env`·`CLAUDE.local.md` 없이 만들어졌다는 뜻이므로 렌더러가
+       * 한 번 제안한다(구버전부터 쓰던 리포가 기능의 존재조차 모르는 상태를 깨는 유일한 지점).
+       */
+      carrySuggestions?: string[]
     }>
     archive(workspaceId: string): Promise<void>
-    unarchive(workspaceId: string): Promise<{ error?: string; carryFailures?: CarryFailure[] }>
+    unarchive(workspaceId: string): Promise<{
+      error?: string
+      carryFailures?: CarryFailure[]
+      carrySuggestions?: string[]
+    }>
     /** stacked 워크스페이스를 최신 base(부모 브랜치) 위로 rebase 하고 리모트에 force-push 한다. */
     restack(workspaceId: string): Promise<RestackResult>
     /** 모델 B: worktree 내부 스택의 다른 브랜치로 체크아웃 전환한다(clean 워킹트리 필요). */

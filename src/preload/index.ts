@@ -14,6 +14,8 @@ const api: WooiApi = {
   repo: {
     add: () => ipcRenderer.invoke(IPC.repoAdd),
     update: (repoId, patch) => ipcRenderer.invoke(IPC.repoUpdate, repoId, patch),
+    adoptCarrySuggestions: (repoId, workspaceId) =>
+      ipcRenderer.invoke(IPC.repoAdoptCarry, repoId, workspaceId),
     remove: (repoId) => ipcRenderer.invoke(IPC.repoRemove, repoId),
     reorder: (repoId, targetRepoId, position) =>
       ipcRenderer.invoke(IPC.repoReorder, repoId, targetRepoId, position),

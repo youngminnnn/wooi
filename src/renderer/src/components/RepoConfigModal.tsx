@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { CarryItem, CarryMode } from '@shared/types'
+import { validateCarryPath } from '@shared/carryPath'
 import { useStore } from '../store'
 import Modal, { inputClass, labelClass, primaryBtn, ghostBtn } from './Modal'
 
@@ -38,6 +39,16 @@ export default function RepoConfigModal({
   const [carryItems, setCarryItems] = useState<CarryItem[]>(repo?.carryItems ?? [])
 
   const confirm = useStore((s) => s.confirm)
+  const pushToast = useStore((s) => s.pushToast)
+
+  // 행별 오류 메시지(없으면 null). 아직 비어 있는 행은 저장 시 버려지므로 오류로 보지 않는다 —
+  // '+ Add path' 로 방금 만든 빈 행이 즉시 빨개지면 타이핑을 시작하기도 전에 혼내는 꼴이 된다.
+  const carryErrors = carryItems.map((item) => {
+    if (!item.path.trim()) return null
+    const checked = validateCarryPath(item.path)
+    return checked.ok ? null : checked.reason
+  })
+  const hasCarryError = carryErrors.some(Boolean)
 
   useEffect(() => {
     if (!repo) onClose()
@@ -53,7 +64,10 @@ export default function RepoConfigModal({
   if (!repo) return null
 
   const save = async (): Promise<void> => {
-    await window.api.repo.update(repoId, {
+    // 저장 전에 막는다. 예전에는 잘못된 경로(절대 경로·`..`·`.git`)도 여기서 조용히 저장되고,
+    // main 이 검증하는 시점이 워크스페이스 생성 때라서 한참 뒤에야 실패 토스트로 드러났다.
+    if (carryErrors.some(Boolean)) return
+    const res = await window.api.repo.update(repoId, {
       name: name.trim() || repo.name,
       setupScript,
       devScript,
@@ -63,6 +77,12 @@ export default function RepoConfigModal({
         .filter((i) => i.path.trim())
         .map((i) => ({ ...i, path: i.path.trim() }))
     })
+    // main 은 신뢰 경계라 같은 규칙으로 다시 검증한다. 여기까지 왔다면 렌더러 검증과 어긋난
+    // 경우뿐이므로, 모달을 닫지 않고 이유를 그대로 보여 준다.
+    if (res?.error) {
+      pushToast('error', res.error)
+      return
+    }
     onClose()
   }
 
@@ -115,7 +135,12 @@ export default function RepoConfigModal({
           <button className={ghostBtn} onClick={onClose}>
             Cancel
           </button>
-          <button className={primaryBtn} onClick={save}>
+          <button
+            className={primaryBtn + (hasCarryError ? ' opacity-40 cursor-not-allowed' : '')}
+            onClick={save}
+            disabled={hasCarryError}
+            title={hasCarryError ? 'Fix the highlighted carry paths first' : undefined}
+          >
             Save
           </button>
         </>
@@ -183,44 +208,55 @@ export default function RepoConfigModal({
 
           <div className="space-y-1.5">
             {carryItems.map((item, i) => (
-              <div key={i} className="flex items-center gap-1.5">
-                <input
-                  ref={(el) => {
-                    pathInputs.current[i] = el
-                    if (el && focusOnMount.current === i) {
-                      focusOnMount.current = null
-                      el.focus()
+              <div key={i}>
+                <div className="flex items-center gap-1.5">
+                  <input
+                    ref={(el) => {
+                      pathInputs.current[i] = el
+                      if (el && focusOnMount.current === i) {
+                        focusOnMount.current = null
+                        el.focus()
+                      }
+                    }}
+                    className={
+                      carryPathClass +
+                      (carryErrors[i]
+                        ? ' border-[var(--danger-500)] focus:border-[var(--danger-400)]'
+                        : '')
                     }
-                  }}
-                  className={carryPathClass}
-                  value={item.path}
-                  onChange={(e) => updateCarry(i, { path: e.target.value })}
-                  placeholder="e.g. CLAUDE.local.md"
-                  spellCheck={false}
-                  // Enter 로 다음 행을 이어서 추가한다(여러 경로를 손 안 떼고 입력).
-                  onKeyDown={(e) => {
-                    if (e.key !== 'Enter' || e.nativeEvent.isComposing) return
-                    e.preventDefault()
-                    if (!item.path.trim()) return
-                    addCarryRow()
-                  }}
-                />
-                <select
-                  className={carryModeClass}
-                  value={item.mode}
-                  onChange={(e) => updateCarry(i, { mode: e.target.value as CarryMode })}
-                >
-                  <option value="copy">Copy</option>
-                  <option value="link">Link</option>
-                </select>
-                <button
-                  className={carryRemoveClass}
-                  onClick={() => setCarryItems((items) => items.filter((_, x) => x !== i))}
-                  title="Remove"
-                  aria-label={`Remove ${item.path || 'entry'}`}
-                >
-                  ✕
-                </button>
+                    aria-invalid={carryErrors[i] ? true : undefined}
+                    value={item.path}
+                    onChange={(e) => updateCarry(i, { path: e.target.value })}
+                    placeholder="e.g. CLAUDE.local.md"
+                    spellCheck={false}
+                    // Enter 로 다음 행을 이어서 추가한다(여러 경로를 손 안 떼고 입력).
+                    onKeyDown={(e) => {
+                      if (e.key !== 'Enter' || e.nativeEvent.isComposing) return
+                      e.preventDefault()
+                      if (!item.path.trim()) return
+                      addCarryRow()
+                    }}
+                  />
+                  <select
+                    className={carryModeClass}
+                    value={item.mode}
+                    onChange={(e) => updateCarry(i, { mode: e.target.value as CarryMode })}
+                  >
+                    <option value="copy">Copy</option>
+                    <option value="link">Link</option>
+                  </select>
+                  <button
+                    className={carryRemoveClass}
+                    onClick={() => setCarryItems((items) => items.filter((_, x) => x !== i))}
+                    title="Remove"
+                    aria-label={`Remove ${item.path || 'entry'}`}
+                  >
+                    ✕
+                  </button>
+                </div>
+                {carryErrors[i] && (
+                  <p className="mt-1 text-xs text-[var(--danger-400)]">{carryErrors[i]}</p>
+                )}
               </div>
             ))}
           </div>

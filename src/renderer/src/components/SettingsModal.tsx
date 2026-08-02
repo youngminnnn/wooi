@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
-import { Compass, Download, RefreshCw } from 'lucide-react'
+import { Compass, Download, RefreshCw, Settings2 } from 'lucide-react'
 import { useStore } from '../store'
+import { openRepoSettings } from '../lib/repoSettings'
 import { hasNewVersion, updateStatusText } from '../lib/update'
 import Modal, { inputClass, labelClass, primaryBtn, ghostBtn } from './Modal'
 import IntegrationsPanel from './IntegrationsPanel'
@@ -15,8 +16,22 @@ import type {
   NotificationEvent,
   NotificationSettings,
   PermissionMode,
+  Repo,
   ThemePreference
 } from '@shared/types'
+
+/**
+ * 리포 행에 붙는 한 줄 요약. "무엇이 설정돼 있는지"를 열어 보지 않고도 알 수 있게 해,
+ * 목록 자체가 기능 소개 역할을 하도록 한다(아무것도 없으면 그 사실이 곧 안내가 된다).
+ */
+function describeRepoConfig(repo: Repo): string {
+  const parts: string[] = []
+  if (repo.setupScript.trim()) parts.push('setup')
+  if (repo.devScript.trim()) parts.push('dev')
+  if (repo.archiveScript.trim()) parts.push('archive')
+  if (repo.carryItems.length > 0) parts.push(`${repo.carryItems.length} carried file(s)`)
+  return parts.length > 0 ? parts.join(' · ') : 'Nothing configured yet'
+}
 
 const NOTIFICATION_EVENTS: NotificationEvent[] = ['completed', 'error', 'needsInput']
 const NOTIFICATION_CHANNELS: NotificationChannel[] = ['osNotification', 'sound', 'badge']
@@ -35,6 +50,7 @@ export default function SettingsModal({
   onStartTour: () => void
 }): React.JSX.Element {
   const settings = useStore((s) => s.app!.settings)
+  const repos = useStore((s) => s.app!.repos)
   const [mode, setMode] = useState<PermissionMode>(settings.defaultPermissionMode)
   const [manualWorkspaceSetup, setManualWorkspaceSetup] = useState(settings.manualWorkspaceSetup)
   const [notifications, setNotifications] = useState<NotificationSettings>(settings.notifications)
@@ -118,6 +134,43 @@ export default function SettingsModal({
               </span>
             </span>
           </button>
+        </Section>
+
+        {/* 전역 설정과 리포별 설정은 완전히 분리된 두 모달인데, 서로를 가리키는 링크가 하나도
+            없었다. 설정을 찾으러 ⌘, 를 누른 사용자는 여기서 스크립트·carry 를 찾다가 못 찾고
+            포기한다 — 그런 것이 리포마다 따로 있다는 사실 자체를 여기서 알려 주고 넘긴다. */}
+        <Section title="Repositories">
+          <p className="text-xs text-neutral-600 leading-relaxed">
+            Setup / dev / archive commands and the files carried into new worktrees are configured
+            per repository, not here.
+          </p>
+          <div className="space-y-1">
+            {repos.length === 0 && (
+              <p className="text-xs text-neutral-600">
+                No repositories yet — add one from the sidebar.
+              </p>
+            )}
+            {repos.map((repo) => (
+              <button
+                key={repo.id}
+                type="button"
+                onClick={() => {
+                  // 두 모달이 동시에 뜨지 않도록 이쪽을 먼저 닫는다.
+                  onClose()
+                  openRepoSettings(repo.id)
+                }}
+                className="flex items-center gap-2.5 w-full text-left px-3 py-2 rounded-lg border border-[var(--border)] text-neutral-300 hover:bg-[var(--surface-2)] hover:text-neutral-100 transition-colors"
+              >
+                <Settings2 size={14} className="shrink-0 text-neutral-500" />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm truncate">{repo.name}</span>
+                  <span className="block text-xs text-neutral-600 truncate">
+                    {describeRepoConfig(repo)}
+                  </span>
+                </span>
+              </button>
+            ))}
+          </div>
         </Section>
 
         <Section title="Appearance">
