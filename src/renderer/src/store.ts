@@ -14,6 +14,9 @@ import type {
   PermissionRequest,
   PrStatus,
   RunningAgent,
+  ReviewEnvelope,
+  ReviewFinding,
+  ReviewVerdict,
   ScriptKind,
   ScriptStatus,
   StackCascadeResult,
@@ -25,6 +28,7 @@ import { AGENT_BACKEND_IDS, cascadeProblems } from '@shared/types'
 import { playNotification } from './lib/sound'
 import { carrySuggestShownFlag, readUiFlag, setUiFlag } from './lib/uiFlags'
 import { openRepoSettings } from './lib/repoSettings'
+import { bodyOf, emptyView, isPosted, type ReviewViewState } from './lib/review'
 
 export const scriptKey = (workspaceId: string, kind: ScriptKind): string => `${workspaceId}:${kind}`
 
@@ -212,6 +216,17 @@ interface UIState {
   /** 생성 중인 workspace 의 자리표시 행(repoId 로 사이드바에 배치). */
   pending: PendingWorkspace[]
 
+  /**
+   * 열려 있는 PR 리뷰. null 이 아니면 전체 화면 리뷰 모드다(사이드바·대화창을 대체).
+   * 리뷰는 workspace 와 무관하게 임의의 PR 을 대상으로 하므로 별도 축으로 둔다.
+   */
+  activeReviewId: string | null
+  /**
+   * reviewId → 화면 상태(사이드카에서 읽어온 diff·지적·활동 + 선택/편집).
+   * 리뷰의 **메타데이터는 여기 없다** — `app.reviews` 가 권위이고 상태 방송으로 갱신된다.
+   */
+  reviewViews: Record<string, ReviewViewState>
+
   init: () => Promise<void>
   /** worktree 생성을 시작하고, 완료될 때까지 사이드바에 스피너 행을 즉시 띄운다. */
   createWorkspace: (
@@ -298,6 +313,43 @@ interface UIState {
   retrySetup: (workspaceId: string) => void
   confirm: (opts: ConfirmOptions) => Promise<boolean>
   resolveConfirm: (ok: boolean) => void
+
+  // ── PR 리뷰 모드 ───────────────────────────────────────────────────────
+  /** 리뷰를 시작하고 전체 화면 모드로 진입한다. 실패하면 토스트만 띄우고 진입하지 않는다. */
+  startReview: (args: {
+    repoId: string
+    prNumber: number
+    prompt: string
+    agentBackend: AgentBackendId
+  }) => Promise<void>
+  /** 사이드바에서 리뷰를 골라 화면에 띄운다(사이드카를 아직 안 읽었으면 함께 읽는다). */
+  openReview: (reviewId: string) => void
+  /** 리뷰의 diff·지적·활동을 사이드카에서 읽어 화면 상태에 채운다(한 번만). */
+  loadReview: (reviewId: string) => Promise<void>
+  /** 게시하지 않은 지적이 있으면 확인을 받고 리뷰를 닫는다(사이드바 ×·화면 × 공용). */
+  requestCloseReview: (reviewId: string) => Promise<void>
+  /** 리뷰를 완전히 삭제한다(워크트리·ref·기록 모두). */
+  closeReview: (reviewId: string) => Promise<void>
+  /** 워크트리만 지우고 결과는 남긴다. */
+  archiveReview: (reviewId: string) => Promise<void>
+  /** 아카이브된 리뷰를 되살린다(워크트리 재구성). */
+  unarchiveReview: (reviewId: string) => Promise<void>
+  /** 실행 중인 리뷰를 중단한다. */
+  cancelReview: (reviewId: string) => Promise<void>
+  toggleFinding: (reviewId: string, findingId: string) => void
+  /** 아직 게시하지 않은 항목 전체를 선택/해제한다. */
+  toggleAllFindings: (reviewId: string, on: boolean) => void
+  editFinding: (reviewId: string, findingId: string, body: string) => void
+  /** 선택된(또는 지정된) 지적을 순서대로 개별 코멘트로 게시한다. */
+  postFindings: (reviewId: string, findingIds: string[]) => Promise<void>
+  /** PR 전체 판정을 제출한다. 성공하면 true. */
+  submitReview: (reviewId: string, verdict: ReviewVerdict, body: string) => Promise<boolean>
+  /** 활성 리뷰들의 답글·새 커밋을 한 번 확인한다. */
+  pollReviews: () => Promise<void>
+  /** 인라인 스레드에 답장한다. 성공하면 true. */
+  replyToThread: (reviewId: string, commentId: number, body: string) => Promise<boolean>
+  /** 앞선 맥락 위에서 추가 지시를 보낸다. */
+  followUpReview: (reviewId: string, text: string) => Promise<void>
 }
 
 let initialized = false
@@ -318,6 +370,11 @@ const STATUS_POLL_INTERVAL_MS = 15_000
 let authPollTimer: ReturnType<typeof setInterval> | null = null
 const AUTH_POLL_INTERVAL_MS = 30_000
 
+// 리뷰에 달린 답글·새 커밋 폴링. GitHub REST 는 시간당 5000 이고 세션당 셸 호출을 묶어 두어
+// 1분 간격이면 넉넉하다. 아카이브됐거나 아직 코멘트를 안 단 세션은 메인에서 알아서 건너뛴다.
+let reviewPollTimer: ReturnType<typeof setInterval> | null = null
+const REVIEW_POLL_INTERVAL_MS = 60_000
+
 // gh 연결 모달이 닫힐 때까지 붙들어 두는, 사용자가 원래 하려던 액션. 상태에 담지 않는 이유는
 // 함수라 비교·직렬화 대상이 아니고, 렌더에 영향을 주지 않기 때문이다.
 let pendingGithubAction: (() => void | Promise<void>) | null = null
@@ -333,6 +390,25 @@ function githubConnected(auth: AuthStatus | null): boolean {
  */
 function same(a: unknown, b: unknown): boolean {
   return JSON.stringify(a) === JSON.stringify(b)
+}
+
+/** id 기준 upsert(첫 등장 순서 보존). 스트리밍으로 들어오는 목록에 쓴다. */
+function upsertById<T extends { id: string }>(list: T[], item: T): T[] {
+  const idx = list.findIndex((x) => x.id === item.id)
+  if (idx < 0) return [...list, item]
+  const next = list.slice()
+  next[idx] = item
+  return next
+}
+
+/**
+ * 후속 턴이 내놓은 지적을 기존 목록에 **덧붙인다**(같은 id 면 갱신).
+ * 교체하면 이미 게시한 지적이 목록에서 사라져, 무엇을 달았는지 추적할 수 없게 된다.
+ */
+function mergeFindings(prev: ReviewFinding[], incoming: ReviewFinding[]): ReviewFinding[] {
+  let out = prev
+  for (const f of incoming) out = upsertById(out, f)
+  return out
 }
 
 function upsertItem(items: ChatItem[], item: ChatItem): ChatItem[] {
@@ -377,6 +453,8 @@ export const useStore = create<UIState>((set, get) => ({
   toasts: [],
   confirmState: null,
   pending: [],
+  activeReviewId: null,
+  reviewViews: {},
 
   init: async () => {
     if (initialized) return
@@ -425,6 +503,15 @@ export const useStore = create<UIState>((set, get) => ({
         void get().refreshAuth()
       }, AUTH_POLL_INTERVAL_MS)
     }
+
+    // 리뷰 답글 폴링. git 상태 폴링과 같은 규칙 — 창이 가려져 있으면 건너뛰고, 포커스가
+    // 돌아오는 순간 한 번 따라잡는다(onWindowFocus 참고).
+    if (!reviewPollTimer) {
+      reviewPollTimer = setInterval(() => {
+        if (windowFocused) void get().pollReviews()
+      }, REVIEW_POLL_INTERVAL_MS)
+    }
+    void get().pollReviews()
 
     // git 상태와 마찬가지로, 최초 진입 시 모든 활성 workspace 의 PR 상태도 미리 갱신한다.
     // 그러지 않으면 prStatus 가 비어 있어, 해당 세션에 직접 들어가 selectWorkspace 의
@@ -498,6 +585,7 @@ export const useStore = create<UIState>((set, get) => ({
       clearSelectedUnread()
       // 자리를 비운 사이 바뀌었을 수 있으니 모든 워크트리 상태를 즉시 한 번 갱신한다.
       void get().refreshAllGit()
+      void get().pollReviews()
     })
     window.api.onWindowBlur(() => {
       windowFocused = false
@@ -718,6 +806,28 @@ export const useStore = create<UIState>((set, get) => ({
     // 에이전트 계정이 앱 밖에서 바뀌었다(터미널 로그인·토큰 갱신 등). 폴링을 기다리지 않고
     // 즉시 인증 상태를 다시 읽어, 통합 패널과 배너가 곧바로 맞는 값을 보여 주게 한다.
     window.api.onAuthChanged(() => void get().refreshAuth())
+    // PR 리뷰 스트림. 레코드(상태·요약)는 evtState 로 오고, 여기로는 덩치 큰 것과
+    // 실행 중에만 의미 있는 것(진행 로그)이 흘러온다.
+    window.api.onReview(({ reviewId, event }: ReviewEnvelope) => {
+      patchReview(set, get, reviewId, (v) => {
+        switch (event.type) {
+          case 'status':
+            return {}
+          case 'diff':
+            return { diff: event.diff }
+          case 'progress':
+            // 진행 로그는 화면 표시용이라 무한정 쌓아둘 이유가 없다.
+            return { progress: [...v.progress, event.item].slice(-200) }
+          case 'findings':
+            // 후속 턴의 지적은 기존 목록에 덧붙는다(앞선 지적은 이미 게시됐을 수 있다).
+            return { findings: mergeFindings(v.findings, event.findings) }
+          case 'activity':
+            return { activity: upsertById(v.activity, event.item) }
+          case 'error':
+            return { error: event.message }
+        }
+      })
+    })
 
     window.api.onPermission((req: PermissionRequest) => {
       if (notifyEnabled(get(), req.workspaceId, 'needsInput', 'sound')) playNotification()
@@ -934,12 +1044,13 @@ export const useStore = create<UIState>((set, get) => ({
   },
 
   selectWorkspace: async (id) => {
-    // 선택 시 미확인 표시 해제.
+    // 선택 시 미확인 표시 해제. 사이드바 선택은 하나의 축이므로 리뷰 화면에서도 빠져나온다
+    // (리뷰 세션 자체는 남아 있어 사이드바에서 다시 고를 수 있다).
     set((s) => {
-      if (!id || !s.unread[id]) return { selectedWorkspaceId: id }
+      if (!id || !s.unread[id]) return { selectedWorkspaceId: id, activeReviewId: null }
       const unread = { ...s.unread }
       delete unread[id]
-      return { selectedWorkspaceId: id, unread }
+      return { selectedWorkspaceId: id, unread, activeReviewId: null }
     })
     if (!id) return
 
@@ -1193,8 +1304,196 @@ export const useStore = create<UIState>((set, get) => ({
     const cs = get().confirmState
     if (cs) cs.resolve(ok)
     set({ confirmState: null })
+  },
+
+  // ── PR 리뷰 모드 ─────────────────────────────────────────────────────────
+
+  startReview: async ({ repoId, prNumber, prompt, agentBackend }) => {
+    // PR 조회도 코멘트 게시도 gh 를 쓰므로 다른 PR 기능과 같은 지연 게이트를 태운다.
+    await get().requireGithub('Reviewing a pull request needs GitHub.', async () => {
+      const res = await window.api.review.start({ repoId, prNumber, prompt, agentBackend })
+      if (res.error || !res.reviewId) {
+        get().pushToast('error', res.error ?? 'Failed to start the review.')
+        return
+      }
+      // 레코드는 상태 방송으로 들어온다. 여기서는 화면만 전환하고 사이드카를 준비한다.
+      const id = res.reviewId
+      set({ activeReviewId: id, reviewViews: { ...get().reviewViews, [id]: emptyView() } })
+    })
+  },
+
+  openReview: (reviewId) => {
+    set({ activeReviewId: reviewId })
+    void get().loadReview(reviewId)
+    // 열어서 봤으므로 미확인 점을 끈다.
+    void window.api.review.markSeen(reviewId)
+  },
+
+  loadReview: async (reviewId) => {
+    if (get().reviewViews[reviewId]?.loaded) return
+    const bundle = await window.api.review.load(reviewId)
+    patchReview(set, get, reviewId, (v) => ({
+      loaded: true,
+      diff: bundle.diff ?? v.diff,
+      findings: bundle.findings,
+      activity: bundle.activity
+    }))
+  },
+
+  requestCloseReview: async (reviewId) => {
+    const session = get().app?.reviews.find((r) => r.id === reviewId)
+    const view = get().reviewViews[reviewId]
+    if (!session) return
+    const unposted = (view?.findings ?? []).filter((f) => !isPosted(session, f.id)).length
+    if (unposted > 0) {
+      const ok = await get().confirm({
+        title: 'Delete this review?',
+        body: `${unposted} finding${unposted === 1 ? '' : 's'} haven't been posted yet. This removes the review and its results for good — archive it instead if you might come back.`,
+        confirmLabel: 'Delete',
+        danger: true
+      })
+      if (!ok) return
+    }
+    await get().closeReview(reviewId)
+  },
+
+  closeReview: async (reviewId) => {
+    const { reviewViews, activeReviewId } = get()
+    const next = { ...reviewViews }
+    delete next[reviewId]
+    set({ reviewViews: next, activeReviewId: activeReviewId === reviewId ? null : activeReviewId })
+    await window.api.review.close(reviewId)
+  },
+
+  archiveReview: async (reviewId) => {
+    await window.api.review.archive(reviewId)
+    // 아카이브한 리뷰를 열어 두고 있었다면 화면에서 빠져나온다(워크트리가 사라졌다).
+    if (get().activeReviewId === reviewId) set({ activeReviewId: null })
+  },
+
+  unarchiveReview: async (reviewId) => {
+    const res = await window.api.review.unarchive(reviewId)
+    if (res.error) {
+      get().pushToast('error', res.error)
+      return
+    }
+    get().openReview(reviewId)
+  },
+
+  cancelReview: async (reviewId) => {
+    await window.api.review.cancel(reviewId)
+  },
+
+  toggleFinding: (reviewId, findingId) =>
+    patchReview(set, get, reviewId, (v) => ({
+      selected: { ...v.selected, [findingId]: !v.selected[findingId] }
+    })),
+
+  toggleAllFindings: (reviewId, on) =>
+    patchReview(set, get, reviewId, (v) => {
+      const session = get().app?.reviews.find((r) => r.id === reviewId)
+      const selected: Record<string, boolean> = {}
+      for (const f of v.findings) {
+        // 이미 게시한 항목은 다시 선택되지 않게 둔다(중복 코멘트 방지).
+        if (on && !(session && isPosted(session, f.id))) selected[f.id] = true
+      }
+      return { selected }
+    }),
+
+  editFinding: (reviewId, findingId, body) =>
+    patchReview(set, get, reviewId, (v) => ({ edits: { ...v.edits, [findingId]: body } })),
+
+  postFindings: async (reviewId, findingIds) => {
+    // 순차로 보낸다. 같은 PR 에 병렬 POST 를 날리면 GitHub 2차 레이트리밋에 걸려
+    // 뒤쪽 코멘트가 통째로 실패한다.
+    let ok = 0
+    let failed = 0
+    for (const findingId of findingIds) {
+      const view = get().reviewViews[reviewId]
+      const session = get().app?.reviews.find((r) => r.id === reviewId)
+      const finding = view?.findings.find((f) => f.id === findingId)
+      if (!view || !session || !finding) continue
+      if (isPosted(session, findingId)) continue
+
+      patchReview(set, get, reviewId, (v) => ({
+        posting: { ...v.posting, [findingId]: { state: 'posting' as const } }
+      }))
+
+      const res = await window.api.review.post(reviewId, findingId, bodyOf(view, finding))
+      if (res.error) {
+        failed++
+        patchReview(set, get, reviewId, (v) => ({
+          posting: { ...v.posting, [findingId]: { state: 'failed' as const, error: res.error } }
+        }))
+      } else {
+        ok++
+        // 성공은 레코드(postedComments)가 기록한다 — 여기서는 진행 표시만 걷어낸다.
+        patchReview(set, get, reviewId, (v) => {
+          const posting = { ...v.posting }
+          delete posting[findingId]
+          return { posting, selected: { ...v.selected, [findingId]: false } }
+        })
+      }
+    }
+
+    if (ok && !failed) get().pushToast('success', `Posted ${ok} comment${ok === 1 ? '' : 's'}.`)
+    else if (ok && failed) get().pushToast('error', `Posted ${ok}, failed ${failed}.`)
+    else if (failed)
+      get().pushToast('error', `Failed to post ${failed} comment${failed === 1 ? '' : 's'}.`)
+  },
+
+  submitReview: async (reviewId, verdict, body) => {
+    const res = await window.api.review.submit(reviewId, verdict, body)
+    if (res.error) {
+      get().pushToast('error', res.error)
+      return false
+    }
+    const label =
+      verdict === 'approve'
+        ? 'Approved'
+        : verdict === 'request-changes'
+          ? 'Requested changes'
+          : 'Commented'
+    get().pushToast('success', `${label} on the pull request.`)
+    return true
+  },
+
+  pollReviews: async () => {
+    const reviews = get().app?.reviews ?? []
+    // 순차로 돈다. 세션마다 gh 를 병렬로 띄우면 로그인 셸이 한꺼번에 여러 개 뜬다.
+    for (const r of reviews) {
+      if (r.archived || r.postedComments.length === 0) continue
+      await window.api.review.poll(r.id)
+    }
+  },
+
+  replyToThread: async (reviewId, commentId, body) => {
+    const res = await window.api.review.reply(reviewId, commentId, body)
+    if (res.error) {
+      get().pushToast('error', res.error)
+      return false
+    }
+    return true
+  },
+
+  followUpReview: async (reviewId, text) => {
+    const res = await window.api.review.followUp(reviewId, text)
+    if (res.error) get().pushToast('error', res.error)
   }
 }))
+
+/** 리뷰 세션 1개를 불변 갱신한다. 세션이 없으면(이미 닫힘) 아무것도 하지 않는다. */
+function patchReview(
+  set: (partial: Partial<UIState>) => void,
+  get: () => UIState,
+  reviewId: string,
+  mutate: (v: ReviewViewState) => Partial<ReviewViewState>
+): void {
+  const views = get().reviewViews
+  // 화면 상태가 아직 없으면(방송이 먼저 도착한 경우) 빈 상태를 만들어 얹는다.
+  const view = views[reviewId] ?? emptyView()
+  set({ reviewViews: { ...views, [reviewId]: { ...view, ...mutate(view) } } })
+}
 
 function patchWorkspace(
   set: (fn: (s: UIState) => Partial<UIState>) => void,

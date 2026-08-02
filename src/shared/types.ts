@@ -725,6 +725,11 @@ export interface AppSettings {
 export interface AppState {
   repos: Repo[]
   workspaces: Workspace[]
+  /**
+   * PR 리뷰 세션(메타데이터만). 워크스페이스와 나란히 사이드바가 그리므로 같은 상태 방송에
+   * 실어 보낸다 — 덕분에 아카이브 UI 가 워크스페이스 것과 같은 모양으로 나온다.
+   */
+  reviews: ReviewSession[]
   settings: AppSettings
   /**
    * 레거시 Claude 계정 레이트리밋 스냅샷. 새 코드는 rateLimitsByAgent를 우선 사용한다.
@@ -1087,6 +1092,236 @@ export interface WorkspaceDiff {
   files: FileDiff[]
 }
 
+// ── PR 리뷰 모드 ─────────────────────────────────────────────────────────
+//
+// 워크스페이스의 Changes 탭이 쓰는 FileDiff 와 달리, 리뷰 모드는 **줄 하나하나가 주소를 가져야**
+// 한다 — GitHub 인라인 코멘트가 "diff 안에 실제로 존재하는 줄"만 받기 때문이다(아니면 422).
+// 그래서 patch 를 통짜 문자열로 두지 않고 hunk → row 로 쪼개 old/new 줄 번호를 계산해 둔다.
+
+/** GitHub 코멘트의 기준 면. RIGHT = 새 파일(추가/문맥), LEFT = 옛 파일(삭제/문맥). */
+export type DiffSide = 'LEFT' | 'RIGHT'
+
+export type DiffRowKind = 'context' | 'add' | 'del'
+
+/** diff 한 줄. 코멘트를 달 수 있는 최소 단위. */
+export interface DiffRow {
+  kind: DiffRowKind
+  /** 앞의 +/-/공백 표식을 뗀 코드 본문. */
+  text: string
+  /** 옛 파일에서의 줄 번호. add 행은 null. */
+  oldLine: number | null
+  /** 새 파일에서의 줄 번호. del 행은 null. */
+  newLine: number | null
+}
+
+export interface ReviewHunk {
+  /** "@@ -1,7 +1,9 @@ fn foo()" 원문 헤더(뒤쪽 섹션 힌트 포함). */
+  header: string
+  rows: DiffRow[]
+}
+
+export interface ReviewFileDiff {
+  /** 새 경로. 삭제된 파일이면 옛 경로. GitHub API 의 `path` 로 그대로 쓴다. */
+  path: string
+  /** rename 일 때의 옛 경로. 아니면 null. */
+  oldPath: string | null
+  status: FileDiffStatus
+  additions: number
+  deletions: number
+  binary: boolean
+  hunks: ReviewHunk[]
+}
+
+export interface ReviewDiff {
+  files: ReviewFileDiff[]
+}
+
+export type ReviewSeverity = 'blocker' | 'major' | 'minor' | 'nit' | 'question' | 'praise'
+
+/** 에이전트가 submit_review 도구로 제출한 지적 1건(앵커 검증 전 원본). */
+export interface ReviewFindingInput {
+  severity: ReviewSeverity
+  title: string
+  /** GitHub 마크다운. ```suggestion 블록 허용. */
+  body: string
+  /** 인라인 지적일 때만. diff 에 나온 경로 그대로. */
+  file?: string
+  line?: number
+  /** 여러 줄에 걸친 지적의 시작 줄. */
+  startLine?: number
+  side?: DiffSide
+}
+
+export interface ReviewArtifact {
+  summary: string
+  /** 후속 턴의 대화형 답변. 최초 리뷰에서는 비어 있다. */
+  reply: string
+  general: ReviewFindingInput[]
+  inline: ReviewFindingInput[]
+}
+
+/** diff 의 실제 행에 확정 고정된 위치. 이 값이 있어야 인라인 코멘트를 걸 수 있다. */
+export interface ReviewAnchor {
+  file: string
+  side: DiffSide
+  line: number
+  startLine: number | null
+  /** 에이전트가 준 줄이 diff 에 없어 가까운 줄로 옮겼다면 원래 줄. 아니면 null. */
+  snappedFrom: number | null
+}
+
+/** 앵커 검증까지 끝난 지적. anchor 가 null 이면 전반(general) 지적. */
+export interface ReviewFinding {
+  id: string
+  severity: ReviewSeverity
+  title: string
+  body: string
+  anchor: ReviewAnchor | null
+}
+
+export type ReviewStatus = 'preparing' | 'running' | 'done' | 'error' | 'cancelled'
+
+export type ReviewCommentKind = 'inline' | 'issue'
+
+/** PR 전체에 대한 판정. 개별 코멘트와 달리 GitHub 의 리뷰 제출 엔드포인트로 간다. */
+export type ReviewVerdict = 'approve' | 'request-changes' | 'comment'
+
+/**
+ * 자기 PR 에는 승인·변경 요청을 낼 수 없다는 안내. GitHub 서버의 규칙이라 우리가 우회할 수
+ * 없으므로, 화면에서 선택지를 감출 때와 main 이 제출을 막을 때 **같은 문장**을 쓴다.
+ */
+export const SELF_REVIEW_BLOCKED =
+  "GitHub doesn't let you approve or request changes on your own pull request."
+
+/**
+ * Wooi 로 게시한 코멘트 1건.
+ *
+ * `commentId` 는 답글을 찾는 **유일한 조인 키**다 — GitHub 인라인 답글은 `in_reply_to_id` 로
+ * 스레드 루트를 가리키는데, 그 값이 바로 우리가 게시할 때 받은 이 id 다.
+ */
+export interface PostedComment {
+  findingId: string
+  commentId: number
+  htmlUrl: string
+  kind: ReviewCommentKind
+  /** ISO 8601. 이 이후에 달린 남의 코멘트만 새 활동으로 본다. */
+  createdAt: string
+}
+
+/**
+ * 사이드바가 그리고 app.json 에 저장되는 리뷰 세션 레코드.
+ *
+ * 여기에는 **가벼운 메타데이터만** 둔다. diff·지적 본문·활동 로그는 용량이 커서 별도
+ * 사이드카 파일로 뺀다(워크스페이스와 트랜스크립트의 관계와 동일) — app.json 은 변경마다
+ * 파일 전체를 다시 쓰고 상태 방송마다 통째로 직렬화되기 때문이다.
+ */
+export interface ReviewSession {
+  id: string
+  repoId: string
+  /**
+   * 이 리뷰를 돌리는 에이전트. 워크스페이스와 같은 규칙으로 **시작할 때 정해져 고정**된다 —
+   * 후속 턴은 앞선 대화를 resume 하는데, 그 세션 id 는 그 백엔드에서만 유효하기 때문이다.
+   */
+  agentBackend: AgentBackendId
+  prNumber: number
+  prUrl: string
+  prTitle: string
+  /** PR 작성자의 GitHub 로그인. 자기 PR 인지 판단하는 근거다. */
+  prAuthor: string
+  /**
+   * 내가 쓴 PR 인가. GitHub 은 자기 PR 을 승인하거나 변경 요청할 수 없게 막으므로, 이 값이
+   * true 면 판정 선택지에서 그 둘을 아예 뺀다(눌러 보고 GraphQL 에러를 받는 대신).
+   *
+   * 시작 시점에 한 번 계산해 둔다. 작성자도 내 계정도 리뷰 도중에 바뀌지 않는다.
+   */
+  viewerIsAuthor: boolean
+  /** 인라인 코멘트의 commit_id 로 쓰인다. */
+  headSha: string
+  baseRefName: string
+  /** 리뷰를 시작할 때 사용자가 쓴 최초 프롬프트. */
+  prompt: string
+  status: ReviewStatus
+  summary: string
+  archived: boolean
+  createdAt: number
+  updatedAt: number
+  /** 후속 턴을 같은 맥락으로 이어 붙이기 위한 SDK 세션 id. */
+  agentSessionId: string | null
+  postedComments: PostedComment[]
+  /** 답글 폴링 워터마크(ISO). 이보다 뒤에 생긴 남의 코멘트만 새 활동으로 본다. */
+  lastSeenAt: string | null
+  /** 마지막으로 확인한 PR head sha. 달라지면 새 커밋이 올라온 것이다. */
+  lastSeenHeadSha: string
+  /** 아직 확인하지 않은 새 활동(답글·커밋)이 있는지 — 사이드바 점. */
+  unread: boolean
+  /** 마지막으로 제출한 판정. GitHub 은 여러 번 제출할 수 있으므로 차단용이 아니라 표시용이다. */
+  lastVerdict: ReviewVerdict | null
+  lastVerdictAt: number | null
+}
+
+/** 실행 중 에이전트 활동을 사용자에게 보여주기 위한 축약 항목. */
+export interface ReviewProgressItem {
+  id: string
+  kind: 'text' | 'tool' | 'error'
+  text: string
+  ts: number
+}
+
+/**
+ * 활동 타임라인의 한 항목. 에이전트와의 대화, 가져온 답글, 새 커밋을 한 줄기로 합친다 —
+ * 사용자가 보고 싶은 건 "이 리뷰에서 무슨 일이 있었나" 라는 하나의 흐름이기 때문이다.
+ */
+export type ReviewActivityItem =
+  | { id: string; kind: 'turn'; role: 'user' | 'agent'; text: string; ts: number }
+  | { id: string; kind: 'tool'; text: string; ts: number }
+  | {
+      id: string
+      kind: 'reply'
+      /** 답글이 달린 스레드 루트 코멘트 id(= 우리가 게시한 코멘트). issue 코멘트면 null. */
+      threadRootId: number | null
+      /** 이 답글 자체의 코멘트 id. 여기에 다시 답장할 때 쓴다. */
+      commentId: number
+      author: string
+      body: string
+      htmlUrl: string
+      /** 인라인 답글일 때의 위치. line 은 diff 에서 밀려나면 null 일 수 있다. */
+      path?: string
+      line?: number | null
+      ts: number
+    }
+  | { id: string; kind: 'commits'; headSha: string; ts: number }
+  | { id: string; kind: 'error'; text: string; ts: number }
+
+/** 리뷰 화면을 열 때 사이드카에서 한 번에 읽어오는 덩치 큰 부분. */
+export interface ReviewBundle {
+  diff: ReviewDiff | null
+  findings: ReviewFinding[]
+  activity: ReviewActivityItem[]
+}
+
+export type ReviewEvent =
+  | { type: 'status'; status: ReviewStatus }
+  | { type: 'diff'; diff: ReviewDiff }
+  | { type: 'progress'; item: ReviewProgressItem }
+  | { type: 'findings'; findings: ReviewFinding[] }
+  | { type: 'activity'; item: ReviewActivityItem }
+  | { type: 'error'; message: string }
+
+/** evtReview 페이로드. */
+export interface ReviewEnvelope {
+  reviewId: string
+  event: ReviewEvent
+}
+
+/** 리뷰 시작 모달의 열린 PR 목록 항목. */
+export interface ReviewPrCandidate {
+  number: number
+  title: string
+  head: string
+  base: string
+  author: string
+}
+
 // ── IPC 채널 이름 ────────────────────────────────────────────────────────
 
 export const IPC = {
@@ -1165,6 +1400,33 @@ export const IPC = {
   prReopen: 'pr:reopen',
   /** Draft PR 을 리뷰 가능 상태로 전환한다. */
   prReady: 'pr:ready',
+
+  /** 리뷰 시작 모달의 열린 PR 목록(제목·작성자 포함). */
+  reviewListOpenPrs: 'review:listOpenPrs',
+  /** PR 리뷰를 시작한다. 즉시 reviewId 를 돌려주고 나머지는 evtReview 로 흘린다. */
+  reviewStart: 'review:start',
+  /** 실행 중인 리뷰를 중단한다. */
+  reviewCancel: 'review:cancel',
+  /** 지적 1건을 실제 PR 에 코멘트로 게시한다(편집된 본문을 그대로 받는다). */
+  reviewPost: 'review:post',
+  /** 리뷰를 닫고 리뷰용 워크트리를 정리한다. */
+  reviewClose: 'review:close',
+  /** 리뷰 화면 진입 시 사이드카(diff·지적·활동)를 읽어온다. */
+  reviewLoad: 'review:load',
+  /** 워크트리는 지우고 결과·ref 는 남긴다(되살리기 가능). */
+  reviewArchive: 'review:archive',
+  /** 아카이브된 리뷰의 워크트리를 다시 만든다. */
+  reviewUnarchive: 'review:unarchive',
+  /** PR 리뷰를 제출한다(승인/변경 요청/코멘트). */
+  reviewSubmit: 'review:submit',
+  /** 답글·새 커밋을 한 번 확인한다(렌더러 주도 폴링). */
+  reviewPoll: 'review:poll',
+  /** 미확인 표시를 끈다. */
+  reviewMarkSeen: 'review:markSeen',
+  /** 인라인 스레드에 답장한다. */
+  reviewReply: 'review:reply',
+  /** 앞선 맥락 위에서 추가 지시를 보낸다. */
+  reviewFollowUp: 'review:followUp',
   openExternal: 'shell:openExternal',
   settingsUpdate: 'settings:update',
   authGetStatus: 'auth:getStatus',
@@ -1243,6 +1505,8 @@ export const IPC = {
   evtScriptOutput: 'evt:scriptOutput',
   evtScriptExit: 'evt:scriptExit',
   evtState: 'evt:state',
+  /** PR 리뷰 진행 상황·결과 스트림. 트랜스크립트와 분리된 임시 스트림(영속하지 않음). */
+  evtReview: 'evt:review',
   /** OS 알림 클릭 등으로 특정 workspace 를 선택하도록 renderer 에 요청. */
   evtSelectWorkspace: 'evt:selectWorkspace',
   /** main 창이 포커스를 얻었을 때의 알림 — 보고 있는 workspace 의 미확인 표시 해제 트리거. */

@@ -6,6 +6,7 @@ import type {
   EffortSetting,
   PermissionMode,
   Repo,
+  ReviewSession,
   Workspace
 } from '@shared/types'
 
@@ -24,7 +25,7 @@ const DEFAULT_MODEL = CLAUDE_DEFAULT_MODEL
  * 디스크 영속 형식의 현재 스키마 버전. 영속 데이터 모양이 바뀔 때마다 1 올리고,
  * MIGRATIONS 에 직전 버전 → 새 버전 변환 함수를 추가한다.
  */
-export const CURRENT_SCHEMA_VERSION = 13
+export const CURRENT_SCHEMA_VERSION = 15
 
 /**
  * v12 이하의 settings 모양. 그 시절엔 에이전트가 Claude 하나뿐이라 모델·effort·fast mode·
@@ -99,6 +100,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
 export const EMPTY_STATE: AppState = {
   repos: [],
   workspaces: [],
+  reviews: [],
   settings: DEFAULT_SETTINGS
 }
 
@@ -288,6 +290,21 @@ export const MIGRATIONS: Array<(raw: Record<string, unknown>) => Record<string, 
       }
     }
     return { ...raw, settings }
+  },
+  // v13 → v14: PR 리뷰 세션을 영속화한다. 그 전까지 리뷰는 메모리에만 있었으므로 기존
+  // 파일에는 복원할 세션이 없다 — 빈 목록으로 시작한다.
+  (raw) => ({ ...raw, reviews: (raw.reviews as ReviewSession[]) ?? [] }),
+  // v14 → v15: 리뷰에 에이전트 선택과 "내 PR 인가" 를 붙인다. v14 시절 리뷰는 전부 Claude 로
+  // 돌았으므로 그대로 claude 로 채운다. 작성자는 알 길이 없어 비워 두는데, 그래도 위험하지 않다 —
+  // 승인 차단은 모르면 막지 않는 쪽(=지금까지와 동일)으로 떨어지고, 제출 직전에 한 번 더 확인한다.
+  (raw) => {
+    const reviews = ((raw.reviews as Partial<ReviewSession>[]) ?? []).map((r) => ({
+      ...r,
+      agentBackend: r.agentBackend ?? DEFAULT_AGENT_BACKEND,
+      prAuthor: r.prAuthor ?? '',
+      viewerIsAuthor: r.viewerIsAuthor ?? false
+    }))
+    return { ...raw, reviews }
   }
 ]
 

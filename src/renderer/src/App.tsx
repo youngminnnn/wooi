@@ -11,6 +11,9 @@ import TitleBar from './components/TitleBar'
 import { UpdateBanner } from './components/UpdateBanner'
 import { NoticeBanner } from './components/NoticeBanner'
 import Sidebar from './components/Sidebar'
+import PrReviewScreen from './components/review/PrReviewScreen'
+import { useFeatureNudge } from './lib/featureNudge'
+import PrReviewStartModal from './components/review/PrReviewStartModal'
 import ChatView from './components/ChatView'
 import WorkArea from './components/WorkArea'
 import Splitter from './components/Splitter'
@@ -63,6 +66,11 @@ export default function App(): React.JSX.Element {
   const [quickSwitchOpen, setQuickSwitchOpen] = useState(false)
   // 설정의 "Take a tour" 로 여는 기능 투어. 실제 화면 위에서 진행하도록 앱 레벨에서 렌더한다.
   const [tourOpen, setTourOpen] = useState(false)
+  const [reviewStartOpen, setReviewStartOpen] = useState(false)
+  const activeReviewId = useStore((s) => s.activeReviewId)
+
+  // 업데이트로 새로 생긴 기능을 한 번만 알려 준다(신규 설치 사용자에게는 뜨지 않는다).
+  useFeatureNudge()
 
   useEffect(() => {
     void init()
@@ -95,14 +103,20 @@ export default function App(): React.JSX.Element {
     configRepoId !== null ||
     onboardingOpen ||
     githubGateOpen ||
-    tourOpen
+    tourOpen ||
+    reviewStartOpen
 
   // '?' 키(어디서든, 단 입력 중이 아닐 때)로 단축키 도움말을 연다. Overview 등에서
   // 커스텀 이벤트로도 열 수 있다.
   useEffect(() => {
     const onHelp = (): void => setShowShortcuts(true)
+    const onReview = (): void => setReviewStartOpen(true)
     window.addEventListener('wooi:open-shortcuts', onHelp)
-    return () => window.removeEventListener('wooi:open-shortcuts', onHelp)
+    window.addEventListener('wooi:open-pr-review', onReview)
+    return () => {
+      window.removeEventListener('wooi:open-shortcuts', onHelp)
+      window.removeEventListener('wooi:open-pr-review', onReview)
+    }
   }, [])
 
   // 리포 설정 모달은 사이드바 톱니 말고도 여러 곳(토스트 액션·스크립트 패널·⌘K·설정)에서
@@ -397,13 +411,17 @@ export default function App(): React.JSX.Element {
       )}
 
       <div className="flex-1 flex min-h-0">
+        {/* 사이드바는 리뷰 중에도 그대로 둔다 — 리뷰는 워크스페이스와 병행하는 작업이고,
+            사이드바가 그 둘을 오가는 유일한 통로다. */}
         <Sidebar
           onNewWorkspace={handleNewWorkspace}
           onStackWorkspace={handleStackWorkspace}
           onOpenQuickSwitch={() => setQuickSwitchOpen(true)}
         />
         <div ref={contentRef} className="flex-1 min-w-0 border-l border-[var(--border)] flex">
-          {selected ? (
+          {activeReviewId ? (
+            <PrReviewScreen key={activeReviewId} reviewId={activeReviewId} />
+          ) : selected ? (
             <>
               <div data-tour="chat" className="flex-1 min-w-0">
                 <ChatView key={selected.id} workspace={selected} />
@@ -443,6 +461,7 @@ export default function App(): React.JSX.Element {
         />
       )}
       {githubGateOpen && <GithubConnectModal />}
+      {reviewStartOpen && <PrReviewStartModal onClose={() => setReviewStartOpen(false)} />}
       {showSettings && (
         // 설정은 백엔드 카탈로그·인증 상태 등 바깥에서 들어오는 값을 많이 읽는다. 그중 하나가
         // 깨져도 앱 전체가 날아가지 않도록 이 서브트리만 격리한다.

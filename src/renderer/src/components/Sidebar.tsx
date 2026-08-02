@@ -20,6 +20,8 @@ import {
   MoreVertical,
   Search,
   ArrowUpDown,
+  GitPullRequest,
+  Square,
   X
 } from 'lucide-react'
 import { useStore } from '../store'
@@ -45,7 +47,16 @@ import { WorkspaceAgents } from './WorkspaceAgents'
 import { useNow } from '../lib/useNow'
 import { formatDuration } from '../lib/format'
 import { useDragReorder, type DragReorder } from '../lib/useDragReorder'
-import type { AgentBackendId, PrState, PrStatus, Repo, Workspace } from '@shared/types'
+import type {
+  AgentBackendId,
+  PrState,
+  PrStatus,
+  Repo,
+  ReviewSession,
+  ReviewStatus,
+  Workspace
+} from '@shared/types'
+import { STATUS_LABEL } from '../lib/review'
 
 /** running 상태가 이 시간을 넘기면 사이드바에 "오래 실행 중" 힌트(멈춤일 수 있음)를 표시한다. */
 const RUNNING_STALE_MS = 5 * 60 * 1000
@@ -78,6 +89,15 @@ export default function Sidebar({
 
   // 사이드바에 보이는 순서 그대로의 활성 워크스페이스 목록. 번호 배지·⌘K 힌트 조건이 모두 여기서 나온다.
   const ordered = orderVisibleWorkspaces(app.repos, app.workspaces)
+
+  // 리뷰는 워크스페이스와 같은 상태 방송(app.reviews)으로 온다 — 영속되고, 아카이브 구분도
+  // 워크스페이스와 똑같이 archived 플래그 하나로 끝난다.
+  const activeReviews = app.reviews.filter((r) => !r.archived)
+  const archivedReviews = app.reviews.filter((r) => r.archived)
+  const reviewRunningCount = activeReviews.filter(
+    (r) => r.status === 'preparing' || r.status === 'running'
+  ).length
+  const repoNameById = new Map(app.repos.map((r) => [r.id, r.name]))
 
   // Overview·검색은 활성(비아카이브) 워크스페이스가 하나라도 있을 때만 의미가 있다(App.tsx 라우팅과 동일).
   const hasActiveWorkspaces = ordered.length > 0
@@ -237,6 +257,38 @@ export default function Sidebar({
       </div>
 
       <div data-tour="workspaces" className="flex-1 overflow-y-auto px-2 pb-4">
+        {/* PR 리뷰 세션. 워크스페이스와 나란히 두지 않고 별도 구역으로 뺀 이유는 ⌘1–9 번호가
+            orderVisibleWorkspaces(워크스페이스 전용)로 매겨지기 때문이다 — 리포 블록 사이에
+            끼워 넣으면 "위에서 n번째 = ⌘n" 불변식이 깨진다. 구역을 나누면 그 규칙을 건드리지
+            않으면서 리뷰가 어떤 종류의 작업인지도 더 분명해진다. */}
+        {app.reviews.length > 0 && (
+          <div className="mb-3">
+            <div className="flex items-center gap-1.5 px-2 py-1.5">
+              <GitPullRequest size={14} className="text-neutral-500 shrink-0" />
+              <span className="flex-1 truncate text-sm font-medium text-neutral-300">Reviews</span>
+              {reviewRunningCount > 0 && (
+                <span
+                  className="flex items-center gap-1 text-xs text-[var(--info-400)]/80 shrink-0"
+                  title={`${reviewRunningCount} running`}
+                >
+                  <Loader2 size={10} className="animate-spin" />
+                  {reviewRunningCount}
+                </span>
+              )}
+            </div>
+            <div className="mt-0.5 space-y-0.5">
+              {activeReviews.map((session) => (
+                <ReviewRow
+                  key={session.id}
+                  session={session}
+                  repoName={repoNameById.get(session.repoId) ?? ''}
+                />
+              ))}
+            </div>
+            {archivedReviews.length > 0 && <ArchivedReviewsSection reviews={archivedReviews} />}
+          </div>
+        )}
+
         {app.repos.length === 0 && (
           <p className="px-3 py-8 text-xs text-neutral-500 text-center leading-relaxed">
             No repositories yet.
@@ -771,6 +823,202 @@ function WorkspaceRow({
 }
 
 /** worktree 생성이 끝날 때까지 보여주는 비활성 자리표시 행. 완료되면 실제 WorkspaceRow 로 교체된다. */
+/**
+ * PR 리뷰 세션 1건. 워크스페이스 행과 같은 선택·호버 문법을 쓰되, 좌측 아이콘과 `#번호` 로
+ * "이건 리뷰다" 를 구분한다. 드래그 정렬에는 참여하지 않는다(세션은 순서가 의미 없다).
+ */
+function ReviewRow({
+  session,
+  repoName
+}: {
+  session: ReviewSession
+  repoName: string
+}): React.JSX.Element {
+  const active = useStore((s) => s.activeReviewId === session.id)
+  const openReview = useStore((s) => s.openReview)
+  const requestCloseReview = useStore((s) => s.requestCloseReview)
+  const archiveReview = useStore((s) => s.archiveReview)
+  const confirm = useStore((s) => s.confirm)
+  // 워크스페이스 행과 같은 규칙 — 에이전트가 하나뿐이면 정보가 아니라 잡음이다.
+  const showAgent = useAvailableBackends().length > 1
+
+  const { id, prNumber, prTitle } = session
+
+  const archive = async (): Promise<void> => {
+    const ok = await confirm({
+      title: `Archive review of #${prNumber}?`,
+      body: 'Its worktree is removed, but the findings and conversation are kept. You can unarchive it later.',
+      confirmLabel: 'Archive',
+      danger: true
+    })
+    if (!ok) return
+    await archiveReview(id)
+  }
+
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={() => openReview(id)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          openReview(id)
+        }
+      }}
+      style={{ paddingLeft: 12 }}
+      className={
+        'group/rev relative w-full flex items-center gap-2 pr-1.5 py-1.5 rounded-md text-left cursor-pointer focus:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-strong)] ' +
+        (active
+          ? 'bg-[var(--surface-3)] before:absolute before:left-0 before:top-1.5 before:bottom-1.5 before:w-0.5 before:rounded-full before:bg-[var(--info-500)]'
+          : 'hover:bg-[var(--surface)] focus-within:bg-[var(--surface)]')
+      }
+    >
+      <ReviewStatusDot status={session.status} />
+      <div className="flex-1 min-w-0">
+        <div
+          className={'truncate text-sm ' + (active ? 'text-neutral-100' : 'text-neutral-300')}
+          title={prTitle}
+        >
+          {prTitle}
+        </div>
+        <div className="flex items-center gap-1 text-xs text-neutral-500 truncate">
+          {showAgent && (
+            <span className="shrink-0 text-neutral-500">
+              <AgentBackendMark backend={session.agentBackend} size={10} />
+            </span>
+          )}
+          <span className="shrink-0 tabular-nums">#{prNumber}</span>
+          {repoName && <span className="truncate">{repoName}</span>}
+        </div>
+      </div>
+
+      {/* 워크스페이스 행과 같은 방식 — 호버 액션은 절대 배치라 평소 폭을 차지하지 않는다. */}
+      <div
+        className="absolute right-0 top-0 bottom-0 flex items-center gap-0.5 pl-8 opacity-0 group-hover/rev:opacity-100 group-focus-within/rev:opacity-100"
+        style={{
+          background: `linear-gradient(to right, transparent 0, ${
+            active ? 'var(--surface-3)' : 'var(--surface)'
+          } 32px)`
+        }}
+      >
+        <button
+          onClick={(e) => {
+            e.stopPropagation()
+            void archive()
+          }}
+          className="h-5 w-5 grid place-items-center rounded text-neutral-500 hover:bg-[var(--surface-2)] hover:text-neutral-200 shrink-0"
+          title="Archive (keeps the findings, removes the worktree)"
+        >
+          <Archive size={12} />
+        </button>
+        <button
+          onClick={(e) => {
+            e.stopPropagation()
+            void requestCloseReview(id)
+          }}
+          className="h-5 w-5 grid place-items-center rounded text-neutral-500 hover:bg-[var(--danger-500)]/15 hover:text-[var(--danger-400)] shrink-0"
+          title="Delete review permanently"
+        >
+          <Trash2 size={12} />
+        </button>
+      </div>
+
+      {/* 확인하지 않은 새 활동(답글·커밋). 워크스페이스의 미확인 점과 같은 어휘. */}
+      {session.unread && !active && (
+        <span
+          className="h-2 w-2 rounded-full bg-[var(--info-500)] shrink-0"
+          title="New replies or commits since you last looked"
+        />
+      )}
+    </div>
+  )
+}
+
+/**
+ * 아카이브된 리뷰. 워크스페이스의 ArchivedSection 과 같은 모양·같은 규칙이다
+ * (접힌 채로 시작, 호버로 되살리기/삭제 노출).
+ */
+function ArchivedReviewsSection({ reviews }: { reviews: ReviewSession[] }): React.JSX.Element {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="mt-1">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center gap-1 px-2 py-1 text-xs text-neutral-600 hover:text-neutral-400"
+      >
+        <ChevronRight size={11} className={open ? 'rotate-90 transition' : 'transition'} />
+        Archived ({reviews.length})
+      </button>
+      {open && (
+        <div className="space-y-0.5">
+          {reviews.map((r) => (
+            <ArchivedReviewRow key={r.id} session={r} />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ArchivedReviewRow({ session }: { session: ReviewSession }): React.JSX.Element {
+  const unarchiveReview = useStore((s) => s.unarchiveReview)
+  const requestCloseReview = useStore((s) => s.requestCloseReview)
+
+  return (
+    <div className="group/arcrev flex items-center gap-2 pl-6 pr-1.5 py-1 rounded-md hover:bg-[var(--surface)]">
+      <span className="flex-1 truncate text-xs text-neutral-500" title={session.prTitle}>
+        #{session.prNumber} {session.prTitle}
+      </span>
+      <button
+        onClick={() => void unarchiveReview(session.id)}
+        className="opacity-0 group-hover/arcrev:opacity-100 h-5 w-5 grid place-items-center rounded text-neutral-500 hover:bg-[var(--surface-2)] hover:text-neutral-200"
+        title="Unarchive (recreate the review worktree)"
+      >
+        <ArchiveRestore size={12} />
+      </button>
+      <button
+        onClick={() => void requestCloseReview(session.id)}
+        className="opacity-0 group-hover/arcrev:opacity-100 h-5 w-5 grid place-items-center rounded text-neutral-500 hover:bg-[var(--danger-500)]/15 hover:text-[var(--danger-400)]"
+        title="Delete permanently"
+      >
+        <Trash2 size={12} />
+      </button>
+    </div>
+  )
+}
+
+/** 리뷰 상태를 StatusDot 과 같은 어휘로 표현한다(실행=스피너, 오류=경고, 그 외=아이콘/점). */
+function ReviewStatusDot({ status }: { status: ReviewStatus }): React.JSX.Element {
+  const title = STATUS_LABEL[status]
+  if (status === 'preparing' || status === 'running') {
+    return (
+      <span title={title} className="shrink-0 grid place-items-center">
+        <Loader2 size={13} className="text-[var(--info-400)] animate-spin" />
+      </span>
+    )
+  }
+  if (status === 'error') {
+    return (
+      <span title={title} className="shrink-0 grid place-items-center">
+        <AlertTriangle size={12} className="text-[var(--danger-400)]" />
+      </span>
+    )
+  }
+  if (status === 'cancelled') {
+    return (
+      <span title={title} className="shrink-0 grid place-items-center">
+        <Square size={11} fill="currentColor" className="text-neutral-600" />
+      </span>
+    )
+  }
+  return (
+    <span title={title} className="shrink-0 grid place-items-center">
+      <GitPullRequest size={13} className="text-[var(--success-400)]" />
+    </span>
+  )
+}
+
 function PendingRow({ name }: { name: string }): React.JSX.Element {
   return (
     <div className="w-full flex items-center gap-2 pl-3 pr-1.5 py-1.5 rounded-md text-left opacity-70 select-none">

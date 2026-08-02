@@ -310,7 +310,7 @@ export default function QuestionPrompt({
                         <span className="min-w-0 truncate text-xs text-neutral-400">{answer}</span>
                       ) : (
                         <span className="shrink-0 text-xs text-[var(--brand-300)]/70">
-                          답변 필요
+                          Needs an answer
                         </span>
                       ))}
                   </button>

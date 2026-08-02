@@ -92,6 +92,25 @@ const api: WooiApi = {
     syncDismiss: (workspaceId) => ipcRenderer.invoke(IPC.stackSyncDismiss, workspaceId)
   },
 
+  review: {
+    listOpenPrs: (repoId) => ipcRenderer.invoke(IPC.reviewListOpenPrs, repoId),
+    start: (args) => ipcRenderer.invoke(IPC.reviewStart, args),
+    cancel: (reviewId) => ipcRenderer.invoke(IPC.reviewCancel, reviewId),
+    post: (reviewId, findingId, body) =>
+      ipcRenderer.invoke(IPC.reviewPost, reviewId, findingId, body),
+    close: (reviewId) => ipcRenderer.invoke(IPC.reviewClose, reviewId),
+    load: (reviewId) => ipcRenderer.invoke(IPC.reviewLoad, reviewId),
+    archive: (reviewId) => ipcRenderer.invoke(IPC.reviewArchive, reviewId),
+    unarchive: (reviewId) => ipcRenderer.invoke(IPC.reviewUnarchive, reviewId),
+    submit: (reviewId, verdict, body) =>
+      ipcRenderer.invoke(IPC.reviewSubmit, reviewId, verdict, body),
+    poll: (reviewId) => ipcRenderer.invoke(IPC.reviewPoll, reviewId),
+    markSeen: (reviewId) => ipcRenderer.invoke(IPC.reviewMarkSeen, reviewId),
+    reply: (reviewId, commentId, body) =>
+      ipcRenderer.invoke(IPC.reviewReply, reviewId, commentId, body),
+    followUp: (reviewId, text) => ipcRenderer.invoke(IPC.reviewFollowUp, reviewId, text)
+  },
+
   fs: {
     list: (workspaceId, relPath) => ipcRenderer.invoke(IPC.fsList, workspaceId, relPath),
     read: (workspaceId, relPath) => ipcRenderer.invoke(IPC.fsRead, workspaceId, relPath),
@@ -185,6 +204,7 @@ const api: WooiApi = {
   onScriptOutput: (cb) => subscribe(IPC.evtScriptOutput, cb),
   onScriptExit: (cb) => subscribe(IPC.evtScriptExit, cb),
   onState: (cb) => subscribe(IPC.evtState, cb),
+  onReview: (cb) => subscribe(IPC.evtReview, cb),
   onSelectWorkspace: (cb) => subscribe(IPC.evtSelectWorkspace, cb),
   onWindowFocus: (cb) => subscribe(IPC.evtWindowFocus, () => cb()),
   onWindowBlur: (cb) => subscribe(IPC.evtWindowBlur, () => cb()),

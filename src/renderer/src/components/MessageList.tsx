@@ -491,7 +491,7 @@ function BashBlock({
           {running ? (
             <button
               onClick={onStop}
-              title={agent ? 'Interrupt the turn' : '중단'}
+              title={agent ? 'Interrupt the turn' : 'Stop'}
               className="grid h-4 w-4 place-items-center text-neutral-500 hover:text-[var(--danger-400)]"
             >
               {/* 평상시 스피너, 마우스를 올리면 중단(정지) 버튼으로 바뀐다. */}

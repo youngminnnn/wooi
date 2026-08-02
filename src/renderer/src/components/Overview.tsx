@@ -7,7 +7,8 @@ import {
   Square,
   Gauge,
   Timer,
-  AlertTriangle
+  AlertTriangle,
+  MessageSquarePlus
 } from 'lucide-react'
 import { refreshAccountUsage, useStore } from '../store'
 import { useNow } from '../lib/useNow'
@@ -189,16 +190,28 @@ export default function Overview(): React.JSX.Element {
               <span className="text-[var(--info-400)]"> · {counts.running} running</span>
             )}
           </span>
-          {counts.running > 0 && (
+          <div className="ml-auto flex items-center gap-2">
+            {/* PR 리뷰는 워크스페이스와 무관한 별도 흐름이라 여기서 바로 들어갈 수 있게 둔다. */}
             <button
-              onClick={onStopAll}
-              className="ml-auto flex items-center gap-1 h-7 px-2.5 rounded-md text-xs text-[var(--danger-300)] bg-[var(--danger-500)]/10 border border-[var(--danger-500)]/20 hover:bg-[var(--danger-500)]/20"
-              title="Stop the current turn in every running session"
+              data-tour="review-pr"
+              onClick={() => window.dispatchEvent(new Event('wooi:open-pr-review'))}
+              className="flex items-center gap-1 h-7 px-2.5 rounded-md text-xs text-neutral-300 border border-[var(--border-2)] hover:bg-[var(--surface-2)] hover:text-neutral-100"
+              title="Review a pull request — enter a PR number to start"
             >
-              <Square size={11} fill="currentColor" />
-              Stop all
+              <MessageSquarePlus size={12} />
+              Review PR
             </button>
-          )}
+            {counts.running > 0 && (
+              <button
+                onClick={onStopAll}
+                className="flex items-center gap-1 h-7 px-2.5 rounded-md text-xs text-[var(--danger-300)] bg-[var(--danger-500)]/10 border border-[var(--danger-500)]/20 hover:bg-[var(--danger-500)]/20"
+                title="Stop the current turn in every running session"
+              >
+                <Square size={11} fill="currentColor" />
+                Stop all
+              </button>
+            )}
+          </div>
         </div>
 
         <div

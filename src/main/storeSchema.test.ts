@@ -105,6 +105,37 @@ describe('v12 → v13 (백엔드별 에이전트 설정 분리)', () => {
   })
 })
 
+describe('v14 → v15 (리뷰의 에이전트 · PR 작성자)', () => {
+  /** v14 시점의 리뷰 레코드. 그 시절 리뷰는 전부 Claude 로 돌았고 작성자를 몰랐다. */
+  function v14File(): Record<string, unknown> {
+    return {
+      schemaVersion: 14,
+      repos: [],
+      workspaces: [],
+      reviews: [{ id: 'rv1', repoId: 'r1', prNumber: 3, status: 'done', archived: false }]
+    }
+  }
+
+  const reviewsOf = (out: Record<string, unknown>): Record<string, unknown>[] =>
+    out.reviews as Record<string, unknown>[]
+
+  it('기존 리뷰를 claude 로 채운다', () => {
+    expect(reviewsOf(migrate(v14File(), 14))[0].agentBackend).toBe('claude')
+  })
+
+  // 작성자를 모를 때 자기 PR 로 단정하면 정상적인 승인까지 막힌다 — 모르면 막지 않는 쪽이다.
+  it('작성자를 모르는 리뷰는 자기 PR 로 단정하지 않는다', () => {
+    const review = reviewsOf(migrate(v14File(), 14))[0]
+    expect(review.prAuthor).toBe('')
+    expect(review.viewerIsAuthor).toBe(false)
+  })
+
+  it('리뷰가 없는 파일도 그대로 통과한다', () => {
+    const out = migrate({ schemaVersion: 14, repos: [], workspaces: [] }, 14)
+    expect(out.reviews).toEqual([])
+  })
+})
+
 describe('레거시 파일 전체 경로', () => {
   it('v0(버전 필드 없음) 파일을 현재 스키마까지 끝까지 변환한다', () => {
     const legacy = {
