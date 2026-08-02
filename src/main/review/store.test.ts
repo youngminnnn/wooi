@@ -88,4 +88,28 @@ describe('사이드카 JSONL', () => {
     const b = toBundle(parseJsonl('{"rec":"finding"}\n{"foo":1}\n'))
     expect(b.findings).toEqual([])
   })
+
+  /** 버린 지적은 같은 id 의 묘비로 덮어쓴다 — append 전용 파일을 다시 쓰지 않기 위함이다. */
+  it('묘비가 같은 id 의 지적을 목록에서 지운다', () => {
+    const text = jsonl(
+      { id: 'f1', rec: 'finding', finding: finding('f1') },
+      { id: 'f2', rec: 'finding', finding: finding('f2') },
+      { id: 'f1', rec: 'finding-dismissed' }
+    )
+    const b = toBundle(parseJsonl(text))
+    expect(b.findings.map((f) => f.id)).toEqual(['f2'])
+    // 묘비가 활동 타임라인으로 새면 빈 항목이 화면에 뜬다.
+    expect(b.activity).toEqual([])
+  })
+
+  it('버린 뒤 같은 id 로 다시 들어오면 되살아난다 — 순서는 첫 등장 자리', () => {
+    const text = jsonl(
+      { id: 'f1', rec: 'finding', finding: finding('f1') },
+      { id: 'f2', rec: 'finding', finding: finding('f2') },
+      { id: 'f1', rec: 'finding-dismissed' },
+      { id: 'f1', rec: 'finding', finding: finding('f1', 'back') }
+    )
+    const b = toBundle(parseJsonl(text))
+    expect(b.findings.map((f) => f.title)).toEqual(['back', 'f2'])
+  })
 })

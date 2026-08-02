@@ -2,7 +2,15 @@ import { useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
-import { AlertCircle, Check, ExternalLink, Loader2, MoveVertical, Pencil } from 'lucide-react'
+import {
+  AlertCircle,
+  Check,
+  ExternalLink,
+  Loader2,
+  MoveVertical,
+  Pencil,
+  Trash2
+} from 'lucide-react'
 import type { ReviewFinding, ReviewSession } from '@shared/types'
 import { useStore } from '../../store'
 import { bodyOf, isPosted, postedUrl, SEVERITY_STYLE, type ReviewViewState } from '../../lib/review'
@@ -30,6 +38,7 @@ export default function ReviewFindingCard({
   const toggleFinding = useStore((s) => s.toggleFinding)
   const editFinding = useStore((s) => s.editFinding)
   const postFindings = useStore((s) => s.postFindings)
+  const dismissFinding = useStore((s) => s.dismissFinding)
 
   const [editing, setEditing] = useState(false)
 
@@ -112,6 +121,16 @@ export default function ReviewFindingCard({
               >
                 {posting && <Loader2 size={11} className="animate-spin" />}
                 {posting ? 'Posting…' : 'Comment'}
+              </button>
+              {/* 안 달 제안은 지워 둬야 "아직 안 단 코멘트" 를 세는 곳들이 조용해진다. */}
+              <button
+                onClick={() => void dismissFinding(session.id, finding.id)}
+                disabled={posting}
+                title="Discard this suggestion — it won't be posted"
+                className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-neutral-500 hover:bg-[var(--danger-500)]/10 hover:text-[var(--danger-300)] disabled:opacity-50"
+              >
+                <Trash2 size={11} />
+                Discard
               </button>
             </>
           )}

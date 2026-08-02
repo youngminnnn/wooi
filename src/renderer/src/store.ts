@@ -340,8 +340,10 @@ interface UIState {
   /** 아직 게시하지 않은 항목 전체를 선택/해제한다. */
   toggleAllFindings: (reviewId: string, on: boolean) => void
   editFinding: (reviewId: string, findingId: string, body: string) => void
+  /** 안 달기로 한 지적을 목록에서 버린다. */
+  dismissFinding: (reviewId: string, findingId: string) => Promise<void>
   /** 선택된(또는 지정된) 지적을 순서대로 개별 코멘트로 게시한다. */
-  postFindings: (reviewId: string, findingIds: string[]) => Promise<void>
+  postFindings: (reviewId: string, findingIds: string[]) => Promise<{ ok: number; failed: number }>
   /** PR 전체 판정을 제출한다. 성공하면 true. */
   submitReview: (reviewId: string, verdict: ReviewVerdict, body: string) => Promise<boolean>
   /** 활성 리뷰들의 답글·새 커밋을 한 번 확인한다. */
@@ -1403,6 +1405,22 @@ export const useStore = create<UIState>((set, get) => ({
   editFinding: (reviewId, findingId, body) =>
     patchReview(set, get, reviewId, (v) => ({ edits: { ...v.edits, [findingId]: body } })),
 
+  dismissFinding: async (reviewId, findingId) => {
+    // 파일에 먼저 남기고 화면에서 지운다 — 반대로 하면 실패했을 때 화면에서만 사라진
+    // 지적이 다음 로드에서 되살아난다.
+    const res = await window.api.review.dismiss(reviewId, findingId)
+    if (res.error) {
+      get().pushToast('error', res.error)
+      return
+    }
+    patchReview(set, get, reviewId, (v) => {
+      const { [findingId]: _selected, ...selected } = v.selected
+      const { [findingId]: _edit, ...edits } = v.edits
+      const { [findingId]: _posting, ...posting } = v.posting
+      return { findings: v.findings.filter((f) => f.id !== findingId), selected, edits, posting }
+    })
+  },
+
   postFindings: async (reviewId, findingIds) => {
     // 순차로 보낸다. 같은 PR 에 병렬 POST 를 날리면 GitHub 2차 레이트리밋에 걸려
     // 뒤쪽 코멘트가 통째로 실패한다.
@@ -1440,6 +1458,7 @@ export const useStore = create<UIState>((set, get) => ({
     else if (ok && failed) get().pushToast('error', `Posted ${ok}, failed ${failed}.`)
     else if (failed)
       get().pushToast('error', `Failed to post ${failed} comment${failed === 1 ? '' : 's'}.`)
+    return { ok, failed }
   },
 
   submitReview: async (reviewId, verdict, body) => {
@@ -1462,7 +1481,9 @@ export const useStore = create<UIState>((set, get) => ({
     const reviews = get().app?.reviews ?? []
     // 순차로 돈다. 세션마다 gh 를 병렬로 띄우면 로그인 셸이 한꺼번에 여러 개 뜬다.
     for (const r of reviews) {
-      if (r.archived || r.postedComments.length === 0) continue
+      // 추적할 게 없으면 건너뛴다. 코멘트를 안 달았어도 리뷰를 제출했다면 **새 커밋** 은
+      // 계속 봐야 한다 — 그 sha 가 "같은 리뷰를 또 낼 수 있는가" 의 판단 근거이기 때문이다.
+      if (r.archived || (r.postedComments.length === 0 && !r.lastSubmission)) continue
       await window.api.review.poll(r.id)
     }
   },

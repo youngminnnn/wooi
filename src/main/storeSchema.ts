@@ -25,7 +25,7 @@ const DEFAULT_MODEL = CLAUDE_DEFAULT_MODEL
  * 디스크 영속 형식의 현재 스키마 버전. 영속 데이터 모양이 바뀔 때마다 1 올리고,
  * MIGRATIONS 에 직전 버전 → 새 버전 변환 함수를 추가한다.
  */
-export const CURRENT_SCHEMA_VERSION = 15
+export const CURRENT_SCHEMA_VERSION = 16
 
 /**
  * v12 이하의 settings 모양. 그 시절엔 에이전트가 Claude 하나뿐이라 모델·effort·fast mode·
@@ -304,6 +304,18 @@ export const MIGRATIONS: Array<(raw: Record<string, unknown>) => Record<string, 
       prAuthor: r.prAuthor ?? '',
       viewerIsAuthor: r.viewerIsAuthor ?? false
     }))
+    return { ...raw, reviews }
+  },
+
+  // v15 → v16: 판정 두 필드(lastVerdict·lastVerdictAt)를 lastSubmission 하나로 합친다.
+  // 같은 리뷰를 PR 변화 없이 다시 내는 걸 막으려면 **본문과 그때의 head sha** 가 필요한데
+  // 옛 레코드에는 없다 — 비교할 수 없는 기록은 없느니만 못하므로 null 로 둔다(다음 제출은
+  // 한 번 통과하고, 그 뒤부터 정상적으로 걸린다).
+  (raw) => {
+    const reviews = ((raw.reviews as Record<string, unknown>[]) ?? []).map((r) => {
+      const { lastVerdict: _v, lastVerdictAt: _at, ...rest } = r
+      return { ...rest, lastSubmission: rest.lastSubmission ?? null }
+    })
     return { ...raw, reviews }
   }
 ]

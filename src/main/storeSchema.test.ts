@@ -136,6 +136,50 @@ describe('v14 → v15 (리뷰의 에이전트 · PR 작성자)', () => {
   })
 })
 
+describe('v15 → v16 (제출 기록 합치기)', () => {
+  /** v15 시점의 리뷰 레코드 — 판정만 알고 본문도 그때의 sha 도 모른다. */
+  function v15File(): Record<string, unknown> {
+    return {
+      schemaVersion: 15,
+      repos: [],
+      workspaces: [],
+      reviews: [
+        {
+          id: 'rv1',
+          repoId: 'r1',
+          prNumber: 3,
+          status: 'done',
+          archived: false,
+          lastVerdict: 'approve',
+          lastVerdictAt: 1700000000000
+        }
+      ]
+    }
+  }
+
+  const reviewOf = (out: Record<string, unknown>): Record<string, unknown> =>
+    (out.reviews as Record<string, unknown>[])[0]
+
+  /**
+   * 본문을 모르는 기록으로는 "같은 내용인가" 를 판단할 수 없다. 판정만 옮겨 두면 옛 리뷰가
+   * 영문도 모른 채 차단되므로, 비교 불가능한 기록은 아예 버린다.
+   */
+  it('본문을 모르는 옛 판정은 비교 기준으로 삼지 않는다', () => {
+    expect(reviewOf(migrate(v15File(), 15)).lastSubmission).toBeNull()
+  })
+
+  it('합쳐진 옛 필드는 남기지 않는다', () => {
+    const review = reviewOf(migrate(v15File(), 15))
+    expect(review).not.toHaveProperty('lastVerdict')
+    expect(review).not.toHaveProperty('lastVerdictAt')
+  })
+
+  it('리뷰가 없는 파일도 그대로 통과한다', () => {
+    const out = migrate({ schemaVersion: 15, repos: [], workspaces: [] }, 15)
+    expect(out.reviews).toEqual([])
+  })
+})
+
 describe('레거시 파일 전체 경로', () => {
   it('v0(버전 필드 없음) 파일을 현재 스키마까지 끝까지 변환한다', () => {
     const legacy = {

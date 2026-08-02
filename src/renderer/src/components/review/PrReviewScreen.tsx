@@ -64,8 +64,8 @@ export default function PrReviewScreen({ reviewId }: { reviewId: string }): Reac
           {STATUS_LABEL[session.status]}
         </span>
 
-        {/* 마지막으로 낸 판정. GitHub 은 여러 번 제출할 수 있으므로 차단이 아니라 기억용이다. */}
-        {session.lastVerdict && <VerdictChip verdict={session.lastVerdict} />}
+        {/* 마지막으로 낸 판정. 판정을 바꾸거나 PR 이 움직이면 다시 낼 수 있다. */}
+        {session.lastSubmission && <VerdictChip verdict={session.lastSubmission.verdict} />}
 
         {running && (
           <button

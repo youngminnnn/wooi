@@ -1194,6 +1194,13 @@ export const SELF_REVIEW_BLOCKED =
   "GitHub doesn't let you approve or request changes on your own pull request."
 
 /**
+ * 같은 리뷰를 PR 변화 없이 다시 내려 할 때의 안내. 위와 같은 이유로 화면과 main 이 같은
+ * 문장을 공유한다.
+ */
+export const DUPLICATE_REVIEW_BLOCKED =
+  "You already submitted this review, and the pull request hasn't changed since."
+
+/**
  * Wooi 로 게시한 코멘트 1건.
  *
  * `commentId` 는 답글을 찾는 **유일한 조인 키**다 — GitHub 인라인 답글은 `in_reply_to_id` 로
@@ -1254,9 +1261,24 @@ export interface ReviewSession {
   lastSeenHeadSha: string
   /** 아직 확인하지 않은 새 활동(답글·커밋)이 있는지 — 사이드바 점. */
   unread: boolean
-  /** 마지막으로 제출한 판정. GitHub 은 여러 번 제출할 수 있으므로 차단용이 아니라 표시용이다. */
-  lastVerdict: ReviewVerdict | null
-  lastVerdictAt: number | null
+  /** 마지막으로 제출한 리뷰. 화면의 판정 칩과 중복 제출 차단이 모두 이 값을 본다. */
+  lastSubmission: ReviewSubmission | null
+}
+
+/**
+ * 제출한 리뷰 1건의 기록.
+ *
+ * GitHub 은 같은 리뷰를 몇 번이든 다시 받아 주지만, PR 이 그대로인데 같은 말을 또 올리면
+ * 상대의 타임라인만 어지럽힌다. 그래서 **본문과 그때의 head sha 까지** 남긴다 — 이 둘이
+ * 있어야 "같은 내용을, 변한 것 없는 PR 에" 내는 경우를 정확히 집어낼 수 있다.
+ */
+export interface ReviewSubmission {
+  verdict: ReviewVerdict
+  /** 제출한 본문(앞뒤 공백을 정리한 형태). 같은 내용인지 비교하는 기준. */
+  body: string
+  /** 제출 시점에 우리가 알던 PR head sha. */
+  headSha: string
+  at: number
 }
 
 /** 실행 중 에이전트 활동을 사용자에게 보여주기 위한 축약 항목. */
@@ -1409,6 +1431,8 @@ export const IPC = {
   reviewCancel: 'review:cancel',
   /** 지적 1건을 실제 PR 에 코멘트로 게시한다(편집된 본문을 그대로 받는다). */
   reviewPost: 'review:post',
+  /** 안 달기로 한 지적을 목록에서 버린다. */
+  reviewDismiss: 'review:dismiss',
   /** 리뷰를 닫고 리뷰용 워크트리를 정리한다. */
   reviewClose: 'review:close',
   /** 리뷰 화면 진입 시 사이드카(diff·지적·활동)를 읽어온다. */

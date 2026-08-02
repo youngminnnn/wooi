@@ -35,8 +35,7 @@ function session(postedComments: PostedComment[] = []): ReviewSession {
     lastSeenAt: null,
     lastSeenHeadSha: 'abc1234',
     unread: false,
-    lastVerdict: null,
-    lastVerdictAt: null
+    lastSubmission: null
   }
 }
 

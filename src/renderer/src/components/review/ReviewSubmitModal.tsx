@@ -1,9 +1,10 @@
 import { useState } from 'react'
 import { Check, MessageSquare, XCircle } from 'lucide-react'
 import type { ReviewSession, ReviewVerdict } from '@shared/types'
-import { SELF_REVIEW_BLOCKED } from '@shared/types'
+import { DUPLICATE_REVIEW_BLOCKED, SELF_REVIEW_BLOCKED } from '@shared/types'
 import Modal, { ghostBtn, inputClass, labelClass, primaryBtn } from '../Modal'
 import { useStore } from '../../store'
+import { isPosted } from '../../lib/review'
 
 interface VerdictOption {
   value: ReviewVerdict
@@ -53,10 +54,18 @@ export default function ReviewSubmitModal({
   onClose: () => void
 }): React.JSX.Element {
   const submitReview = useStore((s) => s.submitReview)
+  const postFindings = useStore((s) => s.postFindings)
+  // 셀렉터에서 새 배열을 만들면 스냅샷이 매번 달라져 렌더가 멈추지 않는다 — 뷰를 통째로 받는다.
+  const view = useStore((s) => s.reviewViews[session.id])
 
   // 내 PR 이면 GitHub 이 승인·변경 요청을 거부한다. 선택지를 남겨 두면 사용자는 누르고 나서야
   // GraphQL 에러를 보게 되므로 애초에 코멘트만 남긴다.
   const options = session.viewerIsAuthor ? OPTIONS.filter((o) => o.value === 'comment') : OPTIONS
+
+  // 리뷰 제출은 사용자가 이 PR 을 마무리하는 자리다. 여기서 묻지 않으면 읽어 본 지적을
+  // 그대로 두고 판정만 내고 나가게 되고, 그 지적은 상대에게 영영 전달되지 않는다.
+  const unposted = (view?.findings ?? []).filter((f) => !isPosted(session, f.id))
+  const [alsoPost, setAlsoPost] = useState(true)
 
   const [verdict, setVerdict] = useState<ReviewVerdict>('comment')
   const [body, setBody] = useState(session.summary)
@@ -64,14 +73,49 @@ export default function ReviewSubmitModal({
 
   // GitHub 은 승인이 아닌 판정에 본문을 요구한다. 눌러 보고 실패하는 대신 미리 막는다.
   const needsBody = verdict !== 'approve'
-  const canSubmit = !busy && (!needsBody || body.trim().length > 0)
+
+  // 같은 판정·같은 문장을, 그 사이 움직이지 않은 PR 에 또 내는 것은 상대의 타임라인만
+  // 어지럽힌다. main 도 제출 직전에 실제 head sha 로 다시 확인하지만, 버튼이 눌리기 전에
+  // 이유를 보여 주는 편이 낫다.
+  const last = session.lastSubmission
+  const duplicate =
+    !!last &&
+    last.verdict === verdict &&
+    last.body === body.trim() &&
+    last.headSha === session.lastSeenHeadSha
+
+  const posting = alsoPost && unposted.length > 0
+  // 판정이 중복이어도 아직 안 단 코멘트는 올릴 수 있어야 한다 — 그러지 않으면 이 화면이
+  // 막다른 길이 되고, 사용자는 코멘트를 달려고 목록으로 돌아가야 한다.
+  const submitsVerdict = !duplicate
+  const canSubmit =
+    !busy &&
+    (submitsVerdict || posting) &&
+    (!submitsVerdict || !needsBody || body.trim().length > 0)
 
   const submit = async (): Promise<void> => {
     if (!canSubmit) return
     setBusy(true)
-    const ok = await submitReview(session.id, verdict, body)
+    if (posting) {
+      const res = await postFindings(
+        session.id,
+        unposted.map((f) => f.id)
+      )
+      // 코멘트가 하나라도 못 올라갔으면 판정은 보류한다 — "변경 요청" 만 덩그러니 올라가고
+      // 근거가 되는 지적은 없는 상태가 사용자가 원한 결과일 리 없다. 토스트가 이유를 말해 준다.
+      if (res.failed > 0) {
+        setBusy(false)
+        return
+      }
+    }
+    if (submitsVerdict) {
+      const ok = await submitReview(session.id, verdict, body)
+      setBusy(false)
+      if (ok) onClose()
+      return
+    }
     setBusy(false)
-    if (ok) onClose()
+    onClose()
   }
 
   return (
@@ -85,7 +129,13 @@ export default function ReviewSubmitModal({
             Cancel
           </button>
           <button onClick={submit} disabled={!canSubmit} className={primaryBtn}>
-            {busy ? 'Submitting…' : 'Submit review'}
+            {busy
+              ? 'Submitting…'
+              : !submitsVerdict
+                ? `Post ${unposted.length} comment${unposted.length === 1 ? '' : 's'}`
+                : posting
+                  ? `Post ${unposted.length} & submit`
+                  : 'Submit review'}
           </button>
         </>
       }
@@ -141,11 +191,41 @@ export default function ReviewSubmitModal({
             }}
             placeholder={needsBody ? 'Required — what should the author know?' : 'Optional'}
           />
-          <p className="mt-1.5 text-xs text-neutral-500">
-            Prefilled with the agent&rsquo;s summary — edit it however you like. &#8984;&#8629; to
-            submit.
-          </p>
+          {duplicate ? (
+            <p className="mt-1.5 text-xs text-[var(--warning-300)]">
+              {DUPLICATE_REVIEW_BLOCKED} Change the verdict or the message to submit again
+              {posting ? ' — your comments still go up.' : '.'}
+            </p>
+          ) : (
+            <p className="mt-1.5 text-xs text-neutral-500">
+              Prefilled with the agent&rsquo;s summary — edit it however you like. &#8984;&#8629; to
+              submit.
+            </p>
+          )}
         </div>
+
+        {unposted.length > 0 && (
+          <div className="rounded-lg border border-[var(--border-2)] bg-[var(--surface)] px-3 py-2.5">
+            <label className="flex cursor-pointer items-start gap-2.5">
+              <input
+                type="checkbox"
+                className="mt-0.5 accent-[var(--info-500)]"
+                checked={alsoPost}
+                onChange={(e) => setAlsoPost(e.target.checked)}
+              />
+              <span className="min-w-0">
+                <span className="block text-sm text-neutral-200">
+                  Post {unposted.length} unposted comment{unposted.length === 1 ? '' : 's'} with
+                  this review
+                </span>
+                <span className="block text-xs text-neutral-500">
+                  They go up first, then the verdict. Uncheck to submit the verdict alone — or
+                  discard the ones you don&rsquo;t want from the findings list.
+                </span>
+              </span>
+            </label>
+          </div>
+        )}
       </div>
     </Modal>
   )

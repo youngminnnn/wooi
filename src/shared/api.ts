@@ -224,6 +224,11 @@ export interface WooiApi {
       findingId: string,
       body: string
     ): Promise<{ url?: string; error?: string }>
+    /**
+     * 안 달기로 한 지적을 목록에서 버린다. 이미 게시한 것은 거부한다
+     * (GitHub 에 남은 코멘트를 우리만 잊는 상태가 되기 때문).
+     */
+    dismiss(reviewId: string, findingId: string): Promise<{ error?: string }>
     /** 리뷰를 완전히 삭제한다(워크트리·ref·결과 기록 모두). */
     close(reviewId: string): Promise<void>
     /** 리뷰 화면 진입 시 diff·지적·활동을 한 번에 읽어온다. */

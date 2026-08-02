@@ -13,7 +13,7 @@ import type {
   ReviewStatus,
   ReviewVerdict
 } from '@shared/types'
-import { SELF_REVIEW_BLOCKED } from '@shared/types'
+import { DUPLICATE_REVIEW_BLOCKED, SELF_REVIEW_BLOCKED } from '@shared/types'
 import {
   getPrDiffRaw,
   getPrHeadSha,
@@ -134,8 +134,7 @@ export class ReviewManager {
       lastSeenAt: null,
       lastSeenHeadSha: meta.headSha,
       unread: false,
-      lastVerdict: null,
-      lastVerdictAt: null
+      lastSubmission: null
     }
     getStore().update((st) => {
       st.reviews.push(session)
@@ -364,6 +363,24 @@ export class ReviewManager {
   }
 
   /**
+   * 지적 1건을 목록에서 버린다.
+   *
+   * 에이전트가 낸 제안이 전부 달 만한 것은 아니다 — 안 달 것을 남겨 두면 "아직 안 단 코멘트"
+   * 를 세는 곳(닫기 확인·제출 모달)이 계속 그것들을 세어 사용자를 붙잡는다.
+   */
+  dismissFinding(reviewId: string, findingId: string): { error?: string } {
+    const session = this.record(reviewId)
+    if (!session) return { error: 'Review session not found.' }
+    // 이미 PR 에 올라간 코멘트는 여기서 지울 수 없다. 목록에서만 사라지면 GitHub 에 남은
+    // 코멘트를 우리가 잊어버리는 셈이라, 사용자는 지웠다고 생각하고 상대는 계속 보게 된다.
+    if (session.postedComments.some((c) => c.findingId === findingId)) {
+      return { error: 'That comment is already on the pull request — delete it on GitHub.' }
+    }
+    getReviewBundles().dismissFinding(reviewId, findingId)
+    return {}
+  }
+
+  /**
    * PR 전체에 대한 판정을 제출한다(Approve / Request changes / Comment).
    *
    * 개별 코멘트 게시와 독립적이다 — 코멘트를 하나도 안 달고 승인만 할 수도, 코멘트를 다 달고
@@ -386,12 +403,23 @@ export class ReviewManager {
       return { error: SELF_REVIEW_BLOCKED }
     }
 
+    // 제출 시점의 PR 상태. 폴링이 본 sha 를 기본값으로 두고, 중복이 의심될 때만 지금 확인한다
+    // — 매번 gh 를 부르면 정상적인 제출까지 로그인 셸 한 번씩을 물게 된다.
+    const text = body.trim()
+    let headSha = session.lastSeenHeadSha
+    const last = session.lastSubmission
+    if (last && last.verdict === verdict && last.body === text) {
+      // 같은 내용이다. 그 사이 PR 이 움직였는지가 유일한 쟁점이므로 여기서만 실제로 확인한다.
+      // 확인에 실패하면(오프라인 등) 안 움직인 것으로 본다 — 막았을 때의 손해가 더 작다.
+      headSha = (await getPrHeadSha(repoPath, session.prNumber)) ?? last.headSha
+      if (headSha === last.headSha) return { error: DUPLICATE_REVIEW_BLOCKED }
+    }
+
     const res = await submitPrReview(repoPath, session.prNumber, verdict, body)
     if (res.error) return res
 
     this.patch(reviewId, (r) => {
-      r.lastVerdict = verdict
-      r.lastVerdictAt = Date.now()
+      r.lastSubmission = { verdict, body: text, headSha, at: Date.now() }
     })
     return {}
   }
@@ -417,14 +445,16 @@ export class ReviewManager {
   async pollActivity(reviewId: string): Promise<void> {
     const session = this.record(reviewId)
     if (!session || session.archived) return
-    // 아직 아무것도 안 달았으면 추적할 스레드가 없다.
-    if (session.postedComments.length === 0) return
+    // 코멘트를 하나도 안 달았으면 따라갈 스레드가 없다. 그래도 리뷰를 제출했다면 새 커밋은
+    // 계속 봐야 한다 — 그 sha 로 같은 리뷰를 또 낼 수 있는지가 갈린다.
+    const tracksReplies = session.postedComments.length > 0
+    if (!tracksReplies && !session.lastSubmission) return
     const repoPath = this.repoPathFor(session)
     if (!repoPath) return
 
     const [reviewComments, issueComments, headSha, viewerLogin] = await Promise.all([
-      listReviewComments(repoPath, session.prNumber),
-      listIssueComments(repoPath, session.prNumber),
+      tracksReplies ? listReviewComments(repoPath, session.prNumber) : null,
+      tracksReplies ? listIssueComments(repoPath, session.prNumber) : null,
       getPrHeadSha(repoPath, session.prNumber),
       getViewerLogin(repoPath)
     ])

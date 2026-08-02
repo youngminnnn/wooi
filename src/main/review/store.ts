@@ -19,6 +19,11 @@ const CACHE_LIMIT = 8
 type ReviewRecord =
   | { id: string; rec: 'diff'; diff: ReviewDiff }
   | { id: string; rec: 'finding'; finding: ReviewFinding }
+  /**
+   * 버린 지적의 묘비. **지적과 같은 id 를 쓴다** — last-wins 규칙이 그대로 삭제로 동작하고,
+   * append 전용 파일을 다시 쓰지 않아도 된다.
+   */
+  | { id: string; rec: 'finding-dismissed' }
   | { id: string; rec: 'activity'; item: ReviewActivityItem }
 
 /** diff 레코드의 고정 id — 새 diff 를 append 하면 이전 것을 덮어쓴다. */
@@ -51,9 +56,11 @@ function parseJsonl(text: string): ReviewRecord[] {
 function toBundle(records: ReviewRecord[]): ReviewBundle {
   const bundle: ReviewBundle = { diff: null, findings: [], activity: [] }
   for (const rec of records) {
+    // 종류를 하나씩 확인한다 — "나머지는 활동" 으로 두면 묘비 같은 새 레코드가 활동
+    // 타임라인에 undefined 로 섞여 들어간다.
     if (rec.rec === 'diff') bundle.diff = rec.diff
     else if (rec.rec === 'finding') bundle.findings.push(rec.finding)
-    else bundle.activity.push(rec.item)
+    else if (rec.rec === 'activity') bundle.activity.push(rec.item)
   }
   return bundle
 }
@@ -95,6 +102,13 @@ class ReviewBundleStore {
       const idx = b.findings.findIndex((f) => f.id === finding.id)
       if (idx >= 0) b.findings[idx] = finding
       else b.findings.push(finding)
+    })
+  }
+
+  /** 지적을 목록에서 지운다. 사용자가 "이건 안 달겠다" 고 결정한 것이라 되살리지 않는다. */
+  dismissFinding(reviewId: string, findingId: string): void {
+    this.append(reviewId, { id: findingId, rec: 'finding-dismissed' }, (b) => {
+      b.findings = b.findings.filter((f) => f.id !== findingId)
     })
   }
 

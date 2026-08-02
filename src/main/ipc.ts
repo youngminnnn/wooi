@@ -1458,6 +1458,10 @@ export function registerIpc(ctx: IpcContext): void {
     reviewManager.post(reviewId, findingId, body)
   )
 
+  ipcMain.handle(IPC.reviewDismiss, (_e, reviewId: string, findingId: string) =>
+    reviewManager.dismissFinding(reviewId, findingId)
+  )
+
   ipcMain.handle(IPC.reviewClose, async (_e, reviewId: string) => {
     await reviewManager.remove(reviewId)
   })

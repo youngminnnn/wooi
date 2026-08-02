@@ -98,6 +98,7 @@ const api: WooiApi = {
     cancel: (reviewId) => ipcRenderer.invoke(IPC.reviewCancel, reviewId),
     post: (reviewId, findingId, body) =>
       ipcRenderer.invoke(IPC.reviewPost, reviewId, findingId, body),
+    dismiss: (reviewId, findingId) => ipcRenderer.invoke(IPC.reviewDismiss, reviewId, findingId),
     close: (reviewId) => ipcRenderer.invoke(IPC.reviewClose, reviewId),
     load: (reviewId) => ipcRenderer.invoke(IPC.reviewLoad, reviewId),
     archive: (reviewId) => ipcRenderer.invoke(IPC.reviewArchive, reviewId),
