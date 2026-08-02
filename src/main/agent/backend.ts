@@ -94,24 +94,38 @@ export interface AgentBackendMeta {
   id: AgentBackendId
   /** 사용자에게 보여 줄 이름(예: "Claude Code"). */
   label: string
-  /** 이 백엔드의 기본 모델 ID. */
-  defaultModel: string
+  /** 이 백엔드의 기본 모델 ID. null 이면 오버라이드 없이 에이전트 기본값(계정 기본 모델)을 따른다. */
+  defaultModel: string | null
   capabilities: AgentCapabilities
 }
 
 /**
  * Claude Code 백엔드의 기본 모델. store 기본값과 백엔드 메타가 같은 출처를 보도록 여기서 정의한다.
  *
- * `[1m]` 접미사는 예전 CLI 와의 호환 때문에 남겨 둔다. 도입 당시에는 접미사가 **반드시** 필요했다 —
- * opus-5 가 모델 레지스트리에 없어 접미사가 빠지면 윈도가 200K 로 잡혔다(다른 Opus 라인은 1M):
+ * `null` 은 "모델 오버라이드를 넘기지 않는다" 는 뜻이다 — session.ts 가 `model` 옵션을 통째로
+ * 생략하므로 CLI 가 계정 기본 모델과 사용량 인지 라우팅을 그대로 적용한다. 터미널 `claude` 의 모델
+ * 선택기 첫 항목인 "Default (recommended)"(내부적으로 `value: null`)와 같은 동작이다.
+ *
+ * 예전에는 `claude-opus-5[1m]` 을 하드코딩했다. 그러면 터미널에는 있는 "계정 기본값" 선택지가 Wooi
+ * 에는 아예 없어서, 모델을 직접 고르지 않은 사용자가 전부 Opus 5 · 1M 윈도로 고정 시작한다. 로컬
+ * 트랜스크립트 실측(GUI 14k 턴)에서 Opus 5 는 **같은 앱·같은 조건의 Opus 4.8 대비 턴당 +30%,
+ * 세션당 +66%** 토큰을 썼다 — 단가는 둘 다 $5/$25 로 같으니 순수한 소비 행동 차이다(Opus 5 는
+ * thinking 이 기본 ON 이고, 응답·산출 파일이 길고, 시키지 않아도 자기 검증을 한다).
+ *
+ * 이미 모델을 저장해 둔 사용자는 건드리지 않는다(마이그레이션 없음) — "명시적으로 Opus 5 를 골랐다"
+ * 와 "옛 기본값을 물려받았다" 를 구분할 수 없어, 조용히 모델을 바꾸는 쪽이 더 나쁘다. 그 사용자는
+ * Settings → Model 에서 "Default" 를 고르면 이 동작으로 돌아온다.
+ *
+ * 참고 — `[1m]` 접미사: 도입 당시에는 **반드시** 필요했다. opus-5 가 모델 레지스트리에 없어 접미사가
+ * 빠지면 윈도가 200K 로 잡혔다(다른 Opus 라인은 1M):
  *
  *   claude-opus-5      → window 200,000   / 자동압축 167,000   (CLI 2.1.220 이전)
  *   claude-opus-5[1m]  → window 1,000,000 / 자동압축 967,000
  *
  * CLI 2.1.220 부터는 opus-5 가 `native_1m` 으로 등재돼 접미사 없이도 1M 이다(실측 확인). 접미사는
- * 계속 유효하므로(supports_1m_suffix) 굳이 값을 바꿔 저장된 설정을 다시 마이그레이션하지 않는다.
+ * 계속 유효하므로(supports_1m_suffix) 저장된 설정을 다시 마이그레이션하지 않는다.
  */
-export const CLAUDE_DEFAULT_MODEL = 'claude-opus-5[1m]'
+export const CLAUDE_DEFAULT_MODEL: string | null = null
 
 /** Claude Code 백엔드 메타. Claude Agent SDK 의 전체 기능을 지원한다. */
 export const CLAUDE_META: AgentBackendMeta = {

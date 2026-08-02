@@ -48,9 +48,18 @@ function findOption(id: string): ModelOption | undefined {
   return OPTION_BY_ID.get(id) ?? OPTION_BY_ID.get(bare) ?? OPTION_BY_ID.get(`${bare}[1m]`)
 }
 
-/** 모델 ID 를 친근한 라벨로. 목록에 없으면 ID 를 그대로 보여준다. */
+/**
+ * 모델을 고르지 않았을 때(=오버라이드 없음) 쓰는 라벨. 터미널 `claude` 의 모델 선택기 첫 항목과
+ * 같은 뜻이다 — CLI 가 계정 기본 모델과 사용량 인지 라우팅을 그대로 적용한다.
+ */
+export const DEFAULT_MODEL_LABEL = 'Default'
+
+/** 위 항목의 설명. 선택 카드 hint 와 Settings 의 <option> 라벨이 같은 문구를 쓰도록 여기에 둔다. */
+export const DEFAULT_MODEL_HINT = 'Your Claude account default — usage-aware routing'
+
+/** 모델 ID 를 친근한 라벨로. null 은 "오버라이드 없음", 목록에 없으면 ID 를 그대로 보여준다. */
 export function modelLabel(id: string | null): string {
-  if (!id) return MODEL_OPTIONS[0].label
+  if (!id) return DEFAULT_MODEL_LABEL
   return findOption(id)?.label ?? id
 }
 
@@ -58,9 +67,13 @@ export function modelLabel(id: string | null): string {
  * 이 모델에서 fast mode 가 켜질 수 있는지(목록 기준). 목록에 없는 커스텀 ID 는 판단하지 않고
  * true 로 둔다 — 확실하지 않은데 "지원 안 함" 경고를 띄우면 오히려 오해를 준다. 실제 상태는
  * 세션이 보고하는 fastModeState 가 알려 준다.
+ *
+ * null(오버라이드 없음)도 같은 이유로 true 다 — 어떤 모델로 돌지는 CLI 가 정하므로 여기서
+ * 단정할 수 없다. 첫 턴이 끝나면 workspace.lastModel 이 실제 모델을 알려 주고, 그때부터는
+ * 그 값으로 판단된다.
  */
 export function modelSupportsFastMode(id: string | null): boolean {
-  if (!id) return false
+  if (!id) return true
   const opt = findOption(id)
   return opt ? opt.fastMode === true : true
 }
