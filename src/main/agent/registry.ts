@@ -1,7 +1,10 @@
 import type { BrowserWindow } from 'electron'
-import type { AgentBackendId } from '@shared/types'
+import type { AgentBackendId, AgentBackendMeta } from '@shared/types'
 import { SessionManager } from '../claude/manager'
-import { CLAUDE_META, type AgentBackend, type AgentBackendMeta } from './backend'
+import { CodexSessionManager } from '../codex/manager'
+import { detectCodex } from '../codex/executable'
+import { isInstalled } from '../shell'
+import { CLAUDE_META, CODEX_META, type AgentBackend } from './backend'
 
 /** main → renderer 채널 방송 함수. 각 백엔드가 이벤트를 렌더러로 흘려보낼 때 쓴다. */
 export type Dispatch = (channel: string, payload: unknown) => void
@@ -14,11 +17,41 @@ export interface BackendDeps {
 
 /** 식별자별 백엔드 메타데이터 카탈로그. 새 백엔드는 여기에 메타와 createBackend 분기를 추가한다. */
 export const AGENT_BACKENDS: Record<AgentBackendId, AgentBackendMeta> = {
-  claude: CLAUDE_META
+  claude: CLAUDE_META,
+  codex: CODEX_META
 }
 
 /** 알 수 없는/누락 식별자의 폴백 백엔드. */
 export const DEFAULT_BACKEND_ID: AgentBackendId = 'claude'
+
+/** 백엔드별 CLI 실행 파일 이름. 설치 감지의 단일 출처. */
+export const BACKEND_CLI: Record<AgentBackendId, string> = {
+  claude: 'claude',
+  codex: 'codex'
+}
+
+/**
+ * 이 백엔드를 지금 쓸 수 있는지(구동 CLI 가 설치돼 있는지) 확인한다.
+ *
+ * 백엔드를 **인스턴스화하지 않고** 답해야 한다 — 아직 구현이 없거나 CLI 가 없는 백엔드도
+ * 목록에는 나와야 하고(설치 안내를 띄우려면), 그걸 위해 프로세스를 띄울 수는 없기 때문이다.
+ * 로그인 여부는 여기서 보지 않는다(그건 auth 계층의 몫). 여기는 "실행 가능한가"만 본다.
+ */
+export async function backendAvailability(
+  id: AgentBackendId
+): Promise<{ available: boolean; reason?: string }> {
+  // Codex 는 설치 여부만으로 부족하다 — 너무 오래된 버전은 app-server 표면이 달라 붙지 않으므로,
+  // 버전까지 보고 "업데이트하세요"라는 구체적인 안내를 돌려준다.
+  if (id === 'codex') {
+    const install = await detectCodex()
+    return install.usable ? { available: true } : { available: false, reason: install.reason }
+  }
+
+  const cli = BACKEND_CLI[id]
+  if (!cli) return { available: false, reason: 'Unknown agent backend' }
+  if (await isInstalled(cli)) return { available: true }
+  return { available: false, reason: `${backendMeta(id).label} CLI (\`${cli}\`) is not installed` }
+}
 
 /** 식별자에 해당하는 백엔드 메타를 돌려준다(없으면 기본 백엔드). */
 export function backendMeta(id: AgentBackendId): AgentBackendMeta {
@@ -31,6 +64,8 @@ export function backendMeta(id: AgentBackendId): AgentBackendMeta {
  */
 export function createBackend(id: AgentBackendId, deps: BackendDeps): AgentBackend {
   switch (id) {
+    case 'codex':
+      return new CodexSessionManager(deps.dispatch, deps.getWindow)
     case 'claude':
     default:
       return new SessionManager(deps.dispatch, deps.getWindow)

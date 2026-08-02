@@ -37,7 +37,8 @@ function sessionStats(items: ChatItem[]): { cost: number; turns: number } {
   let turns = 0
   for (const it of items) {
     if (it.type === 'result') {
-      cost += it.costUsd
+      // 원가를 알려 주지 않는 백엔드(Codex)는 합계에 기여하지 않는다.
+      cost += it.costUsd ?? 0
       turns += it.numTurns
     }
   }

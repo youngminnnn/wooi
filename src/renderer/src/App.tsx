@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { AlertTriangle } from 'lucide-react'
-import { CURRENT_TERMS_VERSION, orderVisibleWorkspaces } from '@shared/types'
+import { CURRENT_TERMS_VERSION, hasAnyAgent, orderVisibleWorkspaces } from '@shared/types'
 import { useStore } from './store'
 import { nextPermissionMode } from './lib/permission'
 import { OPEN_REPO_SETTINGS_EVENT, openRepoSettings } from './lib/repoSettings'
@@ -16,6 +16,7 @@ import Splitter from './components/Splitter'
 import EmptyState from './components/EmptyState'
 import Overview from './components/Overview'
 import SettingsModal from './components/SettingsModal'
+import ErrorBoundary from './components/ErrorBoundary'
 import NewWorkspaceModal from './components/NewWorkspaceModal'
 import RepoConfigModal from './components/RepoConfigModal'
 import OnboardingModal from './components/OnboardingModal'
@@ -124,8 +125,15 @@ export default function App(): React.JSX.Element {
       if (e.key === 'Tab' && e.shiftKey) {
         const ws = st.app?.workspaces.find((w) => w.id === st.selectedWorkspaceId)
         if (!ws) return
+        // 순환 목록은 그 워크스페이스의 백엔드가 정한다(Claude 와 Codex 는 모드가 서로 다르다).
+        // 카탈로그를 아직 못 읽었으면 바꿀 근거가 없으므로 조용히 무시한다.
+        const modes = st.backends.find((b) => b.id === ws.agentBackend)?.permissionModes
+        if (!modes?.length) return
         e.preventDefault()
-        void window.api.workspace.setPermissionMode(ws.id, nextPermissionMode(ws.permissionMode))
+        void window.api.workspace.setPermissionMode(
+          ws.id,
+          nextPermissionMode(modes, ws.permissionMode)
+        )
         return
       }
 
@@ -325,7 +333,9 @@ export default function App(): React.JSX.Element {
   }
 
   const selected = app.workspaces.find((w) => w.id === selectedId && !w.archived) ?? null
-  const claudeMissing = app.settings.onboarded && authStatus !== null && !authStatus.claude.loggedIn
+  // 에이전트가 **하나도** 연결되지 않았을 때만 경고한다 — Claude 만, 또는 Codex 만 가진 사용자도
+  // 정상 사용자이므로 한쪽이 없다는 이유로 배너를 띄우면 안 된다.
+  const noAgentConnected = app.settings.onboarded && authStatus !== null && !hasAnyAgent(authStatus)
 
   // 우측 패널이 차지할 수 있는 최대 폭 = 사용 가능한 너비 - 채팅 최소 너비.
   // 창이 좁아지면 maxRight 가 줄어 패널이 따라 좁아지고, 다시 넓히면 저장된 rightWidth 로 복원된다.
@@ -367,7 +377,7 @@ export default function App(): React.JSX.Element {
 
       <UpdateBanner />
 
-      {claudeMissing && (
+      {noAgentConnected && (
         <button
           onClick={() => setShowSettings(true)}
           className="no-drag shrink-0 flex items-center justify-center gap-2 h-8 bg-[var(--warning-500)]/10 border-b border-[var(--warning-500)]/25 text-sm text-[var(--warning-300)] hover:bg-[var(--warning-500)]/15"
@@ -426,13 +436,17 @@ export default function App(): React.JSX.Element {
       )}
       {githubGateOpen && <GithubConnectModal />}
       {showSettings && (
-        <SettingsModal
-          onClose={() => setShowSettings(false)}
-          onStartTour={() => {
-            setShowSettings(false)
-            setTourOpen(true)
-          }}
-        />
+        // 설정은 백엔드 카탈로그·인증 상태 등 바깥에서 들어오는 값을 많이 읽는다. 그중 하나가
+        // 깨져도 앱 전체가 날아가지 않도록 이 서브트리만 격리한다.
+        <ErrorBoundary label="Settings">
+          <SettingsModal
+            onClose={() => setShowSettings(false)}
+            onStartTour={() => {
+              setShowSettings(false)
+              setTourOpen(true)
+            }}
+          />
+        </ErrorBoundary>
       )}
       {tourOpen && <FeatureTour onDone={() => setTourOpen(false)} />}
       {showShortcuts && <ShortcutsHelp onClose={() => setShowShortcuts(false)} />}

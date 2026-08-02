@@ -3,7 +3,14 @@ import type { SDKMessage, SDKUserMessage, PermissionResult } from '@anthropic-ai
 import { resolveClaudeExecutable } from './executable'
 import { MCP_SETTING_SOURCES } from './mcp'
 import { CLAUDE_CODE_SYSTEM_PROMPT } from './systemPrompt'
+import { claudeEffort, type ClaudeEffortLevel } from './protocol'
 import type { EffortSetting } from '@shared/types'
+
+/** 사이드 질문용 effort. ultracode 는 워크플로우 성분을 빼고 effort 성분(xhigh)만 남긴다. */
+function sideQuestionEffort(effort: EffortSetting | null): ClaudeEffortLevel | null {
+  if (effort === 'ultracode') return 'xhigh'
+  return claudeEffort(effort)
+}
 
 // session.ts 와 동일 — 패키징 빌드에서 app.asar 내부 경로로 CLI 를 spawn 해 ENOTDIR 로
 // 실패하지 않도록 unpacked 바이너리 경로를 1회 계산해 둔다(dev 에서는 null → SDK 기본값).
@@ -53,7 +60,8 @@ export async function askSideQuestion(opts: SideQuestionOptions): Promise<void> 
       ...(claudeExecutable ? { pathToClaudeCodeExecutable: claudeExecutable } : {}),
       ...(opts.model ? { model: opts.model } : {}),
       // 사이드 질문은 도구·워크플로우를 쓰지 않으므로 ultracode 는 그 effort 성분(xhigh)으로만 환산한다.
-      ...(opts.effort ? { effort: opts.effort === 'ultracode' ? 'xhigh' : opts.effort } : {}),
+      // 그 외 단계는 claudeEffort 로 SDK 가 아는 값으로 좁힌다(Codex 전용 'minimal' → 'low').
+      ...(sideQuestionEffort(opts.effort) ? { effort: sideQuestionEffort(opts.effort)! } : {}),
       // resume 한 세션에 답을 덧쓰면 메인 대화가 오염되므로, forkSession 으로 새 임시 세션에 분기한다.
       ...(opts.resumeSessionId ? { resume: opts.resumeSessionId, forkSession: true } : {})
     }

@@ -2,15 +2,22 @@ import { useEffect, useState } from 'react'
 import { Compass, Download, RefreshCw, Settings2 } from 'lucide-react'
 import { useStore } from '../store'
 import { openRepoSettings } from '../lib/repoSettings'
-import { DOWNLOAD_URL, hasNewVersion, updateStatusText } from '../lib/update'
+import { hasNewVersion, updateStatusText } from '../lib/update'
 import Modal, { inputClass, labelClass, primaryBtn, ghostBtn } from './Modal'
 import IntegrationsPanel from './IntegrationsPanel'
-import { PERMISSION_ORDER, PERMISSION_LABELS, PERMISSION_DESCRIPTIONS } from '../lib/permission'
-import { MODEL_OPTIONS, DEFAULT_MODEL_LABEL, DEFAULT_MODEL_HINT } from '../lib/models'
-import { EFFORT_OPTIONS } from '../lib/effort'
+import { permissionModesFor } from '../lib/permission'
+import { effortOptionsFor } from '../lib/effort'
+import { useAvailableBackends, useBackend, useModels } from '../lib/backends'
 import { applyTheme } from '../lib/theme'
-import { NOTIFICATION_CHANNEL_LABELS, NOTIFICATION_EVENT_LABELS } from '@shared/types'
+import {
+  NOTIFICATION_CHANNEL_LABELS,
+  NOTIFICATION_EVENT_LABELS,
+  agentSettingsFor,
+  normalizePermissionMode
+} from '@shared/types'
 import type {
+  AgentBackendId,
+  AgentSettings,
   EffortSetting,
   NotificationChannel,
   NotificationEvent,
@@ -51,7 +58,6 @@ export default function SettingsModal({
 }): React.JSX.Element {
   const settings = useStore((s) => s.app!.settings)
   const repos = useStore((s) => s.app!.repos)
-  const [mode, setMode] = useState<PermissionMode>(settings.defaultPermissionMode)
   const [manualWorkspaceSetup, setManualWorkspaceSetup] = useState(settings.manualWorkspaceSetup)
   const [notifications, setNotifications] = useState<NotificationSettings>(settings.notifications)
   const [autoCompact, setAutoCompact] = useState(settings.autoCompact)
@@ -63,11 +69,32 @@ export default function SettingsModal({
     }))
   const [defaultRightPanelOpen, setDefaultRightPanelOpen] = useState(settings.defaultRightPanelOpen)
   const [showRunningAgents, setShowRunningAgents] = useState(settings.showRunningAgents)
-  // ''(빈 문자열) = 오버라이드 없음. 저장할 때 null 로 되돌린다.
-  const [model, setModel] = useState(settings.model ?? '')
-  const [effort, setEffort] = useState<EffortSetting | null>(settings.effort)
-  const [fastMode, setFastMode] = useState(settings.fastMode)
   const [theme, setTheme] = useState<ThemePreference>(settings.theme)
+
+  // ── 에이전트 설정 (백엔드별) ────────────────────────────────────────────
+  // 모델 ID·권한 모드는 백엔드마다 다르므로 하나의 전역 값으로 편집할 수 없다. 기본 에이전트를
+  // 고르고, 그 아래에서 **선택된 백엔드의** 기본값만 편집한다.
+  const availableBackends = useAvailableBackends()
+  const [defaultAgentBackend, setDefaultAgentBackend] = useState<AgentBackendId>(
+    settings.defaultAgentBackend
+  )
+  const [agents, setAgents] = useState<Record<AgentBackendId, AgentSettings>>(settings.agents)
+  // 편집 대상 백엔드. 기본 에이전트를 바꾸면 그 백엔드의 설정을 이어서 보여 준다.
+  const [editing, setEditing] = useState<AgentBackendId>(settings.defaultAgentBackend)
+
+  const backend = useBackend(editing)
+  const models = useModels(editing)
+  const agent = agentSettingsFor({ ...settings, agents }, editing)
+  const mode = backend ? normalizePermissionMode(backend, agent.permissionMode) : null
+  const selectedModel = models.find((m) => m.id === agent.model)
+  const efforts = effortOptionsFor(backend, selectedModel)
+
+  /** 편집 중인 백엔드의 기본값 일부를 갱신한다. 다른 백엔드의 값은 건드리지 않는다. */
+  const patchAgent = (patch: Partial<AgentSettings>): void =>
+    setAgents((a) => ({
+      ...a,
+      [editing]: { ...agentSettingsFor({ ...settings, agents: a }, editing), ...patch }
+    }))
 
   // 테마는 즉시 미리보기로 적용한다. 저장 없이 닫으면 저장된 테마로 되돌린다.
   const previewTheme = (next: ThemePreference): void => {
@@ -81,7 +108,8 @@ export default function SettingsModal({
 
   const save = async (): Promise<void> => {
     await window.api.settings.update({
-      defaultPermissionMode: mode,
+      defaultAgentBackend,
+      agents,
       manualWorkspaceSetup,
       notifications,
       // 하위호환: 레거시 soundOnComplete 를 완료 소리 채널과 동기화해 둔다.
@@ -89,10 +117,6 @@ export default function SettingsModal({
       autoCompact,
       defaultRightPanelOpen,
       showRunningAgents,
-      // ''(Default) 는 null 로 저장해 model 옵션 자체를 넘기지 않게 한다.
-      model: model || null,
-      effort,
-      fastMode,
       theme
     })
     onClose()
@@ -300,16 +324,65 @@ export default function SettingsModal({
         </Section>
 
         <Section title="Agent">
+          {/* 에이전트가 둘 이상 준비돼 있을 때만 선택지를 보여 준다 — 하나뿐인 사용자에게
+              다른 에이전트 이름을 노출할 이유가 없다. */}
+          {availableBackends.length > 1 && (
+            <div>
+              <label className={labelClass}>Default agent for new workspaces</label>
+              <select
+                className={inputClass}
+                value={defaultAgentBackend}
+                onChange={(e) => {
+                  const next = e.target.value as AgentBackendId
+                  setDefaultAgentBackend(next)
+                  // 기본을 바꾸면 아래 설정도 그 에이전트 것으로 따라간다(빈 화면을 남기지 않도록).
+                  setEditing(next)
+                }}
+              >
+                {availableBackends.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.label}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1.5 text-xs text-neutral-600">
+                Each workspace stays on the agent it was created with.
+              </p>
+            </div>
+          )}
+
+          {/* 편집 대상 전환 탭 — 기본 에이전트가 아닌 쪽 설정도 미리 손볼 수 있게 한다. */}
+          {availableBackends.length > 1 && (
+            <div className="flex gap-1.5">
+              {availableBackends.map((b) => (
+                <button
+                  key={b.id}
+                  type="button"
+                  onClick={() => setEditing(b.id)}
+                  className={
+                    'flex-1 text-sm px-3 py-1.5 border rounded-lg transition-colors ' +
+                    (editing === b.id
+                      ? 'border-[var(--info-500)] bg-[var(--info-600)]/15 text-neutral-100'
+                      : 'border-[var(--border)] text-neutral-300 hover:bg-[var(--surface-2)]')
+                  }
+                >
+                  {b.label}
+                </button>
+              ))}
+            </div>
+          )}
+
           <div>
             <label className={labelClass}>Default permission mode for new workspaces</label>
             <select
               className={inputClass}
-              value={mode}
-              onChange={(e) => setMode(e.target.value as PermissionMode)}
+              value={mode ?? ''}
+              disabled={!backend}
+              onChange={(e) => patchAgent({ permissionMode: e.target.value as PermissionMode })}
             >
-              {PERMISSION_ORDER.map((m) => (
-                <option key={m} value={m}>
-                  {PERMISSION_LABELS[m]} — {PERMISSION_DESCRIPTIONS[m]}
+              {permissionModesFor(backend).map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.label} — {m.description}
                 </option>
               ))}
             </select>
@@ -320,23 +393,25 @@ export default function SettingsModal({
 
           <div>
             <label className={labelClass}>Model</label>
-            <select className={inputClass} value={model} onChange={(e) => setModel(e.target.value)}>
-              <option value="">
-                {DEFAULT_MODEL_LABEL} (recommended) — {DEFAULT_MODEL_HINT}
-              </option>
-              {MODEL_OPTIONS.map((m) => (
+            <select
+              className={inputClass}
+              value={agent.model ?? ''}
+              onChange={(e) => patchAgent({ model: e.target.value || null })}
+            >
+              {/* Codex 는 모델을 지정하지 않으면 자기 설정/카탈로그 기본값을 쓴다. */}
+              <option value="">Default — let {backend?.label ?? 'the agent'} decide</option>
+              {models.map((m) => (
                 <option key={m.id} value={m.id}>
                   {m.label}
                 </option>
               ))}
-              {model !== '' && !MODEL_OPTIONS.some((m) => m.id === model) && (
-                <option value={model}>{model}</option>
+              {/* 저장된 값이 카탈로그에 없으면(구버전·조회 실패) 그대로 한 줄 보여 준다. */}
+              {agent.model && !models.some((m) => m.id === agent.model) && (
+                <option value={agent.model}>{agent.model}</option>
               )}
             </select>
             <p className="mt-1.5 text-xs text-neutral-600">
               Default for new workspaces. Each workspace can override this from its header dropdown.
-              Leaving this on {DEFAULT_MODEL_LABEL} lets Claude Code pick — pinning Opus keeps every
-              turn on the most expensive model and burns your usage limits faster.
             </p>
           </div>
 
@@ -344,11 +419,13 @@ export default function SettingsModal({
             <label className={labelClass}>Reasoning effort</label>
             <select
               className={inputClass}
-              value={effort ?? ''}
-              onChange={(e) => setEffort((e.target.value || null) as EffortSetting | null)}
+              value={agent.effort ?? ''}
+              onChange={(e) =>
+                patchAgent({ effort: (e.target.value || null) as EffortSetting | null })
+              }
             >
               <option value="">Default — let the model decide</option>
-              {EFFORT_OPTIONS.map((e) => (
+              {efforts.map((e) => (
                 <option key={e.id} value={e.id}>
                   {e.label} — {e.hint}
                 </option>
@@ -360,26 +437,25 @@ export default function SettingsModal({
             </p>
           </div>
 
-          <label className="flex items-start gap-2.5 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={fastMode}
-              onChange={(e) => setFastMode(e.target.checked)}
-              className="accent-blue-600 h-3.5 w-3.5 mt-0.5"
-            />
-            <span className="text-sm text-neutral-300">
-              Fast mode
-              <span className="block text-xs text-neutral-600">
-                Runs the same model with faster output (Claude Code’s <code>/fast</code>). Needs a
-                fast-capable model (Opus 5 or Opus 4.8) on a paid Anthropic plan, and has its own
-                rate limit — sessions fall back to standard speed when it isn’t available. Each
-                workspace can override this with <code>/fast</code>.
-                <strong className="block mt-1 text-[var(--warning-400)]/90">
-                  Billed at roughly 2× the standard token rate — speed only, no quality change.
-                </strong>
+          {/* 백엔드가 fast service tier 를 지원할 때만 표시한다. */}
+          {backend?.capabilities.fastMode && (
+            <label className="flex items-start gap-2.5 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={agent.fastMode}
+                onChange={(e) => patchAgent({ fastMode: e.target.checked })}
+                className="accent-blue-600 h-3.5 w-3.5 mt-0.5"
+              />
+              <span className="text-sm text-neutral-300">
+                Fast mode
+                <span className="block text-xs text-neutral-600">
+                  Runs the same model through the backend’s faster service tier. Availability and
+                  billing depend on the selected agent and account. Each workspace can override
+                  this with <code>/fast</code>.
+                </span>
               </span>
-            </span>
-          </label>
+            </label>
+          )}
 
           <label className="flex items-start gap-2.5 cursor-pointer">
             <input
@@ -401,6 +477,9 @@ export default function SettingsModal({
     </Modal>
   )
 }
+
+/** 항상 최신 릴리스의 dmg 로 리다이렉트된다(자동 업데이트가 막혔을 때의 수동 경로). */
+const DOWNLOAD_URL = 'https://github.com/youngminnnn/wooi/releases/latest/download/Wooi-arm64.dmg'
 
 function UpdatesSection(): React.JSX.Element {
   const [version, setVersion] = useState<string>('')

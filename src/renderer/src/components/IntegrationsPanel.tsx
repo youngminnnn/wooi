@@ -1,25 +1,30 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Check, Loader2, RefreshCw } from 'lucide-react'
 import { useStore } from '../store'
-import { ClaudeMark, GithubMark } from './BrandIcons'
+import { ClaudeMark, CodexMark, GithubMark } from './BrandIcons'
 import ClaudeLoginModal from './ClaudeLoginModal'
+import CodexLoginModal from './CodexLoginModal'
 import GithubLoginModal from './GithubLoginModal'
 
 /**
- * 연동(Claude · GitHub) 상태 + 로그인/로그아웃 패널. 설정·온보딩·gh 연결 모달이 함께 쓴다.
- * `only` 를 주면 해당 연동 행만 렌더한다 — "Connect GitHub" 모달처럼 한 가지 연동만 다루는
- * 화면에서 관계없는 행이 끼어들지 않게 하기 위함이다.
+ * 연동(Claude Code · Codex · GitHub) 상태 + 로그인/로그아웃 패널.
+ * 설정·온보딩·gh 연결 모달이 함께 쓴다.
+ *
+ * 에이전트는 **둘 중 하나만 연결해도 앱을 쓸 수 있다** — 그래서 두 행을 나란히, 대등하게 보여
+ * 준다(어느 쪽도 필수로 표시하지 않는다). `only` 를 주면 해당 연동 행만 렌더한다.
  */
 export default function IntegrationsPanel({
   only
 }: {
-  only?: 'claude' | 'github'
+  only?: 'claude' | 'codex' | 'github'
 } = {}): React.JSX.Element {
   const auth = useStore((s) => s.authStatus)
   const refreshAuth = useStore((s) => s.refreshAuth)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const [claudeLoginOpen, setClaudeLoginOpen] = useState(false)
   const closeClaudeLogin = useCallback(() => setClaudeLoginOpen(false), [])
+  const [codexLoginOpen, setCodexLoginOpen] = useState(false)
+  const closeCodexLogin = useCallback(() => setCodexLoginOpen(false), [])
   const [githubLoginOpen, setGithubLoginOpen] = useState(false)
   const closeGithubLogin = useCallback(() => setGithubLoginOpen(false), [])
 
@@ -49,7 +54,8 @@ export default function IntegrationsPanel({
     }, 3000)
   }
 
-  const claude = auth?.claude
+  const claude = auth?.agents.claude
+  const codex = auth?.agents.codex
   const github = auth?.github
 
   return (
@@ -79,7 +85,30 @@ export default function IntegrationsPanel({
         />
       )}
 
-      {only !== 'claude' && (
+      {only !== 'github' && only !== 'claude' && (
+        <IntegrationRow
+          name="Codex"
+          icon={<CodexMark size={17} />}
+          loading={!auth}
+          installed={!!codex?.installed}
+          // 설치가 npm 전역이라 링크보다 명령이 실행 가능한 안내다.
+          installHint="npm i -g @openai/codex"
+          installUrl="https://developers.openai.com/codex"
+          connected={!!codex?.loggedIn}
+          detail={
+            !codex?.installed
+              ? 'Not installed — install the Codex CLI to use it'
+              : codex.loggedIn
+                ? [codex.email, codex.planType].filter(Boolean).join(' · ') || 'Signed in'
+                : 'Sign in to run Codex agents'
+          }
+          warning={codex?.installed && codex.error ? codex.error : undefined}
+          onConnect={() => setCodexLoginOpen(true)}
+          onDisconnect={() => window.api.auth.codexLogout().then(() => refreshAuth())}
+        />
+      )}
+
+      {only !== 'claude' && only !== 'codex' && (
         <IntegrationRow
           name="GitHub"
           icon={<GithubMark size={17} />}
@@ -116,6 +145,7 @@ export default function IntegrationsPanel({
       </div>
 
       {claudeLoginOpen && <ClaudeLoginModal onClose={closeClaudeLogin} />}
+      {codexLoginOpen && <CodexLoginModal onClose={closeCodexLogin} />}
       {githubLoginOpen && <GithubLoginModal onClose={closeGithubLogin} />}
     </div>
   )
@@ -130,6 +160,7 @@ function IntegrationRow({
   loading,
   installed,
   installUrl,
+  installHint,
   onConnect,
   onDisconnect
 }: {
@@ -141,6 +172,11 @@ function IntegrationRow({
   loading: boolean
   installed: boolean
   installUrl: string
+  /**
+   * 설치가 한 줄 명령으로 끝나는 경우의 명령문(예: npm 전역 설치).
+   * 웹페이지로 보내는 것보다 복사해서 바로 실행할 수 있는 편이 빠르다.
+   */
+  installHint?: string
   onConnect: () => void | Promise<void>
   onDisconnect: () => void | Promise<void>
 }): React.JSX.Element {
@@ -164,6 +200,15 @@ function IntegrationRow({
         </div>
         <div className="text-xs text-neutral-500 truncate">{detail}</div>
         {warning && <div className="text-xs text-[var(--warning-500)]/90 mt-0.5">{warning}</div>}
+        {!installed && !loading && installHint && (
+          <button
+            onClick={() => void navigator.clipboard.writeText(installHint)}
+            title="Copy install command"
+            className="mt-1 font-mono text-xs text-neutral-400 hover:text-neutral-200"
+          >
+            {installHint}
+          </button>
+        )}
       </div>
       {loading ? (
         <Loader2 size={15} className="text-neutral-500 animate-spin" />

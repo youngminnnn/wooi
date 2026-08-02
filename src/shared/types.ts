@@ -3,19 +3,30 @@
  * preload 가 이 타입을 그대로 노출하므로, 채널 이름·페이로드 모양의 단일 출처(SSOT)다.
  */
 
-// ── Claude Code 권한 모드 ───────────────────────────────────────────────
-// Claude Code 가 Shift+Tab 으로 순환하는 모드와 동일하게 노출한다
-// (default → accept edits → plan → auto).
-export type PermissionMode = 'default' | 'acceptEdits' | 'plan' | 'auto'
+// ── 권한 모드 ───────────────────────────────────────────────────────────
+/**
+ * 에이전트의 권한 모드. **백엔드마다 지원하는 값이 다르다** — 어떤 모드를 어떤 순서로 노출할지는
+ * 각 백엔드가 `AgentBackendMeta.permissionModes` 로 선언하고, UI 는 그 목록만 보고 그린다
+ * (라벨·설명·푸터 문구도 거기서 온다). 여기 유니온은 저장·전송되는 식별자의 전체 집합일 뿐이다.
+ *
+ * - Claude Code: default → acceptEdits → plan → auto (CLI 의 Shift+Tab 순환과 동일)
+ * - Codex: readOnly → default(Auto) → fullAccess → plan (CLI 의 승인/샌드박스 조합)
+ *
+ * `default`·`plan` 은 두 백엔드가 의미를 공유하므로 일부러 같은 식별자를 쓴다 — 백엔드를 바꿔도
+ * 전역 기본값이 자연스럽게 이관되고, 지원하지 않는 값이면 백엔드 기본 모드로 폴백한다.
+ */
+export type PermissionMode = 'default' | 'acceptEdits' | 'plan' | 'auto' | 'readOnly' | 'fullAccess'
 
 /**
- * Claude Code CLI 의 reasoning effort(추론 노력) 단계. 모델이 응답에 들이는 사고 깊이를 조절한다.
- * SDK query() 의 effort 옵션으로 그대로 전달된다(낮을수록 빠르고, 높을수록 깊게 추론).
- * - low: 최소 사고, 가장 빠름 / medium: 보통 / high: 깊은 추론(모델 기본값)
- * - xhigh: high 보다 더 깊게(Fable 5·Opus 4.7+) / max: 최대(Fable 5·Opus 4.6+·Sonnet 4.6)
- * 모델마다 지원 단계가 다르며, 지원하지 않으면 CLI 가 조용히 낮춘다.
+ * reasoning effort(추론 노력) 단계. 모델이 응답에 들이는 사고 깊이를 조절한다
+ * (낮을수록 빠르고, 높을수록 깊게 추론).
+ * - minimal: Codex 의 최저 단계 / low: 최소 사고, 가장 빠름 / medium: 보통
+ * - high: 깊은 추론(모델 기본값) / xhigh: high 보다 더 깊게 / max: 최대
+ *
+ * 백엔드·모델마다 지원 단계가 다르다. 선택지는 `AgentBackendMeta.efforts`(정적) 또는
+ * `ModelOption.efforts`(모델별)로 내려오며, 미지원 값은 CLI 가 조용히 낮춘다.
  */
-export type EffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+export type EffortLevel = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 
 /**
  * wooi 가 저장·표시하는 effort 선택값. SDK 의 effort 레벨에 더해, Claude Code CLI 의 effort
@@ -86,6 +97,45 @@ export function fastModeReasonText(reason: FastModeDisabledReason | null | undef
       // 모델별 미지원은 이유 없이 state='off' 로만 온다 — 가장 흔한 경우라 여기서 안내한다.
       return 'This session runs at standard speed — fast mode needs a fast-capable model (Opus 5 or Opus 4.8) on a paid plan.'
   }
+}
+
+// ── 백엔드가 선언하는 선택지 (main → renderer) ───────────────────────────
+// 모델·effort·권한 모드는 백엔드마다 다르므로 렌더러에 상수로 박지 않고, 백엔드 메타에서 받아
+// 그대로 그린다. 덕분에 Codex 처럼 카탈로그가 동적인(model/list) 백엔드도 같은 UI 를 쓴다.
+
+/** 권한 모드 1개의 표시 정보. 배열 순서가 곧 shift+tab 순환 순서다. */
+export interface PermissionModeInfo {
+  id: PermissionMode
+  /** 드롭다운·설정 표시 명칭 (예: "Accept edits"). */
+  label: string
+  /** 한 줄 설명 (예: "Auto-accept file edits, ask for the rest"). */
+  description: string
+  /** 입력창 아래 푸터 배너. null 이면 배너 없이 단축키 힌트만 보여 준다. */
+  footer: { symbol: string; text: string } | null
+}
+
+/** reasoning effort 선택지 1개의 표시 정보. */
+export interface EffortOptionInfo {
+  id: EffortSetting
+  label: string
+  /** 드롭다운 옵션의 보조 설명. */
+  hint: string
+}
+
+/** 모델 선택지 1개. Claude 는 정적 목록, Codex 는 app-server 의 model/list 에서 온다. */
+export interface ModelOption {
+  id: string
+  label: string
+  /**
+   * 이 모델이 지원하는 effort 단계. 지정하면 effort 피커가 이 목록으로 좁혀진다
+   * (Codex 의 model/list 는 모델별 supportedReasoningEfforts 를 준다). 없으면 백엔드 기본 목록.
+   */
+  efforts?: EffortSetting[]
+  /**
+   * 이 모델에서 fast mode(`/fast`)가 실제로 켜지는지(Claude Code 모델 레지스트리의
+   * `fast_mode` capability). 미지원 모델에서 켜 두면 CLI 가 조용히 표준 속도로 돌린다.
+   */
+  fastMode?: true
 }
 
 // ── 도메인 엔티티 ────────────────────────────────────────────────────────
@@ -320,11 +370,16 @@ export function orderVisibleWorkspaces<
 
 /**
  * 이 워크스페이스를 구동하는 AI 코딩 에이전트 백엔드 식별자.
- * 현재는 'claude'(Claude Code, Claude Agent SDK) 하나뿐이지만, 백엔드 추상화 계층을 통해
- * 추후 다른 에이전트(예: Codex)를 식별자만 추가해 붙일 수 있도록 도메인에 남겨 둔다.
- * 백엔드별 기능 지원 여부(capabilities)·기본 모델 등 메타데이터는 main 의 agent 레지스트리가 보유한다.
+ * - claude: Claude Code (Claude Agent SDK)
+ * - codex: OpenAI Codex (`codex app-server` JSON-RPC)
+ *
+ * 워크스페이스는 생성 시 하나를 골라 **그 세션 동안 고정**한다. 백엔드별 기능 지원 여부
+ * (capabilities)·권한 모드·기본 모델 등 메타데이터는 main 의 agent 레지스트리가 보유한다.
  */
-export type AgentBackendId = 'claude'
+export type AgentBackendId = 'claude' | 'codex'
+
+/** 전체 백엔드 식별자 목록(등록 순서 = UI 표시 순서). */
+export const AGENT_BACKEND_IDS: AgentBackendId[] = ['claude', 'codex']
 
 /** 백엔드를 지정하지 않은(레거시·신규) 워크스페이스의 기본 백엔드. */
 export const DEFAULT_AGENT_BACKEND: AgentBackendId = 'claude'
@@ -336,7 +391,92 @@ export const DEFAULT_AGENT_BACKEND: AgentBackendId = 'claude'
  * Record<AgentBackendId, string> 이므로 유니온에 백엔드를 추가하면 컴파일 에러로 잡힌다.
  */
 export const AGENT_BACKEND_LABELS: Record<AgentBackendId, string> = {
-  claude: 'Claude Code'
+  claude: 'Claude Code',
+  codex: 'Codex'
+}
+
+/**
+ * 백엔드가 지원하는 선택 기능 집합. 오케스트레이터는 이 값으로 호출을 가드하고,
+ * 렌더러는 명령·버튼 노출 여부를 판단한다.
+ */
+export interface AgentCapabilities {
+  /** /btw 사이드 질문 */
+  sideQuestion: boolean
+  /** /rewind 파일 체크포인트 되돌리기 */
+  rewind: boolean
+  /** /mcp 서버 패널 + 재연결/활성화 동작 */
+  mcp: boolean
+  /** reasoning effort 단계 선택 */
+  effort: boolean
+  /** fast mode(`/fast`) — 같은 모델을 더 빠른 출력 속도로 돌린다(Claude Code 전용). */
+  fastMode: boolean
+  /**
+   * 이 백엔드가 실제로 답할 수 있는 인터랙티브 명령 패널의 종류(/context·/usage·/mcp 등).
+   *
+   * 불리언이 아니라 목록인 이유: 백엔드마다 지원 범위가 다르다(Codex 는 /context·/usage 는
+   * 되지만 /rewind·/agents 는 없다). 불리언이면 입력창이 지원하지 않는 명령까지 자동완성에
+   * 띄우고, 사용자가 실행하면 에러 토스트가 뜬다.
+   */
+  interactiveCommands: CommandPanelKind[]
+  /** 슬래시 명령 자동완성 */
+  slashCommands: boolean
+  /** 턴이 도는 중에도 입력을 밀어 넣을 수 있는지(Codex 의 turn/steer). false 면 큐잉 후 다음 턴. */
+  steering: boolean
+  /** 앱 안에서 로그인/로그아웃을 끝낼 수 있는지. false 면 외부 터미널 안내. */
+  inAppLogin: boolean
+  /** 플랜 사용량·rate limit 조회 지원 여부. */
+  rateLimits: boolean
+}
+
+/**
+ * 백엔드 1개의 식별·표시·선택지·capabilities. main 이 소유하고 IPC 로 렌더러에 내려 준다
+ * (`IPC.agentListBackends`) — 렌더러는 이 값만 보고 모델·effort·권한 모드 UI 를 그린다.
+ */
+export interface AgentBackendMeta {
+  id: AgentBackendId
+  /** 사용자에게 보여 줄 이름(예: "Claude Code"). */
+  label: string
+  /** 이 백엔드의 기본 모델 ID. null 이면 백엔드/CLI 기본값을 따른다. */
+  defaultModel: string | null
+  /** 권한 모드 선택지. 배열 순서가 shift+tab 순환 순서다. */
+  permissionModes: PermissionModeInfo[]
+  /** 워크스페이스·전역 설정이 값을 지정하지 않았을 때의 권한 모드. */
+  defaultPermissionMode: PermissionMode
+  /** reasoning effort 선택지(모델별로 좁혀질 수 있다 — ModelOption.efforts 참고). */
+  efforts: EffortOptionInfo[]
+  capabilities: AgentCapabilities
+  /**
+   * 지금 이 백엔드를 실제로 쓸 수 있는지(CLI 설치 + 최소 버전 충족). 런타임에 계산된다.
+   * false 면 새 워크스페이스 피커에서 감추고, 이미 만들어진 워크스페이스에는 안내 배너를 띄운다.
+   */
+  available: boolean
+  /** available=false 인 이유(설치 안내·업그레이드 안내 등 사용자 표시용). */
+  unavailableReason?: string
+}
+
+/**
+ * 저장된 권한 모드를 이 백엔드가 실제로 지원하는 값으로 보정한다.
+ *
+ * 전역 기본값·마이그레이션·백엔드 전환 때문에 백엔드가 모르는 모드가 흘러들 수 있다
+ * (예: Codex 워크스페이스에 Claude 의 'acceptEdits'). 그대로 넘기면 CLI 가 거부하거나 조용히
+ * 엉뚱하게 동작하므로, 지원 목록에 없으면 그 백엔드의 기본 모드로 떨어뜨린다.
+ */
+export function normalizePermissionMode(
+  meta: Pick<AgentBackendMeta, 'permissionModes' | 'defaultPermissionMode'>,
+  mode: PermissionMode | null | undefined
+): PermissionMode {
+  if (mode && meta.permissionModes.some((m) => m.id === mode)) return mode
+  return meta.defaultPermissionMode
+}
+
+/** 목록 안에서 다음 권한 모드로 순환한다(shift+tab). 목록에 없으면 첫 항목부터. */
+export function nextPermissionMode(
+  modes: PermissionModeInfo[],
+  mode: PermissionMode
+): PermissionMode {
+  if (modes.length === 0) return mode
+  const i = modes.findIndex((m) => m.id === mode)
+  return modes[(i + 1) % modes.length].id
 }
 
 /**
@@ -417,7 +557,10 @@ export interface Workspace {
    * 'idle' = 아직 완료된 실행 없음, 'success' = 마지막 실행이 exit 0, 'failed' = 그 외로 종료.
    */
   setupState: SetupState
-  /** resume 용 Claude 세션 ID. 아직 세션을 시작하지 않았으면 null. */
+  /**
+   * resume 용 세션 ID. 백엔드마다 의미가 다르지만 역할은 같다 —
+   * Claude Code 의 session id, Codex 의 thread id. 아직 세션을 시작하지 않았으면 null.
+   */
   sessionId: string | null
   permissionMode: PermissionMode
   status: WorkspaceStatus
@@ -484,13 +627,17 @@ export const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettings = {
   needsInput: { osNotification: true, sound: false, badge: true }
 }
 
-export interface AppSettings {
-  defaultPermissionMode: PermissionMode
-  /** 사용할 모델 ID (예: "claude-opus-4-8[1m]"). */
+/**
+ * 백엔드 1개의 전역 기본값. 모델 ID·권한 모드가 백엔드마다 다르므로 하나의 전역 값으로는
+ * 백엔드를 오갈 때 항상 어긋난다 — 그래서 백엔드별로 따로 기억한다.
+ * 각 값이 null 이면 백엔드 메타의 기본값(defaultModel·defaultPermissionMode)을 따른다.
+ */
+export interface AgentSettings {
+  /** 사용할 모델 ID (예: "claude-opus-4-8[1m]", "gpt-5.5"). */
   model: string | null
   /**
-   * 새 turn 에 적용할 기본 reasoning effort. null 이면 effort 를 지정하지 않아 모델의 기본 동작
-   * (대략 'high' + adaptive thinking)을 따른다. workspace 가 자체 effort 를 지정하면 그 값이 우선한다.
+   * 새 turn 에 적용할 기본 reasoning effort. null 이면 effort 를 지정하지 않아 모델의 기본 동작을
+   * 따른다. workspace 가 자체 effort 를 지정하면 그 값이 우선한다.
    */
   effort: EffortSetting | null
   /**
@@ -498,6 +645,34 @@ export interface AppSettings {
    * 속도로 돌린다(지원 모델·유료 플랜 필요). workspace 가 자체 값을 지정하면 그 값이 우선한다.
    */
   fastMode: boolean
+  /** 새 워크스페이스의 기본 권한 모드. null 이면 백엔드의 defaultPermissionMode. */
+  permissionMode: PermissionMode | null
+}
+
+/** 백엔드별 기본값의 초기 상태(모두 "백엔드 기본을 따름"). */
+export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
+  model: null,
+  effort: null,
+  permissionMode: null,
+  fastMode: false
+}
+
+/**
+ * 백엔드 하나의 전역 기본값을 꺼낸다. 저장된 설정에 해당 백엔드 항목이 없어도(구버전에서
+ * 마이그레이션됐거나 백엔드가 나중에 추가됨) 안전한 기본값을 돌려준다.
+ */
+export function agentSettingsFor(settings: AppSettings, id: AgentBackendId): AgentSettings {
+  return settings.agents?.[id] ?? DEFAULT_AGENT_SETTINGS
+}
+
+export interface AppSettings {
+  /**
+   * 새 워크스페이스가 기본으로 쓸 에이전트 백엔드. 사용자가 두 에이전트를 모두 보유했을 때만
+   * 의미가 있으며, 하나뿐이면 그 하나로 자동 해석된다.
+   */
+  defaultAgentBackend: AgentBackendId
+  /** 백엔드별 전역 기본값(모델·effort·권한 모드). */
+  agents: Record<AgentBackendId, AgentSettings>
   /** UI 색상 테마(다크 기본). */
   theme: ThemePreference
   /**
@@ -592,19 +767,27 @@ export type ChatItem =
       isError: boolean
       durationMs: number
       numTurns: number
-      costUsd: number
+      /** 턴 원가(USD). 백엔드가 원가를 알려 주지 않으면(Codex) 생략되고 UI 도 감춘다. */
+      costUsd?: number
       ts: number
     }
   | { id: string; type: 'error'; text: string; ts: number }
   | { id: string; type: 'system'; text: string; ts: number }
   /**
-   * 입력창의 `!명령` (Claude Code CLI bash 모드) 1회 실행.
+   * 명령 1회 실행 카드. 두 가지 출처를 같은 모양으로 그린다:
+   * - 사용자의 `!명령` (Claude Code CLI bash 모드) — `agent` 없음
+   * - 에이전트가 샌드박스에서 실행한 셸 명령 (Codex 의 commandExecution) — `agent: true`
+   *
    * 우측 터미널 패널이 아니라 대화 흐름 안에 인라인으로 명령과 출력을 보여 준다 — id 기준
    * upsert 로 실행 중에는 출력이 자라고, 끝나면 running:false + 종료 코드로 확정된다.
    */
   | {
       id: string
       type: 'bash'
+      /** 에이전트가 실행한 명령이면 true(도구 카드 스타일로 렌더). 사용자의 `!명령` 이면 생략. */
+      agent?: true
+      /** 실행 디렉터리. 워크스페이스 루트와 다를 때만 표시한다. */
+      cwd?: string
       /** 사용자가 입력한 명령(앞의 "!" 는 떼어 낸 본문). */
       command: string
       /** stdout+stderr 누적(앞에서 절사된 tail 일 수 있음). */
@@ -708,6 +891,27 @@ export interface PermissionRequest {
   displayName?: string
   input: Record<string, unknown>
   decisionReason?: string
+  /**
+   * 요청의 성격. 프롬프트 렌더링을 가른다(명령은 명령 줄, 파일 변경은 diff, 질문은 선택지 UI).
+   * 없으면 'tool' 로 간주한다 — 기존 Claude 경로와 저장된 트랜스크립트 호환.
+   */
+  kind?: 'tool' | 'command' | 'fileChange' | 'question'
+  /** kind==='fileChange' 일 때 제안된 통합 diff. DiffView 로 그대로 보여 준다. */
+  diff?: string
+  /**
+   * 백엔드가 이 요청에 대해 제공하는 결정 선택지. 없으면 UI 는 기본 Allow/Deny 를 그린다.
+   * Codex 는 여기에 accept / acceptForSession / decline 등을 그대로 실어 보낸다.
+   */
+  options?: PermissionOption[]
+}
+
+/** 승인 프롬프트가 그리는 버튼 1개. `id` 는 백엔드가 해석하는 불투명 값이다. */
+export interface PermissionOption {
+  id: string
+  label: string
+  behavior: 'allow' | 'deny'
+  /** 이 선택이 세션 동안 같은 종류를 자동 승인하는지(버튼 강조·설명에 사용). */
+  rememberForSession?: boolean
 }
 
 export type PermissionDecision =
@@ -720,8 +924,10 @@ export type PermissionDecision =
        * 없으면 원래 입력을 그대로 사용한다.
        */
       updatedInput?: Record<string, unknown>
+      /** 사용자가 고른 `PermissionRequest.options` 의 id. 백엔드 고유 결정지를 그대로 되돌린다. */
+      optionId?: string
     }
-  | { behavior: 'deny' }
+  | { behavior: 'deny'; optionId?: string }
 
 // ── 스크립트 실행 (setup / dev) ──────────────────────────────────────────
 
@@ -903,6 +1109,13 @@ export const IPC = {
   workspaceSetEffort: 'workspace:setEffort',
   /** fast mode(`/fast`) 오버라이드 — null 이면 전역 설정을 따른다. */
   workspaceSetFastMode: 'workspace:setFastMode',
+  /**
+   * 등록된 에이전트 백엔드의 메타(라벨·권한 모드·effort 선택지·capabilities·가용성) 목록.
+   * 렌더러는 모델/effort/권한 모드 UI 를 이 값으로 그린다.
+   */
+  agentListBackends: 'agent:listBackends',
+  /** 백엔드의 모델 선택지. Codex 는 app-server 의 model/list 를 조회하므로 비동기·동적이다. */
+  agentListModels: 'agent:listModels',
   /** 워크스페이스별 알림 음소거 토글. */
   workspaceSetMuted: 'workspace:setMuted',
   workspaceRename: 'workspace:rename',
@@ -961,6 +1174,14 @@ export const IPC = {
   authClaudeLoginCancel: 'auth:claudeLoginCancel',
   authClaudeLogout: 'auth:claudeLogout',
   /** 앱 내부 PTY 에서 `gh auth login --web` 을 시작한다(별도 Terminal 창 없이). */
+  /** Codex 로그인 시작. 'chatgpt' 는 브라우저 OAuth, 'apiKey' 는 직접 입력. */
+  authCodexLoginStart: 'auth:codexLoginStart',
+  /** 진행 중인 Codex 브라우저 로그인을 취소한다(모달 닫기). */
+  authCodexLoginCancel: 'auth:codexLoginCancel',
+  authCodexLogout: 'auth:codexLogout',
+  /** Codex 플랜 사용량(rate limit) 조회. */
+  authCodexRateLimits: 'auth:codexRateLimits',
+
   authGithubLoginStart: 'auth:githubLoginStart',
   /** 진행 중인 GitHub 로그인 PTY 를 취소·종료한다(모달 닫기). */
   authGithubLoginCancel: 'auth:githubLoginCancel',
@@ -1032,6 +1253,13 @@ export const IPC = {
   evtTerminalExit: 'evt:terminalExit',
   /** 앱 내부 Claude 로그인 진행 이벤트(인증 URL 노출 / 코드 입력 요청 / 완료). */
   evtClaudeLogin: 'evt:claudeLogin',
+  /** 앱 내부 Codex 로그인 진행 이벤트(브라우저 인증 URL 노출 / 완료). */
+  evtCodexLogin: 'evt:codexLogin',
+  /**
+   * 에이전트 계정 상태가 앱 밖에서 바뀌었다는 신호(예: Codex 의 account/updated).
+   * 렌더러가 인증 상태를 다시 읽도록 트리거한다.
+   */
+  evtAuthChanged: 'evt:authChanged',
   /** 앱 내부 GitHub 로그인 진행 이벤트(one-time 코드·디바이스 URL 노출 / 완료). */
   evtGithubLogin: 'evt:githubLogin',
   /** 자동 업데이트 상태 변화(확인 중/최신/발견/다운로드 진행/준비됨/오류). */
@@ -1096,25 +1324,45 @@ export interface CreateWorkspaceArgs {
    * (base = 부모의 branch). 없거나 null 이면 기본 브랜치에서 분기한 스택 뿌리로 만든다.
    */
   parentWorkspaceId?: string | null
+  /**
+   * 이 워크스페이스를 구동할 에이전트. 생성 시 한 번 정해져 세션 내내 고정된다.
+   * 생략하면 전역 기본 백엔드(AppSettings.defaultAgentBackend)를 쓴다.
+   */
+  agentBackend?: AgentBackendId
 }
 
-// ── 외부 연동 인증 상태 (Claude / GitHub) ────────────────────────────────
+// ── 외부 연동 인증 상태 (에이전트들 / GitHub) ────────────────────────────
 
-export interface ClaudeAuthStatus {
-  /** `claude` CLI 가 PATH 에 설치돼 있는지. 미설치면 loggedIn 도 항상 false. */
+/**
+ * 에이전트 백엔드 1개의 CLI 설치·로그인 상태. Claude Code 와 Codex 가 같은 모양을 쓴다 —
+ * 통합 패널·온보딩이 백엔드를 몰라도 같은 행을 그릴 수 있게 하기 위함이다.
+ */
+export interface AgentAuthStatus {
+  /** CLI(`claude` / `codex`)가 PATH 에 설치돼 있는지. 미설치면 loggedIn 도 항상 false. */
   installed: boolean
   loggedIn: boolean
+  /** 감지된 CLI 버전(예: "0.146.0"). 최소 버전 미달 안내에 쓴다. */
+  version?: string
   email?: string
+  /** 조직/워크스페이스 이름(Claude 의 orgName). */
   orgName?: string
-  subscriptionType?: string
+  /** 구독/플랜 종류(Claude 의 subscriptionType, Codex 의 planType). */
+  planType?: string
+  /** 인증 방식(Claude 의 authMethod, Codex 의 chatgpt / apiKey 등). */
   authMethod?: string
   /**
-   * 에이전트 프로세스 환경에 ANTHROPIC_API_KEY/ANTHROPIC_AUTH_TOKEN 이 설정돼 있는지.
-   * 있으면 아래 계정 로그인과 무관하게 에이전트가 그 키로 인증·과금하므로(구독이 아니라),
-   * 패널이 이 불일치를 알려 "로그아웃했는데 왜 계속 되지 / 왜 구독이 아니라 API 과금이지" 혼선을 막는다.
+   * 에이전트 프로세스 환경에 API 키가 설정돼 있는지
+   * (Claude: ANTHROPIC_API_KEY/ANTHROPIC_AUTH_TOKEN). 있으면 계정 로그인과 무관하게 그 키로
+   * 인증·과금하므로, 패널이 이 불일치를 알려 "로그아웃했는데 왜 계속 되지 / 왜 구독이 아니라
+   * API 과금이지" 혼선을 막는다.
    */
   apiKeyInEnv?: boolean
+  /** 상태 조회가 실패한 이유(설치는 됐지만 CLI 가 오류를 낸 경우 등). */
+  error?: string
 }
+
+/** @deprecated `AgentAuthStatus` 로 통합됨. 기존 참조 호환을 위한 별칭. */
+export type ClaudeAuthStatus = AgentAuthStatus
 
 export interface GithubAuthStatus {
   /** `gh` CLI 가 PATH 에 설치돼 있는지. 미설치면 loggedIn 도 항상 false. */
@@ -1125,8 +1373,19 @@ export interface GithubAuthStatus {
 }
 
 export interface AuthStatus {
-  claude: ClaudeAuthStatus
+  /**
+   * 백엔드별 에이전트 인증 상태. 등록된 백엔드 전부에 대해 채워진다.
+   * 온보딩은 "이 중 하나라도 loggedIn" 이면 통과시킨다 — Claude 만, 또는 Codex 만 가진
+   * 사용자도 앱을 쓸 수 있어야 하기 때문이다.
+   */
+  agents: Record<AgentBackendId, AgentAuthStatus>
   github: GithubAuthStatus
+}
+
+/** 에이전트 하나라도 로그인돼 있는지(온보딩·빈 상태 게이트의 단일 판단 함수). */
+export function hasAnyAgent(status: AuthStatus | null): boolean {
+  if (!status) return false
+  return Object.values(status.agents).some((a) => a.installed && a.loggedIn)
 }
 
 // ── GitHub PR 상태 (workspace 브랜치 기준) ───────────────────────────────
@@ -1464,6 +1723,40 @@ export interface TerminalExitEvent {
  */
 export type ClaudeLoginEvent =
   { phase: 'awaiting-code'; url?: string; reprompt?: boolean } | { phase: 'done'; success: boolean }
+
+/** Codex 로그인 방식. ChatGPT 구독은 브라우저 OAuth, 그 외는 OpenAI API 키 직접 입력. */
+export type CodexLoginMethod = 'chatgpt' | 'apiKey'
+
+/**
+ * 앱 내부 Codex 로그인 진행 이벤트.
+ *
+ * Claude·GitHub 과 달리 코드를 받아 되돌려 줄 필요가 없다 — codex app-server 가 OAuth 콜백
+ * 서버까지 직접 호스팅하므로, 우리는 URL 을 열어 주고 완료를 기다리기만 하면 된다.
+ * - awaiting-browser: 브라우저에서 인증 중. url 은 브라우저가 안 열렸을 때의 폴백 링크.
+ * - done: 종료됨. success 면 성공, 아니면 error 에 사유.
+ */
+export type CodexLoginEvent =
+  { phase: 'awaiting-browser'; url: string } | { phase: 'done'; success: boolean; error?: string }
+
+/** ChatGPT 플랜 사용량 창 하나(5시간·주간 등). */
+export interface RateLimitWindow {
+  /** 이 창에서 쓴 비율(0~100). */
+  usedPercent?: number
+  /** 창 길이(분). */
+  windowDurationMins?: number
+  /** 다음 초기화 시각(Unix 초). */
+  resetsAt?: number
+}
+
+/**
+ * 에이전트 플랜의 사용량 스냅샷. 현재는 Codex(ChatGPT 플랜)만 채우지만 모양은 일반적이다 —
+ * API 키로 인증했거나 조회 불가면 null 이 온다.
+ */
+export interface AgentRateLimits {
+  primary?: RateLimitWindow | null
+  secondary?: RateLimitWindow | null
+  rateLimitReachedType?: string | null
+}
 
 /**
  * 앱 내부 GitHub 로그인(디바이스 플로우) 진행 이벤트.

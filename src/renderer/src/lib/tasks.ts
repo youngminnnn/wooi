@@ -32,8 +32,18 @@ export interface TaskEntry {
   activeForm?: string
 }
 
+/**
+ * 목록 전체를 한 번에 주는 스냅샷형 도구.
+ *
+ * Claude 의 할 일 도구는 항목을 하나씩 쌓는 증분형이라 이 모듈이 트랜스크립트를 되짚어 목록을
+ * 복원하지만, Codex 의 플랜(`turn/plan/updated`)은 매번 **전체 목록**을 준다. 그래서 매핑 계층이
+ * 이 이름으로 실어 보내고(main 의 codex/mapping.ts), 여기서는 목록을 통째로 교체한다 —
+ * 체크리스트 렌더러 자체는 두 백엔드가 그대로 공유한다.
+ */
+const SNAPSHOT_TOOLS = new Set(['TaskSnapshot'])
+
 /** 목록을 바꾸는 도구. 이 중 하나라도 있어야 구간이 체크리스트로 승격된다. */
-const MUTATING_TOOLS = new Set(['TaskCreate', 'TaskUpdate'])
+const MUTATING_TOOLS = new Set(['TaskCreate', 'TaskUpdate', ...SNAPSHOT_TOOLS])
 /**
  * 목록을 읽기만 하는 도구. 체크리스트가 같은 정보를 더 잘 보여 주므로 구간에 섞여 있으면 함께
  * 감춘다. 구간을 끊지 않게 두는 것이 중요하다 — 도구 설명이 "TaskUpdate 전에 TaskGet 으로
@@ -111,7 +121,18 @@ export function buildTaskCards(items: readonly ChatItem[]): TaskCards {
     if (item.type === 'tool_use' && isTaskListTool(item.name)) {
       taskToolIds.add(item.toolId)
       runItemIds.push(item.id)
-      if (item.name === 'TaskCreate') {
+      if (SNAPSHOT_TOOLS.has(item.name)) {
+        // 스냅샷은 목록을 통째로 대체한다. 증분형에서 쓰던 색인(번호 ↔ 항목)은 의미가 없어지므로
+        // 함께 비운다 — 남겨 두면 이후 TaskUpdate 가 사라진 항목을 고치려 들 수 있다.
+        const snapshot = tasksFromSnapshot(item.input)
+        if (snapshot) {
+          order.length = 0
+          order.push(...snapshot)
+          byId.clear()
+          draftByToolId.clear()
+          runMutated = true
+        }
+      } else if (item.name === 'TaskCreate') {
         // 번호는 결과로 와야 알 수 있지만, 카드는 지금 바로 보여 준다(실행 중 라이브 갱신).
         const draft = draftFromCreate(item.input)
         if (draft) {
@@ -155,6 +176,30 @@ export function buildTaskCards(items: readonly ChatItem[]): TaskCards {
 }
 
 /** TaskCreate 입력에서 새 항목을 만든다(도구 규약상 항상 pending 으로 시작한다). */
+/**
+ * 스냅샷형 도구 입력을 목록으로 바꾼다. 모양이 어긋나면 null 을 돌려 이전 목록을 유지한다 —
+ * 파싱 실패로 화면의 체크리스트가 통째로 사라지는 것보다 낫다.
+ */
+function tasksFromSnapshot(input: unknown): TaskEntry[] | null {
+  if (!input || typeof input !== 'object') return null
+  const { tasks } = input as Record<string, unknown>
+  if (!Array.isArray(tasks)) return null
+
+  const entries: TaskEntry[] = []
+  for (const raw of tasks) {
+    if (!raw || typeof raw !== 'object') continue
+    const { subject, status } = raw as Record<string, unknown>
+    if (typeof subject !== 'string' || !subject) continue
+    entries.push({
+      // 스냅샷에는 도구가 부여한 번호가 없다. 증분형 갱신의 대상이 되지 않으므로 빈 값으로 둔다.
+      id: '',
+      subject,
+      status: status === 'in_progress' || status === 'completed' ? status : 'pending'
+    })
+  }
+  return entries
+}
+
 function draftFromCreate(input: unknown): TaskEntry | null {
   if (!input || typeof input !== 'object') return null
   const { subject, activeForm } = input as Record<string, unknown>

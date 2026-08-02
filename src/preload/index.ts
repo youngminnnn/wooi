@@ -179,7 +179,9 @@ const api: WooiApi = {
   onWindowFocus: (cb) => subscribe(IPC.evtWindowFocus, () => cb()),
   onWindowBlur: (cb) => subscribe(IPC.evtWindowBlur, () => cb()),
   onClaudeLogin: (cb) => subscribe(IPC.evtClaudeLogin, cb),
+  onCodexLogin: (cb) => subscribe(IPC.evtCodexLogin, cb),
   onGithubLogin: (cb) => subscribe(IPC.evtGithubLogin, cb),
+  onAuthChanged: (cb) => subscribe(IPC.evtAuthChanged, cb),
   onUpdate: (cb) => subscribe(IPC.evtUpdate, cb),
   onNotice: (cb) => subscribe(IPC.evtNotice, cb)
 }

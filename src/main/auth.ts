@@ -1,8 +1,9 @@
 import { spawn } from 'node:child_process'
 import * as pty from 'node-pty'
 import { IPC } from '@shared/types'
-import type { AuthStatus, ClaudeAuthStatus, GithubAuthStatus } from '@shared/types'
+import type { AgentAuthStatus, AuthStatus, GithubAuthStatus } from '@shared/types'
 import { log } from './logger'
+import { runLoginShell, isInstalled } from './shell'
 import { setGithubConnected } from './github'
 
 /**
@@ -27,47 +28,10 @@ function stripAnsi(s: string): string {
   return s.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '').replace(/\x1b\][^\x07]*\x07/g, '')
 }
 
-function runLoginShell(
-  command: string
-): Promise<{ stdout: string; stderr: string; code: number | null }> {
-  return new Promise((resolve) => {
-    const shell = process.env.SHELL || '/bin/zsh'
-    const proc = spawn(shell, ['-lc', command])
-    let stdout = ''
-    let stderr = ''
-    proc.stdout.on('data', (d: Buffer) => (stdout += d.toString()))
-    proc.stderr.on('data', (d: Buffer) => (stderr += d.toString()))
-    proc.on('error', (err) => {
-      log.error(`auth: failed to spawn login shell (${shell})`, err)
-      resolve({ stdout, stderr, code: 1 })
-    })
-    proc.on('close', (code) => resolve({ stdout, stderr, code }))
-  })
-}
-
 function openInTerminal(command: string): void {
   const escaped = command.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
   const script = `tell application "Terminal"\nactivate\ndo script "${escaped}"\nend tell`
   spawn('osascript', ['-e', script])
-}
-
-// 미탐지 진단을 명령당 1회만 남기기 위한 가드(인증 폴링이 짧은 주기로 반복 호출하므로).
-const diagnosed = new Set<string>()
-
-/** CLI 가 PATH 에 있는지 확인한다. 미설치와 "설치됐지만 미로그인"을 구분하기 위함이다. */
-async function isInstalled(command: 'claude' | 'gh'): Promise<boolean> {
-  const { code } = await runLoginShell(`command -v ${command}`)
-
-  // 미탐지 시 진단 정보를 1회 기록한다 — GUI 로 띄운 앱의 PATH 에 CLI 가 안 잡혀
-  // "설치됐는데 미설치로 보이는" 흔한 사례를 로그로 가려내기 위함이다.
-  if (code !== 0 && !diagnosed.has(command)) {
-    diagnosed.add(command)
-    const shell = process.env.SHELL || '/bin/zsh'
-    const { stdout: path } = await runLoginShell('echo "$PATH"')
-    log.warn(`auth: ${command} not found via ${shell} -lc; PATH=${path.trim()}`)
-  }
-
-  return code === 0
 }
 
 /**
@@ -80,7 +44,7 @@ function apiKeyInEnv(): boolean {
   return Boolean(process.env.ANTHROPIC_API_KEY?.trim() || process.env.ANTHROPIC_AUTH_TOKEN?.trim())
 }
 
-async function getClaudeStatus(): Promise<ClaudeAuthStatus> {
+async function getClaudeStatus(): Promise<AgentAuthStatus> {
   if (!(await isInstalled('claude'))) return { installed: false, loggedIn: false }
 
   const { stdout, code } = await runLoginShell('claude auth status --json')
@@ -92,7 +56,7 @@ async function getClaudeStatus(): Promise<ClaudeAuthStatus> {
       loggedIn: Boolean(json.loggedIn),
       email: json.email as string | undefined,
       orgName: json.orgName as string | undefined,
-      subscriptionType: json.subscriptionType as string | undefined,
+      planType: json.subscriptionType as string | undefined,
       authMethod: json.authMethod as string | undefined,
       apiKeyInEnv: apiKeyInEnv()
     }
@@ -121,9 +85,43 @@ async function getGithubStatus(): Promise<GithubAuthStatus> {
   return { installed: true, loggedIn: true, account, protocol }
 }
 
+/**
+ * Codex 상태 조회기. main(index.ts)이 오케스트레이터를 만든 뒤 주입한다.
+ *
+ * 로그인 여부는 app-server 의 `account/read` 가 정본이다 — 자격증명이 OS 키체인에 있을 수 있어
+ * 파일 존재로는 판단할 수 없다. 그 연결은 codex-host 가 소유하므로 여기서 직접 부르지 않고,
+ * 백엔드가 넘겨준 함수를 통해 묻는다(auth.ts 가 에이전트 구현에 의존하지 않도록).
+ */
+let codexStatusProvider: (() => Promise<AgentAuthStatus>) | null = null
+
+export function setCodexStatusProvider(provider: () => Promise<AgentAuthStatus>): void {
+  codexStatusProvider = provider
+}
+
+async function getCodexStatus(): Promise<AgentAuthStatus> {
+  // 미설치면 호스트를 띄울 필요조차 없다(설치 안내만 띄우면 된다).
+  if (!(await isInstalled('codex'))) return { installed: false, loggedIn: false }
+  if (!codexStatusProvider) return { installed: true, loggedIn: false }
+
+  try {
+    return await codexStatusProvider()
+  } catch (err) {
+    log.error('auth: codex status query failed', err)
+    return {
+      installed: true,
+      loggedIn: false,
+      error: err instanceof Error ? err.message : String(err)
+    }
+  }
+}
+
 export async function getAuthStatus(): Promise<AuthStatus> {
-  const [claude, github] = await Promise.all([getClaudeStatus(), getGithubStatus()])
-  return { claude, github }
+  const [claude, codex, github] = await Promise.all([
+    getClaudeStatus(),
+    getCodexStatus(),
+    getGithubStatus()
+  ])
+  return { agents: { claude, codex }, github }
 }
 
 /**

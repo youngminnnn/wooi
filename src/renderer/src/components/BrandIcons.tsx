@@ -25,6 +25,16 @@ export function ClaudeMark({ size = 18 }: { size?: number }): React.JSX.Element 
   )
 }
 
+export function CodexMark({ size = 18 }: { size?: number }): React.JSX.Element {
+  // OpenAI 를 연상시키는 고리 형태. 단색이라 라이트/다크 어디서든 읽힌다.
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-label="Codex">
+      <circle cx="8" cy="8" r="6.2" stroke="currentColor" strokeWidth="1.6" opacity="0.9" />
+      <circle cx="8" cy="8" r="2.1" fill="currentColor" />
+    </svg>
+  )
+}
+
 export function GithubMark({ size = 18 }: { size?: number }): React.JSX.Element {
   return (
     <svg width={size} height={size} viewBox="0 0 16 16" fill="currentColor" aria-label="GitHub">
@@ -42,7 +52,8 @@ export function GithubMark({ size = 18 }: { size?: number }): React.JSX.Element 
  * (이름은 도메인 쪽 AGENT_BACKEND_LABELS 가 같은 방식으로 보장한다.)
  */
 const BACKEND_MARKS: Record<AgentBackendId, (props: { size?: number }) => React.JSX.Element> = {
-  claude: ClaudeMark
+  claude: ClaudeMark,
+  codex: CodexMark
 }
 
 export function AgentBackendMark({

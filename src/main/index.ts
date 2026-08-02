@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { IPC } from '@shared/types'
 import { applyDevPaths, isDevIsolated, wooiHome } from './paths'
 import { AgentOrchestrator } from './agent/orchestrator'
+import { setCodexStatusProvider } from './auth'
 import { ScriptRunner } from './scripts'
 import { getStore } from './store'
 import { TerminalManager } from './terminal'
@@ -47,6 +48,13 @@ function dispatch(channel: string, payload: unknown): void {
 }
 
 const sessions = new AgentOrchestrator(dispatch, () => mainWindow)
+// Codex 의 로그인 상태는 app-server 만 정확히 안다(자격증명이 OS 키체인에 있을 수 있다).
+// auth 계층이 에이전트 구현에 의존하지 않도록, 조회 함수만 주입해 준다.
+setCodexStatusProvider(async () => {
+  const codex = sessions.accountFor('codex')
+  if (!codex?.accountStatus) return { installed: true, loggedIn: false }
+  return codex.accountStatus()
+})
 // setup 스크립트가 끝나면 결과를 workspace 에 영속하고 상태를 방송한다 — 재시작 후에도 성공한
 // setup 은 재실행 버튼을 노출하지 않고, 실패했을 때만 Retry 를 보여 주기 위한 것.
 const scripts = new ScriptRunner(dispatch, (workspaceId, kind, code) => {
@@ -108,6 +116,15 @@ function createWindow(): void {
 
   mainWindow.webContents.on('did-fail-load', (_e, code, desc) => {
     log.error(`renderer load failed: ${code} ${desc}`)
+  })
+
+  // 렌더러의 에러·경고를 메인 로그로 넘긴다. 렌더러가 React 에러로 통째로 언마운트되면 화면은
+  // 비어 버리는데, 그 원인은 DevTools 콘솔에만 남아 로그만 봐서는 "앱은 정상 기동"으로 보인다.
+  // 이 한 줄이 "아무것도 안 뜬다" 류의 문제를 로그에서 바로 짚을 수 있게 해 준다.
+  mainWindow.webContents.on('console-message', (e) => {
+    if (e.level === 'error' || e.level === 'warning') {
+      log.error(`renderer console [${e.level}] ${e.message} (${e.sourceId}:${e.lineNumber})`)
+    }
   })
 
   // 외부 링크(window.open / target=_blank)는 기본 브라우저로.

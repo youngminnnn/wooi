@@ -1,7 +1,9 @@
+import { normalizePermissionMode } from '@shared/types'
 import type {
   ChatEvent,
   ChatItem,
   CommandPanelKind,
+  EffortLevel,
   EffortSetting,
   ImageAttachment,
   McpAction,
@@ -9,6 +11,7 @@ import type {
   PermissionMode,
   PermissionRequest
 } from '@shared/types'
+import { CLAUDE_META } from '../agent/backend'
 
 /**
  * main ↔ agent-host(유틸리티 프로세스) 메시지 프로토콜.
@@ -22,6 +25,38 @@ import type {
  * 필요한 모든 것을 이 프로토콜로 메인에 위임한다(persist·event·sessionId·permissionRequest).
  */
 
+/**
+ * Claude Code 가 이해하는 권한 모드만 추린 부분집합.
+ *
+ * 공용 `PermissionMode` 는 모든 백엔드의 모드를 합친 유니온이라 Codex 전용 값('readOnly' 등)이
+ * 섞여 있다. 그런 값이 Agent SDK 로 새면 CLI 가 거부하거나 조용히 엉뚱하게 동작하므로, 호스트로
+ * 넘어가는 경계에서 타입으로 못 박는다 — 변환은 아래 `claudeMode()` 한 곳에서만 일어난다.
+ */
+export type ClaudePermissionMode = Extract<
+  PermissionMode,
+  'default' | 'acceptEdits' | 'plan' | 'auto'
+>
+
+/** Claude Agent SDK 가 받는 effort 단계(Codex 전용 'minimal' 제외). */
+export type ClaudeEffortLevel = Exclude<EffortLevel, 'minimal'>
+
+/** 임의의 권한 모드를 Claude 가 아는 값으로 좁힌다. 모르는 값은 Claude 기본 모드로 떨어진다. */
+export function claudeMode(mode: PermissionMode | null | undefined): ClaudePermissionMode {
+  // CLAUDE_META.permissionModes 로 걸러진 값이므로 이 단언은 안전하다.
+  return normalizePermissionMode(CLAUDE_META, mode) as ClaudePermissionMode
+}
+
+/**
+ * effort 선택값을 SDK 의 effort 옵션으로 좁힌다.
+ * - 'ultracode' 는 effort 가 아니라 별도 모드라 여기서는 null(별도 경로로 전달)
+ * - Codex 전용 'minimal' 은 Claude 의 최저 단계인 'low' 로 환산(사용자 의도="가장 빠르게" 보존)
+ * - null 이면 지정하지 않아 모델 기본 동작을 따른다
+ */
+export function claudeEffort(effort: EffortSetting | null | undefined): ClaudeEffortLevel | null {
+  if (!effort || effort === 'ultracode') return null
+  return effort === 'minimal' ? 'low' : effort
+}
+
 /** 세션을 만들 때 필요한 설정. 메인이 store 에서 계산해 명령과 함께 호스트로 보낸다. */
 export interface SessionConfig {
   cwd: string
@@ -31,7 +66,7 @@ export interface SessionConfig {
   effort: EffortSetting | null
   /** fast mode(`/fast`) 사용 여부. true 면 settings 레이어로 fastMode 를 켜서 query 를 연다. */
   fastMode: boolean
-  permissionMode: PermissionMode
+  permissionMode: ClaudePermissionMode
   autoCompact: boolean
   resumeSessionId: string | null
 }
@@ -52,7 +87,7 @@ export type HostCommand =
       images?: ImageAttachment[]
     }
   | { type: 'interrupt'; workspaceId: string }
-  | { type: 'setPermissionMode'; workspaceId: string; mode: PermissionMode }
+  | { type: 'setPermissionMode'; workspaceId: string; mode: ClaudePermissionMode }
   | { type: 'dispose'; workspaceId: string }
   | { type: 'disposeAll' }
   | {

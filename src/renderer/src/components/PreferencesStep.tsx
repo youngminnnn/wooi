@@ -2,8 +2,10 @@ import { useState } from 'react'
 import { PanelRight, PanelRightClose } from 'lucide-react'
 import { useStore } from '../store'
 import { primaryBtn } from './Modal'
-import { PERMISSION_ORDER, PERMISSION_LABELS, PERMISSION_DESCRIPTIONS } from '../lib/permission'
+import { permissionModesFor } from '../lib/permission'
+import { useAgentSettings, useBackend } from '../lib/backends'
 import { applyTheme } from '../lib/theme'
+import { normalizePermissionMode } from '@shared/types'
 import type { AppSettings, PermissionMode, ThemePreference } from '@shared/types'
 
 /**
@@ -39,7 +41,15 @@ export default function PreferencesStep({
   const settings = useStore((s) => s.app!.settings)
   const setRightPanelOpen = useStore((s) => s.setRightPanelOpen)
 
-  const [mode, setMode] = useState<PermissionMode>(settings.defaultPermissionMode)
+  // 권한 모드는 백엔드마다 집합이 달라서, 기본 에이전트의 모드 목록으로만 묻는다.
+  const backendId = settings.defaultAgentBackend
+  const backend = useBackend(backendId)
+  const agent = useAgentSettings(backendId)
+  const modes = permissionModesFor(backend)
+
+  const [mode, setMode] = useState<PermissionMode>(() =>
+    backend ? normalizePermissionMode(backend, agent.permissionMode) : 'default'
+  )
   const [rightPanelOpen, setPanel] = useState(settings.defaultRightPanelOpen)
   const [theme, setTheme] = useState<ThemePreference>(settings.theme)
 
@@ -52,7 +62,12 @@ export default function PreferencesStep({
   const finish = (): void => {
     // 고른 패널 상태를 지금 화면에도 즉시 반영한다 — 온보딩을 닫자마자 그 상태로 시작하도록.
     setRightPanelOpen(rightPanelOpen)
-    onDone({ defaultPermissionMode: mode, defaultRightPanelOpen: rightPanelOpen, theme })
+    onDone({
+      // 고른 모드는 그 백엔드의 기본값으로만 저장한다 — 다른 백엔드의 모드 집합을 덮어쓰지 않도록.
+      agents: { ...settings.agents, [backendId]: { ...agent, permissionMode: mode } },
+      defaultRightPanelOpen: rightPanelOpen,
+      theme
+    })
   }
 
   return (
@@ -72,17 +87,15 @@ export default function PreferencesStep({
             hint="Applies to new workspaces. ⇧⇥ switches modes any time during a session."
           >
             <div className="flex flex-col gap-1.5">
-              {PERMISSION_ORDER.map((value) => (
+              {modes.map((info) => (
                 <button
-                  key={value}
+                  key={info.id}
                   type="button"
-                  onClick={() => setMode(value)}
-                  className={choiceClass(mode === value) + ' text-left px-3 py-2'}
+                  onClick={() => setMode(info.id)}
+                  className={choiceClass(mode === info.id) + ' text-left px-3 py-2'}
                 >
-                  <span className="text-sm">{PERMISSION_LABELS[value]}</span>
-                  <span className="block text-xs text-neutral-500">
-                    {PERMISSION_DESCRIPTIONS[value]}
-                  </span>
+                  <span className="text-sm">{info.label}</span>
+                  <span className="block text-xs text-neutral-500">{info.description}</span>
                 </button>
               ))}
             </div>
