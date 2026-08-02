@@ -2,6 +2,7 @@ import {
   FolderGit2,
   Plus,
   Settings,
+  Settings2,
   GitBranch,
   Loader2,
   Send,
@@ -50,6 +51,8 @@ export default function TourDemo(): React.JSX.Element {
 
           <div data-tour="workspaces" className="flex-1 overflow-hidden px-2 pb-4">
             <div className="mb-3">
+              {/* 톱니와 + 는 실제 사이드바 행에 있는 그대로 그린다. 예전엔 이 둘이 빠져 있어서,
+                  투어가 "settings icon" 을 설명하는데 화면에는 가리킬 대상이 없었다. */}
               <div className="flex items-center gap-1.5 px-2 py-1.5">
                 <FolderGit2 size={14} className="text-neutral-500 shrink-0" />
                 <span className="flex-1 truncate text-sm font-medium text-neutral-300">
@@ -58,6 +61,15 @@ export default function TourDemo(): React.JSX.Element {
                 <span className="flex items-center gap-1 text-xs text-[var(--info-400)]/80">
                   <Loader2 size={10} className="animate-spin" />1
                 </span>
+                <div
+                  data-tour="repo-settings"
+                  className="h-5 w-5 grid place-items-center rounded text-neutral-400"
+                >
+                  <Settings2 size={14} />
+                </div>
+                <div className="h-5 w-5 grid place-items-center rounded text-neutral-400">
+                  <Plus size={14} />
+                </div>
               </div>
               <div className="mt-0.5 space-y-0.5">
                 <DemoWs

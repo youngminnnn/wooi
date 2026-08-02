@@ -887,6 +887,8 @@ export const IPC = {
   repoAdd: 'repo:add',
   repoRemove: 'repo:remove',
   repoUpdate: 'repo:update',
+  /** 전달 목록이 빈 리포에 탐지된 후보(.env·CLAUDE.local.md …)를 한 번에 등록한다. */
+  repoAdoptCarry: 'repo:adoptCarry',
   /** 사이드바 드래그 앤 드롭으로 리포 표시 순서를 바꾼다. */
   repoReorder: 'repo:reorder',
   repoListBranches: 'repo:listBranches',

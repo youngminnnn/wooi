@@ -30,7 +30,8 @@ import {
   applyCarryExcludes,
   carryIntoWorktree,
   detectCarryItems,
-  isAgentContextPath
+  isAgentContextPath,
+  validateCarryPath
 } from './carry'
 import { generateWorkspaceName } from './names'
 import { buildStackFromPrs } from './stack'
@@ -62,6 +63,7 @@ import { IPC, DEFAULT_AGENT_BACKEND, reorderById, workspaceStack } from '@shared
 import type {
   AppSettings,
   CarryFailure,
+  CarryItem,
   CommandPanelKind,
   CommandResult,
   CreateWorkspaceArgs,
@@ -118,6 +120,21 @@ async function carryIntoNewWorktree(repo: Repo, worktreePath: string): Promise<C
       agentContext: isAgentContextPath(i.path)
     }))
   }
+}
+
+/**
+ * 전달 목록이 **비어 있는** 리포에 한해, 지금 리포에 실제로 존재하는 후보 경로들을 돌려준다.
+ *
+ * 신규 리포는 추가 시점에 detectCarryItems 로 목록이 채워지지만, v11 이하부터 쓰던 리포는
+ * 마이그레이션이 빈 배열로 남겨 뒀다(사용자 의사 없이 파일을 옮기지 않으려는 의도적 선택).
+ * 그 결과 기존 사용자에게는 이 기능이 존재조차 하지 않는 것처럼 보이고, worktree 는 계속
+ * `.env`·`CLAUDE.local.md` 없이 만들어진다. 워크스페이스를 만드는 순간이 그 사실이 실제로
+ * 문제가 되는 유일한 시점이므로, 여기서 후보를 돌려 렌더러가 한 번 제안하게 한다.
+ */
+function carrySuggestionsFor(repo: Repo): string[] | undefined {
+  if (repo.carryItems.length > 0) return undefined
+  const detected = detectCarryItems(repo.path).map((i) => i.path)
+  return detected.length > 0 ? detected : undefined
 }
 
 export function registerIpc(ctx: IpcContext): void {
@@ -245,12 +262,75 @@ export function registerIpc(ctx: IpcContext): void {
       patch: Partial<
         Pick<Repo, 'name' | 'setupScript' | 'devScript' | 'archiveScript' | 'carryItems'>
       >
-    ) => {
+    ): { error?: string } => {
+      // carryItems 는 그대로 복사·심링크 대상 경로가 되므로 **저장 시점에** 검증한다.
+      // 예전에는 Object.assign 만 해서, 리포 밖을 가리키는 경로도 모달에서 멀쩡히 저장되고
+      // 한참 뒤 워크스페이스를 만들 때가 되어서야 실패 토스트로 드러났다.
+      // 렌더러도 같은 규칙으로 인라인 검증하지만, IPC 는 신뢰 경계라 여기서 다시 본다.
+      let normalized: CarryItem[] | undefined
+      if (patch.carryItems) {
+        normalized = []
+        for (const item of patch.carryItems) {
+          const checked = validateCarryPath(item.path)
+          // 하나라도 잘못되면 패치 전체를 거부한다 — 일부만 저장되면 사용자가 본 화면과
+          // 실제 저장된 값이 어긋난다.
+          if (!checked.ok) return { error: `“${item.path}”: ${checked.reason}` }
+          normalized.push({ path: checked.path, mode: item.mode })
+        }
+      }
+
       store.update((st) => {
         const repo = st.repos.find((r) => r.id === repoId)
-        if (repo) Object.assign(repo, patch)
+        if (repo) Object.assign(repo, patch, normalized ? { carryItems: normalized } : {})
       })
       broadcastState()
+      return {}
+    }
+  )
+
+  /**
+   * 전달 목록이 빈 리포에 후보를 한 번에 등록하고, 지정된 worktree 로도 즉시 전달한다.
+   * 구버전(v11 이하)부터 쓰던 리포는 마이그레이션이 carryItems 를 빈 배열로 남겨 둬서
+   * 신규 리포와 달리 자동 탐지 혜택을 못 받았다 — 그 구멍을 사용자 동의 한 번으로 메운다.
+   */
+  ipcMain.handle(
+    IPC.repoAdoptCarry,
+    async (
+      _e,
+      repoId: string,
+      workspaceId?: string
+    ): Promise<{ error?: string; added: string[]; carryFailures?: CarryFailure[] }> => {
+      const repo = repoFor(repoId)
+      if (!repo) return { error: 'Repository not found.', added: [] }
+
+      const detected = detectCarryItems(repo.path)
+      if (detected.length === 0) return { added: [] }
+
+      // 이미 등록된 경로는 사용자의 선택(모드 포함)을 존중해 건드리지 않고, 없는 것만 더한다.
+      const existing = new Set(repo.carryItems.map((i) => i.path))
+      const fresh = detected.filter((i) => !existing.has(i.path))
+      if (fresh.length === 0) return { added: [] }
+
+      store.update((st) => {
+        const r = st.repos.find((x) => x.id === repoId)
+        if (r) r.carryItems = [...r.carryItems, ...fresh]
+      })
+      broadcastState()
+
+      // 제안이 뜬 계기가 된 worktree 는 이미 만들어져 있으므로, 설정만 고치면 그 워크스페이스는
+      // 여전히 파일이 없는 상태로 남는다. 지금 바로 채워 준다(carryIntoWorktree 는 이미 있는
+      // 파일을 덮어쓰지 않으므로 반복 호출해도 안전하다).
+      let carryFailures: CarryFailure[] | undefined
+      const ws = workspaceId
+        ? store.getState().workspaces.find((w) => w.id === workspaceId && !w.archived)
+        : null
+      if (ws) {
+        const { carried, failures } = carryIntoWorktree(repo.path, ws.worktreePath, fresh)
+        await applyCarryExcludes(ws.worktreePath, carried)
+        if (failures.length > 0) carryFailures = failures
+      }
+
+      return { added: fresh.map((i) => i.path), carryFailures }
     }
   )
 
@@ -326,6 +406,7 @@ export function registerIpc(ctx: IpcContext): void {
       branch?: string
       error?: string
       carryFailures?: CarryFailure[]
+      carrySuggestions?: string[]
     }> => {
       const repo = repoFor(args.repoId)
       if (!repo) return { error: 'Repository not found.' }
@@ -416,7 +497,13 @@ export function registerIpc(ctx: IpcContext): void {
       // name·branch 를 함께 반환해 호출 측이 별도 getState 왕복 없이 토스트를 만들 수 있게 한다.
       // carryFailures 는 렌더러가 별도 토스트로 알린다 — 특히 에이전트 컨텍스트 파일이 빠지면
       // 에러 없이 에이전트만 다르게 동작하므로 조용히 넘기면 안 된다.
-      return { workspaceId: id, name: rawName, branch, carryFailures }
+      return {
+        workspaceId: id,
+        name: rawName,
+        branch,
+        carryFailures,
+        carrySuggestions: carrySuggestionsFor(repo)
+      }
     }
   )
 
@@ -460,7 +547,11 @@ export function registerIpc(ctx: IpcContext): void {
     async (
       _e,
       workspaceId: string
-    ): Promise<{ error?: string; carryFailures?: CarryFailure[] }> => {
+    ): Promise<{
+      error?: string
+      carryFailures?: CarryFailure[]
+      carrySuggestions?: string[]
+    }> => {
       const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
       if (!ws) return { error: 'Workspace not found.' }
       const repo = repoFor(ws.repoId)
@@ -491,7 +582,7 @@ export function registerIpc(ctx: IpcContext): void {
         if (w) w.archived = false
       })
       broadcastState()
-      return { carryFailures }
+      return { carryFailures, carrySuggestions: carrySuggestionsFor(repo) }
     }
   )
 

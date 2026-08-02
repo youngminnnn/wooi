@@ -19,6 +19,8 @@ import type {
 import type { NotificationChannel, NotificationEvent } from '@shared/types'
 import { cascadeProblems } from '@shared/types'
 import { playNotification } from './lib/sound'
+import { carrySuggestShownFlag, readUiFlag, setUiFlag } from './lib/uiFlags'
+import { openRepoSettings } from './lib/repoSettings'
 
 export const scriptKey = (workspaceId: string, kind: ScriptKind): string => `${workspaceId}:${kind}`
 
@@ -252,6 +254,11 @@ interface UIState {
   dismissToast: (id: string) => void
   /** worktree 전달 실패를 사용자에게 알린다. 에이전트 컨텍스트 실패는 error 로 구분해 띄운다. */
   reportCarryFailures: (failures?: CarryFailure[]) => void
+  /**
+   * 전달 목록이 빈 리포에서 worktree 가 만들어졌을 때, 탐지된 후보를 한 번 제안한다.
+   * 리포당 최대 한 번만 뜬다(uiFlags 에 기억).
+   */
+  suggestCarry: (repoId: string, workspaceId: string, suggestions?: string[]) => void
   /** setup 스크립트를 다시 실행한다(스크립트 패널을 함께 연다). 결과는 메인이 setupState 로 영속. */
   retrySetup: (workspaceId: string) => void
   confirm: (opts: ConfirmOptions) => Promise<boolean>
@@ -709,6 +716,7 @@ export const useStore = create<UIState>((set, get) => ({
       branch?: string
       error?: string
       carryFailures?: CarryFailure[]
+      carrySuggestions?: string[]
     }
     try {
       res = await window.api.workspace.create({ repoId, ...args })
@@ -728,6 +736,7 @@ export const useStore = create<UIState>((set, get) => ({
         get().pushToast('success', `Created workspace “${res.name}” on ${res.branch}`)
       }
       get().reportCarryFailures(res.carryFailures)
+      get().suggestCarry(repoId, res.workspaceId, res.carrySuggestions)
     }
   },
 
@@ -754,6 +763,49 @@ export const useStore = create<UIState>((set, get) => ({
           .join('\n')}`
       )
     }
+  },
+
+  // 구버전(v11 이하)부터 등록해 둔 리포는 마이그레이션이 carryItems 를 빈 배열로 남겨서,
+  // 신규 리포와 달리 자동 탐지 혜택을 못 받고 기능의 존재조차 모른 채 지낸다. 그 사이 모든
+  // worktree 는 .env·CLAUDE.local.md 없이 만들어지고, 증상은 에러가 아니라 "에이전트가 왜
+  // 규칙을 안 지키지" 라는 조용한 오작동이다. 방금 그 일이 실제로 일어난 이 시점에 한 번 묻는다.
+  suggestCarry: (repoId, workspaceId, suggestions) => {
+    if (!suggestions || suggestions.length === 0) return
+    // 워크스페이스를 만들 때마다 반복하면 잔소리가 된다 — 리포당 한 번만. 수락하면 carryItems 가
+    // 차서 조건 자체가 다시는 성립하지 않는다.
+    if (readUiFlag(carrySuggestShownFlag(repoId))) return
+    setUiFlag(carrySuggestShownFlag(repoId), true)
+
+    get().pushToast(
+      'info',
+      `New worktrees only contain git-tracked files, so this workspace is missing ${suggestions.join(
+        ', '
+      )}. Carry them into every new workspace?`,
+      [
+        {
+          label: 'Carry them',
+          run: () => {
+            void (async () => {
+              // 설정만 고치면 방금 만든 이 워크스페이스는 여전히 파일이 없는 채로 남는다.
+              // workspaceId 를 넘겨 그 worktree 도 지금 바로 채운다.
+              const res = await window.api.repo.adoptCarrySuggestions(repoId, workspaceId)
+              if (res.error) {
+                get().pushToast('error', res.error)
+                return
+              }
+              if (res.added.length > 0) {
+                get().pushToast(
+                  'success',
+                  `Now carrying ${res.added.join(', ')} into new workspaces.`
+                )
+              }
+              get().reportCarryFailures(res.carryFailures)
+            })()
+          }
+        },
+        { label: 'Repo settings', run: () => openRepoSettings(repoId) }
+      ]
+    )
   },
 
   restackWorkspace: async (workspaceId) => {

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   FolderGit2,
   Plus,
@@ -24,7 +24,13 @@ import {
 import { useStore } from '../store'
 import RowActionsMenu, { type RowAction } from './RowActionsMenu'
 import { GithubMark } from './BrandIcons'
-import { QUICK_SWITCH_HINT_DISMISSED, readUiFlag, setUiFlag } from '../lib/uiFlags'
+import {
+  QUICK_SWITCH_HINT_DISMISSED,
+  readUiFlag,
+  repoSettingsSeenFlag,
+  setUiFlag
+} from '../lib/uiFlags'
+import { OPEN_REPO_SETTINGS_EVENT, openRepoSettings } from '../lib/repoSettings'
 import { orderByStack, orderVisibleWorkspaces, workspaceDisplayName } from '@shared/types'
 import { useGithubDisconnected } from '../lib/github'
 import { WorkspaceAgents } from './WorkspaceAgents'
@@ -44,12 +50,10 @@ const WORKSPACE_MIME = 'application/x-wooi-workspace'
 export default function Sidebar({
   onNewWorkspace,
   onStackWorkspace,
-  onConfigRepo,
   onOpenQuickSwitch
 }: {
   onNewWorkspace: (repoId: string) => void
   onStackWorkspace: (repoId: string, parentWorkspaceId: string) => void
-  onConfigRepo: (repoId: string) => void
   onOpenQuickSwitch: () => void
 }): React.JSX.Element {
   const app = useStore((s) => s.app)!
@@ -85,9 +89,46 @@ export default function Sidebar({
     setHintDismissed(true)
   }
 
+  // 설정 모달을 한 번이라도 열어 본 리포들. 아직 안 열어 본 리포에만 톱니 옆에 안내 점을 띄운다.
+  // 진입 경로가 여러 개(톱니·토스트 액션·⌘K·설정 모달)라 각각에서 표시하지 않고, 공통
+  // 이벤트를 여기서 한 번 듣는다.
+  // 마운트 시 localStorage 에서 한 번만 읽는다. app.repos 를 deps 로 걸어 매번 다시 만들면
+  // (브로드캐스트마다 배열 참조가 새로 온다) 새 Set 때문에 렌더가 한 번씩 더 돈다. 이후 갱신은
+  // 아래 이벤트가 맡고, 나중에 추가된 리포는 애초에 플래그가 없어 자연히 점이 붙는다.
+  const [seenRepos, setSeenRepos] = useState<Set<string>>(
+    () => new Set(app.repos.filter((r) => readUiFlag(repoSettingsSeenFlag(r.id))).map((r) => r.id))
+  )
+  useEffect(() => {
+    const onOpen = (e: Event): void => {
+      const repoId = (e as CustomEvent<string>).detail
+      if (!repoId) return
+      setUiFlag(repoSettingsSeenFlag(repoId), true)
+      setSeenRepos((s) => (s.has(repoId) ? s : new Set(s).add(repoId)))
+    }
+    window.addEventListener(OPEN_REPO_SETTINGS_EVENT, onOpen)
+    return () => window.removeEventListener(OPEN_REPO_SETTINGS_EVENT, onOpen)
+  }, [])
+
   const addRepo = async (): Promise<void> => {
     const res = await window.api.repo.add()
-    if (res.error) pushToast('error', res.error)
+    if (res.error) {
+      pushToast('error', res.error)
+      return
+    }
+    if (!res.repo) return // 사용자가 폴더 선택을 취소했다.
+    // 리포를 막 추가한 이 순간이, 리포별 설정이 존재한다는 걸 알릴 유일하게 자연스러운 시점이다.
+    // 특히 carry 목록은 여기서 자동으로 채워지는데(detectCarryItems) 예전에는 아무 말도 하지
+    // 않아서, 사용자가 자기 리포에 무엇이 설정됐는지 알 방법이 아예 없었다.
+    const carried = res.repo.carryItems.map((i) => i.path)
+    pushToast(
+      'success',
+      carried.length > 0
+        ? `Added “${res.repo.name}”. Ignored files found in this repo (${carried.join(
+            ', '
+          )}) will be copied into every new workspace — new worktrees only contain git-tracked files.`
+        : `Added “${res.repo.name}”. Set up its setup / dev / archive commands and which ignored files to carry into new workspaces.`,
+      [{ label: 'Open repo settings', run: () => openRepoSettings(res.repo!.id) }]
+    )
   }
 
   const repoDnd = useDragReorder({
@@ -206,12 +247,27 @@ export default function Sidebar({
                     {runningCount}
                   </span>
                 )}
+                {/* 예전엔 13px·neutral-500 이라 바로 옆 + 버튼(14px·neutral-400)보다도 흐려서,
+                    유일한 진입점인데도 눈에 걸리지 않았다. 크기·대비를 + 와 맞춘다.
+                    아직 한 번도 열어 보지 않았고 스크립트도 하나도 없는 리포에는 점을 하나
+                    띄워 "여기 볼 게 있다"만 알린다 — 일부러 비워 둔 리포를 계속 채근하지
+                    않도록, 한 번 열어 보면 조건과 무관하게 사라진다. */}
                 <button
-                  onClick={() => onConfigRepo(repo.id)}
-                  className="h-5 w-5 grid place-items-center rounded text-neutral-500 hover:bg-[var(--surface-2)] hover:text-neutral-200"
-                  title="Repository settings (setup / dev / archive scripts)"
+                  data-tour="repo-settings"
+                  onClick={() => openRepoSettings(repo.id)}
+                  className="relative h-5 w-5 grid place-items-center rounded text-neutral-400 hover:bg-[var(--surface-2)] hover:text-neutral-100"
+                  title={`Repository settings — setup / dev / archive commands, and which ignored files (.env, CLAUDE.local.md …) to carry into new workspaces`}
                 >
-                  <Settings2 size={13} />
+                  <Settings2 size={14} />
+                  {!seenRepos.has(repo.id) &&
+                    !repo.setupScript.trim() &&
+                    !repo.devScript.trim() &&
+                    !repo.archiveScript.trim() && (
+                      <span
+                        className="absolute -top-0.5 -right-0.5 h-1.5 w-1.5 rounded-full bg-[var(--info-500)]"
+                        aria-label="Not configured yet"
+                      />
+                    )}
                 </button>
                 <button
                   onClick={() => onNewWorkspace(repo.id)}
@@ -715,14 +771,17 @@ function ArchivedRow({ workspace }: { workspace: Workspace }): React.JSX.Element
   const confirm = useStore((s) => s.confirm)
   const pushToast = useStore((s) => s.pushToast)
   const reportCarryFailures = useStore((s) => s.reportCarryFailures)
+  const suggestCarry = useStore((s) => s.suggestCarry)
 
   const unarchive = async (): Promise<void> => {
     const res = await window.api.workspace.unarchive(workspace.id)
     if (res.error) pushToast('error', res.error)
     else {
       void select(workspace.id)
-      // 언아카이브도 worktree 를 새로 만들므로 전달이 다시 일어난다 — 실패는 동일하게 알린다.
+      // 언아카이브도 worktree 를 새로 만들므로 전달이 다시 일어난다 — 실패는 동일하게 알리고,
+      // 전달 목록이 빈 리포라면 생성 경로와 똑같이 한 번 제안한다.
       reportCarryFailures(res.carryFailures)
+      suggestCarry(workspace.repoId, workspace.id, res.carrySuggestions)
     }
   }
 

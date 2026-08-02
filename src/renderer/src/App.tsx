@@ -3,6 +3,7 @@ import { AlertTriangle } from 'lucide-react'
 import { CURRENT_TERMS_VERSION, orderVisibleWorkspaces } from '@shared/types'
 import { useStore } from './store'
 import { nextPermissionMode } from './lib/permission'
+import { OPEN_REPO_SETTINGS_EVENT, openRepoSettings } from './lib/repoSettings'
 import { applyTheme } from './lib/theme'
 import TitleBar from './components/TitleBar'
 import { UpdateBanner } from './components/UpdateBanner'
@@ -100,6 +101,17 @@ export default function App(): React.JSX.Element {
     return () => window.removeEventListener('wooi:open-shortcuts', onHelp)
   }, [])
 
+  // 리포 설정 모달은 사이드바 톱니 말고도 여러 곳(토스트 액션·스크립트 패널·⌘K·설정)에서
+  // 열린다. 그 전부에 콜백을 꿰는 대신 커스텀 이벤트 한 곳으로 받는다.
+  useEffect(() => {
+    const onOpen = (e: Event): void => {
+      const repoId = (e as CustomEvent<string>).detail
+      if (repoId) setConfigRepoId(repoId)
+    }
+    window.addEventListener(OPEN_REPO_SETTINGS_EVENT, onOpen)
+    return () => window.removeEventListener(OPEN_REPO_SETTINGS_EVENT, onOpen)
+  }, [])
+
   // 키보드: ⇧⇥ 권한 모드 순환, ⌘1–9 워크스페이스 선택, ⌘[ / ⌘] 이전/다음.
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
@@ -151,7 +163,11 @@ export default function App(): React.JSX.Element {
       // 키 판별은 e.code 로 한다 — 한글 IME 에서 e.key 가 'k' 가 아닐 수 있다.
       if (e.code === 'KeyK' && !e.shiftKey && !e.ctrlKey && !e.altKey) {
         e.preventDefault()
-        if (st.app?.workspaces.some((w) => !w.archived)) setQuickSwitchOpen(true)
+        // 워크스페이스가 아직 없어도 리포가 있으면 연다 — 팔레트가 리포 설정 항목도 담고 있어
+        // 이 시점에 오히려 가장 쓸모 있다(막 리포만 추가한 직후).
+        if (st.app?.workspaces.some((w) => !w.archived) || st.app?.repos.length) {
+          setQuickSwitchOpen(true)
+        }
         return
       }
 
@@ -247,7 +263,11 @@ export default function App(): React.JSX.Element {
         const ws = st.app?.workspaces.find((w) => w.id === selId)
         const devCmd = ws && st.app?.repos.find((r) => r.id === ws.repoId)?.devScript
         if (!devCmd || !devCmd.trim()) {
-          st.pushToast('info', 'No dev command set for this repo — add one in repo settings.')
+          // 여기까지 온 사용자는 이미 "dev 명령을 쓰고 싶다"고 손을 든 상태다. 설정이 어디
+          // 있는지 말로만 알려 주고 끝내지 말고, 바로 그 화면으로 데려간다.
+          st.pushToast('info', 'No dev command set for this repo yet.', [
+            { label: 'Set dev command', run: () => ws && openRepoSettings(ws.repoId) }
+          ])
           return
         }
         const devRunning = (st.scriptStatus[selId] ?? []).some(
@@ -353,7 +373,6 @@ export default function App(): React.JSX.Element {
         <Sidebar
           onNewWorkspace={handleNewWorkspace}
           onStackWorkspace={handleStackWorkspace}
-          onConfigRepo={setConfigRepoId}
           onOpenQuickSwitch={() => setQuickSwitchOpen(true)}
         />
         <div ref={contentRef} className="flex-1 min-w-0 border-l border-[var(--border)] flex">

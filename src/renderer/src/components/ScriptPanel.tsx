@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
-import { Play, Square, X, ExternalLink, AlertTriangle, Check } from 'lucide-react'
+import { Play, Square, X, ExternalLink, AlertTriangle, Check, Settings2 } from 'lucide-react'
 import { useStore, scriptKey } from '../store'
+import { openRepoSettings } from '../lib/repoSettings'
 import type { ScriptKind } from '@shared/types'
 
 export default function ScriptPanel({
@@ -87,7 +88,17 @@ export default function ScriptPanel({
         <div className="flex-1" />
 
         {!command.trim() ? (
-          <span className="text-xs text-neutral-600">Set a command in repo settings</span>
+          // 패널을 열었는데 명령이 없다는 건 "이 기능을 쓰려던 참"이라는 뜻이다. 예전에는
+          // 설정의 위치만 알려 주는 클릭 불가 회색 문구여서, 사용자가 스스로 사이드바 톱니를
+          // 찾아내야 했다 — 그 자리를 그대로 진입점으로 만든다.
+          <button
+            onClick={() => openRepoSettings(repo.id)}
+            className="flex items-center gap-1 text-xs px-2 py-1 rounded-md text-neutral-400 hover:bg-[var(--surface-2)] hover:text-neutral-100"
+            title={`Set the ${tab} command for “${repo.name}”`}
+          >
+            <Settings2 size={11} />
+            Set a {tab} command
+          </button>
         ) : running ? (
           <button
             onClick={stop}
@@ -152,9 +163,31 @@ export default function ScriptPanel({
           </span>
         </div>
       )}
-      <pre className="flex-1 overflow-auto px-3 py-2 text-xs font-mono text-neutral-400 whitespace-pre-wrap">
-        {out || (command.trim() ? 'No output yet.' : '')}
-      </pre>
+      {command.trim() ? (
+        <pre className="flex-1 overflow-auto px-3 py-2 text-xs font-mono text-neutral-400 whitespace-pre-wrap">
+          {out || 'No output yet.'}
+        </pre>
+      ) : (
+        // 빈 패널은 그 자체로 설명 기회다 — 이 탭이 무엇을 하는 건지 모르면 위의 버튼을 누를
+        // 이유도 없다. 리포별로 설정된다는 사실을 여기서 한 줄로 못박는다.
+        <div className="flex-1 overflow-auto px-3 py-2 text-xs text-neutral-500 leading-relaxed">
+          {tab === 'dev' ? (
+            <>
+              A <b className="text-neutral-400">dev command</b> is set once per repository and runs
+              in this workspace&rsquo;s worktree, with a unique{' '}
+              <span className="font-mono text-neutral-400">$PORT</span> so parallel dev servers
+              don&rsquo;t collide. Start and stop it here or with{' '}
+              <kbd className="font-medium text-neutral-400">⌃⌘R</kbd>.
+            </>
+          ) : (
+            <>
+              A <b className="text-neutral-400">setup command</b> is set once per repository and
+              runs automatically right after each new workspace is created — e.g.{' '}
+              <span className="font-mono text-neutral-400">npm install</span>.
+            </>
+          )}
+        </div>
+      )}
     </div>
   )
 }
