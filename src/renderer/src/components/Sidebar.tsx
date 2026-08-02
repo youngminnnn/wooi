@@ -24,7 +24,8 @@ import {
 } from 'lucide-react'
 import { useStore } from '../store'
 import RowActionsMenu, { type RowAction } from './RowActionsMenu'
-import { GithubMark } from './BrandIcons'
+import { useAvailableBackends } from '../lib/backends'
+import { AgentBackendMark, GithubMark } from './BrandIcons'
 import {
   QUICK_SWITCH_HINT_DISMISSED,
   SWITCH_HINT_DONE,
@@ -44,7 +45,7 @@ import { WorkspaceAgents } from './WorkspaceAgents'
 import { useNow } from '../lib/useNow'
 import { formatDuration } from '../lib/format'
 import { useDragReorder, type DragReorder } from '../lib/useDragReorder'
-import type { PrState, PrStatus, Repo, Workspace } from '@shared/types'
+import type { AgentBackendId, PrState, PrStatus, Repo, Workspace } from '@shared/types'
 
 /** running 상태가 이 시간을 넘기면 사이드바에 "오래 실행 중" 힌트(멈춤일 수 있음)를 표시한다. */
 const RUNNING_STALE_MS = 5 * 60 * 1000
@@ -59,8 +60,12 @@ export default function Sidebar({
   onStackWorkspace,
   onOpenQuickSwitch
 }: {
-  onNewWorkspace: (repoId: string) => void
-  onStackWorkspace: (repoId: string, parentWorkspaceId: string) => void
+  onNewWorkspace: (repoId: string, agentBackend?: AgentBackendId) => void
+  onStackWorkspace: (
+    repoId: string,
+    parentWorkspaceId: string,
+    agentBackend?: AgentBackendId
+  ) => void
   onOpenQuickSwitch: () => void
 }): React.JSX.Element {
   const app = useStore((s) => s.app)!
@@ -298,13 +303,7 @@ export default function Sidebar({
                       />
                     )}
                 </button>
-                <button
-                  onClick={() => onNewWorkspace(repo.id)}
-                  className="h-5 w-5 grid place-items-center rounded text-neutral-400 hover:bg-[var(--surface-2)] hover:text-neutral-100"
-                  title="New workspace (⌘N)"
-                >
-                  <Plus size={14} />
-                </button>
+                <NewWorkspaceButton repoId={repo.id} onNewWorkspace={onNewWorkspace} />
               </div>
 
               <div className="mt-0.5 space-y-0.5">
@@ -412,7 +411,11 @@ function WorkspaceRow({
   workspace: Workspace
   /** stack 트리에서의 들여쓰기 깊이(뿌리=0). */
   depth: number
-  onStackWorkspace: (repoId: string, parentWorkspaceId: string) => void
+  onStackWorkspace: (
+    repoId: string,
+    parentWorkspaceId: string,
+    agentBackend?: AgentBackendId
+  ) => void
   shortcut?: number
   now: number
   /** 사이드바가 소유한 워크스페이스 재정렬 DnD 배선(형제끼리만 자리 교환). */
@@ -447,6 +450,8 @@ function WorkspaceRow({
   const stale = runningMs >= RUNNING_STALE_MS
   // 표시 이름: 사용자 override → PR 제목 → worktree 이름. override 가 없으면 PR 제목이 자동 반영된다.
   const displayName = workspaceDisplayName(workspace, pr?.title)
+  // 에이전트 배지는 고를 수 있는 에이전트가 둘 이상일 때만 의미가 있다.
+  const showAgent = useAvailableBackends().length > 1
 
   const commitName = (): void => {
     const name = (editingName ?? '').trim()
@@ -486,7 +491,9 @@ function WorkspaceRow({
       icon: githubDisconnected ? <GithubMark size={12} /> : <GitBranchPlus size={13} />,
       onSelect: () =>
         void requireGithub('Stacked workspaces track their pull requests on GitHub.', () =>
-          onStackWorkspace(workspace.repoId, workspace.id)
+          // 스택은 부모의 에이전트를 물려받는다 — 부모 브랜치 위에 이어 작업하는 것이라,
+          // 전역 기본값으로 갈아타면 "Codex 위에 쌓았는데 Claude 가 열리는" 놀람이 된다.
+          onStackWorkspace(workspace.repoId, workspace.id, workspace.agentBackend)
         )
     },
     ...(workspace.parentWorkspaceId
@@ -613,6 +620,14 @@ function WorkspaceRow({
             </div>
           )}
           <div className="flex items-center gap-1 text-xs text-neutral-500 truncate">
+            {/* 어떤 에이전트가 이 워크스페이스를 돌리는지. 생성 시 고정되고 바꿀 수 없으므로,
+                여러 개를 병렬로 돌릴 때 어느 쪽인지 한눈에 보여야 한다. 에이전트가 하나뿐인
+                사용자에게는 정보가 아니라 잡음이라 감춘다. */}
+            {showAgent && (
+              <span className="shrink-0 text-neutral-500">
+                <AgentBackendMark backend={workspace.agentBackend} size={10} />
+              </span>
+            )}
             <GitBranch size={10} className="shrink-0" />
             <span className="truncate">{workspace.branch}</span>
             {git && git.changedFiles > 0 && (
@@ -954,5 +969,63 @@ export function StatusDot({
   }
   return (
     <span title="Idle — ready for input" className="h-2 w-2 rounded-full shrink-0 bg-neutral-600" />
+  )
+}
+
+/**
+ * 새 워크스페이스 "+" 버튼.
+ *
+ * 쓸 수 있는 에이전트가 하나뿐이면 예전처럼 즉시 만든다 — 선택지를 보여 줄 이유가 없다.
+ * 둘 이상이면 어떤 에이전트로 만들지 고르게 한다. 워크스페이스의 에이전트는 생성 시 고정되고
+ * 나중에 바꿀 수 없으므로, **만들기 직전**이 유일하게 고를 수 있는 시점이다.
+ * (⌘N 은 묻지 않고 기본 에이전트로 만든다 — 단축키는 빨라야 한다.)
+ */
+function NewWorkspaceButton({
+  repoId,
+  onNewWorkspace
+}: {
+  repoId: string
+  onNewWorkspace: (repoId: string, agentBackend?: AgentBackendId) => void
+}): React.JSX.Element {
+  const backends = useAvailableBackends()
+  const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null)
+
+  const multi = backends.length > 1
+  const actions: RowAction[] = backends.map((b) => ({
+    key: b.id,
+    label: b.label,
+    icon: <AgentBackendMark backend={b.id} size={13} />,
+    onSelect: () => onNewWorkspace(repoId, b.id)
+  }))
+
+  return (
+    <>
+      <button
+        onClick={(e) => {
+          if (!multi) {
+            onNewWorkspace(repoId)
+            return
+          }
+          const r = e.currentTarget.getBoundingClientRect()
+          setMenuAt({ x: r.right, y: r.bottom + 4 })
+        }}
+        className="h-5 w-5 grid place-items-center rounded text-neutral-400 hover:bg-[var(--surface-2)] hover:text-neutral-100"
+        title={
+          multi ? 'New workspace — choose an agent (⌘N uses the default)' : 'New workspace (⌘N)'
+        }
+        aria-haspopup={multi ? 'menu' : undefined}
+        aria-expanded={multi ? menuAt !== null : undefined}
+      >
+        <Plus size={14} />
+      </button>
+      {menuAt && (
+        <RowActionsMenu
+          at={menuAt}
+          align="right"
+          actions={actions}
+          onClose={() => setMenuAt(null)}
+        />
+      )}
+    </>
   )
 }

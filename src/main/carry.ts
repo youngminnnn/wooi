@@ -33,7 +33,7 @@ const exec = promisify(execFile)
  * 전달 실패를 조용히 넘기면 안 된다(호출 측이 토스트로 알린다).
  */
 const AGENT_CONTEXT_RE =
-  /(^|\/)(CLAUDE([.\w-]*)?\.md|AGENTS?\.md|MEMORY\.md|\.cursorrules|\.claude(\/|$))/i
+  /(^|\/)(CLAUDE([.\w-]*)?\.md|AGENTS?\.md|MEMORY\.md|\.cursorrules|\.(claude|codex)(\/|$))/i
 
 export function isAgentContextPath(path: string): boolean {
   return AGENT_CONTEXT_RE.test(path)

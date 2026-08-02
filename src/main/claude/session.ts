@@ -15,15 +15,14 @@ import { log } from '../logger'
 import { MCP_SETTING_SOURCES, resolveUserMcpServers } from './mcp'
 import { hasUserAutoCompactWindow } from './userSettings'
 import { fastModeReasonText } from '@shared/types'
+import { claudeEffort, type ClaudePermissionMode } from './protocol'
 import type {
   ChatItem,
   ChatEvent,
-  EffortLevel,
   EffortSetting,
   FastModeDisabledReason,
   FastModeState,
   ImageAttachment,
-  PermissionMode,
   PermissionRequest,
   PermissionDecision,
   RewindPoint,
@@ -43,7 +42,7 @@ export interface SessionDeps {
    * 실제 적용 여부는 CLI 가 모델·플랜·쿨다운을 보고 정하며, 그 결과는 result 의 fast_mode_state 로 온다.
    */
   fastMode: boolean
-  permissionMode: PermissionMode
+  permissionMode: ClaudePermissionMode
   /** true 면 컨텍스트 사용률이 임계치를 넘었을 때 턴 종료 후 /compact 를 자동 주입한다. */
   autoCompact: boolean
   /** 이전 실행에서 이어갈 Claude 세션 ID. 없으면 새 세션. */
@@ -490,7 +489,7 @@ export class ClaudeSession {
     await this.q?.interrupt().catch(() => {})
   }
 
-  async setPermissionMode(mode: PermissionMode): Promise<void> {
+  async setPermissionMode(mode: ClaudePermissionMode): Promise<void> {
     this.deps.permissionMode = mode
     await this.q?.setPermissionMode(mode).catch(() => {})
   }
@@ -536,8 +535,7 @@ export class ClaudeSession {
       // effort 옵션이 아니라 settings 레이어의 ultracode: true 로 전달한다. 그 외 effort 레벨은
       // effort 옵션으로 그대로 넘기고, null 이면 아무것도 넘기지 않아 모델 기본 동작을 따른다.
       const ultracode = this.deps.effort === 'ultracode'
-      const sdkEffort: EffortLevel | null =
-        this.deps.effort && this.deps.effort !== 'ultracode' ? this.deps.effort : null
+      const sdkEffort = claudeEffort(this.deps.effort)
       // 자동 압축이 켜져 있고, 사용자가 settings.json 에 직접 값을 적어 두지 않았을 때만 윈도
       // 상한을 제안한다(자동 압축이 꺼져 있으면 압축 자체를 안 하므로 넣을 이유가 없다).
       const autoCompactWindow =

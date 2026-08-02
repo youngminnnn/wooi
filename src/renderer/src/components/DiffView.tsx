@@ -78,7 +78,11 @@ function FileBlock({ file }: { file: FileDiff }): React.JSX.Element {
   )
 }
 
-function DiffLine({ line }: { line: string }): React.JSX.Element {
+/**
+ * 통합 diff 한 줄의 색칠. 승인 프롬프트처럼 구조화된 WorkspaceDiff 없이 **원시 diff 문자열만**
+ * 가진 곳에서도 같은 시각 언어를 쓰도록 내보낸다(색 규칙이 두 벌로 갈라지지 않게).
+ */
+export function DiffLine({ line }: { line: string }): React.JSX.Element {
   // 색은 --diff-* 토큰으로 — diff 는 코드 표면(--code-bg) 위에 그려지고, 그 표면은
   // 테마마다 밝기가 달라서 고정 색으로는 한쪽 테마에서 대비가 무너진다.
   let cls = 'text-[var(--diff-context)]'

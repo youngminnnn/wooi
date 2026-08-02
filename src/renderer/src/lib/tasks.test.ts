@@ -190,6 +190,79 @@ describe('buildTaskCards', () => {
   })
 })
 
+/**
+ * Codex 의 플랜은 매번 **전체 스냅샷**으로 온다(Claude 의 증분형과 반대). 같은 체크리스트
+ * 렌더러를 공유하되, 목록을 누적하지 않고 통째로 교체하는지가 핵심이다.
+ */
+describe('buildTaskCards — 스냅샷형(Codex plan)', () => {
+  // 항목을 직접 만든다 — 위의 `use` 헬퍼를 named 함수 안에서 부르면 eslint 의 rules-of-hooks 가
+  // React 의 `use` 훅 호출로 오인한다.
+  const snapshot = (
+    tasks: { subject: string; status?: string }[],
+    toolId = `s${++seq}`
+  ): ChatItem => ({
+    id: `use:${toolId}`,
+    type: 'tool_use',
+    toolId,
+    name: 'TaskSnapshot',
+    input: { tasks },
+    ts: 0
+  })
+
+  it('스냅샷 하나를 체크리스트 카드로 만든다', () => {
+    seq = 0
+    const items = [
+      snapshot([
+        { subject: 'Read code', status: 'completed' },
+        { subject: 'Write test', status: 'in_progress' },
+        { subject: 'Ship', status: 'pending' }
+      ])
+    ]
+    const { cardByItemId } = buildTaskCards(items)
+    const card = [...cardByItemId.values()][0]
+    expect(card).toEqual([
+      { id: '', subject: 'Read code', status: 'completed' },
+      { id: '', subject: 'Write test', status: 'in_progress' },
+      { id: '', subject: 'Ship', status: 'pending' }
+    ])
+  })
+
+  // 누적되면 턴이 길어질수록 목록이 무한히 늘어난다.
+  it('다음 스냅샷은 이전 목록을 누적하지 않고 대체한다', () => {
+    seq = 0
+    const items = [
+      snapshot([{ subject: 'a' }, { subject: 'b' }], 's1'),
+      text('mid'),
+      snapshot([{ subject: 'a', status: 'completed' }, { subject: 'c' }], 's2')
+    ]
+    const { cardByItemId } = buildTaskCards(items)
+    expect(cardByItemId.get('use:s2')).toEqual([
+      { id: '', subject: 'a', status: 'completed' },
+      { id: '', subject: 'c', status: 'pending' }
+    ])
+  })
+
+  it('모르는 status 는 pending 으로 떨어뜨린다', () => {
+    seq = 0
+    const { cardByItemId } = buildTaskCards([snapshot([{ subject: 'x', status: 'weird' }])])
+    expect([...cardByItemId.values()][0]).toEqual([{ id: '', subject: 'x', status: 'pending' }])
+  })
+
+  it('입력 모양이 어긋나면 카드를 만들지 않는다(화면이 비지 않도록)', () => {
+    seq = 0
+    expect(buildTaskCards([use('TaskSnapshot', { tasks: 'nope' })]).cardByItemId.size).toBe(0)
+    expect(buildTaskCards([use('TaskSnapshot', null)]).cardByItemId.size).toBe(0)
+  })
+
+  it('subject 가 없는 항목은 건너뛴다', () => {
+    seq = 0
+    const { cardByItemId } = buildTaskCards([
+      use('TaskSnapshot', { tasks: [{ subject: 'ok' }, { status: 'pending' }, null] })
+    ])
+    expect([...cardByItemId.values()][0]).toEqual([{ id: '', subject: 'ok', status: 'pending' }])
+  })
+})
+
 describe('taskLabel', () => {
   it('진행 중 항목만 현재진행형(activeForm)을 쓴다', () => {
     expect(

@@ -5,7 +5,7 @@ import PreferencesStep from './PreferencesStep'
 import Logo from './Logo'
 import { primaryBtn } from './Modal'
 import { useStore } from '../store'
-import { CURRENT_TERMS_VERSION } from '@shared/types'
+import { CURRENT_TERMS_VERSION, hasAnyAgent } from '@shared/types'
 import type { AppSettings } from '@shared/types'
 
 // 배포 시 실제 공개 URL 로 교체한다(현재는 앱과 함께 제공되는 repo 문서를 가리킨다).
@@ -166,25 +166,35 @@ function IntegrationsStep({ onDone }: { onDone: () => void }): React.JSX.Element
   // PR·스택 기능을 처음 쓰는 순간에만 연결을 요구한다. 그래서 이 단계는 건너뛸 수 있다.
   const auth = useStore((s) => s.authStatus)
   const githubReady = !!auth && auth.github.installed && auth.github.loggedIn
+  // 에이전트는 **둘 중 하나만** 연결하면 된다. Claude 만, 또는 Codex 만 가진 사용자도
+  // 정상 사용자이므로 한쪽이 없다고 막지 않는다.
+  const agentReady = hasAnyAgent(auth)
 
   return (
     <>
       <div className="px-6 py-4">
         <p className="mb-3 text-sm text-neutral-500 text-center leading-relaxed">
-          Connect your accounts to get started. GitHub is optional — you only need it for pull
-          requests and stacked branches. You can change these anytime in Settings → Integrations.
+          Connect a coding agent to get started — Claude Code or Codex, whichever you have. GitHub
+          is optional; you only need it for pull requests and stacked branches. You can change these
+          anytime in Settings → Integrations.
         </p>
         <IntegrationsPanel />
       </div>
 
       <div className="px-6 py-4 border-t border-[var(--border)] flex items-center justify-end gap-3">
-        {!githubReady && (
-          <span className="text-xs text-neutral-500">
-            You can connect GitHub later — we&rsquo;ll ask when a PR needs it.
+        {!agentReady ? (
+          <span className="text-xs text-[var(--warning-400)]">
+            Connect at least one coding agent to start a session.
           </span>
+        ) : (
+          !githubReady && (
+            <span className="text-xs text-neutral-500">
+              You can connect GitHub later — we&rsquo;ll ask when a PR needs it.
+            </span>
+          )
         )}
         <button className={primaryBtn} onClick={onDone}>
-          {githubReady ? 'Get started' : 'Skip for now'}
+          {agentReady && githubReady ? 'Get started' : 'Skip for now'}
         </button>
       </div>
     </>

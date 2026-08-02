@@ -1,12 +1,17 @@
 import type {
+  AgentBackendId,
+  AgentBackendMeta,
   AppNotice,
   AppState,
   AppSettings,
+  AgentRateLimits,
   AuthStatus,
   CarryFailure,
   ChatItem,
   ChatEnvelope,
   ClaudeLoginEvent,
+  CodexLoginEvent,
+  CodexLoginMethod,
   CommandPanelKind,
   CommandResult,
   CreateWorkspaceArgs,
@@ -20,6 +25,7 @@ import type {
   ImageAttachment,
   McpAction,
   McpServerInfo,
+  ModelOption,
   PermissionDecision,
   PermissionMode,
   PermissionRequest,
@@ -205,6 +211,16 @@ export interface WooiApi {
     search(workspaceId: string, query: string): Promise<FileHit[]>
   }
 
+  agent: {
+    /**
+     * 등록된 에이전트 백엔드의 메타(라벨·권한 모드·effort 선택지·capabilities·가용성).
+     * 렌더러는 이 목록으로 에이전트 피커와 모드/effort UI 를 그린다.
+     */
+    listBackends(): Promise<AgentBackendMeta[]>
+    /** 백엔드의 모델 선택지. 조회 불가(미설치·오류)면 빈 배열. */
+    listModels(backendId: AgentBackendId): Promise<ModelOption[]>
+  }
+
   commands: {
     /** 입력창 자동완성용 슬래시 명령/스킬 목록(/btw, /insights, 사용자 스킬 등). */
     list(workspaceId: string): Promise<SlashCommandInfo[]>
@@ -285,14 +301,9 @@ export interface WooiApi {
     quitAndInstall(): Promise<void>
   }
 
-  /**
-   * 원격 공지(상단 배너). 앱 버전과 무관하게 메시지를 띄우기 위해 main 이 원격 JSON 을
-   * 주기적으로 가져온다. "닫음" 기록은 기기 로컬(uiFlags)이라 여기엔 없다.
-   */
+  /** 앱 재배포 없이 표시하는 원격 상단 공지. */
   notice: {
-    /** 마지막으로 가져온 공지 목록(새로 받아오지 않는다 — 렌더러 초기화용). */
     getActive(): Promise<AppNotice[]>
-    /** 지금 즉시 다시 가져온다. 실패하면 직전 목록이 그대로 돌아온다. */
     refresh(): Promise<AppNotice[]>
   }
 
@@ -311,6 +322,17 @@ export interface WooiApi {
     /** 진행 중인 로그인 PTY 를 취소·종료한다(모달 닫기). */
     claudeLoginCancel(): Promise<void>
     claudeLogout(): Promise<void>
+    /**
+     * Codex 로그인을 시작한다. PTY 가 필요 없다 — app-server 가 OAuth 콜백까지 호스팅하므로
+     * 'chatgpt' 는 브라우저를 열고 완료를 기다리고(진행은 onCodexLogin 으로), 'apiKey' 는
+     * 넘긴 키를 저장하고 즉시 끝난다.
+     */
+    codexLoginStart(method: CodexLoginMethod, apiKey?: string): Promise<void>
+    /** 진행 중인 Codex 브라우저 로그인을 취소한다(모달 닫기). */
+    codexLoginCancel(): Promise<void>
+    codexLogout(): Promise<void>
+    /** Codex 플랜 사용량. API 키 인증이거나 조회 불가면 null. */
+    codexRateLimits(): Promise<AgentRateLimits | null>
     /** 앱 내부 PTY 에서 `gh auth login --web` 을 시작한다(별도 Terminal 창 없이). 진행은 onGithubLogin 으로. */
     githubLoginStart(): Promise<void>
     /** 진행 중인 GitHub 로그인 PTY 를 취소·종료한다(모달 닫기). */
@@ -342,8 +364,12 @@ export interface WooiApi {
   onWindowBlur(cb: () => void): () => void
   /** 앱 내부 Claude 로그인 진행 이벤트(인증 URL / 코드 입력 요청 / 완료) 구독. */
   onClaudeLogin(cb: (e: ClaudeLoginEvent) => void): () => void
+  /** 앱 내부 Codex 로그인 진행 이벤트(브라우저 인증 URL / 완료) 구독. */
+  onCodexLogin(cb: (e: CodexLoginEvent) => void): () => void
   /** 앱 내부 GitHub 로그인 진행 이벤트(one-time 코드·디바이스 URL / 완료) 구독. */
   onGithubLogin(cb: (e: GithubLoginEvent) => void): () => void
+  /** 에이전트 계정이 앱 밖에서 바뀌었다는 신호 — 인증 상태를 다시 읽어야 한다. */
+  onAuthChanged(cb: () => void): () => void
   /** 자동 업데이트 상태 변화(확인 중/발견/다운로드/준비됨/오류) 구독. */
   onUpdate(cb: (status: UpdateStatus) => void): () => void
   onNotice(cb: (notices: AppNotice[]) => void): () => void

@@ -10,10 +10,11 @@ import {
 import { getStore } from '../store'
 import { getTranscripts } from '../transcripts'
 import { log } from '../logger'
-import { IPC, workspaceDisplayName } from '@shared/types'
-import { CLAUDE_META, type AgentBackend } from '../agent/backend'
-import type { HostCommand, HostEvent, SessionConfig } from './protocol'
+import { IPC, agentSettingsFor, workspaceDisplayName } from '@shared/types'
+import { CLAUDE_META, CLAUDE_MODELS, type AgentBackend } from '../agent/backend'
+import { claudeMode, type HostCommand, type HostEvent, type SessionConfig } from './protocol'
 import type {
+  AgentSettings,
   ChatEvent,
   ChatItem,
   CommandPanelKind,
@@ -22,6 +23,7 @@ import type {
   ImageAttachment,
   McpAction,
   McpServerInfo,
+  ModelOption,
   NotificationEvent,
   PermissionDecision,
   PermissionMode,
@@ -224,16 +226,23 @@ export class SessionManager implements AgentBackend {
     )
   }
 
+  /** 이 백엔드(Claude)의 전역 기본값. 워크스페이스 오버라이드가 없을 때의 폴백이다. */
+  private defaults(): AgentSettings {
+    return agentSettingsFor(getStore().getState().settings, CLAUDE_META.id)
+  }
+
   /** store 에서 세션 생성에 필요한 설정을 계산한다(예전 ensure() 의 역할). */
   private configFor(ws: Workspace): SessionConfig {
     const settings = getStore().getState().settings
+    const defaults = this.defaults()
     return {
       cwd: ws.worktreePath,
       repoPath: this.getRepoPath(ws.repoId),
-      model: ws.model ?? settings.model,
-      effort: ws.effort ?? settings.effort,
-      fastMode: ws.fastMode ?? settings.fastMode,
-      permissionMode: ws.permissionMode,
+      model: ws.model ?? defaults.model,
+      effort: ws.effort ?? defaults.effort,
+      fastMode: ws.fastMode ?? defaults.fastMode,
+      // 다른 백엔드에서 넘어온 값(전역 기본값 이관 등)이 SDK 로 새지 않도록 여기서 걸러 낸다.
+      permissionMode: claudeMode(ws.permissionMode),
       autoCompact: settings.autoCompact,
       resumeSessionId: ws.sessionId
     }
@@ -263,7 +272,7 @@ export class SessionManager implements AgentBackend {
     const trimmed = question.trim()
     if (!trimmed) return
 
-    const settings = getStore().getState().settings
+    const defaults = this.defaults()
     const id = randomUUID()
     this.dispatch(IPC.evtSideQuestion, { workspaceId, id, phase: 'start', question: trimmed })
     this.send({
@@ -272,8 +281,8 @@ export class SessionManager implements AgentBackend {
       id,
       cwd: ws.worktreePath,
       resumeSessionId: ws.sessionId,
-      model: ws.model ?? settings.model,
-      effort: ws.effort ?? settings.effort,
+      model: ws.model ?? defaults.model,
+      effort: ws.effort ?? defaults.effort,
       question: trimmed
     })
   }
@@ -344,6 +353,14 @@ export class SessionManager implements AgentBackend {
     return this.request<SlashCommandInfo[]>((reqId) => ({ type: 'listCommands', reqId, cwd }))
   }
 
+  /**
+   * Claude 의 모델 목록은 정적이다 — CLI 가 모델 카탈로그를 질의할 API 를 주지 않으므로,
+   * 검증된 모델 ID 목록을 코드로 관리한다(backend.ts 의 CLAUDE_MODELS).
+   */
+  async listModels(): Promise<ModelOption[]> {
+    return CLAUDE_MODELS
+  }
+
   async interrupt(workspaceId: string): Promise<void> {
     this.sendIfHost({ type: 'interrupt', workspaceId })
     // 세션이 없거나 끊긴 경우에도 사이드바가 '진행 중'에 갇히지 않도록 idle 로 확정한다.
@@ -355,7 +372,7 @@ export class SessionManager implements AgentBackend {
       const w = st.workspaces.find((x) => x.id === workspaceId)
       if (w) w.permissionMode = mode
     })
-    this.sendIfHost({ type: 'setPermissionMode', workspaceId, mode })
+    this.sendIfHost({ type: 'setPermissionMode', workspaceId, mode: claudeMode(mode) })
   }
 
   /**
@@ -584,7 +601,8 @@ export class SessionManager implements AgentBackend {
     // 실제 API 왕복이 없었으니 서버가 사용률을 실어 줄 기회가 없었던 것뿐이다. 이걸 그대로 저장하면
     // 마지막으로 알던 사용률이 앱을 켤 때마다 날아가, 상태줄과 Overview 가 "요금제 한도 없음"처럼 보인다.
     // 창이 빈 응답은 계정 종류(available·subscriptionType)만 갱신하고 창은 이전 값을 유지한다.
-    const prev = store.getState().rateLimits
+    const state = store.getState()
+    const prev = state.rateLimitsByAgent ? state.rateLimitsByAgent.claude : state.rateLimits
     const keepPrevWindows = usage.rateLimits.length === 0 && (prev?.windows.length ?? 0) > 0
     const snapshot: RateLimitSnapshot = {
       // 창을 물려받았으면 조회 시각도 물려받는다 — 그래야 stale 표시가 실제 데이터 나이를 말한다.
@@ -594,6 +612,8 @@ export class SessionManager implements AgentBackend {
       windows: keepPrevWindows ? (prev?.windows ?? []) : usage.rateLimits
     }
     store.update((st) => {
+      st.rateLimitsByAgent = { ...st.rateLimitsByAgent, claude: snapshot }
+      // 구버전 renderer/저장 데이터와의 호환: 단일 필드는 Claude 값을 뜻한다.
       st.rateLimits = snapshot
     })
     this.dispatch(IPC.evtState, store.getState())

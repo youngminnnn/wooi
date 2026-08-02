@@ -59,11 +59,21 @@ import {
   githubLoginCancel,
   githubLogout
 } from './auth'
-import { IPC, DEFAULT_AGENT_BACKEND, reorderById, workspaceStack } from '@shared/types'
+import {
+  IPC,
+  DEFAULT_AGENT_BACKEND,
+  agentSettingsFor,
+  normalizePermissionMode,
+  reorderById,
+  workspaceStack
+} from '@shared/types'
+import { backendMeta } from './agent/registry'
 import type {
+  AgentBackendId,
   AppSettings,
   CarryFailure,
   CarryItem,
+  CodexLoginMethod,
   CommandPanelKind,
   CommandResult,
   CreateWorkspaceArgs,
@@ -449,6 +459,16 @@ export function registerIpc(ctx: IpcContext): void {
       const carryFailures = await carryIntoNewWorktree(repo, worktreePath)
 
       const settings = store.getState().settings
+      // 워크스페이스가 쓸 에이전트는 여기서 정해져 세션 내내 고정된다. 호출자가 지정하지 않으면
+      // 전역 기본 백엔드를 쓴다. 권한 모드는 그 백엔드의 전역 기본값을 따르되, 백엔드가 모르는
+      // 값(다른 백엔드에서 넘어온 기본값)이면 그 백엔드의 기본 모드로 보정한다.
+      const agentBackend =
+        args.agentBackend ?? settings.defaultAgentBackend ?? DEFAULT_AGENT_BACKEND
+      const meta = backendMeta(agentBackend)
+      const permissionMode = normalizePermissionMode(
+        meta,
+        agentSettingsFor(settings, agentBackend).permissionMode
+      )
       const id = randomUUID()
       // 병렬 dev 서버 포트 충돌을 막기 위해 생성 시점에 고유 포트를 배정한다.
       const used = new Set<number>(
@@ -462,7 +482,7 @@ export function registerIpc(ctx: IpcContext): void {
         st.workspaces.push({
           id,
           repoId: repo.id,
-          agentBackend: DEFAULT_AGENT_BACKEND,
+          agentBackend,
           name: rawName,
           displayName: null,
           branch,
@@ -474,7 +494,7 @@ export function registerIpc(ctx: IpcContext): void {
           // setup 은 아래에서 곧 실행된다. 종료 시 onExit 훅이 success/failed 로 갱신한다.
           setupState: 'idle',
           sessionId: null,
-          permissionMode: settings.defaultPermissionMode,
+          permissionMode,
           model: null,
           effort: null,
           fastMode: null,
@@ -1398,6 +1418,16 @@ export function registerIpc(ctx: IpcContext): void {
     return searchFiles(ws.worktreePath, query ?? '').catch(() => [])
   })
 
+  // ── 에이전트 카탈로그 (렌더러의 선택지 UI 근거) ──────────────────────────
+
+  // 백엔드 메타 + 가용성. 렌더러는 이 값으로 권한 모드·effort 선택지와 에이전트 피커를 그린다.
+  ipcMain.handle(IPC.agentListBackends, () => ctx.sessions.listBackends())
+
+  // 백엔드별 모델 목록. Claude 는 정적, Codex 는 app-server 의 model/list 조회라 비동기·동적이다.
+  ipcMain.handle(IPC.agentListModels, (_e, backendId: AgentBackendId) =>
+    ctx.sessions.listModels(backendId)
+  )
+
   // ── 슬래시 명령 목록 (입력창 자동완성) ───────────────────────────────────
 
   ipcMain.handle(IPC.commandsList, (_e, workspaceId: string) => {
@@ -1550,6 +1580,27 @@ export function registerIpc(ctx: IpcContext): void {
     ctx.sessions.abortAll()
     broadcastState()
   })
+  // Codex 로그인은 PTY 가 필요 없다 — app-server 가 OAuth 콜백 서버까지 호스팅하므로,
+  // 우리는 인증 URL 을 기본 브라우저로 열어 주고 완료 알림(evtCodexLogin)만 기다린다.
+  ipcMain.handle(IPC.authCodexLoginStart, async (_e, method: CodexLoginMethod, apiKey?: string) => {
+    const codex = ctx.sessions.accountFor('codex')
+    if (!codex?.loginStart) throw new Error('Codex sign-in is not available.')
+    await codex.loginStart(method, apiKey)
+  })
+  ipcMain.handle(IPC.authCodexLoginCancel, () => ctx.sessions.accountFor('codex')?.loginCancel?.())
+  ipcMain.handle(IPC.authCodexLogout, async () => {
+    const codex = ctx.sessions.accountFor('codex')
+    if (!codex?.logout) return
+    // Claude 와 같은 이유로 완료까지 await 한다 — 이어지는 refreshAuth()가 반영된 상태를 읽도록.
+    await codex.logout()
+    codex.abortAll()
+    broadcastState()
+  })
+  ipcMain.handle(
+    IPC.authCodexRateLimits,
+    () => ctx.sessions.accountFor('codex')?.rateLimits?.() ?? null
+  )
+
   // GitHub 로그인도 별도 Terminal 창 없이 앱 내부 PTY(디바이스 플로우)로 진행하고,
   // 진행 상황은 evtGithubLogin 으로 흘려보낸다.
   ipcMain.handle(IPC.authGithubLoginStart, () => githubLoginStart(dispatch))

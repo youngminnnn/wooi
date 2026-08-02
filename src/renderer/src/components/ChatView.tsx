@@ -38,7 +38,7 @@ import StackPopover from './StackPopover'
 import StackSyncBanner from './StackSyncBanner'
 import ExportMenu from './ExportMenu'
 import HeaderButton from './HeaderButton'
-import { GithubMark } from './BrandIcons'
+import { AgentBackendMark, GithubMark } from './BrandIcons'
 import { useGithubDisconnected } from '../lib/github'
 import { workspaceDisplayName } from '@shared/types'
 import type { PrState, Workspace } from '@shared/types'
@@ -166,6 +166,12 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
   // 표시 이름: 사용자 override → PR 제목 → worktree 이름 순으로 결정한다.
   const displayName = workspaceDisplayName(workspace, pr?.title)
 
+  // 에이전트 배지는 고를 수 있는 에이전트가 둘 이상일 때만 의미가 있다.
+  const backends = useStore((s) => s.backends)
+  const showAgentBadge = backends.filter((b) => b.available).length > 1
+  const agentLabel =
+    backends.find((b) => b.id === workspace.agentBackend)?.label ?? workspace.agentBackend
+
   const archiveWorkspace = async (): Promise<void> => {
     const ok = await confirm({
       title: `Archive "${displayName}"?`,
@@ -273,6 +279,16 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
             />
           ) : (
             <div className="group/name flex items-center gap-1 min-w-0">
+              {/* 어떤 에이전트가 이 워크스페이스를 돌리는지 — 생성 시 고정돼 바뀌지 않는다.
+                  에이전트가 하나뿐인 사용자에게는 정보가 아니라 잡음이라 감춘다. */}
+              {showAgentBadge && (
+                <span
+                  className="shrink-0 grid place-items-center text-neutral-500"
+                  title={`Running on ${agentLabel}`}
+                >
+                  <AgentBackendMark backend={workspace.agentBackend} size={13} />
+                </span>
+              )}
               <div
                 className="text-base font-semibold text-neutral-100 truncate cursor-text"
                 title={`${displayName}\n(double-click to rename · clear to reset)`}

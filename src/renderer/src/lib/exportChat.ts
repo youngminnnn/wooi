@@ -44,8 +44,11 @@ function itemToMarkdown(it: ChatItem): string {
       const out = it.output.endsWith('\n') ? it.output : `${it.output}\n`
       return `\`\`\`sh\n$ ${it.command}\n${out}\`\`\``
     }
-    case 'result':
-      return `_${it.numTurns} turns · ${(it.durationMs / 1000).toFixed(1)}s · $${it.costUsd.toFixed(4)}_`
+    case 'result': {
+      // 원가를 알려 주지 않는 백엔드(Codex)에서는 비용 항목을 아예 뺀다.
+      const cost = it.costUsd === undefined ? '' : ` · $${it.costUsd.toFixed(4)}`
+      return `_${it.numTurns} turns · ${(it.durationMs / 1000).toFixed(1)}s${cost}_`
+    }
     case 'error':
       return `> ⚠️ **Error:** ${it.text}`
     case 'system':

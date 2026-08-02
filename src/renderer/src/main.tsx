@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 // highlight.js 토큰 색은 index.css 가 --hl-* 토큰으로 테마별(github-dark/github)로 정의한다.
 import './index.css'
 import App from './App'
+import ErrorBoundary from './components/ErrorBoundary'
 import { bootstrapTheme } from './lib/theme'
 
 // 권위 있는 설정이 도착하기 전, 캐시된 테마를 첫 페인트 전에 적용한다.
@@ -10,6 +11,9 @@ bootstrapTheme()
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App />
+    {/* 최후의 방어선 — 여기까지 올라온 예외라도 백지 화면 대신 원인을 보여 준다. */}
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
   </StrictMode>
 )

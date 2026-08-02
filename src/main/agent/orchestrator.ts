@@ -14,8 +14,16 @@ import {
   type RewindActionResult,
   type SlashCommandInfo
 } from '@shared/types'
-import type { AgentBackend, AgentBackendMeta } from './backend'
-import { createBackend, type Dispatch } from './registry'
+import type { AgentBackendMeta, ModelOption } from '@shared/types'
+import type { AgentBackend } from './backend'
+import {
+  AGENT_BACKENDS,
+  backendAvailability,
+  backendMeta,
+  createBackend,
+  type Dispatch
+} from './registry'
+import { log } from '../logger'
 
 /**
  * 여러 에이전트 백엔드를 소유하고, 워크스페이스가 지정한 백엔드(workspace.agentBackend)로 호출을
@@ -55,6 +63,55 @@ export class AgentOrchestrator {
   /** 워크스페이스를 구동하는 백엔드의 메타(식별·표시·capabilities). */
   metaFor(workspaceId: string): AgentBackendMeta {
     return this.backendFor(workspaceId).meta
+  }
+
+  // ── 카탈로그 (렌더러가 선택지 UI 를 그리는 근거) ─────────────────────────
+
+  /**
+   * 등록된 모든 백엔드의 메타를 가용성까지 반영해 돌려준다.
+   *
+   * 가용성 확인(CLI 설치·버전)은 백엔드를 **인스턴스화하지 않고** 정적 메타만 읽는 것으로는
+   * 알 수 없으므로 여기서 한 번 물어본다. 확인이 실패해도 목록 자체는 항상 돌려준다 —
+   * 렌더러는 available=false 인 항목을 이유와 함께 비활성으로 보여 준다.
+   */
+  async listBackends(): Promise<AgentBackendMeta[]> {
+    const ids = Object.keys(AGENT_BACKENDS) as AgentBackendId[]
+    return Promise.all(
+      ids.map(async (id) => {
+        const meta = backendMeta(id)
+        try {
+          const { available, reason } = await backendAvailability(id)
+          return { ...meta, available, unavailableReason: available ? undefined : reason }
+        } catch (err) {
+          log.error(`agent: availability check failed for ${id}`, err)
+          return { ...meta, available: false, unavailableReason: 'Availability check failed' }
+        }
+      })
+    )
+  }
+
+  /**
+   * 백엔드의 계정 API. 이 백엔드가 계정을 직접 다루지 않으면(Claude) null.
+   * 호출부는 null 을 "그 백엔드는 다른 경로로 인증한다"로 해석해야 한다.
+   */
+  accountFor(id: AgentBackendId): AgentBackend | null {
+    const backend = this.get(id)
+    return backend.accountStatus ? backend : null
+  }
+
+  /**
+   * 백엔드의 모델 선택지. 쓸 수 없는 백엔드(CLI 미설치)는 프로세스를 띄우지 않고 빈 목록으로
+   * 끊는다 — 조회 실패도 마찬가지로 빈 목록이며, 렌더러는 저장된 값으로 폴백한다.
+   */
+  async listModels(id: AgentBackendId): Promise<ModelOption[]> {
+    try {
+      const { available } = await backendAvailability(id)
+      if (!available) return []
+      return await this.get(id).listModels()
+    } catch (err) {
+      log.error(`agent: model list failed for ${id}`, err)
+      return []
+    }
   }
 
   // ── 핵심 (모든 백엔드 위임) ──────────────────────────────────────────────
@@ -120,15 +177,15 @@ export class AgentOrchestrator {
 
   runCommand(workspaceId: string, kind: CommandPanelKind): Promise<CommandResult> {
     const backend = this.backendFor(workspaceId)
-    if (!backend.meta.capabilities.interactiveCommands) {
-      throw new Error(`${backend.meta.label} does not support interactive commands.`)
+    if (!backend.meta.capabilities.interactiveCommands.includes(kind)) {
+      throw new Error(`${backend.meta.label} does not support /${kind}.`)
     }
     return backend.runCommand(workspaceId, kind)
   }
 
   /**
    * 계정 레이트리밋 스냅샷 갱신. 레이트리밋은 계정에 하나뿐인 값이라 워크스페이스로 라우팅하지
-   * 않고, 해당 기능을 지원하는 백엔드 전부에 요청한다(현재는 Claude 하나).
+   * 않고, 해당 기능을 지원하는 백엔드 전부에 요청한다(Claude·Codex 둘 다 지원한다).
    * 지원하지 않는 백엔드는 조용히 건너뛴다 — 배경 갱신이 에러를 던질 이유가 없다.
    */
   async refreshRateLimits(allowShortLived: boolean): Promise<void> {
@@ -137,7 +194,9 @@ export class AgentOrchestrator {
     if (allowShortLived) this.get(DEFAULT_AGENT_BACKEND)
     await Promise.all(
       [...this.backends.values()]
-        .filter((b) => b.meta.capabilities.interactiveCommands)
+        // capabilities.rateLimits 로 가른다. interactiveCommands 는 이제 배열이라 빈 값도 truthy 라서
+        // 그걸로 거르면 지원하지 않는 백엔드까지 전부 통과한다.
+        .filter((b) => b.meta.capabilities.rateLimits)
         .map((b) => b.refreshRateLimits(allowShortLived))
     )
   }

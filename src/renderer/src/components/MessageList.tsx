@@ -346,10 +346,18 @@ function Item({
       return (
         <BashBlock
           command={item.command}
+          cwd={item.cwd}
+          agent={item.agent}
           output={item.output}
           exitCode={item.exitCode}
           running={item.running}
-          onStop={() => void window.api.terminal.killInline(workspaceId, item.id)}
+          // 사용자의 `!명령` 은 그 인라인 프로세스만 죽이면 되지만, 에이전트가 실행한 명령은
+          // 턴의 일부다 — 프로세스만 죽이면 에이전트는 계속 도므로 턴 자체를 중단한다.
+          onStop={() =>
+            item.agent
+              ? void window.api.chat.interrupt(workspaceId)
+              : void window.api.terminal.killInline(workspaceId, item.id)
+          }
         />
       )
     case 'task':
@@ -442,12 +450,18 @@ function TaskChecklist({
  */
 function BashBlock({
   command,
+  cwd,
+  agent,
   output,
   exitCode,
   running,
   onStop
 }: {
   command: string
+  /** 실행 디렉터리. 에이전트가 worktree 밖에서 돌렸을 때를 알아볼 수 있게 툴팁에 싣는다. */
+  cwd?: string
+  /** 에이전트가 실행한 명령인가(사용자의 `!명령` 과 구분). */
+  agent?: boolean
   output: string
   exitCode: number | null
   running: boolean
@@ -458,15 +472,26 @@ function BashBlock({
     <div className="group/bash rounded-lg border border-[var(--border)] bg-[var(--bg-3)] overflow-hidden font-mono text-xs">
       <div className="flex items-center gap-2 px-2.5 py-1.5 border-b border-[var(--border)] bg-[var(--surface)]">
         <TerminalIcon size={12} className="text-neutral-500 shrink-0" />
-        <span className="text-[var(--success-400)] shrink-0">$</span>
-        <span className="text-neutral-200 truncate" title={command}>
+        {/* 에이전트가 돌린 명령은 프롬프트 기호를 달리해, 내가 친 `!명령` 과 한눈에 구분되게 한다. */}
+        <span
+          className={
+            'shrink-0 ' + (agent ? 'text-[var(--accent-400)]' : 'text-[var(--success-400)]')
+          }
+          title={agent ? 'Run by the agent' : 'Run by you'}
+        >
+          {agent ? '⌁' : '$'}
+        </span>
+        <span
+          className="text-neutral-200 truncate"
+          title={cwd ? `${command}\n\n(in ${cwd})` : command}
+        >
           {command}
         </span>
         <span className="ml-auto shrink-0">
           {running ? (
             <button
               onClick={onStop}
-              title="중단"
+              title={agent ? 'Interrupt the turn' : '중단'}
               className="grid h-4 w-4 place-items-center text-neutral-500 hover:text-[var(--danger-400)]"
             >
               {/* 평상시 스피너, 마우스를 올리면 중단(정지) 버튼으로 바뀐다. */}

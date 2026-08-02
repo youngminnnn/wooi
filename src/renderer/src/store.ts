@@ -1,5 +1,7 @@
 import { create } from 'zustand'
 import type {
+  AgentBackendId,
+  AgentBackendMeta,
   AppNotice,
   AppState,
   AuthStatus,
@@ -8,6 +10,7 @@ import type {
   ChatItem,
   GitStatus,
   ImageAttachment,
+  ModelOption,
   PermissionRequest,
   PrStatus,
   RunningAgent,
@@ -18,7 +21,7 @@ import type {
   Workspace
 } from '@shared/types'
 import type { NotificationChannel, NotificationEvent } from '@shared/types'
-import { cascadeProblems } from '@shared/types'
+import { AGENT_BACKEND_IDS, cascadeProblems } from '@shared/types'
 import { playNotification } from './lib/sound'
 import { carrySuggestShownFlag, readUiFlag, setUiFlag } from './lib/uiFlags'
 import { openRepoSettings } from './lib/repoSettings'
@@ -131,6 +134,14 @@ interface UIState {
   permissions: PermissionRequest[]
   authStatus: AuthStatus | null
   /**
+   * 등록된 에이전트 백엔드의 메타(라벨·권한 모드·effort 선택지·capabilities·가용성).
+   * 권한 모드·effort·에이전트 피커 UI 의 유일한 근거다 — 렌더러에 상수로 두지 않는다.
+   * 아직 못 읽었으면 빈 배열이며, UI 는 저장된 값을 그대로 보여 주는 것으로 폴백한다.
+   */
+  backends: AgentBackendMeta[]
+  /** 백엔드별 모델 선택지(Claude 는 정적, Codex 는 app-server 카탈로그). */
+  models: Partial<Record<AgentBackendId, ModelOption[]>>
+  /**
    * gh 연결을 요구하는 액션이 대기 중이면(=연결 모달이 떠 있으면) 그 사유. null 이면 닫힘.
    * gh 는 하드 게이트가 아니라 지연 게이트다 — PR·스택처럼 gh 가 실제로 필요한 액션을 누른
    * 그 순간에만 이 모달이 뜨고, 연결이 끝나면 원래 하려던 액션이 이어서 실행된다.
@@ -142,11 +153,7 @@ interface UIState {
    * 놓치지 않는다.
    */
   updateStatus: UpdateStatus
-  /**
-   * 원격 공지 목록(main 의 evtNotice). 앱 버전과 무관하게 상단 배너로 알리는 메시지다.
-   * 사용자가 닫았는지는 기기 로컬 플래그(uiFlags)라 여기 담지 않는다 — 여기 있는 건
-   * "지금 이 버전·이 시각에 유효한 공지" 전량이고, 무엇을 보여 줄지는 배너가 고른다.
-   */
+  /** 현재 앱 버전·시각에 유효한 원격 공지. */
   notices: AppNotice[]
   /** workspace 별 컨텍스트 윈도 사용량(마지막 턴 기준). 입력창 사용량 미터용. */
   contextUsage: Record<string, ContextUsage>
@@ -196,7 +203,13 @@ interface UIState {
   /** worktree 생성을 시작하고, 완료될 때까지 사이드바에 스피너 행을 즉시 띄운다. */
   createWorkspace: (
     repoId: string,
-    args?: { name?: string; baseBranch?: string; parentWorkspaceId?: string | null },
+    args?: {
+      name?: string
+      baseBranch?: string
+      parentWorkspaceId?: string | null
+      /** 이 워크스페이스를 구동할 에이전트. 생략하면 전역 기본 백엔드. */
+      agentBackend?: AgentBackendId
+    },
     displayName?: string
   ) => Promise<void>
   /** stacked 워크스페이스를 최신 base(부모 브랜치) 위로 rebase·force-push 한다. */
@@ -213,18 +226,13 @@ interface UIState {
   refreshGit: (workspaceId: string) => Promise<void>
   /** 진입 여부와 무관하게 모든(비아카이브) 워크스페이스의 git 상태를 한 번에 갱신한다. */
   refreshAllGit: () => Promise<void>
-  /**
-   * 해당 workspace 의 PR 상태를 갱신한다.
-   * silent 면 새로고침 스피너(prRefreshing)를 띄우지 않는다 — 사용자가 요청하지 않은 백그라운드
-   * 폴링이 헤더에서 계속 깜빡이지 않도록.
-   */
-  refreshPr: (workspaceId: string, opts?: { silent?: boolean }) => Promise<void>
-  /** 진입 여부와 무관하게 모든(비아카이브) 워크스페이스의 PR 상태를 한 번에 갱신한다. */
-  refreshAllPr: () => Promise<void>
+  refreshPr: (workspaceId: string) => Promise<void>
   /** PR 상태를 즉시(낙관적) 설정한다. 브랜치 전환 시 캐시된 값으로 헤더를 바로 갱신할 때 쓴다. */
   setPrStatus: (workspaceId: string, status: PrStatus | null) => void
   refreshScriptStatus: (workspaceId: string) => Promise<void>
   refreshAuth: () => Promise<void>
+  /** 에이전트 백엔드 메타 + 백엔드별 모델 목록을 다시 읽는다(가용성은 실행 중에도 바뀐다). */
+  refreshAgents: () => Promise<void>
   /**
    * gh 가 필요한 액션을 실행한다. 이미 연결돼 있으면 그대로 실행하고, 아니면 연결 모달을 띄운 뒤
    * 연결이 끝나는 즉시 action 을 이어서 수행한다(사용자가 닫으면 그냥 버린다).
@@ -297,20 +305,6 @@ const STATUS_POLL_INTERVAL_MS = 15_000
 let authPollTimer: ReturnType<typeof setInterval> | null = null
 const AUTH_POLL_INTERVAL_MS = 30_000
 
-// PR 상태 폴링. 예전에는 폴링이 아예 없어서, 리뷰 승인·병합·CI 결과처럼 앱 밖(GitHub)에서 일어난
-// 변화가 워크스페이스를 다시 선택하거나 에이전트 턴이 끝나기 전까지 칩에 반영되지 않았다.
-// 다만 PR 조회 한 번은 git 상태와 비교가 안 되게 비싸다 — 로그인 셸을 띄워 gh 를 돌리고 네트워크
-// 왕복까지 한다(리포 단위인 열린 PR 목록은 main 에서 리포별로 묶어 한 번만 받아온다 —
-// github.ts 의 listOpenPrs 참고). 그래서 두 단으로 나눈다: 전체 훑기 사이에 지금 보고 있는
-// 워크스페이스만 한 번 더 끼워 넣어, 헤더 PR 칩은 사이드바 PR 점보다 촘촘하게 따라가게 한다.
-let prPollTimer: ReturnType<typeof setInterval> | null = null
-let prPollInFlight = false
-const PR_POLL_INTERVAL_MS = 20_000
-const PR_ALL_INTERVAL_MS = 40_000
-/** 마지막 전체 갱신 시각. 포커스 복귀가 잦아도 gh 호출이 몰리지 않게 하한(아래)을 두는 기준. */
-let lastPrAllAt = 0
-const PR_ALL_MIN_GAP_MS = 15_000
-
 // gh 연결 모달이 닫힐 때까지 붙들어 두는, 사용자가 원래 하려던 액션. 상태에 담지 않는 이유는
 // 함수라 비교·직렬화 대상이 아니고, 렌더에 영향을 주지 않기 때문이다.
 let pendingGithubAction: (() => void | Promise<void>) | null = null
@@ -318,6 +312,14 @@ let pendingGithubAction: (() => void | Promise<void>) | null = null
 /** gh(GitHub CLI)가 설치·로그인돼 PR·스택 기능을 쓸 수 있는 상태인가. */
 function githubConnected(auth: AuthStatus | null): boolean {
   return !!auth && auth.github.installed && auth.github.loggedIn
+}
+
+/**
+ * 값이 실질적으로 같은지(JSON 기준). 폴링으로 다시 읽은 결과가 이전과 같으면 set 을 건너뛰어
+ * 불필요한 리렌더를 막는 용도다 — 작고 평평한 카탈로그 데이터에만 쓴다.
+ */
+function same(a: unknown, b: unknown): boolean {
+  return JSON.stringify(a) === JSON.stringify(b)
 }
 
 function upsertItem(items: ChatItem[], item: ChatItem): ChatItem[] {
@@ -341,6 +343,8 @@ export const useStore = create<UIState>((set, get) => ({
   prRefreshing: {},
   permissions: [],
   authStatus: null,
+  backends: [],
+  models: {},
   githubGate: null,
   updateStatus: { state: 'idle' },
   notices: [],
@@ -377,6 +381,7 @@ export const useStore = create<UIState>((set, get) => ({
     const rightPanelOpen = remembered ?? app.settings.defaultRightPanelOpen
     set({ app, ready: true, runningSince: seededRunningSince, rightPanelOpen })
     void get().refreshAuth()
+    void get().refreshAgents()
 
     // 최초 진입 시 모든 워크트리의 git 상태를 한 번 받아오고(진입 전에도 사이드바에 노출),
     // 이후 일정 간격으로 폴링해 백그라운드에서 변한 변경 파일 수·ahead/behind 를 최신으로 유지한다.
@@ -402,26 +407,8 @@ export const useStore = create<UIState>((set, get) => ({
     // git 상태와 마찬가지로, 최초 진입 시 모든 활성 workspace 의 PR 상태도 미리 갱신한다.
     // 그러지 않으면 prStatus 가 비어 있어, 해당 세션에 직접 들어가 selectWorkspace 의
     // refreshPr 가 실행되기 전까지 사이드바에 PR 칩이 뜨지 않는다.
-    void get().refreshAllPr()
-
-    // 이후로는 주기적으로 따라잡는다. 창이 가려져 있으면 건너뛰고(포커스 복귀 시 아래에서 즉시
-    // 한 번 갱신), gh 미연결이면 어차피 조용히 null 만 돌아오므로 아예 돌지 않는다.
-    if (!prPollTimer) {
-      prPollTimer = setInterval(() => {
-        if (!windowFocused) return
-        if (!githubConnected(get().authStatus)) return
-        // 앞선 폴링이 아직 안 끝났으면(느린 네트워크·많은 워크스페이스) 이번 틱은 건너뛴다.
-        if (prPollInFlight) return
-        const selected = get().selectedWorkspaceId
-        const full = Date.now() - lastPrAllAt >= PR_ALL_INTERVAL_MS
-        if (!full && !selected) return
-        prPollInFlight = true
-        const done = (): void => {
-          prPollInFlight = false
-        }
-        if (full) void get().refreshAllPr().then(done, done)
-        else void get().refreshPr(selected!, { silent: true }).then(done, done)
-      }, PR_POLL_INTERVAL_MS)
+    for (const w of app.workspaces) {
+      if (!w.archived) void get().refreshPr(w.id)
     }
 
     // 패널을 토글할 때마다(키보드 ⌘J·버튼·Composer 등 경로 무관) 마지막 상태를 기억해 둔다.
@@ -441,7 +428,9 @@ export const useStore = create<UIState>((set, get) => ({
         set({ prStatus: {} })
         return
       }
-      void get().refreshAllPr()
+      for (const w of state.app?.workspaces ?? []) {
+        if (!w.archived) void get().refreshPr(w.id)
+      }
     })
 
     window.api.onState((next) => {
@@ -487,11 +476,6 @@ export const useStore = create<UIState>((set, get) => ({
       clearSelectedUnread()
       // 자리를 비운 사이 바뀌었을 수 있으니 모든 워크트리 상태를 즉시 한 번 갱신한다.
       void get().refreshAllGit()
-      // PR 도 같이 훑되(자리를 비운 사이 리뷰·병합이 일어났을 수 있다), gh 호출이 비싼 만큼
-      // 앱을 자주 오갈 때 매번 돌지 않도록 최소 간격을 둔다.
-      if (githubConnected(get().authStatus) && Date.now() - lastPrAllAt >= PR_ALL_MIN_GAP_MS) {
-        void get().refreshAllPr()
-      }
     })
     window.api.onWindowBlur(() => {
       windowFocused = false
@@ -499,6 +483,8 @@ export const useStore = create<UIState>((set, get) => ({
     window.addEventListener('focus', () => {
       windowFocused = true
       void get().refreshAuth()
+      // 자리를 비운 사이 사용자가 에이전트 CLI 를 설치·제거했을 수 있으므로 가용성도 다시 본다.
+      void get().refreshAgents()
       clearSelectedUnread()
     })
     window.addEventListener('blur', () => {
@@ -702,12 +688,14 @@ export const useStore = create<UIState>((set, get) => ({
     })
     window.api.onUpdate((status) => set({ updateStatus: status }))
 
-    // 원격 공지: 업데이트 상태와 같은 이유로 현재 값을 한 번 받고 이후 갱신을 구독한다.
-    // (main 은 창이 뜬 뒤 몇 초 있다 처음 가져오므로, 보통 첫 값은 비어 있고 곧 방송이 온다.)
     void window.api.notice.getActive().then((notices) => {
       if (get().notices.length === 0) set({ notices })
     })
     window.api.onNotice((notices) => set({ notices }))
+
+    // 에이전트 계정이 앱 밖에서 바뀌었다(터미널 로그인·토큰 갱신 등). 폴링을 기다리지 않고
+    // 즉시 인증 상태를 다시 읽어, 통합 패널과 배너가 곧바로 맞는 값을 보여 주게 한다.
+    window.api.onAuthChanged(() => void get().refreshAuth())
 
     window.api.onPermission((req: PermissionRequest) => {
       if (notifyEnabled(get(), req.workspaceId, 'needsInput', 'sound')) playNotification()
@@ -976,39 +964,14 @@ export const useStore = create<UIState>((set, get) => ({
     })
   },
 
-  refreshPr: async (workspaceId, opts) => {
-    const silent = opts?.silent === true
-    if (!silent) set((s) => ({ prRefreshing: { ...s.prRefreshing, [workspaceId]: true } }))
+  refreshPr: async (workspaceId) => {
+    set((s) => ({ prRefreshing: { ...s.prRefreshing, [workspaceId]: true } }))
     try {
       const status = await window.api.pr.status(workspaceId)
       set((s) => ({ prStatus: { ...s.prStatus, [workspaceId]: status } }))
     } finally {
-      if (!silent) set((s) => ({ prRefreshing: { ...s.prRefreshing, [workspaceId]: false } }))
+      set((s) => ({ prRefreshing: { ...s.prRefreshing, [workspaceId]: false } }))
     }
-  },
-
-  refreshAllPr: async () => {
-    const workspaces = get().app?.workspaces.filter((w) => !w.archived) ?? []
-    // 다음 전체 갱신까지의 간격은 "시작 시각" 기준으로 잰다. 조회가 오래 걸릴 때 끝난 시각으로
-    // 재면 전체 훑기가 계속 뒤로 밀린다.
-    lastPrAllAt = Date.now()
-    if (!workspaces.length) return
-    // git 과 같은 방식 — 병렬로 받아 한 번만 반영해 워크스페이스 수만큼 리렌더가 나지 않게 한다.
-    const entries = await Promise.all(
-      workspaces.map(async (w) => {
-        // undefined = 조회 자체가 실패 → 기존 값을 지우지 않는다(일시적 실패에 칩이 사라졌다
-        // 다시 나타나는 깜빡임 방지). null = 조회 성공했고 PR 이 없음 → 그대로 반영한다.
-        const status = await window.api.pr.status(w.id).catch(() => undefined)
-        return [w.id, status] as const
-      })
-    )
-    set((s) => {
-      const prStatus = { ...s.prStatus }
-      for (const [id, status] of entries) {
-        if (status !== undefined) prStatus[id] = status
-      }
-      return { prStatus }
-    })
   },
 
   setPrStatus: (workspaceId, status) =>
@@ -1024,12 +987,34 @@ export const useStore = create<UIState>((set, get) => ({
       const status = await window.api.auth.getStatus()
       set({ authStatus: status })
     } catch {
-      set({
-        authStatus: {
-          claude: { installed: false, loggedIn: false },
-          github: { installed: false, loggedIn: false }
-        }
-      })
+      // 폴백은 **등록된 모든 백엔드**를 채워야 한다. 하나라도 빠지면 `authStatus.agents[id]` 를
+      // 읽는 모든 패널이 undefined 를 만나 터진다(조회 실패는 앱 기동 직후 흔하다).
+      const agents = Object.fromEntries(
+        AGENT_BACKEND_IDS.map((id) => [id, { installed: false, loggedIn: false }])
+      ) as AuthStatus['agents']
+      set({ authStatus: { agents, github: { installed: false, loggedIn: false } } })
+    }
+  },
+
+  /**
+   * 에이전트 카탈로그(백엔드 메타 + 백엔드별 모델 목록)를 새로 읽는다.
+   * 백엔드 가용성은 CLI 설치 여부에 따라 앱 실행 중에도 바뀔 수 있으므로(사용자가 그 사이
+   * `npm i -g @openai/codex` 를 할 수 있다), 창 포커스·설정 열기 시점에 다시 부른다.
+   */
+  refreshAgents: async () => {
+    try {
+      const backends = await window.api.agent.listBackends()
+      // 내용이 그대로면 set 하지 않는다. 이 함수는 창 포커스마다 불리는데, 매번 새 배열을 넣으면
+      // 참조가 바뀌어 구독하는 모든 컴포넌트가 헛되이 리렌더된다(카탈로그는 거의 안 변한다).
+      if (!same(get().backends, backends)) set({ backends })
+
+      const lists = await Promise.all(
+        backends.map(async (b) => [b.id, await window.api.agent.listModels(b.id)] as const)
+      )
+      const models = Object.fromEntries(lists) as Record<AgentBackendId, ModelOption[]>
+      if (!same(get().models, models)) set({ models })
+    } catch {
+      // 카탈로그를 못 읽어도 앱은 동작해야 한다 — UI 는 저장된 값을 그대로 보여 준다.
     }
   },
 

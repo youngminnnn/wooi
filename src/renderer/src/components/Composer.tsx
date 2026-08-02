@@ -31,10 +31,11 @@ import {
   Activity
 } from 'lucide-react'
 import { useStore } from '../store'
-import { PERMISSION_FOOTER } from '../lib/permission'
-import { MODEL_OPTIONS, modelLabel, modelSupportsFastMode } from '../lib/models'
-import { EFFORT_OPTIONS, effortLabel } from '../lib/effort'
+import { permissionModeFooter } from '../lib/permission'
+import { modelLabel, modelSupportsFastMode } from '../lib/models'
+import { effortLabel, effortOptionsFor } from '../lib/effort'
 import { FAST_MODE_HINT, fastModeLabel, fastModeStatus } from '../lib/fastMode'
+import { useAgentSettings, useModels, useWorkspaceBackend } from '../lib/backends'
 import {
   INTERACTIVE_COMMANDS,
   MENTION_DROP_HINT_BYTES,
@@ -114,6 +115,14 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
   // running 을 함께 보는 건 안전장치다: 배지가 어떤 이유로 남더라도 턴이 끝나면 입력이 풀린다.
   const compacting = useStore((s) => s.compacting[workspace.id] ?? false)
   const locked = compacting && running
+  // 권한 모드의 푸터 문구는 백엔드가 선언한다(Claude 와 Codex 는 모드 이름부터 다르다).
+  const backend = useWorkspaceBackend(workspace)
+  // 이 백엔드가 답할 수 있는 인터랙티브 명령만 가로챈다. 카탈로그를 아직 못 읽었으면 빈 목록이라
+  // 전부 일반 텍스트로 나가는데, 그게 "에러 토스트"보다 나은 폴백이다.
+  const supportedCommands = backend?.capabilities.interactiveCommands ?? EMPTY_COMMANDS
+  const supportsSideQuestion = backend?.capabilities.sideQuestion ?? false
+  // 지원하지 않는 백엔드에서는 /fast 도 상태줄 표시도 감춘다.
+  const supportsFastMode = backend?.capabilities.fastMode ?? false
 
   // 슬래시 명령 자동완성: 명령 목록(워크스페이스당 1회 조회)과 메뉴 선택 인덱스.
   const [commands, setCommands] = useState<SlashCommandInfo[] | null>(null)
@@ -414,7 +423,8 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
     if (images.length || !trimmed.startsWith('!')) return false
     const command = trimmed.slice(1).trim()
     if (!command) return true // "!" 만 입력 — 메시지로 새지 않도록 삼키되 아무것도 실행 안 함.
-    void window.api.terminal.exec(workspace.id, command)
+    if (workspace.agentBackend === 'codex') void window.api.chat.send(workspace.id, trimmed)
+    else void window.api.terminal.exec(workspace.id, command)
     return true
   }
 
@@ -433,7 +443,7 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
     }
 
     // /model·/effort·/fast 는 백엔드 왕복 없이 로컬 선택 카드로 처리한다(첨부가 있으면 일반 전송).
-    const picker = images.length ? null : matchPicker(trimmed)
+    const picker = images.length ? null : matchPicker(trimmed, supportsFastMode)
     if (picker) {
       openPicker(picker)
       setText('')
@@ -443,7 +453,7 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
 
     // /mcp·/context·/reload-plugins 등 인터랙티브(TUI 전용) 명령은 일반 프롬프트로 보내면 동작하지
     // 않으므로 인터셉트해 SDK 제어 메서드로 실행하고 결과를 카드로 보여 준다(첨부가 있으면 일반 전송).
-    const interactive = images.length ? null : matchInteractive(trimmed)
+    const interactive = images.length ? null : matchInteractive(trimmed, supportedCommands)
     if (interactive) {
       runInteractive(interactive)
       setText('')
@@ -454,7 +464,7 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
     // /diff·/copy·/help·/clear·/memory 는 Wooi UI 에서 직접 처리한다(에이전트로 보내지 않는다).
     // runLocal 이 입력창 텍스트를 알맞게 정리하므로(대부분 비우고, /help 만 '/' 로 메뉴를 띄움)
     // 여기서는 setText 를 호출하지 않는다.
-    const local = images.length ? null : matchLocal(trimmed)
+    const local = images.length ? null : matchLocal(trimmed, workspace.agentBackend === 'claude')
     if (local) {
       runLocal(local)
       historyIdx.current = -1
@@ -464,7 +474,7 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
     // /btw 는 사이드 질문으로 분기한다 — 일반 메시지로 보내면 현재 턴 뒤에 큐잉되어 메인 대화에
     // 쌓이므로(=오염), 맥락만 공유하는 임시 질의로 처리하고 답변은 별도 카드로 보여 준다.
     // (사이드 질문은 텍스트 전용 — 첨부가 있으면 일반 메시지로 보낸다.)
-    const sideQ = images.length ? null : /^\/btw(?:\s+([\s\S]+))?$/.exec(trimmed)
+    const sideQ = images.length ? null : matchSideQuestion(trimmed, supportsSideQuestion)
     if (sideQ) {
       const question = (sideQ[1] ?? '').trim()
       if (!question) return // 질문 없이 "/btw" 만 보낸 경우는 무시.
@@ -481,10 +491,11 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
       mediaType,
       dataBase64
     }))
-    // 실행 중이면 백엔드로 바로 보내지 않고 대기 큐에 넣는다 — 칩으로 표시되고 취소할 수 있으며,
-    // 현재 턴이 끝나면(idle) 순서대로 자동 전송된다. 실행 중이 아니면 즉시 전송.
+    // steering 미지원 백엔드만 실행 중 메시지를 대기 큐에 넣는다. Codex 같이
+    // steering 지원 시에는 즉시 전송해 현재 턴에 반영한다.
     setPickerCard(null)
-    if (running) enqueueMessage(workspace.id, trimmed, payload.length ? payload : undefined)
+    if (running && !backend?.capabilities.steering)
+      enqueueMessage(workspace.id, trimmed, payload.length ? payload : undefined)
     else void window.api.chat.send(workspace.id, trimmed, payload.length ? payload : undefined)
     setText('')
     setImages([])
@@ -818,9 +829,11 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
             </span>
           ) : (
             (() => {
-              const footer = PERMISSION_FOOTER[workspace.permissionMode]
-              const accent =
-                workspace.permissionMode === 'plan' ? 'text-cyan-400' : 'text-[var(--warning-400)]'
+              const footer = permissionModeFooter(backend, workspace.permissionMode)
+              // 읽기 전용 계열(plan·readOnly)은 "멈춤" 계열 색, 나머지는 경고 색으로 구분한다.
+              const readOnlyish =
+                workspace.permissionMode === 'plan' || workspace.permissionMode === 'readOnly'
+              const accent = readOnlyish ? 'text-cyan-400' : 'text-[var(--warning-400)]'
               return footer ? (
                 <span className={accent}>
                   {footer.symbol} {footer.text}{' '}
@@ -1072,32 +1085,55 @@ function SideAnswerCard({
   )
 }
 
-/** "/model"·"/effort"·"/fast" 면 그 종류를 돌려준다(뒤따르는 인자는 무시하고 선택 카드를 연다). */
-function matchPicker(text: string): PickerKind | null {
+/**
+ * "/model"·"/effort"·"/fast" 면 그 종류를 돌려준다(뒤따르는 인자는 무시하고 선택 카드를 연다).
+ *
+ * `allowFast` 는 이 워크스페이스의 백엔드가 fast mode 를 지원하는지다 — 지원하지 않으면(Codex)
+ * 가로채지 않고 일반 텍스트로 흘려보낸다. 아무 일도 안 하는 카드를 띄우는 것보다 낫다.
+ */
+function matchPicker(text: string, allowFast: boolean): PickerKind | null {
   const m = /^\/(model|effort|fast)(?:\s.*)?$/.exec(text)
-  return m ? (m[1] as PickerKind) : null
+  if (!m) return null
+  const kind = m[1] as PickerKind
+  return kind === 'fast' && !allowFast ? null : kind
 }
 
 /**
  * "/mcp" 처럼 인자 없는 인터랙티브 명령이면 해당 정의를 돌려준다(아니면 null).
  * 별칭도 함께 해석한다(예: /cost·/stats → /usage).
+ *
+ * `supported` 는 이 워크스페이스의 백엔드가 실제로 답할 수 있는 종류다 — 지원하지 않는 명령은
+ * 인터랙티브로 가로채지 않고 일반 텍스트로 흘려보낸다(에러 토스트 대신 에이전트가 답하게).
  */
-function matchInteractive(text: string): (typeof INTERACTIVE_COMMANDS)[number] | null {
+function matchInteractive(
+  text: string,
+  supported: readonly CommandPanelKind[]
+): (typeof INTERACTIVE_COMMANDS)[number] | null {
   const m = /^\/([\w-]+)\s*$/.exec(text)
   if (!m) return null
   const name = m[1]
-  return INTERACTIVE_COMMANDS.find((c) => c.name === name || c.aliases?.includes(name)) ?? null
+  const found = INTERACTIVE_COMMANDS.find((c) => c.name === name || c.aliases?.includes(name))
+  return found && supported.includes(found.kind) ? found : null
 }
 
 /** Wooi UI 가 직접 처리하는 로컬 명령(에이전트로 보내지 않음). */
 type LocalCommand = 'diff' | 'copy' | 'help' | 'clear' | 'memory'
 const LOCAL_COMMANDS: readonly LocalCommand[] = ['diff', 'copy', 'help', 'clear', 'memory']
 
-/** "/diff" 처럼 로컬에서 처리하는 명령이면 그 종류를 돌려준다(뒤따르는 인자는 무시). */
-function matchLocal(text: string): LocalCommand | null {
+/**
+ * "/diff" 처럼 로컬에서 처리하는 명령이면 그 종류를 돌려준다(뒤따르는 인자는 무시).
+ * `/memory` 는 CLAUDE.md 를 여는 Claude 전용 기능이라 Codex 입력을 가로채지 않는다.
+ */
+export function matchLocal(text: string, allowClaudeMemory: boolean): LocalCommand | null {
   const m = /^\/([\w-]+)(?:\s[\s\S]*)?$/.exec(text)
   if (!m) return null
-  return (LOCAL_COMMANDS as readonly string[]).includes(m[1]) ? (m[1] as LocalCommand) : null
+  if (!(LOCAL_COMMANDS as readonly string[]).includes(m[1])) return null
+  return m[1] === 'memory' && !allowClaudeMemory ? null : (m[1] as LocalCommand)
+}
+
+/** Claude side-question capability 가 있는 워크스페이스에서만 `/btw` 를 로컬 처리한다. */
+export function matchSideQuestion(text: string, supported: boolean): RegExpExecArray | null {
+  return supported ? /^\/btw(?:\s+([\s\S]+))?$/.exec(text) : null
 }
 
 /** 인터랙티브 명령 결과 카드의 임시 상태(트랜스크립트에 저장되지 않음). */
@@ -1816,11 +1852,17 @@ function StatusLine({
   const usage = useStore((s) => s.contextUsage[workspace.id])
   const compacting = useStore((s) => s.compacting[workspace.id] ?? false)
   // 레이트리밋은 계정 단위 전역 값이라 workspace.id 로 색인하지 않는다(contextUsage 와 다른 점).
-  const rateLimits = useStore((s) => s.app!.rateLimits)
+  const rateLimits = useStore((s) => {
+    const app = s.app!
+    if (app.rateLimitsByAgent) return app.rateLimitsByAgent[workspace.agentBackend]
+    return workspace.agentBackend === 'claude' ? app.rateLimits : undefined
+  })
   const liveBranch = useStore((s) => s.gitStatus[workspace.id]?.branch)
-  const settingsModel = useStore((s) => s.app!.settings.model)
-  const settingsEffort = useStore((s) => s.app!.settings.effort)
-  const settingsFastMode = useStore((s) => s.app!.settings.fastMode)
+  const backend = useWorkspaceBackend(workspace)
+  const models = useModels(workspace.agentBackend)
+  const defaults = useAgentSettings(workspace.agentBackend)
+  // fast mode 는 Claude Code 전용이라, 지원하지 않는 백엔드에서는 상태줄에서도 감춘다.
+  const supportsFastMode = backend?.capabilities.fastMode ?? false
 
   // worktree 절대 경로의 마지막 구간(디렉토리명). 비정상 경로면 전체 경로로 폴백한다.
   const dirName = workspace.worktreePath.split('/').filter(Boolean).pop() ?? workspace.worktreePath
@@ -1831,11 +1873,11 @@ function StatusLine({
   const branch = liveBranch && liveBranch !== '?' ? liveBranch : workspace.branch
 
   // 표시는 "유효 값" 기준: workspace 오버라이드 → (모델은 init 으로 확정된 lastModel) → 전역 설정.
-  const modelText = modelLabel(workspace.model ?? workspace.lastModel ?? settingsModel)
-  const effortText = effortLabel(workspace.effort ?? settingsEffort)
+  const modelText = modelLabel(models, workspace.model ?? workspace.lastModel ?? defaults.model)
+  const effortText = effortLabel(backend, workspace.effort ?? defaults.effort)
   // fast mode 는 "설정" 보다 세션이 보고한 "실제 상태" 를 우선해 보여 준다(쿨다운·미지원 모델 등).
   const fast = fastModeStatus(
-    workspace.fastMode ?? settingsFastMode,
+    workspace.fastMode ?? defaults.fastMode,
     workspace.fastModeState,
     workspace.fastModeReason
   )
@@ -1869,22 +1911,26 @@ function StatusLine({
         <Zap size={11} className="shrink-0 text-neutral-600" />
         <span className="truncate">{effortText}</span>
       </button>
-      <button
-        onClick={() => onPick('fast')}
-        className={
-          'flex items-center gap-1 min-w-0 shrink transition-colors ' +
-          (fast.active
-            ? 'text-[var(--accent-300)] hover:text-[var(--accent-200)]'
-            : 'hover:text-neutral-300')
-        }
-        title={`${fast.title} — click or type /fast to change`}
-      >
-        <Rabbit
-          size={11}
-          className={'shrink-0 ' + (fast.active ? 'text-[var(--accent-400)]' : 'text-neutral-600')}
-        />
-        <span className="truncate">{fast.text}</span>
-      </button>
+      {supportsFastMode && (
+        <button
+          onClick={() => onPick('fast')}
+          className={
+            'flex items-center gap-1 min-w-0 shrink transition-colors ' +
+            (fast.active
+              ? 'text-[var(--accent-300)] hover:text-[var(--accent-200)]'
+              : 'hover:text-neutral-300')
+          }
+          title={`${fast.title} — click or type /fast to change`}
+        >
+          <Rabbit
+            size={11}
+            className={
+              'shrink-0 ' + (fast.active ? 'text-[var(--accent-400)]' : 'text-neutral-600')
+            }
+          />
+          <span className="truncate">{fast.text}</span>
+        </button>
+      )}
       <ContextStatus usage={usage} compacting={compacting} />
       <RateLimitStatus snapshot={rateLimits} />
     </div>
@@ -1915,34 +1961,40 @@ function PickerCard({
   running: boolean
   onClose: () => void
 }): React.JSX.Element {
-  const settingsModel = useStore((s) => s.app!.settings.model)
-  const settingsEffort = useStore((s) => s.app!.settings.effort)
-  const settingsFastMode = useStore((s) => s.app!.settings.fastMode)
+  const backend = useWorkspaceBackend(workspace)
+  const models = useModels(workspace.agentBackend)
+  const defaults = useAgentSettings(workspace.agentBackend)
 
   const options = useMemo<PickerOption[]>(() => {
     if (kind === 'fast') {
       return [
-        { value: '', label: 'Default', hint: fastModeLabel(settingsFastMode) },
+        { value: '', label: 'Default', hint: fastModeLabel(defaults.fastMode) },
         { value: 'on', label: 'On', hint: FAST_MODE_HINT },
         { value: 'off', label: 'Off', hint: 'Standard output speed' }
       ]
     }
     if (kind === 'model') {
       const base: PickerOption[] = [
-        { value: '', label: 'Default', hint: modelLabel(settingsModel) },
-        ...MODEL_OPTIONS.map((m) => ({ value: m.id, label: m.label }))
+        { value: '', label: 'Default', hint: modelLabel(models, defaults.model) },
+        ...models.map((m) => ({ value: m.id, label: m.label }))
       ]
       // 목록에 없는 커스텀 모델을 이미 쓰고 있으면 그 항목도 노출해 선택 상태가 보이도록.
-      if (workspace.model && !MODEL_OPTIONS.some((m) => m.id === workspace.model)) {
+      if (workspace.model && !models.some((m) => m.id === workspace.model)) {
         base.push({ value: workspace.model, label: workspace.model })
       }
       return base
     }
+    // effort 는 모델이 지원 단계를 알려 주면(Codex) 그쪽으로 좁힌다.
+    const active = models.find((m) => m.id === (workspace.model ?? defaults.model))
     return [
-      { value: '', label: 'Default', hint: effortLabel(settingsEffort) },
-      ...EFFORT_OPTIONS.map((e) => ({ value: e.id, label: e.label, hint: e.hint }))
+      { value: '', label: 'Default', hint: effortLabel(backend, defaults.effort) },
+      ...effortOptionsFor(backend, active).map((e) => ({
+        value: e.id,
+        label: e.label,
+        hint: e.hint
+      }))
     ]
-  }, [kind, settingsModel, settingsEffort, settingsFastMode, workspace.model])
+  }, [kind, backend, models, defaults.model, defaults.effort, defaults.fastMode, workspace.model])
 
   // 현재 값: fast 는 boolean|null 을 'on'/'off'/''(전역 따름) 문자열로 환산해 다른 카드와 같게 다룬다.
   const current =
@@ -2004,8 +2056,8 @@ function PickerCard({
         ? 'Reasoning effort for this workspace'
         : 'Fast mode for this workspace — same model, faster output'
   // /fast 카드에서만: 지금 쓰는 모델이 fast mode 를 지원하지 않으면 켜도 소용없으므로 미리 알린다.
-  const effectiveModel = workspace.model ?? workspace.lastModel ?? settingsModel
-  const fastUnsupported = kind === 'fast' && !modelSupportsFastMode(effectiveModel)
+  const effectiveModel = workspace.model ?? workspace.lastModel ?? defaults.model
+  const fastUnsupported = kind === 'fast' && !modelSupportsFastMode(models, effectiveModel)
   const iconProps = { size: 13, className: 'text-[var(--accent-400)] shrink-0' }
   const icon =
     kind === 'model' ? (
@@ -2067,8 +2119,8 @@ function PickerCard({
       </div>
       {fastUnsupported && (
         <div className="px-3 py-1.5 text-xs text-[var(--warning-400)]/90 border-t border-[var(--border)]">
-          {modelLabel(effectiveModel)} doesn’t support fast mode — switch to Opus 5 or Opus 4.8 with
-          /model.
+          {modelLabel(models, effectiveModel)} doesn’t support fast mode — switch to Opus 5 or Opus
+          4.8 with /model.
         </div>
       )}
       <div className="px-3 py-1.5 text-xs text-neutral-600 border-t border-[var(--border)]">
@@ -2276,3 +2328,5 @@ const EMPTY: ChatItem[] = []
 /** 멘션 후보가 없을 때 돌려주는 고정 배열(매 렌더 새 배열을 만들지 않도록). */
 const EMPTY_HITS: FileHit[] = []
 const EMPTY_QUEUE: import('../store').QueuedMessage[] = []
+/** 참조 동일성 유지용 — 매 렌더마다 새 배열을 만들면 하위 memo 가 헛되이 깨진다. */
+const EMPTY_COMMANDS: CommandPanelKind[] = []
