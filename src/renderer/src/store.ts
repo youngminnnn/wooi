@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type {
+  AppNotice,
   AppState,
   AuthStatus,
   CarryFailure,
@@ -141,6 +142,12 @@ interface UIState {
    * 놓치지 않는다.
    */
   updateStatus: UpdateStatus
+  /**
+   * 원격 공지 목록(main 의 evtNotice). 앱 버전과 무관하게 상단 배너로 알리는 메시지다.
+   * 사용자가 닫았는지는 기기 로컬 플래그(uiFlags)라 여기 담지 않는다 — 여기 있는 건
+   * "지금 이 버전·이 시각에 유효한 공지" 전량이고, 무엇을 보여 줄지는 배너가 고른다.
+   */
+  notices: AppNotice[]
   /** workspace 별 컨텍스트 윈도 사용량(마지막 턴 기준). 입력창 사용량 미터용. */
   contextUsage: Record<string, ContextUsage>
   /** workspace 별 대화 압축 진행 여부(자동/수동 /compact 진행 중이면 true). */
@@ -336,6 +343,7 @@ export const useStore = create<UIState>((set, get) => ({
   authStatus: null,
   githubGate: null,
   updateStatus: { state: 'idle' },
+  notices: [],
   contextUsage: {},
   compacting: {},
   unread: {},
@@ -693,6 +701,13 @@ export const useStore = create<UIState>((set, get) => ({
       if (get().updateStatus.state === 'idle') set({ updateStatus: status })
     })
     window.api.onUpdate((status) => set({ updateStatus: status }))
+
+    // 원격 공지: 업데이트 상태와 같은 이유로 현재 값을 한 번 받고 이후 갱신을 구독한다.
+    // (main 은 창이 뜬 뒤 몇 초 있다 처음 가져오므로, 보통 첫 값은 비어 있고 곧 방송이 온다.)
+    void window.api.notice.getActive().then((notices) => {
+      if (get().notices.length === 0) set({ notices })
+    })
+    window.api.onNotice((notices) => set({ notices }))
 
     window.api.onPermission((req: PermissionRequest) => {
       if (notifyEnabled(get(), req.workspaceId, 'needsInput', 'sound')) playNotification()

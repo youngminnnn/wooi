@@ -138,6 +138,11 @@ const api: WooiApi = {
     quitAndInstall: () => ipcRenderer.invoke(IPC.updateQuitAndInstall)
   },
 
+  notice: {
+    getActive: () => ipcRenderer.invoke(IPC.noticeGetActive),
+    refresh: () => ipcRenderer.invoke(IPC.noticeRefresh)
+  },
+
   openExternal: (url) => ipcRenderer.invoke(IPC.openExternal, url),
 
   settings: {
@@ -175,7 +180,8 @@ const api: WooiApi = {
   onWindowBlur: (cb) => subscribe(IPC.evtWindowBlur, () => cb()),
   onClaudeLogin: (cb) => subscribe(IPC.evtClaudeLogin, cb),
   onGithubLogin: (cb) => subscribe(IPC.evtGithubLogin, cb),
-  onUpdate: (cb) => subscribe(IPC.evtUpdate, cb)
+  onUpdate: (cb) => subscribe(IPC.evtUpdate, cb),
+  onNotice: (cb) => subscribe(IPC.evtNotice, cb)
 }
 
 contextBridge.exposeInMainWorld('api', api)

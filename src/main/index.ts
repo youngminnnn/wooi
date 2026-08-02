@@ -10,6 +10,7 @@ import { registerIpc } from './ipc'
 import { log } from './logger'
 import { hydrateEnvFromLoginShell } from './env'
 import { initUpdater } from './updater'
+import { initNotice } from './notice'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -142,6 +143,7 @@ app.whenReady().then(() => {
   registerIpc({ sessions, scripts, terminals, getWindow: () => mainWindow })
   createWindow()
   initUpdater(dispatch)
+  initNotice(dispatch)
   if (isDevIsolated()) {
     log.info(`dev 격리: userData=${app.getPath('userData')} worktreeRoot=${wooiHome()}`)
   }
