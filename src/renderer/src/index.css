@@ -83,41 +83,48 @@
 :root {
   color-scheme: dark;
 
+  /*
+    순수 검정에 가까운 배경은 눈부심/헤일로 때문에 오히려 시인성이 떨어진다.
+    Material Design 의 권장 다크 표면(#121212), GitHub Dark(#0d1117 → 보더 #30363d),
+    VS Code Dark Modern(#1f1f1f), Discord(#1e1f22~#313338) 등 일반적인 사례에 맞춰
+    베이스를 한 단계 밝히고, 보더는 면 대비가 실제로 보이도록 더 크게 올렸다.
+  */
+
   /* 배경(어두운→밝은 순) */
-  --bg: #0b0c0e;
-  --bg-2: #0d0e11;
-  --bg-3: #101216;
+  --bg: #14161a;
+  --bg-2: #171a1e;
+  --bg-3: #1a1d22;
 
   /* 패널/카드 표면 */
-  --surface: #15171c;
-  --surface-2: #1c1f25;
-  --surface-3: #1b1f27;
-  --surface-4: #1f2630;
+  --surface: #1e2127;
+  --surface-2: #262a31;
+  --surface-3: #252932;
+  --surface-4: #2a313c;
 
   /* 경계선 */
-  --border: #23262d;
-  --border-2: #2a2e36;
-  --border-3: #2f333b;
-  --border-strong: #384050;
+  --border: #2f333b;
+  --border-2: #383d46;
+  --border-3: #424854;
+  --border-strong: #4e5768;
 
   /* 본문 텍스트 */
   --text: #e6e7ea;
-  --text-muted: #aab0ba;
+  --text-muted: #a7aeb9;
 
   /* 마크다운 링크 */
   --link: #6ea8fe;
 
   /* 스크롤바 */
-  --scroll-thumb: #2a2d33;
-  --scroll-thumb-hover: #383c44;
+  --scroll-thumb: #383d45;
+  --scroll-thumb-hover: #4c525c;
 
   /* 포커스 링 */
-  --focus-ring: #4b88f5;
+  --focus-ring: #5a93f7;
 
   /* 코드 블록은 두 테마 모두 어두운 표면을 유지한다(highlight.js github-dark 토큰과 맞추기 위함). */
-  --code-bg: #15171c;
-  --code-border: #23262d;
-  --code-inline-bg: #1c1f25;
+  --code-bg: #1a1d23;
+  --code-border: #2f333b;
+  --code-inline-bg: #262a31;
 }
 
 html[data-theme='light'] {
