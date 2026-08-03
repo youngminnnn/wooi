@@ -13,7 +13,6 @@ import { sessionTranscriptExists } from './sessionFiles'
 import { CLAUDE_CODE_SYSTEM_PROMPT } from './systemPrompt'
 import { log } from '../logger'
 import { MCP_SETTING_SOURCES, resolveUserMcpServers } from './mcp'
-import { hasUserAutoCompactWindow } from './userSettings'
 import { fastModeReasonText } from '@shared/types'
 import { claudeEffort, type ClaudePermissionMode } from './protocol'
 import type {
@@ -87,24 +86,6 @@ type ContextUsage = Awaited<ReturnType<Query['getContextUsage']>>
  * 구 SDK 이거나 Claude Code 쪽 자동 압축이 꺼져 있어 autoCompactThreshold 가 비는 경우다.
  */
 const AUTO_COMPACT_FALLBACK_PERCENT = 92
-
-/**
- * 자동 압축 윈도(토큰). Claude Code 의 `autoCompactWindow` 설정으로 전달하며, 모델의 물리적
- * 컨텍스트 윈도와 무관하게 "이 크기를 넘으면 압축한다" 는 상한이 된다.
- *
- * 왜 두는가: 요즘 Opus/Sonnet 라인은 윈도가 1M 이라 자동 압축이 **967,000 토큰**에서야 걸린다.
- * 매 턴 대화 전체를 다시 보내므로, 압축 임계치가 곧 정상 상태의 턴당 입력 비용이다 — 967K 로
- * 두면 200K 대비 턴당 입력이 대략 5~6 배가 된다. 실측(로컬 트랜스크립트)에서도 GUI 세션의
- * 최대 컨텍스트 p90 이 250~266K 로, 대부분의 코딩 세션이 필요로 하는 것보다 훨씬 크게 자랐다.
- *
- * 200K 는 Claude Code CLI 자신이 권장하는 값이다(내장 팁: "Each turn is re-sending more context
- * than most coding sessions need … Set \"autoCompactWindow\": 200000"). 압축은 요약이라 맥락이
- * 사라지는 게 아니라 접히는 것이고, 임계치를 넘긴 뒤에야 동작하므로 짧은 세션에는 영향이 없다.
- *
- * 사용자가 자기 settings.json 에 이 키를 직접 적어 뒀다면 주입하지 않는다(userSettings.ts).
- * CLI 스키마 허용 범위는 100,000 ~ 1,000,000 이다.
- */
-const DEFAULT_AUTO_COMPACT_WINDOW = 200_000
 
 /**
  * 지금 압축해야 하는지 — Claude Code **자신의** 자동 압축 시점과 같은 기준으로 판단한다.
@@ -536,12 +517,6 @@ export class ClaudeSession {
       // effort 옵션으로 그대로 넘기고, null 이면 아무것도 넘기지 않아 모델 기본 동작을 따른다.
       const ultracode = this.deps.effort === 'ultracode'
       const sdkEffort = claudeEffort(this.deps.effort)
-      // 자동 압축이 켜져 있고, 사용자가 settings.json 에 직접 값을 적어 두지 않았을 때만 윈도
-      // 상한을 제안한다(자동 압축이 꺼져 있으면 압축 자체를 안 하므로 넣을 이유가 없다).
-      const autoCompactWindow =
-        this.deps.autoCompact && !hasUserAutoCompactWindow(this.deps.cwd, this.deps.repoPath)
-          ? DEFAULT_AUTO_COMPACT_WINDOW
-          : null
       this.q = query({
         prompt: this.promptStream(this.input),
         options: {
@@ -571,11 +546,14 @@ export class ClaudeSession {
           // 으로는 활성화되지 않는다(CLI 가 SDK 모드에서 flagSettings.fastMode 를 요구한다). 지원 모델·
           // 플랜이 아니거나 fast rate limit 쿨다운이면 CLI 가 조용히 표준 속도로 돌리고 result 로 알려 준다.
           //
-          // autoCompactWindow — 1M 윈도 모델의 967K 임계치를 200K 로 낮춘다(상수 주석 참고).
+          // autoCompactWindow — 주입하지 않는다. 한때 200K 를 넣어 턴당 입력 비용을 눌렀지만, 1M
+          // 윈도 모델을 고른 세션까지 967K → 167K 로 끌어내려 "1M 인데 왜 이렇게 빨리 압축되냐" 가
+          // 됐다. 압축 시점은 모델 윈도를 따르는 게 맞으므로 Claude Code 의 모델별 공식 임계치를
+          // 그대로 쓴다(overAutoCompactThreshold). 낮추고 싶은 사용자는 자기 settings.json 에
+          // autoCompactWindow 를 적으면 되고, settingSources 로 그대로 로드된다.
           settings: {
             ...(ultracode ? { enableWorkflows: true, ultracode: true } : {}),
-            ...(this.deps.fastMode ? { fastMode: true } : {}),
-            ...(autoCompactWindow !== null ? { autoCompactWindow } : {})
+            ...(this.deps.fastMode ? { fastMode: true } : {})
           },
           ...(Object.keys(mcpServers).length ? { mcpServers } : {}),
           ...(claudeExecutable ? { pathToClaudeCodeExecutable: claudeExecutable } : {}),
