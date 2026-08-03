@@ -135,6 +135,11 @@ those chains itself with plain `git` and `gh` — no extra stacking CLI needed.
 - **Detected, not just declared** — if an agent builds a chain on its own with
   `git checkout -b` and `gh pr create`, Wooi reconstructs the stack from the PRs' base
   links and shows it the same way.
+- **The default base is the parent, for everyone** — stacking a workspace records the
+  parent as that branch's `gh-merge-base`, so a bare `gh pr create` — yours or an
+  agent's — targets the parent branch instead of the repo's default branch. If a PR
+  still ends up on the wrong base, Wooi says so and offers to retarget it rather than
+  quietly accepting it and dropping the stack.
 
 ### PR review
 

@@ -285,6 +285,10 @@ interface UIState {
   applyStackSync: (workspaceId: string) => Promise<void>
   /** 대기 중인 스택 캐스케이드 계획을 무시한다. */
   dismissStackSync: (workspaceId: string) => Promise<void>
+  /** 스택과 어긋난 PR 의 base 를 부모 브랜치로 되돌린다. */
+  retargetBase: (workspaceId: string) => Promise<void>
+  /** 어긋난 base 를 그대로 두기로 한다(그 base 를 채택하고 다시 묻지 않는다). */
+  keepBase: (workspaceId: string) => Promise<void>
   /** 캐스케이드 단계별 결과를 토스트로 알린다(문제가 있으면 브랜치별로 나열). */
   reportCascade: (cascade: StackCascadeResult, successMsg: string) => void
   selectWorkspace: (id: string | null) => Promise<void>
@@ -1150,6 +1154,21 @@ export const useStore = create<UIState>((set, get) => ({
 
   dismissStackSync: async (workspaceId) => {
     await window.api.stack.syncDismiss(workspaceId).catch(() => {})
+  },
+
+  retargetBase: async (workspaceId) => {
+    const res = await window.api.stack
+      .baseRetarget(workspaceId)
+      .catch((err) => ({ error: err instanceof Error ? err.message : String(err) }))
+    if (res.error) get().pushToast('error', `Retarget failed: ${res.error}`)
+    else get().pushToast('success', 'Pull request retargeted onto the parent branch.')
+    void get().refreshGit(workspaceId)
+    void get().refreshPr(workspaceId)
+  },
+
+  keepBase: async (workspaceId) => {
+    await window.api.stack.baseKeep(workspaceId).catch(() => {})
+    void get().refreshGit(workspaceId)
   },
 
   reportCascade: (cascade, successMsg) => {

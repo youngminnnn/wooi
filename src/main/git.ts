@@ -171,6 +171,43 @@ export async function addWorktree(
   await git(repoPath, ['worktree', 'add', '-b', branch, worktreePath, startPoint])
 }
 
+// ── gh 의 기본 PR base (branch.<name>.gh-merge-base) ────────────────────────
+//
+// `gh pr create` 는 `--base` 가 없으면 이 브랜치 설정을 읽고, 그것도 없으면 리포 기본 브랜치를
+// 쓴다. 스택 워크스페이스에서 에이전트가 맨손으로 `gh pr create` 를 치면 PR 이 부모가 아니라
+// main 을 향하는 이유가 이것이다 — 값을 미리 심어 두면 명령을 누가 치든(Wooi·에이전트·터미널)
+// 부모 브랜치를 향한다. 프롬프트로 부탁하는 대신 기본값 자체를 옳게 만드는 쪽이다.
+//
+// 저장 위치는 리포 공용 config 의 브랜치 섹션이라 어느 worktree 에서 실행해도 같은 곳에 쓰이고,
+// `git branch -m` 은 섹션을 함께 옮기며 브랜치 삭제 시 함께 지워진다. 이 키를 모르는 구버전 gh
+// 는 그냥 무시한다.
+
+function ghMergeBaseKey(branch: string): string {
+  return `branch.${branch}.gh-merge-base`
+}
+
+/** 브랜치에 설정된 gh 기본 base. 없으면 null. */
+export async function ghMergeBase(cwd: string, branch: string): Promise<string | null> {
+  const r = await gitTry(cwd, ['config', '--get', ghMergeBaseKey(branch)])
+  return r.ok && r.stdout ? r.stdout : null
+}
+
+/**
+ * 브랜치의 gh 기본 base 를 base 로 맞춘다. base 가 null 이면 설정을 지워 gh 자신의 기본값
+ * (리포 기본 브랜치)으로 되돌린다 — 부모가 병합돼 스택 뿌리로 내려온 브랜치가 여기 해당한다.
+ * 이미 같은 값이면 아무것도 쓰지 않는다.
+ */
+export async function syncGhMergeBase(
+  cwd: string,
+  branch: string,
+  base: string | null
+): Promise<void> {
+  const current = await ghMergeBase(cwd, branch)
+  if (current === base) return
+  if (base) await gitTry(cwd, ['config', ghMergeBaseKey(branch), base])
+  else await gitTry(cwd, ['config', '--unset', ghMergeBaseKey(branch)])
+}
+
 /** worktree 를 제거하고, 요청 시 브랜치도 삭제한다. */
 export async function removeWorktree(
   repoPath: string,

@@ -1,5 +1,9 @@
-import { describe, it, expect } from 'vitest'
-import { sanitizeBranch, parseGithubOwner } from './git'
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { execFileSync } from 'node:child_process'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { sanitizeBranch, parseGithubOwner, ghMergeBase, syncGhMergeBase } from './git'
 
 describe('sanitizeBranch', () => {
   it('공백을 하이픈으로 바꾼다', () => {
@@ -55,5 +59,72 @@ describe('parseGithubOwner', () => {
     expect(parseGithubOwner('https://gitlab.com/foo/bar.git')).toBeNull()
     expect(parseGithubOwner('')).toBeNull()
     expect(parseGithubOwner('not a url')).toBeNull()
+  })
+})
+
+// `gh pr create` 가 `--base` 없이 고르는 base 를 우리가 심어 두는 부분이다. 실제 git config 를
+// 오가는 값이라 임시 리포와 worktree 로 확인한다 — 특히 worktree 에서 쓴 값이 리포 공용 config
+// 로 들어가야 다른 경로(리포 루트에서 도는 캐스케이드 등)에서도 같은 값을 본다.
+describe('gh-merge-base (gh 의 기본 PR base)', () => {
+  let base: string
+  let repo: string
+  let wt: string
+
+  const git = (cwd: string, args: string[]): string =>
+    execFileSync('git', args, { cwd, encoding: 'utf-8' }).trim()
+
+  beforeEach(() => {
+    base = mkdtempSync(join(tmpdir(), 'wooi-git-'))
+    repo = join(base, 'main')
+    wt = join(base, 'wt')
+    mkdirSync(repo)
+    git(repo, ['init', '-q', '-b', 'main'])
+    git(repo, ['config', 'user.email', 'test@example.com'])
+    git(repo, ['config', 'user.name', 'test'])
+    writeFileSync(join(repo, 'README.md'), 'hello\n')
+    git(repo, ['add', '-A'])
+    git(repo, ['commit', '-qm', 'init'])
+    git(repo, ['worktree', 'add', '-q', wt, '-b', 'child'])
+  })
+
+  afterEach(() => {
+    rmSync(base, { recursive: true, force: true })
+  })
+
+  it('설정이 없으면 null 이다', async () => {
+    await expect(ghMergeBase(wt, 'child')).resolves.toBeNull()
+  })
+
+  it('worktree 에서 쓴 값을 리포 공용 config 에서도 읽는다', async () => {
+    await syncGhMergeBase(wt, 'child', 'parent')
+    expect(git(repo, ['config', '--get', 'branch.child.gh-merge-base'])).toBe('parent')
+    await expect(ghMergeBase(repo, 'child')).resolves.toBe('parent')
+  })
+
+  it('null 을 주면 설정을 지운다(gh 기본값으로 되돌림)', async () => {
+    await syncGhMergeBase(wt, 'child', 'parent')
+    await syncGhMergeBase(wt, 'child', null)
+    await expect(ghMergeBase(wt, 'child')).resolves.toBeNull()
+  })
+
+  it('설정이 없을 때 지우기를 요청해도 실패하지 않는다', async () => {
+    await expect(syncGhMergeBase(wt, 'child', null)).resolves.toBeUndefined()
+  })
+
+  it('값을 바꾸면 덮어쓴다(중복 항목이 쌓이지 않는다)', async () => {
+    await syncGhMergeBase(wt, 'child', 'parent')
+    await syncGhMergeBase(wt, 'child', 'grandparent')
+    expect(git(repo, ['config', '--get-all', 'branch.child.gh-merge-base'])).toBe('grandparent')
+  })
+
+  it('슬래시가 든 브랜치 이름도 다룬다', async () => {
+    await syncGhMergeBase(wt, 'feat/child', 'feat/parent')
+    await expect(ghMergeBase(wt, 'feat/child')).resolves.toBe('feat/parent')
+  })
+
+  it('브랜치를 rename 해도 설정이 따라온다(Wooi 는 push 전에 이름을 바꾼다)', async () => {
+    await syncGhMergeBase(wt, 'child', 'parent')
+    git(wt, ['branch', '-m', 'feat/child'])
+    await expect(ghMergeBase(wt, 'feat/child')).resolves.toBe('parent')
   })
 })

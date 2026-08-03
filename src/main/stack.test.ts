@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildStackFromPrs } from './stack'
+import { buildStackFromPrs, detectBaseMismatch } from './stack'
 
 type Pr = { number: number; head: string; base: string }
 
@@ -56,5 +56,86 @@ describe('buildStackFromPrs', () => {
     expect(order).toContain('feat-2b')
     expect(order.indexOf('feat-1')).toBeLessThan(order.indexOf('feat-2a'))
     expect(order.indexOf('feat-1')).toBeLessThan(order.indexOf('feat-2b'))
+  })
+})
+
+describe('detectBaseMismatch', () => {
+  const parent = 'feat-1'
+
+  it('부모 위에 제대로 쌓인 PR 은 어긋남이 아니다', () => {
+    expect(
+      detectBaseMismatch({
+        headPr: { number: 2, base: parent },
+        parentBranch: parent,
+        pendingSync: false,
+        dismissed: null
+      })
+    ).toBeNull()
+  })
+
+  it('스택인데 PR 이 기본 브랜치를 향하면 어긋남으로 본다', () => {
+    expect(
+      detectBaseMismatch({
+        headPr: { number: 2, base: 'main' },
+        parentBranch: parent,
+        pendingSync: false,
+        dismissed: null
+      })
+    ).toEqual({ prNumber: 2, prBase: 'main', expectedBase: parent })
+  })
+
+  it('PR 이 아직 없으면 판정하지 않는다', () => {
+    expect(
+      detectBaseMismatch({
+        headPr: null,
+        parentBranch: parent,
+        pendingSync: false,
+        dismissed: null
+      })
+    ).toBeNull()
+  })
+
+  it('스택이 아니면(부모 없음) 판정하지 않는다', () => {
+    expect(
+      detectBaseMismatch({
+        headPr: { number: 2, base: 'main' },
+        parentBranch: null,
+        pendingSync: false,
+        dismissed: null
+      })
+    ).toBeNull()
+  })
+
+  it('부모 병합 캐스케이드가 대기 중이면 판정하지 않는다(그때는 조부모를 향하는 게 정상)', () => {
+    expect(
+      detectBaseMismatch({
+        headPr: { number: 2, base: 'main' },
+        parentBranch: parent,
+        pendingSync: true,
+        dismissed: null
+      })
+    ).toBeNull()
+  })
+
+  it('사용자가 그대로 두기로 한 base 는 다시 묻지 않는다', () => {
+    expect(
+      detectBaseMismatch({
+        headPr: { number: 2, base: 'main' },
+        parentBranch: parent,
+        pendingSync: false,
+        dismissed: 'main'
+      })
+    ).toBeNull()
+  })
+
+  it('그대로 두기로 한 base 와 또 다른 base 로 바뀌면 다시 묻는다', () => {
+    expect(
+      detectBaseMismatch({
+        headPr: { number: 2, base: 'develop' },
+        parentBranch: parent,
+        pendingSync: false,
+        dismissed: 'main'
+      })
+    ).toEqual({ prNumber: 2, prBase: 'develop', expectedBase: parent })
   })
 })

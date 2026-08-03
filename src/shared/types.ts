@@ -543,6 +543,16 @@ export interface Workspace {
    * 브랜치명을 기억하는 이유는, 그 위에서 또 다른 병합이 일어나면 다시 알려야 하기 때문이다.
    */
   stackSyncDismissed?: string | null
+  /**
+   * PR 의 base 가 스택 관계와 어긋난 상태(감지만 — 리타겟은 사용자 승인 후). 없으면 null.
+   * 해소되면(리타겟했거나 사용자가 그대로 두기로 했으면) 지워진다.
+   */
+  baseMismatch?: BaseMismatch | null
+  /**
+   * 사용자가 "그대로 둔다"고 한 base 브랜치. 그 base 를 다시 어긋남으로 보지 않기 위해 기억한다
+   * (스택 위에서 일부러 다른 브랜치를 향하게 두는 경우가 있다).
+   */
+  baseMismatchDismissed?: string | null
   /** worktree 절대 경로 */
   worktreePath: string
   /**
@@ -1166,6 +1176,23 @@ export interface StackSyncPlan {
   detectedAt: number
 }
 
+/**
+ * 스택 워크스페이스의 PR 이 부모가 아닌 브랜치(대개 리포 기본 브랜치)를 향하고 있는 상태.
+ *
+ * `--base` 없이 `gh pr create` 를 실행하면 gh 가 리포 기본 브랜치를 고르기 때문에, 에이전트가
+ * 직접 PR 을 열면 흔히 이렇게 된다. 예전에는 이 값을 그대로 진실로 채택했는데, 그러면 스택
+ * 관계가 경고 한 줄 없이 사라지고 ahead/behind·restack·머지 캐스케이드가 전부 엉뚱한 기준으로
+ * 계산된다. 그래서 채택하지 않고 사용자에게 물어본다(리타겟할지, 이대로 둘지).
+ */
+export interface BaseMismatch {
+  /** 어긋난 PR 번호. */
+  prNumber: number
+  /** PR 이 실제로 향하고 있는 base 브랜치. */
+  prBase: string
+  /** 스택 관계상 향해야 할 base(부모 워크스페이스의 브랜치). */
+  expectedBase: string
+}
+
 // ── git diff (변경 검토용) ───────────────────────────────────────────────
 
 export type FileDiffStatus = 'added' | 'modified' | 'deleted' | 'renamed'
@@ -1520,6 +1547,10 @@ export const IPC = {
   stackSyncApply: 'stack:syncApply',
   /** 대기 중 캐스케이드 계획을 무시하고 지운다. */
   stackSyncDismiss: 'stack:syncDismiss',
+  /** 스택과 어긋난 PR 의 base 를 부모 브랜치로 되돌린다(gh pr edit --base). */
+  stackBaseRetarget: 'stack:baseRetarget',
+  /** 어긋난 base 를 의도한 것으로 받아들인다(그 base 를 채택하고 다시 묻지 않는다). */
+  stackBaseKeep: 'stack:baseKeep',
   /** 진행 중인 머지를 취소한다(충돌 포기). */
   gitAbortMerge: 'git:abortMerge',
   prStatus: 'pr:status',

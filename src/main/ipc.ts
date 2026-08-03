@@ -24,6 +24,7 @@ import {
   repoNameFromPath,
   resolveUniqueWorktree,
   restackOnto,
+  syncGhMergeBase,
   updateFromBase
 } from './git'
 import {
@@ -34,7 +35,7 @@ import {
   validateCarryPath
 } from './carry'
 import { generateWorkspaceName } from './names'
-import { buildStackFromPrs } from './stack'
+import { buildStackFromPrs, detectBaseMismatch } from './stack'
 import { findFreePort, waitForPortFree } from './net'
 import {
   getPrStatus,
@@ -45,6 +46,7 @@ import {
   closePr,
   reopenPr,
   markPrReady,
+  retargetPr,
   listOpenPrs,
   listOpenPrsForReview,
   fetchOwnerAvatarDataUrl
@@ -181,6 +183,28 @@ export function registerIpc(ctx: IpcContext): void {
 
   const repoFor = (repoId: string): Repo | undefined =>
     store.getState().repos.find((r) => r.id === repoId)
+
+  /**
+   * `--base` 없이 실행된 `gh pr create` 가 향할 base 를 워크스페이스의 실제 base 에 맞춘다
+   * ([[git]] syncGhMergeBase). Wooi 의 Create PR 버튼은 `--base` 를 직접 붙이지만, 에이전트나
+   * 사용자가 터미널에서 맨손으로 여는 PR 은 이 설정이 없으면 전부 리포 기본 브랜치를 향한다.
+   *
+   * base 가 리포 기본 브랜치면 설정을 지워 gh 기본값에 맡긴다 — 값을 굳이 고정해 두면 나중에
+   * 리포 기본 브랜치가 바뀌거나 fork 로 PR 을 열 때 어긋난 값만 남는다.
+   * best-effort 다: 실패해도 워크스페이스 생성·캐스케이드를 막지 않는다.
+   */
+  const syncPrBase = async (
+    ws: Pick<Workspace, 'repoId' | 'worktreePath' | 'branch'>,
+    base: string
+  ): Promise<void> => {
+    const repo = repoFor(ws.repoId)
+    if (!repo) return
+    await syncGhMergeBase(
+      ws.worktreePath,
+      ws.branch,
+      base === repo.defaultBranch ? null : base
+    ).catch(() => {})
+  }
 
   /**
    * 리포의 origin 리모트가 GitHub 이면 소유자 아바타를 받아 data URL 로 저장한다(best-effort).
@@ -463,6 +487,9 @@ export function registerIpc(ctx: IpcContext): void {
       } catch (err) {
         return { error: err instanceof Error ? err.message : String(err) }
       }
+      // 스택이면 여기서 gh 의 기본 PR base 를 부모 브랜치로 못 박는다 — 에이전트가 첫 PR 을
+      // 열기 전에 심어야 의미가 있다.
+      await syncPrBase({ repoId: repo.id, worktreePath, branch }, baseBranch)
 
       // 셋업 스크립트보다 먼저 — 셋업이 전달된 .env·node_modules 를 볼 수 있어야 한다.
       const carryFailures = await carryIntoNewWorktree(repo, worktreePath)
@@ -591,6 +618,9 @@ export function registerIpc(ctx: IpcContext): void {
       } catch (err) {
         return { error: err instanceof Error ? err.message : String(err) }
       }
+      // worktree 를 새로 만드는 경로라 gh 기본 base 도 다시 맞춘다(설정 자체는 리포 공용이라
+      // 보통 남아 있지만, 아카이브 중에 base 가 바뀌었을 수 있다).
+      await syncPrBase(ws, ws.baseBranch)
       // 언아카이브도 worktree 를 새로 만드는 경로다 — 전달을 빠뜨리면 복원된 워크스페이스만
       // 지침 파일 없이 동작하게 된다.
       const carryFailures = await carryIntoNewWorktree(repo, ws.worktreePath)
@@ -1159,6 +1189,17 @@ export function registerIpc(ctx: IpcContext): void {
     const headPr = prs.find((p) => p.head === head)
     // 외부에서 부모 PR 이 병합됐는지 감지한다(감지만 — 실행은 사용자 승인 후).
     const plan = await detectStackSync(ws, prs).catch(() => null)
+    // 스택 관계상 이 브랜치의 PR 이 향해야 할 base. 부모가 아카이브됐으면 판정하지 않는다.
+    const parentBranch = ws.parentWorkspaceId
+      ? (store.getState().workspaces.find((w) => w.id === ws.parentWorkspaceId && !w.archived)
+          ?.branch ?? null)
+      : null
+    const mismatch = detectBaseMismatch({
+      headPr: headPr ? { number: headPr.number, base: headPr.base } : null,
+      parentBranch,
+      pendingSync: plan !== null,
+      dismissed: ws.baseMismatchDismissed ?? null
+    })
 
     let changed = false
     store.update((st) => {
@@ -1201,13 +1242,34 @@ export function registerIpc(ctx: IpcContext): void {
             changed = true
           }
         }
-      } else if (headPr && w.baseBranch !== headPr.base) {
+      } else if (headPr && !mismatch && w.baseBranch !== headPr.base) {
         // 스택은 아니지만 현재 브랜치의 PR base 가 다르면 맞춘다(ahead/behind 정확도).
+        // mismatch 일 때는 채택하지 않는다 — PR 의 base 를 그대로 믿으면 스택 관계가 조용히
+        // 사라지고, 이후 restack·캐스케이드가 전부 엉뚱한 기준으로 돌아간다.
         w.baseBranch = headPr.base
+        changed = true
+      }
+      const sameMismatch =
+        (w.baseMismatch?.prNumber ?? null) === (mismatch?.prNumber ?? null) &&
+        (w.baseMismatch?.prBase ?? null) === (mismatch?.prBase ?? null) &&
+        (w.baseMismatch?.expectedBase ?? null) === (mismatch?.expectedBase ?? null)
+      if (!sameMismatch) {
+        w.baseMismatch = mismatch
+        changed = true
+      }
+      // 어긋난 동안에도 기록상의 base 는 스택 관계(부모 브랜치)로 유지한다. 이 수정 이전에
+      // PR base 를 그대로 채택해 버린 워크스페이스도 여기서 제자리를 찾는다.
+      if (mismatch && w.baseBranch !== mismatch.expectedBase) {
+        w.baseBranch = mismatch.expectedBase
         changed = true
       }
     })
     if (changed) broadcastState()
+
+    // 기록된 base 를 gh 의 기본 PR base 에도 반영한다. 여기서 함께 처리하면 이 변경 이전에
+    // 만들어진 스택 워크스페이스도 다음 PR 상태 갱신 때 자동으로 백필된다.
+    const after = store.getState().workspaces.find((w) => w.id === workspaceId)
+    if (after) await syncPrBase(after, after.baseBranch)
   }
 
   ipcMain.handle(IPC.prStatus, async (_e, workspaceId: string) => {
@@ -1291,8 +1353,13 @@ export function registerIpc(ctx: IpcContext): void {
         if (c) {
           c.parentWorkspaceId = grandparentId
           c.baseBranch = grandparentBranch
+          // 부모가 사라졌으니 그 부모를 기준으로 잡아 둔 base 어긋남 판정도 무효다.
+          c.baseMismatch = null
         }
       })
+      // base 가 조부모로 내려갔으므로 gh 기본 base 도 함께 옮긴다(조부모가 리포 기본
+      // 브랜치면 설정이 지워져 gh 기본값으로 되돌아간다).
+      await syncPrBase(child, grandparentBranch)
       const r = await restackOnto(child.worktreePath, grandparentBranch, mergedBranch).catch(
         (err): RestackResult => ({
           status: 'error',
@@ -1425,6 +1492,55 @@ export function registerIpc(ctx: IpcContext): void {
       if (w?.stackSync) w.stackSyncDismissed = w.stackSync.mergedBranch
     })
     clearStackSync(workspaceId)
+  })
+
+  /**
+   * 스택과 어긋난 PR 의 base 를 부모 브랜치로 되돌린다([[types]] BaseMismatch).
+   * 리타겟은 GitHub 쪽 상태만 바꾸고 커밋 히스토리는 건드리지 않는다 — force-push 가 없으므로
+   * 캐스케이드와 달리 되돌리기 쉽다. 그래도 남의 PR 을 바꾸는 일이라 사용자 승인 후에만 돈다.
+   */
+  ipcMain.handle(
+    IPC.stackBaseRetarget,
+    async (_e, workspaceId: string): Promise<{ error?: string }> => {
+      const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
+      if (!ws || ws.archived) return { error: 'Workspace not found.' }
+      const m = ws.baseMismatch
+      if (!m) return { error: 'Nothing to retarget.' }
+      const res = await retargetPr(ws.worktreePath, m.expectedBase, String(m.prNumber)).catch(
+        (err) => ({ error: err instanceof Error ? err.message : String(err) })
+      )
+      if (res.error) return res
+      store.update((st) => {
+        const w = st.workspaces.find((x) => x.id === workspaceId)
+        if (!w) return
+        w.baseBranch = m.expectedBase
+        w.baseMismatch = null
+      })
+      broadcastState()
+      await syncPrBase(ws, m.expectedBase)
+      return {}
+    }
+  )
+
+  /**
+   * 어긋난 base 를 사용자가 의도한 것으로 받아들인다 — 그 base 를 기록상의 base 로 채택하고,
+   * 같은 base 로는 다시 묻지 않는다. 부모 링크는 그대로 둔다(사이드바의 스택 묶음은 유지).
+   */
+  ipcMain.handle(IPC.stackBaseKeep, async (_e, workspaceId: string): Promise<void> => {
+    const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
+    const kept = ws?.baseMismatch?.prBase
+    if (!ws || !kept) return
+    store.update((st) => {
+      const w = st.workspaces.find((x) => x.id === workspaceId)
+      if (!w) return
+      w.baseBranch = kept
+      w.baseMismatchDismissed = kept
+      w.baseMismatch = null
+    })
+    broadcastState()
+    // 채택한 base 를 gh 기본값에도 반영한다 — 그러지 않으면 다음 재동기화가 부모 브랜치로
+    // 되돌려 놓아, 사용자의 선택과 어긋난 PR 이 또 만들어진다.
+    await syncPrBase(ws, kept)
   })
 
   ipcMain.handle(IPC.prClose, async (_e, workspaceId: string): Promise<{ error?: string }> => {
