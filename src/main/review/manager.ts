@@ -13,7 +13,7 @@ import type {
   ReviewStatus,
   ReviewVerdict
 } from '@shared/types'
-import { DUPLICATE_REVIEW_BLOCKED, SELF_REVIEW_BLOCKED } from '@shared/types'
+import { EMPTY_RESUBMIT_BLOCKED, SELF_REVIEW_BLOCKED } from '@shared/types'
 import {
   getPrDiffRaw,
   getPrHeadSha,
@@ -403,23 +403,18 @@ export class ReviewManager {
       return { error: SELF_REVIEW_BLOCKED }
     }
 
-    // 제출 시점의 PR 상태. 폴링이 본 sha 를 기본값으로 두고, 중복이 의심될 때만 지금 확인한다
-    // — 매번 gh 를 부르면 정상적인 제출까지 로그인 셸 한 번씩을 물게 된다.
-    const text = body.trim()
-    let headSha = session.lastSeenHeadSha
-    const last = session.lastSubmission
-    if (last && last.verdict === verdict && last.body === text) {
-      // 같은 내용이다. 그 사이 PR 이 움직였는지가 유일한 쟁점이므로 여기서만 실제로 확인한다.
-      // 확인에 실패하면(오프라인 등) 안 움직인 것으로 본다 — 막았을 때의 손해가 더 작다.
-      headSha = (await getPrHeadSha(repoPath, session.prNumber)) ?? last.headSha
-      if (headSha === last.headSha) return { error: DUPLICATE_REVIEW_BLOCKED }
-    }
+    // 이미 한 번 낸 리뷰를 빈 본문으로 또 내는 건 같은 말의 반복이다. 승인은 GitHub 이 본문
+    // 없이도 받아 주므로 여기서만 걸린다.
+    if (session.lastSubmission && !body.trim()) return { error: EMPTY_RESUBMIT_BLOCKED }
 
     const res = await submitPrReview(repoPath, session.prNumber, verdict, body)
     if (res.error) return res
 
+    // 총평은 방금 PR 로 갔다. 여기서 비워야 제출 모달이 빈 본문으로 다시 열리고, 같은 말이
+    // 무심코 또 올라가지 않는다(코멘트·변경 요청은 본문 없이는 나가지 않는다).
     this.patch(reviewId, (r) => {
-      r.lastSubmission = { verdict, body: text, headSha, at: Date.now() }
+      r.lastSubmission = { verdict, at: Date.now() }
+      r.summary = ''
     })
     return {}
   }
@@ -446,7 +441,7 @@ export class ReviewManager {
     const session = this.record(reviewId)
     if (!session || session.archived) return
     // 코멘트를 하나도 안 달았으면 따라갈 스레드가 없다. 그래도 리뷰를 제출했다면 새 커밋은
-    // 계속 봐야 한다 — 그 sha 로 같은 리뷰를 또 낼 수 있는지가 갈린다.
+    // 계속 봐야 한다 — 내 지적에 대한 응답이 커밋으로 오기 때문이다.
     const tracksReplies = session.postedComments.length > 0
     if (!tracksReplies && !session.lastSubmission) return
     const repoPath = this.repoPathFor(session)

@@ -1501,7 +1501,7 @@ export const useStore = create<UIState>((set, get) => ({
     // 순차로 돈다. 세션마다 gh 를 병렬로 띄우면 로그인 셸이 한꺼번에 여러 개 뜬다.
     for (const r of reviews) {
       // 추적할 게 없으면 건너뛴다. 코멘트를 안 달았어도 리뷰를 제출했다면 **새 커밋** 은
-      // 계속 봐야 한다 — 그 sha 가 "같은 리뷰를 또 낼 수 있는가" 의 판단 근거이기 때문이다.
+      // 계속 봐야 한다 — 내 지적에 대한 응답이 커밋으로 오기 때문이다.
       if (r.archived || (r.postedComments.length === 0 && !r.lastSubmission)) continue
       await window.api.review.poll(r.id)
     }

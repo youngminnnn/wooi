@@ -160,11 +160,7 @@ describe('v15 → v16 (제출 기록 합치기)', () => {
   const reviewOf = (out: Record<string, unknown>): Record<string, unknown> =>
     (out.reviews as Record<string, unknown>[])[0]
 
-  /**
-   * 본문을 모르는 기록으로는 "같은 내용인가" 를 판단할 수 없다. 판정만 옮겨 두면 옛 리뷰가
-   * 영문도 모른 채 차단되므로, 비교 불가능한 기록은 아예 버린다.
-   */
-  it('본문을 모르는 옛 판정은 비교 기준으로 삼지 않는다', () => {
+  it('옛 판정은 옮기지 않고 비운다', () => {
     expect(reviewOf(migrate(v15File(), 15)).lastSubmission).toBeNull()
   })
 
@@ -176,6 +172,45 @@ describe('v15 → v16 (제출 기록 합치기)', () => {
 
   it('리뷰가 없는 파일도 그대로 통과한다', () => {
     const out = migrate({ schemaVersion: 15, repos: [], workspaces: [] }, 15)
+    expect(out.reviews).toEqual([])
+  })
+})
+
+describe('v16 → v17 (제출 기록에서 본문 빼기)', () => {
+  function v16File(lastSubmission: unknown): Record<string, unknown> {
+    return {
+      schemaVersion: 16,
+      repos: [],
+      workspaces: [],
+      reviews: [{ id: 'rv1', repoId: 'r1', prNumber: 3, status: 'done', lastSubmission }]
+    }
+  }
+
+  const reviewOf = (out: Record<string, unknown>): Record<string, unknown> =>
+    (out.reviews as Record<string, unknown>[])[0]
+
+  it('본문과 head sha 를 버리고 판정만 남긴다', () => {
+    const out = migrate(
+      v16File({
+        verdict: 'request-changes',
+        body: 'Please fix the retry loop.',
+        headSha: 'abc1234',
+        at: 1700000000000
+      }),
+      16
+    )
+    expect(reviewOf(out).lastSubmission).toEqual({
+      verdict: 'request-changes',
+      at: 1700000000000
+    })
+  })
+
+  it('제출한 적 없는 리뷰는 그대로 둔다', () => {
+    expect(reviewOf(migrate(v16File(null), 16)).lastSubmission).toBeNull()
+  })
+
+  it('리뷰가 없는 파일도 그대로 통과한다', () => {
+    const out = migrate({ schemaVersion: 16, repos: [], workspaces: [] }, 16)
     expect(out.reviews).toEqual([])
   })
 })
