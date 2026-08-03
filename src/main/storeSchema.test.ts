@@ -207,4 +207,25 @@ describe('레거시 파일 전체 경로', () => {
     const future = { schemaVersion: CURRENT_SCHEMA_VERSION + 5, repos: [], workspaces: [] }
     expect(migrate(future, CURRENT_SCHEMA_VERSION + 5)).toEqual(future)
   })
+
+  it('이미 변환된 파일에 v12 변환이 다시 돌아도 agents 를 덮어쓰지 않는다', () => {
+    // 예전 store 는 마이그레이션 뒤에도 파일의 schemaVersion 을 올리지 않아 이 상황이 실제로
+    // 났다 — 매 부팅마다 v12→v13 이 다시 돌며 사용자의 권한 모드를 acceptEdits 로 되돌렸다.
+    const already = migrate(v12File(), 12)
+    const again = migrate({ ...already, schemaVersion: 12 }, 12)
+    expect(agentsOf(again).claude).toEqual(agentsOf(already).claude)
+    expect(agentsOf(again).claude.permissionMode).toBe('plan')
+  })
+
+  it('사용자가 고른 권한 모드는 재변환에도 살아남는다', () => {
+    const migrated = migrate(v12File(), 12)
+    const settings = migrated.settings as AppSettings
+    settings.agents = {
+      ...settings.agents,
+      claude: { ...settings.agents.claude, permissionMode: 'auto' }
+    }
+
+    const again = migrate({ ...migrated, schemaVersion: 12 }, 12)
+    expect(agentsOf(again).claude.permissionMode).toBe('auto')
+  })
 })

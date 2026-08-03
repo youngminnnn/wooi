@@ -271,8 +271,14 @@ export const MIGRATIONS: Array<(raw: Record<string, unknown>) => Record<string, 
   // 워크스페이스는 건드리지 않는다 — agentBackend·model·effort·permissionMode 모양이 그대로다.
   // onboarded 도 건드리지 않는다: 이미 쓰고 있던 사용자를 백엔드 추가 때문에 다시 온보딩시키지
   // 않는다(Codex 를 나중에 설치하면 피커가 자연히 나타난다).
+  //
+  // 이미 agents 를 가진 파일은 그대로 둔다 — 예전에는 마이그레이션 뒤에도 파일의 schemaVersion 이
+  // 그대로 남아(store.ts 참고) 이 변환이 매 부팅마다 다시 돌았고, 옛 필드가 없으니 agents 를
+  // 기본값으로 새로 만들어 사용자의 권한 모드·모델 선택을 지웠다. 버전 기록은 고쳤지만, 이미
+  // 낮은 버전으로 굳은 파일이 마지막으로 한 번 더 지워지지 않도록 여기서도 막는다.
   (raw) => {
     const legacy = (raw.settings as LegacySettingsV12) ?? {}
+    if (legacy.agents) return raw
     const { defaultPermissionMode, model, effort, fastMode, ...rest } = legacy
     const settings = {
       ...rest,
