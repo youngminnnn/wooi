@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
@@ -27,6 +27,16 @@ export default function ReviewActivityPanel({
   const running = session.status === 'preparing' || session.status === 'running'
   const canSend = text.trim().length > 0 && !running && !!session.agentSessionId
 
+  // 지금 도는 턴의 마지막 진행 줄. progress 는 리뷰 내내 쌓이므로 **마지막 질문 이후** 것만
+  // 본다 — 앞선 리뷰 때의 줄을 지금 하는 일인 양 보여주면 없느니만 못하다.
+  const latest = useMemo(() => {
+    const askedAt = view.activity.reduce(
+      (ts, a) => (a.kind === 'turn' && a.role === 'user' ? a.ts : ts),
+      0
+    )
+    return view.progress.filter((p) => p.ts >= askedAt).at(-1)
+  }, [view.activity, view.progress])
+
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: 'end' })
   }, [view.activity.length, view.progress.length])
@@ -54,9 +64,16 @@ export default function ReviewActivityPanel({
         </div>
 
         {running && (
-          <div className="mt-3 flex items-center gap-1.5 text-xs text-neutral-500">
-            <Loader2 size={12} className="animate-spin text-[var(--info-400)]" />
-            Working…
+          <div className="mt-3 space-y-1">
+            <div className="flex items-center gap-1.5 text-xs text-neutral-500">
+              <Loader2 size={12} className="animate-spin text-[var(--info-400)]" />
+              {session.status === 'preparing' ? 'Checking out the latest commits…' : 'Working…'}
+            </div>
+            {latest && (
+              <p className="max-h-8 overflow-hidden font-mono text-[11px] leading-4 text-neutral-600 break-all">
+                {latest.text}
+              </p>
+            )}
           </div>
         )}
         <div ref={endRef} />

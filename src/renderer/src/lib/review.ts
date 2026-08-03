@@ -10,6 +10,9 @@ import type {
   ReviewStatus
 } from '@shared/types'
 
+/** 오른쪽 패널에서 보고 있던 탭. */
+export type ReviewTab = 'findings' | 'activity'
+
 /**
  * 리뷰 1건의 화면 상태.
  *
@@ -35,6 +38,12 @@ export interface ReviewViewState {
    * postedComments 이고, 그래야 재시작 후에도 "이미 단 코멘트" 가 유지된다.
    */
   posting: Record<string, { state: 'posting' | 'failed'; error?: string }>
+  /**
+   * 오른쪽 패널에서 마지막으로 보던 탭. 화면 상태이면서도 리뷰마다 따로 기억해야 한다 —
+   * 워크스페이스를 오가면 리뷰 화면이 통째로 언마운트되는데, 그때마다 findings 로 되돌아가면
+   * 답글을 주고받던 흐름이 매번 끊긴다.
+   */
+  tab: ReviewTab
 }
 
 export function emptyView(): ReviewViewState {
@@ -47,7 +56,8 @@ export function emptyView(): ReviewViewState {
     error: null,
     edits: {},
     selected: {},
-    posting: {}
+    posting: {},
+    tab: 'findings'
   }
 }
 

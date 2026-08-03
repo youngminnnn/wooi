@@ -31,8 +31,11 @@ export default function PrReviewScreen({ reviewId }: { reviewId: string }): Reac
   const cancelReview = useStore((s) => s.cancelReview)
   const postFindings = useStore((s) => s.postFindings)
   const toggleAllFindings = useStore((s) => s.toggleAllFindings)
+  const setReviewTab = useStore((s) => s.setReviewTab)
   const [submitOpen, setSubmitOpen] = useState(false)
-  const [tab, setTab] = useState<'findings' | 'activity'>('findings')
+  // 탭은 스토어가 리뷰별로 들고 있다 — 워크스페이스를 오가면 이 화면은 언마운트되므로
+  // 로컬 state 로 두면 돌아올 때마다 findings 로 되돌아간다.
+  const tab = view?.tab ?? 'findings'
 
   const counts = useMemo(() => countByFile(view?.findings ?? []), [view?.findings])
 
@@ -148,7 +151,7 @@ export default function PrReviewScreen({ reviewId }: { reviewId: string }): Reac
             {(['findings', 'activity'] as const).map((t) => (
               <button
                 key={t}
-                onClick={() => setTab(t)}
+                onClick={() => setReviewTab(reviewId, t)}
                 className={
                   'flex items-center gap-1 rounded-md px-2 py-1 text-xs capitalize ' +
                   (tab === t
