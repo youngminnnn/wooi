@@ -40,6 +40,18 @@ export function isAgentContextPath(path: string): boolean {
 }
 
 /**
+ * 리뷰 워크트리로 가져갈 항목만 고른다 — 에이전트 컨텍스트뿐이다.
+ *
+ * 워크스페이스는 전달 목록을 통째로 받지만(셋업·dev 스크립트가 `.env` 와 `node_modules` 를
+ * 실제로 쓴다) 리뷰 워크트리는 코드를 읽기만 하고 아무것도 실행하지 않는다. 시크릿 사본을
+ * 디스크에 하나 더 늘릴 이유가 없으므로 런타임 파일은 빼고, 에이전트가 프로젝트 규칙을 모른 채
+ * 리뷰하는 것만 막는다.
+ */
+export function agentContextItems(items: CarryItem[]): CarryItem[] {
+  return items.filter((i) => isAgentContextPath(i.path))
+}
+
+/**
  * 리포 추가 시 목록을 미리 채우기 위해 탐지하는 흔한 파일들.
  * 빈 목록으로 시작하면 사용자가 기능의 존재를 모른 채 "왜 에이전트가 규칙을 안 지키지?" 를
  * 계속 겪게 되므로, 실제로 존재하는 것만 골라 안전한 copy 모드로 미리 등록한다.
