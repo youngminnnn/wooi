@@ -19,6 +19,7 @@ export default function ChangesPanel({
   const [loading, setLoading] = useState(true)
   // git 상태의 변경 파일 수가 바뀌면 diff 를 다시 가져오는 트리거로 쓴다.
   const changedFiles = useStore((s) => s.gitStatus[workspaceId]?.changedFiles ?? 0)
+  const openFileViewer = useStore((s) => s.openFileViewer)
 
   useEffect(() => {
     let alive = true
@@ -46,7 +47,12 @@ export default function ChangesPanel({
     <div className="h-full flex flex-col min-h-0">
       <PanelToolbar label={`vs ${baseBranch}`} onRefresh={refresh} spinning={loading} />
       <div className="flex-1 overflow-y-auto px-3 py-3">
-        <DiffView diff={diff} loading={loading} baseBranch={baseBranch} />
+        <DiffView
+          diff={diff}
+          loading={loading}
+          baseBranch={baseBranch}
+          onOpenFile={(path) => openFileViewer(workspaceId, path)}
+        />
       </div>
     </div>
   )

@@ -5,6 +5,7 @@ import type { AgentBackendId } from '@shared/types'
 import { useStore } from './store'
 import { nextPermissionMode } from './lib/permission'
 import { OPEN_REPO_SETTINGS_EVENT, openRepoSettings } from './lib/repoSettings'
+import { OPEN_FILE_QUICK_OPEN_EVENT, openFileQuickOpen } from './lib/fileViewer'
 import { applyTheme } from './lib/theme'
 import { finishSwitchHint } from './lib/uiFlags'
 import TitleBar from './components/TitleBar'
@@ -15,6 +16,8 @@ import PrReviewScreen from './components/review/PrReviewScreen'
 import { useFeatureNudge } from './lib/featureNudge'
 import PrReviewStartModal from './components/review/PrReviewStartModal'
 import ChatView from './components/ChatView'
+import FileViewerOverlay from './components/FileViewerOverlay'
+import FileQuickOpen from './components/FileQuickOpen'
 import WorkArea from './components/WorkArea'
 import Splitter from './components/Splitter'
 import EmptyState from './components/EmptyState'
@@ -69,7 +72,10 @@ export default function App(): React.JSX.Element {
   // 설정의 "Take a tour" 로 여는 기능 투어. 실제 화면 위에서 진행하도록 앱 레벨에서 렌더한다.
   const [tourOpen, setTourOpen] = useState(false)
   const [reviewStartOpen, setReviewStartOpen] = useState(false)
+  // ⇧⌘O 파일 퀵 오픈. 큰 파일 뷰어의 "주소창" 역할을 겸한다.
+  const [quickOpenFile, setQuickOpenFile] = useState(false)
   const activeReviewId = useStore((s) => s.activeReviewId)
+  const fileViewer = useStore((s) => s.fileViewer)
 
   // 업데이트로 새로 생긴 기능을 한 번만 알려 준다(신규 설치 사용자에게는 뜨지 않는다).
   useFeatureNudge()
@@ -77,6 +83,12 @@ export default function App(): React.JSX.Element {
   useEffect(() => {
     void init()
   }, [init])
+
+  // 파일 퀵 오픈은 대상 워크스페이스가 있어야 뜻이 있다 — Overview 로 빠지면 닫는다
+  // (열린 채로 남으면 렌더되지 않으면서 전역 단축키만 계속 막는다).
+  useEffect(() => {
+    if (!selectedId) setQuickOpenFile(false)
+  }, [selectedId])
 
   // 권위 있는 설정의 테마를 <html> 에 반영한다(설정 변경·system 선호 변화 추적 포함).
   const theme = app?.settings.theme
@@ -106,25 +118,36 @@ export default function App(): React.JSX.Element {
     onboardingOpen ||
     githubGateOpen ||
     tourOpen ||
-    reviewStartOpen
+    reviewStartOpen ||
+    quickOpenFile
+
+  // 큰 파일 뷰어가 실제로 화면에 떠 있는지 — 리뷰 화면에 들어가 있으면 가려지므로 아니다.
+  const fileViewerVisible = !activeReviewId && !!fileViewer && fileViewer.workspaceId === selectedId
 
   // 모달 상태는 여기(App)에만 있으므로, 대화 화면의 전역 키 핸들러(Composer 의 Esc 등)가
   // 볼 수 있도록 store 로 내보낸다 — 모달이 떠 있을 때 뒤쪽 단축키가 같이 발동하면 안 된다.
+  //
+  // 파일 뷰어도 같은 이유로 포함한다(Esc·⌘F 를 뷰어가 가져간다). 다만 아래 전역 단축키
+  // 핸들러는 뷰어를 막지 않는다 — 워크스페이스 전환(⌘1–9·⌘K)은 뷰어 위에서도 되어야 하고,
+  // 전환하면 store 가 뷰어를 알아서 닫는다.
   const setOverlayOpen = useStore((s) => s.setOverlayOpen)
   useEffect(() => {
-    setOverlayOpen(anyModalOpen)
-  }, [anyModalOpen, setOverlayOpen])
+    setOverlayOpen(anyModalOpen || fileViewerVisible)
+  }, [anyModalOpen, fileViewerVisible, setOverlayOpen])
 
   // '?' 키(어디서든, 단 입력 중이 아닐 때)로 단축키 도움말을 연다. Overview 등에서
   // 커스텀 이벤트로도 열 수 있다.
   useEffect(() => {
     const onHelp = (): void => setShowShortcuts(true)
     const onReview = (): void => setReviewStartOpen(true)
+    const onQuickOpen = (): void => setQuickOpenFile(true)
     window.addEventListener('wooi:open-shortcuts', onHelp)
     window.addEventListener('wooi:open-pr-review', onReview)
+    window.addEventListener(OPEN_FILE_QUICK_OPEN_EVENT, onQuickOpen)
     return () => {
       window.removeEventListener('wooi:open-shortcuts', onHelp)
       window.removeEventListener('wooi:open-pr-review', onReview)
+      window.removeEventListener(OPEN_FILE_QUICK_OPEN_EVENT, onQuickOpen)
     }
   }, [])
 
@@ -308,6 +331,12 @@ export default function App(): React.JSX.Element {
           void window.api.workspace.revealInFinder(selId)
           return
         }
+        // ⇧⌘O: 파일 퀵 오픈 — 고르면 대화창 위의 큰 파일 뷰어로 열린다.
+        if (e.code === 'KeyO') {
+          e.preventDefault()
+          openFileQuickOpen()
+          return
+        }
         // ⇧⌘X: 대화 내보내기 메뉴 열기(ExportMenu 가 이벤트를 받아 드롭다운을 연다).
         if (e.code === 'KeyX') {
           e.preventDefault()
@@ -440,7 +469,11 @@ export default function App(): React.JSX.Element {
           onStackWorkspace={handleStackWorkspace}
           onOpenQuickSwitch={() => setQuickSwitchOpen(true)}
         />
-        <div ref={contentRef} className="flex-1 min-w-0 border-l border-[var(--border)] flex">
+        {/* relative — 큰 파일 뷰어가 이 영역(대화 + 작업 패널)만 덮는 오버레이로 올라탄다. */}
+        <div
+          ref={contentRef}
+          className="relative flex-1 min-w-0 border-l border-[var(--border)] flex"
+        >
           {activeReviewId ? (
             <PrReviewScreen key={activeReviewId} reviewId={activeReviewId} />
           ) : selected ? (
@@ -472,6 +505,10 @@ export default function App(): React.JSX.Element {
           ) : (
             <EmptyState />
           )}
+
+          {/* 대화 위에 띄우는 큰 파일 뷰어. 대화·작업 패널은 뒤에 그대로 마운트돼 있어
+              닫으면 스크롤 위치와 입력창 초안이 그대로 살아 있다. */}
+          {selected && fileViewerVisible && <FileViewerOverlay workspace={selected} />}
         </div>
       </div>
 
@@ -500,6 +537,9 @@ export default function App(): React.JSX.Element {
       {tourOpen && <FeatureTour onDone={() => setTourOpen(false)} />}
       {showShortcuts && <ShortcutsHelp onClose={() => setShowShortcuts(false)} />}
       {quickSwitchOpen && <QuickSwitcher onClose={() => setQuickSwitchOpen(false)} />}
+      {quickOpenFile && selected && (
+        <FileQuickOpen workspaceId={selected.id} onClose={() => setQuickOpenFile(false)} />
+      )}
       {newWs && (
         <NewWorkspaceModal
           repoId={newWs.repoId}
