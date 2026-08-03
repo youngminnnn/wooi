@@ -37,6 +37,7 @@ import DiffModal from './DiffModal'
 import PrActionsMenu from './PrActionsMenu'
 import StackPopover from './StackPopover'
 import StackSyncBanner from './StackSyncBanner'
+import StackBaseBanner from './StackBaseBanner'
 import ExportMenu from './ExportMenu'
 import HeaderButton from './HeaderButton'
 import { AgentBackendMark, GithubMark } from './BrandIcons'
@@ -482,6 +483,9 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
 
       {/* 외부 병합으로 스택이 stale 해졌을 때의 승인 배너(force-push 는 승인 후에만). */}
       <StackSyncBanner workspace={workspace} />
+
+      {/* PR 이 부모가 아닌 브랜치를 향할 때(에이전트가 --base 없이 연 PR) 되돌릴지 묻는 배너. */}
+      <StackBaseBanner workspace={workspace} />
 
       {/* 대화 */}
       <MessageList workspaceId={workspace.id} running={running} />

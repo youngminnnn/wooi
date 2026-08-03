@@ -273,6 +273,13 @@ export interface WooiApi {
     syncApply(workspaceId: string): Promise<{ error?: string; cascade?: StackCascadeResult }>
     /** 대기 중인 캐스케이드 계획을 무시한다(같은 병합은 다시 알리지 않는다). */
     syncDismiss(workspaceId: string): Promise<void>
+    /**
+     * 스택과 어긋난 PR 의 base 를 부모 브랜치로 되돌린다(에이전트가 `--base` 없이 PR 을 연 경우).
+     * GitHub 쪽 base 만 바꾸고 커밋은 건드리지 않는다.
+     */
+    baseRetarget(workspaceId: string): Promise<{ error?: string }>
+    /** 어긋난 base 를 의도한 것으로 받아들인다(그 base 를 채택하고 다시 묻지 않는다). */
+    baseKeep(workspaceId: string): Promise<void>
   }
 
   fs: {

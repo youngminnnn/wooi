@@ -1,4 +1,4 @@
-import type { StackedBranch } from '@shared/types'
+import type { BaseMismatch, StackedBranch } from '@shared/types'
 
 /** 열린 PR 의 head/base 브랜치 쌍(스택 감지 입력). */
 export interface PrEdge {
@@ -62,4 +62,30 @@ export function buildStackFromPrs(
     placed.add(e.branch)
   }
   return out
+}
+
+/**
+ * 현재 브랜치의 PR base 가 스택 관계와 어긋났는지 판정한다([[types]] BaseMismatch).
+ * 어긋나지 않았거나 판단할 근거가 없으면 null(= 호출부는 PR 의 base 를 그대로 채택한다).
+ *
+ * 판단 근거를 좁게 잡는다 — 잘못 띄운 배너는 사용자가 매번 무시해야 하는 소음이 된다:
+ * - 부모 워크스페이스를 특정할 수 없으면(스택이 아니거나 부모가 아카이브됨) 판정하지 않는다.
+ * - 부모 병합으로 이미 캐스케이드 계획이 떠 있으면 판정하지 않는다 — 그때는 자식 PR 이
+ *   조부모를 향하는 게 정상이고, 배너도 그쪽(StackSyncBanner)이 이미 떠 있다.
+ * - 사용자가 "그대로 둔다"고 한 base 는 다시 묻지 않는다.
+ */
+export function detectBaseMismatch(opts: {
+  /** 현재 브랜치의 열린 PR. 없으면(PR 미생성) 판정할 대상 자체가 없다. */
+  headPr: { number: number; base: string } | null
+  /** 부모 워크스페이스의 브랜치. 스택이 아니거나 부모를 못 찾으면 null. */
+  parentBranch: string | null
+  /** 대기 중인 머지 캐스케이드 계획이 있는지. */
+  pendingSync: boolean
+  /** 사용자가 그대로 두기로 한 base 브랜치. */
+  dismissed: string | null
+}): BaseMismatch | null {
+  const { headPr, parentBranch, pendingSync, dismissed } = opts
+  if (!headPr || !parentBranch || pendingSync) return null
+  if (headPr.base === parentBranch || headPr.base === dismissed) return null
+  return { prNumber: headPr.number, prBase: headPr.base, expectedBase: parentBranch }
 }
