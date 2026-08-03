@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Loader2, FilePlus2, FileMinus2, FilePen, FileCode } from 'lucide-react'
+import { Loader2, FilePlus2, FileMinus2, FilePen, FileCode, Maximize2 } from 'lucide-react'
 import type { FileDiff, WorkspaceDiff } from '@shared/types'
 
 /**
@@ -9,11 +9,17 @@ import type { FileDiff, WorkspaceDiff } from '@shared/types'
 export default function DiffView({
   diff,
   loading,
-  baseBranch
+  baseBranch,
+  onOpenFile
 }: {
   diff: WorkspaceDiff | null
   loading: boolean
   baseBranch: string
+  /**
+   * 파일 전문을 큰 뷰어로 여는 콜백. 주지 않으면 버튼이 뜨지 않는다 —
+   * 모달 안의 diff 는 뒤에 오버레이를 띄울 수 없어 호출자가 뺀다.
+   */
+  onOpenFile?: (path: string) => void
 }): React.JSX.Element {
   if (loading) {
     return (
@@ -41,23 +47,34 @@ export default function DiffView({
         <span className="text-[var(--danger-400)]">−{totalDel}</span>
       </div>
       {diff.files.map((f) => (
-        <FileBlock key={f.path} file={f} />
+        <FileBlock key={f.path} file={f} onOpenFile={onOpenFile} />
       ))}
     </div>
   )
 }
 
-function FileBlock({ file }: { file: FileDiff }): React.JSX.Element {
+function FileBlock({
+  file,
+  onOpenFile
+}: {
+  file: FileDiff
+  onOpenFile?: (path: string) => void
+}): React.JSX.Element {
   const [open, setOpen] = useState(file.additions + file.deletions <= 400)
+  // 삭제된 파일은 worktree 에 없어 전문을 열 수 없다.
+  const canOpen = !!onOpenFile && file.status !== 'deleted'
 
   return (
     <div className="rounded-lg border border-[var(--border)] overflow-hidden">
-      <button
-        onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center gap-2 px-3 py-2 bg-[var(--bg-3)] hover:bg-[var(--surface)] text-left"
-      >
-        <StatusIcon status={file.status} />
-        <span className="flex-1 truncate text-sm font-mono text-neutral-200">{file.path}</span>
+      <div className="flex items-center gap-2 px-3 py-2 bg-[var(--bg-3)] hover:bg-[var(--surface)]">
+        <button
+          onClick={() => setOpen((v) => !v)}
+          className="flex-1 min-w-0 flex items-center gap-2 text-left"
+          title={open ? 'Collapse this file' : 'Expand this file'}
+        >
+          <StatusIcon status={file.status} />
+          <span className="flex-1 truncate text-sm font-mono text-neutral-200">{file.path}</span>
+        </button>
         {file.binary ? (
           <span className="text-xs text-neutral-500">binary</span>
         ) : (
@@ -66,7 +83,17 @@ function FileBlock({ file }: { file: FileDiff }): React.JSX.Element {
             <span className="text-[var(--danger-400)]">−{file.deletions}</span>
           </span>
         )}
-      </button>
+        {canOpen && (
+          <button
+            onClick={() => onOpenFile?.(file.path)}
+            aria-label={`Open ${file.path} in the file viewer`}
+            title="Open the whole file in the file viewer"
+            className="shrink-0 grid h-6 w-6 place-items-center rounded text-neutral-500 hover:bg-[var(--surface-2)] hover:text-neutral-100"
+          >
+            <Maximize2 size={12} />
+          </button>
+        )}
+      </div>
       {open && !file.binary && file.patch && (
         <pre className="overflow-x-auto text-xs font-mono leading-[1.45] bg-[var(--code-bg)] m-0">
           {file.patch.split('\n').map((line, i) => (

@@ -119,6 +119,28 @@ interface ConfirmState extends ConfirmOptions {
   resolve: (ok: boolean) => void
 }
 
+/** 큰 파일 뷰어가 방문한 파일 한 개. */
+export interface FileViewerEntry {
+  /** worktree 기준 상대 경로. */
+  path: string
+  /** 열자마자 이동할 줄(1-based). diff·멘션에서 특정 줄로 보낼 때 쓴다. */
+  line?: number
+}
+
+export interface FileViewerState {
+  /** 이 경로들이 속한 worktree. 다른 워크스페이스로 옮기면 뷰어는 닫힌다. */
+  workspaceId: string
+  /** 방문 기록(뒤로/앞으로). */
+  history: FileViewerEntry[]
+  /** history 안의 현재 위치. */
+  index: number
+  /** 왼쪽 파일 트리 표시 여부. */
+  treeOpen: boolean
+}
+
+/** 뷰어 방문 기록 상한. 브라우저처럼 오래된 것부터 버린다. */
+const FILE_HISTORY_MAX = 50
+
 let toastSeq = 0
 let pendingSeq = 0
 
@@ -232,6 +254,14 @@ interface UIState {
    * 창을 닫으면 false 로 돌아오고 패널은 제자리(인라인)로 복귀한다([[paneWindows]]).
    */
   detachedPanes: PaneState
+  /**
+   * 대화창 위에 띄우는 큰 파일 뷰어. null 이면 닫혀 있다.
+   * 우측 패널의 좁은 뷰어로는 코드를 읽기 어려워서, 브라우저처럼 앞/뒤로 오갈 수 있는
+   * 전체 폭 뷰어를 따로 둔다(대화는 뒤에 그대로 살아 있고 닫으면 즉시 복귀한다).
+   */
+  fileViewer: FileViewerState | null
+  /** 큰 파일 뷰어 왼쪽 트리의 너비(px). */
+  fileViewerTreeWidth: number
   toasts: Toast[]
   confirmState: ConfirmState | null
   /**
@@ -347,6 +377,16 @@ interface UIState {
   toggleRightPanel: () => void
   setRightPanelOpen: (open: boolean) => void
   setTerminalRatio: (ratio: number) => void
+  /**
+   * 큰 파일 뷰어를 연다. 이미 열려 있으면 그 파일로 이동하고 방문 기록에 쌓는다.
+   * line 을 주면 그 줄로 스크롤한다.
+   */
+  openFileViewer: (workspaceId: string, path: string, line?: number) => void
+  closeFileViewer: () => void
+  /** 방문 기록에서 delta 만큼 이동(-1 뒤로, +1 앞으로). 범위를 벗어나면 아무것도 하지 않는다. */
+  navigateFileViewer: (delta: number) => void
+  toggleFileViewerTree: () => void
+  setFileViewerTreeWidth: (px: number) => void
   /** 토스트를 띄우고 그 id 를 반환한다. actions 를 주면 인라인 버튼이 붙고 자동으로 닫히지 않는다. */
   pushToast: (kind: ToastKind, message: string, actions?: ToastAction[]) => string
   dismissToast: (id: string) => void
@@ -503,6 +543,8 @@ export const useStore = create<UIState>((set, get) => ({
   rightPanelOpen: true,
   terminalRatio: 0.5,
   detachedPanes: { work: false, scripts: false },
+  fileViewer: null,
+  fileViewerTreeWidth: 260,
   toasts: [],
   confirmState: null,
   overlayOpen: false,
@@ -1197,10 +1239,13 @@ export const useStore = create<UIState>((set, get) => ({
     // 선택 시 미확인 표시 해제. 사이드바 선택은 하나의 축이므로 리뷰 화면에서도 빠져나온다
     // (리뷰 세션 자체는 남아 있어 사이드바에서 다시 고를 수 있다).
     set((s) => {
-      if (!id || !s.unread[id]) return { selectedWorkspaceId: id, activeReviewId: null }
+      // 다른 워크스페이스로 옮기면 파일 뷰어는 닫는다 — 열린 경로가 그 worktree 전용이라
+      // 그대로 두면 새 워크스페이스에서 없는 파일을 가리키게 된다.
+      const fileViewer = s.fileViewer?.workspaceId === id ? s.fileViewer : null
+      if (!id || !s.unread[id]) return { selectedWorkspaceId: id, activeReviewId: null, fileViewer }
       const unread = { ...s.unread }
       delete unread[id]
-      return { selectedWorkspaceId: id, unread, activeReviewId: null }
+      return { selectedWorkspaceId: id, unread, activeReviewId: null, fileViewer }
     })
 
     // 별도 창으로 떼어 둔 패널은 메인 창의 선택을 따라간다 — 보조 모니터의 작업 패널이 다른
@@ -1450,6 +1495,47 @@ export const useStore = create<UIState>((set, get) => ({
 
   // 터미널 비율 — 패널/터미널 어느 쪽도 사라지지 않도록 0.15~0.85 로 클램프한다.
   setTerminalRatio: (ratio) => set({ terminalRatio: Math.max(0.15, Math.min(0.85, ratio)) }),
+
+  openFileViewer: (workspaceId, path, line) =>
+    set((s) => {
+      const cur = s.fileViewer
+      // 처음 열거나 다른 워크스페이스로 넘어가면 기록을 새로 시작한다(경로가 그 worktree 전용이다).
+      if (!cur || cur.workspaceId !== workspaceId)
+        return { fileViewer: { workspaceId, history: [{ path, line }], index: 0, treeOpen: true } }
+
+      // 보고 있던 파일을 다시 열면 기록을 늘리지 않고 줄 위치만 갱신한다.
+      if (cur.history[cur.index]?.path === path) {
+        const history = cur.history.slice()
+        history[cur.index] = { path, line }
+        return { fileViewer: { ...cur, history } }
+      }
+
+      // 뒤로 간 상태에서 새 파일을 열면 앞쪽 기록은 브라우저처럼 버린다.
+      const history = [...cur.history.slice(0, cur.index + 1), { path, line }].slice(
+        -FILE_HISTORY_MAX
+      )
+      return { fileViewer: { ...cur, history, index: history.length - 1 } }
+    }),
+
+  closeFileViewer: () => set({ fileViewer: null }),
+
+  navigateFileViewer: (delta) =>
+    set((s) => {
+      const cur = s.fileViewer
+      if (!cur) return {}
+      const index = cur.index + delta
+      if (index < 0 || index >= cur.history.length) return {}
+      return { fileViewer: { ...cur, index } }
+    }),
+
+  toggleFileViewerTree: () =>
+    set((s) =>
+      s.fileViewer ? { fileViewer: { ...s.fileViewer, treeOpen: !s.fileViewer.treeOpen } } : {}
+    ),
+
+  // 트리가 사라지거나 코드 영역을 다 먹지 않도록 양끝을 클램프한다.
+  setFileViewerTreeWidth: (px) =>
+    set({ fileViewerTreeWidth: Math.max(180, Math.min(560, Math.round(px))) }),
 
   pushToast: (kind, message, actions) => {
     const id = `toast:${++toastSeq}`

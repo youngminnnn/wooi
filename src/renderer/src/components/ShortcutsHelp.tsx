@@ -28,10 +28,20 @@ const GROUPS: { title: string; items: { keys: string[]; label: string }[] }[] = 
   {
     title: 'Workspace tools',
     items: [
+      { keys: ['⇧⌘O'], label: 'Open a file in the big viewer' },
       { keys: ['⇧⌘E'], label: 'Open workspace in editor' },
       { keys: ['⇧⌘F'], label: 'Reveal workspace in Finder' },
       { keys: ['⇧⌘X'], label: 'Export conversation' },
       { keys: ['⇧⌘⌫'], label: 'Archive workspace' }
+    ]
+  },
+  {
+    title: 'File viewer',
+    items: [
+      { keys: ['⇧⌘O'], label: 'Open a file — type a path, add #L42 to jump to a line' },
+      { keys: ['⌘F'], label: 'Find in the open file' },
+      { keys: ['⌘⌥←', '/', '⌘⌥→'], label: 'Back / forward through visited files' },
+      { keys: ['Esc'], label: 'Close the viewer and return to the conversation' }
     ]
   },
   {

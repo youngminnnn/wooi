@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { RefreshCw } from 'lucide-react'
 import { useStore } from '../store'
+import { isPaneWindow } from '../lib/paneWindow'
 import DiffView from './DiffView'
 import type { WorkspaceDiff } from '@shared/types'
 
@@ -19,6 +20,7 @@ export default function ChangesPanel({
   const [loading, setLoading] = useState(true)
   // git 상태의 변경 파일 수가 바뀌면 diff 를 다시 가져오는 트리거로 쓴다.
   const changedFiles = useStore((s) => s.gitStatus[workspaceId]?.changedFiles ?? 0)
+  const openFileViewer = useStore((s) => s.openFileViewer)
 
   useEffect(() => {
     let alive = true
@@ -46,7 +48,13 @@ export default function ChangesPanel({
     <div className="h-full flex flex-col min-h-0">
       <PanelToolbar label={`vs ${baseBranch}`} onRefresh={refresh} spinning={loading} />
       <div className="flex-1 overflow-y-auto px-3 py-3">
-        <DiffView diff={diff} loading={loading} baseBranch={baseBranch} />
+        <DiffView
+          diff={diff}
+          loading={loading}
+          baseBranch={baseBranch}
+          // 분리한 패널 창에는 큰 뷰어가 없다(FileBrowser 의 openViewer 주석 참고).
+          onOpenFile={isPaneWindow ? undefined : (path) => openFileViewer(workspaceId, path)}
+        />
       </div>
     </div>
   )

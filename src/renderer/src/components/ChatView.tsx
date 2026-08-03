@@ -3,6 +3,7 @@ import {
   GitBranch,
   FolderOpen,
   Code2,
+  FileSearch,
   Terminal,
   Archive,
   RefreshCw,
@@ -42,6 +43,7 @@ import ExportMenu from './ExportMenu'
 import HeaderButton from './HeaderButton'
 import { AgentBackendMark, GithubMark } from './BrandIcons'
 import { useGithubDisconnected } from '../lib/github'
+import { openFileQuickOpen } from '../lib/fileViewer'
 import { workspaceDisplayName } from '@shared/types'
 import type { PrState, Workspace } from '@shared/types'
 
@@ -399,6 +401,13 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
           indicator={devRunning}
         >
           <Terminal size={15} />
+        </HeaderButton>
+        <HeaderButton
+          title="Open a file in the big viewer"
+          shortcut="⇧⌘O"
+          onClick={openFileQuickOpen}
+        >
+          <FileSearch size={15} />
         </HeaderButton>
         <HeaderButton
           title="Open in editor"

@@ -87,6 +87,9 @@ export default function MessageList({
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f') {
+        // 모달·파일 뷰어가 떠 있으면 ⌘F 는 그쪽 것이다(파일 내 검색). 뒤에서 대화 검색바가
+        // 같이 열리면 닫을 때까지 사용자는 그 존재를 모른다.
+        if (useStore.getState().overlayOpen) return
         e.preventDefault()
         setSearchOpen(true)
         setTimeout(() => searchInputRef.current?.select(), 0)
