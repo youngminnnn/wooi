@@ -106,6 +106,13 @@ export default function App(): React.JSX.Element {
     tourOpen ||
     reviewStartOpen
 
+  // 모달 상태는 여기(App)에만 있으므로, 대화 화면의 전역 키 핸들러(Composer 의 Esc 등)가
+  // 볼 수 있도록 store 로 내보낸다 — 모달이 떠 있을 때 뒤쪽 단축키가 같이 발동하면 안 된다.
+  const setOverlayOpen = useStore((s) => s.setOverlayOpen)
+  useEffect(() => {
+    setOverlayOpen(anyModalOpen)
+  }, [anyModalOpen, setOverlayOpen])
+
   // '?' 키(어디서든, 단 입력 중이 아닐 때)로 단축키 도움말을 연다. Overview 등에서
   // 커스텀 이벤트로도 열 수 있다.
   useEffect(() => {

@@ -44,6 +44,11 @@ const BUILTIN_COMMANDS: SlashCommandInfo[] = [
   { name: 'copy', description: "Copy the assistant's last response to the clipboard" },
   { name: 'help', description: 'List the slash commands available here' },
   { name: 'memory', description: 'Open this project’s CLAUDE.md in your editor' },
+  {
+    name: 'add-dir',
+    description: 'Give the agent access to a directory outside this workspace',
+    argumentHint: '<path>'
+  },
   // /mcp·/context·/usage(+cost·stats)·/rewind·/permissions 등 인터셉트 명령(SSOT: INTERACTIVE_COMMANDS).
   ...INTERACTIVE_COMMANDS.map((c) => ({
     name: c.name,

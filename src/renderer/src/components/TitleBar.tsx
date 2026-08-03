@@ -176,8 +176,9 @@ function PermissionQueue({
   }
 
   const respond = (req: PermissionRequest, behavior: 'allow' | 'deny'): void => {
-    // AskUserQuestion 은 답을 골라야 하는 도구라 큐에서 바로 처리하지 않고 세션으로 보낸다.
-    if (req.toolName === 'AskUserQuestion') {
+    // 답이나 선택을 골라야 하는 요청(AskUserQuestion·계획 승인)은 큐에서 바로 처리하지 않고
+    // 해당 세션으로 보낸다 — 전용 프롬프트에서 무엇을 고르는지 보고 결정해야 한다.
+    if (req.toolName === 'AskUserQuestion' || req.kind === 'plan') {
       void selectWorkspace(req.workspaceId)
       onClose()
       return

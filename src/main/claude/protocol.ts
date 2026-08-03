@@ -69,6 +69,8 @@ export interface SessionConfig {
   permissionMode: ClaudePermissionMode
   autoCompact: boolean
   resumeSessionId: string | null
+  /** `/add-dir` 로 더해진 작업 루트(절대 경로). 비어 있으면 cwd 만 쓴다. */
+  additionalDirs: string[]
 }
 
 /** /btw 사이드 질문 진행 상황(호스트 → 메인 → 렌더러). 'start' 는 메인이 직접 보낸다. */
@@ -148,6 +150,9 @@ export type HostEvent =
   // workspace 를 idle 로 확정하도록 메인에 요청한다(메인의 forceIdle 로 연결).
   | { type: 'settleIdle'; workspaceId: string }
   | { type: 'permissionRequest'; request: PermissionRequest }
+  // 세션이 스스로 바꾼 권한 모드(계획 승인 → acceptEdits/default). 메인이 store 에 반영하고
+  // 렌더러로 방송한다 — 모드는 workspace 상태라 호스트만 알고 있으면 UI 와 어긋난다.
+  | { type: 'permissionMode'; workspaceId: string; mode: ClaudePermissionMode }
   | { type: 'response'; reqId: string; ok: true; data: unknown }
   | { type: 'response'; reqId: string; ok: false; error: string }
   | { type: 'sideQuestion'; update: SideQuestionUpdate }

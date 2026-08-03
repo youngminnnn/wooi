@@ -32,6 +32,7 @@ import Composer from './Composer'
 import ScriptPanel from './ScriptPanel'
 import PermissionPrompt from './PermissionPrompt'
 import QuestionPrompt from './QuestionPrompt'
+import PlanPrompt from './PlanPrompt'
 import DiffModal from './DiffModal'
 import PrActionsMenu from './PrActionsMenu'
 import StackPopover from './StackPopover'
@@ -483,10 +484,12 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
       {/* 대화 */}
       <MessageList workspaceId={workspace.id} running={running} />
 
-      {/* 권한 프롬프트 — AskUserQuestion 은 답을 받아야 하므로 질문 UI 로 분기 */}
+      {/* 권한 프롬프트 — 답을 받아야 하는 질문(AskUserQuestion)과 계획 승인은 전용 UI 로 분기 */}
       {pending &&
         (pending.toolName === 'AskUserQuestion' ? (
           <QuestionPrompt key={pending.requestId} request={pending} />
+        ) : pending.kind === 'plan' ? (
+          <PlanPrompt key={pending.requestId} request={pending} />
         ) : (
           <PermissionPrompt request={pending} />
         ))}

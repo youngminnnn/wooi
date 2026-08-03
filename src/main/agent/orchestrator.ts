@@ -183,6 +183,15 @@ export class AgentOrchestrator {
     backend.sideQuestion(workspaceId, question)
   }
 
+  /** /add-dir — 지원하지 않는 백엔드에서는 이유를 담은 에러로 돌려준다(입력창이 토스트로 띄운다). */
+  addDirectory(workspaceId: string, dir: string): { error?: string } {
+    const backend = this.backendFor(workspaceId)
+    if (!backend.meta.capabilities.addDirectory || !backend.addDirectory) {
+      return { error: `${backend.meta.label} does not support /add-dir.` }
+    }
+    return backend.addDirectory(workspaceId, dir)
+  }
+
   runCommand(workspaceId: string, kind: CommandPanelKind): Promise<CommandResult> {
     const backend = this.backendFor(workspaceId)
     if (!backend.meta.capabilities.interactiveCommands.includes(kind)) {

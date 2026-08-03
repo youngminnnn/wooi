@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto'
-import { join } from 'node:path'
+import { homedir } from 'node:os'
+import { statSync, type Stats } from 'node:fs'
+import { join, relative, resolve } from 'node:path'
 import {
   utilityProcess,
   Notification,
@@ -48,6 +50,11 @@ const RATE_LIMIT_DEBOUNCE_MS = 1500
  * 라이브 Query 위에서 도는 제어 요청이라 비용도 사실상 없다(세션이 없으면 아예 no-op).
  */
 const RATE_LIMIT_POLL_MS = 5 * 60_000
+
+/** `~/src` 처럼 셸에서 익숙한 홈 경로 표기를 받아 준다(셸을 거치지 않으므로 직접 푼다). */
+function expandHome(p: string): string {
+  return p === '~' || p.startsWith('~/') ? join(homedir(), p.slice(1)) : p
+}
 
 /**
  * workspace 단위 Claude 세션의 생명주기를 관리한다.
@@ -194,6 +201,14 @@ export class SessionManager implements AgentBackend {
       case 'permissionRequest':
         this.onPermissionRequest(msg.request)
         break
+      case 'permissionMode':
+        // 호스트의 라이브 세션에는 이미 적용된 상태다 — 여기서는 store 와 UI 만 맞춘다.
+        getStore().update((st) => {
+          const w = st.workspaces.find((x) => x.id === msg.workspaceId)
+          if (w) w.permissionMode = msg.mode
+        })
+        this.dispatch(IPC.evtState, getStore().getState())
+        break
       case 'response': {
         const pending = this.pendingRequests.get(msg.reqId)
         if (pending) {
@@ -243,7 +258,8 @@ export class SessionManager implements AgentBackend {
       // 다른 백엔드에서 넘어온 값(전역 기본값 이관 등)이 SDK 로 새지 않도록 여기서 걸러 낸다.
       permissionMode: claudeMode(ws.permissionMode),
       autoCompact: settings.autoCompact,
-      resumeSessionId: ws.sessionId
+      resumeSessionId: ws.sessionId,
+      additionalDirs: ws.additionalDirs ?? []
     }
   }
 
@@ -417,6 +433,39 @@ export class SessionManager implements AgentBackend {
       }
     })
     this.dispose(workspaceId)
+  }
+
+  /**
+   * `/add-dir` — worktree 밖 디렉토리를 작업 루트로 더한다.
+   *
+   * SDK 의 additionalDirectories 는 query 를 열 때 고정되고 세션 중에 넓힐 수 없다(제어 채널의
+   * register_repo_root 는 cwd 하위만 받는다). 그래서 모델·effort 와 같은 방식으로 기존 세션을
+   * dispose 하고, 다음 메시지에서 새 루트로 query 를 다시 열되 resume 으로 맥락을 이어받는다.
+   */
+  addDirectory(workspaceId: string, dir: string): { error?: string } {
+    const ws = this.getWorkspace(workspaceId)
+    if (!ws) return { error: 'Workspace not found.' }
+
+    const abs = resolve(ws.worktreePath, expandHome(dir))
+    let stat: Stats
+    try {
+      stat = statSync(abs)
+    } catch {
+      return { error: `No such directory: ${abs}` }
+    }
+    if (!stat.isDirectory()) return { error: `Not a directory: ${abs}` }
+    // worktree 안은 이미 작업 루트다 — 더해 봐야 바뀌는 게 없으니 세션만 날리지 않도록 막는다.
+    if (abs === ws.worktreePath || !relative(ws.worktreePath, abs).startsWith('..')) {
+      return { error: 'That directory is already part of this workspace.' }
+    }
+    if ((ws.additionalDirs ?? []).includes(abs)) return { error: `Already added: ${abs}` }
+
+    getStore().update((st) => {
+      const w = st.workspaces.find((x) => x.id === workspaceId)
+      if (w) w.additionalDirs = [...(w.additionalDirs ?? []), abs]
+    })
+    this.dispose(workspaceId)
+    return {}
   }
 
   dispose(workspaceId: string): void {

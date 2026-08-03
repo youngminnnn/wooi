@@ -95,10 +95,12 @@ async function start(autoCompact: boolean): Promise<Harness> {
     permissionMode: 'default',
     autoCompact,
     resumeSessionId: null,
+    additionalDirs: [],
     emit: (e) => events.push(e),
     persist: (i) => items.push(i),
     requestPermission: async () => ({ behavior: 'deny' }),
     onSessionId: () => {},
+    onPermissionMode: () => {},
     settleIdle: () => events.push({ type: 'status', status: 'idle' })
   })
   return {
