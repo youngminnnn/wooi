@@ -244,10 +244,41 @@ export default function App(): React.JSX.Element {
 
       // 우상단 헤더 도구 단축키 — 현재 선택된 workspace 를 대상으로 한다.
       // ⇧⌘ 조합이라 macOS 기본 단축키(⌘S/E/F, ⌘⌫ 등)나 앱 기존 단축키와 충돌하지 않는다.
-      // (dev 실행은 아래에서 ⌃⌘R 로 별도 처리 — ⇧⌘R 은 기본 메뉴 Force Reload 와 충돌.)
       const selId = st.selectedWorkspaceId
+
+      // dev 스크립트 실행/중지 — 스크립트 패널 열림 여부와 무관하게 동작한다.
+      // ⇧⌘D 와 (구) ⌃⌘R 둘 다 여기로 들어온다.
+      const toggleDevScript = (id: string): void => {
+        const ws = st.app?.workspaces.find((w) => w.id === id)
+        const devCmd = ws && st.app?.repos.find((r) => r.id === ws.repoId)?.devScript
+        if (!devCmd || !devCmd.trim()) {
+          // 여기까지 온 사용자는 이미 "dev 명령을 쓰고 싶다"고 손을 든 상태다. 설정이 어디
+          // 있는지 말로만 알려 주고 끝내지 말고, 바로 그 화면으로 데려간다.
+          st.pushToast('info', 'No dev command set for this repo yet.', [
+            { label: 'Set dev command', run: () => ws && openRepoSettings(ws.repoId) }
+          ])
+          return
+        }
+        const devRunning = (st.scriptStatus[id] ?? []).some(
+          (s) => s.kind === 'dev' && s.state === 'running'
+        )
+        if (devRunning) {
+          void window.api.script.stop(id, 'dev').then(() => st.refreshScriptStatus(id))
+        } else {
+          // 실행 시 스크립트 패널(dev 탭)을 열어 로그·상태를 바로 볼 수 있게 한다.
+          st.setScriptPanelOpen(id, true)
+          void window.api.script.run(id, 'dev').then(() => st.refreshScriptStatus(id))
+        }
+      }
+
       // 키 판별은 e.code 로 한다 — 한글 IME 등에서 e.key 가 문자가 아닐 수 있다.
       if (selId && e.shiftKey) {
+        // ⇧⌘D: dev 스크립트 실행/중지. 다른 헤더 도구 단축키와 같은 ⇧⌘ 계열로 맞췄다.
+        if (e.code === 'KeyD') {
+          e.preventDefault()
+          toggleDevScript(selId)
+          return
+        }
         // ⇧⌘S: 스크립트 패널 열기/닫기.
         if (e.code === 'KeyS') {
           e.preventDefault()
@@ -280,31 +311,11 @@ export default function App(): React.JSX.Element {
         }
       }
 
-      // ⌃⌘R: dev 스크립트 실행/중지 — 스크립트 패널 열림 여부와 무관하게 동작한다.
-      // (⇧⌘R 은 Electron 기본 메뉴의 Force Reload 와 충돌하므로 Control 조합을 쓴다.)
+      // ⌃⌘R: ⇧⌘D 이전에 쓰던 dev 단축키. 손에 익은 사용자를 위해 당분간 함께 유지한다.
       // 키 판별은 e.code('KeyR')로 한다 — 한글 IME·Control 조합에서 e.key 가 'r' 이 아닐 수 있다.
       if (selId && e.ctrlKey && e.code === 'KeyR') {
         e.preventDefault()
-        const ws = st.app?.workspaces.find((w) => w.id === selId)
-        const devCmd = ws && st.app?.repos.find((r) => r.id === ws.repoId)?.devScript
-        if (!devCmd || !devCmd.trim()) {
-          // 여기까지 온 사용자는 이미 "dev 명령을 쓰고 싶다"고 손을 든 상태다. 설정이 어디
-          // 있는지 말로만 알려 주고 끝내지 말고, 바로 그 화면으로 데려간다.
-          st.pushToast('info', 'No dev command set for this repo yet.', [
-            { label: 'Set dev command', run: () => ws && openRepoSettings(ws.repoId) }
-          ])
-          return
-        }
-        const devRunning = (st.scriptStatus[selId] ?? []).some(
-          (s) => s.kind === 'dev' && s.state === 'running'
-        )
-        if (devRunning) {
-          void window.api.script.stop(selId, 'dev').then(() => st.refreshScriptStatus(selId))
-        } else {
-          // 실행 시 스크립트 패널(dev 탭)을 열어 로그·상태를 바로 볼 수 있게 한다.
-          st.setScriptPanelOpen(selId, true)
-          void window.api.script.run(selId, 'dev').then(() => st.refreshScriptStatus(selId))
-        }
+        toggleDevScript(selId)
         return
       }
 
