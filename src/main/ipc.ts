@@ -35,7 +35,7 @@ import {
   validateCarryPath
 } from './carry'
 import { generateWorkspaceName } from './names'
-import { getWorkspacePrStatus } from './prCache'
+import { getWorkspacePrStatus, invalidateWorkspacePr } from './prCache'
 import { buildStackFromPrs, detectBaseMismatch } from './stack'
 import { findFreePort, waitForPortFree } from './net'
 import {
@@ -586,6 +586,8 @@ export function registerIpc(ctx: IpcContext): void {
       if (pr?.title?.trim()) snapshotName = pr.title.trim()
     }
     if (repo) await removeWorktree(repo.path, ws.worktreePath, ws.branch, false)
+    // worktree 가 사라졌으니 캐시된 PR 상태도 물어볼 근거가 없다(언아카이브하면 다시 조회된다).
+    invalidateWorkspacePr(workspaceId)
 
     store.update((st) => {
       const w = st.workspaces.find((x) => x.id === workspaceId)
@@ -655,6 +657,7 @@ export function registerIpc(ctx: IpcContext): void {
     ctx.scripts.disposeWorkspace(workspaceId)
     ctx.terminals.disposeWorkspace(workspaceId)
     getTranscripts().remove(workspaceId)
+    invalidateWorkspacePr(workspaceId)
     if (repo) await removeWorktree(repo.path, ws.worktreePath, ws.branch, deleteBranch)
 
     store.update((st) => {
