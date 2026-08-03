@@ -20,9 +20,9 @@ and no automatic prompt** — nothing runs until you send your first message.
 - 🧱 **The stack is made of agents** — stack one agent's workspace on another's branch.
   When the parent merges, Wooi rebases the children and retargets their PR bases, so the
   rest of the stack stays valid.
-- 🔍 **The agent drafts, you decide what ships** — every agent reviews PRs now; the part
-  that's missing is somewhere to work the result. Findings land inline on the diff they're
-  about, each one editable, discardable, and postable on its own or as a batch.
+- 🔍 **PR review, on the diff** — every agent reviews PRs now; the part that's missing is
+  somewhere to work the result. Findings land inline on the diff they're about, each one
+  editable, discardable, and postable on its own or as a batch.
 - 🧵 **True parallelism** — kick off a refactor, a feature, and a bugfix at the same
   time, and watch all three from one sidebar.
 - 🔒 **Isolated by default** — a separate worktree + branch per task means agents never
