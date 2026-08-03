@@ -96,12 +96,11 @@ export class SessionManager implements AgentBackend {
     const host = utilityProcess.fork(entry, [], {
       serviceName: 'wooi-agent-host',
       // 메인이 로그인 셸로 보정한 PATH·토큰을 그대로 물려준다(자식 claude CLI 가 인증/설정을
-      // 읽을 수 있도록). app 이 없는 유틸리티 프로세스용으로 userData·패키징 여부를 넘긴다.
+      // 읽을 수 있도록). app 이 없는 유틸리티 프로세스용으로 userData 경로를 넘긴다.
       env: {
         ...process.env,
         WOOI_USER_DATA: app.getPath('userData'),
-        WOOI_LOG_NAME: 'host.log',
-        WOOI_PACKAGED: app.isPackaged ? '1' : ''
+        WOOI_LOG_NAME: 'host.log'
       }
     })
 

@@ -78,7 +78,6 @@ vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
 
 beforeAll(() => {
   process.env.WOOI_USER_DATA = mkdtempSync(join(tmpdir(), 'wooi-watchdog-'))
-  delete process.env.WOOI_PACKAGED
 })
 
 afterEach(() => {

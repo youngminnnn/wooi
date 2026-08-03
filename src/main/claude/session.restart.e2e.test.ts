@@ -14,7 +14,6 @@ import type { ChatEvent, ChatItem } from '@shared/types'
  *
  * CLI 프로세스를 실제로 spawn 하므로 기본 `npm test` 에서는 건너뛴다. 실행:
  *   WOOI_E2E=1 npx vitest run src/main/claude/session.restart.e2e.test.ts
- * (Wooi 가 띄운 셸에서 돌릴 때는 상속된 WOOI_PACKAGED 를 지워야 한다: `env -u WOOI_PACKAGED …`)
  */
 describe.skipIf(!process.env.WOOI_E2E)('ClaudeSession failed-turn restart', () => {
   it('인증 오류로 산출 없이 끝난 턴을 같은 세션을 이어받아 1회 다시 돌린다', async () => {

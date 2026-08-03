@@ -47,9 +47,6 @@ vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
 beforeAll(() => {
   // 로거가 실제 userData 로그를 건드리지 않도록 임시 디렉터리로 돌린다.
   process.env.WOOI_USER_DATA = mkdtempSync(join(tmpdir(), 'wooi-preflight-'))
-  // Wooi 가 띄운 셸에서 돌리면 WOOI_PACKAGED=1 이 상속돼, session.ts 로드 시 패키징된 앱의
-  // 네이티브 바이너리 경로(process.resourcesPath)를 찾다 throw 한다. 테스트에선 항상 비패키징.
-  delete process.env.WOOI_PACKAGED
 })
 
 async function runFirstTurn(autoCompact: boolean, usage: typeof contextUsage) {

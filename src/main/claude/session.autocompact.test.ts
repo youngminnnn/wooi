@@ -58,7 +58,6 @@ vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
 }))
 
 // 네이티브 바이너리 경로 계산은 패키징된 앱 전용이라(process.resourcesPath) 테스트에선 무의미하다.
-// Wooi 가 띄운 셸에서 돌리면 WOOI_PACKAGED 가 상속돼 실제로 던지므로, 환경과 무관하게 고정한다.
 vi.mock('./executable', () => ({ resolveClaudeExecutable: () => null }))
 
 /** 대기 중인 마이크로태스크/타이머가 정리될 때까지 잠깐 양보한다. */
