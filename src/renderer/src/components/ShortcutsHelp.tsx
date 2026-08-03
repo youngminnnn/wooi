@@ -17,6 +17,7 @@ const GROUPS: { title: string; items: { keys: string[]; label: string }[] }[] = 
     title: 'Session & panels',
     items: [
       { keys: ['⌘N'], label: 'New workspace in the focused repository' },
+      { keys: ['⇧⌘R'], label: 'Review a pull request' },
       { keys: ['⌘,'], label: 'Open settings' },
       { keys: ['⌘J'], label: 'Toggle the work panel' },
       { keys: ['⇧⌘S'], label: 'Toggle the scripts panel' },
@@ -32,7 +33,7 @@ const GROUPS: { title: string; items: { keys: string[]; label: string }[] }[] = 
       { keys: ['⇧⌘E'], label: 'Open workspace in editor' },
       { keys: ['⇧⌘F'], label: 'Reveal workspace in Finder' },
       { keys: ['⇧⌘X'], label: 'Export conversation' },
-      { keys: ['⇧⌘⌫'], label: 'Archive workspace' }
+      { keys: ['⇧⌘⌫'], label: 'Archive workspace — or the review you have open' }
     ]
   },
   {

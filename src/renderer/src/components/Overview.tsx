@@ -186,6 +186,11 @@ export default function Overview(): React.JSX.Element {
             >
               <MessageSquarePlus size={12} />
               Review PR
+              {/* 단축키를 버튼에 붙여 둔다 — 사이드바의 'Search workspaces / ⌘K' 와 같은 방식으로,
+                  익히기 전까지만 눈에 들어오고 익히면 자연히 배경이 된다. */}
+              <kbd className="ml-0.5 text-[11px] leading-none font-medium text-neutral-600 tabular-nums">
+                ⇧⌘R
+              </kbd>
             </button>
             {counts.running > 0 && (
               <button
