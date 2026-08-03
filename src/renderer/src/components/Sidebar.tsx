@@ -28,6 +28,7 @@ import {
 import { useStore } from '../store'
 import RowActionsMenu, { type RowAction } from './RowActionsMenu'
 import { useAvailableBackends } from '../lib/backends'
+import { useMultiAgent, type MultiAgentState } from '../lib/multiAgent'
 import { AgentBackendMark, GithubMark } from './BrandIcons'
 import {
   QUICK_SWITCH_HINT_DISMISSED,
@@ -42,7 +43,7 @@ import {
   switchClickCount
 } from '../lib/uiFlags'
 import { OPEN_REPO_SETTINGS_EVENT, openRepoSettings } from '../lib/repoSettings'
-import { experimentsOf, orderVisibleWorkspaces, workspaceDisplayName } from '@shared/types'
+import { AGENT_BACKEND_LABELS, orderVisibleWorkspaces, workspaceDisplayName } from '@shared/types'
 import { orderRowsWithPending } from '../lib/sidebarRows'
 import { useGithubDisconnected } from '../lib/github'
 import { WorkspaceAgents } from './WorkspaceAgents'
@@ -452,22 +453,14 @@ export default function Sidebar({
  * 대화에서 정해진다 — 미리 고르게 하면 "Codex 한테 시켜줘" 라고 말했는데 메뉴에서 체크를 안 했다는
  * 이유로 안 되는, 설명하기 어려운 실패가 생긴다.
  */
-function useMultiAgentAction(workspace: Workspace): RowAction[] {
-  const enabled = useStore((s) => experimentsOf(s.app?.settings).multiAgent)
-  const available = useAvailableBackends()
-  // 조율하는 쪽이 될 수 있는 백엔드에서만 제안한다 — 켤 수는 있는데 아무 일도 안 일어나는
-  // 스위치를 만들지 않기 위해서다. 에이전트가 하나뿐이면 애초에 넘길 상대가 없다.
-  const canCoordinate = available.find((b) => b.id === workspace.agentBackend)?.capabilities
-    .delegate
-  if (!enabled || !canCoordinate || available.length < 2) return []
-
-  const on = workspace.multiAgent === true
+function multiAgentAction(workspace: Workspace, state: MultiAgentState): RowAction[] {
+  if (!state.canUse) return []
   return [
     {
       key: 'multiAgent',
-      label: on ? 'Turn off multi-agent mode' : 'Turn on multi-agent mode',
+      label: state.active ? 'Turn off multi-agent mode' : 'Turn on multi-agent mode',
       icon: <Users size={13} />,
-      onSelect: () => void window.api.workspace.setMultiAgent(workspace.id, !on),
+      onSelect: () => void window.api.workspace.setMultiAgent(workspace.id, !state.active),
       separatorBefore: true
     }
   ]
@@ -561,8 +554,9 @@ function WorkspaceRow({
     if (active) void select(null)
   }
 
-  // 멀티 에이전트 모드 토글. 실험 기능이 꺼져 있거나 이 백엔드가 조율할 수 없으면 빈 목록이다.
-  const multiAgentAction = useMultiAgentAction(workspace)
+  // 멀티 에이전트 상태 — 행 배지와 메뉴 토글이 같은 판단을 쓴다. 훅을 두 번 부르면 행마다
+  // store 구독이 하나 더 늘어나므로(워크스페이스가 많을수록 손해) 한 번 읽어 나눠 쓴다.
+  const multiAgent = useMultiAgent(workspace)
 
   // 행당 액션이 5개까지 늘어나 아이콘을 나열하면 제목 폭을 계속 잠식한다. 그래서 1차 액션
   // (뒤처진 stacked 워크스페이스의 restack)만 인라인으로 승격하고 나머지는 이 메뉴로 모은다.
@@ -607,7 +601,7 @@ function WorkspaceRow({
       : []),
     // 멀티 에이전트 모드 토글(실험 기능). 대부분의 워크스페이스는 모달 없이 자동 생성되므로,
     // 만든 뒤에 켜는 이 경로가 사실상 주된 진입점이다. 다음 세션부터 적용된다.
-    ...multiAgentAction,
+    ...multiAgentAction(workspace, multiAgent),
     {
       key: 'mute',
       label: workspace.muted ? 'Unmute notifications' : 'Mute notifications',
@@ -728,10 +722,20 @@ function WorkspaceRow({
           <div className="flex items-center gap-1 text-xs text-neutral-500 truncate">
             {/* 어떤 에이전트가 이 워크스페이스를 돌리는지. 생성 시 고정되고 바꿀 수 없으므로,
                 여러 개를 병렬로 돌릴 때 어느 쪽인지 한눈에 보여야 한다. 에이전트가 하나뿐인
-                사용자에게는 정보가 아니라 잡음이라 감춘다. */}
+                사용자에게는 정보가 아니라 잡음이라 감춘다.
+                멀티 에이전트면 마크 옆에 사람 아이콘을 붙여 "이 마크는 메인일 뿐이고 다른 종류도
+                돈다"를 알린다 — 마크만 보고 단일 에이전트로 오해하지 않게 한다. */}
             {showAgent && (
-              <span className="shrink-0 text-neutral-500">
+              <span
+                className="shrink-0 flex items-center gap-0.5 text-neutral-500"
+                title={
+                  multiAgent.active
+                    ? `Multi-agent — ${AGENT_BACKEND_LABELS[workspace.agentBackend]} can run tasks with other agents`
+                    : `Running on ${AGENT_BACKEND_LABELS[workspace.agentBackend]}`
+                }
+              >
                 <AgentBackendMark backend={workspace.agentBackend} size={10} />
+                {multiAgent.active && <Users size={10} />}
               </span>
             )}
             <GitBranch size={10} className="shrink-0" />
