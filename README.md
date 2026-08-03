@@ -21,8 +21,9 @@ and no automatic prompt** — nothing runs until you send your first message.
 - 🧱 **The stack is made of agents** — stack one agent's workspace on another's branch.
   When the parent merges, Wooi rebases the children and retargets their PR bases, so the
   rest of the stack stays valid.
-- 🔍 **Review PRs in place** — point an agent at a pull request, edit its findings, and post
-  them without leaving the app.
+- 🔍 **The agent drafts, you decide what ships** — every agent reviews PRs now; the part
+  that's missing is somewhere to work the result. Findings land inline on the diff they're
+  about, each one editable, discardable, and postable on its own or as a batch.
 - 🧵 **True parallelism** — kick off a refactor, a feature, and a bugfix at the same
   time, and watch all three from one sidebar.
 - 🔒 **Isolated by default** — a separate worktree + branch per task means agents never
@@ -140,9 +141,24 @@ those chains itself with plain `git` and `gh` — no extra stacking CLI needed.
 
 ### PR review
 
-Review a pull request without leaving Wooi. A review gets its own row in the sidebar and
+Getting an agent to review a pull request is the easy part — every agent does that now.
+The hard part is what comes back: a wall of prose in a chat log, detached from the code it
+describes, that you then have to translate into actual review comments by hand.
+
+Wooi makes the diff the workspace instead. A review gets its own row in the sidebar and
 runs alongside your workspaces instead of taking one over.
 
+- **A diff you review on, not a transcript you read** — three panes: the changed files with
+  a count of findings on each, the full diff in the middle, and a findings/activity sidebar.
+  The footer keeps a running `N inline · M general` tally.
+- **Findings land on the lines they're about** — each one is anchored to its hunk and
+  rendered as a card right there in the diff, with a severity badge and a markdown body.
+  If an agent cites a line that isn't part of the diff, the card says so and shows where it
+  got moved to, so you catch a misplaced comment before it goes out instead of after.
+- **Curate before you post** — **Edit** reworks the wording inline, **Discard** drops the
+  ones you don't want, **Comment** posts that finding on its own. Or tick the ones you want
+  and post the batch; each goes out as its own review comment, and posted cards go quiet
+  with a link to the comment on GitHub.
 - **Start a review** — **Review PR** on the Overview board. Pick a repo, choose one of its
   open PRs (or type a number / URL), and say what you want looked at.
 - **Claude or Codex** — pick the agent when you start. A review stays on the agent it was
@@ -151,9 +167,6 @@ runs alongside your workspaces instead of taking one over.
   `~/wooi/reviews/<repo>/pr-<number>-<id>`, a worktree dedicated to that review, so the
   agent can read code outside the changed hunks and grep the rest of the tree without
   touching the checkout you're working in.
-- **Findings land on the diff** — each suggestion is anchored to the lines it's about. Edit
-  the wording before it goes out, discard the ones you don't want, and post them
-  individually or all at once.
 - **Activity timeline** — replies to comments you posted and new commits on the PR are
   polled automatically and land in the timeline. Ask a follow-up and the review picks up
   from there.
