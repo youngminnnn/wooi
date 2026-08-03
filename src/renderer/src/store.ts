@@ -103,6 +103,8 @@ export interface PendingWorkspace {
   repoId: string
   /** 사용자가 입력한 이름. 자동 생성 모드면 빈 문자열(행에는 "Creating…" 만 표시). */
   name: string
+  /** stacked 생성이면 부모 workspace id. 자리표시 행을 부모 밑에 들여써서 놓는 데 쓴다. */
+  parentWorkspaceId: string | null
 }
 
 export interface ConfirmOptions {
@@ -907,7 +909,15 @@ export const useStore = create<UIState>((set, get) => ({
     // 즉각적인 피드백을 주고 git 은 그동안 백그라운드로 진행한다. 완료 시 실제 행으로 교체된다.
     const placeholderId = `pending:${++pendingSeq}`
     set((s) => ({
-      pending: [...s.pending, { id: placeholderId, repoId, name: displayName ?? '' }]
+      pending: [
+        ...s.pending,
+        {
+          id: placeholderId,
+          repoId,
+          name: displayName ?? '',
+          parentWorkspaceId: args?.parentWorkspaceId ?? null
+        }
+      ]
     }))
 
     let res: {

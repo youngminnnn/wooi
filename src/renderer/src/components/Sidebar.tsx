@@ -41,7 +41,8 @@ import {
   switchClickCount
 } from '../lib/uiFlags'
 import { OPEN_REPO_SETTINGS_EVENT, openRepoSettings } from '../lib/repoSettings'
-import { orderByStack, orderVisibleWorkspaces, workspaceDisplayName } from '@shared/types'
+import { orderVisibleWorkspaces, workspaceDisplayName } from '@shared/types'
+import { orderRowsWithPending } from '../lib/sidebarRows'
 import { useGithubDisconnected } from '../lib/github'
 import { WorkspaceAgents } from './WorkspaceAgents'
 import { useNow } from '../lib/useNow'
@@ -362,23 +363,26 @@ export default function Sidebar({
                 {active.length === 0 && repoPending.length === 0 && (
                   <p className="px-3 py-1 text-xs text-neutral-600">No workspaces</p>
                 )}
-                {/* 이 렌더 순서는 orderVisibleWorkspaces 의 정의(레포 순 → 레포 안 orderByStack)와
-                    일치해야 한다 — ⌘1–9 번호가 "위에서 n번째" 와 어긋나지 않게 하는 불변식이다.
-                    여기 정렬 방식을 바꾸면 shared/types.ts 의 orderVisibleWorkspaces 도 같이 고칠 것. */}
-                {orderByStack(active).map(({ workspace: ws, depth }) => (
-                  <WorkspaceRow
-                    key={ws.id}
-                    workspace={ws}
-                    depth={depth}
-                    onStackWorkspace={onStackWorkspace}
-                    shortcut={shortcutById.get(ws.id)}
-                    now={now}
-                    dnd={workspaceDnd}
-                  />
-                ))}
-                {repoPending.map((p) => (
-                  <PendingRow key={p.id} name={p.name} />
-                ))}
+                {/* 워크스페이스 행의 순서는 orderVisibleWorkspaces 의 정의(레포 순 → 레포 안
+                    orderByStack)와 일치해야 한다 — ⌘1–9 번호가 "위에서 n번째" 와 어긋나지 않게
+                    하는 불변식이다. 여기 정렬 방식을 바꾸면 shared/types.ts 의
+                    orderVisibleWorkspaces 도 같이 고칠 것. (생성 중 자리표시 행은 번호를 받지
+                    않고 몇 초 만에 실제 행으로 바뀌므로, 그 사이 한 칸 밀리는 건 감수한다.) */}
+                {orderRowsWithPending(active, repoPending).map((row) =>
+                  row.kind === 'workspace' ? (
+                    <WorkspaceRow
+                      key={row.workspace.id}
+                      workspace={row.workspace}
+                      depth={row.depth}
+                      onStackWorkspace={onStackWorkspace}
+                      shortcut={shortcutById.get(row.workspace.id)}
+                      now={now}
+                      dnd={workspaceDnd}
+                    />
+                  ) : (
+                    <PendingRow key={row.pending.id} name={row.pending.name} depth={row.depth} />
+                  )
+                )}
               </div>
 
               {archived.length > 0 && <ArchivedSection repoId={repo.id} workspaces={archived} />}
@@ -1019,9 +1023,13 @@ function ReviewStatusDot({ status }: { status: ReviewStatus }): React.JSX.Elemen
   )
 }
 
-function PendingRow({ name }: { name: string }): React.JSX.Element {
+function PendingRow({ name, depth }: { name: string; depth: number }): React.JSX.Element {
   return (
-    <div className="w-full flex items-center gap-2 pl-3 pr-1.5 py-1.5 rounded-md text-left opacity-70 select-none">
+    // 들여쓰기는 WorkspaceRow 와 같은 식(12 + depth * 14)이라야 부모 밑에 줄이 맞는다.
+    <div
+      style={{ paddingLeft: 12 + depth * 14 }}
+      className="w-full flex items-center gap-2 pr-1.5 py-1.5 rounded-md text-left opacity-70 select-none"
+    >
       <Loader2 size={13} className="text-[var(--info-400)] animate-spin shrink-0" />
       <div className="flex-1 min-w-0">
         <div className="truncate text-sm text-neutral-300">{name || 'Creating…'}</div>
