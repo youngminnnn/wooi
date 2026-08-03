@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import {
+  Archive,
   ExternalLink,
   FileCheck,
   Loader2,
@@ -28,6 +29,7 @@ export default function PrReviewScreen({ reviewId }: { reviewId: string }): Reac
   const session = useStore((s) => s.app?.reviews.find((r) => r.id === reviewId))
   const view = useStore((s) => s.reviewViews[reviewId])
   const requestCloseReview = useStore((s) => s.requestCloseReview)
+  const requestArchiveReview = useStore((s) => s.requestArchiveReview)
   const cancelReview = useStore((s) => s.cancelReview)
   const postFindings = useStore((s) => s.postFindings)
   const toggleAllFindings = useStore((s) => s.toggleAllFindings)
@@ -86,6 +88,15 @@ export default function PrReviewScreen({ reviewId }: { reviewId: string }): Reac
           className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-neutral-400 hover:bg-[var(--surface-2)] hover:text-neutral-100 active:scale-90"
         >
           <ExternalLink size={15} />
+        </button>
+        {/* 워크스페이스와 같은 어휘·같은 단축키 — 결과는 남기고 워크트리만 정리한다. */}
+        <button
+          onClick={() => void requestArchiveReview(reviewId)}
+          title="Archive review (⇧⌘⌫) — keeps the findings, removes the worktree"
+          aria-label="Archive review"
+          className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-neutral-400 hover:bg-[var(--surface-2)] hover:text-neutral-100 active:scale-90"
+        >
+          <Archive size={15} />
         </button>
         <button
           onClick={() => void requestCloseReview(reviewId)}

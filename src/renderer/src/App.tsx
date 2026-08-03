@@ -162,7 +162,8 @@ export default function App(): React.JSX.Element {
     return () => window.removeEventListener(OPEN_REPO_SETTINGS_EVENT, onOpen)
   }, [])
 
-  // 키보드: ⇧⇥ 권한 모드 순환, ⌘1–9 워크스페이스 선택, ⌘[ / ⌘] · ⌘↑ / ⌘↓ 이전/다음.
+  // 키보드: ⇧⇥ 권한 모드 순환, ⌘1–9 워크스페이스 선택, ⌘[ / ⌘] · ⌘↑ / ⌘↓ 이전/다음,
+  // ⇧⌘R PR 리뷰 시작.
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       const st = useStore.getState()
@@ -213,6 +214,19 @@ export default function App(): React.JSX.Element {
               if (ok) useStore.getState().approveAllPermissions()
             })
         }
+        return
+      }
+
+      // ⇧⌘R: PR 리뷰 시작 모달. 리뷰는 워크스페이스를 고르지 않은 상태(Overview)에서도, 다른
+      // 리뷰를 보는 중에도 시작할 수 있어야 하므로 아래 selId 게이트 바깥에 둔다.
+      if (e.shiftKey && e.code === 'KeyR' && !e.ctrlKey && !e.altKey) {
+        e.preventDefault()
+        // 리포가 하나도 없으면 고를 PR 도 없다 — ⌘N 과 같은 안내를 준다.
+        if (!st.app?.repos.length) {
+          st.pushToast('info', 'Add a repository first.')
+          return
+        }
+        setReviewStartOpen(true)
         return
       }
 
@@ -301,6 +315,18 @@ export default function App(): React.JSX.Element {
           st.setScriptPanelOpen(id, true)
           void window.api.script.run(id, 'dev').then(() => st.refreshScriptStatus(id))
         }
+      }
+
+      // 리뷰 화면이 떠 있으면 헤더 도구의 대상은 뒤에 가려진 워크스페이스가 아니라 리뷰다
+      // (리뷰를 열어도 selectedWorkspaceId 는 그대로 남는다). 아카이브만 리뷰에 대응하는
+      // 동작이 있고, 나머지 ⇧⌘ 도구는 엉뚱한 워크스페이스를 건드리지 않도록 여기서 끊는다.
+      if (st.activeReviewId && e.shiftKey) {
+        // ⇧⌘⌫: 리뷰 아카이브 — 사이드바의 아카이브 버튼과 같은 경로(확인 후 워크트리만 정리).
+        if (e.key === 'Backspace' || e.key === 'Delete') {
+          e.preventDefault()
+          void st.requestArchiveReview(st.activeReviewId)
+        }
+        return
       }
 
       // 키 판별은 e.code 로 한다 — 한글 IME 등에서 e.key 가 문자가 아닐 수 있다.

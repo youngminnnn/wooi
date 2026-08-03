@@ -416,6 +416,8 @@ interface UIState {
   requestCloseReview: (reviewId: string) => Promise<void>
   /** 리뷰를 완전히 삭제한다(워크트리·ref·기록 모두). */
   closeReview: (reviewId: string) => Promise<void>
+  /** 확인을 받고 리뷰를 아카이브한다(사이드바 아카이브 버튼·⇧⌘⌫ 공용). */
+  requestArchiveReview: (reviewId: string) => Promise<void>
   /** 워크트리만 지우고 결과는 남긴다. */
   archiveReview: (reviewId: string) => Promise<void>
   /** 아카이브된 리뷰를 되살린다(워크트리 재구성). */
@@ -1612,6 +1614,19 @@ export const useStore = create<UIState>((set, get) => ({
     delete next[reviewId]
     set({ reviewViews: next, activeReviewId: activeReviewId === reviewId ? null : activeReviewId })
     await window.api.review.close(reviewId)
+  },
+
+  requestArchiveReview: async (reviewId) => {
+    const session = get().app?.reviews.find((r) => r.id === reviewId)
+    if (!session || session.archived) return
+    const ok = await get().confirm({
+      title: `Archive review of #${session.prNumber}?`,
+      body: 'Its worktree is removed, but the findings and conversation are kept. You can unarchive it later.',
+      confirmLabel: 'Archive',
+      danger: true
+    })
+    if (!ok) return
+    await get().archiveReview(reviewId)
   },
 
   archiveReview: async (reviewId) => {

@@ -833,23 +833,11 @@ function ReviewRow({
   const active = useStore((s) => s.activeReviewId === session.id)
   const openReview = useStore((s) => s.openReview)
   const requestCloseReview = useStore((s) => s.requestCloseReview)
-  const archiveReview = useStore((s) => s.archiveReview)
-  const confirm = useStore((s) => s.confirm)
+  const requestArchiveReview = useStore((s) => s.requestArchiveReview)
   // 워크스페이스 행과 같은 규칙 — 에이전트가 하나뿐이면 정보가 아니라 잡음이다.
   const showAgent = useAvailableBackends().length > 1
 
   const { id, prNumber, prTitle } = session
-
-  const archive = async (): Promise<void> => {
-    const ok = await confirm({
-      title: `Archive review of #${prNumber}?`,
-      body: 'Its worktree is removed, but the findings and conversation are kept. You can unarchive it later.',
-      confirmLabel: 'Archive',
-      danger: true
-    })
-    if (!ok) return
-    await archiveReview(id)
-  }
 
   return (
     <div
@@ -901,7 +889,7 @@ function ReviewRow({
         <button
           onClick={(e) => {
             e.stopPropagation()
-            void archive()
+            void requestArchiveReview(id)
           }}
           className="h-5 w-5 grid place-items-center rounded text-neutral-500 hover:bg-[var(--surface-2)] hover:text-neutral-200 shrink-0"
           title="Archive (keeps the findings, removes the worktree)"
