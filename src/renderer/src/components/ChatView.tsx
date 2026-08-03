@@ -102,12 +102,15 @@ const PR_STYLE: Record<PrState, { Icon: LucideIcon; iconClass: string; badgeClas
 export default function ChatView({ workspace }: { workspace: Workspace }): React.JSX.Element {
   const showScripts = useStore((s) => s.scriptPanelOpen[workspace.id] ?? false)
   const setShowScripts = useStore((s) => s.setScriptPanelOpen)
+  // 스크립트 패널을 별도 창으로 떼어 뒀으면 여기서는 그리지 않고, 버튼은 그 창을 앞으로 가져온다.
+  const scriptsDetached = useStore((s) => s.detachedPanes.scripts)
   // dev 스크립트 실행 여부 — 스크립트 버튼에 실행 중 점을 띄워 패널을 닫아도 알 수 있게 한다.
   const devRunning = useStore((s) =>
     (s.scriptStatus[workspace.id] ?? []).some((x) => x.kind === 'dev' && x.state === 'running')
   )
   const rightPanelOpen = useStore((s) => s.rightPanelOpen)
   const toggleRightPanel = useStore((s) => s.toggleRightPanel)
+  const workPaneDetached = useStore((s) => s.detachedPanes.work)
   const [showDiff, setShowDiff] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [updating, setUpdating] = useState(false)
@@ -378,10 +381,20 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
         <div className="flex-1" />
 
         <HeaderButton
-          title={devRunning ? 'Scripts — dev running' : 'Run project scripts'}
+          title={
+            scriptsDetached
+              ? 'Scripts — open in a separate window'
+              : devRunning
+                ? 'Scripts — dev running'
+                : 'Run project scripts'
+          }
           shortcut="⇧⌘S"
-          onClick={() => setShowScripts(workspace.id, !showScripts)}
-          active={showScripts}
+          onClick={() =>
+            scriptsDetached
+              ? void window.api.pane.focus('scripts')
+              : setShowScripts(workspace.id, !showScripts)
+          }
+          active={showScripts || scriptsDetached}
           indicator={devRunning}
         >
           <Terminal size={15} />
@@ -405,10 +418,16 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
           <Archive size={15} />
         </HeaderButton>
         <HeaderButton
-          title={rightPanelOpen ? 'Hide work panel' : 'Show work panel'}
+          title={
+            workPaneDetached
+              ? 'Work panel — open in a separate window'
+              : rightPanelOpen
+                ? 'Hide work panel'
+                : 'Show work panel'
+          }
           shortcut="⌘J"
           onClick={toggleRightPanel}
-          active={rightPanelOpen}
+          active={rightPanelOpen || workPaneDetached}
         >
           <PanelRight size={15} />
         </HeaderButton>
@@ -578,8 +597,8 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
       {/* 입력 */}
       <Composer workspace={workspace} />
 
-      {/* 스크립트 패널 */}
-      {showScripts && (
+      {/* 스크립트 패널 — 별도 창으로 떼어 뒀으면 그쪽에서 그린다. */}
+      {showScripts && !scriptsDetached && (
         <ScriptPanel
           workspaceId={workspace.id}
           onClose={() => setShowScripts(workspace.id, false)}

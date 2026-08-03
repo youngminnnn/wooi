@@ -7,9 +7,20 @@
  * (`wooi:open-shortcuts`, `wooi:archive-workspace` …)을 그대로 따른다.
  */
 
+import { isPaneWindow } from './paneWindow'
+
 export const OPEN_REPO_SETTINGS_EVENT = 'wooi:open-repo-settings'
 
-/** 해당 리포의 설정 모달을 연다. App 의 리스너가 받아 모달을 띄운다. */
+/**
+ * 해당 리포의 설정 모달을 연다. App 의 리스너가 받아 모달을 띄운다.
+ *
+ * 분리한 패널 창([[paneWindow]])에는 그 모달이 없으므로 요청을 메인 창으로 넘긴다 — 보조
+ * 모니터에서 누른 버튼이 아무 반응도 없는 것처럼 보이지 않도록.
+ */
 export function openRepoSettings(repoId: string): void {
+  if (isPaneWindow) {
+    void window.api.pane.openRepoSettings(repoId)
+    return
+  }
   window.dispatchEvent(new CustomEvent(OPEN_REPO_SETTINGS_EVENT, { detail: repoId }))
 }

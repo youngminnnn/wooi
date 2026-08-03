@@ -15,6 +15,13 @@ const FLUSH_INTERVAL_MS = 16
 /** flush 사이에 모아 둘 스트림별 출력 상한(바이트 근사). 초과분은 앞에서 잘라 tail 만 남긴다. */
 const PENDING_LIMIT = 512 * 1024
 
+/**
+ * 이미 흘려보낸 출력을 다시 읽을 수 있게 보관하는 꼬리 버퍼의 상한.
+ * 출력은 이벤트로만 나가므로, 나중에 뜬 창(분리한 스크립트 패널)은 이 버퍼가 없으면
+ * 돌고 있는 dev 서버의 로그를 "No output yet." 로 보게 된다.
+ */
+const HISTORY_LIMIT = 256 * 1024
+
 interface Running {
   proc: ChildProcess
   exitCode: number | null
@@ -52,6 +59,8 @@ function killProcessGroup(proc: ChildProcess, signal: NodeJS.Signals = 'SIGTERM'
  */
 export class ScriptRunner {
   private running = new Map<string, Running>()
+  /** (workspaceId, kind) 별 누적 출력의 꼬리. 프로세스가 끝나도 다음 실행 전까지 남겨 둔다. */
+  private history = new Map<string, string>()
 
   /**
    * @param onExit 스크립트 프로세스가 종료될 때(정상/비정상 무관) 불린다. setup 결과를
@@ -85,6 +94,8 @@ export class ScriptRunner {
       ...(env ? { env: { ...process.env, ...env } } : {})
     })
     const key = this.key(workspaceId, kind)
+    // 새 실행은 새 로그다 — 이전 실행의 꼬리가 앞에 남아 있으면 어디부터가 이번 출력인지 알 수 없다.
+    this.history.delete(key)
     this.running.set(key, {
       proc,
       exitCode: null,
@@ -111,12 +122,9 @@ export class ScriptRunner {
       this.scheduleFlush(workspaceId, kind)
     })
     proc.on('error', (err) => {
-      this.dispatch(IPC.evtScriptOutput, {
-        workspaceId,
-        kind,
-        stream: 'stderr',
-        chunk: `\n[wooi] failed to start: ${err.message}\n`
-      })
+      const chunk = `\n[wooi] failed to start: ${err.message}\n`
+      this.remember(key, chunk)
+      this.dispatch(IPC.evtScriptOutput, { workspaceId, kind, stream: 'stderr', chunk })
     })
     proc.on('close', (code) => {
       // 종료 직전 남은 출력을 마저 비운 뒤 종료를 알린다(순서 보장).
@@ -127,9 +135,18 @@ export class ScriptRunner {
         entry.flushTimer = null
         entry.exitCode = code
       }
+      // 종료 줄은 렌더러가 evtScriptExit 를 받아 직접 붙인다. 나중에 뜬 창도 같은 화면을 보도록
+      // 꼬리 버퍼에는 여기서 같은 문구를 남겨 둔다.
+      this.remember(key, `\n[wooi] exited (code ${code ?? '?'})\n`)
       this.dispatch(IPC.evtScriptExit, { workspaceId, kind, code })
       this.onExit?.(workspaceId, kind, code)
     })
+  }
+
+  /** 내보낸 출력을 꼬리 버퍼에 누적한다(상한을 넘으면 앞을 잘라 최신 부분만 남긴다). */
+  private remember(key: string, chunk: string): void {
+    const next = (this.history.get(key) ?? '') + chunk
+    this.history.set(key, next.length > HISTORY_LIMIT ? next.slice(-HISTORY_LIMIT) : next)
   }
 
   /** 다음 flush 가 예약돼 있지 않으면 하나 예약한다(주기적으로 묶어 보냄). */
@@ -147,14 +164,17 @@ export class ScriptRunner {
       clearTimeout(entry.flushTimer)
       entry.flushTimer = null
     }
+    const key = this.key(workspaceId, kind)
     if (entry.pendingOut) {
       const chunk = entry.pendingOut
       entry.pendingOut = ''
+      this.remember(key, chunk)
       this.dispatch(IPC.evtScriptOutput, { workspaceId, kind, stream: 'stdout', chunk })
     }
     if (entry.pendingErr) {
       const chunk = entry.pendingErr
       entry.pendingErr = ''
+      this.remember(key, chunk)
       this.dispatch(IPC.evtScriptOutput, { workspaceId, kind, stream: 'stderr', chunk })
     }
   }
@@ -198,6 +218,11 @@ export class ScriptRunner {
     this.running.delete(this.key(workspaceId, kind))
   }
 
+  /** 지금까지의 누적 출력(꼬리). 나중에 뜬 창이 이전 로그를 채우는 데 쓴다. */
+  getOutput(workspaceId: string, kind: ScriptKind): string {
+    return this.history.get(this.key(workspaceId, kind)) ?? ''
+  }
+
   getStatus(workspaceId: string): ScriptStatus[] {
     const kinds: ScriptKind[] = ['setup', 'dev']
     return kinds.map((kind) => {
@@ -213,10 +238,14 @@ export class ScriptRunner {
   disposeWorkspace(workspaceId: string): void {
     this.stop(workspaceId, 'setup')
     this.stop(workspaceId, 'dev')
+    // 사라진 workspace 의 로그를 붙들고 있을 이유가 없다.
+    this.history.delete(this.key(workspaceId, 'setup'))
+    this.history.delete(this.key(workspaceId, 'dev'))
   }
 
   disposeAll(): void {
     for (const { proc } of this.running.values()) killProcessGroup(proc)
     this.running.clear()
+    this.history.clear()
   }
 }

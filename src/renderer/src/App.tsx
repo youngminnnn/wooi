@@ -41,6 +41,8 @@ export default function App(): React.JSX.Element {
   const rightWidth = useStore((s) => s.rightWidth)
   const setRightWidth = useStore((s) => s.setRightWidth)
   const rightPanelOpen = useStore((s) => s.rightPanelOpen)
+  // 작업 패널을 별도 창으로 떼어 뒀으면 여기서는 그리지 않는다 — 분리는 복제가 아니라 이동이다.
+  const workPaneDetached = useStore((s) => s.detachedPanes.work)
   const rightBase = useRef(rightWidth)
 
   // 사이드바 오른쪽의 메인 컨텐츠 영역 너비를 측정한다. 우측 작업 패널은 고정 px 라서
@@ -286,10 +288,12 @@ export default function App(): React.JSX.Element {
           toggleDevScript(selId)
           return
         }
-        // ⇧⌘S: 스크립트 패널 열기/닫기.
+        // ⇧⌘S: 스크립트 패널 열기/닫기. 별도 창으로 떼어 뒀다면 이미 열려 있는 셈이므로
+        // 그 창을 앞으로 가져온다(다른 모니터에 있는 창을 찾아 주는 편이 사용자가 원한 결과다).
         if (e.code === 'KeyS') {
           e.preventDefault()
-          st.setScriptPanelOpen(selId, !(st.scriptPanelOpen[selId] ?? false))
+          if (st.detachedPanes.scripts) void window.api.pane.focus('scripts')
+          else st.setScriptPanelOpen(selId, !(st.scriptPanelOpen[selId] ?? false))
           return
         }
         // ⇧⌘E: 에디터에서 열기.
@@ -444,7 +448,7 @@ export default function App(): React.JSX.Element {
               <div data-tour="chat" className="flex-1 min-w-0">
                 <ChatView key={selected.id} workspace={selected} />
               </div>
-              {rightPanelOpen && (
+              {rightPanelOpen && !workPaneDetached && (
                 <>
                   <Splitter
                     axis="x"

@@ -1,12 +1,13 @@
-import { app, shell, BrowserWindow, session } from 'electron'
-import { join } from 'node:path'
+import { app, BrowserWindow, session } from 'electron'
 import { IPC } from '@shared/types'
 import { applyDevPaths, isDevIsolated, wooiHome } from './paths'
 import { AgentOrchestrator } from './agent/orchestrator'
 import { setCodexStatusProvider } from './auth'
+import { PaneWindows } from './paneWindows'
 import { ScriptRunner } from './scripts'
 import { getStore } from './store'
 import { TerminalManager } from './terminal'
+import { applyNavigationGuards, loadRenderer, rendererWebPreferences } from './windows'
 import { registerIpc } from './ipc'
 import { log } from './logger'
 import { hydrateEnvFromLoginShell } from './env'
@@ -67,6 +68,8 @@ const scripts = new ScriptRunner(dispatch, (workspaceId, kind, code) => {
   dispatch(IPC.evtState, store.getState())
 })
 const terminals = new TerminalManager(dispatch)
+// 듀얼 모니터를 위해 작업 패널·스크립트 패널을 별도 창으로 떼어 낼 수 있게 한다([[paneWindows]]).
+const panes = new PaneWindows(dispatch)
 
 /**
  * 프로덕션에서만 엄격한 Content-Security-Policy 를 응답 헤더로 주입한다.
@@ -99,15 +102,13 @@ function createWindow(): void {
     backgroundColor: '#14161a',
     titleBarStyle: 'hiddenInset',
     trafficLightPosition: { x: 14, y: 16 },
-    webPreferences: {
-      preload: join(import.meta.dirname, '../preload/index.mjs'),
-      sandbox: false,
-      contextIsolation: true,
-      nodeIntegration: false
-    }
+    webPreferences: rendererWebPreferences()
   })
 
   mainWindow.on('ready-to-show', () => mainWindow?.show())
+
+  // 분리한 패널 창은 메인 창의 위성이다 — 주인이 닫히면 함께 정리한다.
+  mainWindow.on('closed', () => panes.closeAll())
 
   // 창이 포커스를 얻으면 renderer 가 보고 있는 workspace 의 미확인 표시를 해제하도록 알린다.
   // DOM 의 window 'focus' 는 Dock 클릭·앱 전환 시 누락될 수 있어, main 의 신뢰 가능한 이벤트로 보완한다.
@@ -127,29 +128,10 @@ function createWindow(): void {
     }
   })
 
-  // 외부 링크(window.open / target=_blank)는 기본 브라우저로.
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (/^https?:\/\//.test(url)) shell.openExternal(url)
-    return { action: 'deny' }
-  })
+  // 외부 링크 처리와 이탈 내비게이션 차단은 모든 창이 같다([[windows]]).
+  applyNavigationGuards(mainWindow)
 
-  // 앱 내 일반 링크(<a href> 클릭)가 창을 외부 URL 로 이동시키지 않게 가로채,
-  // 사용자의 기본 브라우저로 연다. 개발 서버 URL 로의 이동만 허용.
-  mainWindow.webContents.on('will-navigate', (event, url) => {
-    const devUrl = process.env['ELECTRON_RENDERER_URL']
-    if (devUrl && url.startsWith(devUrl)) return
-    // 개발 서버로의 이동을 뺀 나머지는 전부 막는다(기본 거부). http(s) 만 기본 브라우저로 넘긴다.
-    // 특히 입력창 밖으로 파일을 떨어뜨리면 브라우저 기본 동작이 file:// 로 이동해 앱 화면이
-    // 그 파일로 통째로 바뀌고 되돌아올 방법이 없다 — 스킴을 가리지 않고 차단해야 한다.
-    event.preventDefault()
-    if (/^https?:\/\//.test(url)) shell.openExternal(url)
-  })
-
-  if (process.env['ELECTRON_RENDERER_URL']) {
-    mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
-  } else {
-    mainWindow.loadFile(join(import.meta.dirname, '../renderer/index.html'))
-  }
+  loadRenderer(mainWindow)
 }
 
 app.whenReady().then(() => {
@@ -157,7 +139,7 @@ app.whenReady().then(() => {
   // 미설치로 보이거나 child 프로세스가 토큰/설정을 못 읽는 일이 없게 한다.
   hydrateEnvFromLoginShell()
   applyContentSecurityPolicy()
-  registerIpc({ sessions, scripts, terminals, getWindow: () => mainWindow })
+  registerIpc({ sessions, scripts, terminals, panes, getWindow: () => mainWindow })
   createWindow()
   sessions.prewarm()
   initUpdater(dispatch)
@@ -167,8 +149,10 @@ app.whenReady().then(() => {
   }
   log.info('main ready')
 
+  // Dock 클릭으로 되살릴 창은 **메인 창**이다. 창 개수만 보면 분리한 패널 창만 떠 있을 때
+  // 메인 창을 다시 만들지 못해 앱이 패널 하나에 갇힌다.
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    if (!mainWindow || mainWindow.isDestroyed()) createWindow()
   })
 })
 

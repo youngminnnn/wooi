@@ -88,6 +88,7 @@ import type {
   McpAction,
   McpServerInfo,
   MemoryScope,
+  PaneKind,
   PermissionDecision,
   PermissionMode,
   PrMergeMethod,
@@ -103,6 +104,7 @@ import type {
   Workspace
 } from '@shared/types'
 import type { AgentOrchestrator } from './agent/orchestrator'
+import type { PaneWindows } from './paneWindows'
 import type { ScriptRunner } from './scripts'
 import type { TerminalManager } from './terminal'
 
@@ -110,6 +112,7 @@ interface IpcContext {
   sessions: AgentOrchestrator
   scripts: ScriptRunner
   terminals: TerminalManager
+  panes: PaneWindows
   getWindow: () => BrowserWindow | null
 }
 
@@ -840,6 +843,41 @@ export function registerIpc(ctx: IpcContext): void {
 
   ipcMain.handle(IPC.scriptGetStatus, (_e, workspaceId: string) => {
     return ctx.scripts.getStatus(workspaceId)
+  })
+
+  ipcMain.handle(IPC.scriptGetOutput, (_e, workspaceId: string, kind: ScriptKind) => {
+    return ctx.scripts.getOutput(workspaceId, kind)
+  })
+
+  // ── 분리한 패널 창 ─────────────────────────────────────────────────────
+
+  ipcMain.handle(IPC.paneOpen, (_e, kind: PaneKind, workspaceId: string | null) => {
+    ctx.panes.open(kind, workspaceId)
+  })
+
+  ipcMain.handle(IPC.paneClose, (_e, kind: PaneKind) => {
+    ctx.panes.close(kind)
+  })
+
+  ipcMain.handle(IPC.paneFocus, (_e, kind: PaneKind) => {
+    ctx.panes.focus(kind)
+  })
+
+  ipcMain.handle(IPC.paneGetState, () => ctx.panes.state())
+
+  ipcMain.handle(IPC.paneSetWorkspace, (_e, workspaceId: string | null) => {
+    ctx.panes.setWorkspace(workspaceId)
+  })
+
+  // 분리한 창에는 리포 설정 모달이 없다(설정은 메인 창의 것이다). 요청을 메인 창으로 넘기고
+  // 그 창을 앞으로 가져와, 보조 모니터에서 누른 버튼이 아무 일도 안 일어난 것처럼 보이지 않게 한다.
+  ipcMain.handle(IPC.paneOpenRepoSettings, (_e, repoId: string) => {
+    const win = ctx.getWindow()
+    if (!win || win.isDestroyed()) return
+    if (win.isMinimized()) win.restore()
+    win.show()
+    win.focus()
+    win.webContents.send(IPC.evtOpenRepoSettings, repoId)
   })
 
   // ── git ────────────────────────────────────────────────────────────────
