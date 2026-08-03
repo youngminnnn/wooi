@@ -89,12 +89,15 @@ class Store {
           : r
       )
 
-      // 미래 버전 파일(다운그레이드 상황)은 버전을 깎지 않고 보존해, 신버전으로 되돌렸을 때
-      // 마이그레이션이 재실행되거나 데이터가 손상되지 않게 한다. 알려진 필드만 읽는다.
+      // 마이그레이션한 결과는 **현재 버전으로 기록한다**. 읽은 버전을 그대로 남기면 다음 부팅에
+      // 같은 마이그레이션이 이미 변환된 데이터 위에서 다시 돌아, 옛 필드를 찾지 못하고 기본값으로
+      // 덮어쓴다(예: v12→v13 이 agents.claude.permissionMode 를 매번 acceptEdits 로 되돌림).
+      // 다만 미래 버전 파일(다운그레이드 상황)은 버전을 깎지 않고 보존해, 신버전으로 되돌렸을 때
+      // 데이터가 손상되지 않게 한다 — 그래서 max 다. 알려진 필드만 읽는다.
       // 마이그레이션 후에도 누락 필드가 없도록 settings 는 기본값과 최종 병합한다.
       const saved = (migrated.settings as Partial<AppSettings>) ?? {}
       return {
-        schemaVersion: version,
+        schemaVersion: Math.max(version, CURRENT_SCHEMA_VERSION),
         repos: (migrated.repos as Repo[]) ?? [],
         workspaces,
         reviews,
