@@ -1147,11 +1147,11 @@ function ArchivedRow({ workspace }: { workspace: Workspace }): React.JSX.Element
 const PR_DOT: Record<PrState, { dotClass: string; label: string }> = {
   draft: { dotClass: 'bg-neutral-400', label: 'Draft' },
   review_required: { dotClass: 'bg-[var(--warning-400)]', label: 'Review required' },
-  changes_requested: { dotClass: 'bg-orange-400', label: 'Changes requested' },
+  changes_requested: { dotClass: 'bg-[var(--attention-400)]', label: 'Changes requested' },
   approved: { dotClass: 'bg-[var(--success-400)]', label: 'Ready to merge' },
   conflict: { dotClass: 'bg-[var(--danger-400)]', label: 'Conflict' },
   open: { dotClass: 'bg-[var(--accent-400)]', label: 'Open' },
-  merged: { dotClass: 'bg-purple-400', label: 'Merged' },
+  merged: { dotClass: 'bg-[var(--merged-400)]', label: 'Merged' },
   closed: { dotClass: 'bg-neutral-500', label: 'Closed' }
 }
 
@@ -1182,7 +1182,7 @@ export function StatusDot({
   if (status === 'running') {
     // 압축 중(보라) · 오래 실행(앰버, 멈춤일 수 있음) · 일반 실행(파랑) 을 색으로 구분한다.
     const color = compacting
-      ? 'text-purple-400'
+      ? 'text-[var(--merged-400)]'
       : stale
         ? 'text-[var(--warning-400)]'
         : 'text-[var(--info-400)]'

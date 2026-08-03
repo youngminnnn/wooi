@@ -21,9 +21,10 @@
   시맨틱 상태 색 — 하드코딩된 Tailwind 색(red/amber/emerald/blue/violet/sky)을 의미 기반
   토큰으로 모은다. 값은 Tailwind v4 기본 팔레트와 동일(oklch)해 외관 변화는 없다.
   컴포넌트는 text-[var(--danger-fg)] / bg-[var(--warning-500)]/10 처럼 쓰고, 알파(/10)는
-  Tailwind 가 color-mix 로 처리한다. 라이트/다크 공통(기존 코드도 두 테마에서 동일 색을 썼다).
+  Tailwind 가 color-mix 로 처리한다. 값은 다크 기준이고, 200/300/400 은 라이트 모드에서
+  같은 계열의 어두운 쪽으로 뒤집는다(아래 html[data-theme='light'] 블록).
   ─ danger=red · warning=amber · success=emerald · info=blue · accent=violet · brand=sky
-  PR 상태 배지·MCP 상태 점 같은 '범주형' 팔레트(orange/purple/cyan 포함)는 의도적으로 원형 유지.
+  ─ 범주형(PR 상태 전용): attention=orange(changes requested) · merged=purple
 */
 :root {
   /* danger (red) */
@@ -73,6 +74,19 @@
   --brand-500: oklch(68.5% 0.169 237.323);
   --brand-600: oklch(58.8% 0.158 241.966);
   --brand-fg: var(--brand-400);
+
+  /* attention (orange) — PR "Changes requested" */
+  --attention-200: oklch(90.1% 0.076 70.697);
+  --attention-400: oklch(75% 0.183 55.934);
+  --attention-500: oklch(70.5% 0.213 47.604);
+
+  /* merged (purple) — PR "Merged" */
+  --merged-200: oklch(90.2% 0.063 306.703);
+  --merged-400: oklch(71.4% 0.203 305.504);
+  --merged-500: oklch(62.7% 0.265 303.9);
+
+  /* readonly (cyan) — plan·readOnly 권한 모드처럼 '멈춤' 계열 강조 */
+  --readonly-400: oklch(78.9% 0.154 211.53);
 }
 
 /*
@@ -153,6 +167,49 @@
 html[data-theme='light'] {
   color-scheme: light;
 
+  /*
+    시맨틱 상태 색 반전 — 200/300/400 은 "어두운 면 위의 밝은 글자"를 전제로 한 값이라
+    흰 면 위에서는 대비가 무너진다. 예를 들어 PR 헤더 배지의 "Review required" 는
+    text-[var(--warning-200)] 를 bg-[var(--warning-500)]/10 위에 얹는데, 라이트에서
+    이 조합은 1.15:1 로 사실상 글자가 보이지 않는다.
+    그래서 neutral 스케일과 같은 방식으로 이 세 단계만 같은 계열의 어두운 쪽으로
+    바꾼다 — 200→800(틴트 위 본문, 6.6~8.1:1) · 300→700(밝은 면 위 본문, 5.0~7.3:1) ·
+    400→600(아이콘·상태 점, 2.9~5.4:1). 컴포넌트 className 은 그대로 두고 색만 뒤집는다.
+    500/600 은 손대지 않는다 — 틴트(/10)와 솔리드 버튼 배경(bg-…-500/90 + text-black)의
+    기준값이라 어둡게 만들면 오히려 버튼이 깨진다.
+  */
+  --danger-200: oklch(44.4% 0.177 26.899); /* red-800 */
+  --danger-300: oklch(50.5% 0.213 27.518); /* red-700 */
+  --danger-400: oklch(57.7% 0.245 27.325); /* red-600 */
+
+  --warning-200: oklch(47.3% 0.137 46.201); /* amber-800 */
+  --warning-300: oklch(55.5% 0.163 48.998); /* amber-700 */
+  --warning-400: oklch(66.6% 0.179 58.318); /* amber-600 */
+
+  --success-200: oklch(43.2% 0.095 166.913); /* emerald-800 */
+  --success-300: oklch(50.8% 0.118 165.612); /* emerald-700 */
+  --success-400: oklch(59.6% 0.145 163.225); /* emerald-600 */
+
+  --info-200: oklch(42.4% 0.199 265.638); /* blue-800 */
+  --info-300: oklch(48.8% 0.243 264.376); /* blue-700 */
+  --info-400: oklch(54.6% 0.245 262.881); /* blue-600 */
+
+  --accent-200: oklch(43.2% 0.232 292.759); /* violet-800 */
+  --accent-300: oklch(49.1% 0.27 292.581); /* violet-700 */
+  --accent-400: oklch(54.1% 0.281 293.009); /* violet-600 */
+
+  --brand-200: oklch(44.3% 0.11 240.79); /* sky-800 */
+  --brand-300: oklch(50% 0.134 242.749); /* sky-700 */
+  --brand-400: oklch(58.8% 0.158 241.966); /* sky-600 */
+
+  --attention-200: oklch(47% 0.157 37.304); /* orange-800 */
+  --attention-400: oklch(64.6% 0.222 41.116); /* orange-600 */
+
+  --merged-200: oklch(43.8% 0.218 303.724); /* purple-800 */
+  --merged-400: oklch(55.8% 0.288 302.321); /* purple-600 */
+
+  --readonly-400: oklch(52% 0.105 223.128); /* cyan-700 */
+
   --bg: #f4f4f5;
   --bg-2: #ffffff;
   --bg-3: #ebebee;
@@ -198,24 +255,29 @@ html[data-theme='light'] {
   --hl-del-fg: #b31d28;
   --hl-del-bg: #ffeef0;
 
-  --diff-add: var(--success-600);
-  --diff-del: var(--danger-600);
+  /*
+    diff 색은 :root 의 --success-300/--danger-300 을 그대로 쓴다 — 위 반전으로 라이트에서
+    이미 700 단계가 되어 흰 코드 면에서 5.5:1 / 6.5:1 이 나온다. 예전엔 여기서 600 으로
+    덮었는데 추가(emerald-600)가 3.8:1 로 AA 에 못 미쳤다.
+  */
   --diff-hunk: #0e7490;
   --diff-context: #52525b;
-  --diff-meta: #8e8e97;
+  --diff-meta: #71717a;
 
   /*
     이 앱은 다크 우선으로 작성되어 텍스트가 neutral 스케일(밝을수록 작은 숫자)을 쓴다.
     Tailwind v4 의 유틸리티는 var(--color-neutral-*) 를 참조하므로, 라이트 모드에서 이
     스케일을 반전시키면 text-neutral-100(다크의 가장 밝은 글자)이 자동으로 가장 어두운
     글자가 된다 — 수백 곳의 className 을 건드리지 않고 색을 뒤집는다.
+    600 은 흰 면에서 대비가 특히 빨리 무너지는 구간이라(예전 #9a9aa2 = 2.8:1, 비활성처럼
+    읽힌다) 다른 단계보다 한 톤 더 어둡게 잡는다.
   */
   --color-neutral-100: #18181b;
   --color-neutral-200: #27272a;
   --color-neutral-300: #3f3f46;
   --color-neutral-400: #52525b;
   --color-neutral-500: #71717a;
-  --color-neutral-600: #9a9aa2;
+  --color-neutral-600: #82828b;
   --color-neutral-700: #c4c4ca;
   --color-neutral-800: #d4d4d8;
   --color-neutral-900: #e4e4e7;
