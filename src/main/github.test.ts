@@ -44,6 +44,7 @@ const {
   setGithubConnected,
   getPrStatus,
   listOpenPrs,
+  findOpenPrStatus,
   invalidateOpenPrs,
   getPrChecks,
   createPrWeb,
@@ -182,11 +183,9 @@ describe('열린 PR 목록 캐시', () => {
     await listOpenPrs('/tmp/a', 'repo-1')
     await closePr('/tmp/a')
     await listOpenPrs('/tmp/a', 'repo-1')
-    expect(ghCalls()).toEqual([
-      'gh pr list --state open --json number,headRefName,baseRefName --limit 200',
-      'gh pr close',
-      'gh pr list --state open --json number,headRefName,baseRefName --limit 200'
-    ])
+    const list = ghCalls().filter((c) => c.startsWith('gh pr list'))
+    expect(list).toHaveLength(2)
+    expect(ghCalls()[1]).toBe('gh pr close')
   })
 
   it('조회 도중 무효화되면 그 응답을 캐시에 남기지 않는다', async () => {
@@ -205,6 +204,62 @@ describe('열린 PR 목록 캐시', () => {
     await listOpenPrs('/tmp/a')
     await listOpenPrs('/tmp/a')
     expect(ghCalls()).toHaveLength(2)
+  })
+})
+
+/**
+ * 사이드바 PR 칩은 예전에 워크스페이스마다 `gh pr view` 를 띄워 채웠다 — 워크스페이스가 10개를
+ * 넘어가면 앱을 켤 때마다 그만큼의 로그인 셸이 동시에 떴다. 열린 PR 이라면 리포 목록에 이미 다
+ * 들어 있으므로, 그 목록 하나로 전부 답해야 한다.
+ */
+describe('브랜치별 PR 상태를 리포 목록에서 찾기', () => {
+  const rows = JSON.stringify([
+    {
+      number: 7,
+      url: 'https://gh/pr/7',
+      title: '제목',
+      state: 'OPEN',
+      isDraft: false,
+      reviewDecision: 'APPROVED',
+      mergeable: 'MERGEABLE',
+      mergeStateStatus: 'CLEAN',
+      headRefName: 'feat/a',
+      baseRefName: 'main'
+    }
+  ])
+
+  beforeEach(() => {
+    setGithubConnected(true)
+    invalidateOpenPrs()
+    reply = () => ({ code: 0, stdout: rows })
+  })
+
+  it('워크스페이스가 여럿이어도 gh 는 리포당 한 번만 실행된다', async () => {
+    const results = await Promise.all([
+      findOpenPrStatus('/tmp/a', 'repo-1', 'feat/a'),
+      findOpenPrStatus('/tmp/b', 'repo-1', 'feat/a'),
+      findOpenPrStatus('/tmp/c', 'repo-1', 'feat/a')
+    ])
+    expect(results[0]).toEqual({
+      number: 7,
+      url: 'https://gh/pr/7',
+      title: '제목',
+      state: 'approved',
+      label: 'Ready to merge'
+    })
+    expect(results[1]).toEqual(results[0])
+    expect(results[2]).toEqual(results[0])
+    expect(ghCalls()).toHaveLength(1)
+  })
+
+  it('스택 감지와 상태 칩이 같은 조회를 나눠 쓴다', async () => {
+    await listOpenPrs('/tmp/a', 'repo-1')
+    await findOpenPrStatus('/tmp/a', 'repo-1', 'feat/a')
+    expect(ghCalls()).toHaveLength(1)
+  })
+
+  it('열린 PR 이 아닌 브랜치는 null 을 돌려준다(호출부가 개별 조회로 메운다)', async () => {
+    await expect(findOpenPrStatus('/tmp/a', 'repo-1', 'feat/없음')).resolves.toBeNull()
   })
 })
 

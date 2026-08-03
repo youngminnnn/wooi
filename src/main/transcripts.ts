@@ -45,6 +45,11 @@ class TranscriptStore {
   private dir: string
   /** 삽입 순서 = LRU 순서(맨 앞=가장 오래 전 사용, 맨 뒤=최근 사용). */
   private cache = new Map<string, ChatItem[]>()
+  /**
+   * workspace 별 비용 집계(result 항목 id → USD). 트랜스크립트 캐시와 달리 항목 원문이 아니라
+   * 숫자만 들고 있어 작으므로, LRU 로 버리지 않고 유지한다 — 버리면 다시 파일을 읽어야 한다.
+   */
+  private costs = new Map<string, Map<string, number>>()
 
   constructor() {
     this.dir = join(app.getPath('userData'), 'transcripts')
@@ -71,6 +76,26 @@ class TranscriptStore {
     return items
   }
 
+  /**
+   * 이 workspace 에서 backend 가 보고한 누적 비용(USD).
+   *
+   * 예전에는 렌더러가 트랜스크립트를 통째로 들고 와 매 토큰마다 다시 합산했다 — 워크스페이스가
+   * 여럿이면 대화 전체를 초당 수십 번 훑는 셈이라, 화면에 숫자 하나 띄우자고 렌더러가 수백 MB 를
+   * 붙들고 있었다. 비용은 턴이 끝날 때만 바뀌므로 여기서 한 번 세어 두고 증분으로 갱신한다.
+   */
+  costOf(workspaceId: string): number {
+    const known = this.costs.get(workspaceId)
+    if (known) return sum(known)
+
+    // 처음 묻는다 — 기록을 한 번 읽어 result 항목의 비용만 추려 둔다.
+    const byId = new Map<string, number>()
+    for (const item of this.load(workspaceId)) {
+      if (item.type === 'result') byId.set(item.id, item.costUsd ?? 0)
+    }
+    this.costs.set(workspaceId, byId)
+    return sum(byId)
+  }
+
   /** id 가 이미 있으면 갱신, 없으면 추가. 파일에는 append, 캐시에는 last-wins 로 반영한다. */
   upsert(workspaceId: string, item: ChatItem): void {
     // 캐시에 없으면 먼저 디스크 상태를 적재한다 — 레거시 .json 마이그레이션이 선행되어,
@@ -78,6 +103,10 @@ class TranscriptStore {
     if (!this.cache.has(workspaceId)) this.load(workspaceId)
 
     appendFileDurable(this.fileFor(workspaceId), serializeItem(item))
+
+    // 비용 집계는 증분으로 따라간다(같은 id 가 다시 오면 last-wins — 덮어쓰면 그만이다).
+    // 아직 한 번도 세어 본 적 없으면 그냥 둔다 — 처음 물어볼 때 파일에서 한 번에 만든다.
+    if (item.type === 'result') this.costs.get(workspaceId)?.set(item.id, item.costUsd ?? 0)
 
     const cached = this.cache.get(workspaceId)
     if (cached) {
@@ -90,6 +119,7 @@ class TranscriptStore {
 
   remove(workspaceId: string): void {
     this.cache.delete(workspaceId)
+    this.costs.delete(workspaceId)
     rmSync(this.fileFor(workspaceId), { force: true })
     rmSync(this.legacyFileFor(workspaceId), { force: true })
   }
@@ -132,6 +162,13 @@ class TranscriptStore {
       this.cache.delete(oldest)
     }
   }
+}
+
+/** 집계된 비용의 합. result 항목은 턴당 하나뿐이라 매번 더해도 값싸다. */
+function sum(byId: Map<string, number>): number {
+  let total = 0
+  for (const v of byId.values()) total += v
+  return total
 }
 
 let instance: TranscriptStore | null = null

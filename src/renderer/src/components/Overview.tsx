@@ -14,13 +14,7 @@ import { refreshAccountUsage, useStore } from '../store'
 import { useNow } from '../lib/useNow'
 import { formatCost, formatCountdown, formatDuration, formatTime } from '../lib/format'
 import { workspaceDisplayName } from '@shared/types'
-import type {
-  AgentBackendId,
-  ChatItem,
-  RateLimitSnapshot,
-  UsageInfo,
-  Workspace
-} from '@shared/types'
+import type { AgentBackendId, RateLimitSnapshot, UsageInfo, Workspace } from '@shared/types'
 import { ClaudeMark, CodexMark } from './BrandIcons'
 
 /** 요금제 사용률 재조회 주기. 5시간 창이 눈에 띄게 움직이는 단위가 분이라 1분이면 충분하다. */
@@ -35,17 +29,6 @@ type PlanWindow = {
   usedPct: number | null
   /** 리셋 시각(epoch ms). 알 수 없으면 null. */
   resetsAt: number | null
-}
-
-/** 트랜스크립트에서 backend가 실제로 제공한 누적 비용(USD)만 합산한다. */
-function sessionCost(items: ChatItem[]): number {
-  let cost = 0
-  for (const it of items) {
-    if (it.type === 'result') {
-      cost += it.costUsd ?? 0
-    }
-  }
-  return cost
 }
 
 type FilterKey = 'all' | 'running' | 'attention' | 'unread' | 'idle'
@@ -66,18 +49,6 @@ export default function Overview(): React.JSX.Element {
 
   const active = useMemo(() => app.workspaces.filter((w) => !w.archived), [app.workspaces])
   const anyRunning = active.some((w) => w.status === 'running')
-
-  // workspace 카드의 Claude 비용을 위해 트랜스크립트를 불러온다. Codex는 원가를 제공하지 않는다.
-  const transcripts = useStore((s) => s.transcripts)
-  const ensureHistory = useStore((s) => s.ensureHistory)
-  useEffect(() => {
-    for (const w of active) void ensureHistory(w.id)
-  }, [active, ensureHistory])
-  const costByWorkspace = useMemo(() => {
-    const map: Record<string, number> = {}
-    for (const w of active) map[w.id] = sessionCost(transcripts[w.id] ?? [])
-    return map
-  }, [active, transcripts])
 
   const auth = useStore((s) => s.authStatus)
   const connectedAgents = (['claude', 'codex'] as const).filter((id) => {
@@ -136,6 +107,21 @@ export default function Overview(): React.JSX.Element {
   const now = useNow(anyRunning ? 1000 : 30_000, anyRunning || connectedAgents.length > 0)
   const claudeSnapshot = app.rateLimitsByAgent ? app.rateLimitsByAgent.claude : app.rateLimits
   const showCardCost = claudeSnapshot?.available === false
+
+  // 카드별 비용. 메인이 집계해 숫자만 넘겨준다 — 대화 기록을 렌더러로 끌어오지 않는다.
+  // 요금제 사용자에게는 이 값이 화면에 나오지 않으므로(showCardCost) 아예 묻지도 않는다.
+  // 비용은 턴이 끝날 때만 바뀌니, 사용량 갱신과 같은 박자로 다시 읽으면 충분하다.
+  const [costByWorkspace, setCostByWorkspace] = useState<Record<string, number>>({})
+  useEffect(() => {
+    if (!showCardCost) return
+    let cancelled = false
+    void window.api.chat.getCosts().then((costs) => {
+      if (!cancelled) setCostByWorkspace(costs)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [showCardCost, usageNonce])
 
   const pendingIds = new Set(permissions.map((p) => p.workspaceId))
 

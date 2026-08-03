@@ -82,6 +82,15 @@ export function setGithubConnected(connected: boolean): void {
 }
 
 /**
+ * 지금까지 확인된 gh 연결 여부(확인 전이면 false). 조회 결과가 "정말 없음"인지 "물어보지도
+ * 못했음"인지 구분해야 하는 캐시 계층용이다 — 미연결 상태의 빈 결과를 캐시하면, 연결한 뒤에도
+ * 한동안 PR 이 없는 것처럼 보인다.
+ */
+export function isGithubConnected(): boolean {
+  return ghConnected === true
+}
+
+/**
  * gh 가 설치·로그인돼 있는지 직접 확인한다(캐시 갱신 포함).
  * 앱 기동 직후에는 모든 워크스페이스의 PR 조회가 한꺼번에 몰리므로, 진행 중인 확인이 있으면
  * 그 결과를 함께 기다려 로그인 셸을 워크스페이스 수만큼 띄우지 않는다.
@@ -282,11 +291,23 @@ export interface OpenPr {
 // 전체 훑기 한 번에 중복 로그인 셸이 워크스페이스 수만큼 뜬다 — 폴링 주기를 줄이려면 여기부터
 // 걷어내야 한다. 그래서 리포 단위로 짧게 캐시하고, 진행 중인 요청에는 뒤따르는 호출을 붙인다
 // (probeGithub 와 같은 방식). TTL 은 훑기 한 번을 덮되 사람이 낡음을 느끼지 못할 만큼만 잡는다.
+//
+// 이 목록은 **사이드바 PR 칩의 공급원이기도 하다.** 예전에는 워크스페이스마다 `gh pr view` 를
+// 따로 돌렸는데(측정: 1건당 ~0.6초), 열린 PR 이라면 어차피 여기 다 들어 있다. 그래서 상태 판정에
+// 필요한 필드까지 한 번에 받아 두고, 워크스페이스별 조회는 이 목록에서 브랜치로 찾아 답한다 —
+// 워크스페이스가 몇 개든 리포당 1회다. (`--state all` 은 리포 히스토리 전체를 페이지네이션해
+// 오히려 느리다 — 측정: 100건에 6.5초. 병합·닫힘 PR 은 여기 없고, 호출부가 개별로 메운다.)
 const OPEN_PRS_TTL_MS = 10_000
-const openPrsCache = new Map<string, { at: number; prs: OpenPr[] }>()
-const openPrsInFlight = new Map<string, { epoch: number; promise: Promise<OpenPr[]> }>()
+const openPrsCache = new Map<string, { at: number; prs: OpenPrRow[] }>()
+const openPrsInFlight = new Map<string, { epoch: number; promise: Promise<OpenPrRow[]> }>()
 /** 무효화 세대. 무효화 시점에 이미 날아간 요청의 낡은 응답이 캐시에 눌러앉지 않게 한다. */
 let openPrsEpoch = 0
+
+/** 캐시에 담기는 열린 PR 1건 — 스택 감지용 필드와 상태 칩용 필드를 모두 담는다. */
+interface OpenPrRow extends GhPr {
+  headRefName: string
+  baseRefName: string
+}
 
 /** PR 을 바꾸는 액션 뒤에는 캐시가 낡는다 — 즉시 버려 다음 조회가 실제 상태를 받게 한다. */
 export function invalidateOpenPrs(): void {
@@ -294,22 +315,39 @@ export function invalidateOpenPrs(): void {
   openPrsEpoch++
 }
 
-async function fetchOpenPrs(worktreePath: string): Promise<OpenPr[]> {
+async function fetchOpenPrs(worktreePath: string): Promise<OpenPrRow[]> {
   const { stdout, code } = await runLoginShell(
-    `gh pr list --state open --json number,headRefName,baseRefName --limit 200`,
+    `gh pr list --state open --limit 200 --json number,url,title,state,isDraft,reviewDecision,mergeable,mergeStateStatus,headRefName,baseRefName`,
     worktreePath
   )
   if (code !== 0) return []
   try {
-    const arr = JSON.parse(stdout.trim()) as Array<{
-      number: number
-      headRefName: string
-      baseRefName: string
-    }>
-    return arr.map((p) => ({ number: p.number, head: p.headRefName, base: p.baseRefName }))
+    const arr = JSON.parse(stdout.trim()) as OpenPrRow[]
+    return arr.filter((p) => !!p.headRefName)
   } catch {
     return []
   }
+}
+
+/** 캐시된 행을 사이드바·헤더가 쓰는 PrStatus 로 옮긴다. */
+function statusFromRow(pr: GhPr): PrStatus {
+  const state = stateFor(pr)
+  return { number: pr.number, url: pr.url, title: pr.title ?? '', state, label: PR_LABELS[state] }
+}
+
+/**
+ * 리포의 열린 PR 목록에서 해당 브랜치의 PR 상태를 찾는다. 목록은 리포 단위로 캐시·합류되므로
+ * 워크스페이스가 몇 개든 실제 조회는 리포당 1회다. 열린 PR 이 아니면(없거나 병합·닫힘) null.
+ */
+export async function findOpenPrStatus(
+  worktreePath: string,
+  cacheKey: string,
+  branch: string
+): Promise<PrStatus | null> {
+  if (!branch) return null
+  const rows = await listOpenPrRows(worktreePath, cacheKey)
+  const row = rows.find((p) => p.headRefName === branch)
+  return row ? statusFromRow(row) : null
 }
 
 /**
@@ -318,8 +356,17 @@ async function fetchOpenPrs(worktreePath: string): Promise<OpenPr[]> {
  * 부르는 경우가 이에 해당한다. 생략하면 캐시 없이 매번 새로 조회한다.
  */
 export async function listOpenPrs(worktreePath: string, cacheKey?: string): Promise<OpenPr[]> {
+  const rows = cacheKey
+    ? await listOpenPrRows(worktreePath, cacheKey)
+    : (await connected())
+      ? await fetchOpenPrs(worktreePath)
+      : []
+  return rows.map((p) => ({ number: p.number, head: p.headRefName, base: p.baseRefName }))
+}
+
+/** 캐시·합류를 거쳐 리포의 열린 PR 원본 행을 돌려준다(listOpenPrs 와 findOpenPrStatus 의 공용 경로). */
+async function listOpenPrRows(worktreePath: string, cacheKey: string): Promise<OpenPrRow[]> {
   if (!(await connected())) return []
-  if (cacheKey === undefined) return fetchOpenPrs(worktreePath)
 
   const hit = openPrsCache.get(cacheKey)
   if (hit && Date.now() - hit.at < OPEN_PRS_TTL_MS) return hit.prs

@@ -35,6 +35,7 @@ import {
   validateCarryPath
 } from './carry'
 import { generateWorkspaceName } from './names'
+import { getWorkspacePrStatus, invalidateWorkspacePr } from './prCache'
 import { buildStackFromPrs, detectBaseMismatch } from './stack'
 import { findFreePort, waitForPortFree } from './net'
 import {
@@ -585,6 +586,8 @@ export function registerIpc(ctx: IpcContext): void {
       if (pr?.title?.trim()) snapshotName = pr.title.trim()
     }
     if (repo) await removeWorktree(repo.path, ws.worktreePath, ws.branch, false)
+    // worktree 가 사라졌으니 캐시된 PR 상태도 물어볼 근거가 없다(언아카이브하면 다시 조회된다).
+    invalidateWorkspacePr(workspaceId)
 
     store.update((st) => {
       const w = st.workspaces.find((x) => x.id === workspaceId)
@@ -654,6 +657,7 @@ export function registerIpc(ctx: IpcContext): void {
     ctx.scripts.disposeWorkspace(workspaceId)
     ctx.terminals.disposeWorkspace(workspaceId)
     getTranscripts().remove(workspaceId)
+    invalidateWorkspacePr(workspaceId)
     if (repo) await removeWorktree(repo.path, ws.worktreePath, ws.branch, deleteBranch)
 
     store.update((st) => {
@@ -817,6 +821,18 @@ export function registerIpc(ctx: IpcContext): void {
     ctx.sessions.clearSession(workspaceId)
     getTranscripts().remove(workspaceId)
     broadcastState()
+  })
+
+  // 활성 워크스페이스의 누적 비용만 모아 돌려준다. 대화 기록을 렌더러로 옮기지 않기 위한
+  // 통로다 — 화면에 필요한 건 숫자 하나인데, 예전에는 그것 때문에 전체 트랜스크립트가
+  // 렌더러 힙에 올라간 채 매 토큰마다 다시 합산됐다.
+  ipcMain.handle(IPC.chatGetCosts, (): Record<string, number> => {
+    const costs: Record<string, number> = {}
+    for (const w of store.getState().workspaces) {
+      if (w.archived) continue
+      costs[w.id] = getTranscripts().costOf(w.id)
+    }
+    return costs
   })
 
   ipcMain.handle(IPC.chatGetHistory, (_e, workspaceId: string) => {
@@ -1276,10 +1292,12 @@ export function registerIpc(ctx: IpcContext): void {
     const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
     if (!ws || ws.archived) return null
     // 실제 git/PR 상태에서 현재 브랜치·스택을 먼저 재동기화한다(에이전트가 직접 만든 스택도 인식).
+    // 이 과정에서 리포의 열린 PR 목록을 이미 받아 두므로, 아래 상태 조회는 대개 그 목록에서
+    // 답이 나온다 — 워크스페이스마다 gh 를 따로 띄우지 않는다.
     await reconcileWorkspaceStack(workspaceId).catch(() => {})
-    // worktree 의 현재 브랜치에 연결된 PR (gh 가 현재 브랜치로 자동 조회).
+    // worktree 의 현재 브랜치에 연결된 PR. reconcile 이 w.branch 를 실제 HEAD 로 맞춰 둔다.
     const after = store.getState().workspaces.find((w) => w.id === workspaceId) ?? ws
-    const status = await getPrStatus(after.worktreePath).catch(() => null)
+    const status = await getWorkspacePrStatus(after, after.branch)
     if (status) persistPrNumber(workspaceId, after.branch, status.number)
     return status
   })

@@ -1522,6 +1522,8 @@ export const IPC = {
   chatSend: 'chat:send',
   chatInterrupt: 'chat:interrupt',
   chatGetHistory: 'chat:getHistory',
+  /** 워크스페이스별 누적 비용(USD). 대화 전체를 렌더러로 옮기지 않고 숫자만 받는다. */
+  chatGetCosts: 'chat:getCosts',
   /** /btw 사이드 질문 — 메인 대화를 건드리지 않는 임시 질의를 띄운다. */
   chatSideQuestion: 'chat:sideQuestion',
   /** /clear — 트랜스크립트를 비우고 세션을 새로 시작한다(워크스페이스는 유지). */

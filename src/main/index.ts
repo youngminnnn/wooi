@@ -5,7 +5,9 @@ import { AgentOrchestrator } from './agent/orchestrator'
 import { setCodexStatusProvider } from './auth'
 import { PaneWindows } from './paneWindows'
 import { ScriptRunner } from './scripts'
-import { getStore } from './store'
+import { flushStore, getStore } from './store'
+import { flushPendingSyncs } from './fsutil'
+import { initHealthLogging } from './health'
 import { TerminalManager } from './terminal'
 import { applyNavigationGuards, loadRenderer, rendererWebPreferences } from './windows'
 import { registerIpc } from './ipc'
@@ -113,7 +115,23 @@ function createWindow(): void {
   // 창이 포커스를 얻으면 renderer 가 보고 있는 workspace 의 미확인 표시를 해제하도록 알린다.
   // DOM 의 window 'focus' 는 Dock 클릭·앱 전환 시 누락될 수 있어, main 의 신뢰 가능한 이벤트로 보완한다.
   mainWindow.on('focus', () => mainWindow?.webContents.send(IPC.evtWindowFocus))
-  mainWindow.on('blur', () => mainWindow?.webContents.send(IPC.evtWindowBlur))
+  mainWindow.on('blur', () => {
+    mainWindow?.webContents.send(IPC.evtWindowBlur)
+    // 앱을 떠나는 순간은 밀린 쓰기를 내리기 좋은 지점이다 — 사용자가 보고 있지 않으니 몇 ms 의
+    // 블로킹이 드러나지 않고, 그대로 잠들거나 강제 종료돼도 상태가 남는다.
+    //
+    // 단, 분리된 패널 창([[paneWindows]])으로 초점이 옮겨 간 것뿐일 수도 있다. 그때는 사용자가
+    // 여전히 앱을 쓰는 중이라 동기 쓰기가 그대로 체감된다 — 초점이 앱 밖으로 나갔을 때만 내린다.
+    // 초점 이동은 blur 다음에 반영되므로 한 틱 뒤에 확인한다.
+    setImmediate(() => {
+      const stillInApp = BrowserWindow.getAllWindows().some(
+        (w) => !w.isDestroyed() && w.isFocused()
+      )
+      if (stillInApp) return
+      flushStore()
+      flushPendingSyncs()
+    })
+  })
 
   mainWindow.webContents.on('did-fail-load', (_e, code, desc) => {
     log.error(`renderer load failed: ${code} ${desc}`)
@@ -144,6 +162,7 @@ app.whenReady().then(() => {
   sessions.prewarm()
   initUpdater(dispatch)
   initNotice(dispatch)
+  initHealthLogging(() => sessions.liveSessionCount())
   if (isDevIsolated()) {
     log.info(`dev 격리: userData=${app.getPath('userData')} worktreeRoot=${wooiHome()}`)
   }
@@ -164,4 +183,8 @@ app.on('before-quit', () => {
   sessions.disposeAll()
   scripts.disposeAll()
   terminals.disposeAll()
+  // 상태 쓰기와 트랜스크립트 fsync 는 성능을 위해 모아서 처리된다 — 프로세스가 사라지기 전에
+  // 밀린 것을 마저 내려야 마지막 변경이 유실되지 않는다.
+  flushStore()
+  flushPendingSyncs()
 })
