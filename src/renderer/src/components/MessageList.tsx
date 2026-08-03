@@ -23,6 +23,7 @@ import {
   ListTodo
 } from 'lucide-react'
 import { useStore } from '../store'
+import { DiffLine } from './DiffView'
 import { formatTime } from '../lib/format'
 import { buildTaskCards, taskLabel, type TaskEntry } from '../lib/tasks'
 import type { ChatItem } from '@shared/types'
@@ -326,6 +327,7 @@ function Item({
         <ToolUse
           name={item.name}
           input={item.input}
+          diff={item.diff}
           pending={running && !resolved.has(item.toolId)}
         />
       )
@@ -618,14 +620,17 @@ function Thinking({ text }: { text: string }): React.JSX.Element {
 function ToolUse({
   name,
   input,
+  diff,
   pending
 }: {
   name: string
   input: unknown
+  diff?: string
   pending: boolean
 }): React.JSX.Element {
   const [open, setOpen] = useState(false)
   const summary = summarizeToolInput(name, input)
+  const stat = useMemo(() => (diff ? diffStat(diff) : null), [diff])
   return (
     <div className="text-sm">
       <button
@@ -639,11 +644,25 @@ function ToolUse({
         )}
         <span className="font-medium text-neutral-300">{name}</span>
         {summary && <span className="text-neutral-500 truncate">{summary}</span>}
+        {stat && (
+          <span className="shrink-0 tabular-nums text-xs">
+            <span className="text-[var(--diff-add)]">+{stat.added}</span>{' '}
+            <span className="text-[var(--diff-del)]">−{stat.removed}</span>
+          </span>
+        )}
         <ChevronRight
           size={12}
           className={(open ? 'rotate-90 ' : '') + 'ml-auto shrink-0 transition'}
         />
       </button>
+      {/* 파일 변경은 diff 가 곧 내용이다 — 접지 않고 바로 보여 준다(원시 입력은 셰브런 뒤에 남는다). */}
+      {diff && (
+        <pre className="mt-1 ml-4 max-h-72 overflow-auto rounded-md bg-[var(--code-bg)] py-1 text-xs font-mono leading-[1.45]">
+          {diff.split('\n').map((line, i) => (
+            <DiffLine key={i} line={line} />
+          ))}
+        </pre>
+      )}
       {open && (
         <pre className="mt-1 ml-4 text-xs bg-[var(--surface)] border border-[var(--border)] rounded-md p-2 overflow-x-auto text-neutral-400">
           {JSON.stringify(input, null, 2)}
@@ -651,6 +670,17 @@ function ToolUse({
       )}
     </div>
   )
+}
+
+/** 통합 diff 의 추가/삭제 줄 수(파일 헤더 ---/+++ 는 제외). */
+function diffStat(diff: string): { added: number; removed: number } {
+  let added = 0
+  let removed = 0
+  for (const line of diff.split('\n')) {
+    if (line.startsWith('+') && !line.startsWith('+++')) added++
+    else if (line.startsWith('-') && !line.startsWith('---')) removed++
+  }
+  return { added, removed }
 }
 
 function ToolResult({ text, isError }: { text: string; isError: boolean }): React.JSX.Element {

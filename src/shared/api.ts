@@ -26,6 +26,7 @@ import type {
   McpAction,
   McpServerInfo,
   ModelOption,
+  MemoryScope,
   PermissionDecision,
   PermissionMode,
   PermissionRequest,
@@ -137,6 +138,14 @@ export interface WooiApi {
     openInEditor(workspaceId: string): Promise<void>
     /** /memory — worktree 의 CLAUDE.md 를 에디터로 연다(없으면 worktree 디렉토리를 연다). */
     openMemory(workspaceId: string): Promise<{ error?: string }>
+    /** `#` 단축키 — CLAUDE.md 에 기억 한 줄을 덧붙이고 쓴 파일 경로를 돌려준다. */
+    addMemory(
+      workspaceId: string,
+      scope: MemoryScope,
+      text: string
+    ): Promise<{ path?: string; error?: string }>
+    /** /add-dir — worktree 밖 디렉토리를 작업 루트로 더한다(다음 메시지부터 적용). */
+    addDir(workspaceId: string, dir: string): Promise<{ error?: string }>
   }
 
   chat: {

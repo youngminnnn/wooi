@@ -103,10 +103,12 @@ describe('ClaudeSession stall watchdog', () => {
       permissionMode: 'default',
       autoCompact: false,
       resumeSessionId: null,
+      additionalDirs: [],
       emit: (e) => events.push(e),
       persist: (i) => items.push(i),
       requestPermission: async () => ({ behavior: 'deny' as const }),
       onSessionId: () => {},
+      onPermissionMode: () => {},
       settleIdle: () => {}
     })
 
@@ -150,10 +152,12 @@ describe('ClaudeSession stall watchdog', () => {
       permissionMode: 'default',
       autoCompact: false,
       resumeSessionId: null,
+      additionalDirs: [],
       emit: () => {},
       persist: (i) => items.push(i),
       requestPermission: async () => ({ behavior: 'deny' as const }),
       onSessionId: () => {},
+      onPermissionMode: () => {},
       settleIdle: () => {}
     })
 

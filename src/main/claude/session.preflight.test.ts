@@ -65,10 +65,12 @@ async function runFirstTurn(autoCompact: boolean, usage: typeof contextUsage) {
     autoCompact,
     // 이 값이 있어야 preflight 경로로 들어간다(= fast mode/모델 변경 후 첫 메시지, 앱 재시작 후 첫 메시지).
     resumeSessionId: 'prev-session-id',
+    additionalDirs: [],
     emit: (e) => events.push(e),
     persist: (i) => items.push(i),
     requestPermission: async () => ({ behavior: 'deny' as const }),
     onSessionId: () => {},
+    onPermissionMode: () => {},
     settleIdle: () => {}
   })
 

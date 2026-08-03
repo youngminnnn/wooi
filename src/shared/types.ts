@@ -426,6 +426,8 @@ export interface AgentCapabilities {
   inAppLogin: boolean
   /** 플랜 사용량·rate limit 조회 지원 여부. */
   rateLimits: boolean
+  /** /add-dir — worktree 밖 디렉토리를 작업 루트로 더 열어 줄 수 있는지. */
+  addDirectory: boolean
 }
 
 /**
@@ -570,6 +572,12 @@ export interface Workspace {
   effort: EffortSetting | null
   /** 이 workspace 전용 fast mode 오버라이드. null 이면 전역 설정(AppSettings.fastMode) 을 따른다. */
   fastMode: boolean | null
+  /**
+   * `/add-dir` 로 더해진 작업 디렉토리(절대 경로). worktree 밖의 코드를 함께 읽고 고쳐야 할 때
+   * 쓴다 — 에이전트는 기본적으로 cwd 밖을 건드리지 못한다. 세션 시작 시점에 고정되는 값이라
+   * 추가하면 세션을 새로 연다(대화 맥락은 resume 으로 이어진다).
+   */
+  additionalDirs?: string[]
   /** init 메시지에서 확인된 실제 모델명(예: "claude-opus-4-8[1m]"). 표시용. */
   lastModel: string | null
   /**
@@ -765,7 +773,20 @@ export type ChatItem =
   | { id: string; type: 'user'; text: string; ts: number; attachments?: ChatAttachment[] }
   | { id: string; type: 'assistant'; text: string; ts: number; streaming?: boolean }
   | { id: string; type: 'thinking'; text: string; ts: number; streaming?: boolean }
-  | { id: string; type: 'tool_use'; toolId: string; name: string; input: unknown; ts: number }
+  | {
+      id: string
+      type: 'tool_use'
+      toolId: string
+      name: string
+      input: unknown
+      /**
+       * 파일을 바꾸는 도구(Edit·Write·MultiEdit·NotebookEdit)의 통합 diff.
+       * 도구 실행 **전**에만 뜰 수 있어(그 뒤엔 파일이 이미 바뀌었다) 아이템에 함께 저장한다 —
+       * 대화를 다시 열었을 때도 그때 무엇이 바뀌었는지 그대로 볼 수 있다.
+       */
+      diff?: string
+      ts: number
+    }
   | { id: string; type: 'tool_result'; toolId: string; text: string; isError: boolean; ts: number }
   | {
       id: string
@@ -902,9 +923,14 @@ export interface PermissionRequest {
    * 요청의 성격. 프롬프트 렌더링을 가른다(명령은 명령 줄, 파일 변경은 diff, 질문은 선택지 UI).
    * 없으면 'tool' 로 간주한다 — 기존 Claude 경로와 저장된 트랜스크립트 호환.
    */
-  kind?: 'tool' | 'command' | 'fileChange' | 'question'
+  kind?: 'tool' | 'command' | 'fileChange' | 'question' | 'plan'
   /** kind==='fileChange' 일 때 제안된 통합 diff. DiffView 로 그대로 보여 준다. */
   diff?: string
+  /**
+   * "다시 묻지 않기" 를 고르면 저장될 규칙(예: `Bash(npm run:*)`).
+   * 도구 이름 하나를 통째로 여는 게 아니라 무엇을 허용하는지 사용자가 보고 고르게 한다.
+   */
+  rule?: string
   /**
    * 백엔드가 이 요청에 대해 제공하는 결정 선택지. 없으면 UI 는 기본 Allow/Deny 를 그린다.
    * Codex 는 여기에 accept / acceptForSession / decline 등을 그대로 실어 보낸다.
@@ -919,12 +945,52 @@ export interface PermissionOption {
   behavior: 'allow' | 'deny'
   /** 이 선택이 세션 동안 같은 종류를 자동 승인하는지(버튼 강조·설명에 사용). */
   rememberForSession?: boolean
+  /**
+   * 자동 승인을 어디까지 기억할지. 'session' 은 이 세션 동안만,
+   * 'project' 는 리포의 `.claude/settings.local.json` 에 적어 다음 세션에도 남긴다.
+   */
+  rememberScope?: 'session' | 'project'
+  /** 선택지 아래 한 줄 설명(계획 승인처럼 결과가 서로 다른 선택지에서 사용). */
+  description?: string
+}
+
+/**
+ * 계획(plan) 승인 프롬프트의 선택지. ExitPlanMode 승인은 단순 allow/deny 가 아니라
+ * "승인 후 어떤 권한 모드로 코딩을 시작할지" 를 함께 고르는 것이라, id 를 세션(main)과
+ * 프롬프트(렌더러)가 공유해야 한다 — 터미널 Claude Code 의 세 선택지와 같은 의미다.
+ */
+export const PLAN_OPTIONS: PermissionOption[] = [
+  {
+    id: 'plan-auto-accept',
+    label: 'Yes, and auto-accept edits',
+    behavior: 'allow',
+    description: 'Switches to Accept edits — file edits apply without asking'
+  },
+  {
+    id: 'plan-manual',
+    label: 'Yes, and manually approve edits',
+    behavior: 'allow',
+    description: 'Switches to Default — every edit still asks first'
+  },
+  {
+    id: 'plan-keep',
+    label: 'No, keep planning',
+    behavior: 'deny',
+    description: 'Stays in Plan mode so you can keep refining the plan'
+  }
+]
+
+/** 계획 승인 시 전환할 권한 모드. 알 수 없는 선택지는 안전한 쪽(매번 확인)으로 떨어진다. */
+export function planApprovalMode(optionId: string | undefined): PermissionMode {
+  return optionId === 'plan-auto-accept' ? 'acceptEdits' : 'default'
 }
 
 export type PermissionDecision =
   | {
       behavior: 'allow'
       rememberForSession?: boolean
+      /** rememberForSession 일 때 기억 범위. 없으면 'session'. */
+      rememberScope?: 'session' | 'project'
       /**
        * 도구 입력에 합쳐 SDK 로 되돌려줄 값. AskUserQuestion 처럼 사용자의 응답을
        * 입력에 주입해야 하는 도구에서 사용한다(예: { answers: { 질문: 선택 } }).
@@ -1344,6 +1410,12 @@ export interface ReviewPrCandidate {
   author: string
 }
 
+/**
+ * `#` 기억을 어디에 남길지. project = worktree 의 CLAUDE.md(팀과 공유),
+ * user = ~/.claude/CLAUDE.md(모든 프로젝트에 적용되는 개인 규칙).
+ */
+export type MemoryScope = 'project' | 'user'
+
 // ── IPC 채널 이름 ────────────────────────────────────────────────────────
 
 export const IPC = {
@@ -1384,6 +1456,10 @@ export const IPC = {
   workspaceRevealInFinder: 'workspace:revealInFinder',
   /** /memory — worktree 의 CLAUDE.md 를 에디터로 연다(없으면 worktree 를 연다). */
   workspaceOpenMemory: 'workspace:openMemory',
+  /** `#` 단축키 — 한 줄짜리 기억을 프로젝트/사용자 CLAUDE.md 에 덧붙인다. */
+  workspaceAddMemory: 'workspace:addMemory',
+  /** /add-dir — worktree 밖 디렉토리를 작업 루트로 더한다(세션 재시작). */
+  workspaceAddDir: 'workspace:addDir',
   chatSend: 'chat:send',
   chatInterrupt: 'chat:interrupt',
   chatGetHistory: 'chat:getHistory',

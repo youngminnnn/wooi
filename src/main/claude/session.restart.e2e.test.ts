@@ -50,10 +50,12 @@ describe.skipIf(!process.env.WOOI_E2E)('ClaudeSession failed-turn restart', () =
       permissionMode: 'default',
       autoCompact: false,
       resumeSessionId: null,
+      additionalDirs: [],
       emit: (e) => events.push(e),
       persist: (i) => items.push(i),
       requestPermission: async () => ({ behavior: 'deny' }),
       onSessionId: () => {},
+      onPermissionMode: () => {},
       settleIdle: () => {}
     })
 

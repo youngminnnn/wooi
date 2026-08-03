@@ -32,6 +32,16 @@ import { bodyOf, emptyView, isPosted, type ReviewViewState } from './lib/review'
 
 export const scriptKey = (workspaceId: string, kind: ScriptKind): string => `${workspaceId}:${kind}`
 
+/**
+ * 일괄 승인(⇧⌘A)이 대신 눌러 줘도 되는 요청인지.
+ *
+ * 제외 대상은 "허용/거부"가 아니라 **무엇을 고를지**를 사용자에게 묻는 요청이다:
+ * - AskUserQuestion — 고른 답을 도구 입력에 주입해야 한다(빈 답으로 넘기면 모델이 잘못 진행한다)
+ * - 계획 승인(kind==='plan') — 선택에 따라 세션의 권한 모드가 바뀐다(자동으로 정할 일이 아니다)
+ */
+const isBulkApprovable = (p: PermissionRequest): boolean =>
+  p.toolName !== 'AskUserQuestion' && p.kind !== 'plan'
+
 /** 앱 초기화와 Overview가 겹쳐도 backend별 account usage RPC는 하나만 실행한다. */
 const accountUsageRefreshes: Partial<Record<AgentBackendId, Promise<AppState>>> = {}
 
@@ -213,6 +223,13 @@ interface UIState {
   terminalRatio: number
   toasts: Toast[]
   confirmState: ConfirmState | null
+  /**
+   * 전체 화면을 덮는 모달/오버레이가 떠 있는지(App 이 갱신).
+   * 대화 화면의 전역 키(Esc 중단 등)는 이때 양보해야 한다 — 모달이 Esc 로 닫히는 동안
+   * 뒤에서 턴이 중단되면 사용자는 자기가 무엇을 눌렀는지 알 수 없다.
+   */
+  overlayOpen: boolean
+  setOverlayOpen: (open: boolean) => void
   /** 생성 중인 workspace 의 자리표시 행(repoId 로 사이드바에 배치). */
   pending: PendingWorkspace[]
 
@@ -274,10 +291,10 @@ interface UIState {
   dismissPermission: (requestId: string) => void
   /**
    * 대기 중인 모든 권한 요청을 한 번에 허용한다(병렬 세션의 권한 피로 완화).
-   * AskUserQuestion 은 사용자의 답을 입력에 주입해야 하므로 일괄 승인에서 제외하고 그대로 남긴다.
+   * 답이나 선택을 받아야 하는 요청은 제외하고 그대로 남긴다(isBulkApprovable 참고).
    */
   approveAllPermissions: () => void
-  /** 일괄 승인 가능한(=AskUserQuestion 이 아닌) 대기 권한 수. */
+  /** 일괄 승인 가능한 대기 권한 수. */
   approvablePermissionCount: () => number
   nextUnreadId: () => string | null
   /** 다른 workspace 중 권한 대기 중인 첫 항목. */
@@ -454,6 +471,10 @@ export const useStore = create<UIState>((set, get) => ({
   terminalRatio: 0.5,
   toasts: [],
   confirmState: null,
+  overlayOpen: false,
+  setOverlayOpen: (open) => {
+    if (get().overlayOpen !== open) set({ overlayOpen: open })
+  },
   pending: [],
   activeReviewId: null,
   reviewViews: {},
@@ -1183,17 +1204,15 @@ export const useStore = create<UIState>((set, get) => ({
 
   approveAllPermissions: () => {
     const all = get().permissions
-    // AskUserQuestion 은 답을 받아야 하는 질문이라 자동 허용 대상이 아니다 — 남겨 둔다.
-    const approvable = all.filter((p) => p.toolName !== 'AskUserQuestion')
+    const approvable = all.filter(isBulkApprovable)
     if (!approvable.length) return
     for (const p of approvable) {
       void window.api.permission.respond(p.requestId, { behavior: 'allow' })
     }
-    set({ permissions: all.filter((p) => p.toolName === 'AskUserQuestion') })
+    set({ permissions: all.filter((p) => !isBulkApprovable(p)) })
   },
 
-  approvablePermissionCount: () =>
-    get().permissions.filter((p) => p.toolName !== 'AskUserQuestion').length,
+  approvablePermissionCount: () => get().permissions.filter(isBulkApprovable).length,
 
   /** 미확인 세션 중 선택 후보 하나(사이드바 순서 기준 첫 항목). */
   nextUnreadId: () => {

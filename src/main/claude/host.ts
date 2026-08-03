@@ -47,6 +47,7 @@ function ensure(workspaceId: string, config: SessionConfig): ClaudeSession {
     permissionMode: config.permissionMode,
     autoCompact: config.autoCompact,
     resumeSessionId: config.resumeSessionId,
+    additionalDirs: config.additionalDirs,
     emit: (event: ChatEvent) => post({ type: 'event', workspaceId, event }),
     persist: (item: ChatItem) => post({ type: 'persist', workspaceId, item }),
     requestPermission: (req) =>
@@ -57,6 +58,7 @@ function ensure(workspaceId: string, config: SessionConfig): ClaudeSession {
         post({ type: 'permissionRequest', request })
       }),
     onSessionId: (sessionId: string) => post({ type: 'sessionId', workspaceId, sessionId }),
+    onPermissionMode: (mode) => post({ type: 'permissionMode', workspaceId, mode }),
     settleIdle: () => post({ type: 'settleIdle', workspaceId })
   })
   sessions.set(workspaceId, session)

@@ -28,7 +28,8 @@ import {
   History,
   ShieldCheck,
   RotateCcw,
-  Activity
+  Activity,
+  BookMarked
 } from 'lucide-react'
 import { useStore } from '../store'
 import { permissionModeFooter } from '../lib/permission'
@@ -63,6 +64,7 @@ import type {
   ImageMediaType,
   McpAction,
   McpServerInfo,
+  MemoryScope,
   PermissionsInfo,
   RateLimitSnapshot,
   RewindPoint,
@@ -77,6 +79,12 @@ const IMAGE_TYPES: Record<string, ImageMediaType> = {
   'image/gif': 'image/gif',
   'image/webp': 'image/webp'
 }
+
+/**
+ * "Esc 두 번"으로 인정하는 최대 간격. 짧으면 의도한 연타를 놓치고, 길면 한참 뒤의 Esc 한 번이
+ * 되감기 패널을 여는 것처럼 느껴진다.
+ */
+const DOUBLE_ESC_MS = 700
 
 /** 화면에 띄우는 붙여넣기 이미지: 전송용 base64 + 썸네일용 data URL. */
 type PendingImage = ImageAttachment & { id: string; previewUrl: string }
@@ -109,6 +117,8 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
   const taRef = useRef<HTMLTextAreaElement>(null)
   // ↑ 로 이전 사용자 메시지를 불러올 때의 커서(끝에서부터). -1 = 미사용.
   const historyIdx = useRef(-1)
+  // 마지막으로 Esc 를 눌러 아무것도 소비되지 않은 시각(Esc 두 번 = 되감기 판정용). 0 = 없음.
+  const lastEscAt = useRef(0)
   const running = workspace.status === 'running'
   // 대화 압축(자동/수동 /compact)이 도는 동안은 입력을 잠근다 — 압축 중에 보낸 메시지는 압축
   // 전 맥락에 끼어들어 방금 압축한 결과를 무의미하게 만든다(Claude Code CLI 도 같은 동안 막는다).
@@ -136,6 +146,8 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
   const [commandCard, setCommandCard] = useState<CommandCardState | null>(null)
   // /model·/effort·/fast 선택 카드(로컬 처리, 닫으면 사라짐).
   const [pickerCard, setPickerCard] = useState<PickerKind | null>(null)
+  // `#` 로 적은 기억. 어느 CLAUDE.md 에 남길지 고르는 동안만 들고 있는다.
+  const [memoryDraft, setMemoryDraft] = useState<string | null>(null)
   // 카드 응답을 현재 요청과만 맞추기 위한 단조 토큰(워크스페이스/명령 전환 시 stale 응답 무시).
   const cmdSeq = useRef(0)
 
@@ -162,6 +174,7 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
     setSideAnswer(null)
     setCommandCard(null)
     setPickerCard(null)
+    setMemoryDraft(null)
     setImages([])
     setMentionResult(null)
     setMentionDismissedAt(null)
@@ -400,21 +413,6 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
     wasLocked.current = locked
   }, [locked])
 
-  // 명령 결과/사이드 답변 카드는 입력창 포커스가 빠져도(카드 스크롤·클릭 등) Esc 로 닫히도록
-  // window 레벨에서 키를 받는다. 메뉴가 열려 있을 땐 Esc 가 메뉴 닫기에 쓰이므로 양보한다.
-  useEffect(() => {
-    if (menuOpen || mentionOpen || (!commandCard && !sideAnswer)) return
-    const onEsc = (e: KeyboardEvent): void => {
-      if (e.key !== 'Escape') return
-      e.preventDefault()
-      if (commandCard) setCommandCard(null)
-      else setSideAnswer(null)
-      taRef.current?.focus()
-    }
-    window.addEventListener('keydown', onEsc)
-    return () => window.removeEventListener('keydown', onEsc)
-  }, [menuOpen, mentionOpen, commandCard, sideAnswer])
-
   /**
    * "!명령" 을 1회 실행한다(Claude Code CLI bash 모드). 실행했으면 true.
    * 우측 터미널 패널이 아니라 대화 흐름 안에 명령/출력을 인라인으로 보여 준다.
@@ -428,12 +426,32 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
     return true
   }
 
-  const send = (): void => {
+  /**
+   * 입력창 내용을 보낸다.
+   *
+   * stopFirst 는 "지금 하던 걸 멈추고 이거부터" — 터미널에서 Esc 로 끊고 다시 치는 조작을 한 번에
+   * 한다. 메시지를 큐에 넣고 턴을 중단하면, 턴이 idle 로 끝나는 순간 store 의 큐 플러시가 그대로
+   * 이어서 보낸다(중단이 에러로 끝나면 메시지는 큐에 남아 사용자가 확인·취소할 수 있다).
+   */
+  const send = (opts?: { stopFirst?: boolean }): void => {
     // 압축 중에는 전송(및 로컬 명령·bash)을 모두 막는다 — 초안은 그대로 두고, 압축이 끝나면
     // 사용자가 그대로 다시 Enter 를 누르면 된다.
     if (locked) return
     const trimmed = text.trim()
     if (!trimmed && !images.length) return // 텍스트도 첨부도 없으면 무시.
+
+    // "# 기억할 내용" 은 메시지가 아니라 CLAUDE.md 에 남긴다 — 어느 파일에 쓸지만 고르면 된다.
+    // CLAUDE.md 를 읽는 백엔드에서만 가로챈다(Codex 는 규약이 다르므로 평범한 메시지로 보낸다).
+    const memo = images.length || workspace.agentBackend !== 'claude' ? null : matchMemory(trimmed)
+    if (memo) {
+      setSideAnswer(null)
+      setCommandCard(null)
+      setPickerCard(null)
+      setMemoryDraft(memo)
+      setText('')
+      historyIdx.current = -1
+      return
+    }
 
     // "!명령" 은 메시지로 보내지 않고 터미널에서 실행한다(Claude Code CLI 의 bash 모드).
     if (runBash(trimmed)) {
@@ -466,7 +484,7 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
     // 여기서는 setText 를 호출하지 않는다.
     const local = images.length ? null : matchLocal(trimmed, workspace.agentBackend === 'claude')
     if (local) {
-      runLocal(local)
+      runLocal(local, trimmed)
       historyIdx.current = -1
       return
     }
@@ -494,12 +512,30 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
     // steering 미지원 백엔드만 실행 중 메시지를 대기 큐에 넣는다. Codex 같이
     // steering 지원 시에는 즉시 전송해 현재 턴에 반영한다.
     setPickerCard(null)
-    if (running && !backend?.capabilities.steering)
+    if (running && !backend?.capabilities.steering) {
       enqueueMessage(workspace.id, trimmed, payload.length ? payload : undefined)
-    else void window.api.chat.send(workspace.id, trimmed, payload.length ? payload : undefined)
+      // 큐에 넣은 뒤 중단한다 — 순서가 반대면 턴이 먼저 끝나 플러시가 이 메시지를 놓친다.
+      if (opts?.stopFirst) void window.api.chat.interrupt(workspace.id)
+    } else void window.api.chat.send(workspace.id, trimmed, payload.length ? payload : undefined)
     setText('')
     setImages([])
     historyIdx.current = -1
+  }
+
+  /** `#` 로 적은 기억을 고른 CLAUDE.md 에 덧붙인다. */
+  const saveMemory = (scope: MemoryScope): void => {
+    const memo = memoryDraft
+    setMemoryDraft(null)
+    taRef.current?.focus()
+    if (!memo) return
+    void window.api.workspace.addMemory(workspace.id, scope, memo).then((r) => {
+      if (r.error) pushToast('error', r.error)
+      else
+        pushToast(
+          'success',
+          scope === 'user' ? 'Added to ~/.claude/CLAUDE.md' : 'Added to this project’s CLAUDE.md'
+        )
+    })
   }
 
   /** 인터랙티브 명령을 실행하고 결과를 카드로 띄운다(사이드 답변 카드는 비켜 준다). */
@@ -520,6 +556,63 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
     })
   }
 
+  /**
+   * Esc 의 의미를 터미널 Claude Code 와 맞춘다. 위에서부터 먼저 걸리는 하나만 실행한다:
+   *
+   *   1. 열린 카드 닫기(명령 결과·사이드 답변) — 입력창 포커스가 빠져 있어도 닫히도록 window 에서 받는다
+   *   2. 진행 중인 턴 중단 — 터미널의 Esc 가 하는 일. 지금까지는 Stop 버튼을 눌러야만 했다
+   *   3. Esc 두 번 연속 → 되감기 패널 — 어느 메시지 시점으로 코드를 되돌릴지 고른다
+   *
+   * 모달·confirm·승인 프롬프트·자동완성 메뉴가 떠 있으면 Esc 는 그쪽 것이므로 전부 양보한다.
+   * 핸들러가 최신 상태를 봐야 하므로 매 렌더 ref 만 갈아 끼우고 리스너는 마운트 때 한 번만 건다.
+   */
+  const escHandlerRef = useRef<(e: KeyboardEvent) => void>(() => {})
+  escHandlerRef.current = (e: KeyboardEvent): void => {
+    if (e.key !== 'Escape' || e.metaKey || e.ctrlKey || e.altKey) return
+    const st = useStore.getState()
+    if (st.overlayOpen || st.confirmState || menuOpen || mentionOpen) return
+    // 승인·질문·계획 프롬프트가 떠 있으면 Esc 는 그 프롬프트의 거부/취소다.
+    if (st.permissions.some((p) => p.workspaceId === workspace.id)) return
+
+    if (memoryDraft) {
+      e.preventDefault()
+      setMemoryDraft(null)
+      taRef.current?.focus()
+      return
+    }
+
+    if (commandCard || sideAnswer) {
+      e.preventDefault()
+      if (commandCard) setCommandCard(null)
+      else setSideAnswer(null)
+      taRef.current?.focus()
+      return
+    }
+
+    if (running) {
+      e.preventDefault()
+      void window.api.chat.interrupt(workspace.id)
+      lastEscAt.current = 0 // 중단은 Esc 한 번으로 끝난다 — 연타가 되감기로 이어지지 않게.
+      return
+    }
+
+    if (!supportedCommands.includes('rewind')) return
+    const now = Date.now()
+    if (now - lastEscAt.current <= DOUBLE_ESC_MS) {
+      e.preventDefault()
+      lastEscAt.current = 0
+      const rewind = INTERACTIVE_COMMANDS.find((c) => c.kind === 'rewind')
+      if (rewind) runInteractive(rewind)
+      return
+    }
+    lastEscAt.current = now
+  }
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => escHandlerRef.current(e)
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
   /** /clear — 확인 후 대화 기록·세션을 초기화한다(백엔드 + 화면 모두). */
   const doClear = async (): Promise<void> => {
     const ok = await confirm({
@@ -539,7 +632,7 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
    * 보내지 않고 앱 기능으로 매핑한다. 입력창 텍스트 정리도 여기서 한다(대부분 비우고, /help 만
    * 자동완성 메뉴를 다시 띄우도록 '/' 를 남긴다).
    */
-  const runLocal = (kind: LocalCommand): void => {
+  const runLocal = (kind: LocalCommand, raw: string): void => {
     setSideAnswer(null)
     setCommandCard(null)
     setPickerCard(null)
@@ -547,6 +640,23 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
     if (kind === 'help') {
       setText('/') // 자동완성 메뉴로 사용 가능한 명령을 모두 보여 준다.
       taRef.current?.focus()
+      return
+    }
+
+    // /add-dir 은 인자가 본체다 — 인자가 없으면 지우지 말고 이어 쓸 수 있게 남긴다.
+    if (kind === 'add-dir') {
+      const dir = raw.slice('/add-dir'.length).trim()
+      if (!dir) {
+        pushToast('info', 'Usage: /add-dir <path> — adds a directory outside this worktree.')
+        setText('/add-dir ')
+        taRef.current?.focus()
+        return
+      }
+      setText('')
+      void window.api.workspace.addDir(workspace.id, dir).then((r) => {
+        if (r.error) pushToast('error', r.error)
+        else pushToast('success', `Added ${dir}. The agent can use it from your next message.`)
+      })
       return
     }
 
@@ -597,7 +707,15 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
       .map((i) => i.text)
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
-    // ⌘ 조합은 입력창이 처리하지 않고 전역 단축키(App.tsx)로 흘려보낸다. 특히 ⌘↑/⌘↓ 는
+    // ⌘⏎ = 진행 중인 턴을 멈추고 방금 쓴 메시지를 바로 보낸다. 턴이 길어질 때 방향을 트는
+    // 조작이라 대기 큐(Enter)와 별도 키가 필요하다.
+    if (e.metaKey && e.key === 'Enter' && !e.nativeEvent.isComposing) {
+      e.preventDefault()
+      send({ stopFirst: true })
+      return
+    }
+
+    // 나머지 ⌘ 조합은 입력창이 처리하지 않고 전역 단축키(App.tsx)로 흘려보낸다. 특히 ⌘↑/⌘↓ 는
     // 워크스페이스 전환이라, 입력창에 포커스가 있어도(=대부분의 시간) 아래의 ↑/↓ 메시지 히스토리나
     // 자동완성 메뉴 이동에 먹히면 안 된다.
     if (e.metaKey) return
@@ -693,7 +811,17 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
             onPick={acceptMention}
           />
         )}
-        {commandCard && !menuOpen && !mentionOpen && !pickerCard && (
+        {memoryDraft && !menuOpen && !mentionOpen && (
+          <MemoryCard
+            text={memoryDraft}
+            onPick={saveMemory}
+            onClose={() => {
+              setMemoryDraft(null)
+              taRef.current?.focus()
+            }}
+          />
+        )}
+        {commandCard && !menuOpen && !mentionOpen && !pickerCard && !memoryDraft && (
           <CommandCard
             card={commandCard}
             workspaceId={workspace.id}
@@ -701,10 +829,10 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
             onClose={() => setCommandCard(null)}
           />
         )}
-        {sideAnswer && !menuOpen && !mentionOpen && !commandCard && !pickerCard && (
+        {sideAnswer && !menuOpen && !mentionOpen && !commandCard && !pickerCard && !memoryDraft && (
           <SideAnswerCard answer={sideAnswer} onClose={() => setSideAnswer(null)} />
         )}
-        {pickerCard && !menuOpen && !mentionOpen && (
+        {pickerCard && !menuOpen && !mentionOpen && !memoryDraft && (
           <PickerCard
             kind={pickerCard}
             workspace={workspace}
@@ -779,7 +907,7 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
                 locked
                   ? 'Compacting the conversation…  (input resumes when it finishes)'
                   : running
-                    ? 'Queue a follow-up…  (Enter to send · it runs after the current turn)'
+                    ? 'Queue a follow-up…  (Enter to queue · ⌘Enter to stop the turn and send now)'
                     : 'Message your agent…  (Enter to send · @ for files · / for commands · ! for terminal)'
               }
               className="flex-1 bg-transparent resize-none outline-none text-base leading-relaxed text-neutral-200 placeholder:text-neutral-600 py-1 disabled:cursor-not-allowed"
@@ -787,14 +915,14 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
             {running && (
               <button
                 onClick={() => void window.api.chat.interrupt(workspace.id)}
-                title="Stop the current turn"
+                title="Stop the current turn (Esc)"
                 className="h-8 w-8 grid place-items-center rounded-lg bg-[var(--danger-500)]/15 text-[var(--danger-400)] hover:bg-[var(--danger-500)]/25 active:scale-95"
               >
                 <Square size={15} fill="currentColor" />
               </button>
             )}
             <button
-              onClick={send}
+              onClick={() => send()}
               disabled={locked || (!text.trim() && images.length === 0)}
               title={
                 locked
@@ -802,7 +930,7 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
                   : bashMode
                     ? 'Run in terminal'
                     : running
-                      ? 'Queue message'
+                      ? 'Queue message — ⌘Enter stops the current turn and sends now'
                       : 'Send'
               }
               className={
@@ -1045,6 +1173,73 @@ type SideAnswer = {
  * 입력창 위에 뜨는 /btw 사이드 답변 카드.
  * 메인 대화와 분리된 임시 표시 — 닫으면(Esc/✕) 사라지고 기록에 남지 않는다.
  */
+/**
+ * `#` 로 시작한 입력을 어느 CLAUDE.md 에 남길지 고르는 카드. 터미널 Claude Code 와 같은 흐름이다 —
+ * 기억할 내용을 적고, 프로젝트용인지 개인용인지만 고른다. 1/2 로 바로 고를 수 있고 Esc 로 취소한다.
+ */
+function MemoryCard({
+  text,
+  onPick,
+  onClose
+}: {
+  text: string
+  onPick: (scope: MemoryScope) => void
+  onClose: () => void
+}): React.JSX.Element {
+  const choices: { scope: MemoryScope; label: string; hint: string }[] = [
+    { scope: 'project', label: 'Project memory', hint: 'CLAUDE.md — shared with this repo' },
+    { scope: 'user', label: 'User memory', hint: '~/.claude/CLAUDE.md — all your projects' }
+  ]
+  // 숫자 단축키는 카드 안에서만 받는다 — window 에서 가로채면 입력창에 "1" 을 칠 수 없다.
+  const firstRef = useRef<HTMLButtonElement>(null)
+  useEffect(() => firstRef.current?.focus(), [])
+
+  return (
+    <div
+      onKeyDown={(e) => {
+        if (e.metaKey || e.ctrlKey || e.altKey) return
+        const idx = Number(e.key) - 1
+        if (!choices[idx]) return
+        e.preventDefault()
+        onPick(choices[idx].scope)
+      }}
+      className="absolute bottom-full mb-2 left-0 right-0 rounded-xl border border-[var(--accent-500)]/30 bg-[var(--bg-3)] shadow-2xl z-20"
+    >
+      <div className="flex items-center gap-2 px-3 py-2 border-b border-[var(--border)]">
+        <BookMarked size={13} className="text-[var(--accent-400)] shrink-0" />
+        <span className="text-xs font-medium text-[var(--accent-300)] shrink-0">Add to memory</span>
+        <span className="ml-auto shrink-0 text-xs text-neutral-600 select-none">Esc to cancel</span>
+        <button
+          onClick={onClose}
+          title="Cancel (Esc)"
+          className="shrink-0 h-5 w-5 grid place-items-center rounded text-neutral-500 hover:text-neutral-200 hover:bg-[var(--surface-3)]"
+        >
+          <X size={13} />
+        </button>
+      </div>
+      <p className="px-3 pt-2 text-sm leading-relaxed text-neutral-200 whitespace-pre-wrap break-words">
+        {text}
+      </p>
+      <div className="p-2 flex flex-col gap-1">
+        {choices.map((c, i) => (
+          <button
+            key={c.scope}
+            ref={i === 0 ? firstRef : undefined}
+            onClick={() => onPick(c.scope)}
+            className="flex items-center gap-2 px-2 py-1.5 rounded-lg text-left hover:bg-[var(--surface-3)]"
+          >
+            <span className="shrink-0 h-4 w-4 grid place-items-center rounded border border-[var(--border)] text-[10px] text-neutral-500">
+              {i + 1}
+            </span>
+            <span className="text-xs text-neutral-200">{c.label}</span>
+            <span className="text-[11px] text-neutral-500 truncate">{c.hint}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function SideAnswerCard({
   answer,
   onClose
@@ -1117,18 +1312,36 @@ function matchInteractive(
 }
 
 /** Wooi UI 가 직접 처리하는 로컬 명령(에이전트로 보내지 않음). */
-type LocalCommand = 'diff' | 'copy' | 'help' | 'clear' | 'memory'
-const LOCAL_COMMANDS: readonly LocalCommand[] = ['diff', 'copy', 'help', 'clear', 'memory']
+type LocalCommand = 'diff' | 'copy' | 'help' | 'clear' | 'memory' | 'add-dir'
+const LOCAL_COMMANDS: readonly LocalCommand[] = [
+  'diff',
+  'copy',
+  'help',
+  'clear',
+  'memory',
+  'add-dir'
+]
+/** CLAUDE.md·작업 루트처럼 Claude Code 고유 개념이라 다른 백엔드에서는 가로채지 않는 명령. */
+const CLAUDE_ONLY_COMMANDS: readonly string[] = ['memory', 'add-dir']
 
 /**
- * "/diff" 처럼 로컬에서 처리하는 명령이면 그 종류를 돌려준다(뒤따르는 인자는 무시).
- * `/memory` 는 CLAUDE.md 를 여는 Claude 전용 기능이라 Codex 입력을 가로채지 않는다.
+ * "/diff" 처럼 로컬에서 처리하는 명령이면 그 종류를 돌려준다(뒤따르는 인자는 호출부가 읽는다).
+ * `/memory`·`/add-dir` 은 Claude 전용 기능이라 다른 백엔드의 입력을 가로채지 않는다.
  */
-export function matchLocal(text: string, allowClaudeMemory: boolean): LocalCommand | null {
+export function matchLocal(text: string, allowClaudeOnly: boolean): LocalCommand | null {
   const m = /^\/([\w-]+)(?:\s[\s\S]*)?$/.exec(text)
   if (!m) return null
   if (!(LOCAL_COMMANDS as readonly string[]).includes(m[1])) return null
-  return m[1] === 'memory' && !allowClaudeMemory ? null : (m[1] as LocalCommand)
+  return CLAUDE_ONLY_COMMANDS.includes(m[1]) && !allowClaudeOnly ? null : (m[1] as LocalCommand)
+}
+
+/**
+ * `#` 로 시작하면 메시지가 아니라 CLAUDE.md 에 남길 한 줄 기억이다(터미널 Claude Code 의 `#`).
+ * `##` 로 시작하는 마크다운 제목은 평범한 메시지이므로 건드리지 않는다.
+ */
+export function matchMemory(text: string): string | null {
+  const m = /^#(?!#)\s*([\s\S]+)$/.exec(text)
+  return m ? m[1].trim() || null : null
 }
 
 /** Claude side-question capability 가 있는 워크스페이스에서만 `/btw` 를 로컬 처리한다. */

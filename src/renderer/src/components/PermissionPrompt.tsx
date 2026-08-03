@@ -11,12 +11,33 @@ const SHOW_WAIT_AFTER_MS = 20_000
 /**
  * 백엔드가 선택지를 주지 않았을 때의 기본 결정지(Claude 경로).
  * 배열의 **마지막 항목이 기본 동작**으로 강조되고 포커스를 받는다.
+ *
+ * "다시 묻지 않기" 는 두 갈래다 — 이번 세션만(Always), 리포에 저장해 다음에도(Always in project).
+ * 무엇이 열리는지는 `request.rule`(예: `Bash(npm run:*)`)이 말해 준다.
  */
-const DEFAULT_OPTIONS: PermissionOption[] = [
-  { id: 'deny', label: 'Deny', behavior: 'deny' },
-  { id: 'allowAlways', label: 'Always allow', behavior: 'allow', rememberForSession: true },
-  { id: 'allow', label: 'Allow', behavior: 'allow' }
-]
+function defaultOptions(rule: string | undefined): PermissionOption[] {
+  const what = rule ?? 'this'
+  return [
+    { id: 'deny', label: 'Deny', behavior: 'deny' },
+    {
+      id: 'allowAlways',
+      label: 'Always',
+      behavior: 'allow',
+      rememberForSession: true,
+      rememberScope: 'session',
+      description: `Allow ${what} for the rest of this session`
+    },
+    {
+      id: 'allowProject',
+      label: 'Always in project',
+      behavior: 'allow',
+      rememberForSession: true,
+      rememberScope: 'project',
+      description: `Allow ${what} from now on — saved to this repo's .claude/settings.local.json`
+    },
+    { id: 'allow', label: 'Allow', behavior: 'allow' }
+  ]
+}
 
 export default function PermissionPrompt({
   request
@@ -45,8 +66,8 @@ export default function PermissionPrompt({
   // 선택지는 백엔드가 정한다 — Codex 는 서버가 제시한 결정지를 그대로 싣고, Claude 는 없으므로
   // 기존 Deny/Always allow/Allow 로 떨어진다.
   const options = useMemo(
-    () => (request.options?.length ? request.options : DEFAULT_OPTIONS),
-    [request.options]
+    () => (request.options?.length ? request.options : defaultOptions(request.rule)),
+    [request.options, request.rule]
   )
   const primary = options[options.length - 1]
 
@@ -56,6 +77,7 @@ export default function PermissionPrompt({
         ? {
             behavior: 'allow',
             rememberForSession: option.rememberForSession,
+            rememberScope: option.rememberScope,
             optionId: option.id
           }
         : { behavior: 'deny', optionId: option.id }
@@ -106,22 +128,27 @@ export default function PermissionPrompt({
             </pre>
           )}
           {request.diff && <DiffPreview diff={request.diff} />}
+          {/* 좁혀진 규칙일 때만 노출한다 — 도구 이름뿐인 규칙은 "Always" 의 뜻이 이미 자명하다. */}
+          {request.rule?.includes('(') && (
+            <p className="mt-1.5 text-[11px] text-neutral-500">
+              Always applies to{' '}
+              <code className="rounded bg-[var(--surface-2)] px-1 py-0.5 font-mono text-neutral-400">
+                {request.rule}
+              </code>
+            </p>
+          )}
           {/* 서버가 이유를 준 경우(왜 승인이 필요한지) diff 아래에 덧붙인다. */}
           {request.diff && request.decisionReason && (
             <p className="mt-1.5 text-xs text-neutral-500">{request.decisionReason}</p>
           )}
         </div>
         {/* 보조 동작과 기본 동작(마지막 항목)을 시각적으로 분리해 위계를 분명히 한다. */}
-        <div className="flex items-center gap-1 shrink-0">
+        <div className="flex flex-wrap items-center justify-end gap-1 shrink-0">
           {options.slice(0, -1).map((option) => (
             <button
               key={option.id}
               onClick={() => respond(option)}
-              title={
-                option.rememberForSession
-                  ? `${option.label} — don't ask again for the rest of this session`
-                  : undefined
-              }
+              title={option.description}
               className={
                 'text-sm px-2.5 py-1 rounded-md ' +
                 (option.rememberForSession

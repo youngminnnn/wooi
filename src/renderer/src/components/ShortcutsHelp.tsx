@@ -39,9 +39,12 @@ const GROUPS: { title: string; items: { keys: string[]; label: string }[] }[] = 
     items: [
       { keys: ['⌘F'], label: 'Search the conversation' },
       { keys: ['↑', '/', '↓'], label: 'Recall previous messages (in the input box)' },
-      { keys: ['⏎'], label: 'Send message' },
+      { keys: ['⏎'], label: 'Send message — queues it while a turn is running' },
+      { keys: ['⌘⏎'], label: 'Stop the current turn and send the message now' },
       { keys: ['⇧⏎'], label: 'New line' },
-      { keys: ['Esc'], label: 'Deny a permission / close a dialog' }
+      { keys: ['Esc'], label: 'Stop the current turn — or close a card / deny a permission' },
+      { keys: ['Esc', 'Esc'], label: 'Rewind — restore code to an earlier message' },
+      { keys: ['#'], label: 'Start a message with # to save it to CLAUDE.md' }
     ]
   }
 ]

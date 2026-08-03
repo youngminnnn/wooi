@@ -8,13 +8,15 @@ import type {
 } from '@anthropic-ai/claude-agent-sdk'
 import { AsyncQueue } from './asyncQueue'
 import { clampText, clampInput } from './clamp'
+import { buildFileChangeDiff, isFileChangeTool } from './editDiff'
+import { matchesRule, ruleForRequest, saveAllowRule } from './permissionRules'
 import { resolveClaudeExecutable } from './executable'
 import { sessionTranscriptExists } from './sessionFiles'
 import { CLAUDE_CODE_SYSTEM_PROMPT } from './systemPrompt'
 import { log } from '../logger'
 import { MCP_SETTING_SOURCES, resolveUserMcpServers } from './mcp'
-import { fastModeReasonText } from '@shared/types'
-import { claudeEffort, type ClaudePermissionMode } from './protocol'
+import { fastModeReasonText, planApprovalMode, PLAN_OPTIONS } from '@shared/types'
+import { asClaudeMode, claudeEffort, claudeMode, type ClaudePermissionMode } from './protocol'
 import type {
   ChatItem,
   ChatEvent,
@@ -46,12 +48,19 @@ export interface SessionDeps {
   autoCompact: boolean
   /** 이전 실행에서 이어갈 Claude 세션 ID. 없으면 새 세션. */
   resumeSessionId: string | null
+  /** `/add-dir` 로 더해진 작업 루트(절대 경로). cwd 밖의 코드를 함께 읽고 고칠 수 있게 한다. */
+  additionalDirs: string[]
   emit: (event: ChatEvent) => void
   persist: (item: ChatItem) => void
   requestPermission: (
     req: Omit<PermissionRequest, 'requestId' | 'workspaceId'>
   ) => Promise<PermissionDecision>
   onSessionId: (id: string) => void
+  /**
+   * 세션이 스스로 권한 모드를 바꿨음을 알린다(계획 승인 → acceptEdits/default).
+   * 모드는 workspace 상태의 일부라 메인이 store 에 반영하고 UI 로 방송해야 한다.
+   */
+  onPermissionMode: (mode: ClaudePermissionMode) => void
   /**
    * 진행 중이던 턴이 정상 result 없이 끝났을 때(예: CLI 프로세스가 턴 도중 죽어 result 가
    * 영영 오지 않는 경우) workspace 상태를 idle 로 확정한다. emit('status', idle) 와 달리
@@ -107,6 +116,19 @@ function overAutoCompactThreshold(ctx: ContextUsage): boolean {
 
 /** getContextUsage 제어 요청 상한. 지연돼도 미터·자동압축 판단이 멈추지 않도록 둔다. */
 const CONTEXT_USAGE_TIMEOUT_MS = 5000
+
+/**
+ * 계획 승인 뒤 라이브 query 에 새 권한 모드를 보내기까지의 지연.
+ * CLI 가 ExitPlanMode 를 처리하며 스스로 모드를 되돌리는 창을 넘긴 뒤에 우리 값을 얹는다.
+ */
+const PLAN_MODE_APPLY_DELAY_MS = 250
+
+/**
+ * 계획 승인 직후 CLI 가 보고하는 모드를 무시할 창. PLAN_MODE_APPLY_DELAY_MS 동안 CLI 는 자기
+ * 기본값으로 되돌아갔다가 우리 값을 받으므로, 그 사이 보고를 그대로 반영하면 사용자가 고른
+ * "auto-accept edits" 가 잠깐 'default' 로 깜빡인다. 왕복이 끝날 여유를 조금 더 둔다.
+ */
+const PLAN_MODE_SETTLE_MS = PLAN_MODE_APPLY_DELAY_MS + 750
 
 /**
  * `assistant.error` 만으로 실패한 턴을 프로세스 교체로 다시 돌릴 가치가 있는지 가리는 패턴.
@@ -239,6 +261,8 @@ export class ClaudeSession {
    * 재시도하면 사용자 의도를 거스르므로, 그 경로에서는 재시도를 막는다.
    */
   private interrupted = false
+  /** 계획 승인 뒤 CLI 가 보고하는 권한 모드를 무시할 시각(epoch ms). syncPermissionMode 참고. */
+  private planSettleAt = 0
   /**
    * 턴이 진행 중인지(running 을 방출했고 아직 result/error 로 마무리되지 않았는지).
    * query 루프가 result 없이 끝났을 때 'running' 에 갇히지 않도록 finally 에서 idle 로 푸는 데 쓴다.
@@ -475,6 +499,58 @@ export class ClaudeSession {
     await this.q?.setPermissionMode(mode).catch(() => {})
   }
 
+  /**
+   * 계획 승인 결과를 반영한다(plan → acceptEdits/default).
+   *
+   * 우리 값이 다음 query 에도 남도록 deps 는 즉시 갱신하되, 라이브 query 로 보내는 제어 요청은
+   * 조금 미룬다 — 승인 직후에는 CLI 도 ExitPlanMode 를 처리하며 자체적으로 모드를 되돌리는데,
+   * 그 전에 우리가 먼저 보내면 사용자가 고른 "auto-accept edits" 가 CLI 의 기본값에 덮인다.
+   * canUseTool 응답을 붙잡아 두지 않는 효과도 있다(제어 채널 왕복을 승인 경로 밖으로 뺀다).
+   */
+  private applyPlanApproval(mode: ClaudePermissionMode): void {
+    this.deps.permissionMode = mode
+    this.deps.onPermissionMode(mode)
+    this.planSettleAt = Date.now() + PLAN_MODE_SETTLE_MS
+    setTimeout(() => void this.setPermissionMode(mode), PLAN_MODE_APPLY_DELAY_MS)
+  }
+
+  /**
+   * CLI 가 스스로 바꾼 권한 모드를 UI 에 되비친다.
+   *
+   * 모드는 우리만 바꾸는 게 아니다 — 모델이 EnterPlanMode 로 계획 모드에 들어가거나, CLI 가
+   * ExitPlanMode 를 처리하며 모드를 되돌린다. 이 신호를 흘리면 하단 표시가 실제와 어긋난 채
+   * 남는다(계획을 세우는 중인데 표시는 "default"). CLI 는 모드가 바뀔 때마다
+   * `status` 메시지에 permissionMode 를 실어 보내므로, 그때마다 맞춰 준다.
+   */
+  private syncPermissionMode(reported: string | undefined): void {
+    const mode = asClaudeMode(reported)
+    if (!mode || mode === this.deps.permissionMode) return
+    // 계획 승인 직후의 되돌림은 사용자 선택이 아니라 CLI 의 중간 상태다(상수 주석 참고).
+    if (Date.now() < this.planSettleAt) return
+    this.deps.permissionMode = mode
+    this.deps.onPermissionMode(mode)
+  }
+
+  /**
+   * "다시 묻지 않기" 규칙을 기억한다. 세션 범위는 메모리에만, project 범위는 **원본 리포**의
+   * `.claude/settings.local.json` 에도 적어 다음 세션·다음 워크스페이스까지 남긴다
+   * (worktree 는 작업이 끝나면 사라지므로 거기 적으면 곧 없어진다).
+   */
+  private rememberRule(rule: string, scope: 'session' | 'project' | undefined): void {
+    this.alwaysAllow.add(rule)
+    if (scope !== 'project') return
+    const root = this.deps.repoPath ?? this.deps.cwd
+    const saved = saveAllowRule(root, rule)
+    this.emitItem({
+      id: `system:allow-rule:${Date.now()}`,
+      type: 'system',
+      text: saved
+        ? `Always allowing ${rule} — saved to .claude/settings.local.json`
+        : `Always allowing ${rule} for this session — couldn't write .claude/settings.local.json`,
+      ts: Date.now()
+    })
+  }
+
   /** 입력 큐를 닫아 query 루프를 정상 종료시킨다. */
   dispose(): void {
     this.input.close()
@@ -531,6 +607,9 @@ export class ClaudeSession {
           permissionMode: this.deps.permissionMode,
           // CLI 와 동일하게 파일시스템 설정(settings.json·CLAUDE.md·.mcp.json)을 로드.
           settingSources: MCP_SETTING_SOURCES,
+          // 훅 생애주기 이벤트를 받는다. 성공한 훅은 조용히 넘기고 **실패한 훅만** 표시하기 위해서다 —
+          // 터미널은 훅이 죽으면 경고를 찍는데, 이걸 받지 않으면 Wooi 에서는 아무 흔적 없이 사라진다.
+          includeHookEvents: true,
           // 인라인 settings 레이어 — query Options 가 아니라 settings.json 스키마(Settings) 소속인
           // 플래그를 여기로 전달한다. settingSources 가 읽는 파일 설정 "위에" 합쳐지므로 CLAUDE.md·
           // MCP 로딩에는 영향이 없지만, 같은 이유로 **사용자가 직접 적어 둔 값을 조용히 덮어쓴다**.
@@ -555,6 +634,11 @@ export class ClaudeSession {
             ...(ultracode ? { enableWorkflows: true, ultracode: true } : {}),
             ...(this.deps.fastMode ? { fastMode: true } : {})
           },
+          // /add-dir 로 더한 작업 루트. query 시작 시점에 고정되므로 목록이 바뀌면 매니저가
+          // 세션을 새로 연다(resume 으로 대화 맥락은 이어진다).
+          ...(this.deps.additionalDirs.length
+            ? { additionalDirectories: this.deps.additionalDirs }
+            : {}),
           ...(Object.keys(mcpServers).length ? { mcpServers } : {}),
           ...(claudeExecutable ? { pathToClaudeCodeExecutable: claudeExecutable } : {}),
           ...(this.deps.model ? { model: this.deps.model } : {}),
@@ -885,22 +969,58 @@ export class ClaudeSession {
       return { behavior: 'deny', message: 'User dismissed the question' }
     }
 
+    // ExitPlanMode 는 "이 계획대로 진행할까?" 라는 갈림길이다. 단순 allow/deny 가 아니라
+    // 승인 뒤 어떤 권한 모드로 코딩을 시작할지까지 사용자가 고르므로(터미널 Claude Code 와 동일),
+    // always-allow·auto 와 무관하게 항상 물어보고 선택에 따라 모드를 전환한다. 이 분기가 없으면
+    // plan 모드는 계획만 세우고 빠져나올 길이 없는 막다른 길이 된다.
+    if (toolName === 'ExitPlanMode') {
+      const decision = await this.deps.requestPermission({
+        toolName,
+        title: options.title ?? 'Ready to code?',
+        displayName: options.displayName,
+        decisionReason: options.decisionReason,
+        kind: 'plan',
+        input: clampInput(input) as Record<string, unknown>,
+        options: PLAN_OPTIONS
+      })
+
+      if (decision.behavior === 'allow') {
+        this.applyPlanApproval(claudeMode(planApprovalMode(decision.optionId)))
+        return { behavior: 'allow', updatedInput: input }
+      }
+      return {
+        behavior: 'deny',
+        message:
+          'The user wants to keep planning. Do not make any edits yet — refine the plan and ask again.'
+      }
+    }
+
     // auto 모드: 분류기가 대부분 자동 처리하지만, 위험으로 분류돼 ask 경로로 넘어온 호출도
     // 사용자에게 묻지 않고 자동 승인한다(auto = "묻지 마" 라는 사용자 기대에 맞춤).
     if (this.deps.permissionMode === 'auto') {
       return { behavior: 'allow', updatedInput: input }
     }
 
-    // 사용자가 이 세션에서 항상 허용하기로 한 도구는 다시 묻지 않는다.
-    if (this.alwaysAllow.has(toolName)) {
+    // 사용자가 항상 허용하기로 한 규칙에 걸리면 다시 묻지 않는다. 규칙은 도구 이름이 아니라
+    // `Bash(npm run:*)` 처럼 좁은 범위다 — `npm test` 한 번 허용했다고 `rm -rf` 까지 열리지 않는다.
+    const rule = ruleForRequest(toolName, input, this.deps.cwd)
+    if ([...this.alwaysAllow].some((r) => matchesRule(r, toolName, input, this.deps.cwd))) {
       return { behavior: 'allow', updatedInput: input }
     }
+
+    // 파일을 바꾸는 도구는 무엇이 바뀌는지 diff 로 보여 준다 — 터미널 claude 와 같은 판단 근거다.
+    // 도구는 아직 실행 전이므로 디스크 내용이 곧 "before" 다.
+    const diff = isFileChangeTool(toolName)
+      ? buildFileChangeDiff(toolName, input, this.deps.cwd)
+      : null
 
     const decision = await this.deps.requestPermission({
       toolName,
       title: options.title,
       displayName: options.displayName,
       decisionReason: options.decisionReason,
+      ...(diff ? { kind: 'fileChange' as const, diff } : {}),
+      rule,
       // 표시용 사본만 클램프한다 — 원본 input 은 allow 분기의 updatedInput 으로 그대로 돌려준다.
       // (거대한 input 이 IPC 직렬화에서 메인을 abort 시키는 것을 막는다. clamp.ts 참고.)
       input: clampInput(input) as Record<string, unknown>
@@ -909,7 +1029,7 @@ export class ClaudeSession {
     // allow 분기는 런타임 스키마상 updatedInput(record) 이 필수다(.d.ts 에는 optional 로
     // 표기돼 있으나 CLI 브리지의 Zod 검증은 필수). 원래 입력을 그대로 돌려준다.
     if (decision.behavior === 'allow') {
-      if (decision.rememberForSession) this.alwaysAllow.add(toolName)
+      if (decision.rememberForSession) this.rememberRule(rule, decision.rememberScope)
       return { behavior: 'allow', updatedInput: input }
     }
     return { behavior: 'deny', message: 'User denied permission' }
@@ -962,6 +1082,8 @@ export class ClaudeSession {
       this.currentSessionId = msg.session_id
       this.deps.onSessionId(msg.session_id)
       this.deps.emit({ type: 'session', sessionId: msg.session_id, model: msg.model })
+      // resume 으로 이어받은 세션은 우리가 보낸 값이 아니라 CLI 가 복원한 모드로 시작할 수 있다.
+      this.syncPermissionMode(msg.permissionMode)
       // preflight 는 여기서 돌리지 않는다 — init 은 입력 메시지를 받아야 오는데 preflight 는 그
       // 입력을 붙들고 있어 서로를 기다리게 된다. query 생성 직후(run)로 옮겼다.
     } else if (msg.subtype === 'permission_denied') {
@@ -974,6 +1096,8 @@ export class ClaudeSession {
     } else if (msg.subtype === 'status') {
       // CLI 가 압축을 시작하면 status='compacting' 을 보낸다(수동 /compact 포함). UI 배지용.
       if (msg.status === 'compacting') this.deps.emit({ type: 'compacting', active: true })
+      // 권한 모드가 CLI 쪽에서 바뀌면 status(=null)에 실려 온다 — 모델의 EnterPlanMode 가 대표적.
+      this.syncPermissionMode(msg.permissionMode)
     } else if (msg.subtype === 'compact_boundary') {
       // 압축 완료 — 토큰 변화를 기록으로 남기고 진행 배지를 내린다. 자동/수동 모두 여기로 온다.
       const meta = msg.compact_metadata
@@ -998,7 +1122,39 @@ export class ClaudeSession {
       this.handleTaskUpdated(msg)
     } else if (msg.subtype === 'task_notification') {
       this.handleTaskNotification(msg)
+    } else if (msg.subtype === 'informational') {
+      // 루프가 사람에게 직접 띄우는 한 줄. 훅이 프롬프트를 막은 이유(UserPromptSubmit)나 슬래시
+      // 명령 출력이 여기로 온다 — 흘려보내면 "훅이 조용히 아무 일도 안 한" 것처럼 보인다.
+      // 'info' 는 CLI 에서도 트랜스크립트에서만 보이는 잡음이라 뺀다.
+      if (msg.level !== 'info' && msg.content.trim()) {
+        this.emitItem({
+          id: `info:${msg.uuid}`,
+          type: 'system',
+          text: msg.content.trim(),
+          ts: Date.now()
+        })
+      }
+    } else if (msg.subtype === 'hook_response') {
+      this.handleHookResponse(msg)
     }
+  }
+
+  /**
+   * 훅 실행 결과. 성공한 훅은 조용히 넘긴다 — 훅은 매 도구 호출마다 돌 수 있어 전부 찍으면 대화가
+   * 훅 로그로 뒤덮인다. 죽었거나 0 이 아닌 코드로 끝난 훅만, 터미널처럼 이유(stderr)와 함께 알린다.
+   */
+  private handleHookResponse(
+    msg: Extract<SDKMessage, { type: 'system'; subtype: 'hook_response' }>
+  ): void {
+    if (msg.outcome !== 'error' && !(msg.exit_code && msg.exit_code !== 0)) return
+    const detail = (msg.stderr || msg.output || '').trim().split('\n').slice(0, 3).join(' ')
+    const code = typeof msg.exit_code === 'number' ? ` (exit ${msg.exit_code})` : ''
+    this.emitItem({
+      id: `hook:${msg.hook_id}`,
+      type: 'system',
+      text: `${msg.hook_event} hook failed${code}${detail ? `: ${detail}` : ''}`,
+      ts: Date.now()
+    })
   }
 
   // ── 동적 워크플로우 진행 추적 ─────────────────────────────────────────────
@@ -1248,12 +1404,19 @@ export class ClaudeSession {
           streaming: false
         })
       } else if (block.type === 'tool_use') {
+        const name = String(block.name)
+        // assistant 메시지는 도구 실행 **전**에 도착하므로, 이 시점의 디스크 내용이 곧 변경 전 상태다.
+        // 여기서 diff 를 떠 두지 않으면 나중엔 이미 적용된 뒤라 되살릴 수 없다.
+        const diff = isFileChangeTool(name)
+          ? buildFileChangeDiff(name, block.input ?? {}, this.deps.cwd)
+          : null
         this.emitItem({
           id: `${apiId}:tool:${String(block.id)}`,
           type: 'tool_use',
           toolId: String(block.id),
-          name: String(block.name),
+          name,
           input: clampInput(block.input ?? {}),
+          ...(diff ? { diff: clampText(diff) } : {}),
           ts: Date.now()
         })
       }

@@ -37,6 +37,19 @@ export type ClaudePermissionMode = Extract<
   'default' | 'acceptEdits' | 'plan' | 'auto'
 >
 
+/**
+ * CLI 가 보고한 모드 문자열이 우리가 UI 로 보여 줄 수 있는 값인지 가른다.
+ *
+ * `claudeMode()` 와 달리 **모르는 값을 기본 모드로 접지 않는다** — CLI 는 우리 모드 선택지에 없는
+ * bypassPermissions·dontAsk 로도 갈 수 있는데, 그걸 'default' 로 접어 표시하면 실제보다 안전해
+ * 보이는 거짓말이 된다. 그런 값은 아예 반영하지 않고 마지막으로 알던 모드를 유지한다.
+ */
+export function asClaudeMode(mode: string | undefined): ClaudePermissionMode | null {
+  return CLAUDE_META.permissionModes.some((m) => m.id === mode)
+    ? (mode as ClaudePermissionMode)
+    : null
+}
+
 /** Claude Agent SDK 가 받는 effort 단계(Codex 전용 'minimal' 제외). */
 export type ClaudeEffortLevel = Exclude<EffortLevel, 'minimal'>
 
@@ -69,6 +82,8 @@ export interface SessionConfig {
   permissionMode: ClaudePermissionMode
   autoCompact: boolean
   resumeSessionId: string | null
+  /** `/add-dir` 로 더해진 작업 루트(절대 경로). 비어 있으면 cwd 만 쓴다. */
+  additionalDirs: string[]
 }
 
 /** /btw 사이드 질문 진행 상황(호스트 → 메인 → 렌더러). 'start' 는 메인이 직접 보낸다. */
@@ -148,6 +163,9 @@ export type HostEvent =
   // workspace 를 idle 로 확정하도록 메인에 요청한다(메인의 forceIdle 로 연결).
   | { type: 'settleIdle'; workspaceId: string }
   | { type: 'permissionRequest'; request: PermissionRequest }
+  // 세션이 스스로 바꾼 권한 모드(계획 승인 → acceptEdits/default). 메인이 store 에 반영하고
+  // 렌더러로 방송한다 — 모드는 workspace 상태라 호스트만 알고 있으면 UI 와 어긋난다.
+  | { type: 'permissionMode'; workspaceId: string; mode: ClaudePermissionMode }
   | { type: 'response'; reqId: string; ok: true; data: unknown }
   | { type: 'response'; reqId: string; ok: false; error: string }
   | { type: 'sideQuestion'; update: SideQuestionUpdate }

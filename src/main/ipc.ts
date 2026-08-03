@@ -71,6 +71,7 @@ import {
   workspaceStack
 } from '@shared/types'
 import { backendMeta } from './agent/registry'
+import { appendMemory } from './claude/memory'
 import type {
   AgentBackendId,
   AppState,
@@ -86,6 +87,7 @@ import type {
   ImageAttachment,
   McpAction,
   McpServerInfo,
+  MemoryScope,
   PermissionDecision,
   PermissionMode,
   PrMergeMethod,
@@ -738,6 +740,26 @@ export function registerIpc(ctx: IpcContext): void {
     })
     return {}
   })
+
+  // `#` 단축키 — 대화를 끊지 않고 CLAUDE.md 에 기억 한 줄을 덧붙인다.
+  ipcMain.handle(
+    IPC.workspaceAddMemory,
+    (
+      _e,
+      workspaceId: string,
+      scope: MemoryScope,
+      text: string
+    ): { path?: string; error?: string } => {
+      const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
+      if (!ws) return { error: 'Workspace not found.' }
+      return appendMemory(scope, ws.worktreePath, text)
+    }
+  )
+
+  // /add-dir — worktree 밖 디렉토리를 작업 루트로 더한다(세션은 다음 메시지에서 새로 열린다).
+  ipcMain.handle(IPC.workspaceAddDir, (_e, workspaceId: string, dir: string) =>
+    ctx.sessions.addDirectory(workspaceId, dir)
+  )
 
   // ── 채팅 ───────────────────────────────────────────────────────────────
 

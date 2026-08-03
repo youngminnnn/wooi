@@ -77,6 +77,11 @@ export interface AgentBackend {
   /** 입력창 자동완성용 슬래시 명령 목록(capabilities.slashCommands). */
   listCommands(cwd: string): Promise<SlashCommandInfo[]>
   /**
+   * /add-dir — worktree 밖 디렉토리를 작업 루트로 더한다(capabilities.addDirectory).
+   * 세션 시작 시점에 고정되는 값이라 구현은 기존 세션을 정리하고 다음 메시지에서 다시 연다.
+   */
+  addDirectory?(workspaceId: string, dir: string): { error?: string }
+  /**
    * 계정 단위 레이트리밋 스냅샷을 갱신해 AppState 에 반영한다(capabilities.interactiveCommands).
    * /usage 조회의 파생물이라 별도 capability 를 두지 않는다 — 같은 제어 채널을 타므로 항상 함께 켜/꺼진다.
    *
@@ -214,7 +219,9 @@ export const CLAUDE_META: AgentBackendMeta = {
     // Agent SDK 는 스트리밍 입력 큐를 쓰지만 턴이 도는 중의 입력은 다음 턴으로 넘어간다.
     steering: false,
     inAppLogin: true,
-    rateLimits: true
+    rateLimits: true,
+    // SDK 의 additionalDirectories 로 worktree 밖 디렉토리를 작업 루트에 더할 수 있다.
+    addDirectory: true
   },
   // 실제 가용성은 CLI 설치 여부로 런타임에 덮어쓴다(checkAvailability).
   available: true
@@ -295,7 +302,9 @@ export const CODEX_META: AgentBackendMeta = {
     steering: true,
     // account/login/start 가 OAuth 콜백까지 호스팅해 PTY 없이 앱 안에서 로그인이 끝난다.
     inAppLogin: true,
-    rateLimits: true
+    rateLimits: true,
+    // Codex 는 샌드박스 쓰기 루트를 프로필로 잡아 세션 중 추가하는 경로가 없다.
+    addDirectory: false
   },
   // 실제 가용성은 codex CLI 설치·버전으로 런타임에 덮어쓴다(registry 의 backendAvailability).
   available: false
