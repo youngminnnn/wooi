@@ -16,7 +16,7 @@ import { CLAUDE_CODE_SYSTEM_PROMPT } from './systemPrompt'
 import { log } from '../logger'
 import { MCP_SETTING_SOURCES, resolveUserMcpServers } from './mcp'
 import { fastModeReasonText, planApprovalMode, PLAN_OPTIONS } from '@shared/types'
-import { claudeEffort, claudeMode, type ClaudePermissionMode } from './protocol'
+import { asClaudeMode, claudeEffort, claudeMode, type ClaudePermissionMode } from './protocol'
 import type {
   ChatItem,
   ChatEvent,
@@ -122,6 +122,13 @@ const CONTEXT_USAGE_TIMEOUT_MS = 5000
  * CLI 가 ExitPlanMode 를 처리하며 스스로 모드를 되돌리는 창을 넘긴 뒤에 우리 값을 얹는다.
  */
 const PLAN_MODE_APPLY_DELAY_MS = 250
+
+/**
+ * 계획 승인 직후 CLI 가 보고하는 모드를 무시할 창. PLAN_MODE_APPLY_DELAY_MS 동안 CLI 는 자기
+ * 기본값으로 되돌아갔다가 우리 값을 받으므로, 그 사이 보고를 그대로 반영하면 사용자가 고른
+ * "auto-accept edits" 가 잠깐 'default' 로 깜빡인다. 왕복이 끝날 여유를 조금 더 둔다.
+ */
+const PLAN_MODE_SETTLE_MS = PLAN_MODE_APPLY_DELAY_MS + 750
 
 /**
  * `assistant.error` 만으로 실패한 턴을 프로세스 교체로 다시 돌릴 가치가 있는지 가리는 패턴.
@@ -254,6 +261,8 @@ export class ClaudeSession {
    * 재시도하면 사용자 의도를 거스르므로, 그 경로에서는 재시도를 막는다.
    */
   private interrupted = false
+  /** 계획 승인 뒤 CLI 가 보고하는 권한 모드를 무시할 시각(epoch ms). syncPermissionMode 참고. */
+  private planSettleAt = 0
   /**
    * 턴이 진행 중인지(running 을 방출했고 아직 result/error 로 마무리되지 않았는지).
    * query 루프가 result 없이 끝났을 때 'running' 에 갇히지 않도록 finally 에서 idle 로 푸는 데 쓴다.
@@ -501,7 +510,25 @@ export class ClaudeSession {
   private applyPlanApproval(mode: ClaudePermissionMode): void {
     this.deps.permissionMode = mode
     this.deps.onPermissionMode(mode)
+    this.planSettleAt = Date.now() + PLAN_MODE_SETTLE_MS
     setTimeout(() => void this.setPermissionMode(mode), PLAN_MODE_APPLY_DELAY_MS)
+  }
+
+  /**
+   * CLI 가 스스로 바꾼 권한 모드를 UI 에 되비친다.
+   *
+   * 모드는 우리만 바꾸는 게 아니다 — 모델이 EnterPlanMode 로 계획 모드에 들어가거나, CLI 가
+   * ExitPlanMode 를 처리하며 모드를 되돌린다. 이 신호를 흘리면 하단 표시가 실제와 어긋난 채
+   * 남는다(계획을 세우는 중인데 표시는 "default"). CLI 는 모드가 바뀔 때마다
+   * `status` 메시지에 permissionMode 를 실어 보내므로, 그때마다 맞춰 준다.
+   */
+  private syncPermissionMode(reported: string | undefined): void {
+    const mode = asClaudeMode(reported)
+    if (!mode || mode === this.deps.permissionMode) return
+    // 계획 승인 직후의 되돌림은 사용자 선택이 아니라 CLI 의 중간 상태다(상수 주석 참고).
+    if (Date.now() < this.planSettleAt) return
+    this.deps.permissionMode = mode
+    this.deps.onPermissionMode(mode)
   }
 
   /**
@@ -1055,6 +1082,8 @@ export class ClaudeSession {
       this.currentSessionId = msg.session_id
       this.deps.onSessionId(msg.session_id)
       this.deps.emit({ type: 'session', sessionId: msg.session_id, model: msg.model })
+      // resume 으로 이어받은 세션은 우리가 보낸 값이 아니라 CLI 가 복원한 모드로 시작할 수 있다.
+      this.syncPermissionMode(msg.permissionMode)
       // preflight 는 여기서 돌리지 않는다 — init 은 입력 메시지를 받아야 오는데 preflight 는 그
       // 입력을 붙들고 있어 서로를 기다리게 된다. query 생성 직후(run)로 옮겼다.
     } else if (msg.subtype === 'permission_denied') {
@@ -1067,6 +1096,8 @@ export class ClaudeSession {
     } else if (msg.subtype === 'status') {
       // CLI 가 압축을 시작하면 status='compacting' 을 보낸다(수동 /compact 포함). UI 배지용.
       if (msg.status === 'compacting') this.deps.emit({ type: 'compacting', active: true })
+      // 권한 모드가 CLI 쪽에서 바뀌면 status(=null)에 실려 온다 — 모델의 EnterPlanMode 가 대표적.
+      this.syncPermissionMode(msg.permissionMode)
     } else if (msg.subtype === 'compact_boundary') {
       // 압축 완료 — 토큰 변화를 기록으로 남기고 진행 배지를 내린다. 자동/수동 모두 여기로 온다.
       const meta = msg.compact_metadata

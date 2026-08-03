@@ -37,6 +37,19 @@ export type ClaudePermissionMode = Extract<
   'default' | 'acceptEdits' | 'plan' | 'auto'
 >
 
+/**
+ * CLI 가 보고한 모드 문자열이 우리가 UI 로 보여 줄 수 있는 값인지 가른다.
+ *
+ * `claudeMode()` 와 달리 **모르는 값을 기본 모드로 접지 않는다** — CLI 는 우리 모드 선택지에 없는
+ * bypassPermissions·dontAsk 로도 갈 수 있는데, 그걸 'default' 로 접어 표시하면 실제보다 안전해
+ * 보이는 거짓말이 된다. 그런 값은 아예 반영하지 않고 마지막으로 알던 모드를 유지한다.
+ */
+export function asClaudeMode(mode: string | undefined): ClaudePermissionMode | null {
+  return CLAUDE_META.permissionModes.some((m) => m.id === mode)
+    ? (mode as ClaudePermissionMode)
+    : null
+}
+
 /** Claude Agent SDK 가 받는 effort 단계(Codex 전용 'minimal' 제외). */
 export type ClaudeEffortLevel = Exclude<EffortLevel, 'minimal'>
 
