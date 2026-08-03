@@ -11,8 +11,9 @@ project, the conventions we follow, and how to get a change merged.
 
 - **macOS (Apple Silicon)** — Wooi is a macOS desktop app and is currently only
   built/tested on Apple Silicon.
-- **Node.js 20** — the version pinned in [`.nvmrc`](./.nvmrc) and used in CI. If you
-  use `nvm`, run `nvm use`.
+- **Node.js 24** — the version pinned in [`.nvmrc`](./.nvmrc) and used in CI. It matches
+  the Node runtime bundled by Electron, so the build toolchain and the shipped app agree.
+  If you use `nvm`, run `nvm use`.
 - **git** — required at runtime. **`gh` (GitHub CLI)** is optional for local agent
   sessions, but must be installed and signed in to test PR, stack, and CI-check features.
 - At least one coding agent, installed and signed in: **Claude Code**, or **Codex CLI
@@ -24,7 +25,7 @@ project, the conventions we follow, and how to get a change merged.
 ```bash
 git clone https://github.com/youngminnnn/wooi.git
 cd wooi
-nvm use            # optional, selects Node 20
+nvm use            # optional, selects Node 24
 npm install        # installs deps + electron binary (postinstall)
 npm run dev        # launches the app in development mode (electron-vite)
 ```

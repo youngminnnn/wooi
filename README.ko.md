@@ -231,12 +231,12 @@ Wooi 는 대신 diff 자체를 작업대로 만듭니다. 리뷰할 PR 은 대�
 
 ## 소스로 빌드하기
 
-**macOS (Apple Silicon)** 와 **Node.js 20** 이 필요합니다(버전은 [`.nvmrc`](./.nvmrc) 참고).
+**macOS (Apple Silicon)** 와 **Node.js 24** 가 필요합니다(버전은 [`.nvmrc`](./.nvmrc) 참고).
 
 ```bash
 git clone https://github.com/youngminnnn/wooi.git
 cd wooi
-nvm use          # 선택 사항, Node 20 선택
+nvm use          # 선택 사항, Node 24 선택
 npm install      # 의존성 + Electron 바이너리 설치
 npm run dev      # 개발 모드 실행
 ```
