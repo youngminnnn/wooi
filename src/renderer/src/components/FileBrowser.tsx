@@ -3,6 +3,7 @@ import { ArrowLeft, AtSign, Maximize2 } from 'lucide-react'
 import { PanelToolbar } from './ChangesPanel'
 import { useStore } from '../store'
 import { appendMention, mentionWithRange } from '../lib/mention'
+import { isPaneWindow } from '../lib/paneWindow'
 import FileTree from './files/FileTree'
 import FileViewer from './files/FileViewer'
 import { selectedLineRange } from './files/lineRange'
@@ -25,7 +26,15 @@ export default function FileBrowser({ workspaceId }: { workspaceId: string }): R
 
   const setDraft = useStore((s) => s.setDraft)
   const pushToast = useStore((s) => s.pushToast)
-  const openViewer = useStore((s) => s.openFileViewer)
+  const openFileViewer = useStore((s) => s.openFileViewer)
+
+  /**
+   * 큰 뷰어로 넘기기. 분리한 패널 창([[paneWindow]])에서는 제공하지 않는다 —
+   * 그 창에는 뷰어가 없고, 메인 창으로 넘기면 보조 모니터에서 누른 파일이 반대편 화면에
+   * 뜨게 된다. 패널을 떼어 낸 이유가 그 반대라서, 여기서는 버튼 자체를 내린다
+   * (분리한 창은 크게 늘릴 수 있어 인라인 뷰어로도 읽을 만하다).
+   */
+  const openViewer = isPaneWindow ? undefined : (path: string) => openFileViewer(workspaceId, path)
 
   const selectFile = (path: string): void => {
     setOpenFile(path)
@@ -64,13 +73,15 @@ export default function FileBrowser({ workspaceId }: { workspaceId: string }): R
           <span className="flex-1 truncate text-xs font-mono text-neutral-300" title={openFile}>
             {openFile}
           </span>
-          <button
-            onClick={() => openViewer(workspaceId, openFile)}
-            title="Open in the full-size file viewer (⇧⌘O)"
-            className={iconBtn}
-          >
-            <Maximize2 size={12} />
-          </button>
+          {openViewer && (
+            <button
+              onClick={() => openViewer(openFile)}
+              title="Open in the full-size file viewer (⇧⌘O)"
+              className={iconBtn}
+            >
+              <Maximize2 size={12} />
+            </button>
+          )}
           <button
             onClick={mentionOpenFile}
             title="Mention this file in the message box (select lines first to mention just that range)"
@@ -93,7 +104,7 @@ export default function FileBrowser({ workspaceId }: { workspaceId: string }): R
           workspaceId={workspaceId}
           selected={openFile}
           onSelect={selectFile}
-          onOpen={(path) => openViewer(workspaceId, path)}
+          onOpen={openViewer}
         />
       </div>
     </div>

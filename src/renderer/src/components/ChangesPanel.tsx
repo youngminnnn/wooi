@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { RefreshCw } from 'lucide-react'
 import { useStore } from '../store'
+import { isPaneWindow } from '../lib/paneWindow'
 import DiffView from './DiffView'
 import type { WorkspaceDiff } from '@shared/types'
 
@@ -51,7 +52,8 @@ export default function ChangesPanel({
           diff={diff}
           loading={loading}
           baseBranch={baseBranch}
-          onOpenFile={(path) => openFileViewer(workspaceId, path)}
+          // 분리한 패널 창에는 큰 뷰어가 없다(FileBrowser 의 openViewer 주석 참고).
+          onOpenFile={isPaneWindow ? undefined : (path) => openFileViewer(workspaceId, path)}
         />
       </div>
     </div>
