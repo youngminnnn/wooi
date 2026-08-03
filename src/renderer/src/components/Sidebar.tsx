@@ -450,7 +450,11 @@ export default function Sidebar({
 function useDelegateActions(workspace: Workspace): RowAction[] {
   const enabled = useStore((s) => experimentsOf(s.app?.settings).multiAgent)
   const available = useAvailableBackends()
-  if (!enabled) return []
+  // 조율하는 쪽이 될 수 있는 백엔드에서만 제안한다 — 켤 수는 있는데 아무 일도 안 일어나는
+  // 스위치를 만들지 않기 위해서다.
+  const canCoordinate = available.find((b) => b.id === workspace.agentBackend)?.capabilities
+    .delegate
+  if (!enabled || !canCoordinate) return []
 
   const current = workspace.multiAgent?.subBackends ?? []
   return available

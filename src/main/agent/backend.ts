@@ -221,7 +221,9 @@ export const CLAUDE_META: AgentBackendMeta = {
     inAppLogin: true,
     rateLimits: true,
     // SDK 의 additionalDirectories 로 worktree 밖 디렉토리를 작업 루트에 더할 수 있다.
-    addDirectory: true
+    addDirectory: true,
+    // createSdkMcpServer 로 위임 도구를 프로세스 추가 없이 세션에 꽂을 수 있다(claude/delegate.ts).
+    delegate: true
   },
   // 실제 가용성은 CLI 설치 여부로 런타임에 덮어쓴다(checkAvailability).
   available: true
@@ -304,7 +306,10 @@ export const CODEX_META: AgentBackendMeta = {
     inAppLogin: true,
     rateLimits: true,
     // Codex 는 샌드박스 쓰기 루트를 프로필로 잡아 세션 중 추가하는 경로가 없다.
-    addDirectory: false
+    addDirectory: false,
+    // 아직 없다 — app-server 의 thread/start 에 mcp_servers 를 주입하는 경로를 확인하지 못했다.
+    // Codex 가 위임 **대상**이 되는 것은 이미 되며(`codex exec`), 이건 조율하는 쪽의 이야기다.
+    delegate: false
   },
   // 실제 가용성은 codex CLI 설치·버전으로 런타임에 덮어쓴다(registry 의 backendAvailability).
   available: false

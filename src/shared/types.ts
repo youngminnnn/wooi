@@ -446,6 +446,18 @@ export interface AgentCapabilities {
   rateLimits: boolean
   /** /add-dir — worktree 밖 디렉토리를 작업 루트로 더 열어 줄 수 있는지. */
   addDirectory: boolean
+  /**
+   * 이 백엔드가 **메인일 때** 다른 종류의 에이전트에게 작업을 위임할 수 있는지(실험 기능).
+   *
+   * 위임 도구는 MCP 로 주입하는데, 그 배관이 백엔드마다 다르다 — Claude 는 SDK 의 in-process
+   * 서버를 그대로 꽂을 수 있지만, Codex 는 app-server 스레드에 MCP 설정을 주입하는 별도 경로가
+   * 필요하다. 그래서 이 값이 false 인 백엔드에서는 위임을 **UI 에서 아예 제안하지 않는다** —
+   * 켤 수는 있는데 아무 일도 안 일어나는 스위치가 제일 나쁘다.
+   *
+   * 위임 **대상**이 되는 것과는 무관하다. Codex 는 대상이 될 수 있고(`codex exec` 로 돌린다),
+   * 이 값은 "조율하는 쪽이 될 수 있는가"만 말한다.
+   */
+  delegate: boolean
 }
 
 /**

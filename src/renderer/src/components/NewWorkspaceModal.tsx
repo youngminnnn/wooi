@@ -40,7 +40,10 @@ export default function NewWorkspaceModal({
   // 위임 대상 후보 = 쓸 수 있는 백엔드 중 메인이 아닌 것. 실험 기능이 꺼져 있거나 후보가 없으면
   // (에이전트가 하나뿐인 사용자) 이 블록은 통째로 나오지 않는다.
   const [subBackends, setSubBackends] = useState<AgentBackendId[]>([])
-  const canDelegate = experimentsOf(app.settings).multiAgent
+  const canDelegate =
+    experimentsOf(app.settings).multiAgent &&
+    // 조율하는 쪽이 될 수 있는 백엔드에서만 묻는다(capabilities.delegate).
+    Boolean(available.find((b) => b.id === effectiveBackend)?.capabilities.delegate)
   const delegateCandidates = available.filter((b) => b.id !== effectiveBackend)
   const showDelegation = canDelegate && delegateCandidates.length > 0
 
