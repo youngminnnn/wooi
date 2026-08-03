@@ -7,6 +7,7 @@ import { PaneWindows } from './paneWindows'
 import { ScriptRunner } from './scripts'
 import { flushStore, getStore } from './store'
 import { flushPendingSyncs } from './fsutil'
+import { initHealthLogging } from './health'
 import { TerminalManager } from './terminal'
 import { applyNavigationGuards, loadRenderer, rendererWebPreferences } from './windows'
 import { registerIpc } from './ipc'
@@ -151,6 +152,7 @@ app.whenReady().then(() => {
   sessions.prewarm()
   initUpdater(dispatch)
   initNotice(dispatch)
+  initHealthLogging(() => sessions.liveSessionCount())
   if (isDevIsolated()) {
     log.info(`dev 격리: userData=${app.getPath('userData')} worktreeRoot=${wooiHome()}`)
   }

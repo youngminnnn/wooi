@@ -322,8 +322,6 @@ interface UIState {
   /** 캐스케이드 단계별 결과를 토스트로 알린다(문제가 있으면 브랜치별로 나열). */
   reportCascade: (cascade: StackCascadeResult, successMsg: string) => void
   selectWorkspace: (id: string | null) => Promise<void>
-  /** 아직 로드되지 않았으면 해당 workspace 의 트랜스크립트를 불러온다(대시보드 비용 집계 등에서 사용). */
-  ensureHistory: (workspaceId: string) => Promise<void>
   refreshGit: (workspaceId: string) => Promise<void>
   /** 진입 여부와 무관하게 모든(비아카이브) 워크스페이스의 git 상태를 한 번에 갱신한다. */
   refreshAllGit: () => Promise<void>
@@ -1267,15 +1265,6 @@ export const useStore = create<UIState>((set, get) => ({
     void get().refreshGit(id)
     void get().refreshPr(id)
     void get().refreshScriptStatus(id)
-  },
-
-  ensureHistory: async (workspaceId) => {
-    if (get().loadedTranscripts[workspaceId]) return
-    const history = await window.api.chat.getHistory(workspaceId).catch(() => [])
-    set((s) => ({
-      transcripts: { ...s.transcripts, [workspaceId]: history },
-      loadedTranscripts: { ...s.loadedTranscripts, [workspaceId]: true }
-    }))
   },
 
   refreshGit: async (workspaceId) => {

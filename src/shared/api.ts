@@ -155,6 +155,11 @@ export interface WooiApi {
     send(workspaceId: string, text: string, images?: ImageAttachment[]): Promise<void>
     interrupt(workspaceId: string): Promise<void>
     getHistory(workspaceId: string): Promise<ChatItem[]>
+    /**
+     * 활성 워크스페이스별 누적 비용(USD). backend 가 보고한 값만 담는다.
+     * 대화 기록 자체를 렌더러로 끌어오지 않기 위한 통로다 — 화면에는 숫자 하나만 필요하다.
+     */
+    getCosts(): Promise<Record<string, number>>
     /** /btw 사이드 질문을 띄운다. 답변은 onSideQuestion 으로 스트리밍되며 기록에 남지 않는다. */
     sideQuestion(workspaceId: string, question: string): Promise<void>
     /** /clear — 대화 기록을 비우고 세션을 새로 시작한다(맥락 초기화, 워크스페이스는 유지). */

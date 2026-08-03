@@ -34,13 +34,100 @@ import { log } from '../logger'
  * 멀티플렉싱한다 — Claude 의 경우 단일 agent-host 프로세스). capability-게이트 메서드는 해당
  * 백엔드가 그 기능을 지원하지 않으면 명확한 에러로 끊거나(Promise) 조용히 무시한다(void).
  */
+/**
+ * 동시에 살려 둘 세션 수의 상한.
+ *
+ * 세션 하나는 에이전트 CLI 자식 프로세스 하나를 붙들고 있고, 그게 200~300MB 다. 워크스페이스를
+ * 열 때마다 쌓이면 10개를 넘어가는 순간 앱 하나가 3GB 를 넘겨 기기가 스와핑에 들어간다 —
+ * 그때의 증상은 "특정 기능이 느림"이 아니라 "전부 버벅임"이다.
+ *
+ * 시간 기준(예: 30분 유휴면 정리)이 아니라 **개수 기준**인 것이 중요하다. 시간 기준은
+ * 워크스페이스를 3개만 쓰는 사용자에게도 이유 없이 재시작 비용을 물린다. 개수 기준이면
+ * 상한 아래에서는 아무 일도 일어나지 않고, 실제로 문제가 되는 구간에서만 발동한다.
+ */
+const MAX_LIVE_SESSIONS = 6
+
+/**
+ * 이 시간 안에 쓴 세션은 정리 대상에서 뺀다. 방금 오간 대화로 돌아갔을 때까지 재시작을
+ * 겪게 하면, 아낀 메모리보다 잃는 체감이 크다.
+ */
+const MIN_IDLE_BEFORE_EVICT_MS = 5 * 60_000
+
+/**
+ * 정리할 세션을 고른다. 결정 규칙만 떼어 낸 순수 함수다 — 잘못 고르면 사용자가 쓰고 있던
+ * 세션이 끊기므로, 백엔드나 스토어 없이 규칙 자체를 검증할 수 있어야 한다.
+ *
+ * 상한을 넘은 만큼만, 오래 안 쓴 것부터 고른다. 실행 중이거나 방금 쓴 것은 후보에서 뺀다.
+ */
+export function pickEvictableSessions(args: {
+  lastUsedAt: ReadonlyMap<string, number>
+  running: ReadonlySet<string>
+  now: number
+  max?: number
+  minIdleMs?: number
+}): string[] {
+  const max = args.max ?? MAX_LIVE_SESSIONS
+  const minIdleMs = args.minIdleMs ?? MIN_IDLE_BEFORE_EVICT_MS
+  const excess = args.lastUsedAt.size - max
+  if (excess <= 0) return []
+
+  return [...args.lastUsedAt.entries()]
+    .filter(([id, at]) => !args.running.has(id) && args.now - at >= minIdleMs)
+    .sort((a, b) => a[1] - b[1])
+    .slice(0, excess)
+    .map(([id]) => id)
+}
+
 export class AgentOrchestrator {
   private backends = new Map<AgentBackendId, AgentBackend>()
+  /**
+   * 세션이 살아 있을 법한 워크스페이스와 마지막 사용 시각. 세션은 첫 전송 때 지연 생성되므로
+   * "전송한 적 있고 아직 dispose 되지 않은" 것이 곧 살아 있는 세션이다.
+   */
+  private lastUsedAt = new Map<string, number>()
 
   constructor(
     private dispatch: Dispatch,
     private getWindow: () => BrowserWindow | null
   ) {}
+
+  /** 지금 살아 있는 세션 수(계측용). */
+  liveSessionCount(): number {
+    return this.lastUsedAt.size
+  }
+
+  private touch(workspaceId: string): void {
+    this.lastUsedAt.set(workspaceId, Date.now())
+  }
+
+  /**
+   * 상한을 넘은 만큼 오래 안 쓴 세션을 정리한다. 정리해도 대화는 남는다 — 다음 전송이
+   * 저장된 sessionId 로 resume 하므로([[claude/manager]] 의 resumeSessionId), 사용자에게는
+   * 그 한 번의 응답이 조금 느린 것으로만 나타난다.
+   *
+   * 실행 중이거나 방금 쓴 세션은 건드리지 않는다. 그래서 상한을 넘겨도 정리할 후보가 없으면
+   * 아무것도 하지 않는다 — 상한은 목표치이지 강제 한도가 아니다.
+   */
+  private trimIdleSessions(): void {
+    if (this.lastUsedAt.size <= MAX_LIVE_SESSIONS) return
+
+    const running = new Set(
+      getStore()
+        .getState()
+        .workspaces.filter((w) => w.status === 'running')
+        .map((w) => w.id)
+    )
+    const evictable = pickEvictableSessions({
+      lastUsedAt: this.lastUsedAt,
+      running,
+      now: Date.now()
+    })
+
+    for (const workspaceId of evictable) {
+      log.info(`orchestrator: 유휴 세션 정리 (${workspaceId}) — 다음 전송에서 resume 된다`)
+      this.dispose(workspaceId)
+    }
+  }
 
   /** 식별자별 백엔드를 지연 생성·캐시한다. */
   private get(id: AgentBackendId): AgentBackend {
@@ -125,7 +212,9 @@ export class AgentOrchestrator {
   }
 
   sendMessage(workspaceId: string, text: string, images?: ImageAttachment[]): void {
+    this.touch(workspaceId)
     this.backendFor(workspaceId).sendMessage(workspaceId, text, images)
+    this.trimIdleSessions()
   }
 
   interrupt(workspaceId: string): Promise<void> {
@@ -159,19 +248,24 @@ export class AgentOrchestrator {
   }
 
   dispose(workspaceId: string): void {
+    this.lastUsedAt.delete(workspaceId)
     this.backendFor(workspaceId).dispose(workspaceId)
   }
 
   disposeAll(): void {
+    this.lastUsedAt.clear()
     for (const backend of this.backends.values()) backend.disposeAll()
   }
 
   abortAll(): void {
+    this.lastUsedAt.clear()
     for (const backend of this.backends.values()) backend.abortAll()
   }
 
   /** 계정 전환 후 모든 백엔드의 세션 프로세스를 재활용한다(대화 맥락은 유지). */
   recycleAll(): void {
+    // 프로세스가 갈리므로 살아 있던 세션도 함께 사라진다 — 다음 전송이 다시 만든다.
+    this.lastUsedAt.clear()
     for (const backend of this.backends.values()) backend.recycleAll()
   }
 
@@ -197,6 +291,8 @@ export class AgentOrchestrator {
     if (!backend.meta.capabilities.interactiveCommands.includes(kind)) {
       throw new Error(`${backend.meta.label} does not support /${kind}.`)
     }
+    // 슬래시 명령도 그 세션을 쓴 것이다 — 방금 /context 를 띄운 세션을 유휴로 보고 정리하면 안 된다.
+    if (this.lastUsedAt.has(workspaceId)) this.touch(workspaceId)
     return backend.runCommand(workspaceId, kind)
   }
 
