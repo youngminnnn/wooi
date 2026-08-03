@@ -777,10 +777,12 @@
 
       <h1>
         <span class="en"
-          >Run AI coding agents in parallel — and <span class="grad">stack</span> them</span
+          >Run AI coding agents in parallel — <span class="grad">stack</span> them, then
+          <span class="grad">review</span> them</span
         >
         <span class="ko"
-          >AI 코딩 에이전트를 병렬로 — 이어지는 작업은 <span class="grad">스택</span>으로</span
+          >AI 코딩 에이전트를 병렬로 — <span class="grad">쌓고</span>,
+          <span class="grad">리뷰</span>까지</span
         >
       </h1>
 
@@ -788,12 +790,14 @@
         <span class="en"
           >Independent work runs in parallel on macOS — each agent in its own isolated git worktree,
           on its own branch, shipping its own PR. When work builds on work, stack the agents instead
-          and let Wooi keep the stack straight.</span
+          and let Wooi keep the stack straight. And when a PR comes back for review, an agent reads
+          it in a worktree of its own and posts the findings from here.</span
         >
         <span class="ko"
           >독립적인 작업은 macOS 에서 병렬로 — 에이전트마다 격리된 git worktree 위에서, 각자 자기
           브랜치로, 각자 자기 PR 로. 이어지는 작업은 앞선 작업 위에 쌓아 두면, 스택 정리는 Wooi 가
-          맡습니다.</span
+          맡습니다. 리뷰할 PR 이 돌아오면 에이전트가 전용 worktree 에서 읽고, 지적을 여기서 바로
+          게시합니다.</span
         >
       </p>
 
@@ -858,6 +862,40 @@
 
         <div class="why-grid">
           <div class="why-card">
+            <div class="emoji">🧱</div>
+            <h3>
+              <span class="en">The stack is made of agents</span
+              ><span class="ko">스택의 단위가 에이전트</span>
+            </h3>
+            <p>
+              <span class="en"
+                >Stack one agent's workspace on another's branch. When the parent merges, Wooi
+                rebases the children and retargets their PR bases — the rest of the stack stays
+                valid.</span
+              >
+              <span class="ko"
+                >에이전트의 워크스페이스를 다른 워크스페이스의 브랜치 위에 쌓습니다. 부모가 병합되면
+                Wooi 가 자식들을 rebase 하고 PR base 를 옮겨, 남은 스택이 그대로 유효합니다.</span
+              >
+            </p>
+          </div>
+          <div class="why-card">
+            <div class="emoji">🔍</div>
+            <h3>
+              <span class="en">Review PRs in place</span><span class="ko">PR 리뷰도 이 안에서</span>
+            </h3>
+            <p>
+              <span class="en"
+                >Point an agent at a pull request, edit the findings it lands on the diff, and post
+                them without leaving the app.</span
+              >
+              <span class="ko"
+                >에이전트에게 PR 을 맡기고, diff 위에 붙은 지적을 다듬어 앱을 벗어나지 않고
+                게시합니다.</span
+              >
+            </p>
+          </div>
+          <div class="why-card">
             <div class="emoji">🧵</div>
             <h3><span class="en">True parallelism</span><span class="ko">진짜 병렬</span></h3>
             <p>
@@ -893,39 +931,6 @@
                 >Jump straight from an agent's diff to a GitHub PR in one click.</span
               >
               <span class="ko">에이전트의 diff 에서 GitHub PR 까지 클릭 한 번으로 넘어갑니다.</span>
-            </p>
-          </div>
-          <div class="why-card">
-            <div class="emoji">🧱</div>
-            <h3>
-              <span class="en">Stacked PRs, natively</span
-              ><span class="ko">stacked PR 기본 지원</span>
-            </h3>
-            <p>
-              <span class="en"
-                >Stack a workspace on another's branch. When a parent merges, Wooi rebases the
-                children and retargets their PR bases.</span
-              >
-              <span class="ko"
-                >워크스페이스를 다른 브랜치 위에 쌓으면, 부모가 병합될 때 자식들을 rebase 하고 PR
-                base 를 옮겨 줍니다.</span
-              >
-            </p>
-          </div>
-          <div class="why-card">
-            <div class="emoji">🔍</div>
-            <h3>
-              <span class="en">Review PRs in place</span><span class="ko">PR 리뷰도 이 안에서</span>
-            </h3>
-            <p>
-              <span class="en"
-                >Point an agent at a pull request, edit the findings it lands on the diff, and post
-                them without leaving the app.</span
-              >
-              <span class="ko"
-                >에이전트에게 PR 을 맡기고, diff 위에 붙은 지적을 다듬어 앱을 벗어나지 않고
-                게시합니다.</span
-              >
             </p>
           </div>
           <div class="why-card">

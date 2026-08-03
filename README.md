@@ -1,6 +1,7 @@
 # Wooi
 
-**Run AI coding agents in parallel — and stack them when work builds on work.**
+**Run AI coding agents in parallel — stack them when work builds on work, and review the
+PRs that come back.**
 
 **English** · [한국어](./README.ko.md)
 
@@ -17,15 +18,16 @@ and no automatic prompt** — nothing runs until you send your first message.
 
 ## Why Wooi
 
+- 🧱 **The stack is made of agents** — stack one agent's workspace on another's branch.
+  When the parent merges, Wooi rebases the children and retargets their PR bases, so the
+  rest of the stack stays valid.
+- 🔍 **Review PRs in place** — point an agent at a pull request, edit its findings, and post
+  them without leaving the app.
 - 🧵 **True parallelism** — kick off a refactor, a feature, and a bugfix at the same
   time, and watch all three from one sidebar.
 - 🔒 **Isolated by default** — a separate worktree + branch per task means agents never
   collide in a shared working tree.
 - 🚢 **PR-native** — jump straight from an agent's diff to a GitHub PR in one click.
-- 🔍 **Review PRs in place** — point an agent at a pull request, edit its findings, and post
-  them without leaving the app.
-- 🧱 **Stacked PRs, natively** — when work has to build on work, stack one workspace on
-  another's branch and let Wooi keep the stack straight.
 - 🕵️ **No telemetry** — no servers of its own; transcripts stored locally only.
 
 **[Download the latest release →](https://github.com/youngminnnn/wooi/releases/latest/download/Wooi-arm64.dmg)**
