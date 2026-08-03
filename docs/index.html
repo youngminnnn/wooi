@@ -871,8 +871,8 @@
                 valid.</span
               >
               <span class="ko"
-                >에이전트의 워크스페이스를 다른 워크스페이스의 브랜치 위에 쌓습니다. 부모가 병합되면
-                Wooi 가 자식들을 rebase 하고 PR base 를 옮겨, 남은 스택이 그대로 유효합니다.</span
+                >에이전트 워크스페이스를 다른 워크스페이스의 브랜치 위에 쌓습니다. 부모가 병합되면
+                Wooi 가 자식들을 rebase 하고 PR base 를 옮깁니다. 남은 스택은 그대로 유효.</span
               >
             </p>
           </div>
@@ -890,7 +890,7 @@
               >
               <span class="ko"
                 >PR 리뷰는 이제 어떤 에이전트든 합니다. 없는 건 그 결과를 다룰 화면입니다. 지적이
-                해당하는 diff 줄 위에 바로 붙습니다 — 고치고, 버리고, 낱개로든 한꺼번에든
+                해당 diff 줄 위에 바로 붙습니다. 고치고, 버리고, 낱개로든 한꺼번에든
                 게시합니다.</span
               >
             </p>
@@ -925,12 +925,19 @@
           </div>
           <div class="why-card">
             <div class="emoji">🚢</div>
-            <h3><span class="en">PR-native</span><span class="ko">PR 친화적</span></h3>
+            <h3>
+              <span class="en">Straight from diff to PR</span
+              ><span class="ko">diff 에서 바로 PR 로</span>
+            </h3>
             <p>
               <span class="en"
-                >Jump straight from an agent's diff to a GitHub PR in one click.</span
+                >Open a GitHub PR for an agent's work in one click, without switching to the browser
+                first.</span
               >
-              <span class="ko">에이전트의 diff 에서 GitHub PR 까지 클릭 한 번으로 넘어갑니다.</span>
+              <span class="ko"
+                >에이전트가 만든 변경을 브라우저로 옮겨 가지 않고 그 자리에서 GitHub PR 로
+                엽니다.</span
+              >
             </p>
           </div>
           <div class="why-card">
@@ -1260,7 +1267,7 @@
                   was missing is somewhere to work the result.</span
                 >
                 <span class="ko"
-                  >3분할입니다 — 왼쪽은 변경 파일과 파일별 지적 개수, 가운데는 diff 전체, 오른쪽은
+                  >3분할입니다. 왼쪽은 변경 파일과 파일별 지적 개수, 가운데는 diff 전체, 오른쪽은
                   총평/활동 사이드바. PR 리뷰는 이제 어떤 에이전트든 합니다. 없던 건 그 결과를 다룰
                   화면입니다.</span
                 >
@@ -1278,9 +1285,9 @@
                   comment before it goes out, not after.</span
                 >
                 <span class="ko"
-                  >각 지적이 자기 hunk 에 앵커되어, 심각도 배지와 마크다운 본문을 단 카드로 diff
-                  안에 바로 붙습니다. 에이전트가 diff 에 없는 줄을 짚으면 카드가 그 사실과 옮겨진
-                  위치를 알려 줍니다 — 엉뚱한 줄에 달린 코멘트를 나간 뒤가 아니라 나가기 전에
+                  >각 지적이 자기 hunk 에 앵커되어 심각도 배지와 마크다운 본문을 단 카드로 diff 안에
+                  바로 붙습니다. 에이전트가 diff 에 없는 줄을 짚으면 카드가 그 사실과 옮겨진 위치를
+                  알려 줍니다. 엉뚱한 줄에 달린 코멘트를 나간 뒤가 아니라 나가기 전에
                   잡습니다.</span
                 >
               </li>
@@ -1299,7 +1306,7 @@
                 <span class="ko"
                   ><strong>Edit</strong> 로 문장을 그 자리에서 고치고, <strong>Discard</strong> 로
                   안 달 것을 버리고, <strong>Comment</strong> 로 그 지적만 올립니다. 원하는 것만
-                  체크해 한 번에 올릴 수도 있습니다 — 각각 개별 리뷰 코멘트로 나가고, 게시된 카드는
+                  체크해 한 번에 올릴 수도 있습니다. 각각 개별 리뷰 코멘트로 나가고, 게시된 카드는
                   GitHub 코멘트 링크만 남기고 조용해집니다.</span
                 >
               </li>

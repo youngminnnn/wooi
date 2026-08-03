@@ -27,7 +27,8 @@ and no automatic prompt** — nothing runs until you send your first message.
   time, and watch all three from one sidebar.
 - 🔒 **Isolated by default** — a separate worktree + branch per task means agents never
   collide in a shared working tree.
-- 🚢 **PR-native** — jump straight from an agent's diff to a GitHub PR in one click.
+- 🚢 **Straight from diff to PR** — open a GitHub PR for an agent's work in one click,
+  without switching to the browser first.
 - 🕵️ **No telemetry** — no servers of its own; transcripts stored locally only.
 
 **[Download the latest release →](https://github.com/youngminnnn/wooi/releases/latest/download/Wooi-arm64.dmg)**
