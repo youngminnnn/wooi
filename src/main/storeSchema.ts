@@ -25,7 +25,7 @@ const DEFAULT_MODEL = CLAUDE_DEFAULT_MODEL
  * 디스크 영속 형식의 현재 스키마 버전. 영속 데이터 모양이 바뀔 때마다 1 올리고,
  * MIGRATIONS 에 직전 버전 → 새 버전 변환 함수를 추가한다.
  */
-export const CURRENT_SCHEMA_VERSION = 16
+export const CURRENT_SCHEMA_VERSION = 17
 
 /**
  * v12 이하의 settings 모양. 그 시절엔 에이전트가 Claude 하나뿐이라 모델·effort·fast mode·
@@ -314,13 +314,24 @@ export const MIGRATIONS: Array<(raw: Record<string, unknown>) => Record<string, 
   },
 
   // v15 → v16: 판정 두 필드(lastVerdict·lastVerdictAt)를 lastSubmission 하나로 합친다.
-  // 같은 리뷰를 PR 변화 없이 다시 내는 걸 막으려면 **본문과 그때의 head sha** 가 필요한데
-  // 옛 레코드에는 없다 — 비교할 수 없는 기록은 없느니만 못하므로 null 로 둔다(다음 제출은
-  // 한 번 통과하고, 그 뒤부터 정상적으로 걸린다).
+  // 그때의 중복 차단은 본문·head sha 비교로 돌아갔는데 옛 레코드에는 그 둘이 없어 null 로 뒀다
+  // (v17 에서 비교 자체가 사라졌으므로 지금은 판정 칩이 한 번 비는 것 말고는 영향이 없다).
   (raw) => {
     const reviews = ((raw.reviews as Record<string, unknown>[]) ?? []).map((r) => {
       const { lastVerdict: _v, lastVerdictAt: _at, ...rest } = r
       return { ...rest, lastSubmission: rest.lastSubmission ?? null }
+    })
+    return { ...raw, reviews }
+  },
+
+  // v16 → v17: 제출 기록에서 본문과 head sha 를 뺀다. 같은 리뷰를 또 내는 것은 이제 본문 비교가
+  // 아니라 "제출하면 총평을 비운다" 로 막으므로, 이 둘은 아무도 읽지 않는 사본일 뿐이다.
+  (raw) => {
+    const reviews = ((raw.reviews as Record<string, unknown>[]) ?? []).map((r) => {
+      const last = r.lastSubmission as Record<string, unknown> | null | undefined
+      if (!last) return r
+      const { body: _body, headSha: _sha, ...rest } = last
+      return { ...r, lastSubmission: rest }
     })
     return { ...raw, reviews }
   }

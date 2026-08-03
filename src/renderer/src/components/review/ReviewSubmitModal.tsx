@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Check, MessageSquare, XCircle } from 'lucide-react'
 import type { ReviewSession, ReviewVerdict } from '@shared/types'
-import { DUPLICATE_REVIEW_BLOCKED, SELF_REVIEW_BLOCKED } from '@shared/types'
+import { EMPTY_RESUBMIT_BLOCKED, SELF_REVIEW_BLOCKED } from '@shared/types'
 import Modal, { ghostBtn, inputClass, labelClass, primaryBtn } from '../Modal'
 import { useStore } from '../../store'
 import { isPosted } from '../../lib/review'
@@ -44,7 +44,9 @@ const OPTIONS: VerdictOption[] = [
  * PR 전체에 대한 판정을 제출한다.
  *
  * 본문은 에이전트의 총평으로 미리 채운다 — 대부분 그 문장이 곧 리뷰 요약이고, 사용자는
- * 다듬기만 하면 된다. 빈 화면에서 요약을 다시 쓰게 하는 건 낭비다.
+ * 다듬기만 하면 된다. 빈 화면에서 요약을 다시 쓰게 하는 건 낭비다. 제출이 끝나면 그 총평은
+ * main 이 비우므로(`ReviewSession.summary`), 다음에 이 화면을 열면 본문이 비어 있다 — 같은
+ * 말을 무심코 또 올리는 일은 그렇게 막는다.
  */
 export default function ReviewSubmitModal({
   session,
@@ -72,26 +74,12 @@ export default function ReviewSubmitModal({
   const [busy, setBusy] = useState(false)
 
   // GitHub 은 승인이 아닌 판정에 본문을 요구한다. 눌러 보고 실패하는 대신 미리 막는다.
-  const needsBody = verdict !== 'approve'
-
-  // 같은 판정·같은 문장을, 그 사이 움직이지 않은 PR 에 또 내는 것은 상대의 타임라인만
-  // 어지럽힌다. main 도 제출 직전에 실제 head sha 로 다시 확인하지만, 버튼이 눌리기 전에
-  // 이유를 보여 주는 편이 낫다.
-  const last = session.lastSubmission
-  const duplicate =
-    !!last &&
-    last.verdict === verdict &&
-    last.body === body.trim() &&
-    last.headSha === session.lastSeenHeadSha
+  // 이미 한 번 제출했다면 승인도 본문을 요구한다 — 총평은 제출과 함께 비워졌으므로, 빈 본문은
+  // "같은 판정을 아무 말 없이 또 낸다" 는 뜻이다.
+  const needsBody = verdict !== 'approve' || !!session.lastSubmission
 
   const posting = alsoPost && unposted.length > 0
-  // 판정이 중복이어도 아직 안 단 코멘트는 올릴 수 있어야 한다 — 그러지 않으면 이 화면이
-  // 막다른 길이 되고, 사용자는 코멘트를 달려고 목록으로 돌아가야 한다.
-  const submitsVerdict = !duplicate
-  const canSubmit =
-    !busy &&
-    (submitsVerdict || posting) &&
-    (!submitsVerdict || !needsBody || body.trim().length > 0)
+  const canSubmit = !busy && (!needsBody || body.trim().length > 0)
 
   const submit = async (): Promise<void> => {
     if (!canSubmit) return
@@ -108,14 +96,9 @@ export default function ReviewSubmitModal({
         return
       }
     }
-    if (submitsVerdict) {
-      const ok = await submitReview(session.id, verdict, body)
-      setBusy(false)
-      if (ok) onClose()
-      return
-    }
+    const ok = await submitReview(session.id, verdict, body)
     setBusy(false)
-    onClose()
+    if (ok) onClose()
   }
 
   return (
@@ -129,13 +112,7 @@ export default function ReviewSubmitModal({
             Cancel
           </button>
           <button onClick={submit} disabled={!canSubmit} className={primaryBtn}>
-            {busy
-              ? 'Submitting…'
-              : !submitsVerdict
-                ? `Post ${unposted.length} comment${unposted.length === 1 ? '' : 's'}`
-                : posting
-                  ? `Post ${unposted.length} & submit`
-                  : 'Submit review'}
+            {busy ? 'Submitting…' : posting ? `Post ${unposted.length} & submit` : 'Submit review'}
           </button>
         </>
       }
@@ -191,17 +168,12 @@ export default function ReviewSubmitModal({
             }}
             placeholder={needsBody ? 'Required — what should the author know?' : 'Optional'}
           />
-          {duplicate ? (
-            <p className="mt-1.5 text-xs text-[var(--warning-300)]">
-              {DUPLICATE_REVIEW_BLOCKED} Change the verdict or the message to submit again
-              {posting ? ' — your comments still go up.' : '.'}
-            </p>
-          ) : (
-            <p className="mt-1.5 text-xs text-neutral-500">
-              Prefilled with the agent&rsquo;s summary — edit it however you like. &#8984;&#8629; to
-              submit.
-            </p>
-          )}
+          <p className="mt-1.5 text-xs text-neutral-500">
+            {session.lastSubmission && !body.trim()
+              ? EMPTY_RESUBMIT_BLOCKED
+              : 'Prefilled with the agent’s summary — edit it however you like.'}{' '}
+            &#8984;&#8629; to submit.
+          </p>
         </div>
 
         {unposted.length > 0 && (

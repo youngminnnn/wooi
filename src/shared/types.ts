@@ -1289,11 +1289,14 @@ export const SELF_REVIEW_BLOCKED =
   "GitHub doesn't let you approve or request changes on your own pull request."
 
 /**
- * 같은 리뷰를 PR 변화 없이 다시 내려 할 때의 안내. 위와 같은 이유로 화면과 main 이 같은
- * 문장을 공유한다.
+ * 이미 한 번 낸 리뷰를 빈 본문으로 또 내려 할 때의 안내.
+ *
+ * 제출과 동시에 총평을 비우므로(`ReviewSession.summary`), 다시 내려면 새로 쓴 말이 있어야
+ * 한다 — 본문이 비었다는 건 할 말이 없다는 뜻이고, 그런 판정은 상대의 타임라인만 어지럽힌다.
+ * 화면과 main 이 같은 문장을 공유한다.
  */
-export const DUPLICATE_REVIEW_BLOCKED =
-  "You already submitted this review, and the pull request hasn't changed since."
+export const EMPTY_RESUBMIT_BLOCKED =
+  'You already submitted a review — write a message to submit another.'
 
 /**
  * Wooi 로 게시한 코멘트 1건.
@@ -1343,6 +1346,11 @@ export interface ReviewSession {
   /** 리뷰를 시작할 때 사용자가 쓴 최초 프롬프트. */
   prompt: string
   status: ReviewStatus
+  /**
+   * 에이전트의 총평. 제출 모달의 본문을 이걸로 채우고, **리뷰를 제출하면 비운다** — 그 내용은
+   * 이미 PR 로 갔으므로, 남겨 두면 같은 말이 다시 채워져 또 올라가기 쉽다. 후속 턴이 새 총평을
+   * 내면 다시 찬다.
+   */
   summary: string
   archived: boolean
   createdAt: number
@@ -1356,23 +1364,18 @@ export interface ReviewSession {
   lastSeenHeadSha: string
   /** 아직 확인하지 않은 새 활동(답글·커밋)이 있는지 — 사이드바 점. */
   unread: boolean
-  /** 마지막으로 제출한 리뷰. 화면의 판정 칩과 중복 제출 차단이 모두 이 값을 본다. */
+  /** 마지막으로 제출한 리뷰. 화면의 판정 칩이 이 값을 본다. */
   lastSubmission: ReviewSubmission | null
 }
 
 /**
- * 제출한 리뷰 1건의 기록.
+ * 제출한 리뷰 1건의 기록. 화면의 판정 칩이 이 값을 그린다.
  *
- * GitHub 은 같은 리뷰를 몇 번이든 다시 받아 주지만, PR 이 그대로인데 같은 말을 또 올리면
- * 상대의 타임라인만 어지럽힌다. 그래서 **본문과 그때의 head sha 까지** 남긴다 — 이 둘이
- * 있어야 "같은 내용을, 변한 것 없는 PR 에" 내는 경우를 정확히 집어낼 수 있다.
+ * 본문은 남기지 않는다 — 같은 말을 또 올리는 것은 제출과 동시에 총평(`summary`)을 비우는
+ * 것으로 막고, 본문 비교로 판단하지 않기 때문이다.
  */
 export interface ReviewSubmission {
   verdict: ReviewVerdict
-  /** 제출한 본문(앞뒤 공백을 정리한 형태). 같은 내용인지 비교하는 기준. */
-  body: string
-  /** 제출 시점에 우리가 알던 PR head sha. */
-  headSha: string
   at: number
 }
 

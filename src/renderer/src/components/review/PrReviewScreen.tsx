@@ -64,7 +64,7 @@ export default function PrReviewScreen({ reviewId }: { reviewId: string }): Reac
           {STATUS_LABEL[session.status]}
         </span>
 
-        {/* 마지막으로 낸 판정. 판정을 바꾸거나 PR 이 움직이면 다시 낼 수 있다. */}
+        {/* 마지막으로 낸 판정. 다시 내려면 제출 화면에서 새 본문을 쓰면 된다. */}
         {session.lastSubmission && <VerdictChip verdict={session.lastSubmission.verdict} />}
 
         {running && (
