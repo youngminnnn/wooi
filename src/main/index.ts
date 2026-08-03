@@ -117,10 +117,20 @@ function createWindow(): void {
   mainWindow.on('focus', () => mainWindow?.webContents.send(IPC.evtWindowFocus))
   mainWindow.on('blur', () => {
     mainWindow?.webContents.send(IPC.evtWindowBlur)
-    // 자리를 뜨는 순간은 밀린 쓰기를 내리기 좋은 시점이다 — 사용자가 앱을 보고 있지 않으니
-    // 몇 ms 의 블로킹이 드러나지 않고, 그대로 잠들거나 강제 종료돼도 상태가 남는다.
-    flushStore()
-    flushPendingSyncs()
+    // 앱을 떠나는 순간은 밀린 쓰기를 내리기 좋은 지점이다 — 사용자가 보고 있지 않으니 몇 ms 의
+    // 블로킹이 드러나지 않고, 그대로 잠들거나 강제 종료돼도 상태가 남는다.
+    //
+    // 단, 분리된 패널 창([[paneWindows]])으로 초점이 옮겨 간 것뿐일 수도 있다. 그때는 사용자가
+    // 여전히 앱을 쓰는 중이라 동기 쓰기가 그대로 체감된다 — 초점이 앱 밖으로 나갔을 때만 내린다.
+    // 초점 이동은 blur 다음에 반영되므로 한 틱 뒤에 확인한다.
+    setImmediate(() => {
+      const stillInApp = BrowserWindow.getAllWindows().some(
+        (w) => !w.isDestroyed() && w.isFocused()
+      )
+      if (stillInApp) return
+      flushStore()
+      flushPendingSyncs()
+    })
   })
 
   mainWindow.webContents.on('did-fail-load', (_e, code, desc) => {
