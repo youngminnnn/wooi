@@ -32,6 +32,7 @@ import {
   NOTIFICATION_CHANNEL_LABELS,
   NOTIFICATION_EVENT_LABELS,
   agentSettingsFor,
+  experimentsOf,
   normalizePermissionMode
 } from '@shared/types'
 import type {
@@ -383,6 +384,8 @@ function GeneralPage({
     applyTheme(theme)
     save({ theme })
   }
+  // 저장된 설정에 항목이 없을 수 있으므로(구버전에서 올라옴) 항상 기본값과 병합해 읽는다.
+  const experiments = experimentsOf(settings)
   return (
     <PageFrame title="General" description="Choose how Wooi looks and how new workspaces start.">
       <SettingGroup title="Appearance">
@@ -433,6 +436,20 @@ function GeneralPage({
             <option value="automatic">Create automatically</option>
             <option value="manual">Ask for name and branch</option>
           </select>
+        </SettingRow>
+      </SettingGroup>
+      <SettingGroup title="Experimental">
+        <SettingRow
+          title="Multi-agent delegation"
+          description="Let a workspace hand tasks to a different coding agent — Claude Code delegating to Codex, or the reverse. Rough edges expected."
+        >
+          <Switch
+            label="Multi-agent delegation"
+            checked={experiments.multiAgent}
+            // 실험 스위치는 켜고 끄는 즉시 다음 세션부터 반영된다. 이미 만들어 둔 멀티 에이전트
+            // 워크스페이스의 설정은 지우지 않으므로, 껐다 켜면 그대로 살아난다.
+            onChange={(value) => save({ experiments: { ...experiments, multiAgent: value } })}
+          />
         </SettingRow>
       </SettingGroup>
     </PageFrame>

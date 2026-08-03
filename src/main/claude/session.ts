@@ -17,15 +17,18 @@ import { CLAUDE_CODE_SYSTEM_PROMPT } from './systemPrompt'
 import { log } from '../logger'
 import { MCP_SETTING_SOURCES, resolveUserMcpServers } from './mcp'
 import { isReadOnlyWooiTool, WOOI_MCP_SERVER_NAME } from '../agent/tools/catalog'
+import { createDelegateServer, DELEGATE_MCP_SERVER_NAME, type DelegateServer } from './delegate'
 import { fastModeReasonText, planApprovalMode, PLAN_OPTIONS } from '@shared/types'
 import { asClaudeMode, claudeEffort, claudeMode, type ClaudePermissionMode } from './protocol'
 import type {
+  AgentBackendId,
   ChatItem,
   ChatEvent,
   EffortSetting,
   FastModeDisabledReason,
   FastModeState,
   ImageAttachment,
+  MultiAgentConfig,
   PermissionRequest,
   PermissionDecision,
   RewindPoint,
@@ -59,6 +62,19 @@ export interface SessionDeps {
    * 때문이다 — 모델은 그것을 인자로 지목할 수 없다.
    */
   wooiMcp: McpSdkServerConfigWithInstance
+  /**
+   * 멀티 에이전트 위임 설정. 없거나 null 이면 위임 도구를 아예 노출하지 않는다 —
+   * 기존 단일 에이전트 세션은 이 경로를 전혀 타지 않으므로 **없는 것이 기본**이다.
+   */
+  multiAgent?: MultiAgentConfig | null
+  /**
+   * 위임받을 백엔드의 모델·effort 기본값. 메인이 설정에서 계산해 내려 준다.
+   * multiAgent 가 없으면 쓰이지 않으므로 함께 생략할 수 있다.
+   */
+  agentDefaults?: (backend: AgentBackendId) => {
+    model: string | null
+    effort: EffortSetting | null
+  }
   emit: (event: ChatEvent) => void
   persist: (item: ChatItem) => void
   requestPermission: (
@@ -301,6 +317,14 @@ export class ClaudeSession {
    */
   private agentTasks = new Map<string, RunningAgent>()
   /**
+   * 위임 도구(`mcp__wooi__delegate`)를 제공하는 in-process MCP 서버. 멀티 에이전트 워크스페이스가
+   * 아니면 null 이고, 그때는 query options 에 아무것도 실리지 않는다.
+   *
+   * **query 보다 오래 산다.** 위임 실행은 query 재시작(콜드 resume·프로세스 사망 복구)을 넘어
+   * 살아 있을 수 있고, 진행 중인 것을 끊을 책임은 세션의 interrupt/dispose 에 있다.
+   */
+  private delegate: DelegateServer | null = null
+  /**
    * resume 콜드스타트의 "이중 패스"를 피하기 위한 상태.
    *
    * 다른 계정 로그인 등으로 세션을 콜드 resume 하면, 첫 턴이 디스크 트랜스크립트 전체를 다시
@@ -500,6 +524,9 @@ export class ClaudeSession {
   async interrupt(): Promise<void> {
     // 사용자 의도로 끝난 턴은 자동 재시도 대상이 아니다(handleQueryDeath 가 이 플래그를 본다).
     this.interrupted = true
+    // 위임 실행은 별도 프로세스/query 라 부모 query 의 interrupt 로는 끊기지 않는다. 여기서
+    // 끊지 않으면 사용자가 멈춘 뒤에도 `codex exec` 가 계속 파일을 고친다.
+    this.delegate?.abortAll()
     await this.q?.interrupt().catch(() => {})
   }
 
@@ -563,6 +590,9 @@ export class ClaudeSession {
   /** 입력 큐를 닫아 query 루프를 정상 종료시킨다. */
   dispose(): void {
     this.input.close()
+    // 위임 실행은 부모 query 와 수명이 따로다 — 여기서 끊지 않으면 워크스페이스를 닫아도
+    // 자식 프로세스가 남아 worktree 를 계속 건드린다.
+    this.delegate?.abortAll()
     this.q?.interrupt().catch(() => {})
   }
 
@@ -605,7 +635,15 @@ export class ClaudeSession {
             `Wooi's built-in tools take that name, so yours is not loaded in this workspace`
         )
       }
-      const mcpServers = { ...userServers, [WOOI_MCP_SERVER_NAME]: this.deps.wooiMcp }
+      const delegate = this.ensureDelegate()
+      const mcpServers = {
+        ...userServers,
+        [WOOI_MCP_SERVER_NAME]: this.deps.wooiMcp,
+        // 위임 도구는 아직 별도 서버다. 실행이 agent-host 안에서 일어나고(부모의 canUseTool 을
+        // 직접 쓴다) 호출이 분 단위로 블로킹되므로, "즉시 반환" 을 규약으로 삼는 wooiMcp 채널에
+        // 그대로 얹을 수 없다 — 합치는 방법은 후속 커밋에서 다룬다.
+        ...(delegate ? { [DELEGATE_MCP_SERVER_NAME]: delegate.config } : {})
+      }
       // 'ultracode' 는 effort 레벨이 아니라 별도 모드(xhigh + 상시 워크플로우 조율)다 — SDK 로는
       // effort 옵션이 아니라 settings 레이어의 ultracode: true 로 전달한다. 그 외 effort 레벨은
       // effort 옵션으로 그대로 넘기고, null 이면 아무것도 넘기지 않아 모델 기본 동작을 따른다.
@@ -1306,6 +1344,65 @@ export class ClaudeSession {
   }
 
   /**
+   * 위임 실행의 도구 승인.
+   *
+   * 부모 세션의 `canUseTool` 을 **그대로** 태운다 — 그래야 사용자가 저장해 둔 always-allow 규칙,
+   * auto 모드, 파일 변경 diff 프롬프트가 위임 실행에도 똑같이 적용된다. 네이티브 Task 서브에이전트의
+   * 도구 호출이 부모 화면에서 같은 규칙으로 처리되는 것과 맞추려는 것이다.
+   *
+   * 단 하나 `ExitPlanMode` 만 태우지 않는다. 그 분기는 승인 결과로 **부모 워크스페이스의 권한
+   * 모드를 바꾸는데**(applyPlanApproval), 위임받은 실행이 그걸 갈아치우면 사용자가 고른 적 없는
+   * 권한이 열린다. 계획은 텍스트로 돌려받으면 충분하다.
+   */
+  private delegatePermission = async (
+    toolName: string,
+    input: Record<string, unknown>,
+    options: { title?: string; displayName?: string; decisionReason?: string }
+  ): Promise<PermissionResult> => {
+    if (toolName === 'ExitPlanMode') {
+      return {
+        behavior: 'deny',
+        message:
+          'Plan mode belongs to the workspace that delegated this task — you cannot leave it. ' +
+          'Return your plan as text instead.'
+      }
+    }
+    return this.canUseTool(toolName, input, options)
+  }
+
+  /**
+   * 위임 도구 서버를 (한 번만) 만든다. 멀티 에이전트 워크스페이스가 아니거나 넘길 백엔드가
+   * 없으면 null 을 돌려주고, 그러면 query options 에 위임 도구가 실리지 않는다.
+   *
+   * 한 번만 만드는 이유는 진행 중인 실행의 AbortController 를 이 인스턴스가 들고 있기 때문이다 —
+   * query 를 다시 열 때마다 새로 만들면 앞선 위임 실행을 끊을 손잡이를 잃는다.
+   */
+  private ensureDelegate(): DelegateServer | null {
+    const backends = this.deps.multiAgent?.subBackends ?? []
+    if (backends.length === 0) return null
+    if (this.delegate) return this.delegate
+
+    this.delegate = createDelegateServer({
+      cwd: this.deps.cwd,
+      repoPath: this.deps.repoPath,
+      subBackends: backends,
+      // 값이 아니라 함수다 — 세션 중에 권한 모드가 바뀌면 다음 위임부터 그 값을 따라야 한다.
+      permissionMode: () => this.deps.permissionMode,
+      defaults: this.deps.agentDefaults ?? (() => ({ model: null, effort: null })),
+      canUseTool: this.delegatePermission,
+      upsertAgent: (agent) => {
+        // 같은 taskId 로 다시 넣어 진행 상황을 갱신한다. 사이드바는 전량 REPLACE 라 이걸로 충분하다.
+        this.agentTasks.set(agent.taskId, { ...agent })
+        this.emitAgents()
+      },
+      removeAgent: (taskId) => {
+        if (this.agentTasks.delete(taskId)) this.emitAgents()
+      }
+    })
+    return this.delegate
+  }
+
+  /**
    * 현재 서브에이전트 목록 전량을 방출한다(REPLACE 시맨틱).
    *
    * 델타가 아니라 매번 전량을 보내는 게 핵심이다 — 종료 알림 하나가 유실돼도 다음 갱신이나
@@ -1315,8 +1412,16 @@ export class ClaudeSession {
     this.deps.emit({ type: 'agents', agents: [...this.agentTasks.values()] })
   }
 
-  /** 추적 중인 서브에이전트를 모두 비우고 빈 목록을 방출한다(query 가 사라진 경로에서 호출). */
+  /**
+   * 추적 중인 서브에이전트를 모두 비우고 빈 목록을 방출한다(query 가 사라진 경로에서 호출).
+   *
+   * 네이티브 서브에이전트는 CLI 프로세스와 함께 죽으므로 목록만 비우면 되지만, **위임 실행은
+   * 별도 프로세스라 그냥 살아남는다.** query 가 사라지면 그 도구 호출의 결과를 돌려줄 곳이
+   * 없으므로(고아가 된다) 여기서 함께 끊는다 — 안 그러면 화면에서만 사라진 채 worktree 를
+   * 계속 고치는 프로세스가 남는다.
+   */
   private clearAgents(): void {
+    this.delegate?.abortAll()
     if (this.agentTasks.size === 0) return
     this.agentTasks.clear()
     this.emitAgents()

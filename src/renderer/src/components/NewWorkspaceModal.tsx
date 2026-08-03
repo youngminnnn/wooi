@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { workspaceDisplayName } from '@shared/types'
+import { AGENT_BACKEND_LABELS, experimentsOf, workspaceDisplayName } from '@shared/types'
 import type { AgentBackendId } from '@shared/types'
 import { useStore } from '../store'
 import Modal, { inputClass, labelClass, primaryBtn, ghostBtn } from './Modal'
@@ -37,17 +37,35 @@ export default function NewWorkspaceModal({
       ? agentBackend
       : available[0].id
 
+  // 위임 대상 후보 = 쓸 수 있는 백엔드 중 메인이 아닌 것. 실험 기능이 꺼져 있거나 후보가 없으면
+  // (에이전트가 하나뿐인 사용자) 이 블록은 통째로 나오지 않는다.
+  const [subBackends, setSubBackends] = useState<AgentBackendId[]>([])
+  const canDelegate = experimentsOf(app.settings).multiAgent
+  const delegateCandidates = available.filter((b) => b.id !== effectiveBackend)
+  const showDelegation = canDelegate && delegateCandidates.length > 0
+
+  const toggleSub = (id: AgentBackendId): void => {
+    setSubBackends((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
+  }
+
   // 닫고 즉시 사이드바에 스피너 행을 띄운다(worktree 준비는 백그라운드). 실패는 토스트로 알린다.
   const create = (): void => {
     if (!name.trim()) return
     const trimmed = name.trim()
-    void useStore
-      .getState()
-      .createWorkspace(
-        repoId,
-        { name: trimmed, parentWorkspaceId, agentBackend: effectiveBackend },
-        trimmed
-      )
+    void useStore.getState().createWorkspace(
+      repoId,
+      {
+        name: trimmed,
+        parentWorkspaceId,
+        agentBackend: effectiveBackend,
+        // 메인을 바꿔 후보에서 빠진 값이 남아 있을 수 있으므로 여기서 한 번 더 거른다
+        // (main 도 multiAgentConfigFrom 에서 같은 판단을 한다).
+        ...(showDelegation
+          ? { subBackends: subBackends.filter((id) => id !== effectiveBackend) }
+          : {})
+      },
+      trimmed
+    )
     onClose()
   }
 
@@ -107,6 +125,34 @@ export default function NewWorkspaceModal({
             </div>
             <p className="mt-1.5 text-xs text-neutral-600">
               A workspace stays on the agent it was created with.
+            </p>
+          </div>
+        )}
+
+        {showDelegation && (
+          <div>
+            <label className={labelClass}>Delegate to (experimental)</label>
+            <div className="flex gap-1.5">
+              {delegateCandidates.map((b) => (
+                <button
+                  key={b.id}
+                  type="button"
+                  onClick={() => toggleSub(b.id)}
+                  className={
+                    'flex-1 flex items-center justify-center gap-2 text-sm px-3 py-2 rounded-lg border transition-colors ' +
+                    (subBackends.includes(b.id)
+                      ? 'border-[var(--info-500)] bg-[var(--info-600)]/15 text-neutral-100'
+                      : 'border-[var(--border)] text-neutral-300 hover:bg-[var(--surface-2)]')
+                  }
+                >
+                  <AgentBackendMark backend={b.id} size={15} />
+                  {b.label}
+                </button>
+              ))}
+            </div>
+            <p className="mt-1.5 text-xs text-neutral-600">
+              {AGENT_BACKEND_LABELS[effectiveBackend]} can hand a task to these agents and wait for
+              the answer. They run in this worktree — you don&apos;t drive them directly.
             </p>
           </div>
         )}

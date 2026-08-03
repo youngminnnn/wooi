@@ -1,5 +1,10 @@
 import { CLAUDE_DEFAULT_MODEL } from './agent/backend'
-import { BASE_DEV_PORT, DEFAULT_AGENT_BACKEND, DEFAULT_NOTIFICATION_SETTINGS } from '@shared/types'
+import {
+  BASE_DEV_PORT,
+  DEFAULT_AGENT_BACKEND,
+  DEFAULT_EXPERIMENTS,
+  DEFAULT_NOTIFICATION_SETTINGS
+} from '@shared/types'
 import type {
   AppState,
   AppSettings,
@@ -68,6 +73,9 @@ function normalizeMode(mode: unknown): PermissionMode {
 
 export const DEFAULT_SETTINGS: AppSettings = {
   defaultAgentBackend: DEFAULT_AGENT_BACKEND,
+  // 실험 기능은 전부 꺼진 채로 시작한다. 기존 사용자도 load 의 기본값 병합으로 꺼짐이 되므로
+  // schemaVersion 을 올릴 필요가 없다.
+  experiments: DEFAULT_EXPERIMENTS,
   agents: {
     // Claude 는 검증된 기본 모델을 지정한다(1M 윈도를 잡는 `[1m]` 접미사 포함).
     claude: { model: DEFAULT_MODEL, effort: null, permissionMode: 'default', fastMode: false },

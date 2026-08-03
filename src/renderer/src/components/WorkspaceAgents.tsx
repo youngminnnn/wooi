@@ -19,8 +19,11 @@ export function WorkspaceAgents({
   /** 부모 워크스페이스 행의 stack 들여쓰기 깊이. 행과 같은 기준선에서 한 단계 더 들여쓴다. */
   depth,
   /**
-   * 이 워크트리를 구동하는 에이전트 백엔드. 워크스페이스에서 그대로 받아 온다 — 서브에이전트는
-   * 정의상 부모 세션과 같은 백엔드에서 돌기 때문에, SDK 이벤트에 백엔드를 실어 보낼 필요가 없다.
+   * 이 워크트리를 구동하는 에이전트 백엔드. 네이티브 서브에이전트(Claude 의 Task · Codex 의
+   * collab)는 정의상 부모와 같은 백엔드라 이 값이 곧 그 행의 백엔드다.
+   *
+   * 위임(delegate)으로 띄운 교차 백엔드 실행만 `RunningAgent.backend` 를 따로 싣고, 그때는
+   * 그 값이 이 기본값을 이긴다 — 그래야 "Claude 워크스페이스인데 Codex 가 돌고 있다"가 보인다.
    */
   backend,
   now
@@ -70,39 +73,43 @@ export function WorkspaceAgents({
       </button>
 
       {!collapsed &&
-        rows.map((agent) => (
-          <div
-            key={agent.taskId}
-            style={{ paddingLeft: indent + 12 }}
-            className="flex items-baseline gap-1.5 pr-2 py-0.5 text-xs"
-            title={[
-              `${agent.agentType} · ${AGENT_BACKEND_LABELS[backend]}`,
-              agent.description,
-              agent.lastToolName ? `Last tool: ${agent.lastToolName}` : null,
-              typeof agent.toolUses === 'number' ? `${agent.toolUses} tool uses` : null,
-              typeof agent.totalTokens === 'number'
-                ? `${agent.totalTokens.toLocaleString()} tokens`
-                : null
-            ]
-              .filter(Boolean)
-              .join('\n')}
-          >
-            {/* 좌측 마크가 "어떤 에이전트로 돌고 있나"(Claude Code / 향후 Codex)를, 옆 텍스트가
+        rows.map((agent) => {
+          // 위임 실행은 자기 백엔드를 싣고 오고, 네이티브 서브에이전트는 부모의 것을 따른다.
+          const agentBackend = agent.backend ?? backend
+          return (
+            <div
+              key={agent.taskId}
+              style={{ paddingLeft: indent + 12 }}
+              className="flex items-baseline gap-1.5 pr-2 py-0.5 text-xs"
+              title={[
+                `${agent.agentType} · ${AGENT_BACKEND_LABELS[agentBackend]}`,
+                agent.description,
+                agent.lastToolName ? `Last tool: ${agent.lastToolName}` : null,
+                typeof agent.toolUses === 'number' ? `${agent.toolUses} tool uses` : null,
+                typeof agent.totalTokens === 'number'
+                  ? `${agent.totalTokens.toLocaleString()} tokens`
+                  : null
+              ]
+                .filter(Boolean)
+                .join('\n')}
+            >
+              {/* 좌측 마크가 "어떤 에이전트로 돌고 있나"(Claude Code / Codex)를, 옆 텍스트가
                 "어떤 서브에이전트인가"(Explore 등)를 나타낸다 — 두 축이 겹치지 않는다. */}
-            <span className="shrink-0 translate-y-0.5">
-              <AgentBackendMark backend={backend} size={14} />
-            </span>
-            <span className="shrink-0 font-medium text-neutral-400">{agent.agentType}</span>
-            {/* 설명은 남는 폭만 차지하고 먼저 잘린다 — 타입·경과 시간이 항상 읽히는 쪽이 유용하다. */}
-            <span className="min-w-0 flex-1 truncate text-neutral-600">
-              {agent.lastToolName ? `${agent.lastToolName} · ` : ''}
-              {agent.description}
-            </span>
-            <span className="shrink-0 tabular-nums text-neutral-600">
-              {formatDuration(now - agent.startedAt)}
-            </span>
-          </div>
-        ))}
+              <span className="shrink-0 translate-y-0.5">
+                <AgentBackendMark backend={agentBackend} size={14} />
+              </span>
+              <span className="shrink-0 font-medium text-neutral-400">{agent.agentType}</span>
+              {/* 설명은 남는 폭만 차지하고 먼저 잘린다 — 타입·경과 시간이 항상 읽히는 쪽이 유용하다. */}
+              <span className="min-w-0 flex-1 truncate text-neutral-600">
+                {agent.lastToolName ? `${agent.lastToolName} · ` : ''}
+                {agent.description}
+              </span>
+              <span className="shrink-0 tabular-nums text-neutral-600">
+                {formatDuration(now - agent.startedAt)}
+              </span>
+            </div>
+          )
+        })}
     </div>
   )
 }

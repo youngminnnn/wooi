@@ -41,7 +41,7 @@ import {
   switchClickCount
 } from '../lib/uiFlags'
 import { OPEN_REPO_SETTINGS_EVENT, openRepoSettings } from '../lib/repoSettings'
-import { orderVisibleWorkspaces, workspaceDisplayName } from '@shared/types'
+import { experimentsOf, orderVisibleWorkspaces, workspaceDisplayName } from '@shared/types'
 import { orderRowsWithPending } from '../lib/sidebarRows'
 import { useGithubDisconnected } from '../lib/github'
 import { WorkspaceAgents } from './WorkspaceAgents'
@@ -441,6 +441,37 @@ export default function Sidebar({
  * 리포 이름 옆 아이콘. GitHub 소유자 아바타(avatarDataUrl)가 있으면 그 이미지를,
  * 없거나 로드에 실패하면 기본 리포 아이콘(FolderGit2)으로 폴백한다.
  */
+/**
+ * 이 워크스페이스가 위임할 수 있는 백엔드를 켜고 끄는 액션들(실험 기능).
+ *
+ * 워크스페이스는 기본 설정에서 모달 없이 자동 생성되므로, 만든 **뒤에** 켜는 이 경로가 사실상
+ * 주된 진입점이다. 생성 모달의 피커는 "만들 때부터 정해 두고 싶은" 경우를 위한 것이다.
+ */
+function useDelegateActions(workspace: Workspace): RowAction[] {
+  const enabled = useStore((s) => experimentsOf(s.app?.settings).multiAgent)
+  const available = useAvailableBackends()
+  if (!enabled) return []
+
+  const current = workspace.multiAgent?.subBackends ?? []
+  return available
+    .filter((b) => b.id !== workspace.agentBackend)
+    .map((b, index) => {
+      const on = current.includes(b.id)
+      return {
+        key: `delegate:${b.id}`,
+        label: on ? `Stop delegating to ${b.label}` : `Delegate to ${b.label}`,
+        icon: <AgentBackendMark backend={b.id} size={13} />,
+        onSelect: () =>
+          void window.api.workspace.setSubBackends(
+            workspace.id,
+            on ? current.filter((id) => id !== b.id) : [...current, b.id]
+          ),
+        // 첫 항목에만 구분선을 둬, 위임 토글들이 한 덩어리로 읽히게 한다.
+        separatorBefore: index === 0
+      }
+    })
+}
+
 function RepoIcon({ repo }: { repo: Repo }): React.JSX.Element {
   const [failed, setFailed] = useState(false)
   if (repo.avatarDataUrl && !failed) {
@@ -529,6 +560,10 @@ function WorkspaceRow({
     if (active) void select(null)
   }
 
+  // 위임 대상 후보 = 쓸 수 있는 백엔드 중 이 워크스페이스의 메인이 아닌 것. 실험 기능이 꺼져
+  // 있으면 아무것도 내놓지 않는다.
+  const delegateActions = useDelegateActions(workspace)
+
   // 행당 액션이 5개까지 늘어나 아이콘을 나열하면 제목 폭을 계속 잠식한다. 그래서 1차 액션
   // (뒤처진 stacked 워크스페이스의 restack)만 인라인으로 승격하고 나머지는 이 메뉴로 모은다.
   const actions: RowAction[] = [
@@ -570,6 +605,9 @@ function WorkspaceRow({
           }
         ]
       : []),
+    // 위임 토글(실험 기능). 대부분의 워크스페이스는 모달 없이 자동 생성되므로, 만든 뒤에 켜는
+    // 이 경로가 사실상 주된 진입점이다. 다음 세션부터 적용된다.
+    ...delegateActions,
     {
       key: 'mute',
       label: workspace.muted ? 'Unmute notifications' : 'Mute notifications',

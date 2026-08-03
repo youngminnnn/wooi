@@ -186,6 +186,8 @@ export async function createWorkspace(
       id,
       repoId: repo.id,
       agentBackend,
+      // 모드 하나만 저장한다. 어떤 종류로 위임할지는 미리 고르지 않고 대화에서 정해진다.
+      multiAgent: args.multiAgent === true,
       name: rawName,
       displayName: null,
       branch,

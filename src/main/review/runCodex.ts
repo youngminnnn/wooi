@@ -1,9 +1,9 @@
-import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { EffortSetting, ReviewArtifact, ReviewProgressItem } from '@shared/types'
+import type { ReviewArtifact, ReviewProgressItem } from '@shared/types'
+import { codexEffort, execCodex } from '../codex/exec'
 import { detectCodex } from '../codex/executable'
 import { log } from '../logger'
 import { coerceArtifact, describeArg, extractFencedJson, truncate } from './artifact'
@@ -60,9 +60,12 @@ export async function runCodexReview(
     // 프롬프트는 stdin 으로 — diff 를 통째로 실으므로 인자 길이 한계에 걸린다.
     args.push('-')
 
-    const run = await execCodex(install.path, args, prompt, deps)
-    if (run.aborted)
+    const reader = createCodexReader(deps.onProgress)
+    const outcome = await execCodex(install.path, args, prompt, deps, reader)
+    const run = reader.out
+    if (outcome.aborted)
       return { artifact: null, rawText: run.rawText, sessionId: run.threadId, error: null }
+    if (outcome.error) run.error = outcome.error
 
     const artifact =
       (await readArtifactFile(lastMessagePath)) ??
@@ -133,62 +136,12 @@ function withNull(type: unknown): unknown {
   return type
 }
 
+/** JSONL 스트림에서 읽어낸 것. 프로세스 종료 사유(중단·비정상 종료)는 execCodex 가 따로 준다. */
 export interface CodexRun {
   rawText: string
   artifact: ReviewArtifact | null
   threadId: string | null
   error: string | null
-  aborted: boolean
-}
-
-function execCodex(
-  executable: string,
-  args: string[],
-  prompt: string,
-  deps: ReviewRunDeps
-): Promise<CodexRun> {
-  return new Promise((resolve) => {
-    const child = spawn(executable, args, {
-      cwd: deps.cwd,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      // 사용자 셸에서 하이드레이트된 PATH·자격증명 환경을 그대로 물려준다.
-      env: process.env,
-      signal: deps.abort.signal
-    })
-
-    const reader = createCodexReader(deps.onProgress)
-    const out = reader.out
-    let stderr = ''
-
-    child.stdout.on('data', (chunk: Buffer) => reader.push(chunk.toString()))
-
-    child.stderr.on('data', (chunk: Buffer) => {
-      stderr += chunk.toString()
-    })
-
-    child.on('error', (err) => {
-      if (deps.abort.signal.aborted) {
-        out.aborted = true
-        return
-      }
-      out.error = String(err)
-    })
-
-    child.on('close', (code) => {
-      reader.end()
-      if (deps.abort.signal.aborted) out.aborted = true
-      if (!out.aborted && !out.error && code !== 0) {
-        out.error = truncate(stderr, 400) || `Codex exited with code ${code}.`
-      }
-      if (stderr.trim()) log.warn(`review: codex stderr — ${truncate(stderr, 400)}`)
-      resolve(out)
-    })
-
-    child.stdin.on('error', () => {
-      /* 프로세스가 먼저 죽으면 EPIPE 가 난다 — 종료 처리는 close 에서 한다. */
-    })
-    child.stdin.end(prompt)
-  })
 }
 
 // ── 이벤트 해석 ──────────────────────────────────────────────────────────
@@ -200,12 +153,24 @@ function execCodex(
  * 스트림은 줄 경계로 잘려 오지 않는다 — 청크 중간에서 끊긴 JSON 을 그대로 파싱하면 이벤트가
  * 통째로 사라진다. 남은 조각을 물고 있다가 다음 청크와 이어 붙이는 책임이 여기 있다.
  */
-export function createCodexReader(onProgress: (item: ReviewProgressItem) => void): {
+export function createCodexReader(
+  onProgress: (item: ReviewProgressItem) => void,
+  /**
+   * 최종 메시지를 리뷰 결과(ReviewArtifact)로 파싱할지. 리뷰는 `--output-schema` 로 JSON 을
+   * 강제하므로 기본값이 true 다.
+   *
+   * **스키마 없이 돌리는 호출자는 반드시 false 를 준다.** coerceArtifact 는 `summary` 문자열만
+   * 있어도 아티팩트로 인정하므로, 그냥 JSON 을 답으로 낸 실행에서 최종 메시지가 rawText 에
+   * 들어가지 못하고 통째로 사라진다(위임 실행이 정확히 그 경우다).
+   */
+  options: { parseArtifacts?: boolean } = {}
+): {
   out: CodexRun
   push: (chunk: string) => void
   end: () => void
 } {
-  const out: CodexRun = { rawText: '', artifact: null, threadId: null, error: null, aborted: false }
+  const parseArtifacts = options.parseArtifacts ?? true
+  const out: CodexRun = { rawText: '', artifact: null, threadId: null, error: null }
   const seen = new Set<string>()
   let buffer = ''
 
@@ -219,7 +184,7 @@ export function createCodexReader(onProgress: (item: ReviewProgressItem) => void
       // JSONL 이 아닌 진단 출력. 버린다 — 실패 메시지는 stderr 로 온다.
       return
     }
-    consume(event, out, seen, onProgress)
+    consume(event, out, seen, onProgress, parseArtifacts)
   }
 
   return {
@@ -262,7 +227,8 @@ function consume(
   event: CodexEvent,
   out: CodexRun,
   seen: Set<string>,
-  onProgress: (item: ReviewProgressItem) => void
+  onProgress: (item: ReviewProgressItem) => void,
+  parseArtifacts: boolean
 ): void {
   switch (event.type) {
     case 'thread.started':
@@ -278,7 +244,7 @@ function consume(
         // --output-schema 를 쓰면 모든 agent_message 가 JSON 이다. 파싱되면 결과로,
         // 안 되면 사용자에게 보여 줄 말로 취급한다.
         const text = item.text ?? ''
-        const parsed = parseArtifact(text)
+        const parsed = parseArtifacts ? parseArtifact(text) : null
         if (parsed) {
           out.artifact = parsed
           return
@@ -364,14 +330,4 @@ async function readArtifactFile(path: string): Promise<ReviewArtifact | null> {
   } catch {
     return null
   }
-}
-
-/**
- * effort 를 codex 가 받는 값으로 좁힌다.
- * 'ultracode' 는 Claude 전용 모드라 Codex 에는 없다 — 가장 가까운 최고 단계로 환산한다.
- */
-function codexEffort(effort: EffortSetting | null): string | undefined {
-  if (!effort) return undefined
-  if (effort === 'ultracode' || effort === 'max') return 'xhigh'
-  return effort
 }
