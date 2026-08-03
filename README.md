@@ -259,12 +259,12 @@ A tabbed panel on top plus an interactive terminal below (resizable split):
 
 ## Build from source
 
-Requires **Node.js 20** (see [`.nvmrc`](./.nvmrc)) on **macOS (Apple Silicon)**.
+Requires **Node.js 24** (see [`.nvmrc`](./.nvmrc)) on **macOS (Apple Silicon)**.
 
 ```bash
 git clone https://github.com/youngminnnn/wooi.git
 cd wooi
-nvm use          # optional, selects Node 20
+nvm use          # optional, selects Node 24
 npm install      # installs deps + Electron binary
 npm run dev      # launch in development mode
 ```

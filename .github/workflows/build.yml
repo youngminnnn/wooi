@@ -22,7 +22,7 @@ jobs:
 
       - uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version: '24'
           cache: 'npm'
 
       # electron-builder 는 태그가 아니라 package.json 의 version 으로 빌드한다. 둘이
