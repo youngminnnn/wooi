@@ -5,7 +5,8 @@ import { AgentOrchestrator } from './agent/orchestrator'
 import { setCodexStatusProvider } from './auth'
 import { PaneWindows } from './paneWindows'
 import { ScriptRunner } from './scripts'
-import { getStore } from './store'
+import { flushStore, getStore } from './store'
+import { flushPendingSyncs } from './fsutil'
 import { TerminalManager } from './terminal'
 import { applyNavigationGuards, loadRenderer, rendererWebPreferences } from './windows'
 import { registerIpc } from './ipc'
@@ -113,7 +114,13 @@ function createWindow(): void {
   // 창이 포커스를 얻으면 renderer 가 보고 있는 workspace 의 미확인 표시를 해제하도록 알린다.
   // DOM 의 window 'focus' 는 Dock 클릭·앱 전환 시 누락될 수 있어, main 의 신뢰 가능한 이벤트로 보완한다.
   mainWindow.on('focus', () => mainWindow?.webContents.send(IPC.evtWindowFocus))
-  mainWindow.on('blur', () => mainWindow?.webContents.send(IPC.evtWindowBlur))
+  mainWindow.on('blur', () => {
+    mainWindow?.webContents.send(IPC.evtWindowBlur)
+    // 자리를 뜨는 순간은 밀린 쓰기를 내리기 좋은 시점이다 — 사용자가 앱을 보고 있지 않으니
+    // 몇 ms 의 블로킹이 드러나지 않고, 그대로 잠들거나 강제 종료돼도 상태가 남는다.
+    flushStore()
+    flushPendingSyncs()
+  })
 
   mainWindow.webContents.on('did-fail-load', (_e, code, desc) => {
     log.error(`renderer load failed: ${code} ${desc}`)
@@ -164,4 +171,8 @@ app.on('before-quit', () => {
   sessions.disposeAll()
   scripts.disposeAll()
   terminals.disposeAll()
+  // 상태 쓰기와 트랜스크립트 fsync 는 성능을 위해 모아서 처리된다 — 프로세스가 사라지기 전에
+  // 밀린 것을 마저 내려야 마지막 변경이 유실되지 않는다.
+  flushStore()
+  flushPendingSyncs()
 })

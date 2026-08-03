@@ -35,6 +35,7 @@ import {
   validateCarryPath
 } from './carry'
 import { generateWorkspaceName } from './names'
+import { getWorkspacePrStatus } from './prCache'
 import { buildStackFromPrs, detectBaseMismatch } from './stack'
 import { findFreePort, waitForPortFree } from './net'
 import {
@@ -1276,10 +1277,12 @@ export function registerIpc(ctx: IpcContext): void {
     const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
     if (!ws || ws.archived) return null
     // 실제 git/PR 상태에서 현재 브랜치·스택을 먼저 재동기화한다(에이전트가 직접 만든 스택도 인식).
+    // 이 과정에서 리포의 열린 PR 목록을 이미 받아 두므로, 아래 상태 조회는 대개 그 목록에서
+    // 답이 나온다 — 워크스페이스마다 gh 를 따로 띄우지 않는다.
     await reconcileWorkspaceStack(workspaceId).catch(() => {})
-    // worktree 의 현재 브랜치에 연결된 PR (gh 가 현재 브랜치로 자동 조회).
+    // worktree 의 현재 브랜치에 연결된 PR. reconcile 이 w.branch 를 실제 HEAD 로 맞춰 둔다.
     const after = store.getState().workspaces.find((w) => w.id === workspaceId) ?? ws
-    const status = await getPrStatus(after.worktreePath).catch(() => null)
+    const status = await getWorkspacePrStatus(after, after.branch)
     if (status) persistPrNumber(workspaceId, after.branch, status.number)
     return status
   })

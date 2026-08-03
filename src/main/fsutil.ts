@@ -24,12 +24,51 @@ export function writeFileAtomic(filePath: string, data: string): void {
 }
 
 /**
- * 파일 끝에 한 줄(이상)을 추가하고 fsync 로 디스크에 강제 반영한다.
- * 트랜스크립트처럼 append-only 로그를 즉시 내구화해, 직후 크래시·전원 차단에도 마지막 항목이
- * 페이지 캐시에만 남아 유실되는 일을 막는다. fsync 실패는 best-effort 로 무시한다(append 자체는 완료).
+ * fsync 를 모으는 창. 이 시간 안에 같은 파일로 들어온 append 들은 fsync 한 번을 공유한다.
+ */
+const SYNC_DEBOUNCE_MS = 500
+
+/** fsync 가 예약된 파일들(경로 → 타이머). */
+const pendingSyncs = new Map<string, ReturnType<typeof setTimeout>>()
+
+/**
+ * 파일 끝에 한 줄(이상)을 추가하고, 뒤이어 fsync 로 디스크에 내린다.
+ *
+ * **append 는 즉시, fsync 는 모아서** 한다. append 자체는 싸지만 fsync 는 ~4ms 동안 메인
+ * 스레드를 붙잡는다 — 트랜스크립트 항목마다 이걸 하면, 세션 여러 개가 동시에 응답을 쏟을 때
+ * 메인이 fsync 로 포화되어 IPC 와 창 이벤트가 통째로 밀린다.
+ *
+ * 늦춰지는 것은 "디스크에 확실히 내려갔는가" 뿐이고, append 자체는 이미 커밋되어 OS 가
+ * 들고 있다 — 즉 앱이 죽어도 내용은 남고, OS 째로 죽는 경우(커널 패닉·전원 차단)에만
+ * 마지막 0.5초가 위험하다. 그마저도 트랜스크립트는 줄 단위 JSONL 이라 잘린 줄은 읽을 때
+ * 무시되므로([[parseJsonl]]) 파일이 못 쓰게 되지는 않는다.
+ *
+ * 종료 시에는 flushPendingSyncs() 로 남은 것을 마저 내린다.
  */
 export function appendFileDurable(filePath: string, data: string): void {
   appendFileSync(filePath, data, 'utf-8')
+
+  if (pendingSyncs.has(filePath)) return
+  const timer = setTimeout(() => {
+    pendingSyncs.delete(filePath)
+    syncFile(filePath)
+  }, SYNC_DEBOUNCE_MS)
+  // 이 타이머 때문에 프로세스가 살아 있을 이유는 없다.
+  timer.unref?.()
+  pendingSyncs.set(filePath, timer)
+}
+
+/** 예약된 fsync 를 전부 지금 수행한다(앱 종료 등 프로세스가 사라지기 직전에 호출). */
+export function flushPendingSyncs(): void {
+  for (const [filePath, timer] of pendingSyncs) {
+    clearTimeout(timer)
+    syncFile(filePath)
+  }
+  pendingSyncs.clear()
+}
+
+/** fsync 실패는 best-effort 로 무시한다(append 자체는 이미 커밋됐다). */
+function syncFile(filePath: string): void {
   try {
     const fd = openSync(filePath, 'r')
     try {
@@ -38,7 +77,7 @@ export function appendFileDurable(filePath: string, data: string): void {
       closeSync(fd)
     }
   } catch {
-    // fsync 보강 실패는 무시 — append 는 이미 커밋됐고, 내구성만 best-effort 다.
+    // 파일이 그 사이 지워졌거나(워크스페이스 삭제) fsync 미지원 — 무시한다.
   }
 }
 
