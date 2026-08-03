@@ -777,7 +777,8 @@
 
       <h1>
         <span class="en"
-          >Run AI coding agents in parallel — and <span class="grad">stack</span> them</span
+          >Run AI coding agents in parallel — and <span class="grad">stack</span> them when work
+          builds on work</span
         >
         <span class="ko"
           >AI 코딩 에이전트를 병렬로 — 이어지는 작업은 <span class="grad">스택</span>으로</span
@@ -858,6 +859,43 @@
 
         <div class="why-grid">
           <div class="why-card">
+            <div class="emoji">🧱</div>
+            <h3>
+              <span class="en">The stack is made of agents</span
+              ><span class="ko">스택의 단위가 에이전트</span>
+            </h3>
+            <p>
+              <span class="en"
+                >Stack one agent's workspace on another's branch. When the parent merges, Wooi
+                rebases the children and retargets their PR bases — the rest of the stack stays
+                valid.</span
+              >
+              <span class="ko"
+                >에이전트 워크스페이스를 다른 워크스페이스의 브랜치 위에 쌓습니다. 부모가 병합되면
+                Wooi 가 자식들을 rebase 하고 PR base 를 옮깁니다. 남은 스택은 그대로 유효.</span
+              >
+            </p>
+          </div>
+          <div class="why-card">
+            <div class="emoji">🔍</div>
+            <h3>
+              <span class="en">PR review, on the diff</span
+              ><span class="ko">PR 리뷰를 diff 위에서</span>
+            </h3>
+            <p>
+              <span class="en"
+                >Every agent reviews PRs now; what's missing is somewhere to work the result.
+                Findings land inline on the diff they're about — edit, discard, post one or post the
+                batch.</span
+              >
+              <span class="ko"
+                >PR 리뷰는 이제 어떤 에이전트든 합니다. 없는 건 그 결과를 다룰 화면입니다. 지적이
+                해당 diff 줄 위에 바로 붙습니다. 고치고, 버리고, 낱개로든 한꺼번에든
+                게시합니다.</span
+              >
+            </p>
+          </div>
+          <div class="why-card">
             <div class="emoji">🧵</div>
             <h3><span class="en">True parallelism</span><span class="ko">진짜 병렬</span></h3>
             <p>
@@ -887,44 +925,18 @@
           </div>
           <div class="why-card">
             <div class="emoji">🚢</div>
-            <h3><span class="en">PR-native</span><span class="ko">PR 친화적</span></h3>
-            <p>
-              <span class="en"
-                >Jump straight from an agent's diff to a GitHub PR in one click.</span
-              >
-              <span class="ko">에이전트의 diff 에서 GitHub PR 까지 클릭 한 번으로 넘어갑니다.</span>
-            </p>
-          </div>
-          <div class="why-card">
-            <div class="emoji">🧱</div>
             <h3>
-              <span class="en">Stacked PRs, natively</span
-              ><span class="ko">stacked PR 기본 지원</span>
+              <span class="en">Straight from diff to PR</span
+              ><span class="ko">diff 에서 바로 PR 로</span>
             </h3>
             <p>
               <span class="en"
-                >Stack a workspace on another's branch. When a parent merges, Wooi rebases the
-                children and retargets their PR bases.</span
+                >Open a GitHub PR for an agent's work in one click, without switching to the browser
+                first.</span
               >
               <span class="ko"
-                >워크스페이스를 다른 브랜치 위에 쌓으면, 부모가 병합될 때 자식들을 rebase 하고 PR
-                base 를 옮겨 줍니다.</span
-              >
-            </p>
-          </div>
-          <div class="why-card">
-            <div class="emoji">🔍</div>
-            <h3>
-              <span class="en">Review PRs in place</span><span class="ko">PR 리뷰도 이 안에서</span>
-            </h3>
-            <p>
-              <span class="en"
-                >Point an agent at a pull request, edit the findings it lands on the diff, and post
-                them without leaving the app.</span
-              >
-              <span class="ko"
-                >에이전트에게 PR 을 맡기고, diff 위에 붙은 지적을 다듬어 앱을 벗어나지 않고
-                게시합니다.</span
+                >에이전트가 만든 변경을 브라우저로 옮겨 가지 않고 그 자리에서 GitHub PR 로
+                엽니다.</span
               >
             </p>
           </div>
@@ -1245,6 +1257,61 @@
             <ul>
               <li>
                 <strong
+                  ><span class="en">A diff you review on, not a transcript you read</span
+                  ><span class="ko">읽는 로그가 아니라 작업하는 diff</span></strong
+                >
+                —
+                <span class="en"
+                  >three panes: the changed files with a count of findings on each, the full diff in
+                  the middle, and a findings / activity sidebar. Every agent reviews PRs now — what
+                  was missing is somewhere to work the result.</span
+                >
+                <span class="ko"
+                  >3분할입니다. 왼쪽은 변경 파일과 파일별 지적 개수, 가운데는 diff 전체, 오른쪽은
+                  총평/활동 사이드바. PR 리뷰는 이제 어떤 에이전트든 합니다. 없던 건 그 결과를 다룰
+                  화면입니다.</span
+                >
+              </li>
+              <li>
+                <strong
+                  ><span class="en">Findings land on the lines they're about</span
+                  ><span class="ko">지적은 해당하는 줄 위에</span></strong
+                >
+                —
+                <span class="en"
+                  >each one is anchored to its hunk and rendered as a card right there in the diff,
+                  with a severity badge and a markdown body. If an agent cites a line that isn't in
+                  the diff, the card says so and shows where it moved to — you catch a misplaced
+                  comment before it goes out, not after.</span
+                >
+                <span class="ko"
+                  >각 지적이 자기 hunk 에 앵커되어 심각도 배지와 마크다운 본문을 단 카드로 diff 안에
+                  바로 붙습니다. 에이전트가 diff 에 없는 줄을 짚으면 카드가 그 사실과 옮겨진 위치를
+                  알려 줍니다. 엉뚱한 줄에 달린 코멘트를 나간 뒤가 아니라 나가기 전에
+                  잡습니다.</span
+                >
+              </li>
+              <li>
+                <strong
+                  ><span class="en">Curate before you post</span
+                  ><span class="ko">게시 전에 추리기</span></strong
+                >
+                —
+                <span class="en"
+                  ><strong>Edit</strong> reworks the wording inline, <strong>Discard</strong> drops
+                  what you don't want, <strong>Comment</strong> posts that finding on its own. Or
+                  tick the ones you want and send the batch — each goes out as its own review
+                  comment, and posted cards go quiet with a link to the comment on GitHub.</span
+                >
+                <span class="ko"
+                  ><strong>Edit</strong> 로 문장을 그 자리에서 고치고, <strong>Discard</strong> 로
+                  안 달 것을 버리고, <strong>Comment</strong> 로 그 지적만 올립니다. 원하는 것만
+                  체크해 한 번에 올릴 수도 있습니다. 각각 개별 리뷰 코멘트로 나가고, 게시된 카드는
+                  GitHub 코멘트 링크만 남기고 조용해집니다.</span
+                >
+              </li>
+              <li>
+                <strong
                   ><span class="en">Start a review</span><span class="ko">리뷰 시작</span></strong
                 >
                 —
@@ -1288,22 +1355,6 @@
                 <span class="ko"
                   >PR head 를 별도 리뷰 worktree 에 체크아웃해, 지금 작업 중인 체크아웃은 건드리지
                   않으면서 변경된 hunk 바깥의 코드까지 읽게 합니다.</span
-                >
-              </li>
-              <li>
-                <strong
-                  ><span class="en">Findings land on the diff</span
-                  ><span class="ko">지적은 diff 위에</span></strong
-                >
-                —
-                <span class="en"
-                  >each suggestion is anchored to the lines it's about. Edit the wording before it
-                  goes out, discard the ones you don't want, and post them one at a time or all at
-                  once.</span
-                >
-                <span class="ko"
-                  >각 지적이 해당하는 코드 줄에 붙습니다. 게시 전에 문장을 고치고, 안 달 것은
-                  버리고, 하나씩 또는 한꺼번에 올립니다.</span
                 >
               </li>
               <li>
