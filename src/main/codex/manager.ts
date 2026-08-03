@@ -106,8 +106,7 @@ export class CodexSessionManager implements AgentBackend {
       env: {
         ...process.env,
         WOOI_USER_DATA: app.getPath('userData'),
-        WOOI_LOG_NAME: 'codex-host.log',
-        WOOI_PACKAGED: app.isPackaged ? '1' : ''
+        WOOI_LOG_NAME: 'codex-host.log'
       }
     })
 
