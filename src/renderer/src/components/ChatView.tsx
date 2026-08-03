@@ -63,8 +63,9 @@ const PR_STYLE: Record<PrState, { Icon: LucideIcon; iconClass: string; badgeClas
   },
   changes_requested: {
     Icon: MessageSquareWarning,
-    iconClass: 'text-orange-400',
-    badgeClass: 'border-orange-500/30 bg-orange-500/10 text-orange-200 hover:border-orange-500/60'
+    iconClass: 'text-[var(--attention-400)]',
+    badgeClass:
+      'border-[var(--attention-500)]/30 bg-[var(--attention-500)]/10 text-[var(--attention-200)] hover:border-[var(--attention-500)]/60'
   },
   approved: {
     Icon: CircleCheck,
@@ -86,8 +87,9 @@ const PR_STYLE: Record<PrState, { Icon: LucideIcon; iconClass: string; badgeClas
   },
   merged: {
     Icon: GitMerge,
-    iconClass: 'text-purple-400',
-    badgeClass: 'border-purple-500/30 bg-purple-500/10 text-purple-200 hover:border-purple-500/60'
+    iconClass: 'text-[var(--merged-400)]',
+    badgeClass:
+      'border-[var(--merged-500)]/30 bg-[var(--merged-500)]/10 text-[var(--merged-200)] hover:border-[var(--merged-500)]/60'
   },
   closed: {
     Icon: GitPullRequestClosed,
@@ -438,9 +440,9 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
                       title={`${pr.label} — open pull request #${pr.number} in browser`}
                     >
                       <Icon size={12} className={iconClass} />
-                      <span className="opacity-60">#{pr.number}</span>
+                      <span className="opacity-75">#{pr.number}</span>
                       <span className="font-medium">{pr.label}</span>
-                      <ExternalLink size={10} className="opacity-50" />
+                      <ExternalLink size={10} className="opacity-70" />
                     </button>
                   )
                 })()

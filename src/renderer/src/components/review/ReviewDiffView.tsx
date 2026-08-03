@@ -95,7 +95,9 @@ function FileBlock({
         <div className="bg-[var(--code-bg)] text-xs font-mono leading-[1.5]">
           {file.hunks.map((hunk, hi) => (
             <div key={hi}>
-              <div className="px-3 py-1 text-cyan-400/80 bg-[var(--surface)]/40">{hunk.header}</div>
+              <div className="px-3 py-1 text-[var(--diff-hunk)] bg-[var(--surface)]/40">
+                {hunk.header}
+              </div>
               {hunk.rows.map((row, ri) => (
                 <Row
                   key={ri}

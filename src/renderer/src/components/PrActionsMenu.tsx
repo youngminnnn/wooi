@@ -192,7 +192,7 @@ export default function PrActionsMenu({
                 title={mergeTitle}
                 onClick={() => gated(MERGE_REASON, () => merge('squash'))}
               >
-                <GitMerge size={13} className="text-purple-400" />
+                <GitMerge size={13} className="text-[var(--merged-400)]" />
                 Squash &amp; merge
               </button>
               <button
@@ -202,7 +202,7 @@ export default function PrActionsMenu({
                 title={mergeTitle}
                 onClick={() => gated(MERGE_REASON, () => merge('merge'))}
               >
-                <GitMerge size={13} className="text-purple-400" />
+                <GitMerge size={13} className="text-[var(--merged-400)]" />
                 Create a merge commit
               </button>
               <button
@@ -212,7 +212,7 @@ export default function PrActionsMenu({
                 title={mergeTitle}
                 onClick={() => gated(MERGE_REASON, () => merge('rebase'))}
               >
-                <GitMerge size={13} className="text-purple-400" />
+                <GitMerge size={13} className="text-[var(--merged-400)]" />
                 Rebase &amp; merge
               </button>
               <div className="my-1 border-t border-[var(--border)]" />

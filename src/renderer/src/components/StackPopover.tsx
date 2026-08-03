@@ -13,11 +13,11 @@ import type { PrState, PrStatus, Workspace } from '@shared/types'
 const PR_DOT: Record<PrState, { dotClass: string; label: string }> = {
   draft: { dotClass: 'bg-neutral-400', label: 'Draft' },
   review_required: { dotClass: 'bg-[var(--warning-400)]', label: 'Review required' },
-  changes_requested: { dotClass: 'bg-orange-400', label: 'Changes requested' },
+  changes_requested: { dotClass: 'bg-[var(--attention-400)]', label: 'Changes requested' },
   approved: { dotClass: 'bg-[var(--success-400)]', label: 'Ready to merge' },
   conflict: { dotClass: 'bg-[var(--danger-400)]', label: 'Conflict' },
   open: { dotClass: 'bg-[var(--accent-400)]', label: 'Open' },
-  merged: { dotClass: 'bg-purple-400', label: 'Merged' },
+  merged: { dotClass: 'bg-[var(--merged-400)]', label: 'Merged' },
   closed: { dotClass: 'bg-neutral-500', label: 'Closed' }
 }
 

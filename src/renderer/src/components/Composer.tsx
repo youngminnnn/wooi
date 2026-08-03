@@ -961,7 +961,9 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
               // 읽기 전용 계열(plan·readOnly)은 "멈춤" 계열 색, 나머지는 경고 색으로 구분한다.
               const readOnlyish =
                 workspace.permissionMode === 'plan' || workspace.permissionMode === 'readOnly'
-              const accent = readOnlyish ? 'text-cyan-400' : 'text-[var(--warning-400)]'
+              const accent = readOnlyish
+                ? 'text-[var(--readonly-400)]'
+                : 'text-[var(--warning-400)]'
               return footer ? (
                 <span className={accent}>
                   {footer.symbol} {footer.text}{' '}

@@ -63,7 +63,7 @@ export function UpdateBanner(): React.JSX.Element | null {
   // 자동 설치가 막힌 위치 — 새 버전을 찾아냈을 때만 알린다(설치 위치 안내는 설정에 있다).
   if (status.state === 'blocked' && status.version && !hidden) {
     return (
-      <div className="no-drag shrink-0 flex items-center justify-center gap-3 h-8 bg-amber-500/12 border-b border-amber-500/25 text-sm text-amber-300">
+      <div className="no-drag shrink-0 flex items-center justify-center gap-3 h-8 bg-[var(--warning-500)]/12 border-b border-[var(--warning-500)]/25 text-sm text-[var(--warning-300)]">
         <Download size={13} />
         <span>Version {status.version} is out — Wooi can’t update itself from here.</span>
         <button

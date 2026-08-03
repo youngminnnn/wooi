@@ -291,7 +291,9 @@ function Item({
                 {item.attachments.map((a, i) => (
                   <span
                     key={i}
-                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-black/20 text-xs text-neutral-300"
+                    // 말풍선(--surface-4) 안에 얹히는 칩 — 다크에선 밝게, 라이트에선 어둡게
+                    // 갈리는 --border-2 를 써서 두 테마 모두에서 면이 구분되게 한다.
+                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-[var(--border-2)] text-xs text-neutral-300"
                   >
                     <ImageIcon size={11} className="text-neutral-400" />
                     {a.name}

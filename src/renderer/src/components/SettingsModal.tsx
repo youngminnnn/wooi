@@ -796,7 +796,7 @@ function UpdatesSection(): React.JSX.Element {
         </div>
         {status.state !== 'idle' && (
           <div
-            className={`mt-0.5 text-xs ${status.state === 'blocked' ? 'text-amber-500/90' : 'text-neutral-600'}`}
+            className={`mt-0.5 text-xs ${status.state === 'blocked' ? 'text-[var(--warning-300)]' : 'text-neutral-600'}`}
           >
             {updateStatusText(status)}
           </div>
