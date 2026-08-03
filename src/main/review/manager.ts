@@ -553,10 +553,9 @@ export class ReviewManager {
     const message = text.trim()
     if (!message) return { error: 'Nothing to send.' }
 
-    const prepared = await prepareReviewWorktree(this.keyFor(session, repoPath))
-    if ('error' in prepared) return { error: prepared.error }
-
-    // 사용자의 말을 먼저 타임라인에 남긴다 — 응답을 기다리는 동안 화면이 비지 않도록.
+    // 사용자의 말을 남기고 상태를 올리는 일이 **가장 먼저** 와야 한다. 워크트리 준비는 원격
+    // fetch 라 몇 초씩 걸리는데, 그 뒤로 밀면 보낸 티가 그동안 아무 데도 안 나 화면이 멈춘 것처럼
+    // 보인다(입력창도 안 잠겨 같은 말을 또 보내게 된다).
     this.addActivity(reviewId, {
       id: randomUUID(),
       kind: 'turn',
@@ -565,11 +564,22 @@ export class ReviewManager {
       ts: Date.now()
     })
 
-    const bundle = getReviewBundles().load(reviewId)
     const abort = new AbortController()
     this.running.set(reviewId, abort)
-    this.setStatus(reviewId, 'running')
+    this.setStatus(reviewId, 'preparing')
     try {
+      const prepared = await prepareReviewWorktree(this.keyFor(session, repoPath))
+      if ('error' in prepared) {
+        this.fail(reviewId, prepared.error)
+        return { error: prepared.error }
+      }
+      if (abort.signal.aborted) {
+        this.setStatus(reviewId, 'cancelled')
+        return {}
+      }
+
+      const bundle = getReviewBundles().load(reviewId)
+      this.setStatus(reviewId, 'running')
       const result = await runReview({
         backend: session.agentBackend,
         cwd: prepared.path,

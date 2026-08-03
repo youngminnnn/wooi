@@ -30,7 +30,7 @@ import { AGENT_BACKEND_IDS, cascadeProblems } from '@shared/types'
 import { playNotification } from './lib/sound'
 import { carrySuggestShownFlag, readUiFlag, setUiFlag } from './lib/uiFlags'
 import { openRepoSettings } from './lib/repoSettings'
-import { bodyOf, emptyView, isPosted, type ReviewViewState } from './lib/review'
+import { bodyOf, emptyView, isPosted, type ReviewTab, type ReviewViewState } from './lib/review'
 
 export const scriptKey = (workspaceId: string, kind: ScriptKind): string => `${workspaceId}:${kind}`
 
@@ -400,6 +400,8 @@ interface UIState {
   replyToThread: (reviewId: string, commentId: number, body: string) => Promise<boolean>
   /** 앞선 맥락 위에서 추가 지시를 보낸다. */
   followUpReview: (reviewId: string, text: string) => Promise<void>
+  /** 오른쪽 패널의 탭을 바꾼다(리뷰별로 기억된다). */
+  setReviewTab: (reviewId: string, tab: ReviewTab) => void
 }
 
 let initialized = false
@@ -1670,6 +1672,12 @@ export const useStore = create<UIState>((set, get) => ({
   followUpReview: async (reviewId, text) => {
     const res = await window.api.review.followUp(reviewId, text)
     if (res.error) get().pushToast('error', res.error)
+  },
+
+  setReviewTab: (reviewId, tab) => {
+    patchReview(set, get, reviewId, () => ({ tab }))
+    // 활동을 열어 봤으니 미확인 점을 끈다.
+    if (tab === 'activity') void window.api.review.markSeen(reviewId)
   }
 }))
 
