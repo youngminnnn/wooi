@@ -7,6 +7,7 @@ import { join } from 'node:path'
 import {
   validateCarryPath,
   isAgentContextPath,
+  agentContextItems,
   detectCarryItems,
   carryIntoWorktree,
   applyCarryExcludes
@@ -70,6 +71,27 @@ describe('isAgentContextPath', () => {
     expect(isAgentContextPath('.env.local')).toBe(false)
     expect(isAgentContextPath('node_modules')).toBe(false)
     expect(isAgentContextPath('certs/dev.pem')).toBe(false)
+  })
+})
+
+describe('agentContextItems', () => {
+  it('리뷰 워크트리에는 컨텍스트 파일만 남긴다', () => {
+    const items = [
+      { path: 'CLAUDE.local.md', mode: 'copy' as const },
+      { path: '.claude/settings.local.json', mode: 'link' as const },
+      { path: '.env', mode: 'copy' as const },
+      { path: 'node_modules', mode: 'link' as const }
+    ]
+    expect(agentContextItems(items)).toEqual([
+      { path: 'CLAUDE.local.md', mode: 'copy' },
+      { path: '.claude/settings.local.json', mode: 'link' }
+    ])
+  })
+
+  it('원본 모드를 그대로 유지한다', () => {
+    expect(agentContextItems([{ path: 'MEMORY.md', mode: 'link' }])).toEqual([
+      { path: 'MEMORY.md', mode: 'link' }
+    ])
   })
 })
 

@@ -1,5 +1,6 @@
 import { existsSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
+import { agentContextItems, applyCarryExcludes, carryIntoWorktree } from '../carry'
 import {
   addDetachedWorktree,
   deleteRef,
@@ -12,6 +13,7 @@ import {
   reviewWorktreePathFor
 } from '../git'
 import { log } from '../logger'
+import { getStore } from '../store'
 
 /** 리뷰 워크트리를 가리키는 키. 리뷰 id 까지 있어야 같은 PR 의 다른 세션과 섞이지 않는다. */
 export interface ReviewWorktreeKey {
@@ -64,17 +66,45 @@ export async function prepareReviewWorktree(
     } else {
       await addDetachedWorktree(repoPath, path, ref)
     }
-    return { path }
   } catch (err) {
     // 디렉토리는 남았는데 worktree 등록이 깨진 경우(앱 강제 종료 등) 한 번 정리하고 재시도한다.
     log.warn(`review: worktree setup failed, cleaning up and retrying (${reviewId})`, err)
     await disposeReviewWorktree(key, { keepRef: true })
     try {
       await addDetachedWorktree(repoPath, path, ref)
-      return { path }
     } catch (err2) {
       return { error: `Failed to create the review worktree: ${String(err2)}` }
     }
+  }
+
+  // 체크아웃이 **끝난 뒤에** 전달한다 — 재리뷰 경로의 resetDetachedWorktree 가 `git clean -fd`
+  // 로 추적되지 않는 파일을 지우므로, 순서가 뒤집히면 두 번째 리뷰부터 조용히 사라진다.
+  await carryAgentContext(repoPath, path)
+  return { path }
+}
+
+/**
+ * 리포의 전달 목록 중 에이전트 컨텍스트만 리뷰 워크트리로 옮긴다.
+ *
+ * 리뷰야말로 프로젝트 규칙(코딩 컨벤션, 리뷰 기준)을 알아야 하는 작업인데, worktree 는
+ * `git worktree add` 결과 그대로라 gitignore 된 `CLAUDE.local.md` 같은 파일이 하나도 딸려오지
+ * 않는다. 그대로 두면 에이전트가 규칙을 못 읽은 채 리뷰하고, 사용자는 그 사실을 알 방법이 없다.
+ *
+ * 전달 실패는 리뷰를 막지 않는다 — 지침 없이라도 도는 편이 리뷰 자체를 잃는 것보다 낫다.
+ */
+async function carryAgentContext(repoPath: string, worktreePath: string): Promise<void> {
+  const repo = getStore()
+    .getState()
+    .repos.find((r) => r.path === repoPath)
+  const items = agentContextItems(repo?.carryItems ?? [])
+  if (items.length === 0) return
+
+  try {
+    const { carried, failures } = carryIntoWorktree(repoPath, worktreePath, items)
+    await applyCarryExcludes(worktreePath, carried)
+    for (const f of failures) log.warn(`review: 컨텍스트 전달 실패: ${f.path} — ${f.reason}`)
+  } catch (err) {
+    log.error('review: 컨텍스트 전달 단계 실패', err)
   }
 }
 
