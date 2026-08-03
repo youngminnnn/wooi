@@ -374,20 +374,11 @@
       }
 
       /* ---------- why grid ---------- */
-      /* 5 cards: 3 on the first row, 2 centered on the second (6-col base, each card spans 2). */
+      /* 6 cards, 3 per row. */
       .why-grid {
         display: grid;
-        grid-template-columns: repeat(6, 1fr);
+        grid-template-columns: repeat(3, 1fr);
         gap: 18px;
-      }
-      .why-card {
-        grid-column: span 2;
-      }
-      .why-card:nth-child(4) {
-        grid-column: 2 / span 2;
-      }
-      .why-card:nth-child(5) {
-        grid-column: 4 / span 2;
       }
       .why-card {
         background: var(--bg-card);
@@ -419,12 +410,6 @@
       @media (max-width: 900px) {
         .why-grid {
           grid-template-columns: repeat(2, 1fr);
-        }
-        /* drop the 6-col spans so cards flow normally in the 2-col / 1-col layouts */
-        .why-card,
-        .why-card:nth-child(4),
-        .why-card:nth-child(5) {
-          grid-column: auto;
         }
       }
       @media (max-width: 520px) {
