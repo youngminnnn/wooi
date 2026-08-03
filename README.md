@@ -1,7 +1,7 @@
 # Wooi
 
-**Run AI coding agents in parallel — stack them when work builds on work, and review the
-PRs that come back.**
+**Run AI coding agents in parallel — stack them when work builds on work, review the PRs
+that aren't yours.**
 
 **English** · [한국어](./README.ko.md)
 
@@ -145,7 +145,8 @@ Getting an agent to review a pull request is the easy part — every agent does 
 The hard part is what comes back: a wall of prose in a chat log, detached from the code it
 describes, that you then have to translate into actual review comments by hand.
 
-Wooi makes the diff the workspace instead. A review gets its own row in the sidebar and
+Wooi makes the diff the workspace instead. And since the PR is usually someone else's, a
+review isn't the next step after your own work — it gets its own row in the sidebar and
 runs alongside your workspaces instead of taking one over.
 
 - **A diff you review on, not a transcript you read** — three panes: the changed files with
