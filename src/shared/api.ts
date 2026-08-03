@@ -117,12 +117,12 @@ export interface WooiApi {
     /** 워크스페이스별 알림 음소거를 설정한다. */
     setMuted(workspaceId: string, muted: boolean): Promise<void>
     /**
-     * 이 워크스페이스가 위임할 수 있는 백엔드를 바꾼다(실험 기능). 빈 배열이면 위임을 끈다.
+     * 멀티 에이전트 모드를 켜고 끈다(실험 기능).
      *
      * 세션이 이미 열려 있으면 다음 세션부터 반영된다 — 위임 도구는 query 를 열 때 options 에
      * 실리는 값이라, 도는 중에 더하거나 뺄 수 없다(`/add-dir` 과 같은 성질).
      */
-    setSubBackends(workspaceId: string, subBackends: AgentBackendId[]): Promise<void>
+    setMultiAgent(workspaceId: string, multiAgent: boolean): Promise<void>
     /** 표시 이름 override 를 지정한다. 빈 문자열이면 override 를 지워 기본 규칙으로 되돌린다. */
     rename(workspaceId: string, name: string): Promise<void>
     /**

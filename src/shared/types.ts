@@ -396,24 +396,6 @@ export const AGENT_BACKEND_LABELS: Record<AgentBackendId, string> = {
 }
 
 /**
- * 멀티 에이전트 워크스페이스 설정 — 메인 에이전트가 **다른 종류의** 에이전트에게 일을 넘길 수
- * 있게 한다(예: 메인 Claude Code, 서브 Codex).
- *
- * 사용자 경험은 기존 서브에이전트와 같게 유지한다: 위임된 실행은 사용자가 직접 조작하는 대상이
- * 아니라, 메인 에이전트가 띄우고 끝날 때까지 기다리는 일회성 작업이다. 그래서 워크스페이스도
- * worktree 도 새로 만들지 않고, 사이드바의 "실행 중 에이전트" 패널에만 나타난다.
- */
-export interface MultiAgentConfig {
-  /**
-   * 메인 에이전트가 위임할 수 있는 백엔드. 비어 있으면 위임 도구를 아예 노출하지 않는다.
-   *
-   * 메인 백엔드 자신도 넣을 수 있다(같은 종류의 별도 세션에 맡기고 싶을 때). 다만 그건 대개
-   * 네이티브 서브에이전트가 더 나으므로 기본값에는 넣지 않는다.
-   */
-  subBackends: AgentBackendId[]
-}
-
-/**
  * 백엔드가 지원하는 선택 기능 집합. 오케스트레이터는 이 값으로 호출을 가드하고,
  * 렌더러는 명령·버튼 노출 여부를 판단한다.
  */
@@ -531,12 +513,16 @@ export interface Workspace {
   /** 이 워크스페이스를 구동하는 에이전트 백엔드. 레거시 워크스페이스는 'claude' 로 마이그레이션된다. */
   agentBackend: AgentBackendId
   /**
-   * 멀티 에이전트 위임 설정. 없거나 null 이면 **기존 단일 에이전트 워크스페이스**다.
+   * 멀티 에이전트 워크스페이스인가. 없거나 false 면 **기존 단일 에이전트 워크스페이스**다.
    *
-   * 옵셔널로 두는 것이 요점이다 — 저장된 워크스페이스는 이 필드가 없으므로 마이그레이션 없이
+   * 켜져 있으면 메인 에이전트(`agentBackend`)가 대화 중에 **자연어로** 다른 종류의 에이전트를
+   * 서브에이전트로 띄울 수 있다. 어떤 종류를 쓸지 미리 고르지 않는 것이 요점이다 — 모드가
+   * 켜져 있으면 등록된 모든 에이전트가 대상이고, 선택은 대화에서 일어난다.
+   *
+   * 옵셔널로 두는 것도 요점이다 — 저장된 워크스페이스는 이 필드가 없으므로 마이그레이션 없이
    * 전부 단일 모드로 읽히고, `agentBackend` 의 의미("이 워크스페이스의 메인 백엔드")도 그대로다.
    */
-  multiAgent?: MultiAgentConfig | null
+  multiAgent?: boolean
   /** worktree 이름. 생성 시 정해지는 기본 이름으로, 표시 이름의 최종 폴백이다. */
   name: string
   /**
@@ -1632,7 +1618,7 @@ export const IPC = {
   agentListModels: 'agent:listModels',
   /** 워크스페이스별 알림 음소거 토글. */
   workspaceSetMuted: 'workspace:setMuted',
-  workspaceSetSubBackends: 'workspace:setSubBackends',
+  workspaceSetMultiAgent: 'workspace:setMultiAgent',
   workspaceRename: 'workspace:rename',
   /** 사이드바 드래그 앤 드롭으로 워크스페이스 표시 순서를 바꾼다(같은 레포·같은 stack 부모끼리만). */
   workspaceReorder: 'workspace:reorder',
@@ -1933,10 +1919,10 @@ export interface CreateWorkspaceArgs {
    */
   agentBackend?: AgentBackendId
   /**
-   * 메인 에이전트가 위임할 수 있는 백엔드. 생략하거나 비우면 평범한 단일 에이전트 워크스페이스다.
-   * 실험 기능이 꺼져 있으면 저장은 되지만 세션에 반영되지 않는다(multiAgentFor 가 접는다).
+   * 멀티 에이전트 워크스페이스로 만들지. 생략하면 평범한 단일 에이전트 워크스페이스다.
+   * 실험 기능이 꺼져 있으면 저장은 되지만 세션에 반영되지 않는다(delegateBackendsFor 가 접는다).
    */
-  subBackends?: AgentBackendId[]
+  multiAgent?: boolean
 }
 
 /**

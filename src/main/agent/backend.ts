@@ -1,5 +1,6 @@
 import type {
   AgentAuthStatus,
+  AgentBackendId,
   AgentBackendMeta,
   AgentRateLimits,
   CodexLoginMethod,
@@ -313,4 +314,24 @@ export const CODEX_META: AgentBackendMeta = {
   },
   // 실제 가용성은 codex CLI 설치·버전으로 런타임에 덮어쓴다(registry 의 backendAvailability).
   available: false
+}
+
+/**
+ * 식별자별 백엔드 메타데이터 카탈로그. 새 백엔드는 여기에 메타를 추가한다.
+ *
+ * 구현(SessionManager 등)을 아는 registry.ts 가 아니라 **메타만 아는 이 파일**에 둔다 —
+ * registry 는 각 백엔드의 매니저를 import 하므로, 메타 하나 읽으려는 모듈까지 그 무거운 그래프에
+ * 끌려 들어가고 순환 import 가 생긴다(manager → multiAgent → registry → manager).
+ */
+export const AGENT_BACKENDS: Record<AgentBackendId, AgentBackendMeta> = {
+  claude: CLAUDE_META,
+  codex: CODEX_META
+}
+
+/** 알 수 없는/누락 식별자의 폴백 백엔드. */
+export const DEFAULT_BACKEND_ID: AgentBackendId = 'claude'
+
+/** 식별자에 해당하는 백엔드 메타를 돌려준다(없으면 기본 백엔드). */
+export function backendMeta(id: AgentBackendId): AgentBackendMeta {
+  return AGENT_BACKENDS[id] ?? AGENT_BACKENDS[DEFAULT_BACKEND_ID]
 }

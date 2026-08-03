@@ -18,6 +18,7 @@ import {
   RefreshCw,
   LayoutDashboard,
   MoreVertical,
+  Users,
   Search,
   ArrowUpDown,
   GitPullRequest,
@@ -442,38 +443,34 @@ export default function Sidebar({
  * 없거나 로드에 실패하면 기본 리포 아이콘(FolderGit2)으로 폴백한다.
  */
 /**
- * 이 워크스페이스가 위임할 수 있는 백엔드를 켜고 끄는 액션들(실험 기능).
+ * 멀티 에이전트 모드를 켜고 끄는 액션(실험 기능).
  *
  * 워크스페이스는 기본 설정에서 모달 없이 자동 생성되므로, 만든 **뒤에** 켜는 이 경로가 사실상
- * 주된 진입점이다. 생성 모달의 피커는 "만들 때부터 정해 두고 싶은" 경우를 위한 것이다.
+ * 주된 진입점이다. 생성 모달의 모드 선택은 "만들 때부터 정해 두고 싶은" 경우를 위한 것이다.
+ *
+ * 스위치가 **하나뿐인 것**이 요점이다. 어떤 종류의 에이전트를 쓸지는 여기서 고르는 것이 아니라
+ * 대화에서 정해진다 — 미리 고르게 하면 "Codex 한테 시켜줘" 라고 말했는데 메뉴에서 체크를 안 했다는
+ * 이유로 안 되는, 설명하기 어려운 실패가 생긴다.
  */
-function useDelegateActions(workspace: Workspace): RowAction[] {
+function useMultiAgentAction(workspace: Workspace): RowAction[] {
   const enabled = useStore((s) => experimentsOf(s.app?.settings).multiAgent)
   const available = useAvailableBackends()
   // 조율하는 쪽이 될 수 있는 백엔드에서만 제안한다 — 켤 수는 있는데 아무 일도 안 일어나는
-  // 스위치를 만들지 않기 위해서다.
+  // 스위치를 만들지 않기 위해서다. 에이전트가 하나뿐이면 애초에 넘길 상대가 없다.
   const canCoordinate = available.find((b) => b.id === workspace.agentBackend)?.capabilities
     .delegate
-  if (!enabled || !canCoordinate) return []
+  if (!enabled || !canCoordinate || available.length < 2) return []
 
-  const current = workspace.multiAgent?.subBackends ?? []
-  return available
-    .filter((b) => b.id !== workspace.agentBackend)
-    .map((b, index) => {
-      const on = current.includes(b.id)
-      return {
-        key: `delegate:${b.id}`,
-        label: on ? `Stop delegating to ${b.label}` : `Delegate to ${b.label}`,
-        icon: <AgentBackendMark backend={b.id} size={13} />,
-        onSelect: () =>
-          void window.api.workspace.setSubBackends(
-            workspace.id,
-            on ? current.filter((id) => id !== b.id) : [...current, b.id]
-          ),
-        // 첫 항목에만 구분선을 둬, 위임 토글들이 한 덩어리로 읽히게 한다.
-        separatorBefore: index === 0
-      }
-    })
+  const on = workspace.multiAgent === true
+  return [
+    {
+      key: 'multiAgent',
+      label: on ? 'Turn off multi-agent mode' : 'Turn on multi-agent mode',
+      icon: <Users size={13} />,
+      onSelect: () => void window.api.workspace.setMultiAgent(workspace.id, !on),
+      separatorBefore: true
+    }
+  ]
 }
 
 function RepoIcon({ repo }: { repo: Repo }): React.JSX.Element {
@@ -564,9 +561,8 @@ function WorkspaceRow({
     if (active) void select(null)
   }
 
-  // 위임 대상 후보 = 쓸 수 있는 백엔드 중 이 워크스페이스의 메인이 아닌 것. 실험 기능이 꺼져
-  // 있으면 아무것도 내놓지 않는다.
-  const delegateActions = useDelegateActions(workspace)
+  // 멀티 에이전트 모드 토글. 실험 기능이 꺼져 있거나 이 백엔드가 조율할 수 없으면 빈 목록이다.
+  const multiAgentAction = useMultiAgentAction(workspace)
 
   // 행당 액션이 5개까지 늘어나 아이콘을 나열하면 제목 폭을 계속 잠식한다. 그래서 1차 액션
   // (뒤처진 stacked 워크스페이스의 restack)만 인라인으로 승격하고 나머지는 이 메뉴로 모은다.
@@ -609,9 +605,9 @@ function WorkspaceRow({
           }
         ]
       : []),
-    // 위임 토글(실험 기능). 대부분의 워크스페이스는 모달 없이 자동 생성되므로, 만든 뒤에 켜는
-    // 이 경로가 사실상 주된 진입점이다. 다음 세션부터 적용된다.
-    ...delegateActions,
+    // 멀티 에이전트 모드 토글(실험 기능). 대부분의 워크스페이스는 모달 없이 자동 생성되므로,
+    // 만든 뒤에 켜는 이 경로가 사실상 주된 진입점이다. 다음 세션부터 적용된다.
+    ...multiAgentAction,
     {
       key: 'mute',
       label: workspace.muted ? 'Unmute notifications' : 'Mute notifications',

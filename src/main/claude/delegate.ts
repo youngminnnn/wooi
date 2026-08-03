@@ -36,10 +36,10 @@ export interface DelegateDeps {
   cwd: string
   repoPath: string | null
   /**
-   * 위임할 수 있는 백엔드. 도구 스키마의 enum 이 되므로, 여기 없는 값은 모델이 아예 고를 수 없다.
-   * 비어 있으면 서버를 만들지 않는다(호출부가 판단).
+   * 띄울 수 있는 에이전트 종류. 도구 스키마의 enum 이 되므로, 여기 없는 값은 모델이 아예 고를 수
+   * 없다. 비어 있으면 서버를 만들지 않는다(호출부가 판단).
    */
-  subBackends: AgentBackendId[]
+  backends: AgentBackendId[]
   /**
    * 지금 이 순간의 부모 권한 모드. 세션 중에 바뀌므로 값이 아니라 함수로 받는다 —
    * 위임된 실행이 부모보다 넓은 권한을 갖는 일은 없어야 한다.
@@ -82,7 +82,7 @@ export function createDelegateServer(deps: DelegateDeps): DelegateServer {
   /** 진행 중인 위임 실행. 부모 턴이 끊길 때 함께 끊기 위해 들고 있는다. */
   const running = new Map<string, AbortController>()
 
-  const backends = deps.subBackends
+  const backends = deps.backends
   // z.enum 은 비지 않은 튜플을 요구한다. 호출부가 빈 목록이면 서버를 만들지 않지만,
   // 타입 수준에서도 못 박아 두는 편이 안전하다.
   const backendEnum = z.enum(backends as [AgentBackendId, ...AgentBackendId[]])
@@ -91,7 +91,9 @@ export function createDelegateServer(deps: DelegateDeps): DelegateServer {
     'delegate',
     describeTool(backends),
     {
-      backend: backendEnum.describe('Which agent product should do the work.'),
+      backend: backendEnum.describe(
+        'Which agent product runs this task. Match what the user asked for by name.'
+      ),
       description: z
         .string()
         .describe('A 3-6 word label for this task, shown while it runs (e.g. "Audit auth flow").'),
@@ -106,7 +108,7 @@ export function createDelegateServer(deps: DelegateDeps): DelegateServer {
     async (args) => {
       const backend = args.backend as AgentBackendId
       if (!backends.includes(backend)) {
-        return errorResult(`This workspace cannot delegate to ${AGENT_BACKEND_LABELS[backend]}.`)
+        return errorResult(`${AGENT_BACKEND_LABELS[backend]} is not available in this workspace.`)
       }
 
       const taskId = randomUUID()
@@ -179,19 +181,25 @@ export function createDelegateServer(deps: DelegateDeps): DelegateServer {
 /**
  * 도구 설명 — 위임이 실제로 걸리느냐가 대부분 여기에 달려 있다.
  *
- * 세 가지를 분명히 한다: (1) 이것은 **다른 제품**에게 넘기는 것이고, (2) 같은 백엔드 병렬 작업은
- * 여전히 네이티브 서브에이전트가 맞으며, (3) 넘긴 뒤에는 되물을 수 없다.
+ * 이 워크스페이스는 **멀티 에이전트 모드**다. 사용자는 "Codex 한테 이거 시켜줘", "Codex 로 두
+ * 개 띄워서 비교해줘" 처럼 대화에서 종류를 지목하므로, 그 말이 곧바로 이 도구 호출이 되어야 한다.
+ * 그래서 (1) 여러 번 부를 수 있다는 것, (2) 같은 종류라면 네이티브 서브에이전트가 낫다는 것,
+ * (3) 넘긴 뒤에는 되물을 수 없다는 것 셋을 분명히 적는다.
  */
 function describeTool(backends: AgentBackendId[]): string {
-  const names = backends.map((b) => AGENT_BACKEND_LABELS[b]).join(' or ')
+  const names = backends.map((b) => AGENT_BACKEND_LABELS[b]).join(', ')
   return (
-    `Hand one self-contained task to ${names} — a different coding agent — and wait for its answer. ` +
-    'Use this when the user asked for that agent by name, when a second opinion from a different ' +
-    'model family is worth having, or when that agent is genuinely better suited to the task. ' +
-    'For ordinary parallel work in your own model family, use your built-in subagents instead — ' +
-    'they share your context and are cheaper. ' +
-    'The delegated agent runs in this same worktree with your permission mode, starts from an ' +
-    'empty context, and reports back exactly once as text; it cannot ask you anything mid-run.'
+    'Run a task with a specific coding agent product and wait for its answer. ' +
+    `This is a multi-agent workspace: ${names} are all available to you. ` +
+    'Reach for this whenever the user names an agent ("have Codex look at this", "run it on both ' +
+    'and compare") — that request maps directly onto this tool. Call it once per agent you need; ' +
+    'several can be in flight at the same time. ' +
+    'If the agent you want is your own kind, prefer your built-in subagents instead: they share ' +
+    'your context and cost less. Use this tool for that kind only when the user explicitly asked ' +
+    'for a separate, clean-context run. ' +
+    'The agent runs in this same worktree under your permission mode, starts from an empty ' +
+    'context, and reports back exactly once as text; it cannot ask you anything mid-run, so put ' +
+    'everything it needs in the prompt.'
   )
 }
 

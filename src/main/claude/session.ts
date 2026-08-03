@@ -28,7 +28,6 @@ import type {
   FastModeDisabledReason,
   FastModeState,
   ImageAttachment,
-  MultiAgentConfig,
   PermissionRequest,
   PermissionDecision,
   RewindPoint,
@@ -63,13 +62,13 @@ export interface SessionDeps {
    */
   wooiMcp: McpSdkServerConfigWithInstance
   /**
-   * 멀티 에이전트 위임 설정. 없거나 null 이면 위임 도구를 아예 노출하지 않는다 —
+   * 이 세션이 위임할 수 있는 에이전트 종류. 없거나 비어 있으면 위임 도구를 아예 노출하지 않는다 —
    * 기존 단일 에이전트 세션은 이 경로를 전혀 타지 않으므로 **없는 것이 기본**이다.
    */
-  multiAgent?: MultiAgentConfig | null
+  delegateBackends?: AgentBackendId[]
   /**
    * 위임받을 백엔드의 모델·effort 기본값. 메인이 설정에서 계산해 내려 준다.
-   * multiAgent 가 없으면 쓰이지 않으므로 함께 생략할 수 있다.
+   * delegateBackends 가 비어 있으면 쓰이지 않으므로 함께 생략할 수 있다.
    */
   agentDefaults?: (backend: AgentBackendId) => {
     model: string | null
@@ -1378,14 +1377,14 @@ export class ClaudeSession {
    * query 를 다시 열 때마다 새로 만들면 앞선 위임 실행을 끊을 손잡이를 잃는다.
    */
   private ensureDelegate(): DelegateServer | null {
-    const backends = this.deps.multiAgent?.subBackends ?? []
+    const backends = this.deps.delegateBackends ?? []
     if (backends.length === 0) return null
     if (this.delegate) return this.delegate
 
     this.delegate = createDelegateServer({
       cwd: this.deps.cwd,
       repoPath: this.deps.repoPath,
-      subBackends: backends,
+      backends,
       // 값이 아니라 함수다 — 세션 중에 권한 모드가 바뀌면 다음 위임부터 그 값을 따라야 한다.
       permissionMode: () => this.deps.permissionMode,
       defaults: this.deps.agentDefaults ?? (() => ({ model: null, effort: null })),

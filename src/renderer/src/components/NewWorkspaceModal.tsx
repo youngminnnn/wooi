@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { AGENT_BACKEND_LABELS, experimentsOf, workspaceDisplayName } from '@shared/types'
+import { experimentsOf, workspaceDisplayName } from '@shared/types'
 import type { AgentBackendId } from '@shared/types'
 import { useStore } from '../store'
 import Modal, { inputClass, labelClass, primaryBtn, ghostBtn } from './Modal'
@@ -37,19 +37,16 @@ export default function NewWorkspaceModal({
       ? agentBackend
       : available[0].id
 
-  // 위임 대상 후보 = 쓸 수 있는 백엔드 중 메인이 아닌 것. 실험 기능이 꺼져 있거나 후보가 없으면
-  // (에이전트가 하나뿐인 사용자) 이 블록은 통째로 나오지 않는다.
-  const [subBackends, setSubBackends] = useState<AgentBackendId[]>([])
-  const canDelegate =
+  // 멀티 에이전트는 **모드**다 — 어떤 종류를 쓸지 여기서 고르지 않는다. 켜 두면 대화에서
+  // "Codex 한테 시켜줘" 라고 말하는 것으로 종류가 정해진다.
+  const [multiAgent, setMultiAgent] = useState(false)
+  // 에이전트가 둘 이상 있고, 고른 메인이 조율하는 쪽이 될 수 있을 때만 모드를 제안한다.
+  const showModePicker =
     experimentsOf(app.settings).multiAgent &&
-    // 조율하는 쪽이 될 수 있는 백엔드에서만 묻는다(capabilities.delegate).
+    available.length > 1 &&
     Boolean(available.find((b) => b.id === effectiveBackend)?.capabilities.delegate)
-  const delegateCandidates = available.filter((b) => b.id !== effectiveBackend)
-  const showDelegation = canDelegate && delegateCandidates.length > 0
-
-  const toggleSub = (id: AgentBackendId): void => {
-    setSubBackends((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
-  }
+  // 메인을 조율 불가 백엔드로 바꾸면 모드도 함께 꺼진 것으로 읽는다(체크는 남겨 두고 되돌아오면 살아난다).
+  const effectiveMultiAgent = multiAgent && showModePicker
 
   // 닫고 즉시 사이드바에 스피너 행을 띄운다(worktree 준비는 백그라운드). 실패는 토스트로 알린다.
   const create = (): void => {
@@ -61,11 +58,7 @@ export default function NewWorkspaceModal({
         name: trimmed,
         parentWorkspaceId,
         agentBackend: effectiveBackend,
-        // 메인을 바꿔 후보에서 빠진 값이 남아 있을 수 있으므로 여기서 한 번 더 거른다
-        // (main 도 multiAgentConfigFrom 에서 같은 판단을 한다).
-        ...(showDelegation
-          ? { subBackends: subBackends.filter((id) => id !== effectiveBackend) }
-          : {})
+        ...(effectiveMultiAgent ? { multiAgent: true } : {})
       },
       trimmed
     )
@@ -105,9 +98,46 @@ export default function NewWorkspaceModal({
           )}
         </div>
 
+        {showModePicker && (
+          <div>
+            <label className={labelClass}>Mode</label>
+            <div className="flex gap-1.5">
+              {[
+                { on: false, label: 'Single agent', hint: 'One agent does the work.' },
+                {
+                  on: true,
+                  label: 'Multi-agent',
+                  hint: 'The main agent can run tasks with other agents.'
+                }
+              ].map((option) => (
+                <button
+                  key={option.label}
+                  type="button"
+                  onClick={() => setMultiAgent(option.on)}
+                  className={
+                    'flex-1 text-left text-sm px-3 py-2 rounded-lg border transition-colors ' +
+                    (effectiveMultiAgent === option.on
+                      ? 'border-[var(--info-500)] bg-[var(--info-600)]/15 text-neutral-100'
+                      : 'border-[var(--border)] text-neutral-300 hover:bg-[var(--surface-2)]')
+                  }
+                >
+                  <div className="font-medium">{option.label}</div>
+                  <div className="mt-0.5 text-xs text-neutral-500">{option.hint}</div>
+                </button>
+              ))}
+            </div>
+            {effectiveMultiAgent && (
+              <p className="mt-1.5 text-xs text-neutral-600">
+                Experimental. You don&apos;t pick the other agents here — just ask in the chat
+                (&ldquo;have Codex review this&rdquo;) and the main agent runs them for you.
+              </p>
+            )}
+          </div>
+        )}
+
         {showPicker && (
           <div>
-            <label className={labelClass}>Agent</label>
+            <label className={labelClass}>{effectiveMultiAgent ? 'Main agent' : 'Agent'}</label>
             <div className="flex gap-1.5">
               {available.map((b) => (
                 <button
@@ -127,35 +157,9 @@ export default function NewWorkspaceModal({
               ))}
             </div>
             <p className="mt-1.5 text-xs text-neutral-600">
-              A workspace stays on the agent it was created with.
-            </p>
-          </div>
-        )}
-
-        {showDelegation && (
-          <div>
-            <label className={labelClass}>Delegate to (experimental)</label>
-            <div className="flex gap-1.5">
-              {delegateCandidates.map((b) => (
-                <button
-                  key={b.id}
-                  type="button"
-                  onClick={() => toggleSub(b.id)}
-                  className={
-                    'flex-1 flex items-center justify-center gap-2 text-sm px-3 py-2 rounded-lg border transition-colors ' +
-                    (subBackends.includes(b.id)
-                      ? 'border-[var(--info-500)] bg-[var(--info-600)]/15 text-neutral-100'
-                      : 'border-[var(--border)] text-neutral-300 hover:bg-[var(--surface-2)]')
-                  }
-                >
-                  <AgentBackendMark backend={b.id} size={15} />
-                  {b.label}
-                </button>
-              ))}
-            </div>
-            <p className="mt-1.5 text-xs text-neutral-600">
-              {AGENT_BACKEND_LABELS[effectiveBackend]} can hand a task to these agents and wait for
-              the answer. They run in this worktree — you don&apos;t drive them directly.
+              {effectiveMultiAgent
+                ? 'The agent you talk to. It stays fixed for the life of the workspace.'
+                : 'A workspace stays on the agent it was created with.'}
             </p>
           </div>
         )}

@@ -5,51 +5,39 @@ import {
   type AgentBackendId,
   type AppSettings,
   type EffortSetting,
-  type MultiAgentConfig,
   type Workspace
 } from '@shared/types'
+import { backendMeta } from './backend'
 
 /**
- * 멀티 에이전트 위임 설정의 단일 해석 지점.
+ * 멀티 에이전트 모드의 단일 해석 지점.
  *
- * 위임을 켤지 말지는 **워크스페이스 설정과 실험 스위치의 곱**이다. 두 조건을 세션 생성 경로마다
- * 따로 적으면, 실험을 껐는데 어느 백엔드에서만 위임 도구가 계속 실리는 식으로 갈라진다.
+ * 위임이 열리는 조건은 **워크스페이스 모드 × 실험 스위치 × 메인 백엔드의 capability** 세 가지의
+ * 곱이다. 세션 생성 경로마다 따로 적으면 실험을 껐는데 어느 경로에서만 위임 도구가 계속 실리는
+ * 식으로 갈라지므로 여기 한 곳에 모은다.
  */
 
 /**
- * 이 워크스페이스가 지금 실제로 쓸 위임 설정. 쓸 수 없으면 null 이고, 그때 세션은 위임 도구를
- * 아예 노출하지 않는다.
+ * 이 워크스페이스에서 위임할 수 있는 에이전트 종류. 빈 배열이면 위임 도구를 아예 노출하지 않는다.
  *
- * 실험 스위치를 여기서 보는 것이 요점이다 — 사용자가 실험을 끄면 이미 만들어 둔 멀티 에이전트
- * 워크스페이스도 다음 세션부터 평범한 단일 에이전트 워크스페이스로 돌아간다(설정은 남아 있으므로
- * 다시 켜면 그대로 살아난다).
- */
-export function multiAgentFor(ws: Workspace, settings: AppSettings): MultiAgentConfig | null {
-  if (!experimentsOf(settings).multiAgent) return null
-  const configured = ws.multiAgent?.subBackends ?? []
-  // 저장된 값에 모르는 백엔드가 섞여 있을 수 있다(다운그레이드·손편집). 모르는 값을 그대로
-  // 도구 스키마의 enum 에 실으면 모델이 고를 수 있는 존재하지 않는 선택지가 된다.
-  const subBackends = configured.filter((id) => AGENT_BACKEND_IDS.includes(id))
-  return subBackends.length ? { subBackends } : null
-}
-
-/**
- * 워크스페이스 생성 인자의 위임 백엔드 목록을 저장할 설정으로 좁힌다. 쓸 것이 없으면 null 을
- * 돌려주고, 그러면 워크스페이스는 필드 자체가 없는 평범한 단일 에이전트 워크스페이스가 된다.
+ * 멀티 에이전트 워크스페이스는 **모드**이지 백엔드 화이트리스트가 아니다 — 켜져 있으면 등록된
+ * 모든 에이전트 종류를 쓸 수 있고, 어떤 종류로 띄울지는 대화에서 자연어로 정한다. 미리 목록을
+ * 고르게 하면 "Codex 한테 시켜줘" 라고 말했는데 생성 시점에 체크를 안 했다는 이유로 안 되는,
+ * 설명하기 어려운 실패가 생긴다.
  *
- * **메인 백엔드 자신은 뺀다.** 같은 백엔드 작업은 네이티브 서브에이전트(Task·collab)가 맥락 공유·
- * 비용·속도 어느 쪽으로도 낫고, 위임 도구에 그 선택지를 남기면 모델이 둘 사이에서 헷갈린다.
+ * 메인 백엔드 자신도 뺴지 않는다. "Claude 서브에이전트 두 개 띄워줘" 도 자연스러운 요청이고,
+ * 같은 종류일 때 네이티브 서브에이전트를 우선하라는 안내는 도구 설명이 맡는다(claude/delegate.ts).
+ *
+ * CLI 가 설치돼 있는지는 보지 않는다 — 확인이 비동기라 세션 설정 계산과 결이 맞지 않고, 없는
+ * CLI 로 위임하면 서브런이 "The Codex CLI is not available." 라는 분명한 도구 결과로 끊는다.
  */
-export function multiAgentConfigFrom(
-  subBackends: AgentBackendId[] | undefined,
-  mainBackend: AgentBackendId
-): MultiAgentConfig | null {
-  const picked = (subBackends ?? []).filter(
-    (id) => id !== mainBackend && AGENT_BACKEND_IDS.includes(id)
-  )
-  // 같은 값을 두 번 넣어도(UI 실수·손편집) 도구 스키마의 enum 이 중복되지 않게 한다.
-  const unique = [...new Set(picked)]
-  return unique.length ? { subBackends: unique } : null
+export function delegateBackendsFor(ws: Workspace, settings: AppSettings): AgentBackendId[] {
+  if (!experimentsOf(settings).multiAgent) return []
+  if (!ws.multiAgent) return []
+  // 조율하는 쪽이 될 수 없는 백엔드(위임 도구를 꽂을 경로가 없는 백엔드)에서는 모드가 켜져 있어도
+  // 아무것도 열지 않는다. UI 도 같은 capability 로 모드 자체를 제안하지 않는다.
+  if (!backendMeta(ws.agentBackend).capabilities.delegate) return []
+  return [...AGENT_BACKEND_IDS]
 }
 
 /**

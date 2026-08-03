@@ -1,10 +1,16 @@
 import type { BrowserWindow } from 'electron'
-import type { AgentBackendId, AgentBackendMeta } from '@shared/types'
+import type { AgentBackendId } from '@shared/types'
 import { SessionManager } from '../claude/manager'
 import { CodexSessionManager } from '../codex/manager'
 import { detectCodex } from '../codex/executable'
 import { isInstalled } from '../shell'
-import { CLAUDE_META, CODEX_META, type AgentBackend } from './backend'
+import { backendMeta, type AgentBackend } from './backend'
+
+/**
+ * 백엔드 **구현**을 아는 유일한 모듈. 메타데이터 카탈로그(AGENT_BACKENDS·backendMeta)는 매니저를
+ * 끌어오지 않는 backend.ts 에 있다 — 메타 하나 읽으려고 이 파일을 import 하면 매니저 그래프가
+ * 통째로 딸려 오고 순환이 생기기 때문이다.
+ */
 
 /** main → renderer 채널 방송 함수. 각 백엔드가 이벤트를 렌더러로 흘려보낼 때 쓴다. */
 export type Dispatch = (channel: string, payload: unknown) => void
@@ -14,15 +20,6 @@ export interface BackendDeps {
   dispatch: Dispatch
   getWindow: () => BrowserWindow | null
 }
-
-/** 식별자별 백엔드 메타데이터 카탈로그. 새 백엔드는 여기에 메타와 createBackend 분기를 추가한다. */
-export const AGENT_BACKENDS: Record<AgentBackendId, AgentBackendMeta> = {
-  claude: CLAUDE_META,
-  codex: CODEX_META
-}
-
-/** 알 수 없는/누락 식별자의 폴백 백엔드. */
-export const DEFAULT_BACKEND_ID: AgentBackendId = 'claude'
 
 /** 백엔드별 CLI 실행 파일 이름. 설치 감지의 단일 출처. */
 export const BACKEND_CLI: Record<AgentBackendId, string> = {
@@ -51,11 +48,6 @@ export async function backendAvailability(
   if (!cli) return { available: false, reason: 'Unknown agent backend' }
   if (await isInstalled(cli)) return { available: true }
   return { available: false, reason: `${backendMeta(id).label} CLI (\`${cli}\`) is not installed` }
-}
-
-/** 식별자에 해당하는 백엔드 메타를 돌려준다(없으면 기본 백엔드). */
-export function backendMeta(id: AgentBackendId): AgentBackendMeta {
-  return AGENT_BACKENDS[id] ?? AGENT_BACKENDS[DEFAULT_BACKEND_ID]
 }
 
 /**

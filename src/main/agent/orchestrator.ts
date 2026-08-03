@@ -16,13 +16,8 @@ import {
 } from '@shared/types'
 import type { AgentBackendMeta, ModelOption } from '@shared/types'
 import type { AgentBackend } from './backend'
-import {
-  AGENT_BACKENDS,
-  backendAvailability,
-  backendMeta,
-  createBackend,
-  type Dispatch
-} from './registry'
+import { backendAvailability, createBackend, type Dispatch } from './registry'
+import { AGENT_BACKENDS, backendMeta } from './backend'
 import { log } from '../logger'
 
 /**

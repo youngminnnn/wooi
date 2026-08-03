@@ -8,7 +8,6 @@ import type {
   EffortSetting,
   ImageAttachment,
   McpAction,
-  MultiAgentConfig,
   PermissionDecision,
   PermissionMode,
   PermissionRequest
@@ -87,10 +86,11 @@ export interface SessionConfig {
   /** `/add-dir` 로 더해진 작업 루트(절대 경로). 비어 있으면 cwd 만 쓴다. */
   additionalDirs: string[]
   /**
-   * 멀티 에이전트 위임 설정. null 이면 위임 도구를 노출하지 않는다(기존 단일 에이전트 워크스페이스).
-   * 실험 기능이 꺼져 있으면 메인이 여기서 null 로 접어 보내므로, 호스트는 이 값만 보면 된다.
+   * 이 세션이 위임할 수 있는 에이전트 종류. 비어 있으면 위임 도구를 노출하지 않는다
+   * (기존 단일 에이전트 워크스페이스). 모드·실험 스위치·capability 판단은 메인이 이미 끝내고
+   * 결과만 실어 보내므로, 호스트는 이 목록만 보면 된다.
    */
-  multiAgent: MultiAgentConfig | null
+  delegateBackends: AgentBackendId[]
   /**
    * 위임받을 백엔드의 모델·effort 기본값. 호스트에는 store 가 없으므로 메인이 계산해 실어 보낸다.
    * 백엔드가 늘어도 항목만 늘면 되도록 Record 로 넘긴다.

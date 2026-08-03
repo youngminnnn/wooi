@@ -14,7 +14,7 @@ import { getTranscripts } from '../transcripts'
 import { log } from '../logger'
 import { IPC, agentSettingsFor, workspaceDisplayName } from '@shared/types'
 import { CLAUDE_META, CLAUDE_MODELS, type AgentBackend } from '../agent/backend'
-import { agentDefaultsFor, multiAgentFor } from '../agent/multiAgent'
+import { agentDefaultsFor, delegateBackendsFor } from '../agent/multiAgent'
 import { claudeMode, type HostCommand, type HostEvent, type SessionConfig } from './protocol'
 import { runAgentTool } from '../agent/tools'
 import type {
@@ -287,7 +287,7 @@ export class SessionManager implements AgentBackend {
       autoCompact: settings.autoCompact,
       resumeSessionId: ws.sessionId,
       additionalDirs: ws.additionalDirs ?? [],
-      multiAgent: multiAgentFor(ws, settings),
+      delegateBackends: delegateBackendsFor(ws, settings),
       agentDefaults: agentDefaultsFor(settings)
     }
   }
