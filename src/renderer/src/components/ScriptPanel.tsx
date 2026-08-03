@@ -1,15 +1,28 @@
 import { useEffect, useState } from 'react'
-import { Play, Square, X, ExternalLink, AlertTriangle, Check, Settings2 } from 'lucide-react'
+import {
+  Play,
+  Square,
+  X,
+  ExternalLink,
+  AlertTriangle,
+  Check,
+  Settings2,
+  SquareArrowOutUpRight
+} from 'lucide-react'
 import { useStore, scriptKey } from '../store'
 import { openRepoSettings } from '../lib/repoSettings'
 import type { ScriptKind } from '@shared/types'
 
 export default function ScriptPanel({
   workspaceId,
-  onClose
+  onClose,
+  fill
 }: {
   workspaceId: string
-  onClose: () => void
+  /** 인라인 패널에서만 준다 — 별도 창으로 분리했을 때는 창을 닫는 것이 곧 닫기다. */
+  onClose?: () => void
+  /** 별도 창에서 창 전체를 채울 때. 인라인일 때는 대화 아래 고정 높이로 붙는다. */
+  fill?: boolean
 }): React.JSX.Element {
   const app = useStore((s) => s.app)!
   const ws = app.workspaces.find((w) => w.id === workspaceId)!
@@ -17,6 +30,8 @@ export default function ScriptPanel({
   const output = useStore((s) => s.scriptOutput)
   const statuses = useStore((s) => s.scriptStatus[workspaceId]) ?? []
   const refreshStatus = useStore((s) => s.refreshScriptStatus)
+  const seedOutput = useStore((s) => s.seedScriptOutput)
+  const detachPane = useStore((s) => s.detachPane)
   const [tab, setTab] = useState<ScriptKind>('dev')
 
   const command = tab === 'setup' ? repo.setupScript : repo.devScript
@@ -34,10 +49,17 @@ export default function ScriptPanel({
   // 흔하며, 그냥 두면 로그에 묻혀 "왜 안 뜨지" 로 이어진다.
   const portInUse = /EADDRINUSE|address already in use|port .* is already in use/i.test(out)
 
+  // 이 창(또는 패널)이 뜨기 전에 이미 흘러간 로그를 main 의 꼬리 버퍼에서 한 번 채운다.
+  // 그러지 않으면 돌고 있는 dev 서버를 열어 놓고도 "No output yet." 만 보인다.
+  useEffect(() => {
+    void seedOutput(workspaceId, tab)
+  }, [seedOutput, workspaceId, tab])
+
   // Esc 로도 패널을 닫는다. 패널 안에 포커스가 없어도(출력 스크롤·다른 곳 클릭) 먹히도록 window
   // 레벨에서 받되, Esc 를 이미 쓰고 있는 UI 가 떠 있으면 양보한다 — 그쪽이 닫히면서 뒤의 패널까지
   // 같이 사라지면 "왜 두 개가 닫히지" 가 된다.
   useEffect(() => {
+    if (!onClose) return
     const onKey = (e: KeyboardEvent): void => {
       if (e.key !== 'Escape' || e.defaultPrevented) return
       const s = useStore.getState()
@@ -63,7 +85,13 @@ export default function ScriptPanel({
   }
 
   return (
-    <div className="shrink-0 h-64 border-t border-[var(--border)] bg-[var(--bg-2)] flex flex-col">
+    <div
+      className={
+        fill
+          ? 'h-full bg-[var(--bg-2)] flex flex-col min-h-0'
+          : 'shrink-0 h-64 border-t border-[var(--border)] bg-[var(--bg-2)] flex flex-col'
+      }
+    >
       <div className="h-9 shrink-0 flex items-center gap-1 px-2 border-b border-[var(--border)]">
         {(['dev', 'setup'] as ScriptKind[]).map((kind) => {
           const active = tab === kind
@@ -119,12 +147,26 @@ export default function ScriptPanel({
           </button>
         )}
 
-        <button
-          onClick={onClose}
-          className="h-6 w-6 grid place-items-center rounded-md text-neutral-500 hover:bg-[var(--surface-2)] hover:text-neutral-200"
-        >
-          <X size={14} />
-        </button>
+        {onClose && (
+          <>
+            {/* 듀얼 모니터에서 로그를 옆 화면에 띄워 두기 위한 분리 버튼. */}
+            <button
+              onClick={() => detachPane('scripts')}
+              aria-label="Open scripts panel in a separate window"
+              title="Open in a separate window"
+              className="h-6 w-6 grid place-items-center rounded-md text-neutral-500 hover:bg-[var(--surface-2)] hover:text-neutral-200"
+            >
+              <SquareArrowOutUpRight size={13} />
+            </button>
+            <button
+              onClick={onClose}
+              aria-label="Close scripts panel"
+              className="h-6 w-6 grid place-items-center rounded-md text-neutral-500 hover:bg-[var(--surface-2)] hover:text-neutral-200"
+            >
+              <X size={14} />
+            </button>
+          </>
+        )}
       </div>
 
       {command.trim() && (

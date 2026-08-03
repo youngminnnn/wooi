@@ -68,7 +68,8 @@ const api: WooiApi = {
   script: {
     run: (workspaceId, kind) => ipcRenderer.invoke(IPC.scriptRun, workspaceId, kind),
     stop: (workspaceId, kind) => ipcRenderer.invoke(IPC.scriptStop, workspaceId, kind),
-    getStatus: (workspaceId) => ipcRenderer.invoke(IPC.scriptGetStatus, workspaceId)
+    getStatus: (workspaceId) => ipcRenderer.invoke(IPC.scriptGetStatus, workspaceId),
+    getOutput: (workspaceId, kind) => ipcRenderer.invoke(IPC.scriptGetOutput, workspaceId, kind)
   },
 
   git: {
@@ -155,6 +156,17 @@ const api: WooiApi = {
     onExit: (cb) => subscribe(IPC.evtTerminalExit, cb)
   },
 
+  pane: {
+    open: (kind, workspaceId) => ipcRenderer.invoke(IPC.paneOpen, kind, workspaceId),
+    close: (kind) => ipcRenderer.invoke(IPC.paneClose, kind),
+    focus: (kind) => ipcRenderer.invoke(IPC.paneFocus, kind),
+    getState: () => ipcRenderer.invoke(IPC.paneGetState),
+    setWorkspace: (workspaceId) => ipcRenderer.invoke(IPC.paneSetWorkspace, workspaceId),
+    openRepoSettings: (repoId) => ipcRenderer.invoke(IPC.paneOpenRepoSettings, repoId),
+    onState: (cb) => subscribe(IPC.evtPaneState, cb),
+    onWorkspace: (cb) => subscribe(IPC.evtPaneWorkspace, cb)
+  },
+
   app: {
     setBadgeCount: (count) => ipcRenderer.invoke(IPC.appSetBadge, count),
     getVersion: () => ipcRenderer.invoke(IPC.appGetVersion)
@@ -210,6 +222,7 @@ const api: WooiApi = {
   onState: (cb) => subscribe(IPC.evtState, cb),
   onReview: (cb) => subscribe(IPC.evtReview, cb),
   onSelectWorkspace: (cb) => subscribe(IPC.evtSelectWorkspace, cb),
+  onOpenRepoSettings: (cb) => subscribe(IPC.evtOpenRepoSettings, cb),
   onWindowFocus: (cb) => subscribe(IPC.evtWindowFocus, () => cb()),
   onWindowBlur: (cb) => subscribe(IPC.evtWindowBlur, () => cb()),
   onClaudeLogin: (cb) => subscribe(IPC.evtClaudeLogin, cb),

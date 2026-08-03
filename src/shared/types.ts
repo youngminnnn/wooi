@@ -728,6 +728,14 @@ export interface AppSettings {
    * CURRENT_TERMS_VERSION 과 다르면 온보딩 첫 단계에서 (재)동의를 요구한다.
    */
   acceptedTermsVersion: number | null
+  /**
+   * 별도 창으로 분리한 패널(work/scripts)의 마지막 위치·크기.
+   *
+   * 설정 화면에서 고르는 값이 아니라 창을 닫을 때 기록되는 자리 기억이다 — 듀얼 모니터에서
+   * 보조 화면에 옮겨 둔 창이 다음에 열 때도 같은 화면·같은 크기로 뜨게 한다. 저장된 자리가
+   * 지금 연결된 디스플레이 밖이면(모니터를 뽑은 뒤) 무시하고 기본 위치로 연다.
+   */
+  paneWindowBounds?: Partial<Record<PaneKind, WindowBounds>>
 }
 
 export interface AppState {
@@ -1023,6 +1031,27 @@ export interface ScriptExitEvent {
 }
 
 export type ScriptRunState = 'idle' | 'running' | 'exited'
+
+// ── 분리 가능한 패널(별도 창) ────────────────────────────────────────────
+
+/**
+ * 메인 창에서 떼어 별도 창으로 띄울 수 있는 패널.
+ * 듀얼 모니터에서 대화는 이쪽 화면에, 파일·터미널·스크립트 로그는 저쪽 화면에 두기 위한 것.
+ */
+export type PaneKind = 'work' | 'scripts'
+
+export const PANE_KINDS: readonly PaneKind[] = ['work', 'scripts'] as const
+
+/** 지금 별도 창으로 떠 있는 패널(main 이 소유하고 모든 창에 방송한다). */
+export type PaneState = Record<PaneKind, boolean>
+
+/** 창의 위치·크기(분리한 패널 창의 자리를 기억하는 데 쓴다). */
+export interface WindowBounds {
+  x: number
+  y: number
+  width: number
+  height: number
+}
 
 export interface ScriptStatus {
   kind: ScriptKind
@@ -1471,6 +1500,11 @@ export const IPC = {
   scriptRun: 'script:run',
   scriptStop: 'script:stop',
   scriptGetStatus: 'script:getStatus',
+  /**
+   * 스크립트의 누적 출력(꼬리 버퍼)을 읽는다. 출력은 이벤트로 흘려보내므로, 나중에 뜬 창
+   * (분리한 스크립트 패널)은 그때까지의 로그를 볼 방법이 없다 — 그 창을 채우는 용도다.
+   */
+  scriptGetOutput: 'script:getOutput',
   gitStatus: 'git:status',
   gitDiff: 'git:diff',
   /** base 브랜치를 현재 워크스페이스 브랜치로 머지해 드리프트를 해소한다. */
@@ -1579,6 +1613,19 @@ export const IPC = {
   terminalExec: 'terminal:exec',
   /** 진행 중인 인라인 `!명령`(execInline)을 중단한다. 인자로 workspaceId 와 대상 아이템 id 를 받는다. */
   terminalKillInline: 'terminal:killInline',
+  // 분리한 패널 창 (work / scripts)
+  /** 해당 패널을 별도 창으로 띄운다(이미 떠 있으면 앞으로 가져온다). */
+  paneOpen: 'pane:open',
+  /** 분리한 패널 창을 닫는다 — 패널은 메인 창으로 되돌아간다. */
+  paneClose: 'pane:close',
+  /** 분리한 패널 창을 앞으로 가져온다. */
+  paneFocus: 'pane:focus',
+  /** 지금 분리돼 있는 패널 목록(창이 늦게 떠서 방송을 놓친 경우의 초기화용). */
+  paneGetState: 'pane:getState',
+  /** 메인 창의 선택 워크스페이스가 바뀌었음을 알린다 — 분리한 창이 따라 움직인다. */
+  paneSetWorkspace: 'pane:setWorkspace',
+  /** 분리한 창에서 리포 설정을 요청한다(메인 창을 앞으로 가져와 모달을 연다). */
+  paneOpenRepoSettings: 'pane:openRepoSettings',
   // Dock 미확인 배지
   appSetBadge: 'app:setBadge',
   // 앱 버전 / 자동 업데이트
@@ -1628,6 +1675,12 @@ export const IPC = {
   evtAuthChanged: 'evt:authChanged',
   /** 앱 내부 GitHub 로그인 진행 이벤트(one-time 코드·디바이스 URL 노출 / 완료). */
   evtGithubLogin: 'evt:githubLogin',
+  /** 분리한 패널 창의 열림/닫힘 상태 — 메인 창은 이 값으로 인라인 패널을 감추거나 되돌린다. */
+  evtPaneState: 'evt:paneState',
+  /** 분리한 창이 따라가야 할 워크스페이스(메인 창의 선택을 그대로 따른다). */
+  evtPaneWorkspace: 'evt:paneWorkspace',
+  /** 분리한 창이 요청한 리포 설정 열기 — 메인 창이 받아 모달을 띄운다. */
+  evtOpenRepoSettings: 'evt:openRepoSettings',
   /** 자동 업데이트 상태 변화(확인 중/최신/발견/다운로드 진행/준비됨/오류). */
   evtUpdate: 'evt:update',
   /** 원격 공지 목록이 갱신됨(main 이 주기적으로 가져온 결과). */

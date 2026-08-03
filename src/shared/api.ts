@@ -27,6 +27,8 @@ import type {
   McpServerInfo,
   ModelOption,
   MemoryScope,
+  PaneKind,
+  PaneState,
   PermissionDecision,
   PermissionMode,
   PermissionRequest,
@@ -167,6 +169,8 @@ export interface WooiApi {
     run(workspaceId: string, kind: ScriptKind): Promise<void>
     stop(workspaceId: string, kind: ScriptKind): Promise<void>
     getStatus(workspaceId: string): Promise<ScriptStatus[]>
+    /** 지금까지의 누적 출력(꼬리 버퍼). 나중에 뜬 창이 이전 로그를 채우는 데 쓴다. */
+    getOutput(workspaceId: string, kind: ScriptKind): Promise<string>
   }
 
   git: {
@@ -361,6 +365,23 @@ export interface WooiApi {
     onExit(cb: (e: TerminalExitEvent) => void): () => void
   }
 
+  /**
+   * 패널을 별도 창으로 분리한다(듀얼 모니터에서 보조 화면에 띄우기 위한 것).
+   * 분리한 창은 메인 창의 선택 워크스페이스를 따라가고, 닫으면 패널이 메인 창으로 되돌아온다.
+   */
+  pane: {
+    open(kind: PaneKind, workspaceId: string | null): Promise<void>
+    close(kind: PaneKind): Promise<void>
+    focus(kind: PaneKind): Promise<void>
+    getState(): Promise<PaneState>
+    /** 메인 창 전용 — 선택이 바뀌었음을 분리한 창들에 전달한다. */
+    setWorkspace(workspaceId: string | null): Promise<void>
+    /** 분리한 창 전용 — 메인 창을 앞으로 가져와 해당 리포 설정을 연다. */
+    openRepoSettings(repoId: string): Promise<void>
+    onState(cb: (state: PaneState) => void): () => void
+    onWorkspace(cb: (workspaceId: string | null) => void): () => void
+  }
+
   app: {
     /** macOS Dock 의 미확인 빨간 배지 개수. 0 이면 지운다. */
     setBadgeCount(count: number): Promise<void>
@@ -436,6 +457,8 @@ export interface WooiApi {
   onReview(cb: (e: ReviewEnvelope) => void): () => void
   /** OS 알림 클릭 시 main 이 보내는 workspace 선택 요청. */
   onSelectWorkspace(cb: (workspaceId: string) => void): () => void
+  /** 분리한 패널 창이 요청한 리포 설정 열기(메인 창이 모달을 띄운다). */
+  onOpenRepoSettings(cb: (repoId: string) => void): () => void
   /** main 창이 포커스를 얻었을 때의 알림(미확인 표시 해제 트리거). */
   onWindowFocus(cb: () => void): () => void
   /** main 창이 포커스를 잃었을 때의 알림(이후 완료를 미확인으로 잡는 신뢰 신호). */

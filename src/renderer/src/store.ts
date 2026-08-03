@@ -11,6 +11,8 @@ import type {
   GitStatus,
   ImageAttachment,
   ModelOption,
+  PaneKind,
+  PaneState,
   PermissionRequest,
   PrStatus,
   RunningAgent,
@@ -221,6 +223,13 @@ interface UIState {
   rightPanelOpen: boolean
   /** 우하단 터미널이 우측 컬럼 높이에서 차지하는 비율(0~1). 기본 0.5. 가로 분할 드래그로 조절. */
   terminalRatio: number
+  /**
+   * 지금 별도 창으로 떠 있는 패널(main 이 소유하는 값의 사본).
+   *
+   * 분리는 복제가 아니라 이동이다 — 여기서 true 인 패널은 메인 창에서 그리지 않는다.
+   * 창을 닫으면 false 로 돌아오고 패널은 제자리(인라인)로 복귀한다([[paneWindows]]).
+   */
+  detachedPanes: PaneState
   toasts: Toast[]
   confirmState: ConfirmState | null
   /**
@@ -245,6 +254,17 @@ interface UIState {
   reviewViews: Record<string, ReviewViewState>
 
   init: () => Promise<void>
+  /**
+   * 분리한 패널 창(work/scripts)용 축소 초기화.
+   *
+   * 메인 창의 init 을 그대로 쓰면 알림음·Dock 배지·미확인 계산이 두 창에서 각각 돌아, 소리가
+   * 두 번 나고 배지가 서로를 덮어쓴다. 패널이 실제로 읽는 것(앱 상태·git/PR·스크립트)만 채운다.
+   */
+  initPane: (workspaceId: string | null) => Promise<void>
+  /** 분리한 창이 따라갈 워크스페이스를 바꾼다(메인 창의 선택을 그대로 반영). */
+  setPaneWorkspace: (workspaceId: string | null) => void
+  /** 패널을 별도 창으로 떼어 낸다(듀얼 모니터용). */
+  detachPane: (kind: PaneKind) => void
   /** worktree 생성을 시작하고, 완료될 때까지 사이드바에 스피너 행을 즉시 띄운다. */
   createWorkspace: (
     repoId: string,
@@ -275,6 +295,11 @@ interface UIState {
   /** PR 상태를 즉시(낙관적) 설정한다. 브랜치 전환 시 캐시된 값으로 헤더를 바로 갱신할 때 쓴다. */
   setPrStatus: (workspaceId: string, status: PrStatus | null) => void
   refreshScriptStatus: (workspaceId: string) => Promise<void>
+  /**
+   * 아직 받아 둔 출력이 없으면 main 의 꼬리 버퍼로 채운다.
+   * 출력은 이벤트로만 흘러오므로, 나중에 뜬 창은 이게 없으면 돌고 있는 dev 서버의 로그를 못 본다.
+   */
+  seedScriptOutput: (workspaceId: string, kind: ScriptKind) => Promise<void>
   refreshAuth: () => Promise<void>
   /** 에이전트 백엔드 메타 + 백엔드별 모델 목록을 다시 읽는다(가용성은 실행 중에도 바뀐다). */
   refreshAgents: () => Promise<void>
@@ -469,6 +494,7 @@ export const useStore = create<UIState>((set, get) => ({
   rightWidth: 460,
   rightPanelOpen: true,
   terminalRatio: 0.5,
+  detachedPanes: { work: false, scripts: false },
   toasts: [],
   confirmState: null,
   overlayOpen: false,
@@ -588,6 +614,15 @@ export const useStore = create<UIState>((set, get) => ({
     window.api.onSelectWorkspace((workspaceId) => {
       void get().selectWorkspace(workspaceId)
     })
+
+    // 별도 창으로 분리한 패널의 열림/닫힘. 메인 창은 이 값으로 인라인 패널을 감추거나 되돌린다
+    // — 분리는 복제가 아니라 이동이라, 같은 패널이 두 곳에 동시에 있으면 안 된다([[paneWindows]]).
+    // 창이 늦게 떠서 방송을 놓쳤을 수 있으므로 현재 값을 한 번 읽고 시작한다.
+    void window.api.pane.getState().then((state) => set({ detachedPanes: state }))
+    window.api.pane.onState((state) => set({ detachedPanes: state }))
+
+    // 분리한 창에는 리포 설정 모달이 없다 — 그쪽에서 누른 "Set a dev command" 가 여기로 온다.
+    window.api.onOpenRepoSettings((repoId) => openRepoSettings(repoId))
 
     // 지금 보고 있는 workspace 의 미확인 표시를 해제한다(사용자가 막 들여다봤으므로).
     const clearSelectedUnread = (): void => {
@@ -902,6 +937,67 @@ export const useStore = create<UIState>((set, get) => ({
     })
   },
 
+  initPane: async (workspaceId) => {
+    if (initialized) return
+    initialized = true
+
+    set({ selectedWorkspaceId: workspaceId })
+
+    const app = await window.api.getState()
+    set({ app, ready: true })
+    window.api.onState((next) => set({ app: next }))
+
+    // 이 창이 따라갈 워크스페이스는 메인 창의 선택이 정한다.
+    window.api.pane.onWorkspace((next) => get().setPaneWorkspace(next))
+
+    // 스크립트 출력은 이벤트로만 흘러온다 — 메인 창과 같은 방식으로 누적한다(이 창이 뜨기 전의
+    // 로그는 ScriptPanel 이 main 의 꼬리 버퍼에서 한 번 채운다 — seedScriptOutput).
+    window.api.onScriptOutput(({ workspaceId: id, kind, chunk }) => {
+      const key = scriptKey(id, kind)
+      const out = get().scriptOutput
+      set({ scriptOutput: { ...out, [key]: (out[key] ?? '') + chunk } })
+    })
+    window.api.onScriptExit(({ workspaceId: id, kind, code }) => {
+      const key = scriptKey(id, kind)
+      const out = get().scriptOutput
+      set({
+        scriptOutput: {
+          ...out,
+          [key]: (out[key] ?? '') + `\n[wooi] exited (code ${code ?? '?'})\n`
+        }
+      })
+      void get().refreshScriptStatus(id)
+    })
+
+    // 인증 상태는 Check 탭(gh 필요)이 읽는다.
+    void get().refreshAuth()
+
+    const refresh = (): void => {
+      const id = get().selectedWorkspaceId
+      if (!id) return
+      void get().refreshGit(id)
+      void get().refreshPr(id)
+      void get().refreshScriptStatus(id)
+    }
+    refresh()
+    // 이 창만 보고 있는 동안에도 변경 파일 수·PR 상태가 늙지 않도록 주기적으로 따라잡는다.
+    // 메인 창의 전체 폴링과 달리 지금 보고 있는 워크스페이스 하나만 본다.
+    if (!statusPollTimer) statusPollTimer = setInterval(refresh, STATUS_POLL_INTERVAL_MS)
+  },
+
+  setPaneWorkspace: (workspaceId) => {
+    if (get().selectedWorkspaceId === workspaceId) return
+    set({ selectedWorkspaceId: workspaceId })
+    if (!workspaceId) return
+    void get().refreshGit(workspaceId)
+    void get().refreshPr(workspaceId)
+    void get().refreshScriptStatus(workspaceId)
+  },
+
+  detachPane: (kind) => {
+    void window.api.pane.open(kind, get().selectedWorkspaceId)
+  },
+
   createWorkspace: async (repoId, args, displayName) => {
     // worktree 체크아웃(git)은 큰 리포에서 수 초가 걸리므로, 먼저 자리표시 행을 띄워
     // 즉각적인 피드백을 주고 git 은 그동안 백그라운드로 진행한다. 완료 시 실제 행으로 교체된다.
@@ -1075,6 +1171,14 @@ export const useStore = create<UIState>((set, get) => ({
       delete unread[id]
       return { selectedWorkspaceId: id, unread, activeReviewId: null }
     })
+
+    // 별도 창으로 떼어 둔 패널은 메인 창의 선택을 따라간다 — 보조 모니터의 작업 패널이 다른
+    // 세션을 계속 비추고 있으면 "옆 화면에 띄워 둔 패널" 로 쓸 수 없다.
+    void window.api.pane.setWorkspace(id)
+    // 스크립트 패널을 분리해 둔 동안 세션을 옮기면, 그 세션에 대해 패널이 열려 있는 셈이다.
+    // 이 표시를 해 둬야 창을 닫았을 때 패널이 인라인으로 제자리에 돌아온다.
+    if (id && get().detachedPanes.scripts) get().setScriptPanelOpen(id, true)
+
     if (!id) return
 
     if (!get().loadedTranscripts[id]) {
@@ -1136,6 +1240,16 @@ export const useStore = create<UIState>((set, get) => ({
   refreshScriptStatus: async (workspaceId) => {
     const status = await window.api.script.getStatus(workspaceId)
     set((s) => ({ scriptStatus: { ...s.scriptStatus, [workspaceId]: status } }))
+  },
+
+  seedScriptOutput: async (workspaceId, kind) => {
+    const key = scriptKey(workspaceId, kind)
+    if (get().scriptOutput[key]) return
+    const out = await window.api.script.getOutput(workspaceId, kind).catch(() => '')
+    if (!out) return
+    // 조회하는 사이 라이브 출력이 도착했다면 그쪽이 이어지는 흐름이다 — 앞부분을 덮어써
+    // 중복시키지 않는다.
+    set((s) => (s.scriptOutput[key] ? {} : { scriptOutput: { ...s.scriptOutput, [key]: out } }))
   },
 
   refreshAuth: async () => {
@@ -1288,7 +1402,15 @@ export const useStore = create<UIState>((set, get) => ({
   setRightWidth: (px) => set({ rightWidth: Math.max(320, Math.min(900, Math.round(px))) }),
 
   // 우측 패널 표시 토글 — 숨기면 대화가 전체 폭을 쓰고, 다시 켜면 마지막 너비로 복귀한다.
-  toggleRightPanel: () => set((s) => ({ rightPanelOpen: !s.rightPanelOpen })),
+  // 패널을 별도 창으로 떼어 뒀다면 그 창을 앞으로 가져온다 — 이미 "보이는" 상태라 여기서
+  // 껐다 켜 봐야 아무 변화가 없고, 다른 모니터에 있는 창을 찾아 주는 편이 사용자가 원한 결과다.
+  toggleRightPanel: () => {
+    if (get().detachedPanes.work) {
+      void window.api.pane.focus('work')
+      return
+    }
+    set((s) => ({ rightPanelOpen: !s.rightPanelOpen }))
+  },
 
   // 패널 상태를 직접 지정한다. 온보딩에서 고른 기본값을 지금 화면에도 바로 반영하기 위한 것으로,
   // 토글과 같은 경로를 타므로 localStorage 기억값(⌘J 기록)까지 함께 갱신된다 — 그러지 않으면
