@@ -177,7 +177,7 @@ export default function ScriptPanel({
               in this workspace&rsquo;s worktree, with a unique{' '}
               <span className="font-mono text-neutral-400">$PORT</span> so parallel dev servers
               don&rsquo;t collide. Start and stop it here or with{' '}
-              <kbd className="font-medium text-neutral-400">⌃⌘R</kbd>.
+              <kbd className="font-medium text-neutral-400">⇧⌘D</kbd>.
             </>
           ) : (
             <>

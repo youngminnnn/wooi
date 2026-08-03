@@ -20,7 +20,7 @@ const GROUPS: { title: string; items: { keys: string[]; label: string }[] }[] = 
       { keys: ['⌘,'], label: 'Open settings' },
       { keys: ['⌘J'], label: 'Toggle the work panel' },
       { keys: ['⇧⌘S'], label: 'Toggle the scripts panel' },
-      { keys: ['⌃⌘R'], label: 'Run / stop the dev script' },
+      { keys: ['⇧⌘D'], label: 'Run / stop the dev script' },
       { keys: ['⇧⇥'], label: 'Cycle permission mode' },
       { keys: ['⇧⌘A'], label: 'Approve all pending permissions' }
     ]
