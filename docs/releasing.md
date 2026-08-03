@@ -144,6 +144,13 @@ were most likely to never learn about a release.
    checks signing secrets, builds, signs, notarizes, verifies with `codesign` /
    `stapler` / `spctl`, then creates the GitHub Release with auto-generated
    notes.
+7. **The `homebrew-tap` job follows** — it re-downloads the published
+   `Wooi-arm64.dmg`, hashes it, renders `build/homebrew/wooi.rb` with the new
+   version + `sha256`, and pushes it to `youngminnnn/homebrew-tap` as
+   `Casks/wooi.rb`, so `brew install --cask youngminnnn/tap/wooi` lands on the
+   new build. It needs a `TAP_TOKEN` secret (a PAT with `contents: write` on the
+   tap repo) and **fails the release run if that secret is missing** rather than
+   silently leaving `brew` on the previous version.
 
 ### The mismatch guard
 
