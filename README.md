@@ -1,7 +1,6 @@
 # Wooi
 
-**Run AI coding agents in parallel — stack them when work builds on work, review the PRs
-that aren't yours.**
+**Run AI coding agents in parallel — and stack them when work builds on work.**
 
 **English** · [한국어](./README.ko.md)
 
