@@ -187,7 +187,9 @@ export async function createWorkspace(
       repoId: repo.id,
       agentBackend,
       // 모드 하나만 저장한다. 어떤 종류로 위임할지는 미리 고르지 않고 대화에서 정해진다.
-      multiAgent: args.multiAgent === true,
+      // 호출자가 말하지 않으면 전역 기본값을 따른다 — 기본 설정에서는 모달 없이 만들어지므로
+      // 이 폴백이 없으면 설정에서 고른 "Multi-agent" 가 그 경로에서 통째로 무시된다.
+      multiAgent: args.multiAgent ?? settings.defaultMultiAgent === true,
       name: rawName,
       displayName: null,
       branch,

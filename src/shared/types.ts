@@ -733,9 +733,15 @@ export interface ExperimentSettings {
   multiAgent: boolean
 }
 
-/** 실험 기능의 기본 상태(전부 꺼짐). */
+/**
+ * 실험 기능의 기본 상태.
+ *
+ * multiAgent 를 켜 두는 것은 "안정적이다" 라는 뜻이 아니라 **보이게 두겠다**는 뜻이다 — 에이전트를
+ * 둘 이상 쓰는 사용자만 선택지를 보게 되고(피커·메뉴 모두 available >= 2 로 가드), 워크스페이스
+ * 단위로 다시 켜야 실제로 열린다. 즉 기본 동작은 그대로 단일 에이전트다.
+ */
 export const DEFAULT_EXPERIMENTS: ExperimentSettings = {
-  multiAgent: false
+  multiAgent: true
 }
 
 export interface AppSettings {
@@ -745,7 +751,15 @@ export interface AppSettings {
    */
   defaultAgentBackend: AgentBackendId
   /**
-   * 실험 기능 스위치. 저장된 설정에 없으면(구버전에서 올라옴) 기본값 병합으로 전부 꺼진다.
+   * 새 워크스페이스를 멀티 에이전트 모드로 만들지(실험 기능).
+   *
+   * `defaultAgentBackend` 와 **직교한다** — 멀티 에이전트 워크스페이스도 대화 상대인 메인
+   * 에이전트가 하나 필요하고, 그건 여전히 위 값이다. 설정 UI 는 둘을 "Multi-agent · Claude Code"
+   * 처럼 한 선택지로 합쳐 보여 주지만, 저장은 나눠서 한다.
+   */
+  defaultMultiAgent?: boolean
+  /**
+   * 실험 기능 스위치. 저장된 설정에 없으면(구버전에서 올라옴) 기본값 병합으로 채워진다.
    * 읽을 때는 항상 `experimentsOf(settings)` 를 거쳐 누락에 대비한다.
    */
   experiments?: ExperimentSettings

@@ -18,6 +18,7 @@ function workspace(patch: Partial<Workspace> = {}): Workspace {
 }
 
 const EXPERIMENT_ON = settings({ experiments: { multiAgent: true } })
+const EXPERIMENT_OFF = settings({ experiments: { multiAgent: false } })
 
 describe('delegateBackendsFor', () => {
   it('모드가 켜져 있으면 등록된 모든 에이전트 종류를 연다', () => {
@@ -28,13 +29,17 @@ describe('delegateBackendsFor', () => {
     )
   })
 
-  it('실험 스위치가 꺼져 있으면 모드가 켜져 있어도 아무것도 열지 않는다', () => {
-    expect(delegateBackendsFor(workspace({ multiAgent: true }), settings())).toEqual([])
+  it('실험 스위치를 끄면 모드가 켜져 있어도 아무것도 열지 않는다', () => {
+    // 워크스페이스 설정은 지우지 않으므로, 실험을 다시 켜면 그대로 살아난다.
+    expect(delegateBackendsFor(workspace({ multiAgent: true }), EXPERIMENT_OFF)).toEqual([])
   })
 
-  it('실험 항목이 통째로 없는 저장 설정(구버전)도 꺼진 것으로 읽는다', () => {
+  it('실험 항목이 통째로 없는 저장 설정(구버전)은 기본값을 따른다', () => {
+    // 기본값이 켜짐이므로 기존 사용자도 선택지를 보게 된다. 그래도 **워크스페이스 모드**를
+    // 따로 켜야 실제로 열리므로, 저장된 워크스페이스의 동작은 달라지지 않는다(아래 테스트).
     const legacy = { ...DEFAULT_SETTINGS, experiments: undefined } as AppSettings
-    expect(delegateBackendsFor(workspace({ multiAgent: true }), legacy)).toEqual([])
+    expect(delegateBackendsFor(workspace({ multiAgent: true }), legacy)).toEqual(AGENT_BACKEND_IDS)
+    expect(delegateBackendsFor(workspace(), legacy)).toEqual([])
   })
 
   it('모드를 켜지 않은 기존 워크스페이스는 실험을 켜도 단일 에이전트다', () => {

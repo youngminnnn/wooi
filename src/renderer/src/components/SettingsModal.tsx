@@ -464,7 +464,15 @@ function AgentsPage({
   save: (patch: Partial<AppSettings>) => void
 }): React.JSX.Element {
   const availableBackends = useAvailableBackends()
+  const experiments = experimentsOf(settings)
   const [editing, setEditing] = useState<AgentBackendId>(settings.defaultAgentBackend)
+  // 멀티 항목은 조율할 수 있는 백엔드에만 있다. 저장된 조합이 그렇지 않으면(설정 손편집, 실험을
+  // 끈 뒤, 나중에 capability 가 바뀐 경우) 존재하지 않는 value 를 가리켜 select 가 빈 칸이 되므로,
+  // 그때는 평범한 백엔드 선택으로 되돌려 보여 준다.
+  const multiOption =
+    experiments.multiAgent &&
+    settings.defaultMultiAgent === true &&
+    availableBackends.some((b) => b.id === settings.defaultAgentBackend && b.capabilities.delegate)
   const backend = useBackend(editing)
   const models = useModels(editing)
   const agent = agentSettingsFor(settings, editing)
@@ -484,15 +492,25 @@ function AgentsPage({
         <SettingGroup title="Default agent">
           <SettingRow
             title="Agent for new workspaces"
-            description="Each workspace stays with the agent it was created with."
+            description={
+              multiOption
+                ? 'New workspaces start in multi-agent mode — the main agent can run tasks with other agents. Each workspace keeps the agent it was created with.'
+                : 'Each workspace stays with the agent it was created with.'
+            }
           >
             <select
-              className={inputClass + ' w-48 text-sm'}
-              value={settings.defaultAgentBackend}
+              className={inputClass + ' w-60 text-sm'}
+              value={
+                multiOption ? `multi:${settings.defaultAgentBackend}` : settings.defaultAgentBackend
+              }
               onChange={(event) => {
-                const next = event.target.value as AgentBackendId
+                // 값 하나에 두 설정을 실어 보낸다 — 사용자에게는 한 줄의 선택이지만 저장은
+                // 메인 에이전트와 모드로 나뉜다(둘은 직교한다).
+                const raw = event.target.value
+                const multiAgent = raw.startsWith('multi:')
+                const next = (multiAgent ? raw.slice('multi:'.length) : raw) as AgentBackendId
                 setEditing(next)
-                save({ defaultAgentBackend: next })
+                save({ defaultAgentBackend: next, defaultMultiAgent: multiAgent })
               }}
             >
               {availableBackends.map((item) => (
@@ -500,6 +518,16 @@ function AgentsPage({
                   {item.label}
                 </option>
               ))}
+              {/* 멀티 에이전트는 메인 에이전트를 함께 정해야 의미가 있으므로, 조율할 수 있는
+                  백엔드마다 한 줄씩 낸다 — "Multi-agent" 만 있으면 대화 상대가 누구인지 감춰진다. */}
+              {experiments.multiAgent &&
+                availableBackends
+                  .filter((item) => item.capabilities.delegate)
+                  .map((item) => (
+                    <option key={`multi:${item.id}`} value={`multi:${item.id}`}>
+                      Multi-agent · {item.label}
+                    </option>
+                  ))}
             </select>
           </SettingRow>
         </SettingGroup>

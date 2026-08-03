@@ -38,8 +38,8 @@ export default function NewWorkspaceModal({
       : available[0].id
 
   // 멀티 에이전트는 **모드**다 — 어떤 종류를 쓸지 여기서 고르지 않는다. 켜 두면 대화에서
-  // "Codex 한테 시켜줘" 라고 말하는 것으로 종류가 정해진다.
-  const [multiAgent, setMultiAgent] = useState(false)
+  // "Codex 한테 시켜줘" 라고 말하는 것으로 종류가 정해진다. 시작값은 전역 기본 설정을 따른다.
+  const [multiAgent, setMultiAgent] = useState(() => app.settings.defaultMultiAgent === true)
   // 에이전트가 둘 이상 있고, 고른 메인이 조율하는 쪽이 될 수 있을 때만 모드를 제안한다.
   const showModePicker =
     experimentsOf(app.settings).multiAgent &&
@@ -58,7 +58,9 @@ export default function NewWorkspaceModal({
         name: trimmed,
         parentWorkspaceId,
         agentBackend: effectiveBackend,
-        ...(effectiveMultiAgent ? { multiAgent: true } : {})
+        // 모드를 물어봤다면 **끈 것도 명시해서** 보낸다. 생략하면 main 이 전역 기본값으로
+        // 폴백하므로, 기본이 멀티일 때 사용자가 고른 "Single agent" 가 조용히 뒤집힌다.
+        ...(showModePicker ? { multiAgent: effectiveMultiAgent } : {})
       },
       trimmed
     )
