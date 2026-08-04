@@ -1,11 +1,11 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import {
-  initAgentTools,
+  initRegistry,
   registerAgentTool,
   resetAgentToolsForTest,
   runAgentTool,
   type AgentToolDeps
-} from './index'
+} from './registry'
 
 /**
  * 도구 실행부는 에이전트가 앱을 조작하는 유일한 통로다. 여기서 지켜야 할 것은 두 가지다 —
@@ -21,7 +21,7 @@ beforeEach(() => {
 
 describe('runAgentTool', () => {
   it('등록된 도구에 workspaceId 와 인자를 그대로 넘긴다', async () => {
-    initAgentTools(deps)
+    initRegistry(deps)
     const handler = vi.fn().mockResolvedValue({ ok: true })
     registerAgentTool('demo', handler)
 
@@ -32,7 +32,7 @@ describe('runAgentTool', () => {
   })
 
   it('인자가 없으면 빈 객체로 넘긴다(핸들러가 undefined 를 방어하지 않아도 되게)', async () => {
-    initAgentTools(deps)
+    initRegistry(deps)
     const handler = vi.fn().mockResolvedValue(null)
     registerAgentTool('demo', handler)
 
@@ -42,7 +42,7 @@ describe('runAgentTool', () => {
   })
 
   it('모르는 도구는 던진다 — 조용히 성공하면 모델이 됐다고 믿는다', async () => {
-    initAgentTools(deps)
+    initRegistry(deps)
     await expect(runAgentTool('ws-1', 'nope', {})).rejects.toThrow(/Unknown Wooi tool/)
   })
 
@@ -52,7 +52,7 @@ describe('runAgentTool', () => {
   })
 
   it('핸들러가 던진 오류를 그대로 올린다 — 호출부가 도구 오류로 바꿔 모델에게 준다', async () => {
-    initAgentTools(deps)
+    initRegistry(deps)
     registerAgentTool('demo', vi.fn().mockRejectedValue(new Error('commit first')))
     await expect(runAgentTool('ws-1', 'demo', {})).rejects.toThrow('commit first')
   })

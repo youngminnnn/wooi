@@ -3,6 +3,7 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ChatEvent, ChatItem } from '@shared/types'
+import { testWooiMcp as wooiMcp } from './testWooiMcp'
 
 /**
  * 재시작된 query 도 스톨 워치독의 보호를 받는지 검증한다(회귀 방지).
@@ -104,6 +105,7 @@ describe('ClaudeSession stall watchdog', () => {
       autoCompact: false,
       resumeSessionId: null,
       additionalDirs: [],
+      wooiMcp,
       emit: (e) => events.push(e),
       persist: (i) => items.push(i),
       requestPermission: async () => ({ behavior: 'deny' as const }),
@@ -153,6 +155,7 @@ describe('ClaudeSession stall watchdog', () => {
       autoCompact: false,
       resumeSessionId: null,
       additionalDirs: [],
+      wooiMcp,
       emit: () => {},
       persist: (i) => items.push(i),
       requestPermission: async () => ({ behavior: 'deny' as const }),

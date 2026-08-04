@@ -9,6 +9,7 @@ import {
   readPermissions
 } from './control'
 import { listSlashCommands } from './commands'
+import { createWooiMcpServer } from './wooiMcp'
 import { clampText } from './clamp'
 import { log } from '../logger'
 import type { HostCommand, HostEvent, SessionConfig } from './protocol'
@@ -72,6 +73,9 @@ function ensure(workspaceId: string, config: SessionConfig): ClaudeSession {
     autoCompact: config.autoCompact,
     resumeSessionId: config.resumeSessionId,
     additionalDirs: config.additionalDirs,
+    // 워크스페이스마다 자기 것을 만든다 — 도구가 어느 워크스페이스에서 불렸는지는 이 클로저가
+    // 유일한 근거다(모델이 인자로 지목할 수 없다는 뜻이기도 하다).
+    wooiMcp: createWooiMcpServer((tool, args) => callMain(workspaceId, tool, args)),
     emit: (event: ChatEvent) => post({ type: 'event', workspaceId, event }),
     persist: (item: ChatItem) => post({ type: 'persist', workspaceId, item }),
     requestPermission: (req) =>

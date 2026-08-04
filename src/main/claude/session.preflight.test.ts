@@ -3,6 +3,7 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ChatEvent, ChatItem } from '@shared/types'
+import { testWooiMcp as wooiMcp } from './testWooiMcp'
 
 /**
  * 콜드 resume preflight 가 첫 메시지를 흘려보내는지 검증한다(데드락 회귀 방지).
@@ -66,6 +67,7 @@ async function runFirstTurn(autoCompact: boolean, usage: typeof contextUsage) {
     // 이 값이 있어야 preflight 경로로 들어간다(= fast mode/모델 변경 후 첫 메시지, 앱 재시작 후 첫 메시지).
     resumeSessionId: 'prev-session-id',
     additionalDirs: [],
+    wooiMcp,
     emit: (e) => events.push(e),
     persist: (i) => items.push(i),
     requestPermission: async () => ({ behavior: 'deny' as const }),

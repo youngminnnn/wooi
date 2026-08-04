@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { ChatEvent, ChatItem } from '@shared/types'
 import { AsyncQueue } from './asyncQueue'
+import { testWooiMcp as wooiMcp } from './testWooiMcp'
 
 /**
  * 권한 모드는 우리만 바꾸는 게 아니다 — 모델이 EnterPlanMode 로 계획 모드에 들어가고, CLI 는
@@ -96,6 +97,7 @@ async function start(approvePlanWith?: string): Promise<Harness> {
     autoCompact: false,
     resumeSessionId: null,
     additionalDirs: [],
+    wooiMcp,
     emit: (e) => events.push(e),
     persist: (i) => items.push(i),
     requestPermission: async () =>
