@@ -35,6 +35,50 @@
     <!-- 없으면 <title> 전체가 홈 화면 라벨로 잘려 들어간다. -->
     <meta name="apple-mobile-web-app-title" content="Wooi" />
 
+    <link rel="canonical" href="https://youngminnnn.github.io/wooi/" />
+
+    <!--
+      구조화 데이터 — 검색 결과의 소프트웨어 카드용.
+      softwareVersion 은 자동으로 갱신되지 않는다. 릴리스할 때 package.json 과 같이 올릴 것.
+    -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "Wooi",
+        "description": "Wooi is a macOS app for running AI coding agents in parallel — each in its own git worktree. When work builds on work, stack the agents and Wooi keeps the PR chain rebased and retargeted.",
+        "applicationCategory": "DeveloperApplication",
+        "applicationSubCategory": "Developer Tools",
+        "operatingSystem": "macOS",
+        "softwareVersion": "1.7.0",
+        "url": "https://youngminnnn.github.io/wooi/",
+        "downloadUrl": "https://github.com/youngminnnn/wooi/releases/latest/download/Wooi-arm64.dmg",
+        "installUrl": "https://youngminnnn.github.io/wooi/#install",
+        "releaseNotes": "https://github.com/youngminnnn/wooi/releases",
+        "license": "https://www.apache.org/licenses/LICENSE-2.0",
+        "image": "https://youngminnnn.github.io/wooi/og.png",
+        "author": {
+          "@type": "Person",
+          "name": "youngminnnn",
+          "url": "https://github.com/youngminnnn"
+        },
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "USD"
+        },
+        "isAccessibleForFree": true,
+        "keywords": "parallel AI coding agents, git worktree, stacked PRs, Claude Code, Codex, pull request review, Conductor alternative",
+        "featureList": [
+          "Run AI coding agents in parallel, each in its own isolated git worktree and branch",
+          "Stack a workspace on another workspace's branch for dependent work",
+          "Rebase child branches and retarget their PR bases when a parent PR merges",
+          "Review pull requests on the diff and post the comments back to GitHub",
+          "Claude Code and Codex as interchangeable agent backends"
+        ]
+      }
+    </script>
+
     <style>
       :root {
         --bg: #0a0b0d;
@@ -759,6 +803,9 @@
             ><span class="en">Concept</span><span class="ko">컨셉</span></a
           >
           <a href="#features"><span class="en">Features</span><span class="ko">기능</span></a>
+          <a href="./alternatives.html"
+            ><span class="en">Compare</span><span class="ko">비교</span></a
+          >
           <a href="#install"><span class="en">Install</span><span class="ko">설치</span></a>
           <a href="https://github.com/youngminnnn/wooi" target="_blank" rel="noopener">GitHub</a>
           <button class="lang-btn" id="langToggle" aria-label="Toggle language">

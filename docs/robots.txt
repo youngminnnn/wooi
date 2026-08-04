@@ -1,0 +1,13 @@
+# Wooi — https://youngminnnn.github.io/wooi/
+#
+# NOTE: this file is served at /wooi/robots.txt. Crawlers only honour robots.txt
+# at the host root (https://youngminnnn.github.io/robots.txt), which this repo
+# does not own, so treat the Sitemap line below as documentation rather than as
+# a working discovery hook — submit the sitemap in Google Search Console and
+# Bing Webmaster Tools directly. Moving the site to a custom domain would make
+# this file authoritative.
+
+User-agent: *
+Allow: /
+
+Sitemap: https://youngminnnn.github.io/wooi/sitemap.xml
