@@ -50,6 +50,15 @@ brew install --cask youngminnnn/tap/wooi
 이걸로 끝입니다 — cask 가 **Wooi.app** 을 **Applications** 에 설치합니다.
 거기서 실행한 뒤 온보딩을 진행하세요.
 
+**이미 `.dmg` 로 설치해 두셨다면?** Homebrew 는 자기가 설치하지 않은 앱을 건드리지
+않고 `It seems there is already an App at '/Applications/Wooi.app'` 로 멈춥니다.
+`--adopt` 를 붙이면 지금 있는 앱을 교체하지 않고 Homebrew 관리로 넘깁니다 — 버전이
+달라도 되고, 디스크의 앱은 그대로 둡니다:
+
+```sh
+brew install --cask --adopt youngminnnn/tap/wooi
+```
+
 ### 또는 `.dmg` 직접 받기
 
 1. [최신 `.dmg`](https://github.com/youngminnnn/wooi/releases/latest/download/Wooi-arm64.dmg) 를
