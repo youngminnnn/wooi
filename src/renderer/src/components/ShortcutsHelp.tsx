@@ -8,7 +8,7 @@ const GROUPS: { title: string; items: { keys: string[]; label: string }[] }[] = 
       { keys: ['⌘K'], label: 'Quick switcher — search any workspace' },
       { keys: ['⌘1', '–', '⌘9'], label: 'Switch to the top 9 workspaces in the sidebar' },
       { keys: ['⌘↑', '/', '⌘↓'], label: 'Previous / next workspace' },
-      { keys: ['⌘[', '/', '⌘]'], label: 'Previous / next workspace (alternate)' },
+      { keys: ['⌘['], label: 'Back to the workspace you were just in' },
       { keys: ['⌘U'], label: 'Jump to next unread session' },
       { keys: ['⌘I'], label: 'Jump to next session needing input' }
     ]

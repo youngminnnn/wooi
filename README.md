@@ -257,7 +257,8 @@ A tabbed panel on top plus an interactive terminal below (resizable split):
   `/compact` manually.
 - **Draft preservation & message queueing** — an in-progress message survives workspace
   switches, and you can queue follow-up messages while a turn is running.
-- **Shortcuts** — ↑/↓ to recall previous messages, ⌘1–9 and ⌘[ ⌘] to switch workspaces.
+- **Shortcuts** — ↑/↓ to recall previous messages, ⌘1–9 and ⌘↑ ⌘↓ to switch workspaces, ⌘[ to go
+  back to the one you were just in.
 
 ### Convenience
 

@@ -162,8 +162,8 @@ export default function App(): React.JSX.Element {
     return () => window.removeEventListener(OPEN_REPO_SETTINGS_EVENT, onOpen)
   }, [])
 
-  // 키보드: ⇧⇥ 권한 모드 순환, ⌘1–9 워크스페이스 선택, ⌘[ / ⌘] · ⌘↑ / ⌘↓ 이전/다음,
-  // ⇧⌘R PR 리뷰 시작.
+  // 키보드: ⇧⇥ 권한 모드 순환, ⌘1–9 워크스페이스 선택, ⌘↑ / ⌘↓ 이전/다음,
+  // ⌘[ 직전에 보던 워크스페이스로 뒤로가기, ⇧⌘R PR 리뷰 시작.
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       const st = useStore.getState()
@@ -385,6 +385,15 @@ export default function App(): React.JSX.Element {
         return
       }
 
+      // ⌘[: 직전에 보던 워크스페이스로 돌아간다(브라우저 뒤로가기와 같은 방문 기록 기반).
+      // 사이드바 순서상 앞/뒤로 옮기는 ⌘↑ / ⌘↓ 와는 다른 축이다. 목록이 비어 있어도
+      // 기록이 남아 있을 수 있으므로 아래 list 게이트보다 앞에 둔다.
+      if (e.key === '[' && !e.shiftKey && !e.ctrlKey && !e.altKey) {
+        e.preventDefault()
+        void st.goBackWorkspace()
+        return
+      }
+
       // 사이드바에 보이는 순서(레포 순 → 레포 안에서는 stack 순)와 정확히 같은 목록.
       // Sidebar 의 번호 배지도 같은 함수를 쓰므로 "위에서 n번째 = ⌘n" 이 항상 성립한다.
       const list = orderVisibleWorkspaces(st.app?.repos ?? [], st.app?.workspaces ?? [])
@@ -396,13 +405,14 @@ export default function App(): React.JSX.Element {
           e.preventDefault()
           void st.selectWorkspace(list[idx].id)
         }
-      } else if (e.key === '[' || e.key === ']' || e.key === 'ArrowUp' || e.key === 'ArrowDown') {
-        // ⌘↑/⌘↓ 는 ⌘[ / ⌘] 와 완전히 같은 동작의 별칭이다. 사이드바가 세로 목록이라
-        // 위/아래 방향키 쪽이 공간적으로 직관적이고, 괄호 키와 달리 키보드 레이아웃을 타지 않는다.
+      } else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+        // ⌘↑/⌘↓ 로 사이드바 순서를 위/아래로 훑는다. 세로 목록이라 방향키가 공간적으로
+        // 직관적이고, 괄호 키와 달리 키보드 레이아웃을 타지 않는다. 별칭이던 ⌘[ / ⌘] 는
+        // 뺐다 — ⌘[ 는 방문 기록 뒤로가기가 됐고, 홀로 남은 ⌘] 는 짝 없는 군더더기였다.
         // (Composer 의 ↑/↓ 메시지 히스토리는 ⌘ 없는 경우만 처리하도록 막아 뒀다.)
         e.preventDefault()
         const cur = list.findIndex((w) => w.id === st.selectedWorkspaceId)
-        const delta = e.key === ']' || e.key === 'ArrowDown' ? 1 : -1
+        const delta = e.key === 'ArrowDown' ? 1 : -1
         const next = cur < 0 ? 0 : (cur + delta + list.length) % list.length
         void st.selectWorkspace(list[next].id)
         // 단축키를 쓸 줄 아는 사용자에게 안내 힌트는 소음이다 — 첫 사용 시점에 영구히 끈다.
