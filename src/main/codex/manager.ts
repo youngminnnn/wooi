@@ -294,6 +294,12 @@ export class CodexSessionManager implements AgentBackend {
           permissionMode: ws.permissionMode
         }
       },
+      // "위임이 안 걸린다"의 첫 갈림길을 로그에 남긴다 — 이 줄이 없으면 도구가 스레드에 아예
+      // 안 붙은 것이고, 있는데 위임이 없으면 모델이 도구를 고르지 않은 것이다.
+      onConnect: () =>
+        log.info(
+          `delegate bridge: a delegate-capable Codex thread attached (${this.bridgeCount()})`
+        ),
       onStart: (workspaceId, taskId, backend, description) =>
         this.upsertDelegateAgent(workspaceId, {
           taskId,
@@ -319,6 +325,11 @@ export class CodexSessionManager implements AgentBackend {
       }
     })
     return this.delegateBridge
+  }
+
+  /** 로그 문구용 — 붙어 있는 위임 서버 수. 브리지가 아직 없으면 0. */
+  private bridgeCount(): string {
+    return `${this.delegateBridge?.attachedServers() ?? 0} attached`
   }
 
   /**
