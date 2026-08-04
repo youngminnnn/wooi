@@ -51,7 +51,7 @@ export default function EmptyState(): React.JSX.Element {
             {running > 0 && <span className="text-[var(--info-400)]"> · {running} running</span>}
             <br />
             <span className="text-neutral-600">
-              ⌘K to search · ⌘1–9 to switch · ⌘[ / ⌘] to cycle
+              ⌘K to search · ⌘1–9 to switch · ⌘↑ / ⌘↓ to cycle · ⌘[ to go back
             </span>
           </p>
         )}

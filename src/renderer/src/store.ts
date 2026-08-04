@@ -31,6 +31,7 @@ import { playNotification } from './lib/sound'
 import { carrySuggestShownFlag, readUiFlag, setUiFlag } from './lib/uiFlags'
 import { openRepoSettings } from './lib/repoSettings'
 import { bodyOf, emptyView, isPosted, type ReviewTab, type ReviewViewState } from './lib/review'
+import { popWorkspaceHistory, pushWorkspaceHistory } from './lib/workspaceHistory'
 
 export const scriptKey = (workspaceId: string, kind: ScriptKind): string => `${workspaceId}:${kind}`
 
@@ -321,7 +322,14 @@ interface UIState {
   keepBase: (workspaceId: string) => Promise<void>
   /** 캐스케이드 단계별 결과를 토스트로 알린다(문제가 있으면 브랜치별로 나열). */
   reportCascade: (cascade: StackCascadeResult, successMsg: string) => void
-  selectWorkspace: (id: string | null) => Promise<void>
+  /** 방문 순서 스택(브라우저 뒤로가기용). 현재 선택은 포함하지 않고, 오래된 것이 앞이다. */
+  workspaceHistory: string[]
+  /**
+   * @param opts.fromHistory 뒤로가기로 인한 선택 — 방문 스택에 다시 쌓지 않는다.
+   */
+  selectWorkspace: (id: string | null, opts?: { fromHistory?: boolean }) => Promise<void>
+  /** ⌘[ — 직전에 보던 워크스페이스로 돌아간다(브라우저 뒤로가기). */
+  goBackWorkspace: () => Promise<void>
   refreshGit: (workspaceId: string) => Promise<void>
   /** 진입 여부와 무관하게 모든(비아카이브) 워크스페이스의 git 상태를 한 번에 갱신한다. */
   refreshAllGit: () => Promise<void>
@@ -515,6 +523,7 @@ export const useStore = create<UIState>((set, get) => ({
   ready: false,
   app: null,
   selectedWorkspaceId: null,
+  workspaceHistory: [],
   transcripts: {},
   loadedTranscripts: {},
   scriptOutput: {},
@@ -1235,17 +1244,24 @@ export const useStore = create<UIState>((set, get) => ({
     get().pushToast('error', `Stack cascade needs attention:\n${lines.join('\n')}`)
   },
 
-  selectWorkspace: async (id) => {
+  selectWorkspace: async (id, opts) => {
     // 선택 시 미확인 표시 해제. 사이드바 선택은 하나의 축이므로 리뷰 화면에서도 빠져나온다
     // (리뷰 세션 자체는 남아 있어 사이드바에서 다시 고를 수 있다).
     set((s) => {
       // 다른 워크스페이스로 옮기면 파일 뷰어는 닫는다 — 열린 경로가 그 worktree 전용이라
       // 그대로 두면 새 워크스페이스에서 없는 파일을 가리키게 된다.
       const fileViewer = s.fileViewer?.workspaceId === id ? s.fileViewer : null
-      if (!id || !s.unread[id]) return { selectedWorkspaceId: id, activeReviewId: null, fileViewer }
+      const workspaceHistory = pushWorkspaceHistory(
+        s.workspaceHistory,
+        s.selectedWorkspaceId,
+        id,
+        opts?.fromHistory
+      )
+      if (!id || !s.unread[id])
+        return { selectedWorkspaceId: id, activeReviewId: null, fileViewer, workspaceHistory }
       const unread = { ...s.unread }
       delete unread[id]
-      return { selectedWorkspaceId: id, unread, activeReviewId: null, fileViewer }
+      return { selectedWorkspaceId: id, unread, activeReviewId: null, fileViewer, workspaceHistory }
     })
 
     // 별도 창으로 떼어 둔 패널은 메인 창의 선택을 따라간다 — 보조 모니터의 작업 패널이 다른
@@ -1267,6 +1283,24 @@ export const useStore = create<UIState>((set, get) => ({
     void get().refreshGit(id)
     void get().refreshPr(id)
     void get().refreshScriptStatus(id)
+  },
+
+  goBackWorkspace: async () => {
+    const s = get()
+    // 리뷰 화면은 워크스페이스 위에 겹쳐 뜬 페이지다 — 뒤로가기의 첫 걸음은 그 아래에서
+    // 보고 있던 워크스페이스로 돌아오는 것이다(방문 기록은 아직 건드리지 않는다).
+    if (s.activeReviewId) {
+      await s.selectWorkspace(s.selectedWorkspaceId, { fromHistory: true })
+      return
+    }
+    const alive = new Set((s.app?.workspaces ?? []).filter((w) => !w.archived).map((w) => w.id))
+    const { target, history } = popWorkspaceHistory(
+      s.workspaceHistory,
+      s.selectedWorkspaceId,
+      alive
+    )
+    set({ workspaceHistory: history })
+    if (target) await get().selectWorkspace(target, { fromHistory: true })
   },
 
   refreshGit: async (workspaceId) => {
