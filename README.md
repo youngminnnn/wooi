@@ -1,6 +1,6 @@
 # Wooi
 
-**Run AI coding agents in parallel — and stack them when work builds on work.**
+**Parallel agents are the easy part. Landing their work isn't.**
 
 **English** · [한국어](./README.ko.md)
 
@@ -11,18 +11,26 @@ parallel, each on its own isolated git worktree. Each task runs in its own dedic
 worktree + branch + agent session, and every session starts with **an empty input box
 and no automatic prompt** — nothing runs until you send your first message.
 
+Running agents in isolated worktrees is table stakes now. The unsolved half is
+downstream: **every agent you add is one more branch to rebase and one more PR waiting
+on a reviewer.** Wooi stacks dependent work so it never collides in the first place, and
+turns each review into a diff you work on instead of a transcript you read.
+
 > **Agent support** — Since v1.4.0, Wooi supports both **Claude Code** (via the
 > Claude Agent SDK) and **OpenAI Codex** (via the Codex CLI). Choose an agent when
 > creating a workspace; that workspace keeps the selected agent for its lifetime.
 
 ## Why Wooi
 
-- 🧱 **The stack is made of agents** — stack one agent's workspace on another's branch.
-  When the parent merges, Wooi rebases the children and retargets their PR bases, so the
-  rest of the stack stays valid.
-- 🔍 **PR review, on the diff** — every agent reviews PRs now; the part that's missing is
-  somewhere to work the result. Findings land inline on the diff they're about, each one
-  editable, discardable, and postable on its own or as a batch.
+- 🧱 **Dependent work stacks instead of conflicting** — everywhere else, conflicts
+  between parallel branches get cleaned up after they happen. Wooi's answer is
+  structural: stack one agent's workspace on another's branch, and when the parent
+  merges, Wooi rebases the children and retargets their PR bases — so the rest of the
+  stack stays valid instead of turning into a pile of conflicts.
+- 🔍 **PR review, on the diff** — when agents write code faster, review becomes the
+  constraint. Every agent can review a PR; what's missing is somewhere to work the
+  result. Findings land inline on the diff they're about, each one editable,
+  discardable, and postable on its own or as a batch.
 - 🧵 **True parallelism** — kick off a refactor, a feature, and a bugfix at the same
   time, and watch all three from one sidebar.
 - 🔒 **Isolated by default** — a separate worktree + branch per task means agents never

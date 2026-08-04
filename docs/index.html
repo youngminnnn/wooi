@@ -3,20 +3,23 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Wooi — Run AI coding agents in parallel, and stack them</title>
+    <title>Wooi — Parallel Claude Code &amp; Codex agents, stacked PRs</title>
     <meta
       name="description"
-      content="Wooi is a macOS app for running AI coding agents in parallel — each in its own git worktree. When work builds on work, stack the agents and Wooi keeps the PR chain rebased and retargeted."
+      content="Every orchestrator runs Claude Code and Codex in parallel git worktrees. Wooi handles what they hand back: dependent work stacks instead of conflicting — rebasing the chain and retargeting PR bases when a parent merges — and every PR review lands as editable findings on the diff. Free, open source, macOS."
     />
 
     <!-- Open Graph / social -->
     <meta property="og:type" content="website" />
-    <meta property="og:title" content="Wooi — Run AI coding agents in parallel, and stack them" />
+    <meta
+      property="og:title"
+      content="Wooi — Parallel agents are easy. Landing their work isn't."
+    />
     <meta
       property="og:description"
-      content="Independent work runs in parallel worktrees. Dependent work stacks — and Wooi keeps the stack straight for you."
+      content="Every agent you add is one more branch to rebase and one more PR waiting on a reviewer. Wooi stacks dependent work so it never collides, and turns every review into a diff you work on."
     />
-    <meta property="og:image" content="https://youngminnnn.github.io/wooi/og.png?v=5" />
+    <meta property="og:image" content="https://youngminnnn.github.io/wooi/og.png?v=6" />
     <meta name="theme-color" content="#0a0b0d" />
 
     <!-- 파비콘은 16px 로 줄어들어 한글 "우이"(icon.svg)가 뭉개지므로 축약형 W 마크를 쓴다. -->
@@ -777,24 +780,26 @@
 
       <h1>
         <span class="en"
-          >Run AI coding agents in parallel — and <span class="grad">stack</span> them when work
-          builds on work</span
+          >Parallel agents are the easy part.
+          <span class="grad">Landing their work</span> isn't.</span
         >
         <span class="ko"
-          >AI 코딩 에이전트를 병렬로 — 이어지는 작업은 <span class="grad">스택</span>으로</span
+          >병렬 실행은 쉽습니다. 어려운 건 <span class="grad">머지까지</span>입니다.</span
         >
       </h1>
 
       <p class="subtitle">
         <span class="en"
-          >Independent work runs in parallel on macOS — each agent in its own isolated git worktree,
-          on its own branch, shipping its own PR. When work builds on work, stack the agents instead
-          and let Wooi keep the stack straight.</span
+          >Every agent you add is one more branch to rebase and one more PR waiting on a reviewer.
+          Wooi stacks dependent work so it never collides — rebasing the chain and retargeting PR
+          bases when a parent merges — and turns each review into a diff you work on, not a
+          transcript you read.</span
         >
         <span class="ko"
-          >독립적인 작업은 macOS 에서 병렬로 — 에이전트마다 격리된 git worktree 위에서, 각자 자기
-          브랜치로, 각자 자기 PR 로. 이어지는 작업은 앞선 작업 위에 쌓아 두면, 스택 정리는 Wooi 가
-          맡습니다.</span
+          >에이전트를 하나 더 돌릴 때마다 rebase 할 브랜치와 리뷰를 기다리는 PR 이 하나씩
+          늘어납니다. Wooi 는 이어지는 작업을 쌓아 애초에 부딪히지 않게 하고 — 부모가 병합되면
+          체인을 rebase 하고 PR base 를 옮깁니다 — 리뷰는 읽고 마는 기록이 아니라 그 위에서 작업하는
+          diff 로 만듭니다.</span
         >
       </p>
 
@@ -842,17 +847,19 @@
             <span class="en">Why Wooi</span><span class="ko">왜 Wooi 인가</span>
           </div>
           <h2>
-            <span class="en">One agent at a time is a bottleneck</span>
-            <span class="ko">에이전트를 하나씩 돌리는 건 병목입니다</span>
+            <span class="en">The bottleneck already moved</span>
+            <span class="ko">병목은 이미 옮겨갔습니다</span>
           </h2>
           <p class="section-sub">
             <span class="en"
-              >Wooi removes the wait. Every task gets its own sandbox, so agents never step on each
-              other — and you never lose track of what needs you.</span
+              >Running agents in isolated worktrees is table stakes now — every orchestrator does
+              it. The unsolved half is downstream: branches that were written in parallel and have
+              to land in sequence, and a review queue that grows as fast as the agents write.</span
             >
             <span class="ko"
-              >Wooi 는 그 기다림을 없앱니다. 작업마다 전용 샌드박스가 주어지므로 에이전트끼리
-              충돌하지 않고, 사용자 확인이 필요한 세션을 놓칠 일도 없습니다.</span
+              >격리된 worktree 에서 에이전트를 돌리는 건 이제 기본입니다 — 어느 오케스트레이터나
+              합니다. 안 풀린 쪽은 그 다음입니다. 병렬로 쓰였지만 순서대로 머지돼야 하는 브랜치들,
+              그리고 에이전트가 코드를 쓰는 속도만큼 쌓이는 리뷰 대기열.</span
             >
           </p>
         </div>
@@ -861,18 +868,22 @@
           <div class="why-card">
             <div class="emoji">🧱</div>
             <h3>
-              <span class="en">The stack is made of agents</span
-              ><span class="ko">스택의 단위가 에이전트</span>
+              <span class="en">Dependent work stacks instead of conflicting</span
+              ><span class="ko">이어지는 작업은 충돌하지 않고 쌓입니다</span>
             </h3>
             <p>
               <span class="en"
-                >Stack one agent's workspace on another's branch. When the parent merges, Wooi
-                rebases the children and retargets their PR bases — the rest of the stack stays
-                valid.</span
+                >Everywhere else, conflicts between parallel branches get cleaned up after they
+                happen. Wooi's answer is structural: stack one agent's workspace on another's
+                branch, and when the parent merges, Wooi rebases the children and retargets their PR
+                bases — so the rest of the stack stays valid instead of turning into a pile of
+                conflicts.</span
               >
               <span class="ko"
-                >에이전트 워크스페이스를 다른 워크스페이스의 브랜치 위에 쌓습니다. 부모가 병합되면
-                Wooi 가 자식들을 rebase 하고 PR base 를 옮깁니다. 남은 스택은 그대로 유효.</span
+                >다른 도구에서 병렬 브랜치 충돌은 터진 뒤에 수습합니다. Wooi 의 답은 구조적입니다.
+                에이전트 워크스페이스를 다른 워크스페이스의 브랜치 위에 쌓고, 부모가 병합되면 Wooi
+                가 자식들을 rebase 하고 PR base 를 옮깁니다. 남은 스택은 충돌 더미가 되는 대신
+                그대로 유효합니다.</span
               >
             </p>
           </div>
@@ -884,14 +895,15 @@
             </h3>
             <p>
               <span class="en"
-                >Every agent reviews PRs now; what's missing is somewhere to work the result.
-                Findings land inline on the diff they're about — edit, discard, post one or post the
-                batch.</span
+                >When agents write code faster, review becomes the constraint. Every agent can
+                review a PR; what's missing is somewhere to work the result. Findings land inline on
+                the diff they're about — edit, discard, post one or post the batch, straight to
+                GitHub.</span
               >
               <span class="ko"
-                >PR 리뷰는 이제 어떤 에이전트든 합니다. 없는 건 그 결과를 다룰 화면입니다. 지적이
-                해당 diff 줄 위에 바로 붙습니다. 고치고, 버리고, 낱개로든 한꺼번에든
-                게시합니다.</span
+                >에이전트가 코드를 빨리 쓸수록 병목은 리뷰로 옮겨갑니다. PR 리뷰는 어떤 에이전트든
+                합니다. 없는 건 그 결과를 다룰 화면입니다. 지적이 해당 diff 줄 위에 바로 붙습니다.
+                고치고, 버리고, 낱개로든 한꺼번에든 GitHub 에 그대로 게시합니다.</span
               >
             </p>
           </div>
@@ -1017,15 +1029,17 @@
           </div>
           <div class="concept-step">
             <div class="num">03</div>
-            <h3><span class="en">Ship a PR</span><span class="ko">PR 발행</span></h3>
+            <h3><span class="en">Land the work</span><span class="ko">머지까지</span></h3>
             <p>
               <span class="en"
-                >Review the diff against the base branch and open a GitHub PR in one click — while
-                other agents keep working.</span
+                >Open a GitHub PR in one click. If the task builds on another, stack it and Wooi
+                keeps the chain rebased and retargeted as parents merge — and review lands on the
+                diff, not in a chat log.</span
               >
               <span class="ko"
-                >다른 에이전트들이 계속 작업하는 동안, base 브랜치 대비 diff 를 검토하고 클릭 한
-                번으로 GitHub PR 을 엽니다.</span
+                >클릭 한 번으로 GitHub PR 을 엽니다. 앞선 작업 위에 얹히는 작업이면 스택으로 쌓아
+                두면, 부모가 병합될 때마다 Wooi 가 체인을 rebase 하고 base 를 옮깁니다. 리뷰는 채팅
+                로그가 아니라 diff 위에 붙습니다.</span
               >
             </p>
           </div>
@@ -1053,8 +1067,9 @@
         <div class="section-head">
           <div class="eyebrow"><span class="en">Features</span><span class="ko">기능</span></div>
           <h2>
-            <span class="en">Everything you need to run agents in parallel</span
-            ><span class="ko">에이전트를 병렬로 돌리는 데 필요한 모든 것</span>
+            <span class="en"
+              >Everything you need to run agents in parallel — and land what they write</span
+            ><span class="ko">에이전트를 병렬로 돌리고, 그 결과를 머지하기까지</span>
           </h2>
         </div>
 
