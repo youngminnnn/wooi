@@ -19,6 +19,24 @@ import { BRIDGE_ENV } from './protocol'
 
 const SERVER = join(process.cwd(), 'out', 'main', 'delegateServer.js')
 
+/**
+ * 실행 런타임 두 가지.
+ *
+ * 배포된 앱은 별도 node 를 싣지 않으므로 **Electron 바이너리를 node 모드로** 띄운다
+ * (mcpConfig.ts). 그 경로가 평범한 node 와 같게 동작한다는 보장은 없으므로 — 번들 포맷·내장
+ * 모듈 해석이 갈릴 수 있다 — 둘 다 돌려 본다. Electron 이 없으면 그 항목만 건너뛴다.
+ */
+const ELECTRON = join(
+  process.cwd(),
+  'node_modules/electron/dist/Electron.app/Contents/MacOS/Electron'
+)
+const RUNTIMES: { name: string; exec: string; env: Record<string, string> }[] = [
+  { name: 'node', exec: process.execPath, env: {} },
+  ...(existsSync(ELECTRON)
+    ? [{ name: 'electron (node mode)', exec: ELECTRON, env: { ELECTRON_RUN_AS_NODE: '1' } }]
+    : [])
+]
+
 let child: ChildProcessWithoutNullStreams | null = null
 let bridge: DelegateBridge | null = null
 afterEach(() => {
@@ -65,70 +83,75 @@ function reader(
 }
 
 describe.skipIf(!existsSync(SERVER))('위임 MCP 서버 ↔ 브리지', () => {
-  it('도구를 노출하고 호출을 메인으로 넘긴다', async () => {
-    const asked: { workspaceId: string; backend: string; prompt: string }[] = []
-    bridge = new DelegateBridge({
-      // 서브런을 실제로 돌리지 않는다 — 여기서 보는 것은 배선이지 에이전트가 아니다.
-      resolve: (workspaceId, backend) => {
-        asked.push({ workspaceId, backend, prompt: '' })
-        return null
-      },
-      onStart: () => {},
-      onActivity: () => {},
-      onEnd: () => {}
-    })
+  it.each(RUNTIMES)(
+    '$name 에서 도구를 노출하고 호출을 메인으로 넘긴다',
+    async (runtime) => {
+      const asked: { workspaceId: string; backend: string; prompt: string }[] = []
+      bridge = new DelegateBridge({
+        // 서브런을 실제로 돌리지 않는다 — 여기서 보는 것은 배선이지 에이전트가 아니다.
+        resolve: (workspaceId, backend) => {
+          asked.push({ workspaceId, backend, prompt: '' })
+          return null
+        },
+        onStart: () => {},
+        onActivity: () => {},
+        onEnd: () => {}
+      })
 
-    child = spawn(process.execPath, [SERVER], {
-      stdio: ['pipe', 'pipe', 'pipe'],
-      env: {
-        ...process.env,
-        [BRIDGE_ENV.socket]: bridge.socketPath(),
-        [BRIDGE_ENV.workspaceId]: 'ws-test',
-        [BRIDGE_ENV.backends]: 'claude,codex'
+      child = spawn(runtime.exec, [SERVER], {
+        stdio: ['pipe', 'pipe', 'pipe'],
+        env: {
+          ...process.env,
+          ...runtime.env,
+          [BRIDGE_ENV.socket]: bridge.socketPath(),
+          [BRIDGE_ENV.workspaceId]: 'ws-test',
+          [BRIDGE_ENV.backends]: 'claude,codex'
+        }
+      })
+      const await_ = reader(child)
+      const send = (msg: Record<string, unknown>): void => {
+        child!.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', ...msg })}\n`)
       }
-    })
-    const await_ = reader(child)
-    const send = (msg: Record<string, unknown>): void => {
-      child!.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', ...msg })}\n`)
-    }
 
-    send({ id: 1, method: 'initialize', params: { protocolVersion: '2024-11-05' } })
-    const init = (await await_(1)) as { result?: { serverInfo?: { name?: string } } }
-    expect(init.result?.serverInfo?.name).toBe('wooi')
+      send({ id: 1, method: 'initialize', params: { protocolVersion: '2024-11-05' } })
+      const init = (await await_(1)) as { result?: { serverInfo?: { name?: string } } }
+      expect(init.result?.serverInfo?.name).toBe('wooi')
 
-    send({ id: 2, method: 'tools/list' })
-    const list = (await await_(2)) as {
-      result?: {
-        tools?: { name: string; inputSchema?: { properties?: Record<string, unknown> } }[]
+      send({ id: 2, method: 'tools/list' })
+      const list = (await await_(2)) as {
+        result?: {
+          tools?: { name: string; inputSchema?: { properties?: Record<string, unknown> } }[]
+        }
       }
-    }
-    const tool = list.result?.tools?.[0]
-    expect(tool?.name).toBe('delegate')
-    // enum 이 환경변수에서 왔는지 — 여기가 비면 모델이 백엔드를 고를 수 없다.
-    expect((tool?.inputSchema?.properties?.backend as { enum?: string[] })?.enum).toEqual([
-      'claude',
-      'codex'
-    ])
+      const tool = list.result?.tools?.[0]
+      expect(tool?.name).toBe('delegate')
+      // enum 이 환경변수에서 왔는지 — 여기가 비면 모델이 백엔드를 고를 수 없다.
+      expect((tool?.inputSchema?.properties?.backend as { enum?: string[] })?.enum).toEqual([
+        'claude',
+        'codex'
+      ])
 
-    send({
-      id: 3,
-      method: 'tools/call',
-      params: {
-        name: 'delegate',
-        arguments: { backend: 'claude', description: 'probe', prompt: 'hello' }
+      send({
+        id: 3,
+        method: 'tools/call',
+        params: {
+          name: 'delegate',
+          arguments: { backend: 'claude', description: 'probe', prompt: 'hello' }
+        }
+      })
+      const call = (await await_(3)) as {
+        result?: { isError?: boolean; content?: { text?: string }[] }
       }
-    })
-    const call = (await await_(3)) as {
-      result?: { isError?: boolean; content?: { text?: string }[] }
-    }
-    // resolve 가 null 을 돌려주므로 거절이 정상이다 — 요청이 **소켓을 건너갔다**는 것이 요점이다.
-    expect(asked).toEqual([{ workspaceId: 'ws-test', backend: 'claude', prompt: '' }])
-    expect(call.result?.isError).toBe(true)
-    expect(call.result?.content?.[0]?.text).toContain('no longer delegate')
+      // resolve 가 null 을 돌려주므로 거절이 정상이다 — 요청이 **소켓을 건너갔다**는 것이 요점이다.
+      expect(asked).toEqual([{ workspaceId: 'ws-test', backend: 'claude', prompt: '' }])
+      expect(call.result?.isError).toBe(true)
+      expect(call.result?.content?.[0]?.text).toContain('no longer delegate')
 
-    // 모르는 메서드에 응답하지 않으면 클라이언트가 멈춘다.
-    send({ id: 4, method: 'nope/nope' })
-    const unknown = (await await_(4)) as { error?: { code?: number } }
-    expect(unknown.error?.code).toBe(-32601)
-  }, 30_000)
+      // 모르는 메서드에 응답하지 않으면 클라이언트가 멈춘다.
+      send({ id: 4, method: 'nope/nope' })
+      const unknown = (await await_(4)) as { error?: { code?: number } }
+      expect(unknown.error?.code).toBe(-32601)
+    },
+    30_000
+  )
 })
