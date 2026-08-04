@@ -1,13 +1,14 @@
 import { connect, type Socket } from 'node:net'
 import { randomUUID } from 'node:crypto'
-import { AGENT_BACKEND_LABELS, type AgentBackendId } from '@shared/types'
+import type { AgentBackendId } from '@shared/types'
 import { BRIDGE_ENV, type BridgeRequest, type BridgeResponse } from './protocol'
+import { DELEGATE_ARG_TEXT, delegateToolDescription } from './toolText'
 
 /**
  * 번들된 stdio MCP 서버 — Codex 워크스페이스에 위임 도구를 붙이는 유일한 경로.
  *
  * codex app-server 가 `thread/start` 의 `config.mcp_servers` 를 보고 **이 파일을 자식 프로세스로**
- * 띄운다(실측 확인: codex/probe.e2e.test.ts). 그래서 여기는 메인 프로세스 밖이고, store 도
+ * 띄운다(실측 확인: codex/delegateThread.e2e.test.ts). 그래서 여기는 메인 프로세스 밖이고, store 도
  * 권한 UI 도 세션도 닿지 않는다.
  *
  * 그러므로 이 파일은 아무것도 판단하지 않는다. MCP 프레이밍만 처리하고, 도구 호출은 소켓으로
@@ -98,46 +99,24 @@ function send(message: Record<string, unknown>): void {
   process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', ...message })}\n`)
 }
 
-/**
- * 도구 설명 — Claude 쪽(claude/delegate.ts 의 describeTool)과 **같은 내용을 유지한다**.
- * 두 백엔드가 같은 도구를 다르게 이해하면, 같은 워크스페이스 설정인데 메인이 누구냐에 따라
- * 위임이 걸리기도 하고 안 걸리기도 하는 상태가 된다.
- */
-function toolDescription(): string {
-  const names = BACKENDS.map((b) => AGENT_BACKEND_LABELS[b] ?? b).join(', ')
-  return (
-    'Run a task with a specific coding agent product and wait for its answer. ' +
-    `This is a multi-agent workspace: ${names} are all available to you. ` +
-    'Reach for this whenever the user names an agent ("have Claude look at this", "run it on both ' +
-    'and compare") — that request maps directly onto this tool. Call it once per agent you need. ' +
-    'If the agent you want is your own kind, prefer your built-in subagents instead: they share ' +
-    'your context and cost less. ' +
-    'The agent runs in this same worktree under your permission mode, starts from an empty ' +
-    'context, and reports back exactly once as text; it cannot ask you anything mid-run, so put ' +
-    'everything it needs in the prompt.'
-  )
-}
-
 const TOOL = {
   name: 'delegate',
-  description: toolDescription(),
+  description: delegateToolDescription(BACKENDS),
   inputSchema: {
     type: 'object',
     properties: {
       backend: {
         type: 'string',
         enum: BACKENDS,
-        description: 'Which agent product runs this task. Match what the user asked for by name.'
+        description: DELEGATE_ARG_TEXT.backend
       },
       description: {
         type: 'string',
-        description: 'A 3-6 word label for this task, shown while it runs (e.g. "Audit auth flow").'
+        description: DELEGATE_ARG_TEXT.description
       },
       prompt: {
         type: 'string',
-        description:
-          'The complete task brief. The delegated agent starts with a blank context and cannot ' +
-          'see this conversation, so restate every fact it needs: files, constraints, and what to return.'
+        description: DELEGATE_ARG_TEXT.prompt
       }
     },
     required: ['backend', 'description', 'prompt'],

@@ -10,6 +10,7 @@ import {
   type RunningAgent
 } from '@shared/types'
 import { runSubAgent, type SubAgentPermission } from '../subagent/run'
+import { DELEGATE_ARG_TEXT, delegateToolDescription } from '../subagent/toolText'
 import { log } from '../logger'
 
 /**
@@ -25,9 +26,9 @@ import { log } from '../logger'
  *
  * ## 왜 Task 를 막지 않나
  *
- * 같은 백엔드 작업에는 네이티브 서브에이전트가 여전히 더 낫다(맥락 공유·비용·속도 전부). 이
- * 도구는 그것과 경쟁하는 것이 아니라 **다른 제품에게 넘길 때만** 쓰는 보완재이고, 설명에 그
- * 경계를 적어 둔다. 그래서 위임이 잘 안 걸려도 손해가 없다 — 모델은 그냥 Task 를 쓴다.
+ * 사용자가 제품을 지목하지 않은 작업에는 네이티브 서브에이전트가 여전히 더 낫다(맥락 공유·비용).
+ * 이 도구는 그것과 경쟁하는 것이 아니라 **제품을 지목했을 때** 쓰는 보완재다. 그 경계를 어떻게
+ * 문구로 그었는지, 그리고 첫 판에서 왜 졌는지는 subagent/toolText.ts 에 적혀 있다.
  */
 
 /** 위임 도구가 부모 세션에서 받아야 하는 것들. */
@@ -89,21 +90,11 @@ export function createDelegateServer(deps: DelegateDeps): DelegateServer {
 
   const delegateTool = tool(
     'delegate',
-    describeTool(backends),
+    delegateToolDescription(backends),
     {
-      backend: backendEnum.describe(
-        'Which agent product runs this task. Match what the user asked for by name.'
-      ),
-      description: z
-        .string()
-        .describe('A 3-6 word label for this task, shown while it runs (e.g. "Audit auth flow").'),
-      prompt: z
-        .string()
-        .describe(
-          'The complete task brief. The delegated agent starts with a blank context and cannot ' +
-            'see this conversation, so restate every fact it needs: files, constraints, and what ' +
-            'to return. It reports back once, in text — it cannot ask you follow-up questions.'
-        )
+      backend: backendEnum.describe(DELEGATE_ARG_TEXT.backend),
+      description: z.string().describe(DELEGATE_ARG_TEXT.description),
+      prompt: z.string().describe(DELEGATE_ARG_TEXT.prompt)
     },
     async (args) => {
       const backend = args.backend as AgentBackendId
@@ -176,31 +167,6 @@ export function createDelegateServer(deps: DelegateDeps): DelegateServer {
       running.clear()
     }
   }
-}
-
-/**
- * 도구 설명 — 위임이 실제로 걸리느냐가 대부분 여기에 달려 있다.
- *
- * 이 워크스페이스는 **멀티 에이전트 모드**다. 사용자는 "Codex 한테 이거 시켜줘", "Codex 로 두
- * 개 띄워서 비교해줘" 처럼 대화에서 종류를 지목하므로, 그 말이 곧바로 이 도구 호출이 되어야 한다.
- * 그래서 (1) 여러 번 부를 수 있다는 것, (2) 같은 종류라면 네이티브 서브에이전트가 낫다는 것,
- * (3) 넘긴 뒤에는 되물을 수 없다는 것 셋을 분명히 적는다.
- */
-function describeTool(backends: AgentBackendId[]): string {
-  const names = backends.map((b) => AGENT_BACKEND_LABELS[b]).join(', ')
-  return (
-    'Run a task with a specific coding agent product and wait for its answer. ' +
-    `This is a multi-agent workspace: ${names} are all available to you. ` +
-    'Reach for this whenever the user names an agent ("have Codex look at this", "run it on both ' +
-    'and compare") — that request maps directly onto this tool. Call it once per agent you need; ' +
-    'several can be in flight at the same time. ' +
-    'If the agent you want is your own kind, prefer your built-in subagents instead: they share ' +
-    'your context and cost less. Use this tool for that kind only when the user explicitly asked ' +
-    'for a separate, clean-context run. ' +
-    'The agent runs in this same worktree under your permission mode, starts from an empty ' +
-    'context, and reports back exactly once as text; it cannot ask you anything mid-run, so put ' +
-    'everything it needs in the prompt.'
-  )
 }
 
 function textResult(text: string): { content: Array<{ type: 'text'; text: string }> } {
