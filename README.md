@@ -44,7 +44,18 @@ turns each review into a diff you work on instead of a transcript you read.
 ## Installation
 
 Wooi ships as a **signed and notarized** `.dmg` (Apple Developer ID), so it opens
-without Gatekeeper warnings.
+without Gatekeeper warnings. Apple Silicon only.
+
+### Homebrew
+
+```sh
+brew install --cask youngminnnn/tap/wooi
+```
+
+That's it — the cask installs **Wooi.app** into **Applications**. Open it from
+there and follow the onboarding.
+
+### Or download the `.dmg`
 
 1. Download the
    [latest `.dmg`](https://github.com/youngminnnn/wooi/releases/latest/download/Wooi-arm64.dmg)

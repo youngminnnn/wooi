@@ -134,6 +134,13 @@ git log --oneline $(git describe --tags --abbrev=0)..main
 6. **나머지는 `build.yml` 이 한다** — 태그와 `package.json` 일치 검증, 서명 시크릿
    확인, 빌드·서명·공증, `codesign`/`stapler`/`spctl` 재검증, 그리고 자동 생성 노트로
    GitHub Release 생성.
+7. **이어서 `homebrew-tap` 잡이 돈다** — 방금 올라간 `Wooi-arm64.dmg` 를 다시 받아
+   해시를 계산하고, `build/homebrew/wooi.rb` 에 새 버전과 `sha256` 을 채워
+   `youngminnnn/homebrew-tap` 의 `Casks/wooi.rb` 로 push 한다. 그래야
+   `brew install --cask youngminnnn/tap/wooi` 가 새 빌드를 가리킨다. tap 저장소에
+   `contents: write` 권한이 있는 PAT 를 `TAP_TOKEN` 시크릿으로 등록해야 하고,
+   **없으면 조용히 넘어가지 않고 릴리스 실행을 실패시킨다** — brew 만 옛 버전에
+   멈춰 있는 상태를 만들지 않기 위해서다.
 
 ### 불일치 가드
 

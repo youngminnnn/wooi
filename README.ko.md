@@ -39,7 +39,18 @@ Wooi 는 이어지는 작업을 쌓아 애초에 부딪히지 않게 하고, 리
 ## 설치
 
 Wooi 는 **서명 및 공증(Apple Developer ID)** 된 `.dmg` 로 배포됩니다 — macOS
-Gatekeeper 경고 없이 바로 실행됩니다.
+Gatekeeper 경고 없이 바로 실행됩니다. Apple Silicon 전용입니다.
+
+### Homebrew
+
+```sh
+brew install --cask youngminnnn/tap/wooi
+```
+
+이걸로 끝입니다 — cask 가 **Wooi.app** 을 **Applications** 에 설치합니다.
+거기서 실행한 뒤 온보딩을 진행하세요.
+
+### 또는 `.dmg` 직접 받기
 
 1. [최신 `.dmg`](https://github.com/youngminnnn/wooi/releases/latest/download/Wooi-arm64.dmg) 를
    받아 **Wooi** 를 **Applications** 로 드래그합니다. 이전 빌드는

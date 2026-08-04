@@ -156,3 +156,87 @@ jobs:
               --title "$GITHUB_REF_NAME" \
               --generate-notes
           fi
+
+  # `brew install --cask youngminnnn/tap/wooi` 가 가리키는 tap 저장소
+  # (youngminnnn/homebrew-tap) 의 Casks/wooi.rb 를 새 릴리스로 갱신한다.
+  # 손으로 하면 sha256 을 잘못 붙여도 사용자가 설치를 시도할 때까지 아무도 모른다.
+  #
+  # 릴리스가 실제로 만들어진 뒤에만 의미가 있으므로 macos 잡 성공 + 태그 빌드에만 돈다.
+  # 서명이 필요 없어 ubuntu 에서 돈다(macos 러너는 분당 과금이 10배).
+  homebrew-tap:
+    needs: macos
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # tap 저장소는 이 리포 토큰이 아니라 TAP_TOKEN 으로 push 한다
+    steps:
+      # 시크릿이 없으면 아래 checkout 이 "repository not found" 라는 엉뚱한 메시지로
+      # 죽는다. 조용히 스킵(`if: secrets.TAP_TOKEN != ''`)하면 릴리스는 초록불인데
+      # brew 만 옛 버전에 멈춰 더 나쁘다 — 위 preflight 들과 같이 여기서 끊는다.
+      - name: Preflight — tap token present
+        env:
+          TAP_TOKEN: ${{ secrets.TAP_TOKEN }}
+        run: |
+          if [ -z "${TAP_TOKEN}" ]; then
+            echo "::error::TAP_TOKEN 시크릿이 없습니다."
+            echo "youngminnnn/homebrew-tap 에 contents:write 권한이 있는 PAT 를 Settings → Secrets and variables → Actions 에 TAP_TOKEN 으로 등록하세요."
+            exit 1
+          fi
+          echo "TAP_TOKEN 확인됨."
+
+      - uses: actions/checkout@v7
+
+      - uses: actions/checkout@v7
+        with:
+          repository: youngminnnn/homebrew-tap
+          token: ${{ secrets.TAP_TOKEN }}
+          path: tap
+
+      # 아티팩트가 아니라 릴리스에 붙은 URL 그대로 받는다. cask 가 쓸 바로 그 URL 이
+      # 실제로 살아 있는지까지 같이 검증된다.
+      - name: Compute dmg sha256
+        run: |
+          set -euo pipefail
+          url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/Wooi-arm64.dmg"
+          echo "받는 중: $url"
+          curl -fsSL --retry 3 --retry-delay 5 -o Wooi-arm64.dmg "$url"
+          sha="$(sha256sum Wooi-arm64.dmg | cut -d' ' -f1)"
+          echo "sha256=$sha" >> "$GITHUB_ENV"
+          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+          echo "sha256: $sha"
+
+      # build/homebrew/wooi.rb 가 원본이고, 여기서는 version/sha256 두 줄만 갈아끼운다.
+      # 나머지(url·zap·auto_updates)를 CI 에서 만들어 내면 리뷰 대상이 워크플로 안의
+      # heredoc 이 되어 버린다.
+      - name: Render cask
+        run: |
+          set -euo pipefail
+          mkdir -p tap/Casks
+          sed -E \
+            -e "s|^  version \".*\"$|  version \"${version}\"|" \
+            -e "s|^  sha256 \".*\"$|  sha256 \"${sha256}\"|" \
+            build/homebrew/wooi.rb > tap/Casks/wooi.rb
+
+          # sed 는 패턴이 안 맞아도 조용히 원본을 그대로 흘려보낸다. 그러면 옛 버전·옛
+          # 해시가 그대로 tap 에 커밋되고, 설치하는 사람이 sha256 mismatch 로 처음 안다.
+          grep -qF "  version \"${version}\"" tap/Casks/wooi.rb \
+            || { echo "::error::cask 의 version 치환 실패 — build/homebrew/wooi.rb 의 version 줄 형식을 확인하세요."; exit 1; }
+          grep -qF "  sha256 \"${sha256}\"" tap/Casks/wooi.rb \
+            || { echo "::error::cask 의 sha256 치환 실패 — build/homebrew/wooi.rb 의 sha256 줄 형식을 확인하세요."; exit 1; }
+          echo "--- tap/Casks/wooi.rb"
+          cat tap/Casks/wooi.rb
+
+      - name: Commit + push to tap
+        working-directory: tap
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Casks/wooi.rb
+          if git diff --cached --quiet; then
+            echo "tap 이 이미 ${version} 입니다 — 커밋할 변경 없음."
+            exit 0
+          fi
+          git commit -m "wooi ${version}"
+          git push
+          echo "tap 갱신됨: brew install --cask youngminnnn/tap/wooi (${version})"
