@@ -50,11 +50,11 @@
           fill="url(#title)">Wooi</text>
 
     <!-- headline -->
-    <text x="88" y="350" font-size="54" font-weight="800" fill="#f4f6fb">Run AI coding agents in</text>
-    <text x="88" y="416" font-size="54" font-weight="800" fill="#f4f6fb">parallel — and <tspan fill="#9d8bf5">stack</tspan> them</text>
+    <text x="88" y="350" font-size="54" font-weight="800" fill="#f4f6fb">Parallel agents are easy.</text>
+    <text x="88" y="416" font-size="54" font-weight="800" fill="#f4f6fb"><tspan fill="#9d8bf5">Landing their work</tspan> isn't.</text>
 
     <!-- subtitle -->
-    <text x="90" y="506" font-size="28" font-weight="400" fill="#8a93a3">Each agent in its own git worktree · its own PR.</text>
-    <text x="90" y="546" font-size="28" font-weight="400" fill="#8a93a3">Stack them when work builds on work.</text>
+    <text x="90" y="506" font-size="28" font-weight="400" fill="#8a93a3">Dependent work stacks instead of conflicting.</text>
+    <text x="90" y="546" font-size="28" font-weight="400" fill="#8a93a3">Every PR review lands on the diff.</text>
   </g>
 </svg>

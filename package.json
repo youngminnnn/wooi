@@ -1,7 +1,7 @@
 {
   "name": "wooi",
   "version": "1.7.0",
-  "description": "Orchestrate parallel AI coding agents across isolated git worktrees",
+  "description": "Parallel AI coding agents across isolated git worktrees — dependent work stacks instead of conflicting, and every PR review lands on the diff",
   "main": "./out/main/index.js",
   "type": "module",
   "author": "youngminnnn <youngmin3306@gmail.com>",
