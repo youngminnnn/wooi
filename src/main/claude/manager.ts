@@ -15,6 +15,7 @@ import { log } from '../logger'
 import { IPC, agentSettingsFor, workspaceDisplayName } from '@shared/types'
 import { CLAUDE_META, CLAUDE_MODELS, type AgentBackend } from '../agent/backend'
 import { claudeMode, type HostCommand, type HostEvent, type SessionConfig } from './protocol'
+import { runAgentTool } from '../agent/tools'
 import type {
   AgentSettings,
   ChatEvent,
@@ -221,6 +222,31 @@ export class SessionManager implements AgentBackend {
       case 'sideQuestion':
         this.dispatch(IPC.evtSideQuestion, msg.update)
         break
+      case 'toolCall':
+        void this.onToolCall(msg.callId, msg.workspaceId, msg.tool, msg.args)
+        break
+    }
+  }
+
+  /**
+   * 에이전트가 부른 Wooi 도구를 실행하고 결과를 호스트로 회신한다.
+   *
+   * 실패해도 **반드시 회신한다** — 회신하지 않으면 호스트의 도구 호출이 영영 매달리고, 그 뒤로
+   * 모델의 턴이 통째로 멈춘다. 실패는 도구 오류로 전달돼 모델이 스스로 고쳐 다시 부를 수 있다.
+   */
+  private async onToolCall(
+    callId: string,
+    workspaceId: string,
+    tool: string,
+    args: unknown
+  ): Promise<void> {
+    try {
+      const data = await runAgentTool(workspaceId, tool, args)
+      this.sendIfHost({ type: 'toolResult', callId, ok: true, data })
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err)
+      log.warn(`agent tool failed: ${tool} — ${error}`)
+      this.sendIfHost({ type: 'toolResult', callId, ok: false, error })
     }
   }
 

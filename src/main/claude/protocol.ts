@@ -153,6 +153,12 @@ export type HostCommand =
       question: string
     }
   | { type: 'permissionResponse'; requestId: string; decision: PermissionDecision }
+  /**
+   * 호스트가 올린 Wooi 도구 호출(`toolCall`)의 결과. 메인만 실행할 수 있는 일을 대신 해 주고
+   * 돌려주는 회신이다 — 방향이 반대라는 것 말고는 `response` 와 같은 모양이다.
+   */
+  | { type: 'toolResult'; callId: string; ok: true; data: unknown }
+  | { type: 'toolResult'; callId: string; ok: false; error: string }
 
 /** 호스트 → 메인 이벤트. */
 export type HostEvent =
@@ -169,3 +175,14 @@ export type HostEvent =
   | { type: 'response'; reqId: string; ok: true; data: unknown }
   | { type: 'response'; reqId: string; ok: false; error: string }
   | { type: 'sideQuestion'; update: SideQuestionUpdate }
+  /**
+   * 에이전트가 Wooi 도구(`mcp__wooi__*`)를 호출했다 — 메인이 대신 실행하고 `toolResult` 로 회신한다.
+   *
+   * 도구가 하는 일(store 수정 · git · GitHub · 렌더러 방송)은 전부 메인 소유라, 호스트에서 도는
+   * 인프로세스 MCP 서버는 스스로 아무것도 할 수 없고 이 왕복만 한다. `permissionRequest` →
+   * `permissionResponse` 와 같은 패턴이며, 다른 점은 응답이 사용자가 아니라 메인에서 온다는 것뿐이다.
+   *
+   * workspaceId 는 **인자가 아니라 맥락**이다 — 호출한 세션에서 나오므로 모델이 남의 워크스페이스를
+   * 지목할 방법이 없다.
+   */
+  | { type: 'toolCall'; callId: string; workspaceId: string; tool: string; args: unknown }

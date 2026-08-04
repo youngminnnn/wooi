@@ -2,6 +2,7 @@ import { app, BrowserWindow, session } from 'electron'
 import { IPC } from '@shared/types'
 import { applyDevPaths, isDevIsolated, wooiHome } from './paths'
 import { AgentOrchestrator } from './agent/orchestrator'
+import { initAgentTools } from './agent/tools'
 import { setCodexStatusProvider } from './auth'
 import { PaneWindows } from './paneWindows'
 import { ScriptRunner } from './scripts'
@@ -69,6 +70,13 @@ const scripts = new ScriptRunner(dispatch, (workspaceId, kind, code) => {
   })
   dispatch(IPC.evtState, store.getState())
 })
+// 에이전트가 Wooi 자체를 조작하는 도구들의 실행부에 필요한 것을 넘긴다([[agent/tools]]).
+// scripts 가 만들어진 뒤여야 한다 — 워크스페이스를 만드는 도구가 셋업 스크립트를 돌린다.
+initAgentTools({
+  scripts,
+  broadcastState: () => dispatch(IPC.evtState, getStore().getState())
+})
+
 const terminals = new TerminalManager(dispatch)
 // 듀얼 모니터를 위해 작업 패널·스크립트 패널을 별도 창으로 떼어 낼 수 있게 한다([[paneWindows]]).
 const panes = new PaneWindows(dispatch)
