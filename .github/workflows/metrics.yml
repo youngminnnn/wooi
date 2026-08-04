@@ -1,0 +1,89 @@
+name: metrics
+
+# 주 1회 채택 지표 스냅샷을 찍어 metrics/adoption.jsonl 에 append 하고 커밋한다.
+# Wooi 는 텔레메트리가 없으므로(PRIVACY.md) GitHub 이 이미 집계해 주는 부수 신호가
+# 사용 규모에 대한 유일한 단서다. 숫자를 어떻게 읽어야 하는지는
+# scripts/adoption-snapshot.mjs 상단 주석에 있다.
+#
+# 이 워크플로가 자동화여야 하는 이유: **GitHub 은 traffic(views/clones/referrers)을
+# 14일치만 보관한다.** 2주 안에 한 번도 안 찍으면 그 구간은 영구 소실이다.
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# ⚠ 기본 GITHUB_TOKEN 으로는 traffic 을 읽을 수 없다 — PAT 시크릿이 필요하다
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# traffic 엔드포인트(/traffic/views, /traffic/clones, /traffic/popular/referrers)는
+# fine-grained 기준 **Administration: read** 권한을 요구한다.
+# (https://docs.github.com/en/rest/authentication/permissions-required-for-github-apps)
+# 그런데 워크플로의 `permissions:` 키로 GITHUB_TOKEN 에 줄 수 있는 스코프 목록에는
+# `administration` 이 아예 없다 — actions, checks, contents, deployments, discussions,
+# id-token, issues, packages, pages, pull-requests, security-events, statuses 등뿐이다.
+# (https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#permissions)
+# 즉 `contents: write` 를 줘도 traffic 은 403 이다. 우회 방법은 없고, PAT 가 필요하다.
+#
+# 설정 방법:
+#   1. 저장소 권한이 있는 토큰을 만든다.
+#      - fine-grained PAT: 이 저장소만 선택 → Repository permissions →
+#        Administration: Read-only, Metadata: Read-only
+#      - classic PAT 를 쓴다면 `repo` 스코프
+#   2. Settings → Secrets and variables → Actions → New repository secret
+#      이름을 METRICS_TOKEN 으로 저장한다.
+#
+# METRICS_TOKEN 이 없으면 이 잡은 **일부러 실패한다**(--strict). 릴리스·스타 데이터는
+# 이미 커밋된 뒤라 잃지 않지만, traffic 이 조용히 비는 걸 성공으로 넘기면 14일 뒤에야
+# 데이터가 없다는 걸 알게 되고 그때는 이미 늦다.
+#
+# 참고: git push 는 PAT 가 아니라 기본 GITHUB_TOKEN 으로 한다. GITHUB_TOKEN 이 만든
+# push 는 다른 워크플로를 재트리거하지 않아서 ci.yml 이 매주 헛돌지 않는다.
+
+on:
+  schedule:
+    # 매주 월요일 03:00 UTC (KST 정오). 최소 주 1회면 14일 창 안에 항상 들어온다.
+    - cron: '0 3 * * 1'
+  workflow_dispatch:
+
+concurrency:
+  group: metrics
+  cancel-in-progress: false
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+
+    permissions:
+      # 스냅샷 줄을 커밋해 되돌려 놓기 위한 권한. traffic 읽기와는 무관하다(위 주석 참고).
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '20'
+
+      # npm ci 없이 돈다 — 스크립트는 표준 라이브러리와 gh CLI 만 쓴다.
+      # gh 는 ubuntu-latest 러너에 기본 설치되어 있다.
+      - name: Collect snapshot
+        env:
+          # METRICS_TOKEN 이 없으면 기본 토큰으로 떨어진다. 릴리스·스타는 그대로 모이고,
+          # traffic 만 403 으로 빠진 뒤 아래 --strict 가 잡을 실패로 이어진다.
+          GH_TOKEN: ${{ secrets.METRICS_TOKEN || github.token }}
+        run: node scripts/adoption-snapshot.mjs --strict
+
+      # 스크립트가 --strict 로 죽어도 이미 append 된 줄은 커밋한다 — 부분 데이터라도
+      # 잃지 않는다. 잡 자체는 위 스텝의 실패를 그대로 이어받아 빨간불로 끝난다.
+      #
+      # main 에 "PR 필수" 브랜치 보호가 걸리면 이 push 는 막힌다. 그때는 보호 규칙에서
+      # github-actions[bot] 을 예외로 두거나, 커밋 대신 PR 을 여는 방식으로 바꿔야 한다.
+      - name: Commit snapshot
+        if: always()
+        run: |
+          if git diff --quiet -- metrics/adoption.jsonl; then
+            echo "변경 없음 — 커밋을 건너뜁니다."
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add metrics/adoption.jsonl
+          git commit -m "chore(metrics): adoption snapshot $(date -u +%Y-%m-%d)"
+          git push
