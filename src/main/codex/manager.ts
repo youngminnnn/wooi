@@ -10,8 +10,17 @@ import {
 import { getStore } from '../store'
 import { getTranscripts } from '../transcripts'
 import { log } from '../logger'
-import { IPC, agentSettingsFor, normalizePermissionMode, workspaceDisplayName } from '@shared/types'
+import {
+  AGENT_BACKEND_LABELS,
+  IPC,
+  agentSettingsFor,
+  normalizePermissionMode,
+  workspaceDisplayName
+} from '@shared/types'
 import { CODEX_META, type AgentBackend } from '../agent/backend'
+import { agentDefaultsFor, delegateBackendsFor } from '../agent/multiAgent'
+import { DelegateBridge } from '../subagent/bridge'
+import { delegateServerConfig } from '../subagent/mcpConfig'
 import { durationLabel } from './rateLimits'
 import type { CodexCommand, CodexConfig, CodexEvent } from './protocol'
 import type {
@@ -27,12 +36,14 @@ import type {
   McpAction,
   McpServerInfo,
   ModelOption,
+  AgentBackendId,
   NotificationEvent,
   RateLimitSnapshot,
   PermissionDecision,
   PermissionMode,
   PermissionRequest,
   RewindActionResult,
+  RunningAgent,
   SlashCommandInfo,
   Workspace
 } from '@shared/types'
@@ -75,6 +86,12 @@ function rateLimitWindow(
 export class CodexSessionManager implements AgentBackend {
   readonly meta = CODEX_META
 
+  /**
+   * 위임 브리지와 그 실행 목록. 지연 생성이라 멀티 에이전트를 안 쓰면 소켓도 열리지 않는다.
+   * 위임 실행은 호스트가 아니라 **메인에서** 돌므로 상태도 여기 있다.
+   */
+  private delegateBridge: DelegateBridge | null = null
+  private delegateAgents = new Map<string, Map<string, RunningAgent>>()
   private host: UtilityProcess | null = null
   private hostReady = false
   /** 호스트가 spawn 되기 전 들어온 명령을 모았다가 'spawn' 시 비운다. */
@@ -225,7 +242,11 @@ export class CodexSessionManager implements AgentBackend {
 
   /** store 에서 스레드 생성/재개에 필요한 설정을 계산한다. */
   private configFor(ws: Workspace): CodexConfig {
-    const defaults = agentSettingsFor(getStore().getState().settings, CODEX_META.id)
+    const settings = getStore().getState().settings
+    const defaults = agentSettingsFor(settings, CODEX_META.id)
+    // 위임이 닫혀 있으면 소켓을 띄우지도 않는다 — 단일 에이전트 사용자에게 유닉스 소켓이 하나
+    // 생길 이유가 없다(socketPath() 가 첫 호출에서 리슨을 시작한다).
+    const backends = delegateBackendsFor(ws, settings)
     return {
       cwd: ws.worktreePath,
       model: ws.model ?? defaults.model,
@@ -233,8 +254,93 @@ export class CodexSessionManager implements AgentBackend {
       fastMode: ws.fastMode ?? defaults.fastMode,
       // 다른 백엔드에서 넘어온 모드가 정책 변환으로 새지 않도록 여기서 걸러 낸다.
       permissionMode: normalizePermissionMode(CODEX_META, ws.permissionMode),
-      resumeThreadId: ws.sessionId
+      resumeThreadId: ws.sessionId,
+      delegateServer: backends.length
+        ? delegateServerConfig({
+            socketPath: this.bridge().socketPath(),
+            workspaceId: ws.id,
+            backends
+          })
+        : null
     }
+  }
+
+  /**
+   * 위임 브리지(지연 생성). codex 가 띄운 MCP 서버가 여기로 붙어 실제 서브런을 요청한다.
+   *
+   * 요청마다 store 를 다시 읽는 것이 중요하다 — MCP 서버는 스레드와 함께 살아 있으므로,
+   * 사용자가 멀티 에이전트 모드를 끈 뒤에도 호출이 들어올 수 있다.
+   */
+  private bridge(): DelegateBridge {
+    if (this.delegateBridge) return this.delegateBridge
+    this.delegateBridge = new DelegateBridge({
+      resolve: (workspaceId, backend) => {
+        const ws = this.getWorkspace(workspaceId)
+        if (!ws) return null
+        const settings = getStore().getState().settings
+        const allowed = delegateBackendsFor(ws, settings)
+        if (!allowed.includes(backend as AgentBackendId)) return null
+        const agent = agentDefaultsFor(settings)[backend as AgentBackendId]
+        return {
+          backend: backend as AgentBackendId,
+          cwd: ws.worktreePath,
+          repoPath:
+            getStore()
+              .getState()
+              .repos.find((r) => r.id === ws.repoId)?.path ?? null,
+          model: agent?.model ?? null,
+          effort: agent?.effort ?? null,
+          // 위임된 실행이 부모보다 넓은 권한을 갖지 않도록 워크스페이스 모드를 그대로 물려준다.
+          permissionMode: ws.permissionMode
+        }
+      },
+      onStart: (workspaceId, taskId, backend, description) =>
+        this.upsertDelegateAgent(workspaceId, {
+          taskId,
+          backend: backend as AgentBackendId,
+          agentType: AGENT_BACKEND_LABELS[backend as AgentBackendId] ?? backend,
+          description,
+          startedAt: Date.now(),
+          toolUses: 0
+        }),
+      onActivity: (workspaceId, taskId, activity) => {
+        const agent = this.delegateAgents.get(workspaceId)?.get(taskId)
+        if (!agent) return
+        if (activity.kind === 'tool') {
+          agent.toolUses = (agent.toolUses ?? 0) + 1
+          agent.lastToolName = activity.toolName ?? activity.text
+        }
+        this.upsertDelegateAgent(workspaceId, agent)
+      },
+      onEnd: (workspaceId, taskId) => {
+        const byWorkspace = this.delegateAgents.get(workspaceId)
+        if (!byWorkspace?.delete(taskId)) return
+        this.emitDelegateAgents(workspaceId)
+      }
+    })
+    return this.delegateBridge
+  }
+
+  /**
+   * 위임 실행을 사이드바 "실행 중 에이전트" 목록에 반영한다.
+   *
+   * Codex 자신의 서브에이전트(subAgentActivity)는 호스트가 mapping.ts 에서 만들어 `agents`
+   * 이벤트로 보내는데, 위임 실행은 **메인에서** 도는 별개의 것이라 그 스트림에 낄 수 없다.
+   * 그래서 목록을 여기서 따로 들고 같은 이벤트 모양으로 방송한다.
+   */
+  private upsertDelegateAgent(workspaceId: string, agent: RunningAgent): void {
+    let byWorkspace = this.delegateAgents.get(workspaceId)
+    if (!byWorkspace) {
+      byWorkspace = new Map()
+      this.delegateAgents.set(workspaceId, byWorkspace)
+    }
+    byWorkspace.set(agent.taskId, { ...agent })
+    this.emitDelegateAgents(workspaceId)
+  }
+
+  private emitDelegateAgents(workspaceId: string): void {
+    const agents = [...(this.delegateAgents.get(workspaceId)?.values() ?? [])]
+    this.dispatch(IPC.evtChat, { workspaceId, event: { type: 'agents', agents } })
   }
 
   private request<T>(make: (reqId: string) => CodexCommand): Promise<T> {
@@ -280,6 +386,9 @@ export class CodexSessionManager implements AgentBackend {
 
   async interrupt(workspaceId: string): Promise<void> {
     this.sendIfHost({ type: 'interrupt', workspaceId })
+    // 위임 실행은 별도 프로세스라 스레드 인터럽트로는 끊기지 않는다 — 사용자가 멈췄는데도
+    // 위임받은 에이전트가 계속 파일을 고치는 일이 없어야 한다.
+    this.delegateBridge?.abortWorkspace(workspaceId)
     // 스레드가 없거나 끊긴 경우에도 사이드바가 '진행 중'에 갇히지 않도록 idle 로 확정한다.
     this.forceIdle(workspaceId)
   }
@@ -381,6 +490,9 @@ export class CodexSessionManager implements AgentBackend {
 
   dispose(workspaceId: string): void {
     this.sendIfHost({ type: 'dispose', workspaceId })
+    // 위임 실행은 스레드가 아니라 메인에서 도므로 dispose 로 끊기지 않는다. 여기서 안 끊으면
+    // 워크스페이스를 닫아도 자식 프로세스가 남아 worktree 를 계속 건드린다.
+    this.delegateBridge?.abortWorkspace(workspaceId)
     // 스레드가 사라지면 그 스레드가 기다리던 승인 요청은 응답받을 수 없으므로 거둔다.
     for (const [requestId, wsId] of this.pendingPermissions) {
       if (wsId !== workspaceId) continue
@@ -392,6 +504,9 @@ export class CodexSessionManager implements AgentBackend {
 
   disposeAll(): void {
     this.sendIfHost({ type: 'disposeAll' })
+    this.delegateBridge?.dispose()
+    this.delegateBridge = null
+    this.delegateAgents.clear()
     for (const requestId of this.pendingPermissions.keys()) {
       this.dispatch(IPC.evtPermissionCancel, requestId)
     }

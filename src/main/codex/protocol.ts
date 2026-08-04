@@ -32,6 +32,22 @@ export interface CodexConfig {
   permissionMode: PermissionMode
   /** 이어갈 codex thread id(= workspace.sessionId). 없으면 새 스레드. */
   resumeThreadId: string | null
+  /**
+   * 이 스레드에 붙일 위임 MCP 서버. 멀티 에이전트 워크스페이스가 아니면 null 이고, 그러면
+   * `thread/start` 에 아무것도 실리지 않는다.
+   *
+   * **스레드 단위**인 것이 요점이다. app-server 프로세스는 모든 Codex 워크스페이스가 공유하므로,
+   * 프로세스 인자(`-c`)로 넣으면 단일 에이전트 워크스페이스에까지 도구가 붙는다. `thread/start`
+   * 의 `config` 는 그 스레드에만 적용된다(codex/probe.e2e.test.ts 로 실측 확인).
+   */
+  delegateServer: CodexMcpServer | null
+}
+
+/** codex 의 `mcp_servers.<name>` 설정 한 항목. 우리가 넣는 값만 추린 모양이다. */
+export interface CodexMcpServer {
+  command: string
+  args: string[]
+  env: Record<string, string>
 }
 
 /** 메인 → 호스트 명령. */

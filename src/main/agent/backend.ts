@@ -308,9 +308,10 @@ export const CODEX_META: AgentBackendMeta = {
     rateLimits: true,
     // Codex 는 샌드박스 쓰기 루트를 프로필로 잡아 세션 중 추가하는 경로가 없다.
     addDirectory: false,
-    // 아직 없다 — app-server 의 thread/start 에 mcp_servers 를 주입하는 경로를 확인하지 못했다.
-    // Codex 가 위임 **대상**이 되는 것은 이미 되며(`codex exec`), 이건 조율하는 쪽의 이야기다.
-    delegate: false
+    // `thread/start` 의 config 로 mcp_servers 를 **스레드 단위로** 주입해 위임 도구를 붙인다
+    // (codex/probe.e2e.test.ts 로 실측 확인). 프로세스 인자(-c)는 app-server 를 공유하는 다른
+    // 워크스페이스까지 오염시키므로 쓰지 않는다.
+    delegate: true
   },
   // 실제 가용성은 codex CLI 설치·버전으로 런타임에 덮어쓴다(registry 의 backendAvailability).
   available: false

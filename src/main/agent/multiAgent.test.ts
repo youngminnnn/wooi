@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { DEFAULT_SETTINGS } from '../storeSchema'
 import { AGENT_BACKEND_IDS, type AppSettings, type Workspace } from '@shared/types'
+import { backendMeta } from './backend'
 import { agentDefaultsFor, delegateBackendsFor } from './multiAgent'
 
 /**
@@ -47,11 +48,23 @@ describe('delegateBackendsFor', () => {
     expect(delegateBackendsFor(workspace({ multiAgent: false }), EXPERIMENT_ON)).toEqual([])
   })
 
-  it('조율하는 쪽이 될 수 없는 백엔드에서는 모드가 켜져 있어도 아무것도 열지 않는다', () => {
-    // Codex 는 아직 위임 도구를 꽂을 경로가 없다(capabilities.delegate=false). 도구를 실어 봤자
-    // 아무 일도 일어나지 않으므로 아예 열지 않는다 — UI 도 같은 capability 로 모드를 감춘다.
+  it('Codex 도 메인이 될 수 있다', () => {
+    // Claude 는 SDK 의 in-process MCP 서버로, Codex 는 thread/start 의 config 로 위임 도구를
+    // 붙인다. 경로는 다르지만 열리는 것은 같아야 한다 — 메인을 무엇으로 골랐느냐에 따라 위임이
+    // 되기도 하고 안 되기도 하면 사용자가 이유를 알 수 없다.
     const codexMain = workspace({ agentBackend: 'codex', multiAgent: true })
-    expect(delegateBackendsFor(codexMain, EXPERIMENT_ON)).toEqual([])
+    expect(delegateBackendsFor(codexMain, EXPERIMENT_ON)).toEqual(AGENT_BACKEND_IDS)
+  })
+
+  it('조율할 수 없는 백엔드는 capability 로 걸러진다', () => {
+    // 지금은 모든 백엔드가 조율할 수 있지만, 게이트 자체는 살아 있어야 한다 — 새 백엔드가
+    // 붙었는데 위임 도구를 꽂을 경로가 없으면, 켜도 아무 일이 안 일어나는 스위치가 된다.
+    const gated = AGENT_BACKEND_IDS.filter((id) => !backendMeta(id).capabilities.delegate)
+    for (const id of gated) {
+      expect(
+        delegateBackendsFor(workspace({ agentBackend: id, multiAgent: true }), EXPERIMENT_ON)
+      ).toEqual([])
+    }
   })
 })
 

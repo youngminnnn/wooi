@@ -265,7 +265,19 @@ export class CodexThread {
       model: this.config.model ?? undefined,
       sandbox: policy.sandboxMode,
       approvalPolicy: policy.approvalPolicy,
-      developerInstructions: wooiWorkspaceInstructions(this.workspaceId)
+      // 워크스페이스 안내와 위임 안내를 한 문자열로 합친다 — developerInstructions 는 하나뿐이라
+      // 나중에 쓰는 쪽이 앞의 것을 덮는다.
+      developerInstructions: [
+        wooiWorkspaceInstructions(this.workspaceId),
+        this.config.delegateInstructions
+      ]
+        .filter(Boolean)
+        .join('\n\n'),
+      // 위임 도구는 스레드 설정으로만 붙일 수 있다 — codex 에는 in-process MCP 서버가 없고,
+      // 프로세스 인자로 넣으면 app-server 를 공유하는 다른 워크스페이스까지 오염된다.
+      ...(this.config.delegateServer
+        ? { config: { mcp_servers: { [DELEGATE_MCP_SERVER_NAME]: this.config.delegateServer } } }
+        : {})
     }
 
     const resume = this.config.resumeThreadId
