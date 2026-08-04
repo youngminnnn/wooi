@@ -15,6 +15,7 @@ import type {
   CommandPanelKind,
   CommandResult,
   CreateWorkspaceArgs,
+  CreateWorkspaceResult,
   DirEntry,
   DropPosition,
   EffortSetting,
@@ -94,20 +95,7 @@ export interface WooiApi {
   }
 
   workspace: {
-    create(args: CreateWorkspaceArgs): Promise<{
-      workspaceId?: string
-      name?: string
-      branch?: string
-      error?: string
-      /** worktree 전달에 실패한 항목들. 생성 자체는 성공했지만 사용자에게 알려야 한다. */
-      carryFailures?: CarryFailure[]
-      /**
-       * 리포의 전달 목록이 **비어 있을 때만** 채워지는, 지금 리포에 실제로 존재하는 후보 경로들.
-       * 이 경우 새 worktree 는 `.env`·`CLAUDE.local.md` 없이 만들어졌다는 뜻이므로 렌더러가
-       * 한 번 제안한다(구버전부터 쓰던 리포가 기능의 존재조차 모르는 상태를 깨는 유일한 지점).
-       */
-      carrySuggestions?: string[]
-    }>
+    create(args: CreateWorkspaceArgs): Promise<CreateWorkspaceResult>
     archive(workspaceId: string): Promise<void>
     unarchive(workspaceId: string): Promise<{
       error?: string

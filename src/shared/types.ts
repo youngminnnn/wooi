@@ -1786,6 +1786,25 @@ export interface CreateWorkspaceArgs {
   agentBackend?: AgentBackendId
 }
 
+/**
+ * 워크스페이스 생성 결과. 렌더러(IPC)와 에이전트 도구가 **같은 계약**을 쓰도록 이름을 붙여 둔다 —
+ * 생성 자체는 main 의 한 함수([[workspaces]] createWorkspace)이고 호출 경로만 여럿이다.
+ */
+export interface CreateWorkspaceResult {
+  workspaceId?: string
+  name?: string
+  branch?: string
+  error?: string
+  /** worktree 전달에 실패한 항목들. 생성 자체는 성공했지만 사용자에게 알려야 한다. */
+  carryFailures?: CarryFailure[]
+  /**
+   * 리포의 전달 목록이 **비어 있을 때만** 채워지는, 지금 리포에 실제로 존재하는 후보 경로들.
+   * 이 경우 새 worktree 는 `.env`·`CLAUDE.local.md` 없이 만들어졌다는 뜻이므로 렌더러가
+   * 한 번 제안한다(구버전부터 쓰던 리포가 기능의 존재조차 모르는 상태를 깨는 유일한 지점).
+   */
+  carrySuggestions?: string[]
+}
+
 // ── 외부 연동 인증 상태 (에이전트들 / GitHub) ────────────────────────────
 
 /**
