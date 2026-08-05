@@ -7,7 +7,7 @@ import type {
   Repo,
   Workspace
 } from '@shared/types'
-import { backendMeta } from './agent/registry'
+import { backendMeta } from './agent/backend'
 import {
   applyCarryExcludes,
   carryIntoWorktree,
