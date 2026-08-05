@@ -5,6 +5,7 @@ import { IPC } from '@shared/types'
 import { applyDevPaths, isDevIsolated, wooiHome } from './paths'
 import { AgentOrchestrator } from './agent/orchestrator'
 import { initAgentTools } from './agent/tools'
+import { cancelToolPermissions, initToolPermission } from './agent/tools/permission'
 import { startToolSocket, stopToolSocket } from './agent/tools/socket'
 import { setCodexStatusProvider } from './auth'
 import { PaneWindows } from './paneWindows'
@@ -104,6 +105,10 @@ const scripts = new ScriptRunner(dispatch, (workspaceId, kind, code) => {
 // 자기 옆에 산출물이 놓이는 메인뿐이다.
 process.env.WOOI_TOOL_SOCKET = startToolSocket(app.getPath('userData'))
 process.env.WOOI_TOOL_SHIM = resolveToolShim()
+
+// 소켓으로 들어온 도구 호출은 기존 권한 카드를 그대로 탄다([[agent/tools/permission]]) —
+// Codex 의 app-server 는 MCP 도구에 대해 승인을 물어보지 않기 때문이다.
+initToolPermission({ dispatch: (request) => dispatch(IPC.evtPermission, request) })
 
 // 에이전트가 Wooi 자체를 조작하는 도구들의 실행부에 필요한 것을 넘긴다([[agent/tools]]).
 // scripts 가 만들어진 뒤여야 한다 — 워크스페이스를 만드는 도구가 셋업 스크립트를 돌린다.
@@ -234,6 +239,8 @@ app.on('before-quit', () => {
   // 소켓 파일을 남기면 다음 실행의 bind 가 EADDRINUSE 로 실패한다(그쪽에서도 지우지만, 살아
   // 있는 앱이 쓰던 소켓을 지우는 일이 없도록 정상 종료 경로에서 먼저 치운다).
   stopToolSocket(app.getPath('userData'))
+  // 응답을 받을 창이 사라지므로 매달린 승인 요청을 거부로 확정한다.
+  cancelToolPermissions()
   // 상태 쓰기와 트랜스크립트 fsync 는 성능을 위해 모아서 처리된다 — 프로세스가 사라지기 전에
   // 밀린 것을 마저 내려야 마지막 변경이 유실되지 않는다.
   flushStore()

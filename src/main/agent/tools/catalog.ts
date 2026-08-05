@@ -126,10 +126,19 @@ export const AGENT_TOOLS: AgentToolSpec[] = [
   }
 ]
 
-/** 읽기 전용으로 표시된 도구인가. 권한 자동 승인 판단에 쓴다(전체 이름 `mcp__wooi__x` 로 묻는다). */
+/** 읽기 전용으로 표시된 도구인가(카탈로그의 맨 이름으로 묻는다). */
+export function isReadOnlyToolName(name: string): boolean {
+  return AGENT_TOOLS.some((t) => t.name === name && t.annotations?.readOnlyHint === true)
+}
+
+/**
+ * 같은 판단을 모델에게 보이는 전체 이름(`mcp__wooi__x`)으로 한다.
+ *
+ * 접두사를 반드시 확인한다 — 남의 MCP 서버가 우연히 같은 도구 이름을 쓸 수 있고, 그것까지
+ * 자동 승인하면 우리가 심사하지 않은 도구가 조용히 통과한다.
+ */
 export function isReadOnlyWooiTool(qualifiedName: string): boolean {
   const prefix = `mcp__${WOOI_MCP_SERVER_NAME}__`
   if (!qualifiedName.startsWith(prefix)) return false
-  const name = qualifiedName.slice(prefix.length)
-  return AGENT_TOOLS.some((t) => t.name === name && t.annotations?.readOnlyHint === true)
+  return isReadOnlyToolName(qualifiedName.slice(prefix.length))
 }

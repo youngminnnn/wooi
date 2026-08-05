@@ -1,8 +1,10 @@
 import { createServer, type Server, type Socket } from 'node:net'
 import { chmodSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
+import type { Workspace } from '@shared/types'
 import { log } from '../../logger'
 import { getStore } from '../../store'
+import { ensureToolApproved } from './permission'
 import { runAgentTool } from './registry'
 
 /**
@@ -38,7 +40,7 @@ export interface ToolSocketRequest {
  * 마지막 조건이 핵심이다. 도구는 에이전트가 도는 중에만 불릴 수 있으므로 정상 호출은 항상
  * 통과하지만, 엉뚱한 id 를 적으면 그 워크스페이스가 마침 동시에 돌고 있지 않는 한 걸린다.
  */
-function verifyCaller(workspaceId: string): void {
+function verifyCaller(workspaceId: string): Workspace {
   const ws = getStore()
     .getState()
     .workspaces.find((w) => w.id === workspaceId)
@@ -50,6 +52,7 @@ function verifyCaller(workspaceId: string): void {
         'Pass the workspace id you were given in your instructions.'
     )
   }
+  return ws
 }
 
 let server: Server | null = null
@@ -98,7 +101,10 @@ function handleConnection(socket: Socket): void {
 async function respond(socket: Socket, line: string): Promise<void> {
   try {
     const req = JSON.parse(line) as ToolSocketRequest
-    verifyCaller(req.workspaceId)
+    const workspace = verifyCaller(req.workspaceId)
+    // 승인은 실행 직전에 받는다. Claude 는 SDK 의 canUseTool 이 같은 자리를 맡으므로 공용
+    // 실행부가 아니라 **이 전송 계층**에 둔다 — 양쪽에 걸면 Claude 가 두 번 묻는다.
+    await ensureToolApproved(workspace, req.tool, req.args)
     const data = await runAgentTool(req.workspaceId, req.tool, req.args)
     write(socket, { ok: true, data })
   } catch (err) {

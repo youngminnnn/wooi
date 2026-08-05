@@ -13,15 +13,20 @@ import type { Workspace } from '@shared/types'
 
 const state = vi.hoisted(() => ({ workspaces: [] as Partial<Workspace>[] }))
 const run = vi.hoisted(() => vi.fn())
+const approve = vi.hoisted(() => vi.fn())
 
 vi.mock('../../store', () => ({ getStore: () => ({ getState: () => state }) }))
 vi.mock('./registry', () => ({ runAgentTool: run }))
+// 승인 규칙 자체는 permission.test 가 다룬다. 여기서는 소켓이 **실행 전에 반드시 거친다**는
+// 것만 본다 — 그 순서가 어긋나면 카드가 뜨기도 전에 브랜치가 생긴다.
+vi.mock('./permission', () => ({ ensureToolApproved: approve }))
 
 let dir: string
 
 beforeEach(async () => {
   vi.clearAllMocks()
   run.mockResolvedValue({ ok: true })
+  approve.mockResolvedValue(undefined)
   dir = mkdtempSync(join(tmpdir(), 'wooi-sock-'))
   const { startToolSocket } = await import('./socket')
   startToolSocket(dir)
@@ -104,5 +109,27 @@ describe('도구 소켓', () => {
   it('깨진 줄에도 응답한다 — 답이 없으면 shim 이 매달린다', async () => {
     const res = await call('not json')
     expect(res.ok).toBe(false)
+  })
+
+  it('실행 전에 승인 문지기를 거친다', async () => {
+    state.workspaces = [running]
+
+    await call({ workspaceId: 'ws-1', tool: 'create_stacked_workspace', args: { name: 'x' } })
+
+    expect(approve).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'ws-1' }),
+      'create_stacked_workspace',
+      { name: 'x' }
+    )
+  })
+
+  it('승인이 거부되면 도구를 실행하지 않는다', async () => {
+    state.workspaces = [running]
+    approve.mockRejectedValue(new Error('The user declined this action.'))
+
+    const res = await call({ workspaceId: 'ws-1', tool: 'create_stacked_workspace', args: {} })
+
+    expect(res).toEqual({ ok: false, error: 'The user declined this action.' })
+    expect(run).not.toHaveBeenCalled()
   })
 })

@@ -57,6 +57,7 @@ import {
   githubLogout
 } from './auth'
 import { IPC, agentSettingsFor, reorderById, workspaceStack } from '@shared/types'
+import { resolveToolPermission } from './agent/tools/permission'
 import { appendMemory } from './claude/memory'
 import {
   carryIntoNewWorktree,
@@ -649,6 +650,9 @@ export function registerIpc(ctx: IpcContext): void {
 
   ipcMain.handle(IPC.permissionRespond, (_e, requestId: string, decision: PermissionDecision) => {
     ctx.sessions.respondPermission(requestId, decision)
+    // Wooi 도구 승인은 백엔드가 아니라 메인이 띄운다([[agent/tools/permission]]). requestId 는
+    // 어디서 나왔는지 구분되지 않으므로 양쪽에 흘리고, 자기 것이 아니면 무시한다.
+    resolveToolPermission(requestId, decision)
   })
 
   // ── 스크립트 ───────────────────────────────────────────────────────────
