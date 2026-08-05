@@ -55,6 +55,16 @@ brew install --cask youngminnnn/tap/wooi
 That's it — the cask installs **Wooi.app** into **Applications**. Open it from
 there and follow the onboarding.
 
+**Already installed Wooi from the `.dmg`?** Homebrew won't take over an app it
+didn't put there, and stops with `It seems there is already an App at
+'/Applications/Wooi.app'`. Add `--adopt` to hand the copy you already have over
+to Homebrew instead of replacing it — any version works, and the app on disk is
+left exactly as it is:
+
+```sh
+brew install --cask --adopt youngminnnn/tap/wooi
+```
+
 ### Or download the `.dmg`
 
 1. Download the
