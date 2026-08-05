@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { ChatEvent, ChatItem } from '@shared/types'
 import { AsyncQueue } from './asyncQueue'
+import { testWooiMcp as wooiMcp } from './testWooiMcp'
 
 /**
  * 자동 압축과 "턴 종료 → idle" 순서의 회귀 테스트.
@@ -96,6 +97,7 @@ async function start(autoCompact: boolean): Promise<Harness> {
     autoCompact,
     resumeSessionId: null,
     additionalDirs: [],
+    wooiMcp,
     emit: (e) => events.push(e),
     persist: (i) => items.push(i),
     requestPermission: async () => ({ behavior: 'deny' }),

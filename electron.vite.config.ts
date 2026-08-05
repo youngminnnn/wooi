@@ -21,7 +21,10 @@ export default defineConfig({
         input: {
           index: resolve('src/main/index.ts'),
           host: resolve('src/main/claude/host.ts'),
-          codexHost: resolve('src/main/codex/host.ts')
+          codexHost: resolve('src/main/codex/host.ts'),
+          // toolShim = Codex 용 stdio MCP 서버. 우리가 아니라 `codex app-server` 가 spawn 하므로
+          // 반드시 독립 진입점이어야 한다([[codex/toolShim]]).
+          toolShim: resolve('src/main/codex/toolShim.ts')
         }
       }
     }

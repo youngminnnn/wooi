@@ -553,6 +553,11 @@ export interface Workspace {
    * (스택 위에서 일부러 다른 브랜치를 향하게 두는 경우가 있다).
    */
   baseMismatchDismissed?: string | null
+  /**
+   * 이 워크스페이스가 부모에게 올린 마지막 인계 보고(`report_to_parent`). 없으면 아직 보고 전.
+   * 스택 뿌리(parentWorkspaceId 가 null)에는 채워지지 않는다.
+   */
+  handoff?: StackedHandoff | null
   /** worktree 절대 경로 */
   worktreePath: string
   /**
@@ -869,6 +874,48 @@ export type ChatItem =
       durationMs?: number
       ts: number
     }
+  /**
+   * 스택 자식이 부모에게 올린 인계 보고 카드.
+   *
+   * 부모 **대화에** 나타나지만 부모 세션의 맥락에는 들어가지 않는다 — 트랜스크립트와 에이전트
+   * 컨텍스트는 별개이기 때문이다. 부모 에이전트는 `check_stacked_work` 로 직접 읽는다.
+   * 그래서 이 카드는 **사람에게 알리는 것**이 목적이고, 눌러 자식으로 건너뛸 수 있다.
+   */
+  | {
+      id: string
+      type: 'handoff'
+      /** 보고를 올린 자식 워크스페이스. 카드를 누르면 그리로 이동한다. */
+      childWorkspaceId: string
+      /** 표시용 자식 이름(보고 시점 스냅샷 — 자식이 사라져도 카드는 읽혀야 한다). */
+      childName: string
+      childBranch: string
+      status: StackedHandoffStatus
+      summary: string
+      ts: number
+    }
+
+/**
+ * 자식이 보고하는 상태.
+ * - done: 목적한 작업을 끝냈다.
+ * - blocked: 막혔고 부모(또는 사람)의 판단이 필요하다.
+ *
+ * 둘로만 나눈 이유: 부모가 취할 행동이 갈리는 지점이 여기뿐이다. 진행률 같은 중간 상태는
+ * 워크스페이스의 running/idle 로 이미 보인다.
+ */
+export type StackedHandoffStatus = 'done' | 'blocked'
+
+/**
+ * 스택 자식이 부모에게 남긴 마지막 인계 보고. **자식 레코드에** 둔다.
+ *
+ * 부모에 목록으로 쌓지 않는 이유: 부모가 알고 싶은 것은 "각 자식이 지금 어떤 상태인가" 이고,
+ * 자식이 사라지면 그 보고도 함께 사라지는 게 맞다. 다시 보고하면 덮어쓴다.
+ */
+export interface StackedHandoff {
+  status: StackedHandoffStatus
+  /** 자식이 무엇을 했는지. 부모 에이전트가 이 문장을 그대로 읽는다. */
+  summary: string
+  at: number
+}
 
 /**
  * 지금 살아 있는 서브에이전트 1건의 표시용 스냅샷(사이드바 "Running agents" 패널).
@@ -1807,6 +1854,25 @@ export interface CreateWorkspaceArgs {
    * 생략하면 전역 기본 백엔드(AppSettings.defaultAgentBackend)를 쓴다.
    */
   agentBackend?: AgentBackendId
+}
+
+/**
+ * 워크스페이스 생성 결과. 렌더러(IPC)와 에이전트 도구가 **같은 계약**을 쓰도록 이름을 붙여 둔다 —
+ * 생성 자체는 main 의 한 함수([[workspaces]] createWorkspace)이고 호출 경로만 여럿이다.
+ */
+export interface CreateWorkspaceResult {
+  workspaceId?: string
+  name?: string
+  branch?: string
+  error?: string
+  /** worktree 전달에 실패한 항목들. 생성 자체는 성공했지만 사용자에게 알려야 한다. */
+  carryFailures?: CarryFailure[]
+  /**
+   * 리포의 전달 목록이 **비어 있을 때만** 채워지는, 지금 리포에 실제로 존재하는 후보 경로들.
+   * 이 경우 새 worktree 는 `.env`·`CLAUDE.local.md` 없이 만들어졌다는 뜻이므로 렌더러가
+   * 한 번 제안한다(구버전부터 쓰던 리포가 기능의 존재조차 모르는 상태를 깨는 유일한 지점).
+   */
+  carrySuggestions?: string[]
 }
 
 // ── 외부 연동 인증 상태 (에이전트들 / GitHub) ────────────────────────────

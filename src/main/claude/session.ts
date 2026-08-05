@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { query } from '@anthropic-ai/claude-agent-sdk'
 import type {
+  McpSdkServerConfigWithInstance,
   Query,
   SDKMessage,
   SDKUserMessage,
@@ -15,6 +16,7 @@ import { sessionTranscriptExists } from './sessionFiles'
 import { CLAUDE_CODE_SYSTEM_PROMPT } from './systemPrompt'
 import { log } from '../logger'
 import { MCP_SETTING_SOURCES, resolveUserMcpServers } from './mcp'
+import { isReadOnlyWooiTool, WOOI_MCP_SERVER_NAME } from '../agent/tools/catalog'
 import { fastModeReasonText, planApprovalMode, PLAN_OPTIONS } from '@shared/types'
 import { asClaudeMode, claudeEffort, claudeMode, type ClaudePermissionMode } from './protocol'
 import type {
@@ -50,6 +52,13 @@ export interface SessionDeps {
   resumeSessionId: string | null
   /** `/add-dir` 로 더해진 작업 루트(절대 경로). cwd 밖의 코드를 함께 읽고 고칠 수 있게 한다. */
   additionalDirs: string[]
+  /**
+   * 이 워크스페이스에 묶인 Wooi 도구 서버([[claude/wooiMcp]]). 호스트가 만들어 넘긴다.
+   *
+   * 세션마다 따로인 이유는 도구가 "어느 워크스페이스에서 불렸는가" 를 이 인스턴스로만 알기
+   * 때문이다 — 모델은 그것을 인자로 지목할 수 없다.
+   */
+  wooiMcp: McpSdkServerConfigWithInstance
   emit: (event: ChatEvent) => void
   persist: (item: ChatItem) => void
   requestPermission: (
@@ -587,7 +596,16 @@ export class ClaudeSession {
     try {
       // 사용자가 claude CLI 용으로 등록한 MCP 서버(user/project/local 스코프)를 명시 주입한다.
       // cwd 가 worktree 라 SDK 자동 탐색만으로는 원본 repo 의 project 스코프 서버가 누락되기 때문.
-      const mcpServers = resolveUserMcpServers(this.deps.repoPath)
+      const userServers = resolveUserMcpServers(this.deps.repoPath)
+      // Wooi 자체를 조작하는 도구는 우리가 이긴다 — 같은 이름을 쓰는 사용자 서버가 있으면 앱
+      // 조작 통로가 통째로 남의 것으로 바뀌므로, 덮어쓰되 조용히 넘어가지 않는다.
+      if (userServers[WOOI_MCP_SERVER_NAME]) {
+        log.warn(
+          `mcp: your config defines a server named "${WOOI_MCP_SERVER_NAME}" — ` +
+            `Wooi's built-in tools take that name, so yours is not loaded in this workspace`
+        )
+      }
+      const mcpServers = { ...userServers, [WOOI_MCP_SERVER_NAME]: this.deps.wooiMcp }
       // 'ultracode' 는 effort 레벨이 아니라 별도 모드(xhigh + 상시 워크플로우 조율)다 — SDK 로는
       // effort 옵션이 아니라 settings 레이어의 ultracode: true 로 전달한다. 그 외 effort 레벨은
       // effort 옵션으로 그대로 넘기고, null 이면 아무것도 넘기지 않아 모델 기본 동작을 따른다.
@@ -993,6 +1011,14 @@ export class ClaudeSession {
         message:
           'The user wants to keep planning. Do not make any edits yet — refine the plan and ask again.'
       }
+    }
+
+    // 읽기 전용으로 표시된 Wooi 도구는 묻지 않는다 — 상태를 바꾸지 않으니 승인이 결정할 것이
+    // 없고, 매번 카드가 뜨면 정작 물어야 할 도구(워크스페이스 생성처럼 브랜치를 만들고 리포의
+    // 셋업 스크립트를 돌리는 것)의 카드가 그 사이에 묻힌다. 나머지 Wooi 도구는 아래의 일반
+    // 승인 경로를 그대로 탄다 — 앱을 조작하는 통로에 별도의 우회로를 두지 않는다.
+    if (isReadOnlyWooiTool(toolName)) {
+      return { behavior: 'allow', updatedInput: input }
     }
 
     // auto 모드: 분류기가 대부분 자동 처리하지만, 위험으로 분류돼 ask 경로로 넘어온 호출도

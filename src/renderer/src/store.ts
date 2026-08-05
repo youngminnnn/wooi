@@ -799,6 +799,17 @@ export const useStore = create<UIState>((set, get) => ({
           void s.refreshGit(workspaceId)
           void s.refreshPr(workspaceId)
         }
+
+        // 스택 자식의 인계 보고는 이 워크스페이스의 턴과 무관하게 **아무 때나** 도착한다.
+        // 아래 status 경로(턴이 idle 로 정착할 때)는 그래서 이 경우를 잡지 못한다 — 부모가
+        // 쉬고 있으면 보고가 와도 사이드바에 아무 변화가 없어 그대로 묻힌다.
+        if (event.item.type === 'handoff') {
+          const s = get()
+          if (notifyEnabled(s, workspaceId, 'completed', 'sound')) playNotification()
+          if (workspaceId !== s.selectedWorkspaceId || !windowFocused) {
+            set({ unread: { ...s.unread, [workspaceId]: true } })
+          }
+        }
       } else if (event.type === 'delta') {
         const idx = items.findIndex((i) => i.id === event.id)
         let next: ChatItem[]

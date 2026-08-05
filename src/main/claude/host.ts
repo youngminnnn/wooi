@@ -9,6 +9,7 @@ import {
   readPermissions
 } from './control'
 import { listSlashCommands } from './commands'
+import { createWooiMcpServer } from './wooiMcp'
 import { clampText } from './clamp'
 import { log } from '../logger'
 import type { HostCommand, HostEvent, SessionConfig } from './protocol'
@@ -33,6 +34,30 @@ function post(msg: HostEvent): void {
 const sessions = new Map<string, ClaudeSession>()
 /** 호스트가 발급한 requestId → 권한 결정 resolver(메인의 permissionResponse 로 풀린다). */
 const pendingPermissions = new Map<string, (d: PermissionDecision) => void>()
+/** 호스트가 발급한 callId → Wooi 도구 호출 settler(메인의 toolResult 로 풀린다). */
+const pendingToolCalls = new Map<
+  string,
+  { resolve: (v: unknown) => void; reject: (e: Error) => void }
+>()
+
+/**
+ * Wooi 도구 1건을 메인에 위임하고 결과를 기다린다.
+ *
+ * 인프로세스 MCP 서버(wooiMcp.ts)의 모든 도구가 이 함수 하나로 수렴한다 — 호스트는 도구가
+ * 무엇을 하는지 알 필요가 없고, 이름과 인자를 그대로 실어 보내기만 한다. 그래서 도구가 늘어도
+ * 이 파일과 프로토콜은 그대로다.
+ *
+ * 타임아웃을 걸지 않는다: 도구는 "즉시 반환" 규약을 지키고(오래 걸리는 일은 핸들만 돌려준 뒤
+ * 이벤트 스트림으로 진행 상황을 흘린다), 메인이 죽으면 호스트도 함께 내려가므로 영원히 매달릴
+ * 경로가 없다.
+ */
+export function callMain(workspaceId: string, tool: string, args: unknown): Promise<unknown> {
+  const callId = randomUUID()
+  return new Promise<unknown>((resolve, reject) => {
+    pendingToolCalls.set(callId, { resolve, reject })
+    post({ type: 'toolCall', callId, workspaceId, tool, args })
+  })
+}
 
 function ensure(workspaceId: string, config: SessionConfig): ClaudeSession {
   const existing = sessions.get(workspaceId)
@@ -48,6 +73,9 @@ function ensure(workspaceId: string, config: SessionConfig): ClaudeSession {
     autoCompact: config.autoCompact,
     resumeSessionId: config.resumeSessionId,
     additionalDirs: config.additionalDirs,
+    // 워크스페이스마다 자기 것을 만든다 — 도구가 어느 워크스페이스에서 불렸는지는 이 클로저가
+    // 유일한 근거다(모델이 인자로 지목할 수 없다는 뜻이기도 하다).
+    wooiMcp: createWooiMcpServer((tool, args) => callMain(workspaceId, tool, args)),
     emit: (event: ChatEvent) => post({ type: 'event', workspaceId, event }),
     persist: (item: ChatItem) => post({ type: 'persist', workspaceId, item }),
     requestPermission: (req) =>
@@ -111,6 +139,11 @@ async function handle(msg: HostCommand): Promise<void> {
       sessions.clear()
       for (const resolve of pendingPermissions.values()) resolve({ behavior: 'deny' })
       pendingPermissions.clear()
+      // 세션이 다 사라졌으니 이 도구 호출의 결과를 받을 대화도 없다. 매달린 채 두면 종료가 막힌다.
+      for (const { reject } of pendingToolCalls.values()) {
+        reject(new Error('The session was closed before the tool finished.'))
+      }
+      pendingToolCalls.clear()
       break
 
     case 'permissionResponse': {
@@ -118,6 +151,16 @@ async function handle(msg: HostCommand): Promise<void> {
       if (resolve) {
         pendingPermissions.delete(msg.requestId)
         resolve(msg.decision)
+      }
+      break
+    }
+
+    case 'toolResult': {
+      const pending = pendingToolCalls.get(msg.callId)
+      if (pending) {
+        pendingToolCalls.delete(msg.callId)
+        if (msg.ok) pending.resolve(msg.data)
+        else pending.reject(new Error(msg.error))
       }
       break
     }
