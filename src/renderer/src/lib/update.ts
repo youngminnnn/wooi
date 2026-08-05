@@ -1,4 +1,4 @@
-import type { UpdateStatus } from '@shared/types'
+import { RESTART_SETTLE_MS, type UpdateStatus } from '@shared/types'
 
 /**
  * 자동 업데이트 상태 해석 헬퍼. 상태는 store 의 `updateStatus` 한 곳에서만 구독하고,
@@ -27,6 +27,29 @@ export function newVersionLabel(status: UpdateStatus): string {
   if (status.state === 'downloading') return `Downloading update${v}… ${status.percent ?? 0}%`
   if (status.state === 'blocked') return `New version${v} available — download it manually`
   return `New version${v} available`
+}
+
+/**
+ * "작업이 끝나면 재시작" 예약이 걸렸을 때의 문구. 예약이 없으면 빈 문자열.
+ *
+ * 세 국면을 구분한다 — 아직 다운로드 중 / 진행 중인 작업을 기다리는 중 / 카운트다운.
+ * `now` 는 호출부가 1초마다 갱신하는 현재 시각(카운트다운을 그리기 위한 것). 카운트다운이
+ * 막 시작된 첫 틱에는 `now` 가 한 박자 늦을 수 있으므로 유예 길이로 상한을 씌운다 —
+ * 그러지 않으면 "restarting in 4213s" 같은 값이 한 번 스쳐 지나간다.
+ */
+export function scheduledRestartText(status: UpdateStatus, now: number): string {
+  if (!status.restartWhenIdle) return ''
+  if (status.restartAt) {
+    const secs = Math.ceil((status.restartAt - now) / 1000)
+    const left = Math.min(Math.round(RESTART_SETTLE_MS / 1000), Math.max(0, secs))
+    return `All work finished — restarting in ${left}s.`
+  }
+  if (status.state !== 'ready') {
+    return 'Restart scheduled — Wooi will update once the download and all work finish.'
+  }
+  const busy = status.busyCount ?? 0
+  if (busy === 0) return 'Restart scheduled — waiting for work to settle.'
+  return `Restart scheduled — waiting for ${busy} running ${busy === 1 ? 'task' : 'tasks'} to finish.`
 }
 
 /** 설정 화면 "About" 섹션에 보여 줄 상태 문구. idle 이면 빈 문자열. */

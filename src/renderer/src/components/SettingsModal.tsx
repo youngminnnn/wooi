@@ -4,6 +4,7 @@ import {
   Bot,
   Check,
   ChevronRight,
+  Clock,
   Compass,
   Download,
   Info,
@@ -17,7 +18,8 @@ import {
 } from 'lucide-react'
 import { useStore } from '../store'
 import { openRepoSettings } from '../lib/repoSettings'
-import { hasNewVersion, updateStatusText } from '../lib/update'
+import { hasNewVersion, scheduledRestartText, updateStatusText } from '../lib/update'
+import { useNow } from '../lib/useNow'
 import { inputClass } from './Modal'
 import IntegrationsPanel from './IntegrationsPanel'
 import { permissionModesFor } from '../lib/permission'
@@ -779,8 +781,11 @@ function UpdatesSection(): React.JSX.Element {
   useEffect(() => {
     void window.api.app.getVersion().then(setVersion)
   }, [])
+  // 카운트다운이 걸린 동안만 초 단위로 다시 그린다(배너와 같은 규칙).
+  const now = useNow(1000, !!status.restartAt)
   const checking = status.state === 'checking'
   const isNew = hasNewVersion(status)
+  const scheduled = !!status.restartWhenIdle
   return (
     <div
       className={`flex items-center justify-between gap-3 rounded-xl border px-4 py-3 ${isNew ? 'border-[var(--accent-500)]/40 bg-[var(--accent-500)]/10' : 'border-[var(--border)]'}`}
@@ -801,6 +806,11 @@ function UpdatesSection(): React.JSX.Element {
             {updateStatusText(status)}
           </div>
         )}
+        {scheduled && (
+          <div className="mt-0.5 flex items-center gap-1.5 text-xs text-[var(--accent-300)]">
+            <Clock size={12} /> {scheduledRestartText(status, now)}
+          </div>
+        )}
       </div>
       {status.state === 'blocked' ? (
         <button
@@ -810,12 +820,25 @@ function UpdatesSection(): React.JSX.Element {
           <Download size={14} /> Download latest
         </button>
       ) : status.state === 'ready' ? (
-        <button
-          onClick={() => window.api.update.quitAndInstall()}
-          className="flex shrink-0 items-center gap-1.5 rounded-lg border border-[var(--accent-500)] bg-[var(--accent-600)]/15 px-3 py-1.5 text-sm text-neutral-100"
-        >
-          <RefreshCw size={14} /> Restart & update
-        </button>
+        // 지금 재시작하면 진행 중인 턴이 끊긴다 — 자리를 비울 때를 위해 "다 끝나면" 예약을 나란히 둔다.
+        <div className="flex shrink-0 items-center gap-2">
+          <button
+            onClick={() => void window.api.update.setRestartWhenIdle(!scheduled)}
+            className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm ${
+              scheduled
+                ? 'border-[var(--accent-500)]/50 text-[var(--accent-300)]'
+                : 'border-[var(--border)] text-neutral-300 hover:bg-[var(--surface-2)]'
+            }`}
+          >
+            <Clock size={14} /> {scheduled ? 'Cancel schedule' : 'When work finishes'}
+          </button>
+          <button
+            onClick={() => window.api.update.quitAndInstall()}
+            className="flex items-center gap-1.5 rounded-lg border border-[var(--accent-500)] bg-[var(--accent-600)]/15 px-3 py-1.5 text-sm text-neutral-100"
+          >
+            <RefreshCw size={14} /> Restart & update
+          </button>
+        </div>
       ) : (
         <button
           onClick={() => void window.api.update.check()}

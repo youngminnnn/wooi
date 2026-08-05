@@ -1672,6 +1672,8 @@ export const IPC = {
   updateGetStatus: 'update:getStatus',
   /** 다운로드된 업데이트를 설치하기 위해 앱을 재시작한다. */
   updateQuitAndInstall: 'update:quitAndInstall',
+  /** 지금 말고 "모든 워크스페이스 작업이 끝나면" 재시작하도록 예약한다(또는 예약을 해제한다). */
+  updateSetRestartWhenIdle: 'update:setRestartWhenIdle',
   // 원격 공지(앱 재배포 없이 상단 배너로 알리는 메시지)
   /** 마지막으로 가져온 공지 목록을 읽는다(렌더러 초기화용 — 새로 받아오지 않는다). */
   noticeGetActive: 'notice:getActive',
@@ -1725,6 +1727,12 @@ export const IPC = {
 
 // ── IPC 페이로드 타입 ────────────────────────────────────────────────────
 
+/**
+ * 예약 재시작이 "작업이 다 끝났다"고 판정한 뒤 실제로 재시작하기까지의 유예.
+ * main 은 이 값으로 restartAt 을 잡고, renderer 는 카운트다운의 상한으로 쓴다.
+ */
+export const RESTART_SETTLE_MS = 30_000
+
 /** 자동 업데이트 상태(main → renderer, evtUpdate 페이로드). */
 export interface UpdateStatus {
   state:
@@ -1747,6 +1755,21 @@ export interface UpdateStatus {
   percent?: number
   /** error/blocked 일 때 메시지. */
   error?: string
+  /**
+   * "모든 워크스페이스 작업이 끝나면 재시작" 예약이 걸려 있는가.
+   * state 와 독립적으로 유지되고(다운로드 중에 걸어 둘 수 있다), 실제 발동은 ready 일 때만.
+   */
+  restartWhenIdle?: boolean
+  /**
+   * 예약이 발동 조건을 만족해 카운트다운에 들어간 시각(epoch ms, 이 시각이 지나면 재시작).
+   * 없으면 아직 기다리는 중(=진행 중인 작업이 남아 있다).
+   */
+  restartAt?: number
+  /**
+   * 예약이 기다리고 있는 진행 중 작업 수(에이전트 턴 + 리뷰). 배너가 "무엇을 기다리는지"를
+   * 보여 주기 위한 값으로, 예약이 걸려 있을 때만 채워진다.
+   */
+  busyCount?: number
 }
 
 /** 공지의 심각도. 배너 색과 아이콘을 고른다. */

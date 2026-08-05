@@ -408,6 +408,11 @@ export interface WooiApi {
     getStatus(): Promise<UpdateStatus>
     /** 다운로드 완료된 업데이트를 설치하기 위해 앱을 재시작한다. */
     quitAndInstall(): Promise<void>
+    /**
+     * 지금 말고 "모든 워크스페이스 작업(에이전트 턴·리뷰)이 끝나면" 재시작하도록 예약한다.
+     * `false` 로 부르면 예약을 해제한다. 예약 상태는 UpdateStatus 로 되돌아온다.
+     */
+    setRestartWhenIdle(armed: boolean): Promise<UpdateStatus>
   }
 
   /** 앱 재배포 없이 표시하는 원격 상단 공지. */

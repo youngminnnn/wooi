@@ -178,7 +178,8 @@ const api: WooiApi = {
   update: {
     check: () => ipcRenderer.invoke(IPC.updateCheck),
     getStatus: () => ipcRenderer.invoke(IPC.updateGetStatus),
-    quitAndInstall: () => ipcRenderer.invoke(IPC.updateQuitAndInstall)
+    quitAndInstall: () => ipcRenderer.invoke(IPC.updateQuitAndInstall),
+    setRestartWhenIdle: (armed) => ipcRenderer.invoke(IPC.updateSetRestartWhenIdle, armed)
   },
 
   notice: {
