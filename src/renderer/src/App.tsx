@@ -170,6 +170,12 @@ export default function App(): React.JSX.Element {
       // 모달이나 confirm 대화상자가 떠 있으면 전역 단축키를 막는다.
       if (anyModalOpen || st.confirmState) return
 
+      // 입력창/텍스트영역에 포커스가 있으면 글자 입력·텍스트 편집이 우선이다.
+      const typing = (): boolean => {
+        const el = document.activeElement as HTMLElement | null
+        return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)
+      }
+
       if (e.key === 'Tab' && e.shiftKey) {
         const ws = st.app?.workspaces.find((w) => w.id === st.selectedWorkspaceId)
         if (!ws) return
@@ -187,10 +193,7 @@ export default function App(): React.JSX.Element {
 
       // '?' — 단축키 도움말. 입력창/텍스트영역에 포커스가 있으면 무시(글자 입력을 방해하지 않게).
       if (e.key === '?' && !e.metaKey && !e.ctrlKey && !e.altKey) {
-        const el = document.activeElement as HTMLElement | null
-        const typing =
-          !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)
-        if (!typing) {
+        if (!typing()) {
           e.preventDefault()
           setShowShortcuts(true)
           return
@@ -198,6 +201,16 @@ export default function App(): React.JSX.Element {
       }
 
       if (!e.metaKey) return
+
+      // ⌘Z: 방금 만든 워크스페이스를 되돌린다(⌘N 을 잘못 눌렀을 때의 탈출구).
+      // 글을 쓰는 중이라면 텍스트 실행취소가 우선이므로 그냥 양보한다 — preventDefault 를
+      // 하지 않아야 기본 Edit ▸ Undo 가 그대로 동작한다.
+      if (e.code === 'KeyZ' && !e.shiftKey && !e.ctrlKey && !e.altKey) {
+        if (typing()) return
+        e.preventDefault()
+        void st.undoCreateWorkspace()
+        return
+      }
 
       // ⇧⌘A: 대기 중인 모든 권한을 한 번에 승인(병렬 세션 권한 피로 완화). 확인 후 실행.
       if (e.shiftKey && e.key.toLowerCase() === 'a') {
@@ -327,6 +340,17 @@ export default function App(): React.JSX.Element {
           void st.requestArchiveReview(st.activeReviewId)
         }
         return
+      }
+
+      // ⌥⌘⌫: workspace 영구 삭제. 아카이브(⇧⌘⌫)와 한 글쇠 차이지만 결과는 되돌릴 수 없으므로,
+      // ⌥ 를 요구해 손이 미끄러져 눌리지 않게 하고 삭제 확인도 반드시 거친다(store 가 처리).
+      // 리뷰 화면이 떠 있으면 대상이 되는 워크스페이스가 화면에 없으니 받지 않는다.
+      if (selId && !st.activeReviewId && e.altKey && !e.shiftKey && !e.ctrlKey) {
+        if (e.code === 'Backspace' || e.code === 'Delete') {
+          e.preventDefault()
+          void st.requestDeleteWorkspace(selId)
+          return
+        }
       }
 
       // 키 판별은 e.code 로 한다 — 한글 IME 등에서 e.key 가 문자가 아닐 수 있다.

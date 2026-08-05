@@ -486,6 +486,7 @@ function WorkspaceRow({
   const runningSince = useStore((s) => s.runningSince[workspace.id])
   const restack = useStore((s) => s.restackWorkspace)
   const confirm = useStore((s) => s.confirm)
+  const requestDelete = useStore((s) => s.requestDeleteWorkspace)
   const requireGithub = useStore((s) => s.requireGithub)
   const githubDisconnected = useGithubDisconnected()
   const awaitingPermission = useStore((s) =>
@@ -582,7 +583,18 @@ function WorkspaceRow({
       icon: <Archive size={13} />,
       onSelect: () => void archive(),
       danger: true,
-      separatorBefore: true
+      separatorBefore: true,
+      shortcut: '⇧⌘⌫'
+    },
+    // 아카이브 바로 아래 둔다 — "이 워크스페이스를 치운다" 는 같은 갈래의 선택지이고,
+    // 되돌릴 수 없는 쪽을 찾으려고 다른 곳을 뒤지게 만들 이유가 없다.
+    {
+      key: 'delete',
+      label: 'Delete workspace…',
+      icon: <Trash2 size={13} />,
+      onSelect: () => void requestDelete(workspace.id),
+      danger: true,
+      shortcut: '⌥⌘⌫'
     }
   ]
 
@@ -1076,6 +1088,7 @@ function ArchivedRow({ workspace }: { workspace: Workspace }): React.JSX.Element
   const select = useStore((s) => s.selectWorkspace)
   const confirm = useStore((s) => s.confirm)
   const pushToast = useStore((s) => s.pushToast)
+  const deleteWorkspaceNow = useStore((s) => s.deleteWorkspaceNow)
   const reportCarryFailures = useStore((s) => s.reportCarryFailures)
   const suggestCarry = useStore((s) => s.suggestCarry)
 
@@ -1102,7 +1115,7 @@ function ArchivedRow({ workspace }: { workspace: Workspace }): React.JSX.Element
       danger: true
     })
     if (!ok) return
-    await window.api.workspace.remove(workspace.id, true)
+    await deleteWorkspaceNow(workspace.id)
   }
 
   return (

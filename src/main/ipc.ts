@@ -648,6 +648,9 @@ export function registerIpc(ctx: IpcContext): void {
     }
   )
 
+  // 영구 삭제: 아카이브와 달리 되돌릴 수 없다 — worktree·대화 기록에 더해 (deleteBranch 면)
+  // 브랜치까지 지우고 워크스페이스 레코드 자체를 목록에서 없앤다. 아카이브된 것뿐 아니라
+  // 살아 있는 워크스페이스에도 쓰인다(사이드바 메뉴 · ⌥⌘⌫ · 생성 되돌리기).
   ipcMain.handle(IPC.workspaceRemove, async (_e, workspaceId: string, deleteBranch: boolean) => {
     const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
     if (!ws) return
@@ -656,6 +659,12 @@ export function registerIpc(ctx: IpcContext): void {
     ctx.sessions.dispose(workspaceId)
     ctx.scripts.disposeWorkspace(workspaceId)
     ctx.terminals.disposeWorkspace(workspaceId)
+    // 아카이브 스크립트는 "이 worktree 를 정리한다" 는 훅이다(dev 컨테이너 종료 등). 워크트리가
+    // 아직 살아 있는 워크스페이스를 지울 때는 아카이브와 같은 이유로 실행해야 한다 —
+    // 이미 아카이브된 워크스페이스는 그때 한 번 돌았으므로 건너뛴다.
+    if (!ws.archived && repo?.archiveScript.trim()) {
+      await ctx.scripts.runOnce(repo.archiveScript, ws.worktreePath)
+    }
     getTranscripts().remove(workspaceId)
     invalidateWorkspacePr(workspaceId)
     if (repo) await removeWorktree(repo.path, ws.worktreePath, ws.branch, deleteBranch)
