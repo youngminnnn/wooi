@@ -80,8 +80,12 @@ export async function runAgentTool(
   args: unknown
 ): Promise<unknown> {
   if (!deps) throw new Error('Wooi tools are not ready yet.')
+
+  // `tool` 은 모델이 준 문자열이 그대로 온다. 조회를 Map 으로 하는 것이 1차 방어다 —
+  // 객체였다면 `__proto__`·`constructor` 같은 이름이 프로토타입 사슬을 타고 함수를 물어왔겠지만
+  // Map 은 자기가 담은 키만 안다. 그 위에 실제로 함수인지까지 확인하고 부른다.
   const handler = handlers.get(tool)
-  if (!handler) throw new Error(`Unknown Wooi tool: ${tool}`)
+  if (typeof handler !== 'function') throw new Error(`Unknown Wooi tool: ${tool}`)
 
   log.info(`agent tool: ${tool} (workspace=${workspaceId})`)
   return handler(deps, workspaceId, (args ?? {}) as Record<string, unknown>)
