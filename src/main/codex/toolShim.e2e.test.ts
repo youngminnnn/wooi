@@ -1,9 +1,9 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { createServer, type Server } from 'node:net'
-import { existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 
 /**
  * 빌드된 shim 을 **실제 프로세스로 띄워** MCP 규약과 소켓 전달을 확인한다.
@@ -165,5 +165,33 @@ describe.skipIf(!existsSync(SHIM))('codex tool shim', () => {
     h.send({ id: 1, method: 'resources/list', params: {} })
     const res = await h.next(1)
     expect((res.error as { code: number }).code).toBe(-32601)
+  })
+
+  /**
+   * 패키징 빌드에서 shim 을 실행하는 것은 우리가 아니라 codex 다. asar 밖에 풀린 파일만 보이므로,
+   * shim 이 import 하는 것까지 **함께** 풀려 있어야 한다.
+   *
+   * 실제로 여기서 한 번 깨졌다: rollup 이 카탈로그를 공유 청크로 분리했는데 asarUnpack 이
+   * toolShim.js 하나만 풀어, 패키징 빌드에서 ERR_MODULE_NOT_FOUND 로 죽었다. 유닛 테스트도
+   * dev 실행도 멀쩡했다 — 그 조합은 패키징에서만 드러난다.
+   */
+  it('shim 이 끌어오는 것까지 asarUnpack 범위 안에 있다', () => {
+    const source = readFileSync(SHIM, 'utf8')
+    const imports = [...source.matchAll(/from\s*["'](\.[^"']+)["']/g)].map((m) => m[1])
+
+    // 상대 import 는 전부 out/main 아래로 떨어져야 한다(그 디렉터리를 통째로 푸는 것이 전제).
+    for (const spec of imports) {
+      const target = resolve(dirname(SHIM), spec)
+      expect(existsSync(target), `${spec} → ${target}`).toBe(true)
+      expect(target.startsWith(resolve('out/main'))).toBe(true)
+    }
+
+    const pkg = JSON.parse(readFileSync('package.json', 'utf8')) as {
+      build: { asarUnpack: string[] }
+    }
+    expect(
+      pkg.build.asarUnpack.some((p) => p === 'out/main/**'),
+      'asarUnpack must unpack all of out/main — shim-only leaves its shared chunks inside the asar'
+    ).toBe(true)
   })
 })
