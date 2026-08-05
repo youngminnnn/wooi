@@ -698,22 +698,10 @@ function WorkspaceRow({
             )}
             <GitBranch size={10} className="shrink-0" />
             <span className="truncate">{workspace.branch}</span>
-            {git && git.behind > 0 && (
-              <span
-                className="text-neutral-500 shrink-0 tabular-nums"
-                title={`${git.behind} commit(s) behind ${workspace.baseBranch}`}
-              >
-                ↓{git.behind}
-              </span>
-            )}
-            {git && git.ahead > 0 && (
-              <span
-                className="text-neutral-500 shrink-0 tabular-nums"
-                title={`${git.ahead} commit(s) ahead of ${workspace.baseBranch}`}
-              >
-                ↑{git.ahead}
-              </span>
-            )}
+            {/* base 대비 ahead/behind 커밋 수(↑N ↓N)도 여기 있었지만, 변경 파일 수 배지와 같은
+                이유로 걷어냈다 — 행이 좁아 브랜치 이름을 잘라먹으면서까지 보여 줄 만큼 자주
+                행동으로 이어지지 않는다. behind 는 restack 버튼(아래)과 그 툴팁이, 정확한
+                수치는 워크스페이스 헤더가 이미 말해 준다. */}
             {git && git.conflicted && (
               <span className="text-[var(--danger-fg)] shrink-0" title="Merge conflicts">
                 ⚠
