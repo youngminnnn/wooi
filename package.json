@@ -57,7 +57,8 @@
       "out/**/*"
     ],
     "asarUnpack": [
-      "**/node_modules/node-pty/**"
+      "**/node_modules/node-pty/**",
+      "out/main/toolShim.js"
     ],
     "mac": {
       "category": "public.app-category.developer-tools",

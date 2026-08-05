@@ -264,7 +264,8 @@ export class CodexThread {
       cwd: this.config.cwd,
       model: this.config.model ?? undefined,
       sandbox: policy.sandboxMode,
-      approvalPolicy: policy.approvalPolicy
+      approvalPolicy: policy.approvalPolicy,
+      developerInstructions: wooiWorkspaceInstructions(this.workspaceId)
     }
 
     const resume = this.config.resumeThreadId
@@ -390,6 +391,24 @@ function codexEffort(effort: EffortSetting | null): string | undefined {
  * 임시 디렉터리는 OS 가 정리하므로 우리가 지우지 않는다 — 턴이 끝나기 전에 지우면 codex 가
  * 파일을 읽지 못한다.
  */
+/**
+ * 이 스레드가 어느 Wooi 워크스페이스인지 모델에게 알려 준다.
+ *
+ * Claude 는 세션마다 도구 서버 인스턴스를 따로 만들어 워크스페이스를 클로저로 잡지만, Codex 의
+ * MCP 서버는 모든 워크스페이스가 공유하는 프로세스 하나뿐이라 그럴 수 없다(자세한 사정은
+ * [[codex/toolShim]]). 그래서 값을 여기서 알려 주고 인자로 받는다.
+ *
+ * 이 문장이 신뢰의 근거는 아니다 — 모델이 다른 id 를 적을 수도 있으므로, 메인이 "실재하고 지금
+ * 턴이 도는 워크스페이스인가" 로 다시 좁힌다([[agent/tools/socket]]).
+ */
+function wooiWorkspaceInstructions(workspaceId: string): string {
+  return (
+    `You are running inside Wooi workspace \`${workspaceId}\`. ` +
+    'Whenever you call a `wooi` MCP tool, pass exactly that id as `workspaceId` — ' +
+    'it identifies you, and calls claiming any other workspace are rejected.'
+  )
+}
+
 function buildInput(text: string, images?: ImageAttachment[]): unknown[] {
   const input: unknown[] = []
   if (text.trim()) input.push({ type: 'text', text })

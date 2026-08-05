@@ -1,8 +1,11 @@
 import { app, BrowserWindow, session } from 'electron'
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
 import { IPC } from '@shared/types'
 import { applyDevPaths, isDevIsolated, wooiHome } from './paths'
 import { AgentOrchestrator } from './agent/orchestrator'
 import { initAgentTools } from './agent/tools'
+import { startToolSocket, stopToolSocket } from './agent/tools/socket'
 import { setCodexStatusProvider } from './auth'
 import { PaneWindows } from './paneWindows'
 import { ScriptRunner } from './scripts'
@@ -52,6 +55,27 @@ function dispatch(channel: string, payload: unknown): void {
   }
 }
 
+/**
+ * codex 가 spawn 할 Wooi 도구 shim 의 절대 경로([[codex/toolShim]]).
+ *
+ * 패키징 빌드에서는 **app.asar 밖의 경로**를 써야 한다. 이 파일을 실행하는 것은 우리가 아니라
+ * `codex app-server` 이고, 그쪽은 Electron 의 asar 지원을 받지 않는 남의 프로세스다 — asar
+ * 내부 경로를 넘기면 파일을 못 찾는다(같은 함정을 네이티브 바이너리에서 겪었다:
+ * [[claude/executable]]). electron-builder 가 asarUnpack 으로 실제 파일을 풀어 두므로 그 경로를 쓴다.
+ * dev·소스 실행에서는 asar 자체가 없어 out/main 옆의 파일이 그대로 맞다.
+ */
+function resolveToolShim(): string {
+  const unpacked = join(
+    process.resourcesPath ?? '',
+    'app.asar.unpacked',
+    'out',
+    'main',
+    'toolShim.js'
+  )
+  if (process.resourcesPath && existsSync(unpacked)) return unpacked
+  return join(import.meta.dirname, 'toolShim.js')
+}
+
 const sessions = new AgentOrchestrator(dispatch, () => mainWindow)
 // Codex 의 로그인 상태는 app-server 만 정확히 안다(자격증명이 OS 키체인에 있을 수 있다).
 // auth 계층이 에이전트 구현에 의존하지 않도록, 조회 함수만 주입해 준다.
@@ -71,6 +95,16 @@ const scripts = new ScriptRunner(dispatch, (workspaceId, kind, code) => {
   })
   dispatch(IPC.evtState, store.getState())
 })
+// Codex 는 인프로세스로 붙을 수 없어 도구 호출이 로컬 소켓으로 들어온다([[agent/tools/socket]]).
+// 소켓과 shim 경로를 **여기서** 정해 env 에 박는다 — codex-host(그리고 그가 띄우는 app-server)가
+// 그대로 물려받으므로, 어떤 호스트 프로세스를 fork 하기보다 먼저 와야 한다.
+//
+// 하위 프로세스가 자기 위치로 shim 을 추측하게 두지 않는 이유: import.meta.dirname 이 실행
+// 맥락마다 달라(번들 out/main, 소스 src/main/codex) 조용히 등록이 빠질 수 있다. 경로를 아는 건
+// 자기 옆에 산출물이 놓이는 메인뿐이다.
+process.env.WOOI_TOOL_SOCKET = startToolSocket(app.getPath('userData'))
+process.env.WOOI_TOOL_SHIM = resolveToolShim()
+
 // 에이전트가 Wooi 자체를 조작하는 도구들의 실행부에 필요한 것을 넘긴다([[agent/tools]]).
 // scripts 가 만들어진 뒤여야 한다 — 워크스페이스를 만드는 도구가 셋업 스크립트를 돌린다.
 initAgentTools({
@@ -197,6 +231,9 @@ app.on('before-quit', () => {
   sessions.disposeAll()
   scripts.disposeAll()
   terminals.disposeAll()
+  // 소켓 파일을 남기면 다음 실행의 bind 가 EADDRINUSE 로 실패한다(그쪽에서도 지우지만, 살아
+  // 있는 앱이 쓰던 소켓을 지우는 일이 없도록 정상 종료 경로에서 먼저 치운다).
+  stopToolSocket(app.getPath('userData'))
   // 상태 쓰기와 트랜스크립트 fsync 는 성능을 위해 모아서 처리된다 — 프로세스가 사라지기 전에
   // 밀린 것을 마저 내려야 마지막 변경이 유실되지 않는다.
   flushStore()

@@ -1,4 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import { existsSync } from 'node:fs'
+import { WOOI_MCP_SERVER_NAME } from '../agent/tools/catalog'
 import { log } from '../logger'
 import { RpcClient, type ServerRequestHandler } from './jsonrpc'
 import { RPC, type InitializeResult } from './wire'
@@ -21,6 +23,46 @@ const CLIENT_INFO = {
 
 /** 종료 요청 후 이 시간까지 안 죽으면 SIGKILL 한다(고아 프로세스 방지). */
 const KILL_GRACE_MS = 2_000
+
+/**
+ * Wooi 도구를 이 app-server 연결에만 등록하는 설정 오버라이드.
+ *
+ * `-c` 는 **프로세스 인자**라 사용자의 `~/.codex/config.toml` 을 건드리지 않는다. 같은 목적으로
+ * `config/value/write` 를 쓰면 그 파일에 영구히 기록되고(그게 Wooi 의 MCP 토글 경로다),
+ * `thread/start` 의 config 오버레이로는 서버가 등록되지 않는다 — 둘 다 실측으로 확인했다.
+ * 사용자가 터미널에서 직접 쓰는 codex 에는 영향이 없다.
+ *
+ * 셸을 거치지 않고 spawn 인자로 그대로 넘어가므로 값에 따옴표만 맞추면 된다(TOML 로 파싱된다).
+ */
+function wooiToolArgs(): string[] {
+  // 경로는 둘 다 메인이 정해 env 로 내려 준다([[index]]). 여기서 import.meta.dirname 으로
+  // 추측하지 않는 이유는 그 값이 실행 맥락마다 다르기 때문이다 — 번들에서는 out/main 이지만
+  // 소스로 직접 도는 테스트에서는 src/main/codex 라, 조용히 등록이 빠진 채 통과한다.
+  const socket = process.env.WOOI_TOOL_SOCKET
+  const shim = process.env.WOOI_TOOL_SHIM
+  // 붙을 곳 없는 서버를 띄우면 codex 가 매 기동마다 실패한 MCP 서버를 하나 안고 간다.
+  if (!socket || !shim) return []
+  if (!existsSync(shim)) {
+    log.warn(`codex: Wooi tools not registered — shim missing at ${shim}`)
+    return []
+  }
+  return [
+    '-c',
+    `mcp_servers.${WOOI_MCP_SERVER_NAME}.command=${toml(process.execPath)}`,
+    '-c',
+    `mcp_servers.${WOOI_MCP_SERVER_NAME}.args=[${toml(shim)}]`,
+    // Electron 바이너리를 순수 Node 로 쓰기 위한 스위치. 없으면 앱이 통째로 한 번 더 뜬다.
+    '-c',
+    `mcp_servers.${WOOI_MCP_SERVER_NAME}.env.ELECTRON_RUN_AS_NODE=${toml('1')}`,
+    '-c',
+    `mcp_servers.${WOOI_MCP_SERVER_NAME}.env.WOOI_TOOL_SOCKET=${toml(socket)}`
+  ]
+}
+
+/** TOML 문자열 리터럴로 감싼다(경로에 공백·따옴표가 있어도 안전하게). */
+function toml(value: string): string {
+  return JSON.stringify(value)
+}
 
 export interface AppServerOptions {
   /** codex 실행 파일 절대 경로. */
@@ -51,7 +93,7 @@ export class AppServer {
   }
 
   private async start(): Promise<void> {
-    const child = spawn(this.opts.executable, ['app-server'], {
+    const child = spawn(this.opts.executable, ['app-server', ...wooiToolArgs()], {
       stdio: ['pipe', 'pipe', 'pipe'],
       // 사용자 셸에서 하이드레이트된 PATH·자격증명 환경을 그대로 물려준다.
       env: process.env

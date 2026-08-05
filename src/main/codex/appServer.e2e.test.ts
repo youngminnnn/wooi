@@ -1,5 +1,9 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import { execFileSync } from 'node:child_process'
+import { existsSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
+import { WOOI_MCP_SERVER_NAME } from '../agent/tools/catalog'
 import { AppServer } from './appServer'
 import { RPC } from './wire'
 import { turnPolicyFor } from './modes'
@@ -24,6 +28,8 @@ function codexPath(): string | null {
 }
 
 const CODEX = codexPath()
+/** 빌드 산출물. 없으면(빌드 전) 등록 자체가 생략되므로 함께 건너뛴다. */
+const SHIM = resolve('out/main/toolShim.js')
 
 let server: AppServer | null = null
 afterEach(() => {
@@ -100,6 +106,40 @@ describe.skipIf(!CODEX)('codex app-server (실물)', () => {
       })
       // 파라미터가 거부되면 여기서 RpcError 로 터진다. 턴 자체의 성패는 보지 않는다.
       expect(turn?.turn?.id).toBeTruthy()
+    }, 60_000)
+  })
+
+  /**
+   * Wooi 도구가 실제로 이 연결에 등록되는지 본다.
+   *
+   * `-c` 오버라이드는 codex 의 CLI 표면이라 우리가 통제할 수 없다 — 형식이 바뀌거나 무시되기
+   * 시작하면 도구가 조용히 사라지고, 모델은 워크스페이스를 만들라는 지시를 받고도 맨손 git 으로
+   * 흉내 낸 뒤 성공했다고 보고한다(실제로 겪은 실패 모양이다). 그래서 여기서 못 박는다.
+   *
+   * 산출물이 없으면(빌드 전) 등록 자체를 생략하므로 함께 건너뛴다.
+   */
+  describe.skipIf(!existsSync(SHIM))('Wooi 도구 등록', () => {
+    it('mcp_servers.wooi 가 붙고 카탈로그가 그대로 발견된다', async () => {
+      // 등록만 확인한다 — 도구를 실제로 부르지는 않으므로 소켓은 안 열려 있어도 된다.
+      process.env.WOOI_TOOL_SOCKET = join(tmpdir(), 'wooi-e2e-unused.sock')
+      process.env.WOOI_TOOL_SHIM = SHIM
+      try {
+        const rpc = await start().rpc()
+        const list = await rpc.request<{
+          data?: Array<{ name: string; tools?: Record<string, unknown> }>
+        }>(RPC.mcpStatusList, { limit: 100 })
+
+        const wooi = list?.data?.find((s) => s.name === WOOI_MCP_SERVER_NAME)
+        expect(wooi, 'wooi server not registered').toBeDefined()
+        expect(Object.keys(wooi?.tools ?? {}).sort()).toEqual([
+          'check_stacked_work',
+          'create_stacked_workspace',
+          'report_to_parent'
+        ])
+      } finally {
+        delete process.env.WOOI_TOOL_SOCKET
+        delete process.env.WOOI_TOOL_SHIM
+      }
     }, 60_000)
   })
 })
