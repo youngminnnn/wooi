@@ -2,7 +2,7 @@ import { connect, type Socket } from 'node:net'
 import { randomUUID } from 'node:crypto'
 import type { AgentBackendId } from '@shared/types'
 import { BRIDGE_ENV, type BridgeRequest, type BridgeResponse } from './protocol'
-import { DELEGATE_ARG_TEXT, delegateToolDescription } from './toolText'
+import { DELEGATE_ARG_TEXT, delegateServerInstructions, delegateTools } from './catalog'
 
 /**
  * 번들된 stdio MCP 서버 — Codex 워크스페이스에 위임 도구를 붙이는 유일한 경로.
@@ -99,30 +99,26 @@ function send(message: Record<string, unknown>): void {
   process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', ...message })}\n`)
 }
 
-const TOOL = {
-  name: 'delegate',
-  description: delegateToolDescription(BACKENDS),
+/**
+ * 백엔드마다 도구 하나. 이름(`claude_subagent`)이 곧 어느 제품인지를 말하므로 `backend` 인자가
+ * 없다 — 왜 이 모양인지는 catalog.ts 에 적혀 있다.
+ */
+const TOOLS = delegateTools(BACKENDS).map((spec) => ({
+  name: spec.name,
+  description: spec.description,
   inputSchema: {
     type: 'object',
     properties: {
-      backend: {
-        type: 'string',
-        enum: BACKENDS,
-        description: DELEGATE_ARG_TEXT.backend
-      },
-      description: {
-        type: 'string',
-        description: DELEGATE_ARG_TEXT.description
-      },
-      prompt: {
-        type: 'string',
-        description: DELEGATE_ARG_TEXT.prompt
-      }
+      description: { type: 'string', description: DELEGATE_ARG_TEXT.description },
+      prompt: { type: 'string', description: DELEGATE_ARG_TEXT.prompt }
     },
-    required: ['backend', 'description', 'prompt'],
+    required: ['description', 'prompt'],
     additionalProperties: false
   }
-}
+}))
+
+/** 도구 이름 → 백엔드. tools/call 이 이름으로 들어오므로 여기서 되돌린다. */
+const BACKEND_BY_TOOL = new Map(delegateTools(BACKENDS).map((spec) => [spec.name, spec.backend]))
 
 async function handle(message: JsonRpcMessage): Promise<void> {
   const { id, method, params } = message
@@ -136,7 +132,10 @@ async function handle(message: JsonRpcMessage): Promise<void> {
         result: {
           protocolVersion: PROTOCOL_VERSION,
           capabilities: { tools: {} },
-          serverInfo: { name: 'wooi', version: '1.0.0' }
+          serverInfo: { name: 'wooi', version: '1.0.0' },
+          // 환경에 대한 사실은 여기 싣는다. 도구를 열어 보지 않아도 읽히는 유일한 자리이고,
+          // 실패했을 때 모델이 한 오해("Claude 선택지가 없다")가 정확히 그 종류였다.
+          instructions: delegateServerInstructions(BACKENDS)
         }
       })
     }
@@ -144,20 +143,20 @@ async function handle(message: JsonRpcMessage): Promise<void> {
   }
 
   if (method === 'tools/list') {
-    if (isRequest) send({ id, result: { tools: [TOOL] } })
+    if (isRequest) send({ id, result: { tools: TOOLS } })
     return
   }
 
   if (method === 'tools/call') {
     if (!isRequest) return
     const args = (params?.arguments ?? {}) as Record<string, unknown>
-    const name = params?.name
-    if (name !== TOOL.name) {
-      send({ id, error: { code: -32602, message: `Unknown tool: ${String(name)}` } })
+    const backend = BACKEND_BY_TOOL.get(String(params?.name))
+    if (!backend) {
+      send({ id, error: { code: -32602, message: `Unknown tool: ${String(params?.name)}` } })
       return
     }
     const response = await delegate(
-      String(args.backend ?? ''),
+      backend,
       String(args.description ?? 'Delegated task'),
       String(args.prompt ?? '')
     )

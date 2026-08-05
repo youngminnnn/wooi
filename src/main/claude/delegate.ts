@@ -10,12 +10,17 @@ import {
   type RunningAgent
 } from '@shared/types'
 import { runSubAgent, type SubAgentPermission } from '../subagent/run'
-import { DELEGATE_ARG_TEXT, delegateToolDescription } from '../subagent/toolText'
+import {
+  DELEGATE_ARG_TEXT,
+  DELEGATE_MCP_SERVER_NAME,
+  delegateServerInstructions,
+  delegateTools
+} from '../subagent/catalog'
 import { log } from '../logger'
 
 /**
- * 위임 도구(`mcp__wooi_agents__delegate`) — 메인 에이전트가 **다른 종류의** 에이전트에게 작업 하나를
- * 넘길 수 있게 하는 in-process MCP 서버.
+ * 위임 서브에이전트 도구(`mcp__wooi_agents__<backend>_subagent`)를 세션에 붙이는 in-process
+ * MCP 서버 — 메인 에이전트가 **다른 종류의** 에이전트를 서브에이전트로 띄울 수 있게 한다.
  *
  * ## 왜 MCP 인가
  *
@@ -28,7 +33,7 @@ import { log } from '../logger'
  *
  * 사용자가 제품을 지목하지 않은 작업에는 네이티브 서브에이전트가 여전히 더 낫다(맥락 공유·비용).
  * 이 도구는 그것과 경쟁하는 것이 아니라 **제품을 지목했을 때** 쓰는 보완재다. 그 경계를 어떻게
- * 문구로 그었는지, 그리고 첫 판에서 왜 졌는지는 subagent/toolText.ts 에 적혀 있다.
+ * 문구로 그었는지, 그리고 첫 판에서 왜 졌는지는 subagent/catalog.ts 에 적혀 있다.
  */
 
 /** 위임 도구가 부모 세션에서 받아야 하는 것들. */
@@ -37,8 +42,8 @@ export interface DelegateDeps {
   cwd: string
   repoPath: string | null
   /**
-   * 띄울 수 있는 에이전트 종류. 도구 스키마의 enum 이 되므로, 여기 없는 값은 모델이 아예 고를 수
-   * 없다. 비어 있으면 서버를 만들지 않는다(호출부가 판단).
+   * 띄울 수 있는 에이전트 종류. **종류마다 도구가 하나씩** 생기므로, 여기 없는 백엔드는 이름
+   * 자체가 존재하지 않는다. 비어 있으면 서버를 만들지 않는다(호출부가 판단).
    */
   backends: AgentBackendId[]
   /**
@@ -69,97 +74,91 @@ export interface DelegateServer {
   abortAll: () => void
 }
 
-/**
- * 위임 도구의 MCP 서버 이름. 도구는 모델에게 `mcp__wooi_agents__delegate` 로 보인다.
- *
- * Wooi 도구 서버(`wooi`)와 **따로** 두는 이유는 실행 위치와 수명이 다르기 때문이다: 그쪽 도구는
- * 메인으로 올려 "즉시 반환" 하는 규약이지만(claude/host.ts callMain), 위임은 agent-host 안에서
- * 부모 세션의 canUseTool 을 직접 쓰며 분 단위로 블로킹한다. 정의를 합치는 것과 실행을 합치는
- * 것은 다른 문제이고, 여기서는 아직 둘 다 하지 않았다.
- */
-export const DELEGATE_MCP_SERVER_NAME = 'wooi_agents'
-
 export function createDelegateServer(deps: DelegateDeps): DelegateServer {
   /** 진행 중인 위임 실행. 부모 턴이 끊길 때 함께 끊기 위해 들고 있는다. */
   const running = new Map<string, AbortController>()
 
   const backends = deps.backends
-  // z.enum 은 비지 않은 튜플을 요구한다. 호출부가 빈 목록이면 서버를 만들지 않지만,
-  // 타입 수준에서도 못 박아 두는 편이 안전하다.
-  const backendEnum = z.enum(backends as [AgentBackendId, ...AgentBackendId[]])
 
-  const delegateTool = tool(
-    'delegate',
-    delegateToolDescription(backends),
-    {
-      backend: backendEnum.describe(DELEGATE_ARG_TEXT.backend),
-      description: z.string().describe(DELEGATE_ARG_TEXT.description),
-      prompt: z.string().describe(DELEGATE_ARG_TEXT.prompt)
-    },
-    async (args) => {
-      const backend = args.backend as AgentBackendId
-      if (!backends.includes(backend)) {
-        return errorResult(`${AGENT_BACKEND_LABELS[backend]} is not available in this workspace.`)
-      }
+  /**
+   * 도구 하나의 본체. 백엔드는 **이름에 박혀 있으므로** 인자가 아니라 클로저로 들어온다 —
+   * 모델이 고를 수 있는 값이 아니어서 잘못된 백엔드가 올 수 없다.
+   */
+  const run = async (
+    backend: AgentBackendId,
+    description: string,
+    prompt: string
+  ): Promise<ReturnType<typeof textResult> | ReturnType<typeof errorResult>> => {
+    const taskId = randomUUID()
+    const abort = new AbortController()
+    running.set(taskId, abort)
 
-      const taskId = randomUUID()
-      const abort = new AbortController()
-      running.set(taskId, abort)
-
-      const agent: RunningAgent = {
-        taskId,
-        backend,
-        agentType: AGENT_BACKEND_LABELS[backend],
-        description: args.description,
-        startedAt: Date.now(),
-        toolUses: 0
-      }
-      deps.upsertAgent(agent)
-
-      const { model, effort } = deps.defaults(backend)
-      try {
-        const result = await runSubAgent({
-          backend,
-          cwd: deps.cwd,
-          repoPath: deps.repoPath,
-          model,
-          effort,
-          permissionMode: deps.permissionMode(),
-          prompt: args.prompt,
-          abort,
-          onActivity: (activity) => {
-            if (activity.kind === 'tool') {
-              agent.toolUses = (agent.toolUses ?? 0) + 1
-              agent.lastToolName = activity.toolName ?? activity.text
-            }
-            deps.upsertAgent(agent)
-          },
-          // Codex 경로는 이 콜백을 무시한다(`codex exec` 가 비대화형이라 승인 채널이 없다).
-          canUseTool: deps.canUseTool
-        })
-
-        if (result.error && !result.text) return errorResult(result.error)
-        // 아무 말도 없이 끝나는 경우가 있다(중단되었거나 도구만 돌리고 끝난 실행). 빈 문자열을
-        // 그대로 돌려주면 모델이 성공으로 오해하므로 사실대로 적는다.
-        return textResult(
-          result.text || `${AGENT_BACKEND_LABELS[backend]} finished without returning any text.`
-        )
-      } catch (err) {
-        log.error('delegate: sub-agent run threw', err)
-        return errorResult(err instanceof Error ? err.message : String(err))
-      } finally {
-        running.delete(taskId)
-        deps.removeAgent(taskId)
-      }
+    const agent: RunningAgent = {
+      taskId,
+      backend,
+      agentType: AGENT_BACKEND_LABELS[backend],
+      description,
+      startedAt: Date.now(),
+      toolUses: 0
     }
+    deps.upsertAgent(agent)
+
+    const { model, effort } = deps.defaults(backend)
+    try {
+      const result = await runSubAgent({
+        backend,
+        cwd: deps.cwd,
+        repoPath: deps.repoPath,
+        model,
+        effort,
+        permissionMode: deps.permissionMode(),
+        prompt,
+        abort,
+        onActivity: (activity) => {
+          if (activity.kind === 'tool') {
+            agent.toolUses = (agent.toolUses ?? 0) + 1
+            agent.lastToolName = activity.toolName ?? activity.text
+          }
+          deps.upsertAgent(agent)
+        },
+        // Codex 서브런은 이 콜백을 무시한다(`codex exec` 가 비대화형이라 승인 채널이 없다).
+        canUseTool: deps.canUseTool
+      })
+
+      if (result.error && !result.text) return errorResult(result.error)
+      // 아무 말도 없이 끝나는 경우가 있다(중단되었거나 도구만 돌리고 끝난 실행). 빈 문자열을
+      // 그대로 돌려주면 모델이 성공으로 오해하므로 사실대로 적는다.
+      return textResult(
+        result.text || `${AGENT_BACKEND_LABELS[backend]} finished without returning any text.`
+      )
+    } catch (err) {
+      log.error('delegate: sub-agent run threw', err)
+      return errorResult(err instanceof Error ? err.message : String(err))
+    } finally {
+      running.delete(taskId)
+      deps.removeAgent(taskId)
+    }
+  }
+
+  const tools = delegateTools(backends).map((spec) =>
+    tool(
+      spec.name,
+      spec.description,
+      {
+        description: z.string().describe(DELEGATE_ARG_TEXT.description),
+        prompt: z.string().describe(DELEGATE_ARG_TEXT.prompt)
+      },
+      (args) => run(spec.backend, args.description, args.prompt)
+    )
   )
 
   return {
     config: createSdkMcpServer({
       name: DELEGATE_MCP_SERVER_NAME,
       version: '1.0.0',
-      tools: [delegateTool],
-      // 도구가 하나뿐이고 이 워크스페이스의 존재 이유이므로, 도구 검색 뒤로 미루지 않는다.
+      instructions: delegateServerInstructions(backends),
+      tools,
+      // 이 워크스페이스의 존재 이유인 도구들이므로 도구 검색 뒤로 미루지 않는다.
       alwaysLoad: true
     }),
     abortAll: () => {

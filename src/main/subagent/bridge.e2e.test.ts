@@ -114,8 +114,13 @@ describe.skipIf(!existsSync(SERVER))('위임 MCP 서버 ↔ 브리지', () => {
       }
 
       send({ id: 1, method: 'initialize', params: { protocolVersion: '2024-11-05' } })
-      const init = (await await_(1)) as { result?: { serverInfo?: { name?: string } } }
+      const init = (await await_(1)) as {
+        result?: { serverInfo?: { name?: string }; instructions?: string }
+      }
       expect(init.result?.serverInfo?.name).toBe('wooi')
+      // 환경 안내가 실려야 한다 — 한동안 이 필드가 빠져 있어서 Codex 는 "이 워크스페이스가
+      // 멀티 에이전트다" 라는 사실을 아예 못 받고 있었다.
+      expect(init.result?.instructions).toContain('multi-agent')
 
       send({ id: 2, method: 'tools/list' })
       const list = (await await_(2)) as {
@@ -123,26 +128,24 @@ describe.skipIf(!existsSync(SERVER))('위임 MCP 서버 ↔ 브리지', () => {
           tools?: { name: string; inputSchema?: { properties?: Record<string, unknown> } }[]
         }
       }
-      const tool = list.result?.tools?.[0]
-      expect(tool?.name).toBe('delegate')
-      // enum 이 환경변수에서 왔는지 — 여기가 비면 모델이 백엔드를 고를 수 없다.
-      expect((tool?.inputSchema?.properties?.backend as { enum?: string[] })?.enum).toEqual([
-        'claude',
-        'codex'
+      // 백엔드마다 도구 하나. 이름이 곧 어느 제품인지를 말하므로 `backend` 인자는 없다 —
+      // 모델이 설명을 읽고 해석하는 단계를 없애는 것이 이 구조의 요점이다(catalog.ts).
+      expect(list.result?.tools?.map((t) => t.name)).toEqual(['claude_subagent', 'codex_subagent'])
+      expect(Object.keys(list.result?.tools?.[0]?.inputSchema?.properties ?? {})).toEqual([
+        'description',
+        'prompt'
       ])
 
       send({
         id: 3,
         method: 'tools/call',
-        params: {
-          name: 'delegate',
-          arguments: { backend: 'claude', description: 'probe', prompt: 'hello' }
-        }
+        params: { name: 'claude_subagent', arguments: { description: 'probe', prompt: 'hello' } }
       })
       const call = (await await_(3)) as {
         result?: { isError?: boolean; content?: { text?: string }[] }
       }
-      // resolve 가 null 을 돌려주므로 거절이 정상이다 — 요청이 **소켓을 건너갔다**는 것이 요점이다.
+      // resolve 가 null 을 돌려주므로 거절이 정상이다 — 요청이 **소켓을 건너갔고** 도구 이름이
+      // 백엔드로 되돌려졌다는 것이 요점이다.
       expect(asked).toEqual([{ workspaceId: 'ws-test', backend: 'claude', prompt: '' }])
       expect(call.result?.isError).toBe(true)
       expect(call.result?.content?.[0]?.text).toContain('no longer delegate')
