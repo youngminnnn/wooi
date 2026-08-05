@@ -93,6 +93,41 @@ export function delegateServerInstructions(backends: AgentBackendId[]): string {
   )
 }
 
+/**
+ * Codex 스레드의 `developerInstructions` 에 실을 문장.
+ *
+ * ## 왜 이게 따로 필요한가 — 측정으로 밝혀진 것
+ *
+ * Codex 는 MCP 도구를 모델의 도구 목록에 **눈에 띄게 올려 주지 않는다**. 실측:
+ *
+ *  - 서버는 `status: "ready"` 까지 정상 로드된다.
+ *  - 모델에게 "쓸 수 있는 도구를 전부 나열하라" 고 하면 `claude_subagent` 가 **안 나온다**
+ *    (사용자가 등록해 둔 다른 MCP 서버의 도구도 마찬가지로 안 나온다 — 우리만의 문제가 아니다).
+ *  - 그런데 **이름을 대고 부르라고 하면 정확히 부른다**. 즉 없는 게 아니라 안 보이는 것이다.
+ *
+ * 그래서 "claude 서브에이전트 만들어줘" 같은 자연스러운 요청에서 0/5 였다. 도구 이름을 백엔드별로
+ * 바꾸고 서버 instructions 를 채워도 숫자가 움직이지 않았다 — 모델이 **존재를 모르는데** 이름이
+ * 좋은 것은 소용이 없다. 여기에 도구 이름을 적어 주자 같은 문장이 바로 걸렸다.
+ *
+ * Claude 쪽은 SDK 가 도구 정의를 프롬프트에 직접 싣기 때문에(alwaysLoad) 이 문제가 없다.
+ */
+export function delegateThreadInstructions(backends: AgentBackendId[]): string {
+  const tools = delegateTools(backends)
+  const lines = tools.map(
+    (spec) =>
+      `- \`${spec.name}\` — starts a subagent running on ${AGENT_BACKEND_LABELS[spec.backend] ?? spec.backend}.`
+  )
+  return [
+    'This is a multi-agent Wooi workspace. Besides your own built-in subagents, the MCP server',
+    `\`${DELEGATE_MCP_SERVER_NAME}\` gives you one subagent tool per coding agent product:`,
+    ...lines,
+    'These really run that product, not your own model. When the user asks for a subagent of a',
+    'named product — or asks that product to do something — call its tool; your built-in subagent',
+    'mechanism cannot satisfy that request. When no product is named, prefer your built-in',
+    'subagents: they share your context and cost less.'
+  ].join('\n')
+}
+
 /** 인자 설명. 스키마 표현(zod / JSON Schema)만 다르고 문구는 두 전송 계층이 공유한다. */
 export const DELEGATE_ARG_TEXT = {
   description: 'A 3-6 word label for this task, shown while it runs (e.g. "Audit auth flow").',

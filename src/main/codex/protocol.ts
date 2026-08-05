@@ -41,6 +41,12 @@ export interface CodexConfig {
    * 의 `config` 는 그 스레드에만 적용된다(codex/probe.e2e.test.ts 로 실측 확인).
    */
   delegateServer: CodexMcpServer | null
+  /**
+   * 멀티 에이전트일 때 스레드에 실을 개발자 지침. 위임 도구가 **존재한다는 사실**을 여기서
+   * 알린다 — codex 는 MCP 도구를 모델의 도구 목록에 눈에 띄게 올려 주지 않아서, 서버만 붙여
+   * 두면 모델이 그 도구를 아예 고려하지 않는다(subagent/catalog.ts 에 측정 결과가 있다).
+   */
+  delegateInstructions: string | null
 }
 
 /** codex 의 `mcp_servers.<name>` 설정 한 항목. 우리가 넣는 값만 추린 모양이다. */

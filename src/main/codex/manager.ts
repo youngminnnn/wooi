@@ -20,6 +20,7 @@ import {
 import { CODEX_META, type AgentBackend } from '../agent/backend'
 import { agentDefaultsFor, delegateBackendsFor } from '../agent/multiAgent'
 import { DelegateBridge } from '../subagent/bridge'
+import { delegateThreadInstructions } from '../subagent/catalog'
 import { delegateServerConfig } from '../subagent/mcpConfig'
 import { durationLabel } from './rateLimits'
 import type { CodexCommand, CodexConfig, CodexEvent } from './protocol'
@@ -261,7 +262,8 @@ export class CodexSessionManager implements AgentBackend {
             workspaceId: ws.id,
             backends
           })
-        : null
+        : null,
+      delegateInstructions: backends.length ? delegateThreadInstructions(backends) : null
     }
   }
 

@@ -13,6 +13,7 @@ import type {
 import type { RpcClient } from './jsonrpc'
 import { NOTIFY, RPC, type FileUpdateChange, type ThreadResult } from './wire'
 import { turnPolicyFor } from './modes'
+import { DELEGATE_MCP_SERVER_NAME } from '../subagent/catalog'
 import {
   createMapperState,
   mapNotification,
