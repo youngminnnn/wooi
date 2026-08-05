@@ -583,22 +583,7 @@ const ROWS = [
     shifts: [],
     keys: [['⌘1', null, null]],
     name: 'Extract auth service',
-    meta: [
-      { t: 'wooi/auth-service', w: 94.02, fill: C.n500 },
-      { t: ' ', w: 4 },
-      { t: '·12', w: 15.2, fill: '#fe9a00cc' },
-      { t: ' ', w: 4 },
-      { t: '↑12', w: 20.53, fill: C.n500 }
-    ],
-    // 머지되면 ahead 가 0 이 되어 사라진다(스택 팝오버의 after 와 같은 사실).
-    metaAfter: {
-      at: T_MERGE,
-      segs: [
-        { t: 'wooi/auth-service', w: 94.02, fill: C.n500 },
-        { t: ' ', w: 4 },
-        { t: '·12', w: 15.2, fill: '#fe9a00cc' }
-      ]
-    },
+    meta: [{ t: 'wooi/auth-service', w: 94.02, fill: C.n500 }],
     time: { t: '· 2m 04s', w: 45.95, fill: '#51a2ffcc' },
     timeUntil: T_STACK,
     appear: 0.35,
@@ -611,11 +596,7 @@ const ROWS = [
     shifts: [],
     keys: [['⌘2', null, null]],
     name: 'JWT rotation',
-    meta: [
-      { t: 'wooi/jwt-rotation', w: 88.91, fill: C.n500 },
-      { t: ' ', w: 4 },
-      { t: '↑7', w: 15, fill: C.n500 }
-    ],
+    meta: [{ t: 'wooi/jwt-rotation', w: 88.91, fill: C.n500 }],
     time: { t: '· 0m 21s', w: 45.95, fill: '#51a2ffcc' },
     timeFrom: T_STACK,
     timeUntil: T_RUN_END,
@@ -629,11 +610,7 @@ const ROWS = [
     shifts: [],
     keys: [['⌘3', null, null]],
     name: 'Revoke endpoint',
-    meta: [
-      { t: 'wooi/jwt-revoke', w: 82.98, fill: C.n500 },
-      { t: ' ', w: 4 },
-      { t: '↑3', w: 15.63, fill: C.n500 }
-    ],
+    meta: [{ t: 'wooi/jwt-revoke', w: 82.98, fill: C.n500 }],
     // 아직 도는 중이라 경과 시간이 계속 붙어 있다(PR 은 draft).
     time: { t: '· 0m 08s', w: 45.95, fill: '#51a2ffcc' },
     timeFrom: T_STACK3,
@@ -653,11 +630,7 @@ const ROWS = [
       ['⌘4', T_STACK3, null]
     ],
     name: 'Dark mode toggle',
-    meta: [
-      { t: 'wooi/dark-mode', w: 85.08, fill: C.n500 },
-      { t: ' ', w: 4 },
-      { t: '·4', w: 10.48, fill: '#fe9a00cc' }
-    ],
+    meta: [{ t: 'wooi/dark-mode', w: 85.08, fill: C.n500 }],
     time: { t: '· 1m 12s', w: 42.16, fill: '#51a2ffcc' },
     timeUntil: 1.9,
     appear: 0.6
@@ -676,13 +649,7 @@ const ROWS = [
       ['⌘5', T_STACK3, null]
     ],
     name: 'Fix flaky signup test',
-    meta: [
-      { t: 'wooi/flaky-signup', w: 93.06, fill: C.n500 },
-      { t: ' ', w: 4 },
-      { t: '·3', w: 10.3, fill: '#fe9a00cc' },
-      { t: ' ', w: 4 },
-      { t: '↑2', w: 15.38, fill: C.n500 }
-    ],
+    meta: [{ t: 'wooi/flaky-signup', w: 93.06, fill: C.n500 }],
     time: { t: '· 0m 52s', w: 45.95, fill: '#51a2ffcc' },
     timeUntil: 2.3,
     appear: 0.85
@@ -756,23 +723,15 @@ for (const r of ROWS) {
       px: 11,
       fill: C.n500
     })
-  // 경과 시간(도는 동안) → 정지 → (있으면) 머지 뒤 메타로 이어진다.
-  const stillEnd = r.metaAfter ? r.metaAfter.at : null
+  // 경과 시간(도는 동안) → 정지. 메타는 브랜치 이름뿐이라 그 뒤로는 바뀌지 않는다.
   if (r.time) {
     inner.push(animated(line(r.meta, true), { opacity: only(r.timeFrom ?? 0, r.timeUntil) }))
     // 아직 도는 행은 경과 시간이 사라지지 않으므로 "시간 없는" 판을 만들지 않는다.
     if (r.timeUntil != null) {
-      inner.push(animated(line(r.meta, false), { opacity: only(r.timeUntil, stillEnd) }))
+      inner.push(animated(line(r.meta, false), { opacity: only(r.timeUntil, null) }))
     }
   } else {
-    inner.push(
-      stillEnd == null
-        ? line(r.meta, false)
-        : animated(line(r.meta, false), { opacity: only(0, stillEnd) })
-    )
-  }
-  if (r.metaAfter) {
-    inner.push(animated(line(r.metaAfter.segs, false), { opacity: only(r.metaAfter.at, null) }))
+    inner.push(line(r.meta, false))
   }
 
   // 상태 아이콘
