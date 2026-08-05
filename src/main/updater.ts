@@ -2,8 +2,9 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { app, BrowserWindow, ipcMain, Notification, powerMonitor } from 'electron'
 import electronUpdater from 'electron-updater'
-import { IPC, type UpdateStatus } from '@shared/types'
+import { IPC, RESTART_SETTLE_MS, type UpdateStatus } from '@shared/types'
 import { log } from './logger'
+import { getStore } from './store'
 
 const { autoUpdater } = electronUpdater
 
@@ -15,6 +16,8 @@ const { autoUpdater } = electronUpdater
  *   setInterval 은 맥이 잠들면 밀리므로 이벤트 트리거로 빈 구간을 메운다(최소 30분 간격 스로틀).
  * - 새 버전은 백그라운드로 자동 다운로드하고, 준비되면 renderer 로 방송(배너) + 창이 비활성이면
  *   OS 알림까지 띄운다. 재시작 시점은 사용자가 결정한다(quitAndInstall).
+ * - 지금 재시작하는 대신 **"모든 워크스페이스 작업이 끝나면" 예약**할 수도 있다(updateSetRestartWhenIdle).
+ *   예약이 걸리면 진행 중인 턴/리뷰를 폴링하다가, 전부 끝나고 잠잠해지면 스스로 재시작한다.
  * - 읽기 전용 위치(DMG/App Translocation)라 스스로 설치할 수 없을 때도 확인은 계속한다.
  *   다운로드만 끄고 "새 버전이 나왔다"는 사실은 알려, 수동 내려받기로 이어지게 한다.
  * - macOS 자동 업데이트는 서명·공증된 앱 + `latest-mac.yml`/zip 이 릴리스에 있어야 한다.
@@ -25,8 +28,20 @@ const MIN_CHECK_GAP_MS = 30 * 60 * 1000 // 30m — 이벤트 트리거 스로틀
 const RENOTIFY_MS = 24 * 60 * 60 * 1000 // 24h — 같은 릴리스 OS 알림 재알림 간격
 const FIRST_CHECK_DELAY_MS = 8_000 // 창이 뜬 뒤로 미뤄 초기 로딩과 경쟁하지 않게
 const RESUME_CHECK_DELAY_MS = 15_000 // 절전 복귀 직후엔 네트워크가 아직 안 붙어 있을 수 있다
+/** 예약 재시작이 걸려 있을 때 "작업이 남았는지" 확인하는 주기. */
+const IDLE_POLL_MS = 5_000
 
+/** 렌더러로 마지막에 방송한 상태(예약 정보까지 합친 값). */
 let lastStatus: UpdateStatus = { state: 'idle' }
+/** 예약 정보를 뺀 순수 업데이트 진행 상태 — autoUpdater 이벤트가 쓰는 쪽. */
+let baseStatus: UpdateStatus = { state: 'idle' }
+/** "작업이 끝나면 재시작" 예약 여부. 앱을 다시 띄우면 초기화된다(휘발성). */
+let restartWhenIdle = false
+/** 카운트다운 만료 시각(epoch ms). null 이면 아직 기다리는 중이거나 예약이 없다. */
+let restartAt: number | null = null
+/** 예약이 기다리는 진행 중 작업 수 — 배너 문구용. */
+let busyCount = 0
+let idleTimer: ReturnType<typeof setInterval> | null = null
 /** 마지막으로 확인을 "시작"한 시각 — 이벤트 트리거 스로틀 기준. */
 let lastCheckAt = 0
 /** 마지막으로 OS 알림을 띄운 대상(`상태:버전`)과 시각 — 같은 릴리스로 도배하지 않기 위한 기록. */
@@ -61,6 +76,22 @@ function readOnlyInstallReason(): string | null {
     return `Wooi can’t update itself because its install location is read-only (${bundle}). Move Wooi.app to your Applications folder and open it from there.`
   }
   return null
+}
+
+/**
+ * 지금 "끝나기를 기다려야 하는" 작업 수 — 예약 재시작의 발동 조건.
+ *
+ * 세는 것: 진행 중인 에이전트 턴(workspace.status === 'running')과 진행 중인 PR 리뷰.
+ * 세지 않는 것: 스크립트(dev 서버)와 터미널. 사용자가 직접 띄운 장기 실행 프로세스라
+ * 끝날 일이 없고, 이것까지 기다리면 예약이 영원히 발동하지 않는다.
+ */
+function busyWorkCount(): number {
+  const state = getStore().getState()
+  const turns = state.workspaces.filter((w) => !w.archived && w.status === 'running').length
+  const reviews = state.reviews.filter(
+    (r) => r.status === 'running' || r.status === 'preparing'
+  ).length
+  return turns + reviews
 }
 
 /** 살아 있는 메인 창(없으면 undefined). */
@@ -106,9 +137,60 @@ function notifyNewVersion(status: UpdateStatus): void {
 }
 
 export function initUpdater(dispatch: (channel: string, payload: unknown) => void): void {
+  /** 진행 상태 + 예약 정보를 합쳐 렌더러로 방송한다. */
+  const publish = (): void => {
+    lastStatus = {
+      ...baseStatus,
+      ...(restartWhenIdle ? { restartWhenIdle: true, busyCount } : {}),
+      ...(restartAt !== null ? { restartAt } : {})
+    }
+    dispatch(IPC.evtUpdate, lastStatus)
+  }
+
   const emit = (status: UpdateStatus): void => {
-    lastStatus = status
-    dispatch(IPC.evtUpdate, status)
+    baseStatus = status
+    publish()
+  }
+
+  const stopIdleWatch = (): void => {
+    if (!idleTimer) return
+    clearInterval(idleTimer)
+    idleTimer = null
+  }
+
+  /**
+   * 예약이 걸린 동안 주기적으로 도는 판정. 남은 작업이 없으면 카운트다운을 시작하고,
+   * 그 사이에 새 작업이 시작되면 카운트다운을 되돌린다(다시 잠잠해질 때까지 기다린다).
+   */
+  const evaluateIdleRestart = (): void => {
+    if (!restartWhenIdle) return
+
+    const busy = busyWorkCount()
+    // 아직 받는 중이면 기다린다 — 예약은 유지하고 ready 가 되는 순간부터 카운트다운을 잰다.
+    const blocked = baseStatus.state !== 'ready' || busy > 0
+    const changed = busy !== busyCount || (blocked && restartAt !== null)
+    busyCount = busy
+    if (blocked) {
+      restartAt = null
+      if (changed) publish()
+      return
+    }
+
+    // 곧바로 끄지 않고 유예를 둔다 — 턴과 턴 사이의 짧은 공백(에이전트가 답을 마치고 사용자가
+    // 후속을 입력하는 구간)에 앱이 사라지지 않게 하는 완충이자, 배너에서 취소할 수 있는 창이다.
+    if (restartAt === null) {
+      restartAt = Date.now() + RESTART_SETTLE_MS
+      log.info(`updater: all work finished — restarting in ${RESTART_SETTLE_MS / 1000}s`)
+      publish()
+      return
+    }
+    if (changed) publish()
+    if (Date.now() < restartAt) return
+
+    stopIdleWatch()
+    restartWhenIdle = false
+    log.info('updater: installing scheduled update now')
+    setImmediate(() => autoUpdater.quitAndInstall(false, true))
   }
 
   // 설치 위치 판정은 실행 중 바뀌지 않으므로 한 번만 계산해 둔다.
@@ -155,9 +237,32 @@ export function initUpdater(dispatch: (channel: string, payload: unknown) => voi
 
   // 다운로드 완료된 업데이트를 설치(앱 재시작).
   ipcMain.handle(IPC.updateQuitAndInstall, () => {
-    if (lastStatus.state !== 'ready') return
+    if (baseStatus.state !== 'ready') return
+    stopIdleWatch()
+    restartWhenIdle = false
     // isSilent=false(설치 마법사 표시 안 함, mac 은 무의미), forceRunAfter=true(설치 후 재실행)
     setImmediate(() => autoUpdater.quitAndInstall(false, true))
+  })
+
+  // "작업이 다 끝나면 재시작" 예약을 걸거나 해제한다. 판정은 폴링이므로 예약이 걸려 있는 동안만
+  // 타이머가 돌고, 해제하면 곧바로 멈춘다.
+  ipcMain.handle(IPC.updateSetRestartWhenIdle, (_e, armed: boolean): UpdateStatus => {
+    restartWhenIdle = !!armed && app.isPackaged
+    restartAt = null
+    busyCount = 0
+    if (!restartWhenIdle) {
+      stopIdleWatch()
+      publish()
+      return lastStatus
+    }
+    log.info('updater: restart scheduled for when all work finishes')
+    if (!idleTimer) {
+      idleTimer = setInterval(evaluateIdleRestart, IDLE_POLL_MS)
+      idleTimer.unref?.()
+    }
+    publish() // 예약이 걸렸다는 사실을 먼저 반영하고,
+    evaluateIdleRestart() // 이미 전부 잠잠하면 여기서 곧바로 카운트다운이 시작된다.
+    return lastStatus
   })
 
   if (!app.isPackaged) {
