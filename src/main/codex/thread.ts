@@ -14,6 +14,8 @@ import type { RpcClient } from './jsonrpc'
 import { NOTIFY, RPC, type FileUpdateChange, type ThreadResult } from './wire'
 import { turnPolicyFor } from './modes'
 import { DELEGATE_MCP_SERVER_NAME } from '../subagent/catalog'
+import { WOOI_MCP_SERVER_NAME } from '../agent/tools/catalog'
+import { wooiToolServer } from './appServer'
 import {
   createMapperState,
   mapNotification,
@@ -276,8 +278,18 @@ export class CodexThread {
         .join('\n\n'),
       // 위임 도구는 스레드 설정으로만 붙일 수 있다 — codex 에는 in-process MCP 서버가 없고,
       // 프로세스 인자로 넣으면 app-server 를 공유하는 다른 워크스페이스까지 오염된다.
+      // 스레드 config 는 `-c` 로 등록한 서버를 **덮으므로**(실측), 위임 서버를 실을 때 Wooi 도구
+      // 서버도 함께 다시 선언한다. 안 그러면 멀티 에이전트 워크스페이스에서만 create_stacked_workspace
+      // 같은 도구가 조용히 사라진다.
       ...(this.config.delegateServer
-        ? { config: { mcp_servers: { [DELEGATE_MCP_SERVER_NAME]: this.config.delegateServer } } }
+        ? {
+            config: {
+              mcp_servers: {
+                ...(wooiToolServer() ? { [WOOI_MCP_SERVER_NAME]: wooiToolServer()! } : {}),
+                [DELEGATE_MCP_SERVER_NAME]: this.config.delegateServer
+              }
+            }
+          }
         : {})
     }
 

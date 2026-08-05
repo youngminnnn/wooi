@@ -34,28 +34,49 @@ const KILL_GRACE_MS = 2_000
  *
  * 셸을 거치지 않고 spawn 인자로 그대로 넘어가므로 값에 따옴표만 맞추면 된다(TOML 로 파싱된다).
  */
+/**
+ * Wooi 도구 shim 의 실행 설정. `-c` 인자와 **스레드 config 양쪽이 같은 값**을 써야 한다.
+ *
+ * 스레드 config 를 쓰는 경로(멀티 에이전트 위임)가 생기면서 이게 필요해졌다 — `thread/start` 의
+ * `config.mcp_servers` 는 `-c` 로 등록한 서버를 **덮는다**(실측: 위임 서버만 ready 로 뜨고 wooi 는
+ * 목록에서 사라졌다). 그래서 스레드 config 를 싣는 쪽이 이 서버를 함께 다시 선언한다.
+ */
+export function wooiToolServer(): {
+  command: string
+  args: string[]
+  env: Record<string, string>
+} | null {
+  const socket = process.env.WOOI_TOOL_SOCKET
+  const shim = process.env.WOOI_TOOL_SHIM
+  if (!socket || !shim) return null
+  if (!existsSync(shim)) {
+    log.warn(`codex: Wooi tools not registered — shim missing at ${shim}`)
+    return null
+  }
+  return {
+    command: process.execPath,
+    args: [shim],
+    // Electron 바이너리를 순수 Node 로 쓰기 위한 스위치. 없으면 앱이 통째로 한 번 더 뜬다.
+    env: { ELECTRON_RUN_AS_NODE: '1', WOOI_TOOL_SOCKET: socket }
+  }
+}
+
 function wooiToolArgs(): string[] {
   // 경로는 둘 다 메인이 정해 env 로 내려 준다([[index]]). 여기서 import.meta.dirname 으로
   // 추측하지 않는 이유는 그 값이 실행 맥락마다 다르기 때문이다 — 번들에서는 out/main 이지만
   // 소스로 직접 도는 테스트에서는 src/main/codex 라, 조용히 등록이 빠진 채 통과한다.
-  const socket = process.env.WOOI_TOOL_SOCKET
-  const shim = process.env.WOOI_TOOL_SHIM
   // 붙을 곳 없는 서버를 띄우면 codex 가 매 기동마다 실패한 MCP 서버를 하나 안고 간다.
-  if (!socket || !shim) return []
-  if (!existsSync(shim)) {
-    log.warn(`codex: Wooi tools not registered — shim missing at ${shim}`)
-    return []
-  }
+  const server = wooiToolServer()
+  if (!server) return []
   return [
     '-c',
-    `mcp_servers.${WOOI_MCP_SERVER_NAME}.command=${toml(process.execPath)}`,
+    `mcp_servers.${WOOI_MCP_SERVER_NAME}.command=${toml(server.command)}`,
     '-c',
-    `mcp_servers.${WOOI_MCP_SERVER_NAME}.args=[${toml(shim)}]`,
-    // Electron 바이너리를 순수 Node 로 쓰기 위한 스위치. 없으면 앱이 통째로 한 번 더 뜬다.
-    '-c',
-    `mcp_servers.${WOOI_MCP_SERVER_NAME}.env.ELECTRON_RUN_AS_NODE=${toml('1')}`,
-    '-c',
-    `mcp_servers.${WOOI_MCP_SERVER_NAME}.env.WOOI_TOOL_SOCKET=${toml(socket)}`
+    `mcp_servers.${WOOI_MCP_SERVER_NAME}.args=[${toml(server.args[0])}]`,
+    ...Object.entries(server.env).flatMap(([key, value]) => [
+      '-c',
+      `mcp_servers.${WOOI_MCP_SERVER_NAME}.env.${key}=${toml(value)}`
+    ])
   ]
 }
 
