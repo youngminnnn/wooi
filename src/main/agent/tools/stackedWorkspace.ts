@@ -1,19 +1,48 @@
+import { workspaceDisplayName } from '@shared/types'
+import type { ChatItem, StackedHandoffStatus, Workspace } from '@shared/types'
 import { isWorktreeClean } from '../../git'
 import { getStore } from '../../store'
 import { createWorkspace } from '../../workspaces'
 import type { AgentToolHandler } from './registry'
 
 /**
- * 에이전트가 자기 작업 위에 stacked 워크스페이스를 직접 쌓는다.
+ * 스택 워크스페이스 사이의 작업 인계.
  *
- * 부모는 **호출한 워크스페이스 자신**이다 — 인자로 받지 않으므로 모델이 남의 스택에 끼어들 수
- * 없고, 그게 정확히 스택의 의미이기도 하다("지금 이 작업 위에 다음을 쌓는다").
+ * 두 방향이 비대칭인 것이 핵심이다. 부모 → 자식은 **깨운다**(빈 워크스페이스에 최초 작업을
+ * 넘기는 것이고, 사용자가 그 도구 호출을 방금 승인했다). 자식 → 부모는 **기록만 한다** —
+ * 부모는 사람과 대화 중일 수 있고, 승인하지 않은 턴 비용을 자식이 일으켜서는 안 된다.
+ * 부모는 check_stacked_work 로 직접 읽는다.
  */
-export const createStackedWorkspace: AgentToolHandler = async (deps, workspaceId, args) => {
+
+function workspaceOf(workspaceId: string): Workspace {
   const ws = getStore()
     .getState()
     .workspaces.find((w) => w.id === workspaceId)
   if (!ws) throw new Error('This workspace no longer exists.')
+  return ws
+}
+
+/**
+ * 자식에게 넘기는 최초 메시지.
+ *
+ * 보고하라는 지시를 부모 모델의 문장에 맡기지 않고 여기서 붙인다 — 부모가 빠뜨리면 자식은
+ * 보고할 줄 모르고, 그 순간 인계 고리가 조용히 끊긴다. 규약은 앱이 보장해야 한다.
+ */
+function handoffMessage(task: string, parent: Workspace): string {
+  return [
+    task,
+    '',
+    '---',
+    `This workspace was created by Wooi as a stacked branch on top of \`${parent.branch}\`, ` +
+      'so its pull request will target that branch rather than the default one.',
+    'When you finish this task — or if you get stuck and need a decision — call ' +
+      '`mcp__wooi__report_to_parent` with a summary. That is the only way the parent workspace ' +
+      'finds out; nothing crosses between workspaces on its own.'
+  ].join('\n')
+}
+
+export const createStackedWorkspace: AgentToolHandler = async (deps, workspaceId, args) => {
+  const ws = workspaceOf(workspaceId)
   if (ws.archived) throw new Error('This workspace is archived — you cannot stack on top of it.')
 
   // 새 브랜치는 부모의 **커밋된 tip** 에서 갈라진다. 미커밋 변경을 들고 쌓으면 그 변경이 새
@@ -33,15 +62,94 @@ export const createStackedWorkspace: AgentToolHandler = async (deps, workspaceId
     ...(name ? { name } : {})
   })
   if (result.error) throw new Error(result.error)
+  const childId = result.workspaceId
+  if (!childId) throw new Error('The workspace was created but Wooi lost track of it.')
+
+  // 작업을 넘기면 자식은 **즉시 돌기 시작한다**. 사용자는 방금 이 도구 호출을 승인하면서
+  // 그 작업 문장까지 카드에서 봤으므로, 여기서 다시 묻지 않는다.
+  const task = typeof args.task === 'string' ? args.task.trim() : ''
+  if (task) deps.sendMessage(childId, handoffMessage(task, ws))
 
   // 전달 실패는 생성을 막지 않지만 조용히 넘기면 안 된다 — 새 워크스페이스의 에이전트가
   // 프로젝트 지침(CLAUDE.local.md 등)을 못 읽은 채 다르게 동작한다.
   const carryFailures = (result.carryFailures ?? []).map((f) => `${f.path}: ${f.reason}`)
 
   return {
-    workspaceId: result.workspaceId,
+    workspaceId: childId,
     branch: result.branch,
     baseBranch: ws.branch,
+    started: !!task,
+    ...(task
+      ? {}
+      : { note: 'No task was handed over, so this workspace is idle until someone prompts it.' }),
     ...(carryFailures.length ? { carryFailures } : {})
+  }
+}
+
+export const reportToParent: AgentToolHandler = async (deps, workspaceId, args) => {
+  const ws = workspaceOf(workspaceId)
+  const parentId = ws.parentWorkspaceId
+  if (!parentId) {
+    throw new Error(
+      'This workspace is not stacked on another one, so there is no parent to report to.'
+    )
+  }
+  const parent = getStore()
+    .getState()
+    .workspaces.find((w) => w.id === parentId)
+  if (!parent) throw new Error('The parent workspace no longer exists.')
+
+  const summary = typeof args.summary === 'string' ? args.summary.trim() : ''
+  if (!summary) throw new Error('The summary is empty — say what you did or what you are stuck on.')
+  const status: StackedHandoffStatus = args.status === 'blocked' ? 'blocked' : 'done'
+  const at = Date.now()
+
+  getStore().update((st) => {
+    const self = st.workspaces.find((w) => w.id === workspaceId)
+    // 다시 보고하면 덮어쓴다 — 부모가 알고 싶은 것은 "지금 어떤 상태인가" 하나다.
+    if (self) self.handoff = { status, summary, at }
+  })
+
+  // 부모 **대화에** 카드를 남긴다. 부모 모델은 이걸 읽지 않는다(트랜스크립트 ≠ 컨텍스트) —
+  // 사람이 눈으로 알아채고, 필요하면 부모에게 확인을 시키라고 있는 것이다.
+  const item: ChatItem = {
+    id: `handoff:${workspaceId}:${at}`,
+    type: 'handoff',
+    childWorkspaceId: workspaceId,
+    // 자식이 사라져도 카드는 읽혀야 하므로 이름을 지금 스냅샷한다.
+    childName: workspaceDisplayName(ws),
+    childBranch: ws.branch,
+    status,
+    summary,
+    ts: at
+  }
+  deps.postToTranscript(parentId, item)
+  deps.broadcastState()
+
+  return {
+    reportedTo: { workspaceId: parentId, branch: parent.branch },
+    status,
+    note: 'The parent was not interrupted — it reads this on its next turn.'
+  }
+}
+
+export const checkStackedWork: AgentToolHandler = async (_deps, workspaceId) => {
+  const state = getStore().getState()
+  const children = state.workspaces.filter((w) => w.parentWorkspaceId === workspaceId)
+
+  return {
+    children: children.map((c) => ({
+      workspaceId: c.id,
+      branch: c.branch,
+      name: workspaceDisplayName(c),
+      // running 이면 아직 도는 중이다 — 보고가 없다고 실패한 것이 아니다.
+      running: c.status === 'running',
+      archived: c.archived,
+      prNumber: c.prNumber,
+      report: c.handoff
+        ? { status: c.handoff.status, summary: c.handoff.summary, at: c.handoff.at }
+        : null
+    })),
+    ...(children.length ? {} : { note: 'Nothing is stacked on this workspace yet.' })
   }
 }

@@ -1,4 +1,5 @@
 import { log } from '../../logger'
+import type { ChatItem } from '@shared/types'
 import type { ScriptRunner } from '../../scripts'
 
 /**
@@ -16,6 +17,21 @@ export interface AgentToolDeps {
   scripts: ScriptRunner
   /** 상태를 바꾼 도구가 사이드바·화면을 갱신시키는 통로. */
   broadcastState: () => void
+  /**
+   * 다른 워크스페이스의 에이전트에게 말을 건다. 지금은 스택 자식에게 최초 작업을 넘길 때만 쓴다.
+   *
+   * 이 호출은 그 워크스페이스의 턴을 **시작시킨다**. 그래서 "부모가 자식을 깨우는" 방향으로만
+   * 쓰고, 반대 방향(자식 → 부모)은 쓰지 않는다 — 부모는 사람과 대화 중일 수 있고, 사용자가
+   * 승인하지 않은 턴 비용이 발생한다. 자식의 보고는 기록만 하고 부모가 직접 읽는다.
+   */
+  sendMessage: (workspaceId: string, text: string) => void
+  /**
+   * 워크스페이스 대화에 항목 하나를 남긴다(트랜스크립트 영속 + 화면 반영).
+   *
+   * 트랜스크립트는 에이전트의 대화 맥락과 **별개**다 — 여기 남긴 것은 사람에게 보일 뿐,
+   * 그 워크스페이스의 모델이 읽지 않는다. 알림용으로만 쓴다.
+   */
+  postToTranscript: (workspaceId: string, item: ChatItem) => void
 }
 
 /**

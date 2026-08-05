@@ -7,6 +7,7 @@ import { setCodexStatusProvider } from './auth'
 import { PaneWindows } from './paneWindows'
 import { ScriptRunner } from './scripts'
 import { flushStore, getStore } from './store'
+import { getTranscripts } from './transcripts'
 import { flushPendingSyncs } from './fsutil'
 import { initHealthLogging } from './health'
 import { TerminalManager } from './terminal'
@@ -74,7 +75,12 @@ const scripts = new ScriptRunner(dispatch, (workspaceId, kind, code) => {
 // scripts 가 만들어진 뒤여야 한다 — 워크스페이스를 만드는 도구가 셋업 스크립트를 돌린다.
 initAgentTools({
   scripts,
-  broadcastState: () => dispatch(IPC.evtState, getStore().getState())
+  broadcastState: () => dispatch(IPC.evtState, getStore().getState()),
+  sendMessage: (workspaceId, text) => sessions.sendMessage(workspaceId, text),
+  postToTranscript: (workspaceId, item) => {
+    getTranscripts().upsert(workspaceId, item)
+    dispatch(IPC.evtChat, { workspaceId, event: { type: 'item', item } })
+  }
 })
 
 const terminals = new TerminalManager(dispatch)

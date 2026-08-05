@@ -1,5 +1,5 @@
 import { initRegistry, registerAgentTool, type AgentToolDeps } from './registry'
-import { createStackedWorkspace } from './stackedWorkspace'
+import { checkStackedWork, createStackedWorkspace, reportToParent } from './stackedWorkspace'
 
 export { runAgentTool, type AgentToolDeps, type AgentToolHandler } from './registry'
 
@@ -13,4 +13,6 @@ export { runAgentTool, type AgentToolDeps, type AgentToolHandler } from './regis
 export function initAgentTools(deps: AgentToolDeps): void {
   initRegistry(deps)
   registerAgentTool('create_stacked_workspace', createStackedWorkspace)
+  registerAgentTool('report_to_parent', reportToParent)
+  registerAgentTool('check_stacked_work', checkStackedWork)
 }

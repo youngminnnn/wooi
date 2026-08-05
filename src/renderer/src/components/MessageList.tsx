@@ -20,7 +20,8 @@ import {
   Search,
   X,
   Square,
-  ListTodo
+  ListTodo,
+  Layers
 } from 'lucide-react'
 import { useStore } from '../store'
 import { DiffLine } from './DiffView'
@@ -369,9 +370,62 @@ function Item({
       )
     case 'task':
       return <TaskCard item={item} />
+    case 'handoff':
+      return <HandoffCard item={item} />
     default:
       return null
   }
+}
+
+/**
+ * 스택 자식이 올린 인계 보고 카드.
+ *
+ * **이 카드는 사람을 위한 것이다.** 트랜스크립트는 에이전트의 대화 맥락과 별개라, 이 워크스페이스의
+ * 모델은 여기 쓰인 내용을 읽지 않는다 — 읽게 하려면 `check_stacked_work` 를 부르게 해야 한다.
+ * 그 사실이 화면에서도 드러나도록 안내 한 줄을 같이 둔다.
+ */
+function HandoffCard({
+  item
+}: {
+  item: Extract<ChatItem, { type: 'handoff' }>
+}): React.JSX.Element {
+  const selectWorkspace = useStore((s) => s.selectWorkspace)
+  const exists = useStore((s) => s.app?.workspaces.some((w) => w.id === item.childWorkspaceId))
+  const blocked = item.status === 'blocked'
+
+  return (
+    <div
+      className={
+        'rounded-lg border px-3 py-2.5 text-sm ' +
+        (blocked
+          ? 'border-[var(--warning-500)]/25 bg-[var(--warning-500)]/10'
+          : 'border-[var(--border-2)] bg-[var(--surface)]')
+      }
+    >
+      <div className="flex items-center gap-1.5">
+        <Layers size={13} className={blocked ? 'text-[var(--warning-300)]' : 'text-neutral-400'} />
+        <span className="text-neutral-200">
+          {blocked ? 'Stacked work is blocked' : 'Stacked work finished'}
+        </span>
+        <span className="min-w-0 truncate font-mono text-xs text-neutral-500">
+          {item.childBranch}
+        </span>
+        <div className="flex-1" />
+        {exists && (
+          <button
+            onClick={() => void selectWorkspace(item.childWorkspaceId)}
+            className="shrink-0 rounded-md px-2 py-0.5 text-xs text-neutral-400 hover:bg-[var(--surface-2)] hover:text-neutral-100"
+          >
+            Open {item.childName}
+          </button>
+        )}
+      </div>
+      <div className="mt-1.5 whitespace-pre-wrap text-neutral-300">{item.summary}</div>
+      <div className="mt-1.5 text-xs text-neutral-500">
+        The agent here hasn&rsquo;t seen this — ask it to check stacked work if it should act on it.
+      </div>
+    </div>
+  )
 }
 
 /**
@@ -836,6 +890,8 @@ function itemText(it: ChatItem): string {
       return it.name
     case 'task':
       return `${it.name} ${it.description} ${it.summary ?? ''}`
+    case 'handoff':
+      return `${it.childName} ${it.childBranch} ${it.summary}`
     default:
       return ''
   }

@@ -24,7 +24,12 @@ export const WOOI_MCP_INSTRUCTIONS = [
   'These tools control Wooi itself — the desktop app hosting this conversation.',
   'Each Wooi workspace is a git worktree with its own branch, and they can be stacked:',
   'one workspace branches off another so their pull requests review as a chain.',
-  'The tools always act on the workspace you are running in; you cannot target another one.'
+  'The tools always act on the workspace you are running in; you cannot target another one.',
+  '',
+  'Stacked workspaces hand work back and forth: a parent starts a child with a task, the child',
+  'reports back when it finishes or gets stuck, and the parent reads those reports on its next',
+  'turn. Reports do not interrupt whoever is working — nothing arrives in your conversation on',
+  'its own, so check for it when the answer would change what you do.'
 ].join(' ')
 
 export interface AgentToolSpec {
@@ -67,9 +72,57 @@ export const AGENT_TOOLS: AgentToolSpec[] = [
         .describe(
           'Branch name for the new workspace, following the repository’s branch naming convention ' +
             '(e.g. "feat/inline-login"). Omit to let Wooi generate one.'
+        ),
+      task: z
+        .string()
+        .optional()
+        .describe(
+          'The task to hand the new workspace, sent as its first message — it starts working on ' +
+            'this right away. Write it for an agent that cannot see this conversation: what to ' +
+            'build, why it is a separate pull request, and anything you already decided that it ' +
+            'should not revisit. Omit only if the user will drive that workspace themselves.'
         )
     },
     annotations: { title: 'Create a stacked workspace', readOnlyHint: false }
+  },
+  {
+    name: 'report_to_parent',
+    description: [
+      'Report back to the workspace this one was stacked on: what you finished, or what you are',
+      'blocked on. Call this when the task you were handed is done or cannot proceed — it is the',
+      'only way the parent finds out, since nothing crosses between workspaces on its own.',
+      '',
+      'Write the summary for an agent that never saw your conversation: what changed, what you',
+      'decided and why, and anything it must know before building on your branch. Reporting again',
+      'replaces your previous report. This does not interrupt the parent — it reads the report on',
+      'its next turn, and the user is shown it in the parent’s conversation.'
+    ].join(' '),
+    inputSchema: {
+      summary: z
+        .string()
+        .describe('What you did, decided, or got stuck on. Written for someone with no context.'),
+      status: z
+        .enum(['done', 'blocked'])
+        .optional()
+        .describe(
+          '"done" if the task is complete, "blocked" if it needs a decision from the parent or ' +
+            'the user. Defaults to "done".'
+        )
+    },
+    annotations: { title: 'Report to the parent workspace', readOnlyHint: false }
+  },
+  {
+    name: 'check_stacked_work',
+    description: [
+      'List the workspaces stacked directly on this one, with whether each is currently running,',
+      'its branch and pull request, and the last report it sent back.',
+      '',
+      'Reports never arrive in your conversation on their own, so call this when a child’s result',
+      'would change what you do next — before building on its branch, before opening a pull',
+      'request that depends on it, or when the user asks how the stack is going.'
+    ].join(' '),
+    inputSchema: {},
+    annotations: { title: 'Check stacked workspaces', readOnlyHint: true }
   }
 ]
 
