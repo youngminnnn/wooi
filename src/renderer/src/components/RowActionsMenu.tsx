@@ -10,6 +10,8 @@ export type RowAction = {
   danger?: boolean
   /** 위에 구분선을 넣는다. */
   separatorBefore?: boolean
+  /** 같은 일을 하는 단축키(예: '⇧⌘⌫'). 메뉴 오른쪽에 흐리게 붙는다. */
+  shortcut?: string
 }
 
 /**
@@ -105,7 +107,12 @@ export default function RowActionsMenu({
             <span className="grid h-3.5 w-3.5 shrink-0 place-items-center text-neutral-400">
               {a.icon}
             </span>
-            {a.label}
+            <span className="min-w-0 flex-1 truncate">{a.label}</span>
+            {a.shortcut && (
+              <span className="shrink-0 text-[10px] text-neutral-600 tabular-nums">
+                {a.shortcut}
+              </span>
+            )}
           </button>
         </div>
       ))}

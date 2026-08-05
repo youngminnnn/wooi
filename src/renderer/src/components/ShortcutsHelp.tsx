@@ -17,6 +17,7 @@ const GROUPS: { title: string; items: { keys: string[]; label: string }[] }[] = 
     title: 'Session & panels',
     items: [
       { keys: ['⌘N'], label: 'New workspace in the focused repository' },
+      { keys: ['⌘Z'], label: 'Undo — delete the workspace you just created' },
       { keys: ['⇧⌘R'], label: 'Review a pull request' },
       { keys: ['⌘,'], label: 'Open settings' },
       { keys: ['⌘J'], label: 'Toggle the work panel' },
@@ -33,7 +34,8 @@ const GROUPS: { title: string; items: { keys: string[]; label: string }[] }[] = 
       { keys: ['⇧⌘E'], label: 'Open workspace in editor' },
       { keys: ['⇧⌘F'], label: 'Reveal workspace in Finder' },
       { keys: ['⇧⌘X'], label: 'Export conversation' },
-      { keys: ['⇧⌘⌫'], label: 'Archive workspace — or the review you have open' }
+      { keys: ['⇧⌘⌫'], label: 'Archive workspace — or the review you have open' },
+      { keys: ['⌥⌘⌫'], label: 'Delete workspace for good — worktree, branch and history' }
     ]
   },
   {

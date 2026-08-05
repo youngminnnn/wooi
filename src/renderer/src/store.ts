@@ -26,12 +26,13 @@ import type {
   Workspace
 } from '@shared/types'
 import type { NotificationChannel, NotificationEvent } from '@shared/types'
-import { AGENT_BACKEND_IDS, cascadeProblems } from '@shared/types'
+import { AGENT_BACKEND_IDS, cascadeProblems, workspaceDisplayName } from '@shared/types'
 import { playNotification } from './lib/sound'
 import { carrySuggestShownFlag, readUiFlag, setUiFlag } from './lib/uiFlags'
 import { openRepoSettings } from './lib/repoSettings'
 import { bodyOf, emptyView, isPosted, type ReviewTab, type ReviewViewState } from './lib/review'
 import { popWorkspaceHistory, pushWorkspaceHistory } from './lib/workspaceHistory'
+import { undoCreateVerdict, type UndoableCreate } from './lib/undoCreate'
 
 export const scriptKey = (workspaceId: string, kind: ScriptKind): string => `${workspaceId}:${kind}`
 
@@ -144,6 +145,17 @@ const FILE_HISTORY_MAX = 50
 
 let toastSeq = 0
 let pendingSeq = 0
+
+/** "3 commits" / "1 commit" — 확인 다이얼로그 문장을 세는 곳마다 s 를 붙이지 않게. */
+function plural(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? '' : 's'}`
+}
+
+/** ["a", "b", "c"] → "a, b and c". 잃는 것을 한 문장으로 나열할 때 쓴다. */
+function joinList(parts: string[]): string {
+  if (parts.length <= 1) return parts[0] ?? ''
+  return `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`
+}
 
 /**
  * 우측 작업 패널의 펼침/접힘 상태를 실행 간에 기억하기 위한 localStorage 키.
@@ -310,6 +322,26 @@ interface UIState {
     },
     displayName?: string
   ) => Promise<void>
+  /**
+   * 워크스페이스를 영구 삭제한다(확인 후). 아카이브와 달리 worktree·브랜치·대화 기록이 모두
+   * 사라지며 되돌릴 수 없다 — 무엇을 잃는지(미커밋 변경·미푸시 커밋·쌓인 스택)를 먼저 알린다.
+   */
+  requestDeleteWorkspace: (workspaceId: string) => Promise<void>
+  /**
+   * 확인 없이 즉시 영구 삭제한다 — 물어보는 것은 호출부의 몫이다.
+   * 지운 워크스페이스를 보고 있었다면 ⌘[ 와 같은 규칙으로 직전에 보던 곳으로 돌아간다.
+   */
+  deleteWorkspaceNow: (workspaceId: string) => Promise<void>
+  /**
+   * ⌘Z 로 되돌릴 수 있는 직전 워크스페이스 생성. 한 단계만 기억한다 — 되돌리기를 연달아 눌러
+   * 예전 워크스페이스까지 지우는 것은 실행취소가 아니라 사고다([[undoCreate]] 참고).
+   */
+  undoableCreate: UndoableCreate | null
+  /**
+   * 방금 만든 워크스페이스를 취소한다(⌘Z). 아직 손대지 않았으면 묻지 않고 지우고, 이미 쓴
+   * 흔적(세션·변경·커밋)이 있으면 일반 삭제와 같은 확인을 거친다.
+   */
+  undoCreateWorkspace: () => Promise<void>
   /** stacked 워크스페이스를 최신 base(부모 브랜치) 위로 rebase·force-push 한다. */
   restackWorkspace: (workspaceId: string) => Promise<void>
   /** 외부 병합으로 대기 중인 스택 캐스케이드를 실행한다(rebase + force-push — 사용자 승인 후). */
@@ -1095,12 +1127,96 @@ export const useStore = create<UIState>((set, get) => ({
     }
     if (res.workspaceId) {
       void get().selectWorkspace(res.workspaceId)
+      // 방금 만든 것 하나만 되돌리기 대상으로 기억한다. 토스트에 ⌘Z 를 적어 두는 이유는,
+      // 되돌리고 싶은 그 순간이 이 기능을 발견해야 하는 유일한 순간이기 때문이다.
+      set({ undoableCreate: { workspaceId: res.workspaceId, at: Date.now() } })
       if (res.name && res.branch) {
-        get().pushToast('success', `Created workspace “${res.name}” on ${res.branch}`)
+        get().pushToast('success', `Created workspace “${res.name}” on ${res.branch} — ⌘Z to undo`)
       }
       get().reportCarryFailures(res.carryFailures)
       get().suggestCarry(repoId, res.workspaceId, res.carrySuggestions)
     }
+  },
+
+  requestDeleteWorkspace: async (workspaceId) => {
+    const s = get()
+    const ws = s.app?.workspaces.find((w) => w.id === workspaceId)
+    if (!ws) return
+    const name = workspaceDisplayName(ws, s.prStatus[workspaceId]?.title)
+
+    // 무엇을 잃는지 먼저 센다 — "되돌릴 수 없다" 는 말만으로는 지금 이 워크트리에 남은
+    // 미커밋 변경이나 아직 푸시하지 않은 커밋이 있다는 사실이 전달되지 않는다.
+    const git = s.gitStatus[workspaceId]
+    const stacked = (s.app?.workspaces ?? []).filter(
+      (w) => !w.archived && w.parentWorkspaceId === workspaceId
+    ).length
+    const losses: string[] = []
+    if (git?.changedFiles) losses.push(plural(git.changedFiles, 'uncommitted file'))
+    if (git?.ahead) losses.push(`${plural(git.ahead, 'commit')} not in ${ws.baseBranch}`)
+
+    const body = [
+      `Deletes its worktree, the local branch ${ws.branch}, and the conversation for good.`,
+      losses.length ? `You lose ${joinList(losses)}.` : '',
+      ws.status === 'running' ? 'The agent is still working here — its turn is stopped.' : '',
+      stacked ? `${plural(stacked, 'workspace')} stacked on this branch will lose their base.` : '',
+      'Anything already pushed — the remote branch and its PR — stays on GitHub.',
+      'Archive it instead to keep the branch and history.'
+    ]
+      .filter(Boolean)
+      .join(' ')
+
+    const ok = await s.confirm({
+      title: `Permanently delete “${name}”?`,
+      body,
+      confirmLabel: 'Delete',
+      danger: true
+    })
+    if (!ok) return
+    await get().deleteWorkspaceNow(workspaceId)
+    get().pushToast('info', `Deleted “${name}”.`)
+  },
+
+  undoableCreate: null,
+
+  undoCreateWorkspace: async () => {
+    const s = get()
+    const undoable = s.undoableCreate
+    const ws = s.app?.workspaces.find((w) => w.id === undoable?.workspaceId)
+    const verdict = undoCreateVerdict(undoable, ws, ws ? s.gitStatus[ws.id] : null, Date.now())
+
+    if (!ws || verdict === 'nothing') {
+      if (undoable) set({ undoableCreate: null })
+      s.pushToast('info', 'Nothing to undo.')
+      return
+    }
+    // 이미 쓴 흔적이 있는 워크스페이스는 조용히 지우지 않는다 — 일반 삭제와 같은 확인을 거친다.
+    if (verdict === 'confirm') {
+      await get().requestDeleteWorkspace(ws.id)
+      return
+    }
+
+    const name = workspaceDisplayName(ws)
+    await get().deleteWorkspaceNow(ws.id)
+    get().pushToast('info', `Undid — deleted workspace “${name}”.`)
+  },
+
+  deleteWorkspaceNow: async (workspaceId) => {
+    // 리뷰 화면 뒤에 가려진 워크스페이스를 지우는 경우엔 화면을 건드리지 않는다.
+    const wasSelected = get().selectedWorkspaceId === workspaceId && !get().activeReviewId
+    await window.api.workspace.remove(workspaceId, true)
+    if (get().undoableCreate?.workspaceId === workspaceId) set({ undoableCreate: null })
+    if (!wasSelected) return
+
+    // 보고 있던 워크스페이스가 사라졌으니 ⌘[ 와 같은 규칙으로 직전에 보던 곳으로 돌아간다.
+    // 방송된 상태를 기다리지 않고 지운 id 를 직접 제외한다 — 되돌아갈 곳이 방금 지운 그
+    // 워크스페이스가 되면 안 된다.
+    const s = get()
+    const alive = new Set(
+      (s.app?.workspaces ?? []).filter((w) => !w.archived && w.id !== workspaceId).map((w) => w.id)
+    )
+    const { target, history } = popWorkspaceHistory(s.workspaceHistory, workspaceId, alive)
+    set({ workspaceHistory: history })
+    await get().selectWorkspace(target, { fromHistory: true })
   },
 
   // 전달 실패는 워크스페이스 생성을 막지 않지만, 조용히 넘기면 에이전트가 프로젝트 지침을
