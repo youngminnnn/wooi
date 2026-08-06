@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { AGENT_BACKEND_IDS, AGENT_BACKEND_LABELS, type AgentBackendId } from '@shared/types'
 
 /**
  * 에이전트에게 노출하는 Wooi 도구의 **정의**(이름 · 설명 · 스키마). 실행부는 [[agent/tools]] 에 있다.
@@ -49,6 +50,12 @@ export interface AgentToolSpec {
   alwaysLoad?: boolean
 }
 
+/**
+ * 워크스페이스와 무관하게 언제나 있는 도구들.
+ *
+ * 여기 없는 것도 있다 — 위임 서브에이전트 도구는 멀티 에이전트 워크스페이스에서만 존재하므로
+ * 목록이 아니라 함수([[agentToolsFor]])로 만든다.
+ */
 export const AGENT_TOOLS: AgentToolSpec[] = [
   {
     name: 'create_stacked_workspace',
@@ -126,9 +133,73 @@ export const AGENT_TOOLS: AgentToolSpec[] = [
   }
 ]
 
+/**
+ * 이 워크스페이스가 지금 쓸 수 있는 도구 전부.
+ *
+ * 카탈로그가 상수가 아니라 함수인 이유: 위임 서브에이전트 도구(`claude_subagent` …)는 멀티
+ * 에이전트 워크스페이스에만 있어야 한다. 늘 노출해 두고 호출 시점에 거절하면 모델에게 쓸 수 없는
+ * 도구를 보여 주는 셈이라 계약이 나쁘다 — 없는 것은 보이지 않아야 한다.
+ */
+export function agentToolsFor(delegateBackends: AgentBackendId[] = []): AgentToolSpec[] {
+  return [...AGENT_TOOLS, ...delegateToolSpecs(delegateBackends)]
+}
+
+/**
+ * 백엔드마다 서브에이전트 도구 하나.
+ *
+ * 이름이 판단을 대신한다. 처음에는 도구 하나(`delegate`) + `backend` enum 이었는데, Codex 메인
+ * 워크스페이스에서 "claude 서브에이전트를 만들어 줘" 라고 해도 모델이 자기 네이티브 서브에이전트를
+ * 골랐다 — 설명을 읽고 도달하는 데 실패한 것이다. `claude_subagent` 라는 이름이 있으면 매칭이
+ * 기계적이고, 잘못된 백엔드 값이 원천적으로 불가능해진다.
+ *
+ * 도구 이름은 사용자가 CLAUDE.md 규칙에 적게 되므로 한번 정하면 바꾸기 어렵다.
+ */
+export function delegateToolSpecs(backends: AgentBackendId[]): AgentToolSpec[] {
+  return backends.map((backend) => {
+    const label = AGENT_BACKEND_LABELS[backend] ?? backend
+    return {
+      name: delegateToolName(backend),
+      description: [
+        `Start a ${label} subagent in this workspace and wait for its result.`,
+        `It really runs on ${label} — not on your own model.`,
+        `Use this whenever the user asks for a ${label} subagent, or asks ${label} to do`,
+        'something, by name. Your own built-in subagent mechanism cannot run this product, so a',
+        'request naming it is always this tool. Call it once per subagent you want; several can',
+        'run at the same time.',
+        'The subagent works in this same worktree under your permission mode, starts from an',
+        'empty context, and reports back exactly once as text — it cannot ask you anything',
+        'mid-run, so put everything it needs into the prompt.'
+      ].join(' '),
+      inputSchema: {
+        description: z
+          .string()
+          .describe(
+            'A 3-6 word label for this task, shown while it runs (e.g. "Audit auth flow").'
+          ),
+        prompt: z
+          .string()
+          .describe(
+            'The complete task brief. The subagent starts with a blank context and cannot see ' +
+              'this conversation, so restate every fact it needs: files, constraints, and what to return.'
+          )
+      },
+      annotations: { title: `Run a ${label} subagent`, readOnlyHint: false }
+    }
+  })
+}
+
+/** `claude` → `claude_subagent`. 이름만으로 어느 제품인지 읽히는 것이 요점이다. */
+export function delegateToolName(backend: AgentBackendId): string {
+  return `${backend}_subagent`
+}
+
 /** 읽기 전용으로 표시된 도구인가(카탈로그의 맨 이름으로 묻는다). */
 export function isReadOnlyToolName(name: string): boolean {
-  return AGENT_TOOLS.some((t) => t.name === name && t.annotations?.readOnlyHint === true)
+  // 위임 도구까지 포함해 본다 — 목록에 없는 이름을 "읽기 전용이 아님" 으로 떨어뜨리는 것이
+  // 안전한 기본값이지만, 나중에 읽기 전용 위임 도구가 생기면 여기서 자동으로 반영된다.
+  return agentToolsFor(AGENT_BACKEND_IDS).some(
+    (t) => t.name === name && t.annotations?.readOnlyHint === true
+  )
 }
 
 /**

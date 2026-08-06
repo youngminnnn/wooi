@@ -4,9 +4,8 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { AppServer } from '../codex/appServer'
 import { RPC, SERVER_REQUEST } from '../codex/wire'
-import { DelegateBridge } from './bridge'
-import { BRIDGE_ENV } from './protocol'
-import { DELEGATE_MCP_SERVER_NAME, delegateThreadInstructions } from './catalog'
+import { delegateThreadInstructions } from './catalog'
+import { WOOI_MCP_SERVER_NAME } from '../agent/tools/catalog'
 
 /**
  * **모델이 우리 도구를 고르는가** 를 센다.
@@ -33,7 +32,7 @@ function codexPath(): string | null {
 }
 
 const CODEX = codexPath()
-const SERVER = join(process.cwd(), 'out', 'main', 'delegateServer.js')
+const SERVER = join(process.cwd(), 'out', 'main', 'toolShim.js')
 const ENABLED = process.env.WOOI_E2E_CHOICE === '1'
 
 /**
@@ -67,31 +66,20 @@ interface Attempt {
 }
 
 let app: AppServer | null = null
-let bridge: DelegateBridge | null = null
 afterEach(() => {
   app?.dispose()
   app = null
-  bridge?.dispose()
-  bridge = null
 })
 
 /** 표현 하나를 실제 Codex 스레드에 넣고 위임 도구 호출 수를 센다. */
 async function attempt(prompt: string): Promise<Attempt> {
   let delegated = 0
-  // 서브런은 실제로 돌리지 않는다(resolve 가 null) — 세려는 것은 모델의 선택이지 서브에이전트의
-  // 실력이 아니고, 진짜로 돌리면 표현 하나에 몇 분씩 걸린다.
-  bridge = new DelegateBridge({
-    resolve: () => null,
-    onStart: () => {},
-    onActivity: () => {},
-    onEnd: () => {}
-  })
   app = new AppServer({
     executable: CODEX!,
     onNotification: (method, params) => {
       if (method !== 'item/started') return
       const item = (params as { item?: { type?: string; server?: string } })?.item
-      if (item?.type === 'mcpToolCall' && item.server === DELEGATE_MCP_SERVER_NAME) delegated += 1
+      if (item?.type === 'mcpToolCall' && item.server === WOOI_MCP_SERVER_NAME) delegated += 1
     },
     // 승인에 답하지 않으면 도구 호출이 그 자리에서 멈춘다. 여기서 재는 것은 승인 정책이 아니므로
     // 무조건 수락한다 — 실제 앱에서는 codex-host 가 이 요청을 사용자 질문 UI 로 옮긴다.
@@ -107,16 +95,14 @@ async function attempt(prompt: string): Promise<Attempt> {
     sandbox: 'read-only',
     // 제품 경로와 같게 싣는다(codex/thread.ts). 이게 빠지면 모델이 도구의 존재를 모른다.
     developerInstructions: delegateThreadInstructions(['claude', 'codex']),
+    // 제품 경로와 같은 모양 — 하나의 shim 을 위임 도구까지 켜서 스레드 단위로 선언한다.
+    // 소켓은 일부러 붙지 않는 경로를 준다: 세려는 것은 **모델의 선택**이지 실행 결과가 아니다.
     config: {
       mcp_servers: {
-        wooi_agents: {
+        [WOOI_MCP_SERVER_NAME]: {
           command: process.execPath,
           args: [SERVER],
-          env: {
-            [BRIDGE_ENV.socket]: bridge.socketPath(),
-            [BRIDGE_ENV.workspaceId]: 'ws-choice',
-            [BRIDGE_ENV.backends]: 'claude,codex'
-          }
+          env: { WOOI_TOOL_SOCKET: '/tmp/wooi-choice-nosock', WOOI_TOOL_DELEGATE: 'claude,codex' }
         }
       }
     }
@@ -134,8 +120,6 @@ async function attempt(prompt: string): Promise<Attempt> {
   await new Promise((r) => setTimeout(r, 45_000))
   app.dispose()
   app = null
-  bridge.dispose()
-  bridge = null
   return { prompt, delegated }
 }
 

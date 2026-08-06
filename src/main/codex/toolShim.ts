@@ -1,6 +1,7 @@
 import { connect } from 'node:net'
 import { z } from 'zod'
-import { AGENT_TOOLS, WOOI_MCP_INSTRUCTIONS } from '../agent/tools/catalog'
+import { agentToolsFor, WOOI_MCP_INSTRUCTIONS } from '../agent/tools/catalog'
+import type { AgentBackendId } from '@shared/types'
 
 /**
  * Codex 용 stdio MCP 서버.
@@ -19,6 +20,19 @@ import { AGENT_TOOLS, WOOI_MCP_INSTRUCTIONS } from '../agent/tools/catalog'
  */
 
 const SOCKET = process.env.WOOI_TOOL_SOCKET ?? ''
+
+/**
+ * 이 shim 이 노출할 위임 서브에이전트 종류(쉼표 구분). 비어 있으면 위임 도구가 없다.
+ *
+ * 왜 env 인가: `tools/list` 시점에는 어느 워크스페이스인지 알 수 없다(workspaceId 는 호출 인자로
+ * 온다). 프로세스 전역으로 한 번 등록된 shim 은 모든 워크스페이스를 공유하므로, 워크스페이스마다
+ * 다른 도구 집합을 보이려면 **그 워크스페이스 전용 shim** 을 스레드 설정으로 한 번 더 띄우는
+ * 수밖에 없다. 그때 이 값으로 무엇을 노출할지 정한다([[codex/thread]]).
+ */
+const DELEGATE_BACKENDS = (process.env.WOOI_TOOL_DELEGATE ?? '')
+  .split(',')
+  .map((id) => id.trim())
+  .filter(Boolean) as AgentBackendId[]
 
 interface JsonRpcMessage {
   id?: number | string
@@ -53,7 +67,7 @@ function inputSchemaOf(shape: z.ZodRawShape): Record<string, unknown> {
 }
 
 function tools(): unknown[] {
-  return AGENT_TOOLS.map((spec) => ({
+  return agentToolsFor(DELEGATE_BACKENDS).map((spec) => ({
     name: spec.name,
     description: spec.description,
     inputSchema: inputSchemaOf(spec.inputSchema),

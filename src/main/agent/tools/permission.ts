@@ -1,5 +1,12 @@
 import { randomUUID } from 'node:crypto'
-import type { PermissionDecision, PermissionRequest, Workspace } from '@shared/types'
+import type { PermissionResult } from '@anthropic-ai/claude-agent-sdk'
+import {
+  AGENT_BACKEND_LABELS,
+  type AgentBackendId,
+  type PermissionDecision,
+  type PermissionRequest,
+  type Workspace
+} from '@shared/types'
 import { isReadOnlyToolName } from './catalog'
 
 /**
@@ -84,6 +91,60 @@ export async function ensureToolApproved(
   if (decision.behavior !== 'allow') {
     throw new Error('The user declined this action.')
   }
+}
+
+/**
+ * 위임된 서브에이전트의 **내부** 도구 호출을 승인받는다.
+ *
+ * 위임 도구 호출 자체(`claude_subagent`)는 ensureToolApproved 가 이미 물었다. 여기는 그 서브에이전트가
+ * 일하면서 부르는 도구들이다 — 파일을 고치고 명령을 돌리므로 부모와 같은 기준으로 물어야 한다.
+ *
+ * 부모 세션의 canUseTool(session.ts)을 그대로 쓰지 못하는 이유는 실행 위치다. 서브런은 메인에서
+ * 돌고 그 함수는 agent-host 안에 있다. 대신 같은 권한 카드를 쓰고, 누가 부른 것인지 문장에 적어
+ * 사용자가 부모의 요청과 헷갈리지 않게 한다.
+ *
+ * `fullAccess`·`readOnly` 판단은 부모 워크스페이스 모드를 그대로 따른다(needsApproval 과 같은 규칙).
+ */
+export async function askSubAgentPermission(
+  workspace: Workspace,
+  backend: AgentBackendId,
+  toolName: string,
+  input: Record<string, unknown>
+): Promise<PermissionResult> {
+  // 사용자가 "승인 없이 돌려라" 를 고른 모드에서 위임만 따로 묻지 않는다.
+  if (workspace.permissionMode === 'fullAccess') return { behavior: 'allow', updatedInput: input }
+  if (!deps) return { behavior: 'deny', message: 'Wooi cannot ask for permission right now.' }
+
+  const label = AGENT_BACKEND_LABELS[backend] ?? backend
+  const requestId = randomUUID()
+  const decision = await new Promise<PermissionDecision>((resolve) => {
+    pending.set(requestId, resolve)
+    deps!.dispatch({
+      requestId,
+      workspaceId: workspace.id,
+      toolName,
+      displayName: toolName,
+      title: `The ${label} subagent wants to use \`${toolName}\`.`,
+      input: clampForCard(input)
+    })
+  })
+
+  if (decision.behavior === 'allow') {
+    return { behavior: 'allow', updatedInput: decision.updatedInput ?? input }
+  }
+  return { behavior: 'deny', message: 'The user declined this tool call.' }
+}
+
+/**
+ * 카드에 실을 입력만 줄인다. 거대한 입력(큰 Write 본문 등)이 IPC 직렬화 경계에서 메인을
+ * 터뜨리는 것을 막는다 — 원본은 그대로 서브런에 돌려준다.
+ */
+function clampForCard(input: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(input)) {
+    out[key] = typeof value === 'string' && value.length > 2000 ? `${value.slice(0, 2000)}…` : value
+  }
+  return out
 }
 
 /** 버튼 라벨용 짧은 명사구. 카탈로그의 annotations.title 과 같은 문구를 쓴다. */

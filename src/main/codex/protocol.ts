@@ -1,4 +1,5 @@
 import type {
+  AgentBackendId,
   ChatEvent,
   ChatItem,
   CommandPanelKind,
@@ -40,20 +41,19 @@ export interface CodexConfig {
    * 프로세스 인자(`-c`)로 넣으면 단일 에이전트 워크스페이스에까지 도구가 붙는다. `thread/start`
    * 의 `config` 는 그 스레드에만 적용된다(codex/probe.e2e.test.ts 로 실측 확인).
    */
-  delegateServer: CodexMcpServer | null
+  /**
+   * 이 스레드가 띄울 수 있는 서브에이전트 종류. 비어 있으면 위임 도구가 붙지 않는다.
+   *
+   * 서버 실행 설정이 아니라 **목록**을 넘긴다 — shim 실행 파일은 Wooi 도구와 같은 것을 쓰고,
+   * 이 값은 그 shim 이 무엇을 노출할지 정하는 스위치일 뿐이다([[codex/thread]] delegateMcpConfig).
+   */
+  delegateBackends: AgentBackendId[]
   /**
    * 멀티 에이전트일 때 스레드에 실을 개발자 지침. 위임 도구가 **존재한다는 사실**을 여기서
    * 알린다 — codex 는 MCP 도구를 모델의 도구 목록에 눈에 띄게 올려 주지 않아서, 서버만 붙여
    * 두면 모델이 그 도구를 아예 고려하지 않는다(subagent/catalog.ts 에 측정 결과가 있다).
    */
   delegateInstructions: string | null
-}
-
-/** codex 의 `mcp_servers.<name>` 설정 한 항목. 우리가 넣는 값만 추린 모양이다. */
-export interface CodexMcpServer {
-  command: string
-  args: string[]
-  env: Record<string, string>
 }
 
 /** 메인 → 호스트 명령. */

@@ -27,10 +27,7 @@ export default defineConfig({
           codexHost: resolve('src/main/codex/host.ts'),
           // toolShim = Codex 용 stdio MCP 서버. 우리가 아니라 `codex app-server` 가 spawn 하므로
           // 반드시 독립 진입점이어야 한다([[codex/toolShim]]).
-          toolShim: resolve('src/main/codex/toolShim.ts'),
-          // 위임 서브에이전트 전용 shim. 같은 이유로 독립 진입점이다 — toolShim 과 합치는 것은
-          // 후속 커밋에서 다룬다(실행 모델이 달라 소켓 계약이 같지 않다).
-          delegateServer: resolve('src/main/subagent/delegateServer.ts')
+          toolShim: resolve('src/main/codex/toolShim.ts')
         }
       }
     }
