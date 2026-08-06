@@ -1,7 +1,9 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { existsSync, rmSync } from 'node:fs'
+import { createServer, type Server } from 'node:net'
 import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 import { AppServer } from '../codex/appServer'
 import { RPC, SERVER_REQUEST } from '../codex/wire'
 import { delegateThreadInstructions } from './catalog'
@@ -66,14 +68,46 @@ interface Attempt {
 }
 
 let app: AppServer | null = null
+let socket: Server | null = null
 afterEach(() => {
   app?.dispose()
   app = null
+  socket?.close()
+  socket = null
+  rmSync(SOCKET_PATH, { force: true })
 })
+
+const SOCKET_PATH = join(tmpdir(), `wooi-choice-${process.pid}.sock`)
+
+/**
+ * 메인 대신 도구 소켓을 받아 **성공**을 돌려준다.
+ *
+ * 서브런을 실제로 돌리지 않는 이유는 세려는 것이 모델의 선택이지 서브에이전트의 실력이 아니기
+ * 때문이다. 그렇다고 실패를 돌려주면 안 된다 — 실패한 도구는 모델이 다시 부르므로 호출 **횟수**가
+ * 의미를 잃는다. 실제로 두 번 잘못 읽었다: 소켓을 안 열었을 때(연결 실패)도, 프로토콜대로
+ * 거절했을 때도 횟수가 2~6 으로 튀었다. 성공을 돌려줘야 "몇 개를 띄우려 했나" 가 그대로 남는다.
+ */
+function startStubSocket(): Server {
+  rmSync(SOCKET_PATH, { force: true })
+  const server = createServer((conn) => {
+    conn.on('data', () => {
+      conn.write(
+        JSON.stringify({
+          ok: true,
+          data: { text: 'Probe run — the subagent did not really run.' }
+        }) + '\n'
+      )
+      conn.end()
+    })
+  })
+  server.listen(SOCKET_PATH)
+  return server
+}
 
 /** 표현 하나를 실제 Codex 스레드에 넣고 위임 도구 호출 수를 센다. */
 async function attempt(prompt: string): Promise<Attempt> {
   let delegated = 0
+  socket = startStubSocket()
   app = new AppServer({
     executable: CODEX!,
     onNotification: (method, params) => {
@@ -96,13 +130,12 @@ async function attempt(prompt: string): Promise<Attempt> {
     // 제품 경로와 같게 싣는다(codex/thread.ts). 이게 빠지면 모델이 도구의 존재를 모른다.
     developerInstructions: delegateThreadInstructions(['claude', 'codex']),
     // 제품 경로와 같은 모양 — 하나의 shim 을 위임 도구까지 켜서 스레드 단위로 선언한다.
-    // 소켓은 일부러 붙지 않는 경로를 준다: 세려는 것은 **모델의 선택**이지 실행 결과가 아니다.
     config: {
       mcp_servers: {
         [WOOI_MCP_SERVER_NAME]: {
           command: process.execPath,
           args: [SERVER],
-          env: { WOOI_TOOL_SOCKET: '/tmp/wooi-choice-nosock', WOOI_TOOL_DELEGATE: 'claude,codex' }
+          env: { WOOI_TOOL_SOCKET: SOCKET_PATH, WOOI_TOOL_DELEGATE: 'claude,codex' }
         }
       }
     }
@@ -120,6 +153,8 @@ async function attempt(prompt: string): Promise<Attempt> {
   await new Promise((r) => setTimeout(r, 45_000))
   app.dispose()
   app = null
+  socket.close()
+  socket = null
   return { prompt, delegated }
 }
 
