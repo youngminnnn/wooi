@@ -8,6 +8,13 @@ import { AppServer } from '../codex/appServer'
 import { RPC, SERVER_REQUEST } from '../codex/wire'
 import { delegateThreadInstructions } from './catalog'
 import { WOOI_MCP_SERVER_NAME } from '../agent/tools/catalog'
+import { query } from '@anthropic-ai/claude-agent-sdk'
+import type { SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
+import { AGENT_BACKEND_IDS } from '@shared/types'
+import { createWooiMcpServer } from '../claude/wooiMcp'
+import { resolveClaudeExecutable } from '../claude/executable'
+import { MCP_SETTING_SOURCES } from '../claude/mcp'
+import { CLAUDE_CODE_SYSTEM_PROMPT } from '../claude/systemPrompt'
 
 /**
  * **모델이 우리 도구를 고르는가** 를 센다.
@@ -19,10 +26,23 @@ import { WOOI_MCP_SERVER_NAME } from '../agent/tools/catalog'
  * 그래서 이건 프롬프트 싸움이고, 프롬프트 싸움은 **세어야** 안다. 문구나 도구 이름을 만질 때마다
  * "이제 될 겁니다" 라고 말하는 대신 이 숫자를 본다.
  *
+ * 두 백엔드를 **같은 표현으로** 잰다. 노출 방식이 서로 다르기 때문이다 — Claude 는 SDK 가 도구
+ * 정의를 프롬프트에 직접 싣고, Codex 는 MCP 도구를 눈에 띄게 올려 주지 않아 스레드 지침으로
+ * 존재를 알려야 한다. 표현을 공유해야 그 차이가 숫자로 드러난다.
+ *
  * 모델을 실제로 부르므로 기본은 건너뛴다. 표현 하나에 한 턴씩 쓴다:
  *
  *   WOOI_E2E_CHOICE=1 npx vitest run src/main/subagent/choice.e2e.test.ts
  */
+
+function cliExists(cli: string): boolean {
+  try {
+    const shell = process.env.SHELL || '/bin/zsh'
+    return Boolean(execFileSync(shell, ['-lc', `command -v ${cli}`], { encoding: 'utf8' }).trim())
+  } catch {
+    return false
+  }
+}
 
 function codexPath(): string | null {
   try {
@@ -34,22 +54,36 @@ function codexPath(): string | null {
 }
 
 const CODEX = codexPath()
+const claudeExecutable = resolveClaudeExecutable()
+const CLAUDE = Boolean(claudeExecutable) || cliExists('claude')
 const SERVER = join(process.cwd(), 'out', 'main', 'toolShim.js')
 const ENABLED = process.env.WOOI_E2E_CHOICE === '1'
 
 /**
  * 사용자가 **다른 제품을 지목한** 표현들. 전부 위임 도구로 가야 맞다.
  *
+ * `other` 는 메인이 **아닌** 제품이다 — 메인이 무엇이냐에 따라 지목 대상이 바뀌므로 문장을
+ * 고정하지 않는다. 그러지 않으면 Claude 메인에게 "Claude 서브에이전트를 만들어 줘" 라고 묻는
+ * 셈이 되는데, 그건 네이티브를 써도 맞는 요청이라 재는 것이 달라진다.
+ *
  * 한국어와 영어를 섞는다 — 실제 실패가 한국어("claude subagent를 생성해서")에서 났고, 어휘
  * 매칭이 언어를 건너 작동하는지가 이 기능의 관건이다.
  */
-const NAMED: string[] = [
-  'claude subagent를 하나 생성해서 README.md 첫 줄만 읽고 알려달라고 해줘.',
-  'Claude 한테 이 저장소의 package.json name 필드가 뭔지 물어봐 줘.',
-  'Have a Claude subagent tell me the name field in package.json.',
-  'codex, claude 서브에이전트를 각각 하나씩 만들어서 README.md 첫 줄을 읽어 오라고 해줘.',
-  'Claude 랑 Codex 둘 다한테 package.json 의 name 을 물어보고 답을 비교해줘.'
-]
+function named(other: string): { prompt: string; want: number }[] {
+  return [
+    {
+      prompt: `${other} subagent를 하나 생성해서 README.md 첫 줄만 읽고 알려달라고 해줘.`,
+      want: 1
+    },
+    { prompt: `${other} 한테 이 저장소의 package.json name 필드가 뭔지 물어봐 줘.`, want: 1 },
+    { prompt: `Have a ${other} subagent tell me the name field in package.json.`, want: 1 },
+    {
+      prompt: 'codex, claude 서브에이전트를 각각 하나씩 만들어서 README.md 첫 줄을 읽어 와 줘.',
+      want: 2
+    },
+    { prompt: 'Claude 랑 Codex 둘 다한테 package.json 의 name 을 물어보고 답을 비교해줘.', want: 2 }
+  ]
+}
 
 /** 제품을 지목하지 **않은** 표현. 네이티브를 써도 맞으므로 위임이 없어도 실패가 아니다. */
 const UNNAMED: string[] = ['서브에이전트를 하나 띄워서 README.md 첫 줄을 읽어와 줘.']
@@ -105,7 +139,7 @@ function startStubSocket(): Server {
 }
 
 /** 표현 하나를 실제 Codex 스레드에 넣고 위임 도구 호출 수를 센다. */
-async function attempt(prompt: string): Promise<Attempt> {
+async function codexAttempt(prompt: string): Promise<Attempt> {
   let delegated = 0
   socket = startStubSocket()
   app = new AppServer({
@@ -158,24 +192,75 @@ async function attempt(prompt: string): Promise<Attempt> {
   return { prompt, delegated }
 }
 
-describe.skipIf(!ENABLED || !CODEX || !existsSync(SERVER))('모델이 위임 도구를 고르는가', () => {
+/**
+ * 표현 하나를 실제 Claude 세션에 넣고 위임 도구 호출 수를 센다.
+ *
+ * agent-host 를 띄우지 않고 여기서 직접 query 를 연다 — 재려는 것은 모델이 도구를 고르는가이고,
+ * 그 판단에 필요한 것은 제품 경로와 **같은 MCP 서버**(createWooiMcpServer)뿐이다. 호스트를
+ * 거치면 측정 대상이 아니라 배관을 함께 재게 된다.
+ */
+async function claudeAttempt(prompt: string): Promise<Attempt> {
+  let delegated = 0
+  const server = createWooiMcpServer(
+    async (tool) => {
+      // 실제로 돌리지 않고 성공을 돌려준다 — 실패한 도구는 모델이 재시도해서 횟수가 의미를 잃는다.
+      if (tool.endsWith('_subagent')) delegated += 1
+      return { text: 'Probe run — the subagent did not really run.' }
+    },
+    [...AGENT_BACKEND_IDS]
+  )
+
+  const q = query({
+    prompt: oneShot(prompt),
+    options: {
+      cwd: process.cwd(),
+      // 제품 세션과 같은 조건으로 맞춘다. 시스템 프롬프트가 다르면 다른 것을 재게 된다.
+      systemPrompt: CLAUDE_CODE_SYSTEM_PROMPT,
+      settingSources: MCP_SETTING_SOURCES,
+      mcpServers: { [WOOI_MCP_SERVER_NAME]: server },
+      maxTurns: 8,
+      // 승인 프롬프트가 없는 환경이라 물어보면 그대로 멈춘다. 재려는 것은 권한이 아니다.
+      canUseTool: async (_tool, input) => ({ behavior: 'allow' as const, updatedInput: input }),
+      ...(claudeExecutable ? { pathToClaudeCodeExecutable: claudeExecutable } : {})
+    }
+  })
+
+  try {
+    for await (const msg of q) if (msg.type === 'result') break
+  } finally {
+    q.close()
+  }
+  return { prompt, delegated }
+}
+
+async function* oneShot(prompt: string): AsyncGenerator<SDKUserMessage> {
+  yield { type: 'user', message: { role: 'user', content: prompt }, parent_tool_use_id: null }
+}
+
+/** 결과를 사람이 읽는 표로 찍고 적중 수를 돌려준다. */
+function report(label: string, results: (Attempt & { want: number })[]): number {
+  for (const r of results) {
+    const mark = r.delegated > 0 ? 'HIT ' : 'MISS'
+    console.log(`${label} ${mark}  got=${r.delegated} want=${r.want}  ${r.prompt}`)
+  }
+  const hits = results.filter((r) => r.delegated > 0).length
+  console.log(`\n${label} named: ${hits}/${results.length}`)
+  return hits
+}
+
+describe.skipIf(!ENABLED || !CODEX || !existsSync(SERVER))('Codex 메인', () => {
   it(
     '제품을 지목한 요청은 위임으로 간다',
     async () => {
-      const results: Attempt[] = []
-      for (const prompt of NAMED) results.push(await attempt(prompt))
-
-      for (const r of results) {
-        console.log(`${r.delegated > 0 ? 'HIT ' : 'MISS'}  ${r.delegated}  ${r.prompt}`)
-      }
-      const hits = results.filter((r) => r.delegated > 0).length
-      console.log(`\nnamed: ${hits}/${results.length}`)
+      const cases = named('Claude')
+      const results = []
+      for (const c of cases) results.push({ ...(await codexAttempt(c.prompt)), want: c.want })
 
       // 전부를 요구하지 않는다 — 모델 선택이라 결정적이지 않고, 그걸 100% 로 못 박으면 테스트가
       // 사실이 아니라 소원이 된다. 과반이면 문구가 이기고 있다고 본다.
-      expect(hits * 2).toBeGreaterThan(results.length)
+      expect(report('codex ', results) * 2).toBeGreaterThan(results.length)
     },
-    NAMED.length * 120_000
+    named('Claude').length * 120_000
   )
 
   it(
@@ -184,11 +269,36 @@ describe.skipIf(!ENABLED || !CODEX || !existsSync(SERVER))('모델이 위임 도
       // 실패로 판정하지 않는다. 위임을 너무 세게 밀어붙여 **아무 서브에이전트나 이 도구로**
       // 흘러가는 과교정을 눈으로 보기 위한 관찰용이다.
       for (const prompt of UNNAMED) {
-        const r = await attempt(prompt)
-        console.log(`unnamed  delegated=${r.delegated}  ${r.prompt}`)
+        const r = await codexAttempt(prompt)
+        console.log(`codex  unnamed  delegated=${r.delegated}  ${r.prompt}`)
       }
       expect(true).toBe(true)
     },
     UNNAMED.length * 120_000
+  )
+})
+
+describe.skipIf(!ENABLED || !CLAUDE)('Claude 메인', () => {
+  it(
+    '제품을 지목한 요청은 위임으로 간다',
+    async () => {
+      const cases = named('Codex')
+      const results = []
+      for (const c of cases) results.push({ ...(await claudeAttempt(c.prompt)), want: c.want })
+      expect(report('claude', results) * 2).toBeGreaterThan(results.length)
+    },
+    named('Codex').length * 180_000
+  )
+
+  it(
+    '제품을 지목하지 않은 요청은 네이티브로 가도 된다',
+    async () => {
+      for (const prompt of UNNAMED) {
+        const r = await claudeAttempt(prompt)
+        console.log(`claude unnamed  delegated=${r.delegated}  ${r.prompt}`)
+      }
+      expect(true).toBe(true)
+    },
+    UNNAMED.length * 180_000
   )
 })
