@@ -4,6 +4,7 @@ import { createServer, type Server } from 'node:net'
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
+import { agentToolsFor } from '../agent/tools/catalog'
 
 /**
  * 빌드된 shim 을 **실제 프로세스로 띄워** MCP 규약과 소켓 전달을 확인한다.
@@ -90,11 +91,10 @@ describe.skipIf(!existsSync(SHIM))('codex tool shim', () => {
 
     h.send({ id: 2, method: 'tools/list', params: {} })
     const list = (await h.next(2)).result as { tools: Array<{ name: string }> }
-    expect(list.tools.map((t) => t.name)).toEqual([
-      'create_stacked_workspace',
-      'report_to_parent',
-      'check_stacked_work'
-    ])
+    // 소스 카탈로그와 **빌드된 산출물**이 같은지를 본다. 이름을 여기 베껴 두면 도구를 하나
+    // 더할 때마다 전송 테스트가 깨질 뿐, 정작 확인하려는 것(빌드가 최신 카탈로그를 실었는가)은
+    // 확인되지 않는다. 위임 백엔드 없이 띄웠으므로 shim 이 계산하는 것도 agentToolsFor() 다.
+    expect(list.tools.map((t) => t.name)).toEqual(agentToolsFor().map((t) => t.name))
   })
 
   it('모든 도구 스키마에 workspaceId 를 필수로 더한다', async () => {
