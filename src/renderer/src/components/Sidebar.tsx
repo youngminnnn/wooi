@@ -727,18 +727,7 @@ function WorkspaceRow({
                 돈다"를 알린다 — 마크만 보고 단일 에이전트로 오해하지 않게 한다. */}
             {showAgent && (
               <span
-                className={
-                  'shrink-0 flex items-center gap-0.5 text-neutral-500 ' +
-                  // 멀티 에이전트면 마크들을 테두리로 묶어 **하나의 라벨**로 읽히게 한다.
-                  //
-                  // 처음에는 행 배경을 옅게 깔았는데, 목록에서 배경색은 "안 읽음 · 변경됨" 같은
-                  // **상태**로 읽힌다(실제로 그렇게 읽혔다). 분류는 상태가 아니므로 자리를 바꿨다 —
-                  // 테두리 친 칩은 "이 행은 이런 종류다" 라는 뜻으로 읽히고, 배경과 달리 다른
-                  // 행 상태(선택 · 호버 · 실행 중)와 의미가 겹치지 않는다.
-                  (multiAgent.active
-                    ? 'rounded border border-[var(--border-2)] bg-[var(--surface-2)] px-1 py-px'
-                    : '')
-                }
+                className="shrink-0 flex items-center text-neutral-500"
                 title={
                   multiAgent.active
                     ? `Multi-agent — ${AGENT_BACKEND_LABELS[workspace.agentBackend]} is the main agent and can run subagents on ${multiAgent.others
@@ -748,11 +737,16 @@ function WorkspaceRow({
                 }
               >
                 <AgentBackendMark backend={workspace.agentBackend} size={10} />
-                {/* 나머지 제품의 마크를 흐리게 이어 붙인다. 사람 아이콘 하나보다 이쪽이 낫다 —
-                    "여럿" 이라는 것뿐 아니라 **무엇을** 쓸 수 있는지까지 한눈에 읽히고, 단일
-                    에이전트 행(마크 1개)과 폭·모양이 확실히 달라진다. */}
+                {/* 나머지 제품의 마크를 살짝 겹쳐 쌓는다(아바타 스택).
+                    테두리 친 칩도 써 봤지만 분명한 대신 보기 싫었고, 그 앞의 행 배경 틴트는
+                    "안 읽음" 으로 읽혔다. 겹침은 상자도 배경도 쓰지 않으면서 "여럿" 을 형태로
+                    말한다 — 마크 1개와 2개는 훑을 때 바로 갈린다.
+                    링은 사이드바 배경색이라, 겹친 마크 사이가 깨끗하게 끊겨 보인다. */}
                 {multiAgent.others.map((backend) => (
-                  <span key={backend} className="opacity-45">
+                  <span
+                    key={backend}
+                    className="-ml-[3px] rounded-full ring-2 ring-[var(--bg-2)] opacity-70"
+                  >
                     <AgentBackendMark backend={backend} size={10} />
                   </span>
                 ))}
