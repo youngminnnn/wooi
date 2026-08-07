@@ -717,6 +717,8 @@ export interface PostedCommentResult {
   url?: string
   /** ISO 8601. 이 시각 이후의 남의 코멘트만 새 활동으로 본다. */
   createdAt?: string
+  /** 답글이면 GitHub 이 정해 준 **스레드 루트** id. 어느 스레드에 붙었는지의 유일한 근거다. */
+  inReplyToId?: number
   error?: string
 }
 
@@ -750,8 +752,14 @@ async function ghApiPost(
       id?: number
       html_url?: string
       created_at?: string
+      in_reply_to_id?: number | null
     }
-    return { id: created.id, url: created.html_url, createdAt: created.created_at }
+    return {
+      id: created.id,
+      url: created.html_url,
+      createdAt: created.created_at,
+      inReplyToId: created.in_reply_to_id ?? undefined
+    }
   } catch {
     // 게시 자체는 성공했으므로 식별자만 비운다.
     return {}
@@ -828,6 +836,8 @@ export interface GhReviewComment {
   /** 코멘트가 붙은 줄. diff 에서 밀려나면 null 이 온다 → original_line 으로 폴백. */
   line?: number | null
   original_line?: number | null
+  /** diff 안에서의 위치. 코멘트가 밀려나면(= GitHub 의 Outdated) null 이 온다. */
+  position?: number | null
   html_url: string
 }
 

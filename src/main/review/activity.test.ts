@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import type { GhIssueComment, GhReviewComment } from '../github'
-import { detectNewActivity, type DetectActivityInput } from './activity'
+import { detectNewActivity, detectOutdatedComments, type DetectActivityInput } from './activity'
 
 function rc(over: Partial<GhReviewComment> & { id: number }): GhReviewComment {
   return {
@@ -155,5 +155,35 @@ describe('detectNewActivity — 첫 폴링', () => {
     )
     expect(r.items).toHaveLength(1)
     expect(r.nextSince).toBe('2026-01-02T00:00:00Z')
+  })
+})
+
+describe('detectOutdatedComments', () => {
+  /** GitHub 은 코멘트가 밀려나면 position·line 을 둘 다 비우고 원래 자리만 남긴다. */
+  it('position·line 이 모두 비면 낡은 것으로 본다', () => {
+    const map = detectOutdatedComments(
+      [rc({ id: 100, position: null, line: null, original_line: 12 })],
+      [100]
+    )
+    expect(map.get(100)).toBe(true)
+  })
+
+  it('아직 diff 에 남아 있으면 낡지 않았다', () => {
+    const map = detectOutdatedComments([rc({ id: 100, position: 4, line: 12 })], [100])
+    expect(map.get(100)).toBe(false)
+  })
+
+  it('내가 단 코멘트가 아니면 판단하지 않는다', () => {
+    const map = detectOutdatedComments([rc({ id: 7, position: null, line: null })], [100])
+    expect(map.has(7)).toBe(false)
+  })
+
+  /**
+   * 목록에 없는 코멘트를 "낡았다" 로 뒤집으면, 응답을 한 번 못 받은 것만으로 멀쩡한 지적이
+   * 조용히 힘을 잃는다 — 모르는 것은 그대로 둔다.
+   */
+  it('목록에 없는 코멘트는 손대지 않는다', () => {
+    const map = detectOutdatedComments([], [100])
+    expect(map.size).toBe(0)
   })
 })

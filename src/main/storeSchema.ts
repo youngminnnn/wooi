@@ -25,7 +25,7 @@ const DEFAULT_MODEL = CLAUDE_DEFAULT_MODEL
  * 디스크 영속 형식의 현재 스키마 버전. 영속 데이터 모양이 바뀔 때마다 1 올리고,
  * MIGRATIONS 에 직전 버전 → 새 버전 변환 함수를 추가한다.
  */
-export const CURRENT_SCHEMA_VERSION = 17
+export const CURRENT_SCHEMA_VERSION = 18
 
 /**
  * v12 이하의 settings 모양. 그 시절엔 에이전트가 Claude 하나뿐이라 모델·effort·fast mode·
@@ -333,6 +333,18 @@ export const MIGRATIONS: Array<(raw: Record<string, unknown>) => Record<string, 
       const { body: _body, headSha: _sha, ...rest } = last
       return { ...r, lastSubmission: rest }
     })
+    return { ...raw, reviews }
+  },
+
+  // v17 → v18: 리뷰가 자기 모델·추론 강도를 들고 다닌다(시작할 때 고른 값으로 후속 턴까지 돈다).
+  // 옛 리뷰는 무엇으로 돌았는지 알 길이 없으므로 비워 두고, 후속 턴은 지금까지처럼 전역
+  // 기본값으로 떨어진다.
+  (raw) => {
+    const reviews = ((raw.reviews as Partial<ReviewSession>[]) ?? []).map((r) => ({
+      ...r,
+      model: r.model ?? null,
+      effort: r.effort ?? null
+    }))
     return { ...raw, reviews }
   }
 ]
