@@ -75,7 +75,13 @@ describe('codex exec JSONL 읽기', () => {
     })
     const { progress } = read([started])
     expect(progress).toHaveLength(1)
-    expect(progress[0]).toMatchObject({ kind: 'tool', text: "$ /bin/zsh -lc 'ls package.json'" })
+    // 이름과 인자를 나눠 싣는다 — 화면이 워크스페이스 대화와 같은 도구 행으로 그린다.
+    expect(progress[0]).toMatchObject({
+      kind: 'tool',
+      name: 'Bash',
+      detail: "/bin/zsh -lc 'ls package.json'",
+      text: "Bash  /bin/zsh -lc 'ls package.json'"
+    })
   })
 
   // 항목 하나가 started·completed 로 두 번 온다. 그대로 두면 진행 로그가 전부 겹쳐 보인다.

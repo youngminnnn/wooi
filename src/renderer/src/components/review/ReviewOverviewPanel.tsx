@@ -1,8 +1,6 @@
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
-import rehypeHighlight from 'rehype-highlight'
 import type { ReviewSession } from '@shared/types'
 import type { ReviewViewState } from '../../lib/review'
+import { MarkdownBody } from '../ChatPrimitives'
 import ReviewFindingCard from './ReviewFindingCard'
 
 /**
@@ -26,9 +24,7 @@ export default function ReviewOverviewPanel({
         <div className="border-b border-[var(--border)] p-3">
           <h3 className="mb-1.5 text-xs font-medium text-neutral-400">Summary</h3>
           <div className="md text-sm text-neutral-300">
-            <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
-              {session.summary}
-            </ReactMarkdown>
+            <MarkdownBody text={session.summary} />
           </div>
         </div>
       )}

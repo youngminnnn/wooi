@@ -8,6 +8,7 @@ import type {
   CarryFailure,
   ChatEnvelope,
   ChatItem,
+  EffortSetting,
   GitStatus,
   ImageAttachment,
   ModelOption,
@@ -447,6 +448,9 @@ interface UIState {
     prNumber: number
     prompt: string
     agentBackend: AgentBackendId
+    /** 생략하면 그 에이전트의 전역 기본값으로 돈다(모달의 "Default"). */
+    model?: string | null
+    effort?: EffortSetting | null
   }) => Promise<void>
   /** 사이드바에서 리뷰를 골라 화면에 띄운다(사이드카를 아직 안 읽었으면 함께 읽는다). */
   openReview: (reviewId: string) => void
@@ -1720,10 +1724,19 @@ export const useStore = create<UIState>((set, get) => ({
 
   // ── PR 리뷰 모드 ─────────────────────────────────────────────────────────
 
-  startReview: async ({ repoId, prNumber, prompt, agentBackend }) => {
+  startReview: async ({ repoId, prNumber, prompt, agentBackend, model, effort }) => {
     // PR 조회도 코멘트 게시도 gh 를 쓰므로 다른 PR 기능과 같은 지연 게이트를 태운다.
     await get().requireGithub('Reviewing a pull request needs GitHub.', async () => {
-      const res = await window.api.review.start({ repoId, prNumber, prompt, agentBackend })
+      // model·effort 는 **키를 아예 빼야** main 이 전역 기본값으로 해석한다(null 은 "에이전트가
+      // 알아서" 라는 다른 뜻이다).
+      const res = await window.api.review.start({
+        repoId,
+        prNumber,
+        prompt,
+        agentBackend,
+        ...(model !== undefined ? { model } : {}),
+        ...(effort !== undefined ? { effort } : {})
+      })
       if (res.error || !res.reviewId) {
         get().pushToast('error', res.error ?? 'Failed to start the review.')
         return

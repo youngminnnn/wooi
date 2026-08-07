@@ -107,6 +107,29 @@ export function detectNewActivity(input: DetectActivityInput): DetectActivityRes
   return { items, nextSince: newest, nextHeadSha }
 }
 
+/**
+ * 내가 단 인라인 코멘트 중 최신 diff 에서 밀려난 것(GitHub 의 "Outdated") 을 가려낸다.
+ *
+ * GitHub 은 코멘트가 밀려나면 `position` 과 `line` 을 **둘 다** null 로 준다(원래 자리는
+ * `original_line` 에 남는다). 한쪽만 보면 파일 단위 코멘트처럼 원래 줄이 없는 것까지 낡은
+ * 것으로 몰기 쉬워, 두 값이 모두 비었을 때만 낡은 것으로 본다.
+ *
+ * 목록에 없는 코멘트(상대가 지웠거나 아직 못 받은 경우)는 판단하지 않는다 — 모르는 것을
+ * "낡았다" 고 표시하면 멀쩡한 지적이 조용히 힘을 잃는다.
+ */
+export function detectOutdatedComments(
+  reviewComments: GhReviewComment[],
+  postedIds: number[]
+): Map<number, boolean> {
+  const wanted = new Set(postedIds)
+  const out = new Map<number, boolean>()
+  for (const c of reviewComments) {
+    if (!wanted.has(c.id)) continue
+    out.set(c.id, c.position == null && c.line == null)
+  }
+  return out
+}
+
 /** 새 활동 항목에 붙일 안정적인 id 가 없을 때(수동 추가 등) 쓰는 생성기. */
 export function activityId(): string {
   return randomUUID()

@@ -289,8 +289,17 @@ function consume(
         return
       }
       if (!markSeen(seen, item)) return
-      const line = describeItem(item)
-      if (line) onProgress({ id: randomUUID(), kind: 'tool', text: line, ts: Date.now() })
+      const tool = describeItem(item)
+      if (tool) {
+        onProgress({
+          id: randomUUID(),
+          kind: 'tool',
+          name: tool.name,
+          detail: tool.detail,
+          text: tool.detail ? `${tool.name}  ${tool.detail}` : tool.name,
+          ts: Date.now()
+        })
+      }
       return
     }
 
@@ -328,20 +337,23 @@ function parseArtifact(text: string): ReviewArtifact | null {
   }
 }
 
-/** 진행 항목 한 줄. Claude 쪽 describeTool 과 같은 어휘("도구 이름 + 힌트")를 유지한다. */
-function describeItem(item: CodexItem): string | null {
-  const name = item.type ?? 'work'
-  switch (name) {
+/**
+ * 진행 항목 한 줄. Claude 쪽과 같은 어휘("도구 이름 + 인자 요약")로 맞춘다 — 화면은 두
+ * 백엔드를 같은 도구 행으로 그리므로, 여기서 모양이 갈리면 리뷰만 딴 제품처럼 보인다.
+ * 도구 이름도 워크스페이스 대화의 Codex 매핑(WebSearch, server/tool)과 같은 것을 쓴다.
+ */
+function describeItem(item: CodexItem): { name: string; detail: string } | null {
+  switch (item.type ?? 'work') {
     case 'command_execution':
-      return item.command ? `$ ${truncate(item.command)}` : 'Ran a command'
+      return { name: 'Bash', detail: truncate(item.command ?? '') }
     case 'file_change':
-      return `Read ${truncate(item.path ?? 'a file')}`
+      return { name: 'Read', detail: truncate(item.path ?? 'a file') }
     case 'web_search':
-      return `Searched the web  ${truncate(item.query ?? '')}`.trim()
+      return { name: 'WebSearch', detail: truncate(item.query ?? '') }
     case 'mcp_tool_call':
-      return `${item.server ?? 'mcp'}/${item.tool ?? 'tool'}`
+      return { name: `${item.server ?? 'mcp'}/${item.tool ?? 'tool'}`, detail: '' }
     case 'error':
-      return item.message ? truncate(item.message) : null
+      return item.message ? { name: 'Error', detail: truncate(item.message) } : null
     // reasoning·todo_list 등은 굳이 진행 로그에 남기지 않는다 — 잡음만 늘린다.
     default:
       return null
