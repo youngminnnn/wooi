@@ -67,7 +67,8 @@ function inputSchemaOf(shape: z.ZodRawShape): Record<string, unknown> {
 }
 
 function tools(): unknown[] {
-  return agentToolsFor(DELEGATE_BACKENDS).map((spec) => ({
+  // Codex 는 도구 호출을 직렬화한다 — 설명이 그 사실을 반영해야 한다(catalog.ts).
+  return agentToolsFor(DELEGATE_BACKENDS, true).map((spec) => ({
     name: spec.name,
     description: spec.description,
     inputSchema: inputSchemaOf(spec.inputSchema),

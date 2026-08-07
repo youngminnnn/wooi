@@ -1,4 +1,4 @@
-import { experimentsOf, type Workspace } from '@shared/types'
+import { experimentsOf, type AgentBackendId, type Workspace } from '@shared/types'
 import { useStore } from '../store'
 import { useAvailableBackends } from './backends'
 
@@ -18,6 +18,13 @@ export interface MultiAgentState {
   canUse: boolean
   /** 지금 **실제로** 켜져 있는가. 배지·표시는 이 값만 본다. */
   active: boolean
+  /**
+   * 메인이 아닌, 이 워크스페이스에서 서브에이전트로 쓸 수 있는 종류들.
+   *
+   * 사이드바가 마크를 이어 붙이는 데 쓴다 — "여럿" 이라는 사실뿐 아니라 **무엇을** 쓸 수 있는지
+   * 보여 주기 위해서다. 꺼져 있으면 빈 배열이다.
+   */
+  others: AgentBackendId[]
 }
 
 export function useMultiAgent(workspace: Workspace): MultiAgentState {
@@ -29,5 +36,10 @@ export function useMultiAgent(workspace: Workspace): MultiAgentState {
     available.find((b) => b.id === workspace.agentBackend)?.capabilities.delegate
   )
   const canUse = experiment && canCoordinate && available.length > 1
-  return { canUse, active: canUse && workspace.multiAgent === true }
+  const active = canUse && workspace.multiAgent === true
+  return {
+    canUse,
+    active,
+    others: active ? available.filter((b) => b.id !== workspace.agentBackend).map((b) => b.id) : []
+  }
 }

@@ -140,8 +140,12 @@ export const AGENT_TOOLS: AgentToolSpec[] = [
  * 에이전트 워크스페이스에만 있어야 한다. 늘 노출해 두고 호출 시점에 거절하면 모델에게 쓸 수 없는
  * 도구를 보여 주는 셈이라 계약이 나쁘다 — 없는 것은 보이지 않아야 한다.
  */
-export function agentToolsFor(delegateBackends: AgentBackendId[] = []): AgentToolSpec[] {
-  return [...AGENT_TOOLS, ...delegateToolSpecs(delegateBackends)]
+export function agentToolsFor(
+  delegateBackends: AgentBackendId[] = [],
+  /** 부르는 쪽이 도구 호출을 직렬화하는가(Codex). 설명 문구가 달라진다. */
+  serialized = false
+): AgentToolSpec[] {
+  return [...AGENT_TOOLS, ...delegateToolSpecs(delegateBackends, serialized)]
 }
 
 /**
@@ -154,7 +158,18 @@ export function agentToolsFor(delegateBackends: AgentBackendId[] = []): AgentToo
  *
  * 도구 이름은 사용자가 CLAUDE.md 규칙에 적게 되므로 한번 정하면 바꾸기 어렵다.
  */
-export function delegateToolSpecs(backends: AgentBackendId[]): AgentToolSpec[] {
+export function delegateToolSpecs(
+  backends: AgentBackendId[],
+  /**
+   * 부르는 쪽이 도구 호출을 **직렬화**하는가.
+   *
+   * Codex 가 그렇다(실측: 두 서브에이전트를 요청하면 42초 간격으로 하나씩 시작했고, 겹치는 구간이
+   * 0 이었다). Claude 는 한 메시지에 여러 tool_use 를 실어 겹쳐 돌린다. 우리 도구는 분 단위로
+   * 블로킹하므로 이 차이가 사용자에게 그대로 보인다 — "둘 다 동시에 돌려서 비교해줘" 가 순차가
+   * 된다. 모델이 미리 알고 말해 줄 수 있도록 설명에 적는다.
+   */
+  serialized = false
+): AgentToolSpec[] {
   return backends.map((backend) => {
     const label = AGENT_BACKEND_LABELS[backend] ?? backend
     return {
@@ -164,8 +179,11 @@ export function delegateToolSpecs(backends: AgentBackendId[]): AgentToolSpec[] {
         `It really runs on ${label} — not on your own model.`,
         `Use this whenever the user asks for a ${label} subagent, or asks ${label} to do`,
         'something, by name. Your own built-in subagent mechanism cannot run this product, so a',
-        'request naming it is always this tool. Call it once per subagent you want; several can',
-        'run at the same time.',
+        'request naming it is always this tool. Call it once per subagent you want.',
+        serialized
+          ? 'Your tool calls run one after another, so several subagents finish in sequence, not' +
+            ' at the same time — say so if the user expects them to run together.'
+          : 'Several can run at the same time.',
         'The subagent works in this same worktree under your permission mode, starts from an',
         'empty context, and reports back exactly once as text — it cannot ask you anything',
         'mid-run, so put everything it needs into the prompt.'
@@ -183,7 +201,12 @@ export function delegateToolSpecs(backends: AgentBackendId[]): AgentToolSpec[] {
               'this conversation, so restate every fact it needs: files, constraints, and what to return.'
           )
       },
-      annotations: { title: `Run a ${label} subagent`, readOnlyHint: false }
+      annotations: { title: `Run a ${label} subagent`, readOnlyHint: false },
+      // 지연 로딩(tool search) 뒤에 두지 않는다. 실측에서 모델이 이 도구를 쓰기 전에 ToolSearch
+      // 로 먼저 찾아 왔는데, 그건 **이름을 이미 알 때** 통하는 경로다. "codex 한테 시켜줘" 처럼
+      // 이름 없이 말한 요청은 검색 단계에서 놓칠 수 있고, 그게 Codex 에서 겪은 "존재를 모른다"
+      // 와 같은 실패다. 비용은 멀티 에이전트 워크스페이스에만 붙는다 — 그 외에는 도구 자체가 없다.
+      alwaysLoad: true
     }
   })
 }

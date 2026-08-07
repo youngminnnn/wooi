@@ -676,7 +676,10 @@ function WorkspaceRow({
             : // 키보드로 액션에 포커스가 들어오거나 메뉴가 열려 있으면, 오버레이 배경색과 어긋나지
               // 않게 행도 같이 밝힌다(메뉴를 띄운 뒤 커서가 행을 벗어나도 대상이 유지돼 보인다).
               'hover:bg-[var(--surface)] focus-within:bg-[var(--surface)] ' +
-              (menuAt ? 'bg-[var(--surface)]' : ''))
+              (menuAt ? 'bg-[var(--surface)]' : '') +
+              // 멀티 에이전트 행은 은은하게 깔아 목록에서 구분된다. 선택 행에는 얹지 않는다 —
+              // 거기는 이미 배경과 좌측 액센트가 있어서 겹치면 둘 다 흐려진다.
+              (multiAgent.active ? ' bg-[var(--info-500)]/[0.07]' : ''))
         }
       >
         <StatusDot
@@ -730,12 +733,21 @@ function WorkspaceRow({
                 className="shrink-0 flex items-center gap-0.5 text-neutral-500"
                 title={
                   multiAgent.active
-                    ? `Multi-agent — ${AGENT_BACKEND_LABELS[workspace.agentBackend]} can run tasks with other agents`
+                    ? `Multi-agent — ${AGENT_BACKEND_LABELS[workspace.agentBackend]} is the main agent and can run subagents on ${multiAgent.others
+                        .map((b) => AGENT_BACKEND_LABELS[b])
+                        .join(', ')}`
                     : `Running on ${AGENT_BACKEND_LABELS[workspace.agentBackend]}`
                 }
               >
                 <AgentBackendMark backend={workspace.agentBackend} size={10} />
-                {multiAgent.active && <Users size={10} />}
+                {/* 나머지 제품의 마크를 흐리게 이어 붙인다. 사람 아이콘 하나보다 이쪽이 낫다 —
+                    "여럿" 이라는 것뿐 아니라 **무엇을** 쓸 수 있는지까지 한눈에 읽히고, 단일
+                    에이전트 행(마크 1개)과 폭·모양이 확실히 달라진다. */}
+                {multiAgent.others.map((backend) => (
+                  <span key={backend} className="opacity-45">
+                    <AgentBackendMark backend={backend} size={10} />
+                  </span>
+                ))}
               </span>
             )}
             <GitBranch size={10} className="shrink-0" />
