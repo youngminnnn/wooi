@@ -123,6 +123,22 @@ export const AGENT_TOOLS: AgentToolSpec[] = [
     ].join(' '),
     inputSchema: {},
     annotations: { title: 'Check stacked workspaces', readOnlyHint: true }
+  },
+  {
+    name: 'open_pull_request',
+    description: [
+      'Open a pull request for this workspace’s branch, pushing it to the remote first if needed.',
+      '',
+      'There is no base argument: Wooi targets the parent workspace’s branch when this one is',
+      'stacked, and the repository’s default branch otherwise. Use this rather than `gh pr create`,',
+      'which cannot know that and silently targets the default branch.'
+    ].join(' '),
+    inputSchema: {
+      title: z.string().describe('Pull request title.'),
+      body: z.string().describe('Pull request description, in Markdown.'),
+      draft: z.boolean().optional().describe('Open it as a draft. Defaults to false.')
+    },
+    annotations: { title: 'Open a pull request', readOnlyHint: false }
   }
 ]
 

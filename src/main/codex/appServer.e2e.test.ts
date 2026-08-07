@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { WOOI_MCP_SERVER_NAME } from '../agent/tools/catalog'
+import { AGENT_TOOLS, WOOI_MCP_SERVER_NAME } from '../agent/tools/catalog'
 import { AppServer } from './appServer'
 import { RPC } from './wire'
 import { turnPolicyFor } from './modes'
@@ -131,11 +131,9 @@ describe.skipIf(!CODEX)('codex app-server (실물)', () => {
 
         const wooi = list?.data?.find((s) => s.name === WOOI_MCP_SERVER_NAME)
         expect(wooi, 'wooi server not registered').toBeDefined()
-        expect(Object.keys(wooi?.tools ?? {}).sort()).toEqual([
-          'check_stacked_work',
-          'create_stacked_workspace',
-          'report_to_parent'
-        ])
+        // 목록을 여기 베껴 두지 않는다 — 이 테스트가 확인하는 것은 "카탈로그가 그대로 발견되는가"
+        // 이지 카탈로그의 내용이 아니다. 베껴 두면 도구를 하나 더할 때마다 무관한 전송 테스트가 깨진다.
+        expect(Object.keys(wooi?.tools ?? {}).sort()).toEqual(AGENT_TOOLS.map((t) => t.name).sort())
       } finally {
         delete process.env.WOOI_TOOL_SOCKET
         delete process.env.WOOI_TOOL_SHIM
