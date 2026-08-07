@@ -182,6 +182,27 @@ export const AGENT_TOOLS: AgentToolSpec[] = [
         .describe('How many trailing lines to return. Defaults to 200, capped at 500.')
     },
     annotations: { title: 'Read script output', readOnlyHint: true }
+  },
+  {
+    name: 'check_related_work',
+    description: [
+      'List the other workspaces open on this repository — parents, children and unrelated',
+      'siblings alike — with the file paths each is changing and which of those you also touch.',
+      'Paths only, never diffs.',
+      '',
+      'Call it before starting a change that spans several files or a refactor, so you find out',
+      'about a collision now instead of at merge time. It is not a per-turn check.'
+    ].join(' '),
+    inputSchema: {
+      paths: z
+        .array(z.string())
+        .optional()
+        .describe(
+          'Repository-relative paths you are about to change. Omit to compare against what this ' +
+            'workspace has already changed.'
+        )
+    },
+    annotations: { title: 'Check related work', readOnlyHint: true }
   }
 ]
 
