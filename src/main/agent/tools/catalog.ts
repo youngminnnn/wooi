@@ -139,6 +139,42 @@ export const AGENT_TOOLS: AgentToolSpec[] = [
       draft: z.boolean().optional().describe('Open it as a draft. Defaults to false.')
     },
     annotations: { title: 'Open a pull request', readOnlyHint: false }
+  },
+  {
+    name: 'run_script',
+    description: [
+      'Run this repository’s setup or dev script, restarting it if it is already running.',
+      'Use this rather than running the command yourself: it outlives your session and its output',
+      'goes to the panel the user is watching, so you both read the same log.'
+    ].join(' '),
+    inputSchema: {
+      kind: z.enum(['setup', 'dev']).describe('Which script to run.')
+    },
+    annotations: { title: 'Run a repository script', readOnlyHint: false }
+  },
+  {
+    name: 'stop_script',
+    description: 'Stop this workspace’s setup or dev script if it is running.',
+    inputSchema: {
+      kind: z.enum(['setup', 'dev']).describe('Which script to stop.')
+    },
+    annotations: { title: 'Stop a repository script', readOnlyHint: false }
+  },
+  {
+    name: 'read_script_output',
+    description: [
+      'Read a script’s recent output, along with whether it is still running and its exit code.',
+      'The output is truncated from the start — you always get the end, where the errors are.'
+    ].join(' '),
+    inputSchema: {
+      kind: z.enum(['setup', 'dev']).describe('Which script to read.'),
+      tailLines: z
+        .number()
+        .int()
+        .optional()
+        .describe('How many trailing lines to return. Defaults to 200, capped at 500.')
+    },
+    annotations: { title: 'Read script output', readOnlyHint: true }
   }
 ]
 

@@ -28,7 +28,9 @@ beforeEach(() => {
   cancelToolPermissions()
   initToolPermission({ dispatch: (r) => cards.push(r) })
   state.workspaces = [{ id: 'ws-parent', branch: 'feat/base' }]
-  state.repos = [{ id: 'repo-1', defaultBranch: 'main' }]
+  state.repos = [
+    { id: 'repo-1', defaultBranch: 'main', setupScript: 'npm install', devScript: 'npm run dev' }
+  ]
 })
 
 function workspace(over: Partial<Workspace> = {}): Workspace {
@@ -97,6 +99,23 @@ describe('ensureToolApproved', () => {
 
     answer('allow')
     await expect(pending).resolves.toBeUndefined()
+  })
+
+  it('스크립트 카드는 실제로 돌아갈 명령을 보여 준다', async () => {
+    const pending = ensureToolApproved(workspace(), 'run_script', { kind: 'dev' })
+    await vi.waitFor(() => expect(cards).toHaveLength(1))
+
+    expect(cards[0].title).toContain('`npm run dev`')
+
+    answer('allow')
+    await expect(pending).resolves.toBeUndefined()
+  })
+
+  it('스크립트 출력 읽기는 묻지 않는다 — 매번 카드가 뜨면 검증 루프를 못 쓴다', async () => {
+    await expect(
+      ensureToolApproved(workspace(), 'read_script_output', { kind: 'dev' })
+    ).resolves.toBeUndefined()
+    expect(cards).toHaveLength(0)
   })
 
   it('읽기 전용 도구는 묻지 않는다', async () => {
