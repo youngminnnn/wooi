@@ -727,7 +727,7 @@ function WorkspaceRow({
                 돈다"를 알린다 — 마크만 보고 단일 에이전트로 오해하지 않게 한다. */}
             {showAgent && (
               <span
-                className="shrink-0 flex items-center text-neutral-500"
+                className="shrink-0 flex items-center gap-0.5 text-neutral-500"
                 title={
                   multiAgent.active
                     ? `Multi-agent — ${AGENT_BACKEND_LABELS[workspace.agentBackend]} is the main agent and can run subagents on ${multiAgent.others
@@ -737,19 +737,11 @@ function WorkspaceRow({
                 }
               >
                 <AgentBackendMark backend={workspace.agentBackend} size={10} />
-                {/* 나머지 제품의 마크를 살짝 겹쳐 쌓는다(아바타 스택).
-                    테두리 친 칩도 써 봤지만 분명한 대신 보기 싫었고, 그 앞의 행 배경 틴트는
-                    "안 읽음" 으로 읽혔다. 겹침은 상자도 배경도 쓰지 않으면서 "여럿" 을 형태로
-                    말한다 — 마크 1개와 2개는 훑을 때 바로 갈린다.
-                    링은 사이드바 배경색이라, 겹친 마크 사이가 깨끗하게 끊겨 보인다. */}
-                {multiAgent.others.map((backend) => (
-                  <span
-                    key={backend}
-                    className="-ml-[3px] rounded-full ring-2 ring-[var(--bg-2)] opacity-70"
-                  >
-                    <AgentBackendMark backend={backend} size={10} />
-                  </span>
-                ))}
+                {/* 멀티 에이전트 표시. 마크를 종류마다 하나씩 늘어놓지 않는 이유는 확장성이다 —
+                    에이전트가 셋 이상이면 10px 안에서 뭉갠다. 이 글리프 하나가 개수와 무관하게
+                    "메인 말고도 더 있다" 를 말하고, 무엇이 있는지는 툴팁이 답한다.
+                    색이 흐르는 처리는 index.css 참고(왜 배경이 아니라 색인지도 거기 적혀 있다). */}
+                {multiAgent.active && <Users size={10} className="multi-agent-mark" />}
               </span>
             )}
             <GitBranch size={10} className="shrink-0" />

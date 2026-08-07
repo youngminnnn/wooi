@@ -328,7 +328,7 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
                 className="shrink-0 flex items-center gap-1 rounded px-1.5 py-0.5 bg-[var(--surface-2)] text-neutral-400"
                 title={`Multi-agent — ask ${agentLabel} to run a task with another agent (e.g. “have Codex review this”)`}
               >
-                <Users size={10} />
+                <Users size={10} className="multi-agent-mark" />
                 Multi-agent
               </span>
             )}
