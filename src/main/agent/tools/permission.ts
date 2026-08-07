@@ -8,6 +8,7 @@ import {
   type Workspace
 } from '@shared/types'
 import { isReadOnlyToolName } from './catalog'
+import { resolvePrBase } from './pullRequest'
 
 /**
  * 소켓으로 들어온 Wooi 도구 호출에 사용자 승인을 받는다.
@@ -83,7 +84,7 @@ export async function ensureToolApproved(
       workspaceId: workspace.id,
       toolName: `mcp__wooi__${tool}`,
       displayName: TOOL_LABELS[tool] ?? tool,
-      title: titleFor(tool, args),
+      title: titleFor(tool, args, workspace),
       input: (args ?? {}) as Record<string, unknown>
     })
   })
@@ -150,11 +151,12 @@ function clampForCard(input: Record<string, unknown>): Record<string, unknown> {
 /** 버튼 라벨용 짧은 명사구. 카탈로그의 annotations.title 과 같은 문구를 쓴다. */
 const TOOL_LABELS: Record<string, string> = {
   create_stacked_workspace: 'Create a stacked workspace',
-  report_to_parent: 'Report to the parent workspace'
+  report_to_parent: 'Report to the parent workspace',
+  open_pull_request: 'Open a pull request'
 }
 
 /** 카드 한 줄 설명. 무엇이 일어나는지 사용자가 보고 판단할 수 있어야 한다. */
-function titleFor(tool: string, args: unknown): string {
+function titleFor(tool: string, args: unknown, workspace: Workspace): string {
   const a = (args ?? {}) as Record<string, unknown>
   if (tool === 'create_stacked_workspace') {
     const name = typeof a.name === 'string' && a.name.trim() ? ` on \`${a.name.trim()}\`` : ''
@@ -163,6 +165,13 @@ function titleFor(tool: string, args: unknown): string {
   }
   if (tool === 'report_to_parent') {
     return 'The agent wants to report this workspace’s result back to the workspace it was stacked on.'
+  }
+  if (tool === 'open_pull_request') {
+    const draft = a.draft === true ? 'draft ' : ''
+    // base 는 모델의 인자가 아니라 앱이 정한다. 사용자가 판단하는 지점이 바로 그 값이므로
+    // 핸들러와 **같은 함수**로 다시 구해 보여 준다 — 카드의 base 와 실제 base 가 갈리면
+    // 승인이 승인이 아니게 된다.
+    return `The agent wants to open a ${draft}pull request from \`${workspace.branch}\` into \`${resolvePrBase(workspace)}\`.`
   }
   return `The agent wants to run the Wooi tool \`${tool}\`.`
 }

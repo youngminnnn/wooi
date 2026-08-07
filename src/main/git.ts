@@ -336,6 +336,53 @@ export function repoNameFromPath(path: string): string {
   return basename(path)
 }
 
+// ── PR 을 열기 전에 확인해야 하는 것들 ──────────────────────────────────────
+
+/**
+ * origin 에 이 브랜치가 이미 올라가 있는가. 아래 restack 의 remoteBranchExists 와 달리 로컬의
+ * `origin/<branch>` ref 가 아니라 **origin 에 직접** 물어본다 — PR 을 열기 직전의 판단이라,
+ * fetch 를 안 한 사이 다른 곳에서 올라간 브랜치를 "없다" 고 보면 헛된 push 를 시도하게 된다.
+ *
+ * 조회 자체가 실패하면(origin 없음·오프라인) false 로 떨어뜨린다 — 그러면 호출부가 push 를
+ * 시도하고, 진짜 원인은 push 의 에러 메시지로 드러난다. 여기서 에러를 지어내는 것보다 구체적이다.
+ */
+export async function originHasBranch(worktreePath: string, branch: string): Promise<boolean> {
+  const r = await gitTry(worktreePath, ['ls-remote', '--heads', 'origin', branch])
+  return r.ok && r.stdout.length > 0
+}
+
+/**
+ * 현재 브랜치를 origin 에 올리고 업스트림을 잡는다.
+ *
+ * 실패를 삼키지 않고 stderr 를 그대로 돌려주는 것이 요점이다 — 이 리포처럼 브랜치 이름 규칙
+ * pre-push 훅이 걸린 곳에서는 그 문장이 "무엇을 어떻게 고쳐야 하는가" 그 자체다.
+ */
+export async function pushCurrentBranch(
+  worktreePath: string
+): Promise<{ ok: boolean; error: string }> {
+  const r = await gitTry(worktreePath, ['push', '-u', 'origin', 'HEAD'])
+  return { ok: r.ok, error: r.ok ? '' : r.stderr || r.stdout || 'git push failed.' }
+}
+
+/**
+ * base 대비 HEAD 에만 있는 커밋 수. 0 이면 리뷰할 것이 없다는 뜻이다.
+ *
+ * 로컬 ref 가 없으면 origin/<base> 로 한 번 더 시도하고, 그래도 못 세면 null(판단 보류)이다 —
+ * 세지 못했다는 이유만으로 PR 을 막지는 않는다.
+ */
+export async function countCommitsAhead(
+  worktreePath: string,
+  base: string
+): Promise<number | null> {
+  for (const ref of [base, `origin/${base}`]) {
+    const r = await gitTry(worktreePath, ['rev-list', '--count', `${ref}..HEAD`])
+    if (!r.ok) continue
+    const n = parseInt(r.stdout, 10)
+    if (Number.isFinite(n)) return n
+  }
+  return null
+}
+
 /**
  * git 리모트 URL 에서 GitHub 소유자(owner) 이름을 뽑는다. GitHub 리모트가 아니면 null.
  * SSH(git@github.com:owner/repo.git)·HTTPS(https://github.com/owner/repo(.git))·
