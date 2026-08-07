@@ -676,10 +676,7 @@ function WorkspaceRow({
             : // 키보드로 액션에 포커스가 들어오거나 메뉴가 열려 있으면, 오버레이 배경색과 어긋나지
               // 않게 행도 같이 밝힌다(메뉴를 띄운 뒤 커서가 행을 벗어나도 대상이 유지돼 보인다).
               'hover:bg-[var(--surface)] focus-within:bg-[var(--surface)] ' +
-              (menuAt ? 'bg-[var(--surface)]' : '') +
-              // 멀티 에이전트 행은 은은하게 깔아 목록에서 구분된다. 선택 행에는 얹지 않는다 —
-              // 거기는 이미 배경과 좌측 액센트가 있어서 겹치면 둘 다 흐려진다.
-              (multiAgent.active ? ' bg-[var(--info-500)]/[0.07]' : ''))
+              (menuAt ? 'bg-[var(--surface)]' : ''))
         }
       >
         <StatusDot
@@ -730,7 +727,18 @@ function WorkspaceRow({
                 돈다"를 알린다 — 마크만 보고 단일 에이전트로 오해하지 않게 한다. */}
             {showAgent && (
               <span
-                className="shrink-0 flex items-center gap-0.5 text-neutral-500"
+                className={
+                  'shrink-0 flex items-center gap-0.5 text-neutral-500 ' +
+                  // 멀티 에이전트면 마크들을 테두리로 묶어 **하나의 라벨**로 읽히게 한다.
+                  //
+                  // 처음에는 행 배경을 옅게 깔았는데, 목록에서 배경색은 "안 읽음 · 변경됨" 같은
+                  // **상태**로 읽힌다(실제로 그렇게 읽혔다). 분류는 상태가 아니므로 자리를 바꿨다 —
+                  // 테두리 친 칩은 "이 행은 이런 종류다" 라는 뜻으로 읽히고, 배경과 달리 다른
+                  // 행 상태(선택 · 호버 · 실행 중)와 의미가 겹치지 않는다.
+                  (multiAgent.active
+                    ? 'rounded border border-[var(--border-2)] bg-[var(--surface-2)] px-1 py-px'
+                    : '')
+                }
                 title={
                   multiAgent.active
                     ? `Multi-agent — ${AGENT_BACKEND_LABELS[workspace.agentBackend]} is the main agent and can run subagents on ${multiAgent.others
