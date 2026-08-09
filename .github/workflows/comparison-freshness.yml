@@ -1,0 +1,91 @@
+name: comparison-freshness
+
+# docs/alternatives.html 의 비교표가 낡았는지 매달 확인하고, 손볼 게 있으면 이슈로 남긴다.
+#
+# 이 표는 경쟁 도구의 공개 문서를 특정 날짜에 읽고 쓴 것이다. 그 도구들이 기능을 추가하면
+# "문서 없음" 칸이 조용히 거짓이 된다. 우리 저장소에는 아무 변화가 없으니 CI 도 안 돌고,
+# 아무도 모른 채로 남는다 — 비교 페이지에서 가장 위험한 실패 모드가 이거다.
+#
+# 그래서 신호를 밖에서 가져온다. scripts/check-comparison-sources.mjs 가
+# (1) 기록해 둔 커밋과 업스트림의 현재 커밋을 비교하고 (2) 확인일로부터의 경과일을 본다.
+# 둘 중 하나라도 걸리면 이슈 하나를 열거나 이미 열려 있는 이슈의 본문을 갱신한다.
+# 이슈를 새로 쌓지 않고 하나를 계속 고쳐 쓰므로, 방치해도 알림이 시끄러워지지 않는다.
+#
+# 페이지 쪽 방어는 별개로 하나 더 있다 — alternatives.html 은 확인일로부터 제 나이를 계산해서
+# staleAfterDays 를 넘기면 독자에게 직접 경고를 띄운다. 이 워크플로가 잊혀도 페이지는 정직하다.
+
+on:
+  schedule:
+    # 매달 1일 04:00 UTC (KST 13:00). 표의 유효기간(120일)보다 훨씬 촘촘하다.
+    - cron: '0 4 1 * *'
+  workflow_dispatch:
+
+concurrency:
+  group: comparison-freshness
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+
+    permissions:
+      # 추적용 이슈 하나를 열고 갱신하기 위한 권한. 저장소 내용은 건드리지 않는다.
+      issues: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '20'
+
+      # npm ci 없이 돈다 — 스크립트는 표준 라이브러리와 fetch 만 쓴다.
+      - name: Check comparison sources
+        id: check
+        env:
+          # 익명 호출로도 되지만 레이트 리밋이 낮다. 기본 토큰이면 충분하다.
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          # 스크립트는 "손볼 게 있다"를 종료 코드 1로 알린다 — 잡을 빨간불로 만들지 않고
+          # 이슈로 넘겨야 하므로, 실패를 값으로 받는다.
+          node scripts/check-comparison-sources.mjs --markdown > report.md && status=0 || status=1
+          if [ "$status" -eq 0 ]; then
+            echo 'stale=no' >> "$GITHUB_OUTPUT"
+          else
+            echo 'stale=yes' >> "$GITHUB_OUTPUT"
+          fi
+          cat report.md
+
+      # 이슈는 항상 하나만 유지한다. 이미 열려 있으면 본문만 갈아 끼워서, 몇 달 방치돼도
+      # 같은 이슈가 최신 상태를 들고 있게 한다.
+      - name: Open or update tracking issue
+        if: steps.check.outputs.stale == 'yes'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TITLE: 'docs: 비교표(alternatives.html) 재확인 필요'
+        run: |
+          # 라벨이 없으면 아래 issue list 가 에러를 낸다. 먼저 만들어 둔다(이미 있으면 무시).
+          gh label create comparison-freshness \
+            --description '비교표 신선도 추적' --color ededed 2>/dev/null || true
+          existing=$(gh issue list --state open --label comparison-freshness \
+            --json number --jq '.[0].number')
+          if [ -n "$existing" ]; then
+            gh issue edit "$existing" --body-file report.md
+            echo "기존 이슈 #$existing 을 갱신했습니다."
+          else
+            gh issue create --title "$TITLE" --body-file report.md \
+              --label comparison-freshness
+          fi
+
+      # 되돌아온 뒤 다시 확인해서 깨끗해졌으면 이슈를 닫는다.
+      - name: Close tracking issue when clean
+        if: steps.check.outputs.stale == 'no'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          existing=$(gh issue list --state open --label comparison-freshness \
+            --json number --jq '.[0].number' 2>/dev/null)
+          if [ -n "$existing" ]; then
+            gh issue close "$existing" --comment "비교표가 다시 최신입니다 — 자동으로 닫습니다."
+          fi
