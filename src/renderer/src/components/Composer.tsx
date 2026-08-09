@@ -50,11 +50,13 @@ import {
   normalizeUtilization,
   resetLabel,
   shouldShowRateLimits,
+  statusWindow,
   tightestWindow
 } from '../lib/rateLimit'
 import { formatBytes } from '../lib/format'
 import { appendMention, findMention, mentionToken, mentionWithRange } from '../lib/mention'
 import type {
+  AgentBackendId,
   ChatItem,
   CommandPanelKind,
   CommandResult,
@@ -2147,7 +2149,7 @@ function StatusLine({
         </button>
       )}
       <ContextStatus usage={usage} compacting={compacting} />
-      <RateLimitStatus snapshot={rateLimits} />
+      <RateLimitStatus backend={workspace.agentBackend} snapshot={rateLimits} />
     </div>
   )
 }
@@ -2410,9 +2412,17 @@ function ContextStatus({
  * - 스냅샷이 없으면(첫 조회 전) 아무것도 그리지 않는다. 요금제 사용자인지 API 키 사용자인지
  *   모르는 상태에서 자리를 잡아 두면, API 키 사용자에게 잠깐 나타났다 사라지는 깜빡임이 된다.
  * - available=false(API 키 등 요금제 한도 미적용)면 **완전히 숨긴다**(0%·N/A 를 보여 주지 않는다).
- * - 창이 여럿이라도 상태줄에는 가장 빡빡한 창 하나만 — 상태줄은 이미 붐빈다. 나머지는 팝오버로.
+ * - 창이 여럿이라도 상태줄에는 하나만(나머지는 팝오버로). 어느 창인지는 backend 마다 고정이다 —
+ *   Claude 는 5시간 세션 창, Codex 는 주간 창(statusWindow). 다만 **다른 창이 경고선을 넘으면
+ *   경고색은 그대로 켠다** — 보여 주는 창을 고정한 대가로 임박한 한도를 놓치면 안 되기 때문이다.
  */
-function RateLimitStatus({ snapshot }: { snapshot?: RateLimitSnapshot }): React.JSX.Element | null {
+function RateLimitStatus({
+  backend,
+  snapshot
+}: {
+  backend: AgentBackendId
+  snapshot?: RateLimitSnapshot
+}): React.JSX.Element | null {
   const [open, setOpen] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const ref = useRef<HTMLDivElement | null>(null)
@@ -2437,13 +2447,19 @@ function RateLimitStatus({ snapshot }: { snapshot?: RateLimitSnapshot }): React.
     }
   }, [open])
 
-  // 가장 많이 소진된 창을 대표로 삼는다 — 세션을 실제로 죽이는 건 가장 먼저 차는 창이다.
+  // 대표 창은 backend 마다 고정(Claude=5시간, Codex=주간). 사용률 순위로 바뀌지 않는다.
+  const shown = useMemo(() => statusWindow(backend, snapshot?.windows ?? []), [backend, snapshot])
+  // 경고색 판단에만 쓰는 "가장 많이 소진된 창" — 표시 숫자와 다를 수 있다.
   const tightest = useMemo(() => tightestWindow(snapshot?.windows ?? []), [snapshot])
 
-  if (!shouldShowRateLimits(snapshot) || !snapshot || !tightest) return null
+  if (!shouldShowRateLimits(snapshot) || !snapshot || !shown) return null
 
-  const pct = normalizeUtilization(tightest.utilization) ?? 0
-  const warn = isWarning(pct)
+  const pct = normalizeUtilization(shown.utilization) ?? 0
+  const hottestPct = normalizeUtilization(tightest?.utilization ?? null)
+  // 다른 창이 더 뜨거우면 그쪽으로도 경고를 켠다(숫자는 고정된 창을 유지한 채 색만 알린다).
+  const hotter =
+    tightest && tightest.label !== shown.label && isWarning(hottestPct) ? tightest : null
+  const warn = isWarning(pct) || !!hotter
   const stale = isStale(snapshot, now)
 
   const tone = warn ? 'text-[var(--warning-400)]' : 'text-neutral-500'
@@ -2464,7 +2480,8 @@ function RateLimitStatus({ snapshot }: { snapshot?: RateLimitSnapshot }): React.
           (stale ? ' opacity-50' : '')
         }
         title={
-          `Plan usage — ${tightest.label} at ${pct}%` +
+          `Plan usage — ${shown.label} at ${pct}%` +
+          (hotter ? ` (${hotter.label} at ${hottestPct}%)` : '') +
           (stale ? ` (last checked ${agoLabel(now - snapshot.fetchedAt)})` : '') +
           ' — click for all windows'
         }
