@@ -58,7 +58,14 @@ import {
   githubLoginCancel,
   githubLogout
 } from './auth'
-import { IPC, agentSettingsFor, isBranchStack, reorderById, workspaceStack } from '@shared/types'
+import {
+  IPC,
+  SETUP_SCRIPT_ID,
+  agentSettingsFor,
+  isBranchStack,
+  reorderById,
+  workspaceStack
+} from '@shared/types'
 import { resolveToolPermission } from './agent/tools/permission'
 import { appendMemory } from './claude/memory'
 import {
@@ -66,6 +73,7 @@ import {
   carryIntoNewWorktree,
   carrySuggestionsFor,
   createWorkspace,
+  portEnvName,
   scriptEnvFor,
   syncPrBase,
   type ArchiveWorkspaceDeps,
@@ -95,7 +103,6 @@ import type {
   Repo,
   RestackResult,
   RewindActionResult,
-  ScriptKind,
   StackCascadeResult,
   StackCascadeStep,
   StackedBranch,
@@ -180,20 +187,18 @@ export function registerIpc(ctx: IpcContext): void {
    * workspace 의 dev 포트를 반환한다. 아직 배정 전(레거시)이면 다른 workspace 와 겹치지 않는
    * 포트를 BASE_DEV_PORT 부터 골라 배정·영속한 뒤 반환한다.
    */
-  const ensureDevPort = async (workspaceId: string): Promise<number | null> => {
+  const ensureScriptPort = async (
+    workspaceId: string,
+    scriptId: string
+  ): Promise<number | null> => {
     const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
     if (!ws) return null
-    if (typeof ws.devPort === 'number') return ws.devPort
-    const used = new Set<number>(
-      store
-        .getState()
-        .workspaces.map((w) => w.devPort)
-        .filter((p): p is number => typeof p === 'number')
-    )
+    if (typeof ws.ports[scriptId] === 'number') return ws.ports[scriptId]
+    const used = new Set<number>(store.getState().workspaces.flatMap((w) => Object.values(w.ports)))
     const port = await findFreePort(used)
     store.update((st) => {
       const w = st.workspaces.find((x) => x.id === workspaceId)
-      if (w) w.devPort = port
+      if (w) w.ports[scriptId] = port
     })
     return port
   }
@@ -222,7 +227,7 @@ export function registerIpc(ctx: IpcContext): void {
       path,
       defaultBranch,
       setupScript: '',
-      devScript: '',
+      runScripts: [],
       archiveScript: '',
       // 흔한 에이전트 컨텍스트·런타임 설정 파일이 실제로 있으면 미리 채워 둔다. 빈 목록으로
       // 시작하면 사용자가 이 기능을 모른 채, worktree 에 지침 파일이 없어 에이전트가 조용히
@@ -239,13 +244,13 @@ export function registerIpc(ctx: IpcContext): void {
 
   ipcMain.handle(
     IPC.repoUpdate,
-    (
+    async (
       _e,
       repoId: string,
       patch: Partial<
-        Pick<Repo, 'name' | 'setupScript' | 'devScript' | 'archiveScript' | 'carryItems'>
+        Pick<Repo, 'name' | 'setupScript' | 'runScripts' | 'archiveScript' | 'carryItems'>
       >
-    ): { error?: string } => {
+    ): Promise<{ error?: string }> => {
       // carryItems 는 그대로 복사·심링크 대상 경로가 되므로 **저장 시점에** 검증한다.
       // 예전에는 Object.assign 만 해서, 리포 밖을 가리키는 경로도 모달에서 멀쩡히 저장되고
       // 한참 뒤 워크스페이스를 만들 때가 되어서야 실패 토스트로 드러났다.
@@ -261,11 +266,36 @@ export function registerIpc(ctx: IpcContext): void {
           normalized.push({ path: checked.path, mode: item.mode })
         }
       }
+      if (patch.runScripts) {
+        const names = new Set<string>()
+        for (const script of patch.runScripts) {
+          const key = portEnvName(script.name)
+          if (!key) return { error: 'Run script names cannot be empty.' }
+          if (key === SETUP_SCRIPT_ID) return { error: '“setup” is a reserved run script name.' }
+          if (names.has(key)) return { error: `Run script name “${script.name}” is duplicated.` }
+          names.add(key)
+        }
+      }
 
       store.update((st) => {
         const repo = st.repos.find((r) => r.id === repoId)
         if (repo) Object.assign(repo, patch, normalized ? { carryItems: normalized } : {})
       })
+      if (patch.runScripts) {
+        const used = new Set(store.getState().workspaces.flatMap((w) => Object.values(w.ports)))
+        for (const ws of store.getState().workspaces.filter((w) => w.repoId === repoId)) {
+          const ports: Record<string, number> = {}
+          for (const script of patch.runScripts) {
+            const port = ws.ports[script.id] ?? (await findFreePort(used))
+            ports[script.id] = port
+            used.add(port)
+          }
+          store.update((st) => {
+            const target = st.workspaces.find((w) => w.id === ws.id)
+            if (target) target.ports = ports
+          })
+        }
+      }
       broadcastState()
       return {}
     }
@@ -689,54 +719,55 @@ export function registerIpc(ctx: IpcContext): void {
 
   // ── 스크립트 ───────────────────────────────────────────────────────────
 
-  ipcMain.handle(IPC.scriptRun, async (_e, workspaceId: string, kind: ScriptKind) => {
+  ipcMain.handle(IPC.scriptRun, async (_e, workspaceId: string, scriptId: string) => {
     const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
     if (!ws) return
     const repo = repoFor(ws.repoId)
     if (!repo) return
-    const command = kind === 'setup' ? repo.setupScript : repo.devScript
+    const command =
+      scriptId === SETUP_SCRIPT_ID
+        ? repo.setupScript
+        : (repo.runScripts.find((s) => s.id === scriptId)?.command ?? '')
+    if (!command.trim()) return
     // 고유 포트를 env(PORT/WOOI_DEV_PORT)로 주입한다. 레거시 workspace 는 여기서 lazy 배정.
-    let port = await ensureDevPort(workspaceId)
+    const port = scriptId === SETUP_SCRIPT_ID ? null : await ensureScriptPort(workspaceId, scriptId)
 
     // dev 서버는 실제로 포트를 바인딩하므로, 배정된 포트가 며칠 전 값이라 그 사이 다른 프로세스가
     // 차지했을 수 있다. 실행 직전에 실제 가용성을 확인하고, 외부 프로세스가 점유 중이면 비어 있는
     // 포트로 재배정해 bind 실패를 막는다. 이 워크스페이스 자신의 이전 dev 가 같은 포트를 잡고 있을
     // 수 있으므로 먼저 종료하고 잠깐 기다린다 — 자기 포트를 외부 점유로 오인해 매번 바꾸지 않도록.
-    if (kind === 'dev' && port != null) {
-      ctx.scripts.stop(workspaceId, 'dev')
+    if (port != null) {
+      ctx.scripts.stop(workspaceId, scriptId)
       const freed = await waitForPortFree(port, 1500)
       if (!freed) {
         const used = new Set<number>(
-          store
-            .getState()
-            .workspaces.map((w) => w.devPort)
-            .filter((p): p is number => typeof p === 'number')
+          store.getState().workspaces.flatMap((w) => Object.values(w.ports))
         )
         // 외부 점유 중인 현재 포트는 findFreePort 의 OS 프로브에서 자동으로 걸러진다.
         const next = await findFreePort(used)
         store.update((st) => {
           const w = st.workspaces.find((x) => x.id === workspaceId)
-          if (w) w.devPort = next
+          if (w) w.ports[scriptId] = next
         })
-        port = next
       }
     }
 
-    const env = port != null ? scriptEnvFor(port) : undefined
+    const current = store.getState().workspaces.find((w) => w.id === workspaceId) ?? ws
+    const env = scriptEnvFor(repo, current, scriptId)
     if (env) broadcastState()
-    ctx.scripts.run(workspaceId, kind, command, ws.worktreePath, env)
+    ctx.scripts.run(workspaceId, scriptId, command, ws.worktreePath, env)
   })
 
-  ipcMain.handle(IPC.scriptStop, (_e, workspaceId: string, kind: ScriptKind) => {
-    ctx.scripts.stop(workspaceId, kind)
+  ipcMain.handle(IPC.scriptStop, (_e, workspaceId: string, scriptId: string) => {
+    ctx.scripts.stop(workspaceId, scriptId)
   })
 
   ipcMain.handle(IPC.scriptGetStatus, (_e, workspaceId: string) => {
     return ctx.scripts.getStatus(workspaceId)
   })
 
-  ipcMain.handle(IPC.scriptGetOutput, (_e, workspaceId: string, kind: ScriptKind) => {
-    return ctx.scripts.getOutput(workspaceId, kind)
+  ipcMain.handle(IPC.scriptGetOutput, (_e, workspaceId: string, scriptId: string) => {
+    return ctx.scripts.getOutput(workspaceId, scriptId)
   })
 
   // ── 분리한 패널 창 ─────────────────────────────────────────────────────

@@ -1,5 +1,10 @@
 import { randomUUID } from 'node:crypto'
-import { DEFAULT_AGENT_BACKEND, agentSettingsFor, normalizePermissionMode } from '@shared/types'
+import {
+  DEFAULT_AGENT_BACKEND,
+  SETUP_SCRIPT_ID,
+  agentSettingsFor,
+  normalizePermissionMode
+} from '@shared/types'
 import type {
   CarryFailure,
   CreateWorkspaceArgs,
@@ -56,11 +61,38 @@ function repoFor(repoId: string): Repo | undefined {
 }
 
 /** workspace 별 스크립트에 주입할 환경변수. dev 서버가 충돌 없이 고유 포트를 쓰게 한다. */
-export function scriptEnvFor(port: number): Record<string, string> {
-  return {
-    PORT: String(port),
-    WOOI_DEV_PORT: String(port)
+export function portEnvName(name: string): string {
+  return name
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+}
+
+export function scriptEnvFor(repo: Repo, ws: Workspace, scriptId: string): Record<string, string> {
+  const env: Record<string, string> = {}
+  for (const script of repo.runScripts) {
+    const port = ws.ports[script.id]
+    const key = portEnvName(script.name)
+    if (typeof port === 'number' && key && env[`WOOI_PORT_${key}`] === undefined)
+      env[`WOOI_PORT_${key}`] = String(port)
   }
+  const own = ws.ports[scriptId]
+  if (typeof own === 'number') {
+    env.PORT = String(own)
+    env.WOOI_DEV_PORT = String(own)
+  }
+  return env
+}
+
+export function startAutoRunScripts(scripts: ScriptRunner, ws: Workspace, repo: Repo): void {
+  for (const script of repo.runScripts.filter((item) => item.autoStart))
+    scripts.run(
+      ws.id,
+      script.id,
+      script.command,
+      ws.worktreePath,
+      scriptEnvFor(repo, ws, script.id)
+    )
 }
 
 /**
@@ -187,14 +219,14 @@ export async function createWorkspace(
     agentSettingsFor(settings, agentBackend).permissionMode
   )
   const id = randomUUID()
-  // 병렬 dev 서버 포트 충돌을 막기 위해 생성 시점에 고유 포트를 배정한다.
-  const used = new Set<number>(
-    store
-      .getState()
-      .workspaces.map((w) => w.devPort)
-      .filter((p): p is number => typeof p === 'number')
-  )
-  const devPort = await findFreePort(used)
+  // 모든 run script 에 워크스페이스 전체에서 고유한 포트를 하나씩 예약한다.
+  const used = new Set<number>(store.getState().workspaces.flatMap((w) => Object.values(w.ports)))
+  const ports: Record<string, number> = {}
+  for (const script of repo.runScripts) {
+    const port = await findFreePort(used)
+    ports[script.id] = port
+    used.add(port)
+  }
   store.update((st) =>
     st.workspaces.push({
       id,
@@ -214,7 +246,7 @@ export async function createWorkspace(
       createdByWorkspaceId: args.createdByWorkspaceId ?? null,
       prNumber: null,
       worktreePath,
-      devPort,
+      ports,
       // setup 은 아래에서 곧 실행된다. 종료 시 onExit 훅이 success/failed 로 갱신한다.
       setupState: 'idle',
       sessionId: null,
@@ -235,7 +267,17 @@ export async function createWorkspace(
 
   // 셋업 스크립트가 설정돼 있으면 생성 직후 실행(dev 와 같은 포트 env 를 주입).
   if (repo.setupScript.trim()) {
-    deps.scripts.run(id, 'setup', repo.setupScript, worktreePath, scriptEnvFor(devPort))
+    const ws = store.getState().workspaces.find((item) => item.id === id)!
+    deps.scripts.run(
+      id,
+      SETUP_SCRIPT_ID,
+      repo.setupScript,
+      worktreePath,
+      scriptEnvFor(repo, ws, SETUP_SCRIPT_ID)
+    )
+  } else {
+    const ws = store.getState().workspaces.find((item) => item.id === id)!
+    startAutoRunScripts(deps.scripts, ws, repo)
   }
 
   // name·branch 를 함께 반환해 호출 측이 별도 getState 왕복 없이 토스트를 만들 수 있게 한다.

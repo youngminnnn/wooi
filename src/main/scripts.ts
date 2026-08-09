@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { IPC } from '@shared/types'
-import type { ScriptKind, ScriptStatus } from '@shared/types'
+import type { ScriptStatus } from '@shared/types'
 
 type Dispatch = (channel: string, payload: unknown) => void
 
@@ -68,22 +68,22 @@ export class ScriptRunner {
    */
   constructor(
     private dispatch: Dispatch,
-    private onExit?: (workspaceId: string, kind: ScriptKind, code: number | null) => void
+    private onExit?: (workspaceId: string, scriptId: string, code: number | null) => void
   ) {}
 
-  private key(workspaceId: string, kind: ScriptKind): string {
-    return `${workspaceId}:${kind}`
+  private key(workspaceId: string, scriptId: string): string {
+    return `${workspaceId}:${scriptId}`
   }
 
   run(
     workspaceId: string,
-    kind: ScriptKind,
+    scriptId: string,
     command: string,
     cwd: string,
     env?: Record<string, string>
   ): void {
     if (!command.trim()) return
-    this.stop(workspaceId, kind)
+    this.stop(workspaceId, scriptId)
 
     const shell = process.env.SHELL || '/bin/zsh'
     // detached 로 새 프로세스 그룹을 만든다 — 중지 시 자식이 띄운 손자까지 그룹 단위로 정리한다.
@@ -93,7 +93,7 @@ export class ScriptRunner {
       detached: true,
       ...(env ? { env: { ...process.env, ...env } } : {})
     })
-    const key = this.key(workspaceId, kind)
+    const key = this.key(workspaceId, scriptId)
     // 새 실행은 새 로그다 — 이전 실행의 꼬리가 앞에 남아 있으면 어디부터가 이번 출력인지 알 수 없다.
     this.history.delete(key)
     this.running.set(key, {
@@ -111,7 +111,7 @@ export class ScriptRunner {
       entry.pendingOut += data.toString()
       if (entry.pendingOut.length > PENDING_LIMIT)
         entry.pendingOut = entry.pendingOut.slice(-PENDING_LIMIT)
-      this.scheduleFlush(workspaceId, kind)
+      this.scheduleFlush(workspaceId, scriptId)
     })
     proc.stderr?.on('data', (data: Buffer) => {
       const entry = this.running.get(key)
@@ -119,16 +119,16 @@ export class ScriptRunner {
       entry.pendingErr += data.toString()
       if (entry.pendingErr.length > PENDING_LIMIT)
         entry.pendingErr = entry.pendingErr.slice(-PENDING_LIMIT)
-      this.scheduleFlush(workspaceId, kind)
+      this.scheduleFlush(workspaceId, scriptId)
     })
     proc.on('error', (err) => {
       const chunk = `\n[wooi] failed to start: ${err.message}\n`
       this.remember(key, chunk)
-      this.dispatch(IPC.evtScriptOutput, { workspaceId, kind, stream: 'stderr', chunk })
+      this.dispatch(IPC.evtScriptOutput, { workspaceId, scriptId, stream: 'stderr', chunk })
     })
     proc.on('close', (code) => {
       // 종료 직전 남은 출력을 마저 비운 뒤 종료를 알린다(순서 보장).
-      this.flush(workspaceId, kind)
+      this.flush(workspaceId, scriptId)
       const entry = this.running.get(key)
       if (entry) {
         if (entry.flushTimer) clearTimeout(entry.flushTimer)
@@ -138,8 +138,8 @@ export class ScriptRunner {
       // 종료 줄은 렌더러가 evtScriptExit 를 받아 직접 붙인다. 나중에 뜬 창도 같은 화면을 보도록
       // 꼬리 버퍼에는 여기서 같은 문구를 남겨 둔다.
       this.remember(key, `\n[wooi] exited (code ${code ?? '?'})\n`)
-      this.dispatch(IPC.evtScriptExit, { workspaceId, kind, code })
-      this.onExit?.(workspaceId, kind, code)
+      this.dispatch(IPC.evtScriptExit, { workspaceId, scriptId, code })
+      this.onExit?.(workspaceId, scriptId, code)
     })
   }
 
@@ -150,32 +150,32 @@ export class ScriptRunner {
   }
 
   /** 다음 flush 가 예약돼 있지 않으면 하나 예약한다(주기적으로 묶어 보냄). */
-  private scheduleFlush(workspaceId: string, kind: ScriptKind): void {
-    const entry = this.running.get(this.key(workspaceId, kind))
+  private scheduleFlush(workspaceId: string, scriptId: string): void {
+    const entry = this.running.get(this.key(workspaceId, scriptId))
     if (!entry || entry.flushTimer) return
-    entry.flushTimer = setTimeout(() => this.flush(workspaceId, kind), FLUSH_INTERVAL_MS)
+    entry.flushTimer = setTimeout(() => this.flush(workspaceId, scriptId), FLUSH_INTERVAL_MS)
   }
 
   /** 모아 둔 stdout/stderr 를 스트림별로 한 번의 IPC 메시지로 보낸다. */
-  private flush(workspaceId: string, kind: ScriptKind): void {
-    const entry = this.running.get(this.key(workspaceId, kind))
+  private flush(workspaceId: string, scriptId: string): void {
+    const entry = this.running.get(this.key(workspaceId, scriptId))
     if (!entry) return
     if (entry.flushTimer) {
       clearTimeout(entry.flushTimer)
       entry.flushTimer = null
     }
-    const key = this.key(workspaceId, kind)
+    const key = this.key(workspaceId, scriptId)
     if (entry.pendingOut) {
       const chunk = entry.pendingOut
       entry.pendingOut = ''
       this.remember(key, chunk)
-      this.dispatch(IPC.evtScriptOutput, { workspaceId, kind, stream: 'stdout', chunk })
+      this.dispatch(IPC.evtScriptOutput, { workspaceId, scriptId, stream: 'stdout', chunk })
     }
     if (entry.pendingErr) {
       const chunk = entry.pendingErr
       entry.pendingErr = ''
       this.remember(key, chunk)
-      this.dispatch(IPC.evtScriptOutput, { workspaceId, kind, stream: 'stderr', chunk })
+      this.dispatch(IPC.evtScriptOutput, { workspaceId, scriptId, stream: 'stderr', chunk })
     }
   }
 
@@ -209,38 +209,40 @@ export class ScriptRunner {
     })
   }
 
-  stop(workspaceId: string, kind: ScriptKind): void {
-    const entry = this.running.get(this.key(workspaceId, kind))
+  stop(workspaceId: string, scriptId: string): void {
+    const entry = this.running.get(this.key(workspaceId, scriptId))
     if (entry) {
       if (entry.flushTimer) clearTimeout(entry.flushTimer)
       killProcessGroup(entry.proc)
     }
-    this.running.delete(this.key(workspaceId, kind))
+    this.running.delete(this.key(workspaceId, scriptId))
   }
 
   /** 지금까지의 누적 출력(꼬리). 나중에 뜬 창이 이전 로그를 채우는 데 쓴다. */
-  getOutput(workspaceId: string, kind: ScriptKind): string {
-    return this.history.get(this.key(workspaceId, kind)) ?? ''
+  getOutput(workspaceId: string, scriptId: string): string {
+    return this.history.get(this.key(workspaceId, scriptId)) ?? ''
   }
 
   getStatus(workspaceId: string): ScriptStatus[] {
-    const kinds: ScriptKind[] = ['setup', 'dev']
-    return kinds.map((kind) => {
-      const entry = this.running.get(this.key(workspaceId, kind))
-      if (!entry) return { kind, state: 'idle', exitCode: null }
+    const prefix = `${workspaceId}:`
+    const ids = new Set<string>()
+    for (const key of [...this.running.keys(), ...this.history.keys()])
+      if (key.startsWith(prefix)) ids.add(key.slice(prefix.length))
+    return [...ids].map((scriptId) => {
+      const entry = this.running.get(this.key(workspaceId, scriptId))
+      if (!entry) return { scriptId, state: 'idle', exitCode: null }
       if (entry.proc.exitCode === null && !entry.proc.killed) {
-        return { kind, state: 'running', exitCode: null }
+        return { scriptId, state: 'running', exitCode: null }
       }
-      return { kind, state: 'exited', exitCode: entry.exitCode }
+      return { scriptId, state: 'exited', exitCode: entry.exitCode }
     })
   }
 
   disposeWorkspace(workspaceId: string): void {
-    this.stop(workspaceId, 'setup')
-    this.stop(workspaceId, 'dev')
-    // 사라진 workspace 의 로그를 붙들고 있을 이유가 없다.
-    this.history.delete(this.key(workspaceId, 'setup'))
-    this.history.delete(this.key(workspaceId, 'dev'))
+    const prefix = `${workspaceId}:`
+    for (const key of [...this.running.keys()])
+      if (key.startsWith(prefix)) this.stop(workspaceId, key.slice(prefix.length))
+    for (const key of [...this.history.keys()]) if (key.startsWith(prefix)) this.history.delete(key)
   }
 
   disposeAll(): void {

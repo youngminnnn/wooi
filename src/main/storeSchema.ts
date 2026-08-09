@@ -1,4 +1,5 @@
 import { CLAUDE_DEFAULT_MODEL } from './agent/backend'
+import { randomUUID } from 'node:crypto'
 import {
   BASE_DEV_PORT,
   DEFAULT_AGENT_BACKEND,
@@ -30,7 +31,7 @@ const DEFAULT_MODEL = CLAUDE_DEFAULT_MODEL
  * 디스크 영속 형식의 현재 스키마 버전. 영속 데이터 모양이 바뀔 때마다 1 올리고,
  * MIGRATIONS 에 직전 버전 → 새 버전 변환 함수를 추가한다.
  */
-export const CURRENT_SCHEMA_VERSION = 19
+export const CURRENT_SCHEMA_VERSION = 20
 
 /**
  * v12 이하의 settings 모양. 그 시절엔 에이전트가 Claude 하나뿐이라 모델·effort·fast mode·
@@ -153,7 +154,7 @@ export const MIGRATIONS: Array<(raw: Record<string, unknown>) => Record<string, 
   // v2 → v3: workspace 별 dev 서버 포트(devPort) 도입. 병렬 dev 서버 포트 충돌을 막기 위해
   // 기존 workspace 에도 BASE_DEV_PORT 부터 비어 있는 포트를 하나씩 배정한다(이미 값이 있으면 보존).
   (raw) => {
-    const list = (raw.workspaces as Partial<Workspace>[]) ?? []
+    const list = (raw.workspaces as Array<Partial<Workspace> & { devPort?: number | null }>) ?? []
     const used = new Set<number>()
     for (const w of list) if (typeof w.devPort === 'number') used.add(w.devPort)
     const alloc = (): number => {
@@ -372,6 +373,32 @@ export const MIGRATIONS: Array<(raw: Record<string, unknown>) => Record<string, 
       createdByWorkspaceId: w.createdByWorkspaceId ?? null
     }))
     return { ...raw, workspaces }
+  },
+
+  // v19 → v20: 단일 dev 명령과 포트를 리포별 run script 목록과 script-id별 포트로 옮긴다.
+  (raw) => {
+    const ids = new Map<string, string>()
+    const repos = ((raw.repos as Array<Record<string, unknown>>) ?? []).map((repo) => {
+      const { devScript, ...rest } = repo
+      const command = typeof devScript === 'string' ? devScript.trim() : ''
+      const id = command ? randomUUID() : null
+      if (id && typeof repo.id === 'string') ids.set(repo.id, id)
+      return {
+        ...rest,
+        runScripts: id ? [{ id, name: 'Dev', command: devScript as string, autoStart: false }] : []
+      }
+    })
+    const workspaces = ((raw.workspaces as Array<Record<string, unknown>>) ?? []).map(
+      (workspace) => {
+        const { devPort, ...rest } = workspace
+        const id = typeof workspace.repoId === 'string' ? ids.get(workspace.repoId) : undefined
+        return {
+          ...rest,
+          ports: id && typeof devPort === 'number' ? { [id]: devPort } : {}
+        }
+      }
+    )
+    return { ...raw, repos, workspaces }
   }
 ]
 

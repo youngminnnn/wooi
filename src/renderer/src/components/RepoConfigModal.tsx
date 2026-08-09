@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { CarryItem, CarryMode } from '@shared/types'
+import type { CarryItem, CarryMode, RunScript } from '@shared/types'
 import { validateCarryPath } from '@shared/carryPath'
 import { useStore } from '../store'
 import Modal, { inputClass, labelClass, primaryBtn, ghostBtn } from './Modal'
@@ -34,7 +34,7 @@ export default function RepoConfigModal({
   // TypeError 가 나고, 에러 바운더리가 없어 앱 전체가 멈춘다(먹통). repo 가 없으면 닫고 빠진다.
   const [name, setName] = useState(repo?.name ?? '')
   const [setupScript, setSetup] = useState(repo?.setupScript ?? '')
-  const [devScript, setDev] = useState(repo?.devScript ?? '')
+  const [runScripts, setRunScripts] = useState<RunScript[]>(repo?.runScripts ?? [])
   const [archiveScript, setArchive] = useState(repo?.archiveScript ?? '')
   const [carryItems, setCarryItems] = useState<CarryItem[]>(repo?.carryItems ?? [])
 
@@ -49,6 +49,19 @@ export default function RepoConfigModal({
     return checked.ok ? null : checked.reason
   })
   const hasCarryError = carryErrors.some(Boolean)
+  const runNames = runScripts.map((script) =>
+    script.name
+      .toUpperCase()
+      .replace(/[^A-Z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '')
+  )
+  const hasRunError = runScripts.some(
+    (script, index) =>
+      !runNames[index] ||
+      runNames[index] === 'SETUP' ||
+      !script.command.trim() ||
+      runNames.indexOf(runNames[index]) !== index
+  )
 
   useEffect(() => {
     if (!repo) onClose()
@@ -70,7 +83,7 @@ export default function RepoConfigModal({
     const res = await window.api.repo.update(repoId, {
       name: name.trim() || repo.name,
       setupScript,
-      devScript,
+      runScripts,
       archiveScript,
       // 빈 줄은 저장하지 않는다 — 편집 중 잠깐 비워 둔 행이 그대로 남지 않도록.
       carryItems: carryItems
@@ -136,10 +149,12 @@ export default function RepoConfigModal({
             Cancel
           </button>
           <button
-            className={primaryBtn + (hasCarryError ? ' opacity-40 cursor-not-allowed' : '')}
+            className={
+              primaryBtn + (hasCarryError || hasRunError ? ' opacity-40 cursor-not-allowed' : '')
+            }
             onClick={save}
-            disabled={hasCarryError}
-            title={hasCarryError ? 'Fix the highlighted carry paths first' : undefined}
+            disabled={hasCarryError || hasRunError}
+            title={hasCarryError || hasRunError ? 'Fix the highlighted errors first' : undefined}
           >
             Save
           </button>
@@ -169,13 +184,94 @@ export default function RepoConfigModal({
         </div>
 
         <div>
-          <label className={labelClass}>Dev script</label>
-          <input
-            className={inputClass + ' font-mono'}
-            value={devScript}
-            onChange={(e) => setDev(e.target.value)}
-            placeholder="e.g. npm run dev"
-          />
+          <label className={labelClass}>Run scripts</label>
+          <div className="space-y-1.5">
+            {runScripts.map((script, i) => (
+              <div key={script.id} className="flex items-center gap-1.5">
+                <input
+                  className={carryFieldBase + ' w-24 px-2 py-2 text-sm'}
+                  value={script.name}
+                  placeholder="Web"
+                  onChange={(e) =>
+                    setRunScripts((items) =>
+                      items.map((x, n) => (n === i ? { ...x, name: e.target.value } : x))
+                    )
+                  }
+                />
+                <input
+                  className={carryPathClass}
+                  value={script.command}
+                  placeholder="npm run dev"
+                  onChange={(e) =>
+                    setRunScripts((items) =>
+                      items.map((x, n) => (n === i ? { ...x, command: e.target.value } : x))
+                    )
+                  }
+                  onKeyDown={(e) => {
+                    if (
+                      e.key !== 'Enter' ||
+                      e.nativeEvent.isComposing ||
+                      !script.name.trim() ||
+                      !script.command.trim()
+                    )
+                      return
+                    e.preventDefault()
+                    setRunScripts((items) => [
+                      ...items,
+                      { id: crypto.randomUUID(), name: '', command: '', autoStart: false }
+                    ])
+                  }}
+                />
+                <label className="flex shrink-0 items-center gap-1 text-xs text-neutral-400">
+                  <input
+                    type="checkbox"
+                    checked={script.autoStart}
+                    onChange={(e) =>
+                      setRunScripts((items) =>
+                        items.map((x, n) => (n === i ? { ...x, autoStart: e.target.checked } : x))
+                      )
+                    }
+                  />{' '}
+                  Auto
+                </label>
+                <button
+                  className={carryRemoveClass}
+                  onClick={() =>
+                    setRunScripts((items) =>
+                      i > 0 ? [items[i], ...items.slice(0, i), ...items.slice(i + 1)] : items
+                    )
+                  }
+                  title="Move up"
+                >
+                  ↑
+                </button>
+                <button
+                  className={carryRemoveClass}
+                  onClick={() => setRunScripts((items) => items.filter((_, n) => n !== i))}
+                  title="Remove"
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+          </div>
+          <button
+            className={ghostBtn + ' mt-1.5 text-xs'}
+            onClick={() =>
+              setRunScripts((items) => [
+                ...items,
+                { id: crypto.randomUUID(), name: '', command: '', autoStart: false }
+              ])
+            }
+          >
+            + Add run script
+          </button>
+          {hasRunError && (
+            <p className="mt-1 text-xs text-[var(--danger-400)]">
+              Names and commands are required. Names must be unique after normalization and cannot
+              be Setup.
+            </p>
+          )}
           <p className="mt-1.5 text-xs text-neutral-600">
             Dev command you start/stop from the scripts panel. Each workspace gets a unique{' '}
             <span className="font-mono">$PORT</span> (also{' '}

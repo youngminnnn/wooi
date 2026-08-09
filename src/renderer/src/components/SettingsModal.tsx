@@ -97,7 +97,7 @@ const PAGES: { id: Page; label: string; icon: typeof Settings2; keywords: string
 function describeRepoConfig(repo: Repo): string {
   const parts: string[] = []
   if (repo.setupScript.trim()) parts.push('setup')
-  if (repo.devScript.trim()) parts.push('dev')
+  if (repo.runScripts.length) parts.push(`${repo.runScripts.length} run script(s)`)
   if (repo.archiveScript.trim()) parts.push('archive')
   if (repo.carryItems.length > 0) parts.push(`${repo.carryItems.length} carried file(s)`)
   return parts.length > 0 ? parts.join(' · ') : 'Nothing configured yet'

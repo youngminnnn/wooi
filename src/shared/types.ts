@@ -178,8 +178,8 @@ export interface Repo {
   defaultBranch: string
   /** workspace 생성 후 1회 실행하는 셋업 명령 (예: "npm install"). 비어 있으면 미실행. */
   setupScript: string
-  /** 개발 서버 실행 명령 (예: "npm run dev"). 비어 있으면 미실행. */
-  devScript: string
+  /** 사용자가 등록한 장수명 명령(dev 서버·watcher·storybook 등). */
+  runScripts: RunScript[]
   /** workspace 아카이브 시 worktree 에서 실행하는 정리 명령. 비어 있으면 미실행. */
   archiveScript: string
   /**
@@ -612,7 +612,8 @@ export interface Workspace {
    * setup/dev 스크립트에 `$PORT`·`$WOOI_DEV_PORT` 환경변수로 주입된다.
    * 레거시 workspace(배정 전)는 null 일 수 있으며, dev 실행 시 lazy 하게 배정·영속된다.
    */
-  devPort: number | null
+  /** run script id 별로 예약한 포트. */
+  ports: Record<string, number>
   /**
    * setup 스크립트의 마지막 실행 결과(영속). setup 은 생성 직후 자동 실행되는 일회성 초기화라,
    * 이미 성공한 걸 다시 돌리면 재설치·재시드처럼 무의미하거나 파괴적일 수 있다. 그래서 결과를
@@ -1169,21 +1170,28 @@ export type PermissionDecision =
 
 // ── 스크립트 실행 (setup / dev) ──────────────────────────────────────────
 
-export type ScriptKind = 'setup' | 'dev'
+export const SETUP_SCRIPT_ID = 'setup'
+
+export interface RunScript {
+  id: string
+  name: string
+  command: string
+  autoStart: boolean
+}
 
 /** setup 스크립트의 마지막 실행 결과(Workspace.setupState 에 영속). */
 export type SetupState = 'idle' | 'success' | 'failed'
 
 export interface ScriptOutputEvent {
   workspaceId: string
-  kind: ScriptKind
+  scriptId: string
   stream: 'stdout' | 'stderr'
   chunk: string
 }
 
 export interface ScriptExitEvent {
   workspaceId: string
-  kind: ScriptKind
+  scriptId: string
   code: number | null
 }
 
@@ -1211,7 +1219,7 @@ export interface WindowBounds {
 }
 
 export interface ScriptStatus {
-  kind: ScriptKind
+  scriptId: string
   state: ScriptRunState
   exitCode: number | null
 }
