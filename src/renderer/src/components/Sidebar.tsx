@@ -538,8 +538,9 @@ function WorkspaceRow({
   const stale = runningMs >= RUNNING_STALE_MS
   // 표시 이름: 사용자 override → PR 제목 → worktree 이름. override 가 없으면 PR 제목이 자동 반영된다.
   const displayName = workspaceDisplayName(workspace, pr?.title)
-  // 에이전트 배지는 고를 수 있는 에이전트가 둘 이상일 때만 의미가 있다.
-  const showAgent = useAvailableBackends().length > 1
+  // 에이전트 배지와 stack 생성 override 는 같은 사용 가능 목록을 쓴다.
+  const availableBackends = useAvailableBackends()
+  const showAgent = availableBackends.length > 1
 
   const commitName = (): void => {
     const name = (editingName ?? '').trim()
@@ -566,6 +567,12 @@ function WorkspaceRow({
 
   // 행당 액션이 5개까지 늘어나 아이콘을 나열하면 제목 폭을 계속 잠식한다. 그래서 1차 액션
   // (뒤처진 stacked 워크스페이스의 restack)만 인라인으로 승격하고 나머지는 이 메뉴로 모은다.
+  const stack = (agentBackend?: AgentBackendId): void =>
+    void requireGithub('Stacked workspaces track their pull requests on GitHub.', () =>
+      onStackWorkspace(workspace.repoId, workspace.id, agentBackend)
+    )
+  const alternateStackBackends = availableBackends.filter((b) => b.id !== workspace.agentBackend)
+
   const actions: RowAction[] = [
     {
       key: 'rename',
@@ -581,13 +588,22 @@ function WorkspaceRow({
         ? 'Stack a new workspace — Connect GitHub'
         : 'Stack a new workspace',
       icon: githubDisconnected ? <GithubMark size={12} /> : <GitBranchPlus size={13} />,
-      onSelect: () =>
-        void requireGithub('Stacked workspaces track their pull requests on GitHub.', () =>
-          // 스택은 부모의 에이전트를 물려받는다 — 부모 브랜치 위에 이어 작업하는 것이라,
-          // 전역 기본값으로 갈아타면 "Codex 위에 쌓았는데 Claude 가 열리는" 놀람이 된다.
-          onStackWorkspace(workspace.repoId, workspace.id, workspace.agentBackend)
-        )
+      // agent 를 생략하면 main 의 단일 생성 규칙이 부모 agent 를 상속한다.
+      onSelect: () => stack()
     },
+    ...alternateStackBackends.map((backend, index): RowAction => ({
+      key: `stack-${backend.id}`,
+      label: githubDisconnected
+        ? `Stack with ${backend.label} — Connect GitHub`
+        : `Stack with ${backend.label}`,
+      icon: githubDisconnected ? (
+        <GithubMark size={12} />
+      ) : (
+        <AgentBackendMark backend={backend.id} size={13} />
+      ),
+      onSelect: () => stack(backend.id),
+      separatorBefore: index === 0
+    })),
     ...(workspace.parentWorkspaceId
       ? [
           {

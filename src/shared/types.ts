@@ -2019,7 +2019,7 @@ export interface CreateWorkspaceArgs {
   createdByWorkspaceId?: string | null
   /**
    * 이 워크스페이스를 구동할 에이전트. 생성 시 한 번 정해져 세션 내내 고정된다.
-   * 생략하면 전역 기본 백엔드(AppSettings.defaultAgentBackend)를 쓴다.
+   * 생략하면 stacked 자식은 부모 에이전트를 상속하고, 스택 뿌리는 전역 기본 백엔드를 쓴다.
    */
   agentBackend?: AgentBackendId
   /**
