@@ -332,6 +332,51 @@ export async function getStatus(worktreePath: string, baseBranch: string): Promi
   return { branch, ahead, behind, changedFiles, conflicted }
 }
 
+/**
+ * base 대비 이 워크트리가 건드린 파일 경로들(커밋된 것 + 아직 커밋 안 한 것을 합친 집합).
+ *
+ * 둘 다 봐야 한다 — 옆 워크스페이스가 **방금 고쳤지만 아직 커밋하지 않은** 파일이 가장 위험하다.
+ * 커밋된 것만 보면 그게 통째로 안 보인다.
+ *
+ * getStatus 와 같은 방식으로, base ref 가 없는 등의 실패는 조용히 빈 배열로 떨어뜨린다 — 남의
+ * 워크스페이스를 훑는 조회라 하나가 실패했다고 전체를 세울 이유가 없다.
+ */
+export async function listChangedPaths(
+  worktreePath: string,
+  baseBranch: string
+): Promise<string[]> {
+  const paths = new Set<string>()
+
+  const committed = await gitTry(worktreePath, ['diff', '--name-only', `${baseBranch}...HEAD`])
+  if (committed.ok) {
+    for (const line of committed.stdout.split('\n')) if (line.trim()) paths.add(line.trim())
+  }
+
+  const working = await gitTry(worktreePath, ['status', '--porcelain'])
+  if (working.ok) {
+    for (const line of working.stdout.split('\n')) {
+      const path = parsePorcelainPath(line)
+      if (path) paths.add(path)
+    }
+  }
+
+  return [...paths]
+}
+
+/**
+ * `git status --porcelain` 한 줄에서 경로만 뽑는다.
+ * 형식은 `XY <path>` 이고, 이름이 바뀐 항목은 `R  <old> -> <new>` 로 온다(바뀐 뒤 이름을 쓴다).
+ */
+function parsePorcelainPath(line: string): string | null {
+  if (line.length < 4) return null
+  const rest = line.slice(3).trim()
+  if (!rest) return null
+  const arrow = rest.indexOf(' -> ')
+  const path = arrow >= 0 ? rest.slice(arrow + 4) : rest
+  // 공백이 든 경로는 git 이 따옴표로 감싼다.
+  return path.replace(/^"(.*)"$/, '$1')
+}
+
 export function repoNameFromPath(path: string): string {
   return basename(path)
 }
