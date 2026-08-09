@@ -50,6 +50,8 @@ const {
   createPrWeb,
   mergePr,
   closePr,
+  getPrEditable,
+  editPr,
   postInlineComment,
   postIssueComment,
   submitPrReview,
@@ -426,6 +428,128 @@ describe('리뷰 코멘트 게시', () => {
       side: 'RIGHT'
     })
     expect(badSha.error).toBeTruthy()
+    expect(ghCalls()).toEqual([])
+  })
+})
+
+/**
+ * 제목·본문은 사용자가 무엇이든 쓰는 문자열이다. `gh pr edit --title/--body` 로 가면 따옴표
+ * 하나로 셸 인용이 뚫리고 백틱·`$(...)` 이 실행된다. 값은 반드시 stdin(JSON)으로만 나가야 한다.
+ */
+describe('PR 제목·본문 편집', () => {
+  beforeEach(() => {
+    setGithubConnected(true)
+    invalidateOpenPrs()
+  })
+
+  it('편집 모달용 원문은 제목·본문만 따로 읽는다', async () => {
+    reply = () => ({ code: 0, stdout: JSON.stringify({ title: '제목', body: '본문\n둘째 줄' }) })
+    await expect(getPrEditable('/tmp/wt')).resolves.toEqual({
+      title: '제목',
+      body: '본문\n둘째 줄'
+    })
+    expect(commands).toEqual(['gh pr view --json title,body'])
+  })
+
+  it('본문이 없는 PR 은 빈 문자열로 읽힌다', async () => {
+    reply = () => ({ code: 0, stdout: JSON.stringify({ title: '제목', body: null }) })
+    await expect(getPrEditable('/tmp/wt')).resolves.toEqual({ title: '제목', body: '' })
+  })
+
+  it('조회가 실패하거나 JSON 이 깨지면 null 을 돌려준다', async () => {
+    reply = () => ({ code: 1, stdout: '' })
+    await expect(getPrEditable('/tmp/wt')).resolves.toBeNull()
+    reply = () => ({ code: 0, stdout: '{bad' })
+    await expect(getPrEditable('/tmp/wt')).resolves.toBeNull()
+  })
+
+  it('제목·본문을 명령줄이 아니라 stdin 으로 넘긴다', async () => {
+    reply = () => ({ code: 0, stdout: '{}' })
+    const title = `'; rm -rf /; echo '` + '`whoami`'
+    const body = '백틱 `$(id)` 와 $HOME\n둘째 줄 "따옴표" \\ 역슬래시'
+
+    await expect(editPr('/tmp/wt', { title, body }, 42)).resolves.toEqual({})
+
+    expect(ghCalls()).toEqual(['gh api --method PATCH repos/{owner}/{repo}/pulls/42 --input -'])
+    // 값의 어떤 조각도 명령줄에 새어 나가면 안 된다.
+    expect(ghCalls()[0]).not.toContain('rm -rf')
+    expect(ghCalls()[0]).not.toContain('whoami')
+    expect(ghCalls()[0]).not.toContain('$HOME')
+    expect(JSON.parse(stdinWrites[0])).toEqual({ title, body })
+  })
+
+  it('준 필드만 보낸다 — 손대지 않은 쪽은 GitHub 에 있는 값 그대로 남는다', async () => {
+    reply = () => ({ code: 0, stdout: '{}' })
+    await editPr('/tmp/wt', { title: '새 제목' }, 42)
+    expect(JSON.parse(stdinWrites[0])).toEqual({ title: '새 제목' })
+  })
+
+  /** 본문을 통째로 지우는 것도 정당한 편집이다 — 빈 문자열과 미지정을 구분해야 한다. */
+  it('빈 본문은 미지정이 아니라 "비우기" 로 전달된다', async () => {
+    reply = () => ({ code: 0, stdout: '{}' })
+    await editPr('/tmp/wt', { body: '' }, 42)
+    expect(JSON.parse(stdinWrites[0])).toEqual({ body: '' })
+  })
+
+  it('바꿀 필드가 없으면 gh 를 실행하지 않는다', async () => {
+    reply = () => ({ code: 0, stdout: '{}' })
+    await expect(editPr('/tmp/wt', {})).resolves.toEqual({})
+    expect(commands).toEqual([])
+  })
+
+  it('PR 번호를 모르면 현재 브랜치에서 찾아 쓴다', async () => {
+    reply = (c) =>
+      c.startsWith('gh pr view')
+        ? { code: 0, stdout: JSON.stringify({ number: 7 }) }
+        : { code: 0, stdout: '{}' }
+    await editPr('/tmp/wt', { title: 't' })
+    expect(ghCalls()).toEqual([
+      'gh pr view --json number',
+      'gh api --method PATCH repos/{owner}/{repo}/pulls/7 --input -'
+    ])
+  })
+
+  it('브랜치에 PR 이 없으면 gh api 를 부르지 않고 사유를 돌려준다', async () => {
+    reply = () => ({ code: 1, stdout: '' })
+    const res = await editPr('/tmp/wt', { title: 't' })
+    expect(res.error).toMatch(/could not find a pull request/i)
+    expect(ghCalls().some((c) => c.startsWith('gh api'))).toBe(false)
+  })
+
+  /** GitHub 이 거절하면(빈 제목 등) 그 문장이 사용자에게 필요한 정보다. */
+  it('GitHub 오류 메시지를 그대로 전달한다', async () => {
+    reply = () => ({
+      code: 1,
+      stdout: JSON.stringify({
+        message: 'Validation Failed',
+        errors: [{ message: 'title cannot be blank' }]
+      })
+    })
+    const res = await editPr('/tmp/wt', { title: '' }, 42)
+    expect(res.error).toContain('Validation Failed')
+    expect(res.error).toContain('title cannot be blank')
+  })
+
+  /** 제목은 리포 단위 열린 PR 목록에도 실려 있다 — 안 버리면 사이드바가 옛 제목을 계속 보여 준다. */
+  it('편집 뒤에는 열린 PR 목록 캐시를 버린다', async () => {
+    reply = (c) =>
+      c.startsWith('gh pr list')
+        ? {
+            code: 0,
+            stdout: JSON.stringify([{ number: 1, headRefName: 'f', baseRefName: 'main' }])
+          }
+        : { code: 0, stdout: '{}' }
+    await listOpenPrs('/tmp/wt', 'repo-1')
+    await editPr('/tmp/wt', { title: '새 제목' }, 42)
+    await listOpenPrs('/tmp/wt', 'repo-1')
+    expect(ghCalls().filter((c) => c.startsWith('gh pr list'))).toHaveLength(2)
+  })
+
+  it('미연결이면 gh 를 실행하지 않고 안내 메시지를 돌려준다', async () => {
+    setGithubConnected(false)
+    reply = () => ({ code: 1, stdout: '' }) // 재확인(probe)도 실패 = 여전히 미연결
+    const res = await editPr('/tmp/wt', { title: 't' }, 42)
+    expect(res.error).toMatch(/GitHub is not connected/)
     expect(ghCalls()).toEqual([])
   })
 })

@@ -38,6 +38,8 @@ import {
   closePr,
   reopenPr,
   markPrReady,
+  getPrEditable,
+  editPr,
   retargetPr,
   listOpenPrs,
   listOpenPrsForReview,
@@ -1492,6 +1494,33 @@ export function registerIpc(ctx: IpcContext): void {
       error: err instanceof Error ? err.message : String(err)
     }))
   })
+
+  // 편집 모달을 열 때만 제목·본문 원문을 읽는다(상태 폴링에 본문을 싣지 않기 위해).
+  ipcMain.handle(IPC.prEditable, async (_e, workspaceId: string) => {
+    const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
+    if (!ws || ws.archived) return null
+    return getPrEditable(ws.worktreePath).catch(() => null)
+  })
+
+  ipcMain.handle(
+    IPC.prEdit,
+    async (
+      _e,
+      workspaceId: string,
+      edits: { title?: string; body?: string }
+    ): Promise<{ error?: string }> => {
+      const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
+      if (!ws || ws.archived) return { error: 'Workspace not found.' }
+      const res = await editPr(ws.worktreePath, edits, ws.prNumber ?? undefined).catch((err) => ({
+        error: err instanceof Error ? err.message : String(err)
+      }))
+      if (res.error) return res
+      // 제목은 워크스페이스 표시 이름의 기본값이다(displayName override → PR 제목 → worktree 이름).
+      // 캐시를 버려야 다음 상태 조회가 새 제목을 읽고, 사이드바가 곧바로 따라온다.
+      invalidateWorkspacePr(workspaceId)
+      return {}
+    }
+  )
 
   // PR 의 CI 체크. prStatus 와 동일하게 worktree 의 현재 브랜치 PR 을 기준으로 한다.
   ipcMain.handle(IPC.prChecks, async (_e, workspaceId: string) => {

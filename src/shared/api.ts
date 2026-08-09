@@ -34,6 +34,7 @@ import type {
   PermissionMode,
   PermissionRequest,
   PrChecks,
+  PrEditable,
   PrMergeMethod,
   PrStatus,
   Repo,
@@ -209,6 +210,13 @@ export interface WooiApi {
     reopen(workspaceId: string): Promise<{ error?: string }>
     /** Draft PR 을 리뷰 가능 상태로 전환한다. */
     ready(workspaceId: string): Promise<{ error?: string }>
+    /** 편집 모달이 채울 제목·본문 원문. PR 이 없거나 못 읽으면 null. */
+    editable(workspaceId: string): Promise<PrEditable | null>
+    /**
+     * PR 제목·본문을 고친다. 준 필드만 바꾼다 — 빈 문자열은 "비우기" 라는 정당한 편집이라
+     * 미지정과 구분해 그대로 반영한다.
+     */
+    edit(workspaceId: string, edits: { title?: string; body?: string }): Promise<{ error?: string }>
     /** PR 의 CI 체크 롤업(Check 탭). PR 이 없으면 null. */
     checks(workspaceId: string): Promise<PrChecks | null>
   }
