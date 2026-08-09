@@ -148,7 +148,8 @@ ChatGPT 계정으로 로그인하면 별도 API 키가 필요 없습니다.
   `check_related_work` 는 이 리포에 열려 있는 다른 워크스페이스와 각각이 바꾸고 있는 파일 경로를
   알려 줍니다(경로만, diff 는 절대 넘기지 않습니다). 충돌을 나중에 수습하는 대신 시작 전에 피할 수
   있습니다. `create_stacked_workspace` 는 방금 끝낸 작업이 리뷰 가능한 한 덩어리일 때 현재 브랜치
-  위에 다음 워크스페이스를 열고, `report_to_parent` 로 결과를 부모에게 돌려 줍니다.
+  위에 다음 워크스페이스를 열고, `report_to_parent` 로 결과를 부모에게 돌려 줍니다. 모든 Wooi
+  도구와 안전 제약은 [내장 MCP 레퍼런스](docs/built-in-mcp.ko.md)에서 확인할 수 있습니다.
 - **스택 한눈에 보기** — 현재 워크스페이스가 체인에 속해 있으면 헤더에 **Stack** 버튼이 뜹니다.
   스택의 모든 브랜치를 PR 상태(draft / review required / changes requested / ready to merge /
   conflict / merged), PR 번호, ahead/behind 와 함께 나열합니다. 항목을 클릭해 바로 이동하거나,
