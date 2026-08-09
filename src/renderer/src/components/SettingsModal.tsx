@@ -466,12 +466,10 @@ function AgentsPage({
   const availableBackends = useAvailableBackends()
   const experiments = experimentsOf(settings)
   const [editing, setEditing] = useState<AgentBackendId>(settings.defaultAgentBackend)
-  // 멀티 항목은 조율할 수 있는 백엔드에만 있다. 저장된 조합이 그렇지 않으면(설정 손편집, 실험을
-  // 끈 뒤, 나중에 capability 가 바뀐 경우) 존재하지 않는 value 를 가리켜 select 가 빈 칸이 되므로,
-  // 그때는 평범한 백엔드 선택으로 되돌려 보여 준다.
-  const multiOption =
+  // 팀 모드는 메인 에이전트와 직교하는 workspace 기본값이다. 둘을 조합한 선택지로 만들면
+  // 백엔드가 늘 때마다 목록이 두 배가 되므로 각각 독립된 컨트롤로 보여 준다.
+  const canDefaultToTeam =
     experiments.multiAgent &&
-    settings.defaultMultiAgent === true &&
     availableBackends.some((b) => b.id === settings.defaultAgentBackend && b.capabilities.delegate)
   const backend = useBackend(editing)
   const models = useModels(editing)
@@ -491,26 +489,41 @@ function AgentsPage({
       {availableBackends.length > 1 && (
         <SettingGroup title="Default agent">
           <SettingRow
-            title="Agent for new workspaces"
+            title="Work mode"
+            description="Choose whether new workspaces start with one agent or an agent team."
+          >
+            <select
+              className={inputClass + ' w-60 text-sm'}
+              value={canDefaultToTeam && settings.defaultMultiAgent === true ? 'team' : 'solo'}
+              onChange={(event) => save({ defaultMultiAgent: event.target.value === 'team' })}
+            >
+              <option value="solo">Solo — one agent does the work</option>
+              {canDefaultToTeam && (
+                <option value="team">Agent team — the lead can delegate tasks</option>
+              )}
+            </select>
+          </SettingRow>
+          <SettingRow
+            title="Lead agent"
             description={
-              multiOption
-                ? 'New workspaces start in multi-agent mode — the main agent can run tasks with other agents. Each workspace keeps the agent it was created with.'
+              canDefaultToTeam && settings.defaultMultiAgent === true
+                ? 'The agent you talk to. It can delegate to other available agents.'
                 : 'Each workspace stays with the agent it was created with.'
             }
           >
             <select
               className={inputClass + ' w-60 text-sm'}
-              value={
-                multiOption ? `multi:${settings.defaultAgentBackend}` : settings.defaultAgentBackend
-              }
+              value={settings.defaultAgentBackend}
               onChange={(event) => {
-                // 값 하나에 두 설정을 실어 보낸다 — 사용자에게는 한 줄의 선택이지만 저장은
-                // 메인 에이전트와 모드로 나뉜다(둘은 직교한다).
-                const raw = event.target.value
-                const multiAgent = raw.startsWith('multi:')
-                const next = (multiAgent ? raw.slice('multi:'.length) : raw) as AgentBackendId
+                const next = event.target.value as AgentBackendId
                 setEditing(next)
-                save({ defaultAgentBackend: next, defaultMultiAgent: multiAgent })
+                const canDelegate = Boolean(
+                  availableBackends.find((item) => item.id === next)?.capabilities.delegate
+                )
+                save({
+                  defaultAgentBackend: next,
+                  ...(!canDelegate ? { defaultMultiAgent: false } : {})
+                })
               }}
             >
               {availableBackends.map((item) => (
@@ -518,16 +531,6 @@ function AgentsPage({
                   {item.label}
                 </option>
               ))}
-              {/* 멀티 에이전트는 메인 에이전트를 함께 정해야 의미가 있으므로, 조율할 수 있는
-                  백엔드마다 한 줄씩 낸다 — "Multi-agent" 만 있으면 대화 상대가 누구인지 감춰진다. */}
-              {experiments.multiAgent &&
-                availableBackends
-                  .filter((item) => item.capabilities.delegate)
-                  .map((item) => (
-                    <option key={`multi:${item.id}`} value={`multi:${item.id}`}>
-                      Multi-agent · {item.label}
-                    </option>
-                  ))}
             </select>
           </SettingRow>
         </SettingGroup>

@@ -57,11 +57,7 @@ export default function NewFromIssueModal({
     }
     const workspaceId = await useStore
       .getState()
-      .createWorkspace(
-        repoId,
-        { name: picked.title, agentBackend: effectiveBackend },
-        picked.title
-      )
+      .createWorkspace(repoId, { name: picked.title, agentBackend: effectiveBackend }, picked.title)
     if (!workspaceId) {
       setBusy(false)
       return
