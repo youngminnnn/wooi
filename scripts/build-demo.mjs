@@ -14,13 +14,16 @@
  * 앱과 같은 자리에 놓인다.
  *
  * 서사 순서는 랜딩/README 와 같다 — 병렬 실행은 쉬운 쪽이라 한 컷으로 지나가고, 차별화
- * 지점에 나머지 시간을 전부 쓴다:
+ * 지점에 나머지 시간을 전부 쓴다. 스택은 두 박자다: 사람이 행 메뉴로 쌓는 것은 경쟁 도구에도
+ * 있으니 한 컷으로 인정하고 지나가고, **에이전트가 스스로 쌓는** 쪽에 시간을 몰아준다.
  *
- *   0.4– 3.0  병렬 — 세 에이전트, 각자의 worktree
- *   3.2– 6.1  스택 — 행 메뉴로 앞선 작업 위에 새 워크스페이스
- *   6.3– 9.2  체인 — 스택 팝오버에서 PR 상태 한눈에
- *   9.3–12.1  캐스케이드 — 부모 머지 → 자식 rebase·retarget
- *  12.2–18.5  리뷰 — diff 줄 위의 지적을 고치고·버리고·게시
+ *   0.4– 2.9  병렬 — 세 에이전트, 각자의 worktree
+ *   3.05–4.1  스택·사람 — 행 메뉴로 앞선 작업 위에 새 워크스페이스
+ *   4.25–7.3  스택·에이전트 — 그 워크스페이스의 에이전트가 check_related_work 로 형제와의
+ *             충돌을 먼저 확인하고, create_stacked_workspace 로 다음 PR 을 스스로 쌓는다
+ *   7.45–9.9  체인 — 스택 팝오버에서 PR 상태 한눈에
+ *  10.05–12.3 캐스케이드 — 부모 머지 → 자식 rebase·retarget
+ *  12.45–18.5 리뷰 — diff 줄 위의 지적을 고치고·버리고·게시
  *
  * 파일 크기는 README 에서 무한 반복되므로 계속 지켜본다(현재 ~76KB). 장면을 더할 때는
  * 반복되는 조각을 <defs> + <use> 로 빼거나 장면 수를 줄인다.
@@ -315,9 +318,14 @@ const dot = (cx, cy, fill) => `<circle cx="${num(cx)}" cy="${num(cy)}" r="4" fil
 // 두 프레임이 확실히 갈린다(19s 기준 간격 0.0053% > 해상도 0.001%).
 const pct = (t) => (Math.round((Math.max(0, Math.min(DUR, t)) / DUR) * 1e5) / 1e3).toString()
 
-/** prop 별 keyframes 를 만들고 애니메이션 이름을 돌려준다. */
+/**
+ * prop 별 keyframes 를 만들고 애니메이션 이름을 돌려준다.
+ *
+ * 같은 프레임 목록은 한 번만 쓴다 — 장면 하나가 여러 요소를 같은 구간에 켜고 끄므로
+ * (`only(0, T_MERGE)` 같은 것) 내용이 똑같은 @keyframes 가 수십 벌씩 생긴다.
+ */
+const kfByBody = new Map()
 function keyframes(prop, stops) {
-  const name = uid('k')
   const seen = new Set()
   const frames = stops
     .slice()
@@ -330,6 +338,10 @@ function keyframes(prop, stops) {
     })
     .map(([t, v]) => `${pct(t)}%{${prop}:${v}}`)
     .join('')
+  const hit = kfByBody.get(frames)
+  if (hit) return hit
+  const name = uid('k')
+  kfByBody.set(frames, name)
   css.push(`@keyframes ${name}{${frames}}`)
   return name
 }
@@ -337,7 +349,11 @@ function keyframes(prop, stops) {
 /**
  * 자식들을 <g> 로 감싸고 CSS 애니메이션을 건다.
  * tracks: { opacity: [[t,v],…], transform: [[t,'translate(1px,2px)'],…] }
+ *
+ * 규칙 본문이 같은 그룹은 선택자 목록으로 묶어 한 줄에 낸다(`#a,#b,#c{…}`) — 그룹이 270개가
+ * 넘어 한 줄씩 내면 그것만으로 파일의 상당 부분이 된다.
  */
+const idsByRule = new Map()
 function animated(children, tracks, o = {}) {
   const id = uid('g')
   const names = Object.entries(tracks).map(([prop, stops]) => keyframes(prop, stops))
@@ -345,7 +361,10 @@ function animated(children, tracks, o = {}) {
   const rules = [`animation-name:${names.join(',')}`]
   if (o.origin) rules.push(`transform-origin:${o.origin}`)
   if (o.extra) rules.push(o.extra)
-  css.push(`#${id}{${rules.join(';')}}`)
+  const body = rules.join(';')
+  const ids = idsByRule.get(body)
+  if (ids) ids.push(id)
+  else idsByRule.set(body, [id])
   return `<g id="${id}">${children}</g>`
 }
 
@@ -388,13 +407,19 @@ const CMP_R = CMP_L + 768
 /*
  * 서사 순서 — 병렬은 한 컷으로 빠르게 깔고, 차별화(스택 → 머지 캐스케이드 → diff 위 리뷰)에
  * 남은 시간을 전부 쓴다. 앞 3초에서 이탈하는 시청자에게도 "스택" 이 보여야 한다.
+ *
+ * 스택 안에서도 시간 배분이 곧 주장이다. 사람이 행 메뉴로 워크스페이스를 만드는 장면은 경쟁
+ * 도구에도 있으므로 1초로 압축하고(T_STACK), 남는 시간은 전부 **에이전트가 스스로 쪼개는**
+ * 박자에 준다(T_AGENT → T_STACK3). 그 박자가 wooi 만의 조합이다 — 에이전트가 일을 쪼개되,
+ * 충돌을 사후에 푸는 대신 스택으로 미리 피한다.
  */
-const T_STACK = 5.3 // 스택 워크스페이스(JWT rotation) 가 생기는 시점
-const T_STACK3 = 6.05 // 스택 3단(Revoke endpoint)
-const T_MERGE = 9.3 // 부모 PR 머지 → 자식 rebase·retarget
-const T_REVIEW = 12.2 // 본문이 PR 리뷰 화면으로 바뀌는 시점
-const T_RUN_END = 6.8 // 선택된 워크스페이스가 도는 마지막 시점(컴포저 문구가 바뀐다)
-const STILL = 8.0 // prefers-reduced-motion 일 때 세워 둘 시점(스택 팝오버가 열려 있다)
+const T_STACK = 3.9 // 사람이 행 메뉴로 만든 스택 워크스페이스(JWT rotation)
+const T_AGENT = 4.25 // 그 워크스페이스의 에이전트가 첫 턴을 시작하는 시점
+const T_STACK3 = 6.6 // 에이전트가 create_stacked_workspace 로 만든 3단(Revoke endpoint)
+const T_MERGE = 10.2 // 부모 PR 머지 → 자식 rebase·retarget
+const T_REVIEW = 12.45 // 본문이 PR 리뷰 화면으로 바뀌는 시점
+const T_RUN_END = 7.3 // 선택된 워크스페이스가 도는 마지막 시점(컴포저 문구가 바뀐다)
+const STILL = 8.6 // prefers-reduced-motion 일 때 세워 둘 시점(스택 팝오버가 열려 있다)
 
 /** 실행 중 개수 배지의 구간 — 3 → 2 → 1 → 2 → 1. */
 const RUN_COUNT = {
@@ -764,7 +789,7 @@ for (const r of ROWS) {
         rect(248, cy - 12, 26, 24, { fill: C.surface3 }) +
           rect(250, cy - 12, 24, 24, { r: 6, fill: C.surface2 }) +
           icon('dots', 255, cy - 7, 14, C.n300),
-        { opacity: fade(3.5, 3.72, 5.2, 5.4) }
+        { opacity: fade(3.05, 3.2, 4.15, 4.3) }
       )
     )
   }
@@ -899,6 +924,7 @@ WS(rect(CONTENT_X, HEADER_BOT - 1, W - CONTENT_X, 1, { fill: C.border }))
     '#fe9a004d',
     only(0, T_STACK)
   )
+  // 갓 만들어진 워크스페이스에는 아직 PR 이 없다 — 에이전트가 일을 끝내고 PR 을 연 뒤에 붙는다.
   prBadge(
     '#42',
     TW.pr42,
@@ -909,7 +935,7 @@ WS(rect(CONTENT_X, HEADER_BOT - 1, W - CONTENT_X, 1, { fill: C.border }))
     C.success200,
     '#00bc7d1a',
     '#00bc7d4d',
-    only(T_STACK, null)
+    fade(5.3, 5.5)
   )
 
   // Stack 버튼 — 스택이 2개 이상일 때만 나타난다.
@@ -936,9 +962,45 @@ WS(rect(CONTENT_X, HEADER_BOT - 1, W - CONTENT_X, 1, { fill: C.border }))
   })
 }
 
-/* ---------- 대화 (하단 정렬, max-w-3xl + px-5) ---------- */
+/* ---------- 대화 (하단 정렬, max-w-3xl + px-5) ----------
+ *
+ * 블록 사이 간격은 12px 로 고정이고, 한 줄 높이는 text-sm 기준 19.5px 다. 대화는 아래쪽에
+ * 붙으므로 각 장면의 마지막 블록이 604 에서 끝나도록 위로 쌓아 올린다.
+ */
 {
-  // 장면 1 — 사용자 메시지 → 도구 호출 → 도구 결과 → 응답
+  const LINE = 19.5 // text-sm 한 줄
+  const GAP = 12 // 블록 사이
+  const RES_H = 31.95 // 도구 결과 상자(ToolResult) 높이
+
+  /**
+   * 도구 호출 한 줄 — ChatPrimitives 의 ToolUseRow 와 같은 구성이다:
+   * 아이콘 12(결과 전엔 스피너, 온 뒤엔 렌치 · 둘 다 warning-500/80) + gap-1.5 + 굵은 이름 +
+   * 흐린 요약, 그리고 우측 끝에 원시 입력을 펼치는 셰브런.
+   */
+  const toolRow = (top, name, o = {}) => {
+    const cy = top + LINE / 2
+    const label =
+      text(MSG_L + 18, bl(cy, 12), name, { px: 12, fill: C.n300, weight: 500 }) +
+      (o.summary
+        ? text(MSG_L + 18 + o.nameW + 6, bl(cy, 12), o.summary, { px: 12, fill: C.n500 })
+        : '') +
+      icon('chevronright', MSG_R - 12, cy - 6, 12, C.n400)
+    // 결과를 기다리는 동안(pending)에는 렌치 자리에서 스피너가 돈다.
+    const head = o.until
+      ? animated(spinAt(MSG_L, cy - 6, 12, '#fe9a00cc'), { opacity: only(0, o.until) }) +
+        animated(icon('wrench', MSG_L, cy - 6, 12, '#fe9a00cc'), { opacity: only(o.until, null) })
+      : icon('wrench', MSG_L, cy - 6, 12, '#fe9a00cc')
+    return head + label
+  }
+
+  /** 도구 결과 상자(MessageList 의 ToolResult) — ml-4 + bg-3 + border, 등폭 11px. */
+  const toolResult = (top, s) =>
+    rect(MSG_L + 16, top, 768 - 40 - 16, RES_H, { r: 6, fill: C.bg3, stroke: C.border }) +
+    text(MSG_L + 24, bl(top + 8 + 7.98, 11), s, { px: 11, fill: C.n500, mono: true })
+
+  /* 장면 1 — 사용자 메시지 → 도구 호출 → 도구 결과 → 응답. T_STACK 에 워크스페이스가
+   * 바뀌므로 그 직전에 빠진다. */
+  const OUT = [3.6, 3.85]
   const u1w = 374.36 + 28
   WS(
     animated(
@@ -949,29 +1011,15 @@ WS(rect(CONTENT_X, HEADER_BOT - 1, W - CONTENT_X, 1, { fill: C.border }))
           'Extract everything under src/auth into its own service module.',
           { px: 13, fill: C.n100 }
         ),
-      { opacity: fade(0.75, 1.1, 5.05, 5.3) }
+      { opacity: fade(0.7, 1.05, ...OUT) }
     )
   )
   WS(
-    animated(
-      icon('wrench', MSG_L, 519.85 - 6, 12, '#fe9a00cc') +
-        text(MSG_L + 18, bl(519.85, 12), 'Bash', { px: 12, fill: C.n300, weight: 500 }) +
-        text(MSG_L + 18 + TW.toolName + 6, bl(519.85, 12), 'npm test', { px: 12, fill: C.n500 }) +
-        icon('chevronright', MSG_R - 12, 513.85, 12, C.n400),
-      { opacity: fade(1.5, 1.8, 5.05, 5.3) }
-    )
+    animated(toolRow(510.1, 'Bash', { summary: 'npm test', nameW: TW.toolName }), {
+      opacity: fade(1.35, 1.65, ...OUT)
+    })
   )
-  WS(
-    animated(
-      rect(MSG_L + 16, 540.55, 768 - 40 - 16, 31.95, { r: 6, fill: C.bg3, stroke: C.border }) +
-        text(MSG_L + 24, bl(540.55 + 8 + 7.98, 11), '214 passing (3.4s)', {
-          px: 11,
-          fill: C.n500,
-          mono: true
-        }),
-      { opacity: fade(2.0, 2.3, 5.05, 5.3) }
-    )
-  )
+  WS(animated(toolResult(540.55, '214 passing (3.4s)'), { opacity: fade(1.8, 2.1, ...OUT) }))
   // 어시스턴트 응답 — 마크다운이라 `코드`는 인라인 코드 칩으로 그려진다.
   {
     const y = bl(584.5 + 19.5 / 2, 13)
@@ -995,49 +1043,108 @@ WS(rect(CONTENT_X, HEADER_BOT - 1, W - CONTENT_X, 1, { fill: C.border }))
             ],
             { px: 13 }
           ),
-        { opacity: fade(2.7, 3.05, 5.05, 5.3) }
+        { opacity: fade(2.4, 2.75, ...OUT) }
       )
     )
   }
 
-  // 장면 2
-  const u2w = 224.52 + 28
-  WS(
-    animated(
-      bubble(MSG_R - u2w, 537, u2w, 35.5, C.surface4) +
-        text(MSG_R - u2w + 14, bl(537 + 8 + 19.5 / 2, 13), 'Now add JWT rotation on top of that.', {
-          px: 13,
-          fill: C.n100
-        }),
-      { opacity: fade(5.6, 5.95) }
-    )
-  )
+  /* 장면 2 — 사람이 스택한 워크스페이스를 에이전트가 이어받는다.
+   *
+   * 이 워크스페이스는 사람이 행 메뉴로 만들었지만(T_STACK), 그 다음부터는 전부 에이전트가 한다:
+   * 시작 전 형제 워크스페이스와 겹치는 파일이 있는지 보고(check_related_work), 일을 끝낸 뒤
+   * 다음 조각을 자기 위에 다시 스택한다(create_stacked_workspace). 사이드바에 3단이 들여쓰기로
+   * 쌓이는 것과 여기 도구 호출이 같은 시각에 맞물려야 인과가 읽힌다.
+   */
   {
-    const y = bl(584.5 + 19.5 / 2, 13)
-    const P = 4.55 // 인라인 코드 칩의 좌우 패딩(.35em @ 13px)
-    const c1 = P + 122.42 + P
-    const c2 = P + 28.81 + P
+    // 마지막 블록이 604 에서 끝나도록 위로 쌓는다.
+    const B7 = 584.5 // 응답 — 다음 워크스페이스를 왜 따로 냈는지
+    const B6 = B7 - GAP - RES_H // create_stacked_workspace 결과
+    const B5 = B6 - GAP - LINE // create_stacked_workspace 호출
+    const B4 = B5 - GAP - LINE // 응답 — 이 PR 이 어디를 겨냥하는지
+    const B3 = B4 - GAP - RES_H // check_related_work 결과
+    const B2 = B3 - GAP - LINE // check_related_work 호출
+    const B1 = B2 - GAP - 35.5 // 사람이 건넨 과제
+
+    const u2w = 224.52 + 28
     WS(
       animated(
-        rect(MSG_L + 71.36, 587.5, c1, 15, { r: 4, fill: C.codeInlineBg }) +
-          rect(MSG_L + 71.36 + c1 + 211.16, 587.5, c2, 15, { r: 4, fill: C.codeInlineBg }) +
-          rich(
-            MSG_L,
-            y,
-            [
-              { t: 'Stacked on ', w: 71.36, fill: C.n200 },
-              { t: ' ', w: P },
-              { t: 'wooi/auth-service', w: 122.42, px: 11.96, mono: true, fill: C.codeFg },
-              { t: ' ', w: P },
-              { t: ' — this PR targets that branch, not ', w: 211.16, fill: C.n200 },
-              { t: ' ', w: P },
-              { t: 'main', w: 28.81, px: 11.96, mono: true, fill: C.codeFg },
-              { t: ' ', w: P },
-              { t: '.', w: 3.8, fill: C.n200 }
-            ],
-            { px: 13 }
+        bubble(MSG_R - u2w, B1, u2w, 35.5, C.surface4) +
+          text(
+            MSG_R - u2w + 14,
+            bl(B1 + 8 + 19.5 / 2, 13),
+            'Now add JWT rotation on top of that.',
+            {
+              px: 13,
+              fill: C.n100
+            }
           ),
-        { opacity: fade(6.5, 6.85) }
+        { opacity: fade(T_AGENT + 0.1, T_AGENT + 0.4) }
+      )
+    )
+
+    // 형제와 겹치는 파일이 있는지 **시작하기 전에** 본다 — 충돌을 사후에 푸는 대신 미리 피한다.
+    WS(
+      animated(toolRow(B2, 'mcp__wooi__check_related_work', { until: 5.0 }), {
+        opacity: fade(4.75, 5.0)
+      })
+    )
+    WS(
+      animated(toolResult(B3, '3 open workspaces · 0 overlapping paths'), {
+        opacity: fade(5.0, 5.2)
+      })
+    )
+
+    {
+      const y = bl(B4 + 19.5 / 2, 13)
+      const cy = B4 + 3
+      const P = 4.55 // 인라인 코드 칩의 좌우 패딩(.35em @ 13px)
+      const c1 = P + 122.42 + P
+      const c2 = P + 28.81 + P
+      WS(
+        animated(
+          rect(MSG_L + 71.36, cy, c1, 15, { r: 4, fill: C.codeInlineBg }) +
+            rect(MSG_L + 71.36 + c1 + 211.16, cy, c2, 15, { r: 4, fill: C.codeInlineBg }) +
+            rich(
+              MSG_L,
+              y,
+              [
+                { t: 'Stacked on ', w: 71.36, fill: C.n200 },
+                { t: ' ', w: P },
+                { t: 'wooi/auth-service', w: 122.42, px: 11.96, mono: true, fill: C.codeFg },
+                { t: ' ', w: P },
+                { t: ' — this PR targets that branch, not ', w: 211.16, fill: C.n200 },
+                { t: ' ', w: P },
+                { t: 'main', w: 28.81, px: 11.96, mono: true, fill: C.codeFg },
+                { t: ' ', w: P },
+                { t: '.', w: 3.8, fill: C.n200 }
+              ],
+              { px: 13 }
+            ),
+          { opacity: fade(5.4, 5.65) }
+        )
+      )
+    }
+
+    // 다음 조각은 사람을 기다리지 않는다 — 에이전트가 자기 위에 워크스페이스를 하나 더 쌓는다.
+    WS(
+      animated(toolRow(B5, 'mcp__wooi__create_stacked_workspace', { until: T_STACK3 - 0.25 }), {
+        opacity: fade(5.95, 6.2)
+      })
+    )
+    WS(
+      animated(toolResult(B6, 'Revoke endpoint · wooi/jwt-revoke → wooi/jwt-rotation'), {
+        opacity: fade(T_STACK3 - 0.25, T_STACK3 - 0.05)
+      })
+    )
+    WS(
+      animated(
+        text(
+          MSG_L,
+          bl(B7 + 19.5 / 2, 13),
+          'Revocation is its own PR — Revoke endpoint is stacked on this branch and already on it.',
+          { px: 13, fill: C.n200 }
+        ),
+        { opacity: fade(T_STACK3 + 0.2, T_STACK3 + 0.45) }
       )
     )
   }
@@ -1742,11 +1849,11 @@ S(
   }
   S(
     animated(inner.join(''), {
-      opacity: fade(3.9, 4.12, 5.15, 5.35),
+      opacity: fade(3.25, 3.45, 4.1, 4.25),
       transform: [
         [0, 'translate(0px,-6px)'],
-        [3.9, 'translate(0px,-6px)'],
-        [4.15, 'translate(0px,0px)'],
+        [3.25, 'translate(0px,-6px)'],
+        [3.5, 'translate(0px,0px)'],
         [DUR, 'translate(0px,0px)']
       ]
     })
@@ -1843,11 +1950,11 @@ S(
 
   S(
     animated(inner.join(''), {
-      opacity: fade(6.95, 7.2, 11.9, 12.12),
+      opacity: fade(7.15, 7.4, 12.15, 12.37),
       transform: [
         [0, 'translate(0px,-8px)'],
-        [6.95, 'translate(0px,-8px)'],
-        [7.25, 'translate(0px,0px)'],
+        [7.15, 'translate(0px,-8px)'],
+        [7.45, 'translate(0px,0px)'],
         [DUR, 'translate(0px,0px)']
       ]
     })
@@ -1861,16 +1968,17 @@ S(
   S(
     animated(g, {
       // 안 보이는 동안에도 다음 목표로 이동해 둬서, 나타날 때 이미 그쪽을 향한다.
+      // 에이전트 박자(T_AGENT–T_STACK3)에는 일부러 커서가 없다 — 사람이 손대지 않는다는 뜻이다.
       opacity: [
         [0, 0],
-        [3.25, 0],
-        [3.5, 1],
-        [5.3, 1],
-        [5.5, 0],
-        [6.35, 0],
-        [6.6, 1],
-        [7.6, 1],
-        [7.8, 0],
+        [2.75, 0],
+        [2.95, 1],
+        [4.25, 1],
+        [4.45, 0],
+        [6.7, 0],
+        [6.9, 1],
+        [8.2, 1],
+        [8.4, 0],
         [13.5, 0],
         [13.7, 1],
         [18.3, 1],
@@ -1879,11 +1987,11 @@ S(
       ],
       transform: [
         [0, 'translate(560px,470px)'],
-        [3.25, 'translate(560px,470px)'],
-        [3.9, 'translate(262px,205px)'], // 행의 ⋯ 버튼 → Stack a new workspace
-        [6.35, 'translate(262px,205px)'],
-        [6.9, 'translate(990px,62px)'], // 헤더 Stack 버튼
-        [7.9, 'translate(990px,62px)'],
+        [2.6, 'translate(560px,470px)'],
+        [3.15, 'translate(262px,205px)'], // 행의 ⋯ 버튼 → Stack a new workspace
+        [6.5, 'translate(262px,205px)'],
+        [7.1, 'translate(990px,62px)'], // 헤더 Stack 버튼
+        [8.2, 'translate(990px,62px)'],
         [13.3, 'translate(730px,470px)'],
         [13.95, 'translate(700px,516px)'], // 카드 B 의 Discard
         [14.3, 'translate(700px,516px)'],
@@ -1903,13 +2011,19 @@ S(
   /*
    * 서사 — 병렬은 한 컷으로 인정하고 지나가고, 나머지 시간을 스택과 diff 위 리뷰에 쓴다.
    * 랜딩/README 의 "병렬은 쉬운 쪽" 메시지와 같은 순서여야 한다.
+   *
+   * 스택의 두 캡션은 선택지 A/B 가 아니라 한 문장의 앞뒤다 — 사람이 쌓기 시작하고("Stack the
+   * agents."), 그 다음부터는 에이전트가 이어받는다("The agent picks it up"). 그래서 두 번째
+   * 캡션은 새 주제를 여는 대신 앞 문장을 받는 말로 시작한다.
    */
   const CAPS = [
-    [0.4, 3.0, 'Three agents, three ', 'isolated worktrees', ' — the easy part.'],
-    [3.2, 6.1, 'Work that builds on work? ', 'Stack the agents.', ''],
-    [6.3, 9.15, 'Each PR targets its parent — ', 'the whole chain in one place', '.'],
-    [9.35, 12.05, 'Parent merges → ', 'Wooi rebases and retargets the rest.', ''],
-    [12.4, 15.3, 'Review a PR here too — ', 'findings land on the diff line', '.'],
+    [0.4, 2.9, 'Three agents, three ', 'isolated worktrees', ' — the easy part.'],
+    [3.05, 4.1, 'Work that builds on work? ', 'Stack the agents.', ''],
+    [4.25, 5.75, 'The agent picks it up — ', 'it checks its siblings first', '.'],
+    [5.85, 7.3, 'Then it stacks the next PR itself — ', 'conflicts avoided, not resolved', '.'],
+    [7.45, 9.9, 'Each PR targets its parent — ', 'the whole chain in one place', '.'],
+    [10.05, 12.3, 'Parent merges → ', 'Wooi rebases and retargets the rest.', ''],
+    [12.65, 15.3, 'Review a PR here too — ', 'findings land on the diff line', '.'],
     [15.5, 18.5, 'Edit it, discard it, ', 'post one or post the batch', '.']
   ]
   for (const [t0, t1, pre, mid, post] of CAPS) {
@@ -1932,8 +2046,8 @@ const stageAnim = animated(stage.join(''), {
   ]
 })
 
-const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Wooi — stack AI coding agents on each other's branches and review their PRs on the diff">
-<title>Wooi — parallel agents are the easy part: stack them when work builds on work, and review their PRs right on the diff</title>
+const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Wooi — AI coding agents stack their own work on each other's branches, and their pull requests review as a chain">
+<title>Wooi — parallel agents are the easy part: stack them when work builds on work, let each agent split its own work into the next stacked PR, and review the chain right on the diff</title>
 <defs>
 <linearGradient id="wg" gradientUnits="userSpaceOnUse" x1="7.5" y1="7.5" x2="25" y2="25"><stop offset="0" stop-color="#74acff"/><stop offset="1" stop-color="#b08bfa"/></linearGradient>
 <linearGradient id="cg" gradientUnits="userSpaceOnUse" x1="440" y1="0" x2="840" y2="0"><stop offset="0" stop-color="#74acff"/><stop offset="1" stop-color="#b08bfa"/></linearGradient>
@@ -1946,6 +2060,7 @@ text{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,'Helvetic
 .i{fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 g[id]{animation-duration:${DUR}s;animation-timing-function:linear;animation-iteration-count:infinite}
 ${css.join('\n')}
+${[...idsByRule].map(([body, ids]) => `#${ids.join(',#')}{${body}}`).join('\n')}
 /* 모션을 줄인 환경에서는 애니메이션을 끄되(animation:none) 모든 장면이 한꺼번에 겹쳐
    보이지 않도록, 음수 delay + paused 로 한 장면에 세워 둔다 — 스택 팝오버가 열린 ${STILL}s. */
 @media (prefers-reduced-motion:reduce){g[id]{animation-delay:-${STILL}s;animation-play-state:paused}}
