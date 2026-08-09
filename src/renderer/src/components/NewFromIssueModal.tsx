@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Check, Loader2, Search } from 'lucide-react'
-import type { IssueCandidate } from '@shared/types'
+import type { AgentBackendId, IssueCandidate } from '@shared/types'
 import { useStore } from '../store'
 import Modal, { ghostBtn, inputClass, labelClass, primaryBtn } from './Modal'
+import { useAvailableBackends } from '../lib/backends'
+import { AgentBackendMark } from './BrandIcons'
 
 export default function NewFromIssueModal({
   repoId,
@@ -11,7 +13,16 @@ export default function NewFromIssueModal({
   repoId: string
   onClose: () => void
 }): React.JSX.Element {
-  const repo = useStore((s) => s.app?.repos.find((item) => item.id === repoId))
+  const app = useStore((s) => s.app)!
+  const repo = app.repos.find((item) => item.id === repoId)
+  const available = useAvailableBackends()
+  const [agentBackend, setAgentBackend] = useState<AgentBackendId>(
+    () => app.settings.defaultAgentBackend
+  )
+  const effectiveBackend =
+    available.some((backend) => backend.id === agentBackend) || available.length === 0
+      ? agentBackend
+      : available[0].id
   const [issues, setIssues] = useState<IssueCandidate[] | null>(null)
   const [query, setQuery] = useState('')
   const [picked, setPicked] = useState<IssueCandidate | null>(null)
@@ -46,7 +57,11 @@ export default function NewFromIssueModal({
     }
     const workspaceId = await useStore
       .getState()
-      .createWorkspace(repoId, { name: picked.title }, picked.title)
+      .createWorkspace(
+        repoId,
+        { name: picked.title, agentBackend: effectiveBackend },
+        picked.title
+      )
     if (!workspaceId) {
       setBusy(false)
       return
@@ -73,6 +88,33 @@ export default function NewFromIssueModal({
       }
     >
       <div className="space-y-3">
+        {available.length > 1 && (
+          <div>
+            <label className={labelClass}>Agent</label>
+            <div className="flex gap-1.5">
+              {available.map((backend) => (
+                <button
+                  key={backend.id}
+                  type="button"
+                  onClick={() => setAgentBackend(backend.id)}
+                  className={
+                    'flex-1 flex items-center justify-center gap-2 text-sm px-3 py-2 rounded-lg border transition-colors ' +
+                    (effectiveBackend === backend.id
+                      ? 'border-[var(--info-500)] bg-[var(--info-600)]/15 text-neutral-100'
+                      : 'border-[var(--border)] text-neutral-300 hover:bg-[var(--surface-2)]')
+                  }
+                >
+                  <AgentBackendMark backend={backend.id} size={15} />
+                  {backend.label}
+                </button>
+              ))}
+            </div>
+            <p className="mt-1.5 text-xs text-neutral-600">
+              The workspace stays on the agent it was created with.
+            </p>
+          </div>
+        )}
+
         <div>
           <label className={labelClass} htmlFor="issue-filter">
             Issue

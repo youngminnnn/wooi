@@ -17,6 +17,7 @@ const GROUPS: { title: string; items: { keys: string[]; label: string }[] }[] = 
     title: 'Session & panels',
     items: [
       { keys: ['⌘N'], label: 'New workspace in the focused repository' },
+      { keys: ['⇧⌘N'], label: 'Choose an agent for a new workspace' },
       { keys: ['⌘Z'], label: 'Undo — delete the workspace you just created' },
       { keys: ['⇧⌘R'], label: 'Review a pull request' },
       { keys: ['⌘,'], label: 'Open settings' },

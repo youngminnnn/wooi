@@ -54,6 +54,12 @@ export default function RowActionsMenu({
   }, [at, align])
 
   useEffect(() => {
+    if (!ready) return
+    const items = Array.from(
+      ref.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? []
+    )
+    items[0]?.focus()
+
     const onDown = (e: MouseEvent): void => {
       // 메뉴가 portal 로 떠 있어 트리거 버튼은 ref 밖이다. 트리거의 mousedown 까지 "바깥 클릭"
       // 으로 처리하면 닫힌 직후 버튼의 onClick 이 다시 열어서 토글이 동작하지 않는다.
@@ -61,7 +67,21 @@ export default function RowActionsMenu({
       if (ref.current && !ref.current.contains(e.target as Node)) onClose()
     }
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') onClose()
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        onClose()
+        return
+      }
+      const current = items.indexOf(document.activeElement as HTMLButtonElement)
+      let next: number | null = null
+      if (e.key === 'ArrowDown') next = (Math.max(current, -1) + 1) % items.length
+      else if (e.key === 'ArrowUp') next = (current <= 0 ? items.length : current) - 1
+      else if (e.key === 'Home') next = 0
+      else if (e.key === 'End') next = items.length - 1
+      if (next !== null && items.length) {
+        e.preventDefault()
+        items[next]?.focus()
+      }
     }
     window.addEventListener('mousedown', onDown)
     window.addEventListener('keydown', onKey)
@@ -74,7 +94,7 @@ export default function RowActionsMenu({
       window.removeEventListener('resize', onClose)
       window.removeEventListener('scroll', onClose, true)
     }
-  }, [onClose])
+  }, [onClose, ready])
 
   return createPortal(
     <div
