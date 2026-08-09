@@ -84,6 +84,10 @@ export const createStackedWorkspace: AgentToolHandler = async (deps, workspaceId
   const result = await createWorkspace(deps, {
     repoId: ws.repoId,
     parentWorkspaceId: ws.id,
+    // 부모 관계와 별개로 생성자도 남긴다. 스택에서는 두 값이 같지만 묻는 것이 다르다 —
+    // 사람이 UI 에서 만든 스택 자식은 부모가 있어도 생성자가 없고, 그 구분이 대상을 받는
+    // 도구의 권한 판정 근거가 된다([[agent/tools/target]]).
+    createdByWorkspaceId: ws.id,
     ...(name ? { name } : {})
   })
   if (result.error) throw new Error(result.error)

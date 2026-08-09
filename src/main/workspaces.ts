@@ -14,10 +14,12 @@ import {
   detectCarryItems,
   isAgentContextPath
 } from './carry'
-import { addWorktree, resolveUniqueWorktree, syncGhMergeBase } from './git'
+import { addWorktree, removeWorktree, resolveUniqueWorktree, syncGhMergeBase } from './git'
+import { getPrStatus } from './github'
 import { log } from './logger'
 import { generateWorkspaceName } from './names'
 import { findFreePort } from './net'
+import { invalidateWorkspacePr } from './prCache'
 import { getStore } from './store'
 import type { ScriptRunner } from './scripts'
 
@@ -32,6 +34,18 @@ import type { ScriptRunner } from './scripts'
 export interface CreateWorkspaceDeps {
   scripts: ScriptRunner
   /** 생성 직후 전체 상태를 창들에 방송한다(사이드바에 새 행이 나타나는 시점). */
+  broadcastState: () => void
+}
+
+/**
+ * 아카이브에 필요한 것. 생성보다 넓다 — 워크스페이스에 매달려 있던 것들을 전부 끊어야 하기
+ * 때문이다. 구체 클래스가 아니라 쓰는 메서드만 적어 두어, 부르는 쪽(IPC 의 IpcContext,
+ * 도구의 AgentToolDeps)이 자기 모양 그대로 넘길 수 있게 한다.
+ */
+export interface ArchiveWorkspaceDeps {
+  sessions: { dispose: (workspaceId: string) => void }
+  scripts: Pick<ScriptRunner, 'disposeWorkspace' | 'runOnce'>
+  terminals: { disposeWorkspace: (workspaceId: string) => void }
   broadcastState: () => void
 }
 
@@ -195,6 +209,9 @@ export async function createWorkspace(
       branch,
       baseBranch,
       parentWorkspaceId,
+      // 누가 만들었는가. 부모 관계와 별개로 기록한다 — 사람이 UI 에서 만들면 여기가 null 이고,
+      // 그 덕에 에이전트는 자기가 만든 것에만 손댈 수 있다([[agent/tools/target]]).
+      createdByWorkspaceId: args.createdByWorkspaceId ?? null,
       prNumber: null,
       worktreePath,
       devPort,
@@ -231,4 +248,60 @@ export async function createWorkspace(
     carryFailures,
     carrySuggestions: carrySuggestionsFor(repo)
   }
+}
+
+/**
+ * 아카이브: 세션·스크립트·터미널을 정리하고 worktree 디렉토리를 제거하되 브랜치·대화 기록·
+ * 세션 ID 는 유지한다(언아카이브하면 worktree 를 다시 만들고 같은 세션을 이어간다).
+ *
+ * createWorkspace 와 같은 이유로 IPC 핸들러에서 여기로 올라왔다 — 에이전트가 워크스페이스를
+ * 아카이브하는 도구도 이 함수를 그대로 부른다([[agent/tools/workspace]]). 복사해 두면 한쪽만
+ * 고쳐지는 날이 오는데, 이 절차는 **순서가 곧 정확성**이라 어긋나면 조용히 틀린다:
+ * 아카이브 스크립트는 worktree 가 살아 있을 때 돌아야 하고, 표시 이름은 PR 을 물어볼 수
+ * 있을 때 스냅샷해야 한다.
+ *
+ * 없는 워크스페이스는 조용히 넘긴다 — 아카이브의 목적은 "없는 상태" 이고 이미 그 상태다.
+ */
+export async function archiveWorkspace(
+  deps: ArchiveWorkspaceDeps,
+  workspaceId: string
+): Promise<void> {
+  const store = getStore()
+  const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
+  if (!ws) return
+  const repo = repoFor(ws.repoId)
+
+  deps.sessions.dispose(workspaceId)
+  deps.scripts.disposeWorkspace(workspaceId)
+  deps.terminals.disposeWorkspace(workspaceId)
+  // 아카이브 스크립트는 worktree 가 아직 살아 있을 때 실행한다.
+  if (repo?.archiveScript.trim()) {
+    await deps.scripts.runOnce(repo.archiveScript, ws.worktreePath)
+  }
+  // override 가 없으면 현재 표시 이름(PR 제목 등)을 worktree 제거 전에 보존한다.
+  // 아카이브 후에는 worktree·PR 조회가 불가능하므로, 같은 이름을 유지하려면 지금 스냅샷해야 한다.
+  let snapshotName: string | null = null
+  if (!ws.displayName?.trim()) {
+    const pr = await getPrStatus(ws.worktreePath).catch(() => null)
+    if (pr?.title?.trim()) snapshotName = pr.title.trim()
+  }
+  if (repo) await removeWorktree(repo.path, ws.worktreePath, ws.branch, false)
+  // worktree 가 사라졌으니 캐시된 PR 상태도 물어볼 근거가 없다(언아카이브하면 다시 조회된다).
+  invalidateWorkspacePr(workspaceId)
+
+  store.update((st) => {
+    const w = st.workspaces.find((x) => x.id === workspaceId)
+    if (w) {
+      w.archived = true
+      w.status = 'idle'
+      if (snapshotName && !w.displayName?.trim()) w.displayName = snapshotName
+      // 제안을 받아 아카이브했든 다른 경로(사이드바·단축키·에이전트 도구)로 했든 그 병합은
+      // 처리된 것이다. 해제로 기록해 두지 않으면 언아카이브했을 때 같은 제안이 곧바로 다시 뜬다.
+      if (w.archiveSuggest) {
+        w.archiveSuggestDismissed = w.archiveSuggest.mergedBranch
+        w.archiveSuggest = null
+      }
+    }
+  })
+  deps.broadcastState()
 }

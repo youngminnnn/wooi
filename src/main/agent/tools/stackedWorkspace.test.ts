@@ -88,15 +88,24 @@ describe('create_stacked_workspace', () => {
     expect(create).toHaveBeenCalledWith(deps, {
       repoId: 'repo-1',
       parentWorkspaceId: 'ws-parent',
+      createdByWorkspaceId: 'ws-parent',
       name: 'feat/next'
     })
+  })
+
+  // 부모 관계와 생성자는 다른 질문이다 — 사람이 UI 에서 만든 스택 자식은 부모가 있어도 생성자가
+  // 없다. 여기서 생성자를 빠뜨리면 에이전트가 자기가 만든 자식조차 아카이브하지 못한다.
+  it('생성자를 부모 관계와 따로 남긴다', async () => {
+    await create_()
+    expect(create.mock.calls[0][1]).toMatchObject({ createdByWorkspaceId: 'ws-parent' })
   })
 
   it('이름을 안 주면 Wooi 가 짓도록 넘기지 않는다', async () => {
     await create_({})
     expect(create).toHaveBeenCalledWith(deps, {
       repoId: 'repo-1',
-      parentWorkspaceId: 'ws-parent'
+      parentWorkspaceId: 'ws-parent',
+      createdByWorkspaceId: 'ws-parent'
     })
   })
 

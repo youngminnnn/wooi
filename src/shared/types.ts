@@ -544,6 +544,18 @@ export interface Workspace {
    */
   parentWorkspaceId: string | null
   /**
+   * 이 워크스페이스를 만든 **에이전트의 워크스페이스** id. 사람이 UI 에서 만들었으면 null.
+   *
+   * parentWorkspaceId 와 헷갈리기 쉽지만 묻는 것이 다르다 — 저쪽은 "어느 브랜치 위에 쌓였는가"
+   * (git 관계)이고, 이쪽은 "누가 만들었는가"(권한 관계)다. 스택이면 보통 둘이 같지만, 에이전트가
+   * 독립 워크스페이스를 만들면 부모는 null 인 채 생성자만 남고, 사람이 스택을 만들면 그 반대다.
+   *
+   * 대상을 인자로 받는 도구가 "남의 것에 손대지 못한다" 를 판정하는 근거가 이 필드다
+   * ([[agent/tools/target]]). 부모 관계로 대신 판정하면 사람이 만든 워크스페이스까지 에이전트가
+   * 지울 수 있게 된다.
+   */
+  createdByWorkspaceId: string | null
+  /**
    * (현재 체크아웃된 브랜치의) 연결된 GitHub PR 번호(있으면). getPrStatus 로 발견되면 영속되어,
    * 부모 브랜치가 병합·삭제된 뒤에도 stack 관계·retarget 대상을 안정적으로 식별한다. 없으면 null.
    */
@@ -1981,6 +1993,11 @@ export interface CreateWorkspaceArgs {
    * (base = 부모의 branch). 없거나 null 이면 기본 브랜치에서 분기한 스택 뿌리로 만든다.
    */
   parentWorkspaceId?: string | null
+  /**
+   * 만든 주체가 다른 워크스페이스의 에이전트면 그 워크스페이스 id. 렌더러(사람)는 넘기지 않는다.
+   * 나중에 그 에이전트가 이 워크스페이스를 아카이브할 수 있는지의 근거가 된다.
+   */
+  createdByWorkspaceId?: string | null
   /**
    * 이 워크스페이스를 구동할 에이전트. 생성 시 한 번 정해져 세션 내내 고정된다.
    * 생략하면 전역 기본 백엔드(AppSettings.defaultAgentBackend)를 쓴다.
