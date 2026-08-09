@@ -19,7 +19,9 @@ const api: WooiApi = {
     remove: (repoId) => ipcRenderer.invoke(IPC.repoRemove, repoId),
     reorder: (repoId, targetRepoId, position) =>
       ipcRenderer.invoke(IPC.repoReorder, repoId, targetRepoId, position),
-    listBranches: (repoId) => ipcRenderer.invoke(IPC.repoListBranches, repoId)
+    listBranches: (repoId) => ipcRenderer.invoke(IPC.repoListBranches, repoId),
+    listIssues: (repoId) => ipcRenderer.invoke(IPC.repoListIssues, repoId),
+    getIssueBody: (repoId, number) => ipcRenderer.invoke(IPC.repoGetIssueBody, repoId, number)
   },
 
   workspace: {

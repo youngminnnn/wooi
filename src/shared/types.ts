@@ -1657,6 +1657,15 @@ export interface ReviewPrCandidate {
   author: string
 }
 
+/** 워크스페이스 시작 모달과 에이전트 도구가 함께 쓰는 열린 이슈 목록 항목. */
+export interface IssueCandidate {
+  number: number
+  title: string
+  author: string
+  labels: string[]
+  url: string
+}
+
 /**
  * `#` 기억을 어디에 남길지. project = worktree 의 CLAUDE.md(팀과 공유),
  * user = ~/.claude/CLAUDE.md(모든 프로젝트에 적용되는 개인 규칙).
@@ -1676,6 +1685,8 @@ export const IPC = {
   /** 사이드바 드래그 앤 드롭으로 리포 표시 순서를 바꾼다. */
   repoReorder: 'repo:reorder',
   repoListBranches: 'repo:listBranches',
+  repoListIssues: 'repo:listIssues',
+  repoGetIssueBody: 'repo:getIssueBody',
   workspaceCreate: 'workspace:create',
   workspaceArchive: 'workspace:archive',
   /** 병합된 PR 로 뜬 아카이브 제안을 해제한다(같은 병합은 다시 제안하지 않는다). */

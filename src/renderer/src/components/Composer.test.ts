@@ -35,4 +35,14 @@ describe('# 메모리 단축키', () => {
     expect(matchMemory('#   ')).toBeNull()
     expect(matchMemory('call the #memory shortcut')).toBeNull()
   })
+
+  it('이슈 초안처럼 #번호로 시작하는 여러 줄 프롬프트는 일반 메시지로 둔다', () => {
+    expect(
+      matchMemory(
+        '#44 Add a branch stack summary to the README\n\n' +
+          'https://github.com/youngminnnn/stacked-pr-playground/issues/44\n\n' +
+          'Acceptance criteria:\n- Describe the branch relationship.'
+      )
+    ).toBeNull()
+  })
 })

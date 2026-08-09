@@ -322,7 +322,7 @@ interface UIState {
       agentBackend?: AgentBackendId
     },
     displayName?: string
-  ) => Promise<void>
+  ) => Promise<string | undefined>
   /**
    * 워크스페이스를 영구 삭제한다(확인 후). 아카이브와 달리 worktree·브랜치·대화 기록이 모두
    * 사라지며 되돌릴 수 없다 — 무엇을 잃는지(미커밋 변경·미푸시 커밋·쌓인 스택)를 먼저 알린다.
@@ -1140,7 +1140,7 @@ export const useStore = create<UIState>((set, get) => ({
 
     if (res.error) {
       get().pushToast('error', res.error)
-      return
+      return undefined
     }
     if (res.workspaceId) {
       void get().selectWorkspace(res.workspaceId)
@@ -1152,7 +1152,9 @@ export const useStore = create<UIState>((set, get) => ({
       }
       get().reportCarryFailures(res.carryFailures)
       get().suggestCarry(repoId, res.workspaceId, res.carrySuggestions)
+      return res.workspaceId
     }
+    return undefined
   },
 
   requestDeleteWorkspace: async (workspaceId) => {

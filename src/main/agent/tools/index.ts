@@ -11,6 +11,7 @@ import {
 import { runDelegateTool } from './subagent'
 import { archiveWorkspaceTool, createIndependentWorkspace } from './workspace'
 import { delegateToolName } from './catalog'
+import { listIssues } from './issues'
 import { AGENT_BACKEND_IDS } from '@shared/types'
 
 export { runAgentTool, type AgentToolDeps, type AgentToolHandler } from './registry'
@@ -38,6 +39,7 @@ export function initAgentTools(deps: AgentToolDeps): void {
   registerAgentTool('stop_script', stopScript)
   registerAgentTool('read_script_output', readScriptOutput)
   registerAgentTool('check_related_work', checkRelatedWork)
+  registerAgentTool('list_issues', listIssues)
   registerAgentTool('create_workspace', createIndependentWorkspace)
   registerAgentTool('archive_workspace', archiveWorkspaceTool)
 }
