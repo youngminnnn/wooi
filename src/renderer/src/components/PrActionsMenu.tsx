@@ -6,11 +6,13 @@ import {
   GitPullRequestArrow,
   CircleCheck,
   ExternalLink,
-  Loader2
+  Loader2,
+  Pencil
 } from 'lucide-react'
 import { useStore } from '../store'
 import { cascadeAffectedBranches } from '@shared/types'
 import type { PrMergeMethod, PrStatus } from '@shared/types'
+import PrEditModal from './PrEditModal'
 
 /**
  * PR 라이프사이클 액션 메뉴(merge / close / reopen / ready-for-review).
@@ -28,6 +30,7 @@ export default function PrActionsMenu({
 }): React.JSX.Element {
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [editing, setEditing] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   const refreshPr = useStore((s) => s.refreshPr)
   const refreshGit = useStore((s) => s.refreshGit)
@@ -152,6 +155,18 @@ export default function PrActionsMenu({
           role="menu"
           className="absolute right-0 z-30 mt-1 w-56 overflow-hidden rounded-lg border border-[var(--border-strong)] bg-[var(--surface)] py-1 shadow-xl"
         >
+          {/* 제목·본문 편집은 열린 PR 이든 닫힌 PR 이든 GitHub 이 허용한다 — 상태로 막지 않는다. */}
+          <button
+            role="menuitem"
+            className={itemCls}
+            onClick={() =>
+              gated('Editing a pull request needs GitHub.', async () => setEditing(true))
+            }
+          >
+            <Pencil size={13} className="text-neutral-400" />
+            Edit title &amp; description
+          </button>
+          <div className="my-1 border-t border-[var(--border)]" />
           {isClosed ? (
             <button
               role="menuitem"
@@ -239,6 +254,9 @@ export default function PrActionsMenu({
             Open in browser
           </button>
         </div>
+      )}
+      {editing && (
+        <PrEditModal workspaceId={workspaceId} pr={pr} onClose={() => setEditing(false)} />
       )}
     </div>
   )

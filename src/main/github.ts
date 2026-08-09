@@ -4,6 +4,7 @@ import type {
   PrCheck,
   PrCheckState,
   PrChecks,
+  PrEditable,
   PrMergeMethod,
   PrState,
   PrStatus,
@@ -648,6 +649,78 @@ export async function markPrReady(worktreePath: string): Promise<{ error?: strin
   return {}
 }
 
+// ── PR 제목·본문 편집 ────────────────────────────────────────────────────────
+
+/**
+ * 편집 모달이 채워 넣을 원문. 본문은 PrStatus 에 싣지 않는다 — 상태 조회는 워크스페이스마다
+ * 폴링으로 돌아, 매번 PR 본문 전체를 IPC 로 실어 나르게 된다. 편집을 시작할 때만 따로 읽는다.
+ *
+ * 제목도 같이 읽는다. PrStatus 의 제목은 리포 단위 목록 캐시에서 온 값이라 몇 분 낡을 수 있고,
+ * 그 낡은 제목을 그대로 저장하면 사용자가 손대지 않은 변경을 되돌려 버린다.
+ */
+export async function getPrEditable(worktreePath: string): Promise<PrEditable | null> {
+  if (!(await connected())) return null
+  const { stdout, code } = await runLoginShell('gh pr view --json title,body', worktreePath)
+  if (code !== 0) return null
+  try {
+    const pr = JSON.parse(stdout.trim()) as { title?: string; body?: string }
+    return { title: pr.title ?? '', body: pr.body ?? '' }
+  } catch {
+    return null
+  }
+}
+
+/** 현재 브랜치에 연결된 PR 번호. 편집 대상 엔드포인트를 만들 때만 쓴다. */
+async function currentPrNumber(worktreePath: string): Promise<number | null> {
+  const { stdout, code } = await runLoginShell('gh pr view --json number', worktreePath)
+  if (code !== 0) return null
+  try {
+    const pr = JSON.parse(stdout.trim()) as { number?: number }
+    return typeof pr.number === 'number' ? safePrNumber(pr.number) : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * PR 제목·본문을 고친다. 준 필드만 보낸다 — `title` 만 주면 본문은 GitHub 에 있는 그대로 남는다.
+ * 빈 문자열은 "비우기" 라는 정당한 편집이므로 미지정과 구분해 그대로 전달한다.
+ *
+ * `gh pr edit --title/--body` 가 아니라 REST PATCH 를 쓰는 이유는 인용이다 — 제목·본문은 사용자가
+ * 무엇이든 쓸 수 있는 문자열이라, 명령 문자열에 끼워 넣으면 따옴표 하나로 셸 인용이 뚫린다.
+ * ghApiSend 는 값을 전부 stdin(JSON)으로 넘기므로 백틱·`$(...)`·개행이 있어도 안전하다.
+ *
+ * prNumber 를 알면 넘긴다 — 모를 때만 현재 브랜치에서 한 번 더 조회한다.
+ */
+export async function editPr(
+  worktreePath: string,
+  edits: { title?: string; body?: string },
+  prNumber?: number
+): Promise<{ error?: string }> {
+  const payload: Record<string, string> = {}
+  if (edits.title !== undefined) payload.title = edits.title
+  if (edits.body !== undefined) payload.body = edits.body
+  if (Object.keys(payload).length === 0) return {}
+
+  if (!(await connectedFresh())) return { error: NOT_CONNECTED }
+  const n =
+    (prNumber !== undefined ? safePrNumber(prNumber) : null) ??
+    (await currentPrNumber(worktreePath))
+  if (n === null) return { error: 'Wooi could not find a pull request for this branch.' }
+
+  const res = await ghApiSend(
+    worktreePath,
+    'PATCH',
+    `repos/{owner}/{repo}/pulls/${n}`,
+    payload,
+    'Failed to update the pull request.'
+  )
+  // 제목은 리포 단위 열린 PR 목록에도 실려 있다 — 버리지 않으면 사이드바가 옛 제목을 계속 보여 준다.
+  // 실패했더라도 버린다(runGhWrite 와 같은 이유로, 한 번 더 조회할 뿐 잘못될 여지가 없다).
+  invalidateOpenPrs()
+  return res.error ? { error: res.error } : {}
+}
+
 // ── PR 리뷰 모드 ────────────────────────────────────────────────────────────
 // 위 함수들이 "내 worktree 의 현재 브랜치에 달린 PR" 을 다루는 것과 달리, 여기는 **임의의 PR**
 // 을 번호로 지목한다. 그래서 cwd 는 항상 원본 repo 경로이고 PR 번호를 명시적으로 넘긴다.
@@ -800,12 +873,7 @@ export async function getIssueBody(repoPath: string, issueNumber: number): Promi
   }
 }
 
-/**
- * gh api 로 POST 한다. 본문은 전부 stdin(JSON)으로 넘어가므로 사용자가 무엇을 쓰든 안전하다.
- *
- * 오류 메시지는 stdout 을 먼저 본다 — gh 는 GitHub 이 돌려준 오류 본문(JSON)을 stdout 에
- * 찍는데, 사용자에게 실제로 필요한 문장("line must be part of the diff" 같은)이 거기 있다.
- */
+/** 게시된 코멘트 1건의 식별자. 게시 자체가 성공했으면 파싱에 실패해도 빈 객체를 돌려준다. */
 export interface PostedCommentResult {
   /** GitHub 코멘트 id. 인라인 답글이 in_reply_to_id 로 가리키는 값이라, 답글 추적의 조인 키다. */
   id?: number
@@ -817,14 +885,23 @@ export interface PostedCommentResult {
   error?: string
 }
 
-async function ghApiPost(
+/**
+ * gh api 로 JSON 본문을 보낸다(POST/PATCH). 본문은 전부 stdin(JSON)으로 넘어가므로 사용자가
+ * 무엇을 쓰든 안전하다. 성공하면 gh 가 찍은 응답 본문(stdout)을 그대로 돌려준다.
+ *
+ * 오류 메시지는 stdout 을 먼저 본다 — gh 는 GitHub 이 돌려준 오류 본문(JSON)을 stdout 에
+ * 찍는데, 사용자에게 실제로 필요한 문장("line must be part of the diff" 같은)이 거기 있다.
+ */
+async function ghApiSend(
   repoPath: string,
+  method: 'POST' | 'PATCH',
   endpoint: string,
-  payload: Record<string, unknown>
-): Promise<PostedCommentResult> {
+  payload: Record<string, unknown>,
+  fallbackError: string
+): Promise<{ stdout?: string; error?: string }> {
   if (!(await connectedFresh())) return { error: NOT_CONNECTED }
   const { stdout, stderr, code } = await runLoginShell(
-    `gh api --method POST ${endpoint} --input -`,
+    `gh api --method ${method} ${endpoint} --input -`,
     repoPath,
     { stdin: JSON.stringify(payload) }
   )
@@ -840,8 +917,19 @@ async function ghApiPost(
     } catch {
       // stdout 이 JSON 이 아니면 stderr 로 넘어간다.
     }
-    return { error: message || lastError(stderr, 'Failed to post the comment.') }
+    return { error: message || lastError(stderr, fallbackError) }
   }
+  return { stdout }
+}
+
+async function ghApiPost(
+  repoPath: string,
+  endpoint: string,
+  payload: Record<string, unknown>
+): Promise<PostedCommentResult> {
+  const sent = await ghApiSend(repoPath, 'POST', endpoint, payload, 'Failed to post the comment.')
+  if (sent.error) return { error: sent.error }
+  const stdout = sent.stdout ?? ''
   try {
     const created = JSON.parse(stdout.trim()) as {
       id?: number

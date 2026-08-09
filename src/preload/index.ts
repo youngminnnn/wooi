@@ -95,6 +95,8 @@ const api: WooiApi = {
     close: (workspaceId) => ipcRenderer.invoke(IPC.prClose, workspaceId),
     reopen: (workspaceId) => ipcRenderer.invoke(IPC.prReopen, workspaceId),
     ready: (workspaceId) => ipcRenderer.invoke(IPC.prReady, workspaceId),
+    editable: (workspaceId) => ipcRenderer.invoke(IPC.prEditable, workspaceId),
+    edit: (workspaceId, edits) => ipcRenderer.invoke(IPC.prEdit, workspaceId, edits),
     checks: (workspaceId) => ipcRenderer.invoke(IPC.prChecks, workspaceId)
   },
 

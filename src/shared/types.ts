@@ -1778,6 +1778,10 @@ export const IPC = {
   prReopen: 'pr:reopen',
   /** Draft PR 을 리뷰 가능 상태로 전환한다. */
   prReady: 'pr:ready',
+  /** 편집 모달을 열 때 PR 제목·본문 원문을 읽는다(PrStatus 에는 본문이 없다). */
+  prEditable: 'pr:editable',
+  /** PR 제목·본문을 고친다. */
+  prEdit: 'pr:edit',
 
   /** 리뷰 시작 모달의 열린 PR 목록(제목·작성자 포함). */
   reviewListOpenPrs: 'review:listOpenPrs',
@@ -2133,6 +2137,16 @@ export interface PrStatus {
   state: PrState
   /** 표시용 라벨: Draft / Review required / Changes requested / Ready to merge / Conflict / Open / Merged / Closed */
   label: string
+}
+
+/**
+ * PR 에서 사람이 고칠 수 있는 부분. 편집 모달을 열 때만 읽는다 — 본문은 길 수 있어 PrStatus 에
+ * 실으면 워크스페이스마다 도는 상태 폴링이 매번 그 문자열을 실어 나르게 된다.
+ */
+export interface PrEditable {
+  title: string
+  /** 본문이 없는 PR 도 있다 — 그때는 빈 문자열이다. */
+  body: string
 }
 
 // ── PR/CI 체크 상태 (Check 탭) ───────────────────────────────────────────
