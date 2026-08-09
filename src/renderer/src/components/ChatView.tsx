@@ -40,6 +40,7 @@ import PrActionsMenu from './PrActionsMenu'
 import StackPopover from './StackPopover'
 import StackSyncBanner from './StackSyncBanner'
 import StackBaseBanner from './StackBaseBanner'
+import ArchiveSuggestBanner from './ArchiveSuggestBanner'
 import ExportMenu from './ExportMenu'
 import HeaderButton from './HeaderButton'
 import { AgentBackendMark, GithubMark } from './BrandIcons'
@@ -530,6 +531,9 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
 
       {/* PR 이 부모가 아닌 브랜치를 향할 때(에이전트가 --base 없이 연 PR) 되돌릴지 묻는 배너. */}
       <StackBaseBanner workspace={workspace} />
+
+      {/* PR 이 병합돼 할 일이 남지 않았을 때 정리를 제안하는 배너(worktree 제거는 승인 후에만). */}
+      <ArchiveSuggestBanner workspace={workspace} />
 
       {/* 대화 */}
       <MessageList workspaceId={workspace.id} running={running} />

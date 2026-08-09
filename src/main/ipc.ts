@@ -27,7 +27,7 @@ import {
 } from './git'
 import { applyCarryExcludes, carryIntoWorktree, detectCarryItems, validateCarryPath } from './carry'
 import { getWorkspacePrStatus, invalidateWorkspacePr } from './prCache'
-import { buildStackFromPrs, detectBaseMismatch } from './stack'
+import { buildStackFromPrs, detectArchiveSuggestion, detectBaseMismatch } from './stack'
 import { findFreePort, waitForPortFree } from './net'
 import {
   getPrStatus,
@@ -56,7 +56,7 @@ import {
   githubLoginCancel,
   githubLogout
 } from './auth'
-import { IPC, agentSettingsFor, reorderById, workspaceStack } from '@shared/types'
+import { IPC, agentSettingsFor, isBranchStack, reorderById, workspaceStack } from '@shared/types'
 import { resolveToolPermission } from './agent/tools/permission'
 import { appendMemory } from './claude/memory'
 import {
@@ -404,10 +404,35 @@ export function registerIpc(ctx: IpcContext): void {
         w.archived = true
         w.status = 'idle'
         if (snapshotName && !w.displayName?.trim()) w.displayName = snapshotName
+        // 제안을 받아 아카이브했든 다른 경로(사이드바·단축키)로 했든 그 병합은 처리된 것이다.
+        // 해제로 기록해 두지 않으면 언아카이브했을 때 같은 제안이 곧바로 다시 뜬다.
+        if (w.archiveSuggest) {
+          w.archiveSuggestDismissed = w.archiveSuggest.mergedBranch
+          w.archiveSuggest = null
+        }
       }
     })
     broadcastState()
   })
+
+  /**
+   * 아카이브 제안을 해제한다. 어떤 병합을 해제했는지 기억해 두지 않으면 다음 재동기화가 같은
+   * 병합을 다시 감지해 배너가 계속 뜬다("해제" = 이 워크스페이스는 아직 쓸 일이 있다는 뜻).
+   */
+  ipcMain.handle(
+    IPC.workspaceArchiveSuggestDismiss,
+    async (_e, workspaceId: string): Promise<void> => {
+      let changed = false
+      store.update((st) => {
+        const w = st.workspaces.find((x) => x.id === workspaceId)
+        if (!w?.archiveSuggest) return
+        w.archiveSuggestDismissed = w.archiveSuggest.mergedBranch
+        w.archiveSuggest = null
+        changed = true
+      })
+      if (changed) broadcastState()
+    }
+  )
 
   // 언아카이브: 브랜치로부터 worktree 를 복원한다.
   ipcMain.handle(
@@ -1049,6 +1074,35 @@ export function registerIpc(ctx: IpcContext): void {
       pendingSync: plan !== null,
       dismissed: ws.baseMismatchDismissed ?? null
     })
+    // PR 이 병합돼 이 워크스페이스가 끝났으면 정리를 제안한다. 병합은 캐스케이드 감지가 이미
+    // 보고 있는 사실이라, 같은 자리에서 함께 판정해 gh 호출을 늘리지 않는다.
+    const curBranch = head || ws.branch
+    const suggestion = await detectArchiveSuggestion({
+      branch: curBranch,
+      existing: ws.archiveSuggest,
+      branchStack: isBranchStack(ws),
+      hasLiveChildren: store
+        .getState()
+        .workspaces.some((w) => w.parentWorkspaceId === ws.id && !w.archived),
+      pendingSync: plan !== null,
+      dismissed: ws.archiveSuggestDismissed,
+      now: Date.now(),
+      lookupMerged: async () => {
+        // 열린 PR 목록에 이 브랜치가 있으면 병합되지 않은 것이다 — 이미 손에 든 목록으로
+        // 먼저 걸러낸다(대부분의 워크스페이스가 여기서 끝난다).
+        if (prs.some((p) => p.head === curBranch)) return null
+        // 아는 PR 번호가 없으면 조회하지 않는다. 이 재동기화는 상태 갱신마다 도는데, PR 을 연
+        // 적 없는 워크스페이스까지 매번 gh 를 띄우면 그 비용이 상시로 깔린다. 번호는 PR 이
+        // 한 번이라도 조회되면 persistPrNumber 가 적어 두므로(병합된 PR 도 포함), 늦어도
+        // 다음 갱신에는 여기까지 온다.
+        if (curBranch !== ws.branch || ws.prNumber == null) return null
+        const meta = await getPrMeta(ws.worktreePath, ws.prNumber).catch(() => null)
+        if (meta?.state !== 'MERGED') return null
+        // 저장된 번호가 예전 브랜치의 것일 수 있다(HEAD 가 옮겨간 뒤 새 브랜치에 PR 이 없으면
+        // prNumber 가 갱신되지 않는다). 남의 병합을 이 브랜치의 것으로 읽지 않도록 확인한다.
+        return meta.headRefName === curBranch ? { number: meta.number } : null
+      }
+    }).catch(() => null)
 
     let changed = false
     store.update((st) => {
@@ -1061,6 +1115,10 @@ export function registerIpc(ctx: IpcContext): void {
       }
       if ((w.stackSync?.mergedBranch ?? null) !== (plan?.mergedBranch ?? null)) {
         w.stackSync = plan
+        changed = true
+      }
+      if ((w.archiveSuggest?.mergedBranch ?? null) !== (suggestion?.mergedBranch ?? null)) {
+        w.archiveSuggest = suggestion
         changed = true
       }
       // 대기 중인 계획이 있는 동안에는 기록된 스택을 그대로 보존한다. detected 는 "열린 PR" 로만

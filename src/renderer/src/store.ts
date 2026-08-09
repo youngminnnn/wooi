@@ -349,6 +349,8 @@ interface UIState {
   applyStackSync: (workspaceId: string) => Promise<void>
   /** 대기 중인 스택 캐스케이드 계획을 무시한다. */
   dismissStackSync: (workspaceId: string) => Promise<void>
+  /** PR 병합으로 뜬 아카이브 제안을 해제한다(같은 병합은 다시 제안하지 않는다). */
+  dismissArchiveSuggest: (workspaceId: string) => Promise<void>
   /** 스택과 어긋난 PR 의 base 를 부모 브랜치로 되돌린다. */
   retargetBase: (workspaceId: string) => Promise<void>
   /** 어긋난 base 를 그대로 두기로 한다(그 base 를 채택하고 다시 묻지 않는다). */
@@ -1338,6 +1340,10 @@ export const useStore = create<UIState>((set, get) => ({
 
   dismissStackSync: async (workspaceId) => {
     await window.api.stack.syncDismiss(workspaceId).catch(() => {})
+  },
+
+  dismissArchiveSuggest: async (workspaceId) => {
+    await window.api.workspace.dismissArchiveSuggest(workspaceId).catch(() => {})
   },
 
   retargetBase: async (workspaceId) => {
