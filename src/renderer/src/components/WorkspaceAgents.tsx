@@ -98,7 +98,12 @@ export function WorkspaceAgents({
               <span className="shrink-0 translate-y-0.5">
                 <AgentBackendMark backend={agentBackend} size={14} />
               </span>
-              <span className="shrink-0 font-medium text-neutral-400">{agent.agentType}</span>
+              {/* 타입 이름도 결국 잘린다 — `humanize-korean:translationese-research-distiller`
+                  처럼 긴 이름이 오면 shrink-0 은 행을 사이드바 폭 밖으로 밀어내 경과 시간까지
+                  잘라 먹는다. 설명이 먼저 0 폭으로 줄고(basis 0), 그래도 모자라면 여기서 준다. */}
+              <span className="min-w-0 truncate font-medium text-neutral-400">
+                {agent.agentType}
+              </span>
               {/* 설명은 남는 폭만 차지하고 먼저 잘린다 — 타입·경과 시간이 항상 읽히는 쪽이 유용하다. */}
               <span className="min-w-0 flex-1 truncate text-neutral-600">
                 {agent.lastToolName ? `${agent.lastToolName} · ` : ''}
