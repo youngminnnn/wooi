@@ -52,6 +52,7 @@ import type {
   SlashCommandInfo,
   TerminalDataEvent,
   TerminalExitEvent,
+  TranscriptSearchResult,
   UpdateFromBaseResult,
   UpdateStatus,
   WorkspaceDiff
@@ -166,6 +167,15 @@ export interface WooiApi {
     sideQuestion(workspaceId: string, question: string): Promise<void>
     /** /clear — 대화 기록을 비우고 세션을 새로 시작한다(맥락 초기화, 워크스페이스는 유지). */
     clear(workspaceId: string): Promise<void>
+    /**
+     * 워크스페이스를 가로질러 대화 내용을 검색한다(⇧⌘K). 대소문자를 가리지 않는 부분 문자열
+     * 검색이고, main 이 트랜스크립트 파일을 흘려 읽어 **매치 스니펫만** 돌려준다 — 원문은
+     * 렌더러로 넘어오지 않는다.
+     *
+     * 아카이브된 워크스페이스도 기본 포함이다(옛 결정을 찾는 게 이 검색의 목적이라서).
+     * 결과 수에는 상한이 있고, 걸리면 truncated 로 알린다.
+     */
+    search(query: string, opts?: { includeArchived?: boolean }): Promise<TranscriptSearchResult>
   }
 
   permission: {

@@ -37,6 +37,7 @@ import RepoConfigModal from './components/RepoConfigModal'
 import OnboardingModal from './components/OnboardingModal'
 import ShortcutsHelp from './components/ShortcutsHelp'
 import QuickSwitcher from './components/QuickSwitcher'
+import TranscriptSearch from './components/TranscriptSearch'
 import FeatureTour from './components/FeatureTour'
 import GithubConnectModal from './components/GithubConnectModal'
 import Toaster from './components/Toaster'
@@ -80,6 +81,8 @@ export default function App(): React.JSX.Element {
   const [configRepoId, setConfigRepoId] = useState<string | null>(null)
   // ⌘K 퀵 스위처. ⌘1–9 로 닿지 않는(10번째 이후) 워크스페이스로 이동하는 기본 경로다.
   const [quickSwitchOpen, setQuickSwitchOpen] = useState(false)
+  // ⇧⌘K 대화 검색. ⌘K 가 "이름으로 이동" 이라면 이쪽은 "내용으로 찾기" 다.
+  const [transcriptSearchOpen, setTranscriptSearchOpen] = useState(false)
   // 설정의 "Take a tour" 로 여는 기능 투어. 실제 화면 위에서 진행하도록 앱 레벨에서 렌더한다.
   const [tourOpen, setTourOpen] = useState(false)
   const [reviewStartOpen, setReviewStartOpen] = useState(false)
@@ -125,6 +128,7 @@ export default function App(): React.JSX.Element {
     showSettings ||
     showShortcuts ||
     quickSwitchOpen ||
+    transcriptSearchOpen ||
     newWs !== null ||
     configRepoId !== null ||
     onboardingOpen ||
@@ -253,6 +257,14 @@ export default function App(): React.JSX.Element {
           return
         }
         setReviewStartOpen(true)
+        return
+      }
+
+      // ⇧⌘K: 대화 검색 — 워크스페이스를 가로질러 대화 **내용**을 찾는다(⌘K 는 이름으로 이동).
+      // 디스크를 훑는 비동기 검색이라 즉답이 생명인 퀵 스위처와 한 글쇠 차이로 갈라 뒀다.
+      if (e.code === 'KeyK' && e.shiftKey && !e.ctrlKey && !e.altKey) {
+        e.preventDefault()
+        setTranscriptSearchOpen(true)
         return
       }
 
@@ -625,6 +637,7 @@ export default function App(): React.JSX.Element {
       {tourOpen && <FeatureTour onDone={() => setTourOpen(false)} />}
       {showShortcuts && <ShortcutsHelp onClose={() => setShowShortcuts(false)} />}
       {quickSwitchOpen && <QuickSwitcher onClose={() => setQuickSwitchOpen(false)} />}
+      {transcriptSearchOpen && <TranscriptSearch onClose={() => setTranscriptSearchOpen(false)} />}
       {quickOpenFile && selected && (
         <FileQuickOpen workspaceId={selected.id} onClose={() => setQuickOpenFile(false)} />
       )}

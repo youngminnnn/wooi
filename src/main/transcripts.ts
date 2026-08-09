@@ -2,7 +2,8 @@ import { app } from 'electron'
 import { readFileSync, existsSync, mkdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { writeFileAtomic, appendFileDurable } from './fsutil'
-import type { ChatItem } from '@shared/types'
+import { searchTranscripts } from './transcriptSearch'
+import type { ChatItem, TranscriptSearchResult } from '@shared/types'
 
 /** 메모리 캐시에 동시에 보유할 최대 workspace 수. 초과 시 LRU 로 가장 오래된 것을 제거한다. */
 const CACHE_LIMIT = 20
@@ -115,6 +116,17 @@ class TranscriptStore {
       else cached.push(item)
       this.touch(workspaceId, cached)
     }
+  }
+
+  /**
+   * 워크스페이스를 가로질러 대화를 검색한다([[searchTranscripts]]).
+   *
+   * 캐시를 거치지 않고 파일을 직접 흘려 읽는다 — 검색 한 번이 LRU 를 통째로 갈아 치우면
+   * 정작 열려 있는 워크스페이스의 대화가 캐시에서 밀려난다. 갱신은 append 가 먼저 끝나므로
+   * (upsert) 파일만 봐도 최신이다.
+   */
+  search(query: string, workspaceIds: string[]): Promise<TranscriptSearchResult> {
+    return searchTranscripts({ dir: this.dir, workspaceIds, query })
   }
 
   remove(workspaceId: string): void {

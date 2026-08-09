@@ -6,6 +6,7 @@ const GROUPS: { title: string; items: { keys: string[]; label: string }[] }[] = 
     title: 'Navigation',
     items: [
       { keys: ['⌘K'], label: 'Quick switcher — search any workspace' },
+      { keys: ['⇧⌘K'], label: 'Search conversations across every workspace' },
       { keys: ['⌘1', '–', '⌘9'], label: 'Switch to the top 9 workspaces in the sidebar' },
       { keys: ['⌘↑', '/', '⌘↓'], label: 'Previous / next workspace' },
       { keys: ['⌘['], label: 'Back to the workspace you were just in' },
