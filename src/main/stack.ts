@@ -1,4 +1,4 @@
-import type { BaseMismatch, StackedBranch } from '@shared/types'
+import type { ArchiveSuggestion, BaseMismatch, StackedBranch } from '@shared/types'
 
 /** 열린 PR 의 head/base 브랜치 쌍(스택 감지 입력). */
 export interface PrEdge {
@@ -88,4 +88,50 @@ export function detectBaseMismatch(opts: {
   if (!headPr || !parentBranch || pendingSync) return null
   if (headPr.base === parentBranch || headPr.base === dismissed) return null
   return { prNumber: headPr.number, prBase: headPr.base, expectedBase: parentBranch }
+}
+
+/**
+ * PR 이 병합돼 워크스페이스를 정리해도 되는 상태인지 판정한다([[types]] ArchiveSuggestion).
+ *
+ * 조건을 좁게 잡는 이유는 이 배너를 누른 결과가 **파괴적**이기 때문이다 — 아카이브는 worktree 를
+ * `git worktree remove --force` 로 지운다. 잘못 띄운 제안 하나가 남의 작업을 통째로 날린다:
+ *
+ * - worktree 안에 브랜치 스택을 들고 있으면(모델 B) 띄우지 않는다. 그 안의 PR 하나가 병합돼도
+ *   위에 남은 브랜치들은 계속 살아 있어서, 아카이브하면 나머지 작업이 함께 사라진다. 캐스케이드가
+ *   병합된 엔트리를 스택에서 빼 스택이 소진되면 그때 자연히 이 조건을 만족한다.
+ * - 살아 있는 자식 워크스페이스가 있으면 띄우지 않는다. 모델 A 로 PR 을 여러 개 다루는 중이라는
+ *   뜻이기도 하지만, 더 나쁜 이유가 있다 — 재동기화는 `archived` 면 즉시 return 하므로, 자식이
+ *   남은 부모를 아카이브하면 자식들의 캐스케이드 감지가 영영 돌지 않아 조용히 유실된다.
+ * - 대기 중인 캐스케이드가 있으면 그쪽이 먼저다. 사용자가 그걸 처리해야 스택이 정리된다.
+ * - 사용자가 해제한 병합은 다시 묻지 않는다.
+ *
+ * 병합 조회(gh)를 thunk 로 받는 이유: 이 판정은 PR 상태 갱신마다 도는데, 위 조건이 이미 어긋난
+ * 워크스페이스에서까지 매번 gh 를 띄우면 안 된다. 조건을 전부 통과했을 때만 호출된다.
+ */
+export async function detectArchiveSuggestion(opts: {
+  /** 워크스페이스의 현재 브랜치(=제안이 걸리는 대상). */
+  branch: string
+  /** 이미 떠 있는 제안. 같은 브랜치의 제안이면 그대로 유지하고 재조회하지 않는다. */
+  existing: ArchiveSuggestion | null | undefined
+  /** worktree 안에 브랜치 스택(모델 B)을 보유하는지 — `isBranchStack(ws)`. */
+  branchStack: boolean
+  /** 아카이브되지 않은 자식 워크스페이스가 있는지. */
+  hasLiveChildren: boolean
+  /** 대기 중인 머지 캐스케이드 계획(stackSync)이 있는지. */
+  pendingSync: boolean
+  /** 사용자가 해제한 병합 브랜치. */
+  dismissed: string | null | undefined
+  /** 이 브랜치의 PR 이 병합됐으면 그 PR, 아니면 null. */
+  lookupMerged: () => Promise<{ number: number | null } | null>
+  now: number
+}): Promise<ArchiveSuggestion | null> {
+  const { branch, existing, branchStack, hasLiveChildren, pendingSync, dismissed } = opts
+  // 차단 조건을 먼저 본다 — 제안이 떠 있는 동안 자식이 생기거나 캐스케이드가 잡히면 거둬야 한다.
+  if (branchStack || hasLiveChildren || pendingSync) return null
+  if (branch === dismissed) return null
+  // 브랜치가 그대로면 이미 뜬 제안을 그대로 쓴다(에이전트가 브랜치를 옮겼으면 다시 판정한다).
+  if (existing && existing.mergedBranch === branch) return existing
+  const merged = await opts.lookupMerged()
+  if (!merged) return null
+  return { mergedBranch: branch, prNumber: merged.number, detectedAt: opts.now }
 }

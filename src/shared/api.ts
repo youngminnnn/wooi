@@ -97,6 +97,11 @@ export interface WooiApi {
   workspace: {
     create(args: CreateWorkspaceArgs): Promise<CreateWorkspaceResult>
     archive(workspaceId: string): Promise<void>
+    /**
+     * 병합된 PR 로 뜬 아카이브 제안을 해제한다(같은 병합으로는 다시 제안하지 않는다).
+     * 아카이브 자체는 위 archive 를 그대로 쓴다 — 제안은 그 입구일 뿐이다.
+     */
+    dismissArchiveSuggest(workspaceId: string): Promise<void>
     unarchive(workspaceId: string): Promise<{
       error?: string
       carryFailures?: CarryFailure[]

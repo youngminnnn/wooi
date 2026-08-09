@@ -567,6 +567,17 @@ export interface Workspace {
    */
   stackSyncDismissed?: string | null
   /**
+   * PR 이 병합돼 이 워크스페이스가 사실상 끝났을 때의 정리 제안(감지만 — 아카이브는 사용자 승인 후).
+   * 없으면 null. 해소되면(아카이브했거나 사용자가 해제했으면) 지워진다.
+   */
+  archiveSuggest?: ArchiveSuggestion | null
+  /**
+   * 사용자가 해제한 제안의 병합 브랜치. 같은 병합으로 배너가 다시 뜨는 것을 막는다.
+   * 브랜치명을 기억하는 이유는 stackSyncDismissed 와 같다 — 그 뒤에 다른 브랜치가 병합되면
+   * 그건 새로운 사실이므로 다시 알려야 한다.
+   */
+  archiveSuggestDismissed?: string | null
+  /**
    * PR 의 base 가 스택 관계와 어긋난 상태(감지만 — 리타겟은 사용자 승인 후). 없으면 null.
    * 해소되면(리타겟했거나 사용자가 그대로 두기로 했으면) 지워진다.
    */
@@ -1301,6 +1312,23 @@ export interface StackSyncPlan {
 }
 
 /**
+ * PR 이 병합돼 이 워크스페이스에 남은 일이 없다고 앱이 판단한 상태.
+ *
+ * 판단을 에이전트에게 시키지 않는 이유: 앱은 이미 병합을 알고 있다(스택 캐스케이드가 그 신호로
+ * 돈다). 앱이 아는 사실을 굳이 턴을 태워 다시 추론시키면 비용이 들고 판단이 틀릴 수도 있다.
+ *
+ * 감지만 하고 실행하지 않는 것은 stackSync 와 같은 이유다 — 아카이브는 worktree 를
+ * `git worktree remove --force` 로 지우므로, 사용자 모르게 나가면 안 된다.
+ */
+export interface ArchiveSuggestion {
+  /** 이 제안을 띄우게 만든 병합 브랜치. 해제 기억(archiveSuggestDismissed)의 키이기도 하다. */
+  mergedBranch: string
+  /** 병합된 PR 번호(배너에 보여 준다). 번호를 알아내지 못했으면 null. */
+  prNumber: number | null
+  detectedAt: number
+}
+
+/**
  * 스택 워크스페이스의 PR 이 부모가 아닌 브랜치(대개 리포 기본 브랜치)를 향하고 있는 상태.
  *
  * `--base` 없이 `gh pr create` 를 실행하면 gh 가 리포 기본 브랜치를 고르기 때문에, 에이전트가
@@ -1638,6 +1666,8 @@ export const IPC = {
   repoListBranches: 'repo:listBranches',
   workspaceCreate: 'workspace:create',
   workspaceArchive: 'workspace:archive',
+  /** 병합된 PR 로 뜬 아카이브 제안을 해제한다(같은 병합은 다시 제안하지 않는다). */
+  workspaceArchiveSuggestDismiss: 'workspace:archiveSuggestDismiss',
   workspaceUnarchive: 'workspace:unarchive',
   workspaceRemove: 'workspace:remove',
   /** 한 레포의 아카이브된 워크스페이스를 한 번에 영구 삭제한다(브랜치·기록 포함). */

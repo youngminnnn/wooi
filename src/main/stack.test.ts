@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildStackFromPrs, detectBaseMismatch } from './stack'
+import { buildStackFromPrs, detectArchiveSuggestion, detectBaseMismatch } from './stack'
 
 type Pr = { number: number; head: string; base: string }
 
@@ -137,5 +137,121 @@ describe('detectBaseMismatch', () => {
         dismissed: 'main'
       })
     ).toEqual({ prNumber: 2, prBase: 'develop', expectedBase: parent })
+  })
+})
+
+describe('detectArchiveSuggestion', () => {
+  const branch = 'feat/thing'
+  /** 병합 조회 스텁 — 호출 여부까지 세어, 조건이 어긋났을 때 gh 를 부르지 않는지 확인한다. */
+  const merged = (
+    number: number | null = 42
+  ): (() => Promise<{ number: number | null } | null>) & { calls: number } => {
+    const fn = Object.assign(
+      async () => {
+        fn.calls++
+        return { number }
+      },
+      { calls: 0 }
+    )
+    return fn
+  }
+  const notMerged = async (): Promise<null> => null
+
+  const base = {
+    branch,
+    existing: null,
+    branchStack: false,
+    hasLiveChildren: false,
+    pendingSync: false,
+    dismissed: null,
+    now: 1000
+  }
+
+  it('PR 이 병합됐고 걸리는 것이 없으면 제안한다', async () => {
+    expect(await detectArchiveSuggestion({ ...base, lookupMerged: merged(42) })).toEqual({
+      mergedBranch: branch,
+      prNumber: 42,
+      detectedAt: 1000
+    })
+  })
+
+  it('PR 이 병합되지 않았으면 제안하지 않는다', async () => {
+    expect(await detectArchiveSuggestion({ ...base, lookupMerged: notMerged })).toBeNull()
+  })
+
+  it('worktree 안에 브랜치 스택(모델 B)을 들고 있으면 제안하지 않는다', async () => {
+    // 위에 남은 브랜치들이 계속 살아 있어서, 아카이브하면 나머지 작업이 통째로 사라진다.
+    const look = merged()
+    expect(
+      await detectArchiveSuggestion({ ...base, branchStack: true, lookupMerged: look })
+    ).toBeNull()
+    expect(look.calls).toBe(0) // 조건이 어긋났으면 gh 도 부르지 않는다.
+  })
+
+  it('살아 있는 자식 워크스페이스가 있으면 제안하지 않는다', async () => {
+    // 부모를 아카이브하면 재동기화가 즉시 return 해 자식들의 캐스케이드가 조용히 유실된다.
+    const look = merged()
+    expect(
+      await detectArchiveSuggestion({ ...base, hasLiveChildren: true, lookupMerged: look })
+    ).toBeNull()
+    expect(look.calls).toBe(0)
+  })
+
+  it('캐스케이드가 대기 중이면 제안하지 않는다(그쪽 배너가 먼저다)', async () => {
+    const look = merged()
+    expect(
+      await detectArchiveSuggestion({ ...base, pendingSync: true, lookupMerged: look })
+    ).toBeNull()
+    expect(look.calls).toBe(0)
+  })
+
+  it('해제한 뒤에는 같은 병합으로 다시 뜨지 않는다', async () => {
+    const look = merged()
+    expect(
+      await detectArchiveSuggestion({ ...base, dismissed: branch, lookupMerged: look })
+    ).toBeNull()
+    expect(look.calls).toBe(0)
+  })
+
+  it('해제 뒤 다른 브랜치로 옮겨 가 병합되면 다시 제안한다', async () => {
+    expect(
+      await detectArchiveSuggestion({
+        ...base,
+        branch: 'feat/next',
+        dismissed: branch,
+        lookupMerged: merged(43)
+      })
+    ).toEqual({ mergedBranch: 'feat/next', prNumber: 43, detectedAt: 1000 })
+  })
+
+  it('이미 뜬 제안은 그대로 두고 다시 조회하지 않는다', async () => {
+    const existing = { mergedBranch: branch, prNumber: 42, detectedAt: 1 }
+    const look = merged()
+    expect(await detectArchiveSuggestion({ ...base, existing, lookupMerged: look })).toBe(existing)
+    expect(look.calls).toBe(0)
+  })
+
+  it('제안이 떠 있어도 자식이 생기면 거둔다', async () => {
+    const existing = { mergedBranch: branch, prNumber: 42, detectedAt: 1 }
+    expect(
+      await detectArchiveSuggestion({
+        ...base,
+        existing,
+        hasLiveChildren: true,
+        lookupMerged: merged()
+      })
+    ).toBeNull()
+  })
+
+  it('필드가 없는(마이그레이션 전) 워크스페이스도 판정된다', async () => {
+    // archiveSuggest·archiveSuggestDismissed 는 옵셔널이라 저장된 워크스페이스에는 아예 없다.
+    expect(
+      await detectArchiveSuggestion({
+        ...base,
+        existing: undefined,
+        dismissed: undefined,
+        lookupMerged: merged(7)
+      })
+    ).toEqual({ mergedBranch: branch, prNumber: 7, detectedAt: 1000 })
   })
 })
