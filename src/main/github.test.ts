@@ -52,7 +52,9 @@ const {
   closePr,
   postInlineComment,
   postIssueComment,
-  submitPrReview
+  submitPrReview,
+  listOpenIssues,
+  getIssueBody
 } = await import('./github')
 
 /** 연결 확인(probe)은 `command -v gh … && gh auth status` 한 줄이다. */
@@ -78,6 +80,12 @@ describe('gh 미연결', () => {
   it('열린 PR 목록은 gh 를 실행하지 않고 빈 배열을 돌려준다', async () => {
     reply = () => ({ code: 0, stdout: '' })
     await expect(listOpenPrs('/tmp/wt')).resolves.toEqual([])
+    expect(ghCalls()).toEqual([])
+  })
+
+  it('열린 이슈 목록도 gh 를 실행하지 않고 빈 배열을 돌려준다', async () => {
+    reply = () => ({ code: 0, stdout: '' })
+    await expect(listOpenIssues('/tmp/wt')).resolves.toEqual([])
     expect(ghCalls()).toEqual([])
   })
 
@@ -141,6 +149,49 @@ describe('gh 연결됨 (무회귀)', () => {
     reply = () => ({ code: 0, stdout: '' })
     await expect(closePr('/tmp/wt')).resolves.toEqual({})
     expect(commands).toEqual(['gh pr close'])
+  })
+
+  it('열린 이슈 목록을 파싱하고 라벨 이름만 반환한다', async () => {
+    reply = () => ({
+      code: 0,
+      stdout: JSON.stringify([
+        {
+          number: 12,
+          title: 'Fix UI',
+          author: { login: 'octo' },
+          labels: [{ name: 'frontend' }],
+          url: 'https://github.com/o/r/issues/12'
+        }
+      ])
+    })
+    await expect(listOpenIssues('/tmp/wt')).resolves.toEqual([
+      {
+        number: 12,
+        title: 'Fix UI',
+        author: 'octo',
+        labels: ['frontend'],
+        url: 'https://github.com/o/r/issues/12'
+      }
+    ])
+    expect(commands).toEqual([
+      'gh issue list --state open --json number,title,author,labels,url --limit 100'
+    ])
+  })
+
+  it('이슈 목록 JSON 이 깨지면 빈 배열을 반환한다', async () => {
+    reply = () => ({ code: 0, stdout: '{bad' })
+    await expect(listOpenIssues('/tmp/wt')).resolves.toEqual([])
+  })
+
+  it('이슈 목록 명령이 실패하면 빈 배열을 반환한다', async () => {
+    reply = () => ({ code: 1, stdout: 'nope' })
+    await expect(listOpenIssues('/tmp/wt')).resolves.toEqual([])
+  })
+
+  it('선택한 이슈 본문만 별도 조회한다', async () => {
+    reply = () => ({ code: 0, stdout: JSON.stringify({ body: 'Details' }) })
+    await expect(getIssueBody('/tmp/wt', 12)).resolves.toBe('Details')
+    expect(commands).toEqual(['gh issue view 12 --json body'])
   })
 })
 

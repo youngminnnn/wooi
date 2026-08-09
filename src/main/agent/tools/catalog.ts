@@ -221,6 +221,25 @@ export const AGENT_TOOLS: AgentToolSpec[] = [
     annotations: { title: 'Check related work', readOnlyHint: true }
   },
   {
+    name: 'list_issues',
+    description: [
+      'List open GitHub issues for this workspace’s repository, with number, title, author,',
+      'labels, and URL. This tool only lists issues; it does not create a workspace.',
+      'To start work on one, call `create_workspace` and include the issue details in its `task`',
+      'so the new workspace can act without seeing this conversation.'
+    ].join(' '),
+    inputSchema: {
+      limit: z
+        .number()
+        .int()
+        .positive()
+        .max(100)
+        .optional()
+        .describe('Maximum issues to return. Defaults to 30.')
+    },
+    annotations: { title: 'List open issues', readOnlyHint: true }
+  },
+  {
     name: 'create_workspace',
     description: [
       'Create a new Wooi workspace: a fresh git worktree on a new branch off the repository’s',

@@ -41,6 +41,8 @@ import {
   retargetPr,
   listOpenPrs,
   listOpenPrsForReview,
+  listOpenIssues,
+  getIssueBody,
   fetchOwnerAvatarDataUrl
 } from './github'
 import { ReviewManager } from './review/manager'
@@ -372,6 +374,18 @@ export function registerIpc(ctx: IpcContext): void {
     const repo = repoFor(repoId)
     if (!repo) return []
     return listBranches(repo.path).catch(() => [repo.defaultBranch])
+  })
+
+  ipcMain.handle(IPC.repoListIssues, async (_e, repoId: string) => {
+    const repo = repoFor(repoId)
+    if (!repo) return []
+    return listOpenIssues(repo.path).catch(() => [])
+  })
+
+  ipcMain.handle(IPC.repoGetIssueBody, async (_e, repoId: string, number: number) => {
+    const repo = repoFor(repoId)
+    if (!repo) return null
+    return getIssueBody(repo.path, number).catch(() => null)
   })
 
   // ── workspace ────────────────────────────────────────────────────────────

@@ -41,6 +41,7 @@ import type {
   ReviewBundle,
   ReviewEnvelope,
   ReviewPrCandidate,
+  IssueCandidate,
   ReviewVerdict,
   RewindActionResult,
   StackCascadeResult,
@@ -92,6 +93,8 @@ export interface WooiApi {
      */
     reorder(repoId: string, targetRepoId: string, position: DropPosition): Promise<void>
     listBranches(repoId: string): Promise<string[]>
+    listIssues(repoId: string): Promise<IssueCandidate[]>
+    getIssueBody(repoId: string, number: number): Promise<string | null>
   }
 
   workspace: {

@@ -71,10 +71,12 @@ const WORKSPACE_MIME = 'application/x-wooi-workspace'
 
 export default function Sidebar({
   onNewWorkspace,
+  onNewFromIssue,
   onStackWorkspace,
   onOpenQuickSwitch
 }: {
   onNewWorkspace: (repoId: string, agentBackend?: AgentBackendId) => void
+  onNewFromIssue: (repoId: string) => void
   onStackWorkspace: (
     repoId: string,
     parentWorkspaceId: string,
@@ -358,7 +360,11 @@ export default function Sidebar({
                       />
                     )}
                 </button>
-                <NewWorkspaceButton repoId={repo.id} onNewWorkspace={onNewWorkspace} />
+                <NewWorkspaceButton
+                  repoId={repo.id}
+                  onNewWorkspace={onNewWorkspace}
+                  onNewFromIssue={onNewFromIssue}
+                />
               </div>
 
               <div className="mt-0.5 space-y-0.5">
@@ -1267,39 +1273,51 @@ export function StatusDot({
  */
 function NewWorkspaceButton({
   repoId,
-  onNewWorkspace
+  onNewWorkspace,
+  onNewFromIssue
 }: {
   repoId: string
   onNewWorkspace: (repoId: string, agentBackend?: AgentBackendId) => void
+  onNewFromIssue: (repoId: string) => void
 }): React.JSX.Element {
   const backends = useAvailableBackends()
   const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null)
 
   const multi = backends.length > 1
-  const actions: RowAction[] = backends.map((b) => ({
-    key: b.id,
-    label: b.label,
-    icon: <AgentBackendMark backend={b.id} size={13} />,
-    onSelect: () => onNewWorkspace(repoId, b.id)
-  }))
+  const actions: RowAction[] = backends.length
+    ? backends.map((b) => ({
+        key: b.id,
+        label: multi ? `New workspace · ${b.label}` : 'New workspace',
+        icon: <AgentBackendMark backend={b.id} size={13} />,
+        onSelect: () => onNewWorkspace(repoId, b.id)
+      }))
+    : [
+        {
+          key: 'workspace',
+          label: 'New workspace',
+          icon: <Plus size={13} />,
+          onSelect: () => onNewWorkspace(repoId)
+        }
+      ]
+  actions.push({
+    key: 'issue',
+    label: 'New from issue…',
+    icon: <GithubMark size={12} />,
+    onSelect: () => onNewFromIssue(repoId),
+    separatorBefore: true
+  })
 
   return (
     <>
       <button
         onClick={(e) => {
-          if (!multi) {
-            onNewWorkspace(repoId)
-            return
-          }
           const r = e.currentTarget.getBoundingClientRect()
           setMenuAt({ x: r.right, y: r.bottom + 4 })
         }}
         className="h-5 w-5 grid place-items-center rounded text-neutral-400 hover:bg-[var(--surface-2)] hover:text-neutral-100"
-        title={
-          multi ? 'New workspace — choose an agent (⌘N uses the default)' : 'New workspace (⌘N)'
-        }
-        aria-haspopup={multi ? 'menu' : undefined}
-        aria-expanded={multi ? menuAt !== null : undefined}
+        title="New workspace or start from an issue"
+        aria-haspopup="menu"
+        aria-expanded={menuAt !== null}
       >
         <Plus size={14} />
       </button>

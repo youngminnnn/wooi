@@ -8,6 +8,7 @@ import type {
   PrState,
   PrStatus,
   ReviewPrCandidate,
+  IssueCandidate,
   ReviewVerdict
 } from '@shared/types'
 
@@ -753,6 +754,49 @@ export async function listOpenPrsForReview(repoPath: string): Promise<ReviewPrCa
     }))
   } catch {
     return []
+  }
+}
+
+/** 열린 이슈 선택 UI와 에이전트 도구가 공유하는 가벼운 목록. 본문은 선택 뒤 따로 읽는다. */
+export async function listOpenIssues(repoPath: string): Promise<IssueCandidate[]> {
+  if (!(await connected())) return []
+  const { stdout, code } = await runLoginShell(
+    'gh issue list --state open --json number,title,author,labels,url --limit 100',
+    repoPath
+  )
+  if (code !== 0) return []
+  try {
+    const arr = JSON.parse(stdout.trim()) as Array<{
+      number: number
+      title: string
+      author?: { login?: string }
+      labels?: Array<{ name?: string }>
+      url: string
+    }>
+    return arr.map((issue) => ({
+      number: issue.number,
+      title: issue.title ?? '',
+      author: issue.author?.login ?? '',
+      labels: (issue.labels ?? []).map((label) => label.name ?? '').filter(Boolean),
+      url: issue.url ?? ''
+    }))
+  } catch {
+    return []
+  }
+}
+
+/** 선택한 이슈 하나의 본문만 가져온다. */
+export async function getIssueBody(repoPath: string, issueNumber: number): Promise<string | null> {
+  if (!(await connected())) return null
+  const n = safePrNumber(issueNumber)
+  if (n === null) return null
+  const { stdout, code } = await runLoginShell(`gh issue view ${n} --json body`, repoPath)
+  if (code !== 0) return null
+  try {
+    const parsed = JSON.parse(stdout.trim()) as { body?: string }
+    return typeof parsed.body === 'string' ? parsed.body : ''
+  } catch {
+    return null
   }
 }
 
