@@ -20,17 +20,19 @@ export const WOOI_MCP_SERVER_NAME = 'wooi'
  *
  * 시스템 프롬프트(systemPrompt.ts)에 적지 않는다 — 거기는 Claude Code 기본 프롬프트를 얇게
  * 보정하는 자리이고, 도구 설명으로 불리면 그 의도가 무너진다.
+ *
+ * **매 요청 시스템 프롬프트에 실린다.** 도구 정의는 지연 로딩(alwaysLoad 를 켜지 않는다)이라
+ * 검색될 때만 비용을 내지만, 이 문장은 스택을 한 번도 쓰지 않는 워크스페이스까지 전부 낸다.
+ * 그래서 여기에는 **상시 알아야 하는 것만** 둔다 — "스택이라는 게 있고 도구는 지금 이 워크스페이스
+ * 에만 작용한다". 한때 여기 같이 있던 인계 규약(자식이 보고한다 · 보고는 저절로 오지 않는다)은
+ * 필요한 쪽에 필요한 순간 전달하는 편이 싸고 정확해서 옮겼다. 부모는 create_stacked_workspace
+ * 결과로, 자식은 인계 메시지로 받는다([[agent/tools/stackedWorkspace]]).
  */
 export const WOOI_MCP_INSTRUCTIONS = [
   'These tools control Wooi itself — the desktop app hosting this conversation.',
-  'Each Wooi workspace is a git worktree with its own branch, and they can be stacked:',
-  'one workspace branches off another so their pull requests review as a chain.',
-  'The tools always act on the workspace you are running in; you cannot target another one.',
-  '',
-  'Stacked workspaces hand work back and forth: a parent starts a child with a task, the child',
-  'reports back when it finishes or gets stuck, and the parent reads those reports on its next',
-  'turn. Reports do not interrupt whoever is working — nothing arrives in your conversation on',
-  'its own, so check for it when the answer would change what you do.'
+  'Each workspace is a git worktree on its own branch, and workspaces can be stacked:',
+  'one branches off another so their pull requests review as a chain.',
+  'The tools always act on the workspace you are running in; you cannot target another one.'
 ].join(' ')
 
 export interface AgentToolSpec {
@@ -66,6 +68,9 @@ export const AGENT_TOOLS: AgentToolSpec[] = [
       '',
       'Use this when the work you just finished is a complete, reviewable unit and the next piece',
       'should ship as a separate pull request layered on it — rather than growing this branch.',
+      'The next piece should also be substantial: a new workspace starts from an empty context and',
+      'has to rediscover the codebase, so a follow-up you could finish here in a few turns is',
+      'cheaper to just finish here.',
       '',
       'The new workspace forks from the committed tip of this branch, so commit your work first;',
       'the call fails while this worktree has uncommitted changes. It starts with an empty',
@@ -87,7 +92,13 @@ export const AGENT_TOOLS: AgentToolSpec[] = [
           'The task to hand the new workspace, sent as its first message — it starts working on ' +
             'this right away. Write it for an agent that cannot see this conversation: what to ' +
             'build, why it is a separate pull request, and anything you already decided that it ' +
-            'should not revisit. Omit only if the user will drive that workspace themselves.'
+            'should not revisit.\n\n' +
+            'Also hand over what you already learned, so it does not pay to rediscover it: the ' +
+            'files and symbols involved (as `path:line` where you know them), the commands you ' +
+            'ran and what they reported, and the approaches you ruled out and why. Write down ' +
+            'only what you are sure of — a wrong path costs more than a missing one, so leave ' +
+            'out anything you are guessing at.\n\n' +
+            'Omit this parameter entirely only if the user will drive that workspace themselves.'
         )
     },
     annotations: { title: 'Create a stacked workspace', readOnlyHint: false }

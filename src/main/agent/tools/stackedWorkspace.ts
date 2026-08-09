@@ -1,6 +1,7 @@
 import { workspaceDisplayName } from '@shared/types'
 import type { ChatItem, StackedHandoffStatus, Workspace } from '@shared/types'
-import { isWorktreeClean } from '../../git'
+import { isWorktreeClean, summarizeBranch } from '../../git'
+import type { BranchSummary } from '../../git'
 import { getStore } from '../../store'
 import { createWorkspace } from '../../workspaces'
 import type { AgentToolHandler } from './registry'
@@ -23,12 +24,35 @@ function workspaceOf(workspaceId: string): Workspace {
 }
 
 /**
+ * 부모 브랜치가 이미 담고 있는 것. 자식이 물려받은 코드라 첫 턴에 반드시 알아내야 하는데,
+ * 놔두면 `git log` · `git diff` · 파일 훑기로 두세 턴을 쓴다. git 이 공짜로 정확히 답하는
+ * 질문을 모델에게 시키지 않는다.
+ *
+ * 부모 모델이 쓰는 인계문(task)과 역할이 다르다 — 저쪽은 **판단**(왜 이렇게 했는가)이고
+ * 이쪽은 **사실**(무엇이 바뀌었는가)이다. 사실 쪽은 모델이 빠뜨릴 수 없어야 한다.
+ */
+function inheritedWorkSection(summary: BranchSummary): string[] {
+  const lines = ['', '## What this branch already contains']
+  if (summary.commits.length) {
+    lines.push('', 'Commits since the base branch (newest first):')
+    lines.push(...summary.commits.map((c) => `- ${c}`))
+    if (summary.omittedCommits) lines.push(`- …and ${summary.omittedCommits} older commits`)
+  }
+  if (summary.files.length) {
+    lines.push('', 'Files they changed (largest first):')
+    lines.push(...summary.files.map((f) => `- ${f}`))
+    if (summary.omittedFiles) lines.push(`- …and ${summary.omittedFiles} more files`)
+  }
+  return lines
+}
+
+/**
  * 자식에게 넘기는 최초 메시지.
  *
  * 보고하라는 지시를 부모 모델의 문장에 맡기지 않고 여기서 붙인다 — 부모가 빠뜨리면 자식은
  * 보고할 줄 모르고, 그 순간 인계 고리가 조용히 끊긴다. 규약은 앱이 보장해야 한다.
  */
-function handoffMessage(task: string, parent: Workspace): string {
+function handoffMessage(task: string, parent: Workspace, summary: BranchSummary | null): string {
   return [
     task,
     '',
@@ -37,7 +61,8 @@ function handoffMessage(task: string, parent: Workspace): string {
       'so its pull request will target that branch rather than the default one.',
     'When you finish this task — or if you get stuck and need a decision — call ' +
       '`mcp__wooi__report_to_parent` with a summary. That is the only way the parent workspace ' +
-      'finds out; nothing crosses between workspaces on its own.'
+      'finds out; nothing crosses between workspaces on its own.',
+    ...(summary ? inheritedWorkSection(summary) : [])
   ].join('\n')
 }
 
@@ -68,7 +93,17 @@ export const createStackedWorkspace: AgentToolHandler = async (deps, workspaceId
   // 작업을 넘기면 자식은 **즉시 돌기 시작한다**. 사용자는 방금 이 도구 호출을 승인하면서
   // 그 작업 문장까지 카드에서 봤으므로, 여기서 다시 묻지 않는다.
   const task = typeof args.task === 'string' ? args.task.trim() : ''
-  if (task) deps.sendMessage(childId, handoffMessage(task, ws))
+  if (task) {
+    // 요약은 **부모 워크트리에서** 읽는다. 자식은 방금 만들어져 아직 아무 커밋도 없고, 부모는
+    // 위에서 clean 을 확인했으므로 HEAD 가 곧 자식이 갈라진 지점이다.
+    //
+    // 생성 **뒤에** 부르는 것이 중요하다 — createWorkspace 가 addWorktree 에서 fetch 를 돌리므로
+    // 이 시점의 origin ref 가 최신이고, 분기점을 그만큼 정확히 잡는다([[git]] branchPoint).
+    //
+    // 실패해도 인계는 진행한다 — 요약은 자식을 빠르게 만들 뿐, 없다고 틀리지는 않는다.
+    const summary = await summarizeBranch(ws.worktreePath, ws.baseBranch).catch(() => null)
+    deps.sendMessage(childId, handoffMessage(task, ws, summary))
+  }
 
   // 전달 실패는 생성을 막지 않지만 조용히 넘기면 안 된다 — 새 워크스페이스의 에이전트가
   // 프로젝트 지침(CLAUDE.local.md 등)을 못 읽은 채 다르게 동작한다.
@@ -79,6 +114,11 @@ export const createStackedWorkspace: AgentToolHandler = async (deps, workspaceId
     branch: result.branch,
     baseBranch: ws.branch,
     started: !!task,
+    // 인계 규약의 부모 쪽 절반. 서버 안내(WOOI_MCP_INSTRUCTIONS)에 두면 스택을 안 쓰는
+    // 워크스페이스까지 매 요청 값을 치르므로, 자식이 생긴 바로 이 순간에만 붙인다.
+    next:
+      'Nothing crosses between workspaces on its own. This workspace will not be interrupted when ' +
+      'the new one reports back — call `check_stacked_work` when its result would change what you do.',
     ...(task
       ? {}
       : { note: 'No task was handed over, so this workspace is idle until someone prompts it.' }),

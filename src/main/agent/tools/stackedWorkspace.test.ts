@@ -11,13 +11,14 @@ import type { Workspace } from '@shared/types'
  */
 
 const clean = vi.hoisted(() => vi.fn())
+const summarize = vi.hoisted(() => vi.fn())
 const create = vi.hoisted(() => vi.fn())
 const state = vi.hoisted(() => ({ workspaces: [] as Partial<Workspace>[] }))
 const update = vi.hoisted(() =>
   vi.fn((fn: (st: { workspaces: Partial<Workspace>[] }) => void) => fn(state))
 )
 
-vi.mock('../../git', () => ({ isWorktreeClean: clean }))
+vi.mock('../../git', () => ({ isWorktreeClean: clean, summarizeBranch: summarize }))
 vi.mock('../../workspaces', () => ({ createWorkspace: create }))
 vi.mock('../../store', () => ({ getStore: () => ({ getState: () => state, update }) }))
 
@@ -35,6 +36,7 @@ const parent: Partial<Workspace> = {
   id: 'ws-parent',
   repoId: 'repo-1',
   branch: 'feat/base',
+  baseBranch: 'main',
   name: 'base',
   worktreePath: '/tmp/wt',
   parentWorkspaceId: null,
@@ -57,6 +59,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   state.workspaces = [{ ...parent }]
   clean.mockResolvedValue(true)
+  summarize.mockResolvedValue(null)
   create.mockResolvedValue({ workspaceId: 'ws-new', name: 'feat/next', branch: 'feat/next' })
 })
 
@@ -178,6 +181,59 @@ describe('create_stacked_workspace 의 작업 인계', () => {
   it('공백뿐인 task 는 안 준 것으로 본다', async () => {
     await create_({ task: '  \n ' })
     expect(sendMessage).not.toHaveBeenCalled()
+  })
+
+  it('부모에게 보고가 저절로 오지 않는다는 것을 결과로 알려 준다', async () => {
+    // 상시 안내에서 뺀 절반이다 — 여기서마저 빠지면 부모는 오지 않을 보고를 기다린다.
+    const result = await create_({ task: 'Add the login form.' })
+    expect(result.next).toContain('check_stacked_work')
+  })
+})
+
+describe('물려받은 코드 요약', () => {
+  it('부모 브랜치가 이미 담고 있는 커밋과 파일을 인계문에 붙인다', async () => {
+    summarize.mockResolvedValue({
+      commits: ['d86b7e2 feat: 계산 엔진 구현'],
+      files: ['src/calc.js (+82 −4)'],
+      omittedCommits: 0,
+      omittedFiles: 0
+    })
+
+    await create_({ task: 'Turn it into a CLI.' })
+
+    // 요약은 **부모** 워크트리에서, 부모의 base 기준으로 읽어야 한다. 갓 만들어진 자식에는
+    // 아직 아무 커밋도 없다.
+    expect(summarize).toHaveBeenCalledWith('/tmp/wt', 'main')
+    const [, text] = sendMessage.mock.calls[0]
+    expect(text).toContain('d86b7e2 feat: 계산 엔진 구현')
+    expect(text).toContain('src/calc.js (+82 −4)')
+  })
+
+  it('잘린 항목이 있으면 몇 개가 빠졌는지 밝힌다', async () => {
+    summarize.mockResolvedValue({
+      commits: ['abc1234 refactor: 정리'],
+      files: ['src/a.ts (+10 −2)'],
+      omittedCommits: 3,
+      omittedFiles: 120
+    })
+
+    await create_({ task: 'Next piece.' })
+
+    const [, text] = sendMessage.mock.calls[0]
+    expect(text).toContain('3 older commits')
+    expect(text).toContain('120 more files')
+  })
+
+  it('요약에 실패해도 인계는 그대로 이뤄진다', async () => {
+    // 요약은 자식을 빠르게 만들 뿐이다 — 없다고 인계가 틀리지는 않으므로 막아서는 안 된다.
+    summarize.mockRejectedValue(new Error('git exploded'))
+
+    await create_({ task: 'Next piece.' })
+
+    expect(sendMessage).toHaveBeenCalledTimes(1)
+    const [, text] = sendMessage.mock.calls[0]
+    expect(text).toContain('Next piece.')
+    expect(text).not.toContain('already contains')
   })
 })
 

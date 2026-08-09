@@ -3,7 +3,13 @@ import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { sanitizeBranch, parseGithubOwner, ghMergeBase, syncGhMergeBase } from './git'
+import {
+  sanitizeBranch,
+  parseGithubOwner,
+  ghMergeBase,
+  syncGhMergeBase,
+  summarizeBranch
+} from './git'
 
 describe('sanitizeBranch', () => {
   it('공백을 하이픈으로 바꾼다', () => {
@@ -126,5 +132,105 @@ describe('gh-merge-base (gh 의 기본 PR base)', () => {
     await syncGhMergeBase(wt, 'child', 'parent')
     git(wt, ['branch', '-m', 'feat/child'])
     await expect(ghMergeBase(wt, 'feat/child')).resolves.toBe('parent')
+  })
+})
+
+// 스택 인계문에 실리는 요약이다. 자식이 물려받은 코드를 알아내려고 첫 턴을 태우지 않게 하는
+// 것이 목적이라, **부모가 한 일만** 담기는지(base 쪽 커밋이 섞이지 않는지)가 핵심이다.
+describe('summarizeBranch (물려받은 코드 요약)', () => {
+  let base: string
+  let repo: string
+
+  const git = (cwd: string, args: string[]): string =>
+    execFileSync('git', args, { cwd, encoding: 'utf-8' }).trim()
+
+  const commit = (file: string, body: string, message: string): void => {
+    writeFileSync(join(repo, file), body)
+    git(repo, ['add', '-A'])
+    git(repo, ['commit', '-qm', message])
+  }
+
+  beforeEach(() => {
+    base = mkdtempSync(join(tmpdir(), 'wooi-summary-'))
+    repo = join(base, 'repo')
+    mkdirSync(repo)
+    git(repo, ['init', '-q', '-b', 'main'])
+    git(repo, ['config', 'user.email', 'test@example.com'])
+    git(repo, ['config', 'user.name', 'test'])
+    commit('README.md', 'hello\n', 'init')
+    git(repo, ['checkout', '-qb', 'feat/work'])
+  })
+
+  afterEach(() => {
+    rmSync(base, { recursive: true, force: true })
+  })
+
+  it('base 이후의 커밋과 바뀐 파일을 모은다', async () => {
+    commit('calc.js', 'a\nb\nc\n', 'feat: engine')
+
+    const summary = await summarizeBranch(repo, 'main')
+
+    expect(summary?.commits).toHaveLength(1)
+    expect(summary?.commits[0]).toContain('feat: engine')
+    expect(summary?.files).toEqual(['calc.js (+3 −0)'])
+  })
+
+  it('base 가 분기 후 전진해도 base 쪽 커밋을 담지 않는다', async () => {
+    commit('calc.js', 'a\n', 'feat: engine')
+    git(repo, ['checkout', '-q', 'main'])
+    commit('other.js', 'x\n', 'chore: unrelated main work')
+    git(repo, ['checkout', '-q', 'feat/work'])
+
+    const summary = await summarizeBranch(repo, 'main')
+
+    // merge-base 기준이라 main 의 새 커밋은 "내가 물려주는 것" 이 아니다.
+    expect(summary?.commits.join('\n')).not.toContain('unrelated')
+    expect(summary?.files).toEqual(['calc.js (+1 −0)'])
+  })
+
+  it('변경량이 큰 파일이 앞에 온다 — 잘릴 때 요점이 남아야 한다', async () => {
+    writeFileSync(join(repo, 'small.js'), 'a\n')
+    writeFileSync(join(repo, 'big.js'), 'a\n'.repeat(50))
+    git(repo, ['add', '-A'])
+    git(repo, ['commit', '-qm', 'feat: two files'])
+
+    const summary = await summarizeBranch(repo, 'main')
+
+    expect(summary?.files[0]).toContain('big.js')
+  })
+
+  it('base 이후 아무것도 없으면 null 이다 — 빈 절을 인계문에 붙이지 않는다', async () => {
+    await expect(summarizeBranch(repo, 'main')).resolves.toBeNull()
+  })
+
+  it('base ref 가 없으면 던지지 않고 null 이다', async () => {
+    commit('calc.js', 'a\n', 'feat: engine')
+    await expect(summarizeBranch(repo, 'no-such-branch')).resolves.toBeNull()
+  })
+
+  // Wooi 워크트리는 base 를 체크아웃하지 않아 로컬 ref 가 늘 낡아 있다. 낡은 쪽만 보면 base 에서
+  // 당겨 온 커밋이 이 브랜치 몫으로 잡혀, 자식에게 남의 작업을 물려준 것처럼 알려 준다.
+  it('로컬 base 가 낡았으면 upstream 을 기준으로 삼는다', async () => {
+    const remote = join(base, 'remote.git')
+    git(repo, ['init', '-q', '--bare', remote])
+    git(repo, ['remote', 'add', 'origin', remote])
+    git(repo, ['checkout', '-q', 'main'])
+    git(repo, ['push', '-q', '-u', 'origin', 'main'])
+
+    // origin/main 만 전진시키고 로컬 main 은 그대로 둔다.
+    git(repo, ['checkout', '-qb', 'tmp'])
+    commit('release.txt', 'v1\n', 'release: v1.9.0')
+    git(repo, ['push', '-q', 'origin', 'tmp:main'])
+    git(repo, ['fetch', '-q', 'origin'])
+
+    // 워크스페이스는 그 릴리즈 커밋을 당겨 온 뒤 자기 작업을 얹는다.
+    git(repo, ['checkout', '-q', 'feat/work'])
+    git(repo, ['merge', '-q', '--ff-only', 'tmp'])
+    commit('calc.js', 'a\n', 'feat: engine')
+
+    const summary = await summarizeBranch(repo, 'main')
+
+    expect(summary?.commits.join('\n')).not.toContain('release: v1.9.0')
+    expect(summary?.files).toEqual(['calc.js (+1 −0)'])
   })
 })
