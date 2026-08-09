@@ -230,12 +230,19 @@ function titleFor(tool: string, args: unknown, workspace: Workspace): string {
     return `The agent wants to open a ${draft}pull request from \`${workspace.branch}\` into \`${resolvePrBase(workspace)}\`.`
   }
   if (tool === 'run_script' || tool === 'stop_script') {
-    const kind = a.kind === 'setup' ? 'setup' : 'dev'
+    const name = typeof a.name === 'string' ? a.name : typeof a.kind === 'string' ? a.kind : ''
+    const repo = getStore()
+      .getState()
+      .repos.find((r) => r.id === workspace.repoId)
+    const scriptId =
+      name.toLowerCase() === 'setup'
+        ? 'setup'
+        : (repo?.runScripts.find((s) => s.name.toLowerCase() === name.toLowerCase())?.id ?? '')
     // 사용자가 승인하는 대상은 "dev 스크립트" 라는 이름이 아니라 그 안에서 돌아갈 명령이다.
-    const command = scriptCommandFor(workspace, kind)
-    const what = command ? `\`${command}\`` : `the ${kind} script`
+    const command = scriptCommandFor(workspace, scriptId)
+    const what = command ? `\`${command}\`` : `the ${name} script`
     const verb = tool === 'run_script' ? 'run' : 'stop'
-    return `The agent wants to ${verb} this repository’s ${kind} script (${what}).`
+    return `The agent wants to ${verb} this repository’s ${name} script (${what}).`
   }
   return `The agent wants to run the Wooi tool \`${tool}\`.`
 }

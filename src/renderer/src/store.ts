@@ -20,7 +20,6 @@ import type {
   ReviewEnvelope,
   ReviewFinding,
   ReviewVerdict,
-  ScriptKind,
   ScriptStatus,
   StackCascadeResult,
   UpdateStatus,
@@ -35,7 +34,8 @@ import { bodyOf, emptyView, isPosted, type ReviewTab, type ReviewViewState } fro
 import { popWorkspaceHistory, pushWorkspaceHistory } from './lib/workspaceHistory'
 import { undoCreateVerdict, type UndoableCreate } from './lib/undoCreate'
 
-export const scriptKey = (workspaceId: string, kind: ScriptKind): string => `${workspaceId}:${kind}`
+export const scriptKey = (workspaceId: string, scriptId: string): string =>
+  `${workspaceId}:${scriptId}`
 
 /**
  * 일괄 승인(⇧⌘A)이 대신 눌러 줘도 되는 요청인지.
@@ -376,7 +376,7 @@ interface UIState {
    * 아직 받아 둔 출력이 없으면 main 의 꼬리 버퍼로 채운다.
    * 출력은 이벤트로만 흘러오므로, 나중에 뜬 창은 이게 없으면 돌고 있는 dev 서버의 로그를 못 본다.
    */
-  seedScriptOutput: (workspaceId: string, kind: ScriptKind) => Promise<void>
+  seedScriptOutput: (workspaceId: string, scriptId: string) => Promise<void>
   refreshAuth: () => Promise<void>
   /** 에이전트 백엔드 메타 + 백엔드별 모델 목록을 다시 읽는다(가용성은 실행 중에도 바뀐다). */
   refreshAgents: () => Promise<void>
@@ -1004,14 +1004,14 @@ export const useStore = create<UIState>((set, get) => ({
       set({ permissions: get().permissions.filter((p) => p.requestId !== requestId) })
     })
 
-    window.api.onScriptOutput(({ workspaceId, kind, chunk }) => {
-      const key = scriptKey(workspaceId, kind)
+    window.api.onScriptOutput(({ workspaceId, scriptId, chunk }) => {
+      const key = scriptKey(workspaceId, scriptId)
       const out = get().scriptOutput
       set({ scriptOutput: { ...out, [key]: (out[key] ?? '') + chunk } })
     })
 
-    window.api.onScriptExit(({ workspaceId, kind, code }) => {
-      const key = scriptKey(workspaceId, kind)
+    window.api.onScriptExit(({ workspaceId, scriptId, code }) => {
+      const key = scriptKey(workspaceId, scriptId)
       const out = get().scriptOutput
       set({
         scriptOutput: {
@@ -1025,7 +1025,7 @@ export const useStore = create<UIState>((set, get) => ({
       // 안 뜨는지 모른다. 재시도/출력 보기 버튼이 달린 토스트로 알린다. 실패 상태 자체는 메인이
       // Workspace.setupState 로 영속하므로(헤더/스크립트 패널이 이를 읽음) 여기선 알림만 담당한다.
       // code === null 은 kill(아카이브·중지)이라 실패로 보지 않는다.
-      if (kind === 'setup') {
+      if (scriptId === 'setup') {
         const failed = code !== null && code !== 0
         if (failed) {
           const ws = get().app?.workspaces.find((w) => w.id === workspaceId)
@@ -1060,13 +1060,13 @@ export const useStore = create<UIState>((set, get) => ({
 
     // 스크립트 출력은 이벤트로만 흘러온다 — 메인 창과 같은 방식으로 누적한다(이 창이 뜨기 전의
     // 로그는 ScriptPanel 이 main 의 꼬리 버퍼에서 한 번 채운다 — seedScriptOutput).
-    window.api.onScriptOutput(({ workspaceId: id, kind, chunk }) => {
-      const key = scriptKey(id, kind)
+    window.api.onScriptOutput(({ workspaceId: id, scriptId, chunk }) => {
+      const key = scriptKey(id, scriptId)
       const out = get().scriptOutput
       set({ scriptOutput: { ...out, [key]: (out[key] ?? '') + chunk } })
     })
-    window.api.onScriptExit(({ workspaceId: id, kind, code }) => {
-      const key = scriptKey(id, kind)
+    window.api.onScriptExit(({ workspaceId: id, scriptId, code }) => {
+      const key = scriptKey(id, scriptId)
       const out = get().scriptOutput
       set({
         scriptOutput: {

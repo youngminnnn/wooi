@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { CURRENT_SCHEMA_VERSION, DEFAULT_SETTINGS, migrate } from './storeSchema'
-import type { AgentSettings, AppSettings, Workspace } from '@shared/types'
+import type { AgentSettings, AppSettings, Repo, Workspace } from '@shared/types'
 
 /**
  * 마이그레이션은 **사용자의 실제 데이터를 변환**하는 코드다 — 회귀가 나면 설정·워크스페이스가
@@ -269,6 +269,42 @@ describe('v18 → v19 (워크스페이스 생성자 기록)', () => {
   })
 })
 
+describe('v19 → v20 (다중 run script)', () => {
+  it('리포별 dev 명령 id에 맞춰 여러 워크스페이스의 포트를 보존한다', () => {
+    const out = migrate(
+      {
+        schemaVersion: 19,
+        repos: [
+          { id: 'r1', devScript: 'npm run dev' },
+          { id: 'r2', devScript: 'pnpm web' },
+          { id: 'r3', devScript: '' }
+        ],
+        workspaces: [
+          { id: 'w1', repoId: 'r1', devPort: 3100 },
+          { id: 'w2', repoId: 'r1', devPort: null },
+          { id: 'w3', repoId: 'r2', devPort: 3102 },
+          { id: 'w4', repoId: 'r3', devPort: 3103 }
+        ]
+      },
+      19
+    )
+    const repos = out.repos as Repo[]
+    const workspaces = out.workspaces as Workspace[]
+    const r1 = repos[0].runScripts[0]
+    const r2 = repos[1].runScripts[0]
+
+    expect(r1).toMatchObject({ name: 'Dev', command: 'npm run dev', autoStart: false })
+    expect(r2.id).not.toBe(r1.id)
+    expect(repos[2].runScripts).toEqual([])
+    expect(workspaces[0].ports).toEqual({ [r1.id]: 3100 })
+    expect(workspaces[1].ports).toEqual({})
+    expect(workspaces[2].ports).toEqual({ [r2.id]: 3102 })
+    expect(workspaces[3].ports).toEqual({})
+    expect(out).not.toHaveProperty('devScript')
+    expect(workspaces.every((w) => !('devPort' in w))).toBe(true)
+  })
+})
+
 describe('레거시 파일 전체 경로', () => {
   it('v0(버전 필드 없음) 파일을 현재 스키마까지 끝까지 변환한다', () => {
     const legacy = {
@@ -282,7 +318,7 @@ describe('레거시 파일 전체 경로', () => {
     // v0 → v1: 더 이상 노출하지 않는 모드는 acceptEdits 로 환산된다.
     expect(ws.permissionMode).toBe('acceptEdits')
     // v2 → v3: dev 포트가 배정된다.
-    expect(typeof ws.devPort).toBe('number')
+    expect(ws.ports).toBeDefined()
     // v4 → v5: 백엔드 식별자가 채워진다.
     expect(ws.agentBackend).toBe('claude')
     // v8 → v9: 스택 필드가 초기화된다.

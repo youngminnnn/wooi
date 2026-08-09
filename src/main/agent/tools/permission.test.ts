@@ -29,7 +29,12 @@ beforeEach(() => {
   initToolPermission({ dispatch: (r) => cards.push(r) })
   state.workspaces = [{ id: 'ws-parent', branch: 'feat/base' }]
   state.repos = [
-    { id: 'repo-1', defaultBranch: 'main', setupScript: 'npm install', devScript: 'npm run dev' }
+    {
+      id: 'repo-1',
+      defaultBranch: 'main',
+      setupScript: 'npm install',
+      runScripts: [{ id: 'dev-1', name: 'Dev', command: 'npm run dev', autoStart: false }]
+    }
   ]
 })
 

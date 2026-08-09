@@ -112,7 +112,7 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
   const scriptsDetached = useStore((s) => s.detachedPanes.scripts)
   // dev 스크립트 실행 여부 — 스크립트 버튼에 실행 중 점을 띄워 패널을 닫아도 알 수 있게 한다.
   const devRunning = useStore((s) =>
-    (s.scriptStatus[workspace.id] ?? []).some((x) => x.kind === 'dev' && x.state === 'running')
+    (s.scriptStatus[workspace.id] ?? []).some((x) => x.state === 'running')
   )
   const rightPanelOpen = useStore((s) => s.rightPanelOpen)
   const toggleRightPanel = useStore((s) => s.toggleRightPanel)

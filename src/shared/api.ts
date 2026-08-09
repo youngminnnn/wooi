@@ -46,7 +46,6 @@ import type {
   RewindActionResult,
   StackCascadeResult,
   ScriptExitEvent,
-  ScriptKind,
   ScriptOutputEvent,
   ScriptStatus,
   SideQuestionEvent,
@@ -74,7 +73,7 @@ export interface WooiApi {
     update(
       repoId: string,
       patch: Partial<
-        Pick<Repo, 'name' | 'setupScript' | 'devScript' | 'archiveScript' | 'carryItems'>
+        Pick<Repo, 'name' | 'setupScript' | 'runScripts' | 'archiveScript' | 'carryItems'>
       >
     ): Promise<{ error?: string }>
     /**
@@ -174,11 +173,11 @@ export interface WooiApi {
   }
 
   script: {
-    run(workspaceId: string, kind: ScriptKind): Promise<void>
-    stop(workspaceId: string, kind: ScriptKind): Promise<void>
+    run(workspaceId: string, scriptId: string): Promise<void>
+    stop(workspaceId: string, scriptId: string): Promise<void>
     getStatus(workspaceId: string): Promise<ScriptStatus[]>
     /** 지금까지의 누적 출력(꼬리 버퍼). 나중에 뜬 창이 이전 로그를 채우는 데 쓴다. */
-    getOutput(workspaceId: string, kind: ScriptKind): Promise<string>
+    getOutput(workspaceId: string, scriptId: string): Promise<string>
   }
 
   git: {

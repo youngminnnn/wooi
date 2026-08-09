@@ -312,24 +312,24 @@ export default function App(): React.JSX.Element {
       // ⇧⌘D 와 (구) ⌃⌘R 둘 다 여기로 들어온다.
       const toggleDevScript = (id: string): void => {
         const ws = st.app?.workspaces.find((w) => w.id === id)
-        const devCmd = ws && st.app?.repos.find((r) => r.id === ws.repoId)?.devScript
-        if (!devCmd || !devCmd.trim()) {
+        const primary = ws && st.app?.repos.find((r) => r.id === ws.repoId)?.runScripts[0]
+        if (!primary?.command.trim()) {
           // 여기까지 온 사용자는 이미 "dev 명령을 쓰고 싶다"고 손을 든 상태다. 설정이 어디
           // 있는지 말로만 알려 주고 끝내지 말고, 바로 그 화면으로 데려간다.
-          st.pushToast('info', 'No dev command set for this repo yet.', [
-            { label: 'Set dev command', run: () => ws && openRepoSettings(ws.repoId) }
+          st.pushToast('info', 'Add a run script for this repository first.', [
+            { label: 'Open repository settings', run: () => ws && openRepoSettings(ws.repoId) }
           ])
           return
         }
         const devRunning = (st.scriptStatus[id] ?? []).some(
-          (s) => s.kind === 'dev' && s.state === 'running'
+          (s) => s.scriptId === primary.id && s.state === 'running'
         )
         if (devRunning) {
-          void window.api.script.stop(id, 'dev').then(() => st.refreshScriptStatus(id))
+          void window.api.script.stop(id, primary.id).then(() => st.refreshScriptStatus(id))
         } else {
           // 실행 시 스크립트 패널(dev 탭)을 열어 로그·상태를 바로 볼 수 있게 한다.
           st.setScriptPanelOpen(id, true)
-          void window.api.script.run(id, 'dev').then(() => st.refreshScriptStatus(id))
+          void window.api.script.run(id, primary.id).then(() => st.refreshScriptStatus(id))
         }
       }
 

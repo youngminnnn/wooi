@@ -204,20 +204,21 @@ export const AGENT_TOOLS: AgentToolSpec[] = [
   {
     name: 'run_script',
     description: [
-      'Run this repository’s setup or dev script, restarting it if it is already running.',
+      'Run a repository script by its user-defined name, restarting it if already running.',
+      'Names differ per repository; if a name is wrong, the error lists the available names.',
       'Use this rather than running the command yourself: it outlives your session and its output',
       'goes to the panel the user is watching, so you both read the same log.'
     ].join(' '),
     inputSchema: {
-      kind: z.enum(['setup', 'dev']).describe('Which script to run.')
+      name: z.string().describe('Run script name, or the reserved name "setup".')
     },
     annotations: { title: 'Run a repository script', readOnlyHint: false }
   },
   {
     name: 'stop_script',
-    description: 'Stop this workspace’s setup or dev script if it is running.',
+    description: 'Stop a named repository script. Invalid names return the available names.',
     inputSchema: {
-      kind: z.enum(['setup', 'dev']).describe('Which script to stop.')
+      name: z.string().describe('Run script name, or the reserved name "setup".')
     },
     annotations: { title: 'Stop a repository script', readOnlyHint: false }
   },
@@ -228,7 +229,7 @@ export const AGENT_TOOLS: AgentToolSpec[] = [
       'The output is truncated from the start — you always get the end, where the errors are.'
     ].join(' '),
     inputSchema: {
-      kind: z.enum(['setup', 'dev']).describe('Which script to read.'),
+      name: z.string().describe('Run script name, or the reserved name "setup".'),
       tailLines: z
         .number()
         .int()

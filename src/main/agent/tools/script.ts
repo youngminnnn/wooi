@@ -1,4 +1,4 @@
-import type { ScriptKind, ScriptStatus, Workspace } from '@shared/types'
+import { SETUP_SCRIPT_ID, type ScriptStatus, type Workspace } from '@shared/types'
 import { waitForPortFree } from '../../net'
 import { getStore } from '../../store'
 import { scriptEnvFor } from '../../workspaces'
@@ -37,9 +37,19 @@ function workspaceOf(workspaceId: string): Workspace {
 }
 
 /** 모델이 준 kind 를 검증한다. 종류는 둘뿐이라 목록을 문장에 그대로 담아 돌려준다. */
-function kindOf(args: Record<string, unknown>): ScriptKind {
-  if (args.kind === 'setup' || args.kind === 'dev') return args.kind
-  throw new Error('kind must be "setup" or "dev".')
+function scriptIdOf(ws: Workspace, args: Record<string, unknown>): string {
+  const repo = getStore()
+    .getState()
+    .repos.find((r) => r.id === ws.repoId)
+  const asked =
+    typeof args.name === 'string' ? args.name : typeof args.kind === 'string' ? args.kind : ''
+  if (asked.toLocaleLowerCase() === SETUP_SCRIPT_ID) return SETUP_SCRIPT_ID
+  const found = repo?.runScripts.find(
+    (script) => script.name.toLocaleLowerCase() === asked.toLocaleLowerCase()
+  )
+  if (found) return found.id
+  const names = [SETUP_SCRIPT_ID, ...(repo?.runScripts.map((script) => script.name) ?? [])]
+  throw new Error(`name must be one of: ${names.map((name) => `"${name}"`).join(', ')}.`)
 }
 
 /**
@@ -49,88 +59,104 @@ function kindOf(args: Record<string, unknown>): ScriptKind {
  * 승인 카드도 같은 값을 보여 줘야 하므로([[agent/tools/permission]]) export 한다 — 사용자가 승인하는
  * 대상은 "dev 스크립트" 라는 이름이 아니라 그 안에서 돌아갈 명령 그 자체다.
  */
-export function scriptCommandFor(ws: Workspace, kind: ScriptKind): string {
+export function scriptCommandFor(ws: Workspace, scriptId: string): string {
   const repo = getStore()
     .getState()
     .repos.find((r) => r.id === ws.repoId)
   if (!repo) return ''
-  return (kind === 'setup' ? repo.setupScript : repo.devScript).trim()
+  return (
+    scriptId === SETUP_SCRIPT_ID
+      ? repo.setupScript
+      : (repo.runScripts.find((s) => s.id === scriptId)?.command ?? '')
+  ).trim()
 }
 
-function statusOf(deps: AgentToolDeps, workspaceId: string, kind: ScriptKind): ScriptStatus {
-  const found = deps.scripts.getStatus(workspaceId).find((s) => s.kind === kind)
-  return found ?? { kind, state: 'idle', exitCode: null }
+function statusOf(deps: AgentToolDeps, workspaceId: string, scriptId: string): ScriptStatus {
+  const found = deps.scripts.getStatus(workspaceId).find((s) => s.scriptId === scriptId)
+  return found ?? { scriptId, state: 'idle', exitCode: null }
 }
 
 export const runScript: AgentToolHandler = async (deps, workspaceId, args) => {
   const ws = workspaceOf(workspaceId)
-  const kind = kindOf(args)
+  const scriptId = scriptIdOf(ws, args)
+  const name =
+    scriptId === SETUP_SCRIPT_ID
+      ? 'setup'
+      : (getStore()
+          .getState()
+          .repos.find((r) => r.id === ws.repoId)
+          ?.runScripts.find((s) => s.id === scriptId)?.name ?? scriptId)
 
-  const command = scriptCommandFor(ws, kind)
+  const command = scriptCommandFor(ws, scriptId)
   if (!command) {
     throw new Error(
-      `This repository has no ${kind} script configured — the user sets that in Wooi’s ` +
+      `This repository has no ${name} script configured — the user sets that in Wooi’s ` +
         'repository settings, so ask them for the command instead of guessing one.'
     )
   }
 
   // ScriptRunner.run 은 언제나 먼저 stop 한다. 즉 "이미 돌고 있으면" 은 no-op 이 아니라 재시작이고,
   // 그 차이를 모델이 알아야 한다 — 돌던 dev 서버를 끊고 다시 띄운 것이기 때문이다.
-  const wasRunning = statusOf(deps, workspaceId, kind).state === 'running'
+  const wasRunning = statusOf(deps, workspaceId, scriptId).state === 'running'
 
   // dev 는 실제로 포트를 바인딩한다. 재시작 시 앞선 프로세스가 포트를 놓기 전에 새로 띄우면
   // EADDRINUSE 로 죽으므로 잠깐 기다린다. 외부 점유 시의 포트 재배정까지는 하지 않는다 — 그건
   // 사용자 조작 경로(ipc.ts)의 몫이고, 여기서는 실패 이유가 로그에 남아 모델이 읽을 수 있다.
-  const port = ws.devPort
-  if (kind === 'dev' && wasRunning && port != null) {
-    deps.scripts.stop(workspaceId, 'dev')
+  const port = ws.ports[scriptId]
+  if (wasRunning && port != null) {
+    deps.scripts.stop(workspaceId, scriptId)
     await waitForPortFree(port, 1500)
   }
 
   deps.scripts.run(
     workspaceId,
-    kind,
+    scriptId,
     command,
     ws.worktreePath,
-    port != null ? scriptEnvFor(port) : undefined
+    (() => {
+      const repo = getStore()
+        .getState()
+        .repos.find((r) => r.id === ws.repoId)
+      return repo ? scriptEnvFor(repo, ws, scriptId) : undefined
+    })()
   )
 
   return {
-    kind,
+    name,
     command,
     restarted: wasRunning,
     result: wasRunning
-      ? `The ${kind} script was already running; Wooi stopped it and started it again.`
-      : `The ${kind} script was started.`,
+      ? `The ${name} script was already running; Wooi stopped it and started it again.`
+      : `The ${name} script was started.`,
     note: 'It runs in the background — read its output with read_script_output.'
   }
 }
 
 export const stopScript: AgentToolHandler = async (deps, workspaceId, args) => {
-  workspaceOf(workspaceId)
-  const kind = kindOf(args)
+  const ws = workspaceOf(workspaceId)
+  const scriptId = scriptIdOf(ws, args)
 
-  const wasRunning = statusOf(deps, workspaceId, kind).state === 'running'
-  deps.scripts.stop(workspaceId, kind)
+  const wasRunning = statusOf(deps, workspaceId, scriptId).state === 'running'
+  deps.scripts.stop(workspaceId, scriptId)
 
   return {
-    kind,
+    name: args.name ?? args.kind,
     stopped: wasRunning,
     result: wasRunning
-      ? `The ${kind} script was stopped.`
-      : `The ${kind} script was not running, so nothing was stopped.`
+      ? `The script was stopped.`
+      : `The script was not running, so nothing was stopped.`
   }
 }
 
 export const readScriptOutput: AgentToolHandler = async (deps, workspaceId, args) => {
-  workspaceOf(workspaceId)
-  const kind = kindOf(args)
+  const ws = workspaceOf(workspaceId)
+  const scriptId = scriptIdOf(ws, args)
 
   // 모델이 더 큰 값을 줘도 무시한다. 상한은 협상 대상이 아니라 컨텍스트 예산의 문제다.
   const asked = typeof args.tailLines === 'number' ? Math.floor(args.tailLines) : DEFAULT_TAIL_LINES
   const tailLines = Math.min(Math.max(asked, 1), MAX_TAIL_LINES)
 
-  const raw = deps.scripts.getOutput(workspaceId, kind)
+  const raw = deps.scripts.getOutput(workspaceId, scriptId)
   const lines = raw ? raw.split('\n') : []
   const kept = tailWithinBytes(lines.slice(-tailLines), MAX_OUTPUT_BYTES)
 
@@ -140,10 +166,10 @@ export const readScriptOutput: AgentToolHandler = async (deps, workspaceId, args
   if (buf.length > MAX_OUTPUT_BYTES) output = buf.subarray(-MAX_OUTPUT_BYTES).toString('utf8')
 
   const truncated = kept.length < lines.length || buf.length > MAX_OUTPUT_BYTES
-  const status = statusOf(deps, workspaceId, kind)
+  const status = statusOf(deps, workspaceId, scriptId)
 
   return {
-    kind,
+    name: args.name ?? args.kind,
     // 상태를 함께 준다 — "로그가 비었다" 와 "아직 시작하지 않았다" 는 모델이 취할 행동이 다르다.
     running: status.state === 'running',
     exitCode: status.exitCode,

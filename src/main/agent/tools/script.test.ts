@@ -19,7 +19,7 @@ const state = vi.hoisted(() => ({
 vi.mock('../../net', () => ({ waitForPortFree }))
 vi.mock('../../store', () => ({ getStore: () => ({ getState: () => state, update: vi.fn() }) }))
 vi.mock('../../workspaces', () => ({
-  scriptEnvFor: (port: number) => ({ PORT: String(port) })
+  scriptEnvFor: () => ({ PORT: '3100' })
 }))
 
 const run = vi.fn()
@@ -30,21 +30,29 @@ const deps = {
   scripts: { run, stop, getOutput, getStatus }
 } as unknown as AgentToolDeps
 
-const repo: Partial<Repo> = { id: 'repo-1', setupScript: 'npm install', devScript: 'npm run dev' }
+const repo: Partial<Repo> = {
+  id: 'repo-1',
+  setupScript: 'npm install',
+  runScripts: [{ id: 'dev-1', name: 'Dev', command: 'npm run dev', autoStart: false }]
+}
 
 const ws: Partial<Workspace> = {
   id: 'ws-1',
   repoId: 'repo-1',
   worktreePath: '/tmp/wt',
-  devPort: 3100,
+  ports: { 'dev-1': 3100 },
   archived: false
 }
 
 /** 지정한 종류만 running 으로 만든다. */
-function statusIs(kind: 'setup' | 'dev', running: boolean, exitCode: number | null = null): void {
+function statusIs(
+  scriptId: 'setup' | 'dev-1',
+  running: boolean,
+  exitCode: number | null = null
+): void {
   getStatus.mockReturnValue([
-    { kind, state: running ? 'running' : 'exited', exitCode },
-    { kind: kind === 'dev' ? 'setup' : 'dev', state: 'idle', exitCode: null }
+    { scriptId, state: running ? 'running' : 'exited', exitCode },
+    { scriptId: scriptId === 'dev-1' ? 'setup' : 'dev-1', state: 'idle', exitCode: null }
   ])
 }
 
@@ -53,8 +61,8 @@ beforeEach(() => {
   state.workspaces = [{ ...ws }]
   state.repos = [{ ...repo }]
   getStatus.mockReturnValue([
-    { kind: 'setup', state: 'idle', exitCode: null },
-    { kind: 'dev', state: 'idle', exitCode: null }
+    { scriptId: 'setup', state: 'idle', exitCode: null },
+    { scriptId: 'dev-1', state: 'idle', exitCode: null }
   ])
   getOutput.mockReturnValue('')
   waitForPortFree.mockResolvedValue(true)
@@ -70,26 +78,28 @@ async function call(
 
 describe('run_script', () => {
   it('리포에 설정된 명령을 워크트리에서 돌린다', async () => {
-    await expect(call('runScript', { kind: 'dev' })).resolves.toMatchObject({
-      kind: 'dev',
+    await expect(call('runScript', { name: 'dev' })).resolves.toMatchObject({
+      name: 'Dev',
       command: 'npm run dev',
       restarted: false
     })
 
-    expect(run).toHaveBeenCalledWith('ws-1', 'dev', 'npm run dev', '/tmp/wt', { PORT: '3100' })
+    expect(run).toHaveBeenCalledWith('ws-1', 'dev-1', 'npm run dev', '/tmp/wt', { PORT: '3100' })
   })
 
   it('설정되지 않은 스크립트는 거절한다 — 명령을 지어내면 안 된다', async () => {
-    state.repos = [{ ...repo, devScript: '   ' }]
+    state.repos = [
+      { ...repo, runScripts: [{ id: 'dev-1', name: 'Dev', command: '   ', autoStart: false }] }
+    ]
 
-    await expect(call('runScript', { kind: 'dev' })).rejects.toThrow(/no dev script configured/)
+    await expect(call('runScript', { name: 'Dev' })).rejects.toThrow(/no Dev script configured/)
     expect(run).not.toHaveBeenCalled()
   })
 
   it('이미 돌고 있으면 재시작임을 결과 문장으로 알린다', async () => {
-    statusIs('dev', true)
+    statusIs('dev-1', true)
 
-    const result = await call('runScript', { kind: 'dev' })
+    const result = await call('runScript', { name: 'DEV' })
 
     expect(result.restarted).toBe(true)
     expect(result.result).toMatch(/started it again/)
@@ -97,30 +107,38 @@ describe('run_script', () => {
   })
 
   it('dev 재시작은 포트가 풀릴 때까지 기다린다', async () => {
-    statusIs('dev', true)
+    statusIs('dev-1', true)
 
-    await call('runScript', { kind: 'dev' })
+    await call('runScript', { name: 'Dev' })
 
-    expect(stop).toHaveBeenCalledWith('ws-1', 'dev')
+    expect(stop).toHaveBeenCalledWith('ws-1', 'dev-1')
     expect(waitForPortFree).toHaveBeenCalledWith(3100, 1500)
   })
 
   it('모르는 kind 는 거절한다', async () => {
-    await expect(call('runScript', { kind: 'build' })).rejects.toThrow(/"setup" or "dev"/)
+    await expect(call('runScript', { name: 'build' })).rejects.toThrow(/"setup", "Dev"/)
     expect(run).not.toHaveBeenCalled()
+  })
+
+  it('예약 이름 setup 은 계속 실행한다', async () => {
+    await expect(call('runScript', { name: 'setup' })).resolves.toMatchObject({
+      name: 'setup',
+      command: 'npm install'
+    })
+    expect(run).toHaveBeenCalledWith('ws-1', 'setup', 'npm install', '/tmp/wt', { PORT: '3100' })
   })
 })
 
 describe('stop_script', () => {
   it('돌고 있으면 멈춘다', async () => {
-    statusIs('dev', true)
+    statusIs('dev-1', true)
 
-    await expect(call('stopScript', { kind: 'dev' })).resolves.toMatchObject({ stopped: true })
-    expect(stop).toHaveBeenCalledWith('ws-1', 'dev')
+    await expect(call('stopScript', { name: 'dev' })).resolves.toMatchObject({ stopped: true })
+    expect(stop).toHaveBeenCalledWith('ws-1', 'dev-1')
   })
 
   it('안 돌고 있었으면 그렇다고 말해 준다', async () => {
-    await expect(call('stopScript', { kind: 'dev' })).resolves.toMatchObject({
+    await expect(call('stopScript', { name: 'dev' })).resolves.toMatchObject({
       stopped: false,
       result: expect.stringMatching(/not running/)
     })
@@ -180,7 +198,7 @@ describe('read_script_output', () => {
   })
 
   it('상태를 함께 준다 — "로그가 비었다" 와 "아직 시작 안 했다" 는 다르다', async () => {
-    statusIs('dev', false, 1)
+    statusIs('dev-1', false, 1)
 
     await expect(call('readScriptOutput', { kind: 'dev' })).resolves.toMatchObject({
       running: false,

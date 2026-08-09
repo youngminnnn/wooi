@@ -10,6 +10,8 @@ import { startToolSocket, stopToolSocket } from './agent/tools/socket'
 import { setCodexStatusProvider } from './auth'
 import { PaneWindows } from './paneWindows'
 import { ScriptRunner } from './scripts'
+import { startAutoRunScripts } from './workspaces'
+import { SETUP_SCRIPT_ID } from '@shared/types'
 import { flushStore, getStore } from './store'
 import { getTranscripts } from './transcripts'
 import { flushPendingSyncs } from './fsutil'
@@ -87,13 +89,16 @@ setCodexStatusProvider(async () => {
 })
 // setup 스크립트가 끝나면 결과를 workspace 에 영속하고 상태를 방송한다 — 재시작 후에도 성공한
 // setup 은 재실행 버튼을 노출하지 않고, 실패했을 때만 Retry 를 보여 주기 위한 것.
-const scripts = new ScriptRunner(dispatch, (workspaceId, kind, code) => {
-  if (kind !== 'setup') return
+const scripts = new ScriptRunner(dispatch, (workspaceId, scriptId, code) => {
+  if (scriptId !== SETUP_SCRIPT_ID) return
   const store = getStore()
+  const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
+  const repo = ws ? store.getState().repos.find((r) => r.id === ws.repoId) : undefined
   store.update((s) => {
     const ws = s.workspaces.find((w) => w.id === workspaceId)
     if (ws) ws.setupState = code === 0 ? 'success' : 'failed'
   })
+  if (code === 0 && ws && repo) startAutoRunScripts(scripts, ws, repo)
   dispatch(IPC.evtState, store.getState())
 })
 // Codex 는 인프로세스로 붙을 수 없어 도구 호출이 로컬 소켓으로 들어온다([[agent/tools/socket]]).
