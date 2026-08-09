@@ -9,6 +9,7 @@ import {
 } from '@shared/types'
 import { isReadOnlyToolName } from './catalog'
 import { resolvePrBase } from './pullRequest'
+import { scriptCommandFor } from './script'
 
 /**
  * 소켓으로 들어온 Wooi 도구 호출에 사용자 승인을 받는다.
@@ -152,7 +153,9 @@ function clampForCard(input: Record<string, unknown>): Record<string, unknown> {
 const TOOL_LABELS: Record<string, string> = {
   create_stacked_workspace: 'Create a stacked workspace',
   report_to_parent: 'Report to the parent workspace',
-  open_pull_request: 'Open a pull request'
+  open_pull_request: 'Open a pull request',
+  run_script: 'Run a repository script',
+  stop_script: 'Stop a repository script'
 }
 
 /** 카드 한 줄 설명. 무엇이 일어나는지 사용자가 보고 판단할 수 있어야 한다. */
@@ -172,6 +175,14 @@ function titleFor(tool: string, args: unknown, workspace: Workspace): string {
     // 핸들러와 **같은 함수**로 다시 구해 보여 준다 — 카드의 base 와 실제 base 가 갈리면
     // 승인이 승인이 아니게 된다.
     return `The agent wants to open a ${draft}pull request from \`${workspace.branch}\` into \`${resolvePrBase(workspace)}\`.`
+  }
+  if (tool === 'run_script' || tool === 'stop_script') {
+    const kind = a.kind === 'setup' ? 'setup' : 'dev'
+    // 사용자가 승인하는 대상은 "dev 스크립트" 라는 이름이 아니라 그 안에서 돌아갈 명령이다.
+    const command = scriptCommandFor(workspace, kind)
+    const what = command ? `\`${command}\`` : `the ${kind} script`
+    const verb = tool === 'run_script' ? 'run' : 'stop'
+    return `The agent wants to ${verb} this repository’s ${kind} script (${what}).`
   }
   return `The agent wants to run the Wooi tool \`${tool}\`.`
 }
