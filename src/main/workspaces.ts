@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { DEFAULT_AGENT_BACKEND, agentSettingsFor, normalizePermissionMode } from '@shared/types'
 import type {
+  AgentBackendId,
   CarryFailure,
   CreateWorkspaceArgs,
   CreateWorkspaceResult,
@@ -61,6 +62,20 @@ export function scriptEnvFor(port: number): Record<string, string> {
     PORT: String(port),
     WOOI_DEV_PORT: String(port)
   }
+}
+
+/**
+ * 생성 요청에 agent 가 명시되지 않았을 때의 기본값.
+ *
+ * 스택 자식은 부모 작업의 연속이므로 부모 agent 를 물려받고, 스택 뿌리만 전역 기본값을 쓴다.
+ * 이 규칙을 renderer 호출부에 맡기면 수동 생성·agent tool 같은 다른 생성 경로가 서로 달라진다.
+ */
+export function resolveWorkspaceAgentBackend(
+  explicit: AgentBackendId | undefined,
+  parent: Pick<Workspace, 'agentBackend'> | null | undefined,
+  configuredDefault: AgentBackendId | undefined
+): AgentBackendId {
+  return explicit ?? parent?.agentBackend ?? configuredDefault ?? DEFAULT_AGENT_BACKEND
 }
 
 /**
@@ -177,10 +192,14 @@ export async function createWorkspace(
   const carryFailures = await carryIntoNewWorktree(repo, worktreePath)
 
   const settings = store.getState().settings
-  // 워크스페이스가 쓸 에이전트는 여기서 정해져 세션 내내 고정된다. 호출자가 지정하지 않으면
-  // 전역 기본 백엔드를 쓴다. 권한 모드는 그 백엔드의 전역 기본값을 따르되, 백엔드가 모르는
-  // 값(다른 백엔드에서 넘어온 기본값)이면 그 백엔드의 기본 모드로 보정한다.
-  const agentBackend = args.agentBackend ?? settings.defaultAgentBackend ?? DEFAULT_AGENT_BACKEND
+  // 워크스페이스가 쓸 에이전트는 여기서 정해져 세션 내내 고정된다. 호출자가 지정하지 않은
+  // 스택 자식은 부모를 상속하고, 스택 뿌리만 전역 기본값을 쓴다. 권한 모드는 최종 백엔드의
+  // 전역 기본값을 따르되, 백엔드가 모르는 값이면 그 백엔드의 기본 모드로 보정한다.
+  const agentBackend = resolveWorkspaceAgentBackend(
+    args.agentBackend,
+    parent,
+    settings.defaultAgentBackend
+  )
   const meta = backendMeta(agentBackend)
   const permissionMode = normalizePermissionMode(
     meta,

@@ -28,7 +28,7 @@ export default function NewWorkspaceModal({
   // 물어볼 이유가 없으므로 피커를 감추고 그 하나로 만든다.
   const available = useAvailableBackends()
   const [agentBackend, setAgentBackend] = useState<AgentBackendId>(
-    () => app.settings.defaultAgentBackend
+    () => parent?.agentBackend ?? app.settings.defaultAgentBackend
   )
   const showPicker = available.length > 1
   // 기본 백엔드를 쓸 수 없으면(CLI 제거 등) 쓸 수 있는 것으로 대체한다.
@@ -155,6 +155,9 @@ export default function NewWorkspaceModal({
                 >
                   <AgentBackendMark backend={b.id} size={15} />
                   {b.label}
+                  {parent?.agentBackend === b.id && (
+                    <span className="text-[10px] text-neutral-500">Inherited</span>
+                  )}
                 </button>
               ))}
             </div>
