@@ -106,8 +106,11 @@ for (const { p, sha, error } of results) {
     continue
   }
   if (sha && sha !== p.sha) {
+    // 그 열만 따로 다시 본 날이 있으면 그 날짜를 기준으로 말한다. 최상위 reviewedOn 으로
+    // 뭉뚱그리면 이미 재확인한 열을 다시 확인하라고 보채게 된다.
+    const since = p.reviewedOn ?? manifest.reviewedOn
     findings.push(
-      `**${p.name}** — \`${p.path}\` 가 확인 이후 바뀌었다. ` +
+      `**${p.name}** — \`${p.path}\` 가 ${since} 확인 이후 바뀌었다. ` +
         `[변경 내역](https://github.com/${p.repo}/compare/${p.sha}...${sha}) · ` +
         `기록 \`${p.sha.slice(0, 7)}\` → 현재 \`${sha.slice(0, 7)}\``
     )

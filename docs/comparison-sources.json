@@ -5,7 +5,9 @@
     "sha 는 그날 기준으로 해당 파일을 마지막으로 건드린 커밋이다 — 사람이 실제로 읽은 판본.",
     "scripts/check-comparison-sources.mjs 가 현재 커밋과 비교해, 업스트림이 움직였으면 알려 준다.",
     "표를 다시 확인했다면 reviewedOn 과 sha 를 같이 갱신하고,",
-    "alternatives.html 의 #freshness data-checked 도 같은 날짜로 맞춘다(스크립트가 검사한다)."
+    "alternatives.html 의 #freshness data-checked 도 같은 날짜로 맞춘다(스크립트가 검사한다).",
+    "한 프로젝트만 다시 봤다면 그 프로젝트에 reviewedOn 을 따로 적는다. 최상위 reviewedOn 은",
+    "표 전체를 훑은 날이므로, 일부만 보고 그걸 올리면 안 본 열까지 다시 본 것처럼 된다."
   ],
   "reviewedOn": "2026-08-03",
   "staleAfterDays": 120,
@@ -49,8 +51,15 @@
       "name": "Orca",
       "repo": "stablyai/orca",
       "path": "README.md",
-      "sha": "6f28c118bbfe64a7c8f643d4389276ac0a55580b",
-      "docs": ["https://github.com/stablyai/orca"]
+      "sha": "7c4c021aa60f397b95220f3fbf595bc3f61bf9ec",
+      "reviewedOn": "2026-08-09",
+      "docs": [
+        "https://github.com/stablyai/orca",
+        "https://www.onorca.dev/docs/model/worktrees",
+        "https://www.onorca.dev/docs/cli/reference",
+        "https://www.onorca.dev/docs/review/github"
+      ],
+      "note": "8/3 이후 README 가 움직여 8/9 에 다시 읽었다. README 변경 자체는 Android APK 버전 범프뿐이었지만, 다시 읽는 김에 확인해 보니 '남의 PR 리뷰' 행이 과했다 — PR 에서 worktree 를 만드는 것과 리뷰 스레드에 답글을 다는 것은 문서에 있다. '문서 없음' 에서 '일부' 로 고치고 각주 6 을 붙였다. 스태킹·자동 rebase·PR 재타게팅 행은 재확인 결과 그대로다."
     }
   ]
 }

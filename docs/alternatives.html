@@ -396,6 +396,16 @@
         font-size: 12px;
         font-family: var(--mono);
       }
+      /*
+        Yes 와 "문서 없음" 사이. 기능의 일부만 문서에 있을 때 둘 중 하나로 몰면 어느 쪽이든
+        거짓이 된다 — 우리에게 유리한 쪽으로 몰면 특히 그렇다.
+      */
+      .part {
+        color: #9aa8c7;
+        font-weight: 600;
+        font-size: 12px;
+        font-family: var(--mono);
+      }
       .note-mark {
         color: var(--text-faint);
         font-size: 11px;
@@ -732,16 +742,18 @@
           </h2>
           <p class="section-sub">
             <span class="en"
-              >Verified against each project's own README and documentation on 3 August 2026. Every
-              cell is a statement about what those documents said <em>on that date</em> — these
-              projects ship fast, so read "not documented" as "not described then", never as
-              "missing now". Undocumented behaviour may well exist.</span
+              >Verified against each project's own README and documentation on 3 August 2026; the
+              Orca column was re-verified on 9 August 2026. Every cell is a statement about what
+              those documents said <em>on that date</em> — these projects ship fast, so read "not
+              documented" as "not described then", never as "missing now". Undocumented behaviour
+              may well exist.</span
             >
             <span class="ko"
-              >2026년 8월 3일에 각 프로젝트의 README 와 공식 문서를 기준으로 확인했습니다. 표의 모든
-              칸은 <em>그 날짜에</em> 그 문서들이 무엇을 말했는지에 대한 진술입니다. 여기 있는
-              프로젝트들은 빠르게 바뀌므로, "문서 없음"은 "그때 문서에 없었다"로 읽어야지 "지금
-              없다"로 읽으면 안 됩니다. 문서에 없는 동작이 실제로 있을 수 있습니다.</span
+              >2026년 8월 3일에 각 프로젝트의 README 와 공식 문서를 기준으로 확인했고, Orca 열은
+              2026년 8월 9일에 다시 확인했습니다. 표의 모든 칸은 <em>그 날짜에</em> 그 문서들이
+              무엇을 말했는지에 대한 진술입니다. 여기 있는 프로젝트들은 빠르게 바뀌므로, "문서
+              없음"은 "그때 문서에 없었다"로 읽어야지 "지금 없다"로 읽으면 안 됩니다. 문서에 없는
+              동작이 실제로 있을 수 있습니다.</span
             >
           </p>
         </div>
@@ -1040,9 +1052,9 @@
                   >
                 </td>
                 <td>
-                  <span class="no"
-                    ><span class="en">not documented</span><span class="ko">문서 없음</span></span
-                  >
+                  <span class="part"
+                    ><span class="en">partial</span><span class="ko">일부</span></span
+                  ><span class="note-mark">6</span>
                 </td>
               </tr>
 
@@ -1103,6 +1115,11 @@
               >— 확인한 날짜 기준으로 그 문서들에 적혀 있지 않았다는 뜻입니다. 지금 그 기능이 없다는
               뜻이 아닙니다</span
             ></span
+          >
+          <span
+            ><b class="part"><span class="en">partial</span><span class="ko">일부</span></b>
+            <span class="en">— part of the capability is described, part is not; see the note</span
+            ><span class="ko">— 기능의 일부만 문서에 있음. 각주 참고</span></span
           >
           <span
             ><b class="unk">unverified</b>
@@ -1174,6 +1191,22 @@
               >Crystal 은 2026년 2월에 지원이 종료됐고 Nimbalyst 로 이어집니다. 표의 Crystal 행은
               문서가 남아 있는 마지막 릴리스(v0.3.x) 기준입니다. rebase 와 squash-to-main 은 내장돼
               있었지만 스태킹은 없었습니다.</span
+            >
+          </li>
+          <li>
+            <span class="en"
+              >Orca documents both halves partly. A worktree can be created from a PR ("Creating a
+              worktree from a GitHub issue or PR opens the interactive workspace composer"), and
+              from the Checks panel "you can reply to any comment in a review thread, not only the
+              root comment". Authoring new comments on specific diff lines and submitting a review
+              verdict (approve / request changes) are not described.</span
+            >
+            <span class="ko"
+              >Orca 는 양쪽을 절반씩 문서화합니다. PR 에서 worktree 를 만들 수 있고("Creating a
+              worktree from a GitHub issue or PR opens the interactive workspace composer"), Checks
+              패널에서 "you can reply to any comment in a review thread, not only the root comment"
+              라고 적혀 있습니다. 다만 특정 diff 줄에 새 코멘트를 작성하는 것과 리뷰 판정(approve /
+              request changes) 제출은 문서에 없습니다.</span
             >
           </li>
         </ol>
