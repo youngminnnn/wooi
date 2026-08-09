@@ -4,6 +4,7 @@ import type {
   AgentBackendMeta,
   AppNotice,
   AppState,
+  ArchiveScriptFailure,
   AuthStatus,
   CarryFailure,
   ChatEnvelope,
@@ -150,6 +151,24 @@ let pendingSeq = 0
 /** "3 commits" / "1 commit" — 확인 다이얼로그 문장을 세는 곳마다 s 를 붙이지 않게. */
 function plural(count: number, noun: string): string {
   return `${count} ${noun}${count === 1 ? '' : 's'}`
+}
+
+/** 토스트에 붙이는 스크립트 출력 꼬리의 상한. 토스트는 로그 뷰어가 아니다 — 전문은 main 로그에 있다. */
+const SCRIPT_TAIL_LINES = 4
+const SCRIPT_TAIL_LINE_CHARS = 120
+
+/** 출력의 마지막 몇 줄만, 줄마다 길이도 잘라서 돌려준다. 볼 것이 없으면 빈 문자열. */
+function outputTail(output: string): string {
+  const lines = output.split('\n').filter((line) => line.trim())
+  return lines
+    .slice(-SCRIPT_TAIL_LINES)
+    .map((line) => {
+      const trimmed = line.trimEnd()
+      return trimmed.length > SCRIPT_TAIL_LINE_CHARS
+        ? `${trimmed.slice(0, SCRIPT_TAIL_LINE_CHARS)}…`
+        : trimmed
+    })
+    .join('\n')
 }
 
 /** ["a", "b", "c"] → "a, b and c". 잃는 것을 한 문장으로 나열할 때 쓴다. */
@@ -433,6 +452,11 @@ interface UIState {
   dismissToast: (id: string) => void
   /** worktree 전달 실패를 사용자에게 알린다. 에이전트 컨텍스트 실패는 error 로 구분해 띄운다. */
   reportCarryFailures: (failures?: CarryFailure[]) => void
+  /**
+   * 아카이브 스크립트 실패를 알린다. 아카이브·삭제는 실패해도 그대로 완료되므로,
+   * 이 토스트가 없으면 정리되지 않은 컨테이너·프로세스가 조용히 남는다.
+   */
+  reportArchiveScriptFailure: (failure?: ArchiveScriptFailure) => void
   /**
    * 전달 목록이 빈 리포에서 worktree 가 만들어졌을 때, 탐지된 후보를 한 번 제안한다.
    * 리포당 최대 한 번만 뜬다(uiFlags 에 기억).
@@ -1222,7 +1246,9 @@ export const useStore = create<UIState>((set, get) => ({
   deleteWorkspaceNow: async (workspaceId) => {
     // 리뷰 화면 뒤에 가려진 워크스페이스를 지우는 경우엔 화면을 건드리지 않는다.
     const wasSelected = get().selectedWorkspaceId === workspaceId && !get().activeReviewId
-    await window.api.workspace.remove(workspaceId, true)
+    // 아직 아카이브되지 않은 워크스페이스를 지우면 아카이브 스크립트도 여기서 돈다.
+    const { archiveScriptFailure } = await window.api.workspace.remove(workspaceId, true)
+    get().reportArchiveScriptFailure(archiveScriptFailure)
     if (get().undoableCreate?.workspaceId === workspaceId) set({ undoableCreate: null })
     if (!wasSelected) return
 
@@ -1261,6 +1287,21 @@ export const useStore = create<UIState>((set, get) => ({
           .join('\n')}`
       )
     }
+  },
+
+  // 아카이브 스크립트(`docker compose down` 등)는 worktree 를 지우기 전에 딸린 것들을 정리하는
+  // 마지막 기회다. 실패해도 아카이브는 계속되므로 화면상으로는 아무 일 없이 끝난 것처럼 보이고,
+  // 사용자는 컨테이너가 살아 있는 걸 한참 뒤에나 알게 된다 — 그래서 error 로 확실히 띄운다.
+  reportArchiveScriptFailure: (failure) => {
+    if (!failure) return
+    const how = failure.timedOut ? 'timed out' : `exited with code ${failure.code ?? 'unknown'}`
+    const tail = outputTail(failure.output)
+    get().pushToast(
+      'error',
+      `The archive script ${how}, so this workspace's cleanup may not have run — ` +
+        `check for leftover containers or processes. Everything else finished.\n` +
+        `$ ${failure.command}${tail ? `\n${tail}` : ''}`
+    )
   },
 
   // 구버전(v11 이하)부터 등록해 둔 리포는 마이그레이션이 carryItems 를 빈 배열로 남겨서,

@@ -168,6 +168,22 @@ export interface CarryFailure {
   agentContext: boolean
 }
 
+/**
+ * 아카이브 스크립트가 실패했을 때의 결과. 실패해도 아카이브·삭제는 그대로 진행되므로
+ * (worktree 는 이미 사라진다) 사용자가 알 방법은 이것뿐이다 — main 이 IPC 반환값에 실어
+ * 보내고 렌더러가 토스트로 띄운다. 전문은 main 로그에도 남는다.
+ */
+export interface ArchiveScriptFailure {
+  /** 실패한 명령(리포 설정의 archive script). */
+  command: string
+  /** 종료 코드. 시작 실패·타임아웃이면 null. */
+  code: number | null
+  /** 타임아웃으로 강제 종료했는지. */
+  timedOut: boolean
+  /** stdout·stderr 를 합친 출력의 꼬리. */
+  output: string
+}
+
 /** 연결된 git 리포지토리(메인 체크아웃). 모든 workspace 의 부모. */
 export interface Repo {
   id: string

@@ -122,12 +122,25 @@ export const archiveWorkspaceTool: AgentToolHandler = async (deps, workspaceId, 
 
   // 이름은 아카이브 **전에** 잡는다. archiveWorkspace 가 표시 이름을 스냅샷해 덮어쓸 수 있다.
   const name = workspaceDisplayName(target)
-  await archiveWorkspace(deps, target.id)
+  const { archiveScriptFailure } = await archiveWorkspace(deps, target.id)
 
   return {
     archived: { workspaceId: target.id, name, branch: target.branch },
     note:
       'The worktree is gone, but the branch, its pull request and the conversation are kept — ' +
-      'the user can restore it from the sidebar.'
+      'the user can restore it from the sidebar.',
+    // 스크립트 실패는 아카이브를 막지 않지만(worktree 는 이미 사라졌다) 정리가 안 끝났다는 뜻이라
+    // 에이전트에게도 알린다 — 사용자에게는 렌더러가 토스트로 따로 알린다.
+    ...(archiveScriptFailure
+      ? {
+          archiveScriptFailed: {
+            command: archiveScriptFailure.command,
+            code: archiveScriptFailure.code,
+            timedOut: archiveScriptFailure.timedOut,
+            output: archiveScriptFailure.output,
+            note: "The repository's archive script did not succeed, so leftover containers or processes may remain."
+          }
+        }
+      : {})
   }
 }

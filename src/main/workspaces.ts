@@ -7,6 +7,7 @@ import {
 } from '@shared/types'
 import type {
   AgentBackendId,
+  ArchiveScriptFailure,
   CarryFailure,
   CreateWorkspaceArgs,
   CreateWorkspaceResult,
@@ -53,6 +54,32 @@ export interface ArchiveWorkspaceDeps {
   scripts: Pick<ScriptRunner, 'disposeWorkspace' | 'runOnce'>
   terminals: { disposeWorkspace: (workspaceId: string) => void }
   broadcastState: () => void
+}
+
+/** 아카이브·삭제의 결과. 스크립트가 실패했을 때만 채워진다(정리 자체는 어느 쪽이든 끝난다). */
+export interface ArchiveOutcome {
+  archiveScriptFailure?: ArchiveScriptFailure
+}
+
+/**
+ * 리포의 아카이브 스크립트를 worktree 에서 1회 실행한다. 실패해도 **던지지 않는다** —
+ * 아카이브·삭제는 계속 진행돼야 하고(사용자가 지시한 것은 정리다), 실패는 알리기만 한다.
+ * 전문은 로그에 남기고, 요약은 IPC 반환값으로 올려 렌더러가 토스트로 띄운다.
+ *
+ * 아카이브 경로와 삭제 경로가 같은 스크립트를 같은 이유로 돌리므로 한 곳에 둔다 —
+ * 복사해 두면 한쪽만 실패를 삼키는 날이 온다.
+ */
+export async function runArchiveScript(
+  scripts: Pick<ScriptRunner, 'runOnce'>,
+  command: string,
+  worktreePath: string
+): Promise<ArchiveScriptFailure | undefined> {
+  if (!command.trim()) return undefined
+  const { code, timedOut, output } = await scripts.runOnce(command, worktreePath)
+  if (!timedOut && code === 0) return undefined
+  const how = timedOut ? 'timed out' : `exited with code ${code ?? 'unknown'}`
+  log.warn(`archive script ${how} in ${worktreePath}: ${command}\n${output || '(no output)'}`)
+  return { command, code, timedOut, output }
 }
 
 function repoFor(repoId: string): Repo | undefined {
@@ -326,19 +353,20 @@ export async function createWorkspace(
 export async function archiveWorkspace(
   deps: ArchiveWorkspaceDeps,
   workspaceId: string
-): Promise<void> {
+): Promise<ArchiveOutcome> {
   const store = getStore()
   const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
-  if (!ws) return
+  if (!ws) return {}
   const repo = repoFor(ws.repoId)
 
   deps.sessions.dispose(workspaceId)
   deps.scripts.disposeWorkspace(workspaceId)
   deps.terminals.disposeWorkspace(workspaceId)
   // 아카이브 스크립트는 worktree 가 아직 살아 있을 때 실행한다.
-  if (repo?.archiveScript.trim()) {
-    await deps.scripts.runOnce(repo.archiveScript, ws.worktreePath)
-  }
+  // 실패해도 멈추지 않는다 — 정리를 중간에 세우면 worktree 만 남아 상태가 더 나빠진다.
+  const archiveScriptFailure = repo
+    ? await runArchiveScript(deps.scripts, repo.archiveScript, ws.worktreePath)
+    : undefined
   // override 가 없으면 현재 표시 이름(PR 제목 등)을 worktree 제거 전에 보존한다.
   // 아카이브 후에는 worktree·PR 조회가 불가능하므로, 같은 이름을 유지하려면 지금 스냅샷해야 한다.
   let snapshotName: string | null = null
@@ -365,4 +393,5 @@ export async function archiveWorkspace(
     }
   })
   deps.broadcastState()
+  return archiveScriptFailure ? { archiveScriptFailure } : {}
 }

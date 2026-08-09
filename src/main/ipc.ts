@@ -74,8 +74,10 @@ import {
   carrySuggestionsFor,
   createWorkspace,
   portEnvName,
+  runArchiveScript,
   scriptEnvFor,
   syncPrBase,
+  type ArchiveOutcome,
   type ArchiveWorkspaceDeps,
   type CreateWorkspaceDeps
 } from './workspaces'
@@ -427,9 +429,10 @@ export function registerIpc(ctx: IpcContext): void {
   )
 
   // 아카이브 절차 자체는 [[workspaces]] 에 있다 — 에이전트 도구도 같은 일을 해야 하기 때문이다.
-  ipcMain.handle(IPC.workspaceArchive, async (_e, workspaceId: string) => {
-    await archiveWorkspace(archiveDeps, workspaceId)
-  })
+  // 아카이브 스크립트가 실패했으면 그 결과를 실어 보낸다(렌더러가 토스트로 알린다).
+  ipcMain.handle(IPC.workspaceArchive, async (_e, workspaceId: string): Promise<ArchiveOutcome> =>
+    archiveWorkspace(archiveDeps, workspaceId)
+  )
 
   /**
    * 아카이브 제안을 해제한다. 어떤 병합을 해제했는지 기억해 두지 않으면 다음 재동기화가 같은
@@ -501,29 +504,34 @@ export function registerIpc(ctx: IpcContext): void {
   // 영구 삭제: 아카이브와 달리 되돌릴 수 없다 — worktree·대화 기록에 더해 (deleteBranch 면)
   // 브랜치까지 지우고 워크스페이스 레코드 자체를 목록에서 없앤다. 아카이브된 것뿐 아니라
   // 살아 있는 워크스페이스에도 쓰인다(사이드바 메뉴 · ⌥⌘⌫ · 생성 되돌리기).
-  ipcMain.handle(IPC.workspaceRemove, async (_e, workspaceId: string, deleteBranch: boolean) => {
-    const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
-    if (!ws) return
-    const repo = repoFor(ws.repoId)
+  ipcMain.handle(
+    IPC.workspaceRemove,
+    async (_e, workspaceId: string, deleteBranch: boolean): Promise<ArchiveOutcome> => {
+      const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
+      if (!ws) return {}
+      const repo = repoFor(ws.repoId)
 
-    ctx.sessions.dispose(workspaceId)
-    ctx.scripts.disposeWorkspace(workspaceId)
-    ctx.terminals.disposeWorkspace(workspaceId)
-    // 아카이브 스크립트는 "이 worktree 를 정리한다" 는 훅이다(dev 컨테이너 종료 등). 워크트리가
-    // 아직 살아 있는 워크스페이스를 지울 때는 아카이브와 같은 이유로 실행해야 한다 —
-    // 이미 아카이브된 워크스페이스는 그때 한 번 돌았으므로 건너뛴다.
-    if (!ws.archived && repo?.archiveScript.trim()) {
-      await ctx.scripts.runOnce(repo.archiveScript, ws.worktreePath)
+      ctx.sessions.dispose(workspaceId)
+      ctx.scripts.disposeWorkspace(workspaceId)
+      ctx.terminals.disposeWorkspace(workspaceId)
+      // 아카이브 스크립트는 "이 worktree 를 정리한다" 는 훅이다(dev 컨테이너 종료 등). 워크트리가
+      // 아직 살아 있는 워크스페이스를 지울 때는 아카이브와 같은 이유로 실행해야 한다 —
+      // 이미 아카이브된 워크스페이스는 그때 한 번 돌았으므로 건너뛴다.
+      const archiveScriptFailure =
+        !ws.archived && repo
+          ? await runArchiveScript(ctx.scripts, repo.archiveScript, ws.worktreePath)
+          : undefined
+      getTranscripts().remove(workspaceId)
+      invalidateWorkspacePr(workspaceId)
+      if (repo) await removeWorktree(repo.path, ws.worktreePath, ws.branch, deleteBranch)
+
+      store.update((st) => {
+        st.workspaces = st.workspaces.filter((w) => w.id !== workspaceId)
+      })
+      broadcastState()
+      return archiveScriptFailure ? { archiveScriptFailure } : {}
     }
-    getTranscripts().remove(workspaceId)
-    invalidateWorkspacePr(workspaceId)
-    if (repo) await removeWorktree(repo.path, ws.worktreePath, ws.branch, deleteBranch)
-
-    store.update((st) => {
-      st.workspaces = st.workspaces.filter((w) => w.id !== workspaceId)
-    })
-    broadcastState()
-  })
+  )
 
   // 일괄 삭제: 한 레포의 아카이브된 워크스페이스를 모두 영구 제거한다.
   // 단건 remove 와 동일한 정리 절차(세션·스크립트·터미널·기록·worktree·브랜치)를 각 항목에
