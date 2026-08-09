@@ -1,3 +1,4 @@
+import { openPullRequest } from './pullRequest'
 import { initRegistry, registerAgentTool, type AgentToolDeps } from './registry'
 import { checkStackedWork, createStackedWorkspace, reportToParent } from './stackedWorkspace'
 import { runDelegateTool } from './subagent'
@@ -23,4 +24,5 @@ export function initAgentTools(deps: AgentToolDeps): void {
   for (const backend of AGENT_BACKEND_IDS) {
     registerAgentTool(delegateToolName(backend), runDelegateTool(backend))
   }
+  registerAgentTool('open_pull_request', openPullRequest)
 }
