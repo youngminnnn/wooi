@@ -292,7 +292,7 @@
       table {
         border-collapse: collapse;
         width: 100%;
-        min-width: 880px;
+        min-width: 1040px;
         font-size: 14px;
       }
       thead th {
@@ -313,6 +313,19 @@
       }
       thead th.own {
         color: var(--blue);
+      }
+      /*
+        더 이상 유지되지 않는 프로젝트는 열 머리에서 바로 밝힌다. 표 맨 아래 "Project status"
+        행까지 읽어야 알 수 있으면, 그 위 행들은 현행 제품끼리의 비교로 오인된다.
+      */
+      thead th .col-status {
+        display: block;
+        margin-top: 4px;
+        font-family: var(--mono);
+        font-size: 10.5px;
+        font-weight: 400;
+        letter-spacing: 0;
+        color: #e0b464;
       }
       tbody th {
         text-align: left;
@@ -367,11 +380,28 @@
         color: #6ee7a8;
         font-weight: 700;
       }
+      /*
+        "—" 대신 문구를 그대로 박는다. 대시는 legend 를 읽지 않은 사람에게 "없음"으로 읽히지만,
+        우리가 실제로 확인한 건 "그 시점 문서에 없었다" 뿐이다. 셀 자체가 그렇게 말하게 한다.
+      */
       .no {
         color: var(--text-faint);
+        font-family: var(--mono);
+        font-size: 11.5px;
+        white-space: nowrap;
       }
       .unk {
         color: #e0b464;
+        font-weight: 600;
+        font-size: 12px;
+        font-family: var(--mono);
+      }
+      /*
+        Yes 와 "문서 없음" 사이. 기능의 일부만 문서에 있을 때 둘 중 하나로 몰면 어느 쪽이든
+        거짓이 된다 — 우리에게 유리한 쪽으로 몰면 특히 그렇다.
+      */
+      .part {
+        color: #9aa8c7;
         font-weight: 600;
         font-size: 12px;
         font-family: var(--mono);
@@ -380,6 +410,32 @@
         color: var(--text-faint);
         font-size: 11px;
         vertical-align: super;
+      }
+
+      /*
+        이 표는 손을 놓는 순간부터 낡는다. 막을 방법은 없으니 최소한 조용히 낡지는 않게 한다 —
+        페이지가 확인 날짜로부터 제 나이를 계산해서, 오래되면 스스로 경고를 띄운다.
+        갱신할 때 건드릴 곳은 #freshness 의 data-checked 하나뿐이다.
+      */
+      .freshness {
+        display: none;
+        margin: 22px 0 0;
+        padding: 14px 16px;
+        border: 1px solid rgba(224, 180, 100, 0.35);
+        border-left: 3px solid #e0b464;
+        border-radius: 10px;
+        background: rgba(224, 180, 100, 0.07);
+        color: var(--text-dim);
+        font-size: 13.5px;
+        line-height: 1.6;
+        /* .page-head 가 가운데 정렬이라, 문단은 명시적으로 왼쪽으로 되돌린다. */
+        text-align: left;
+      }
+      .freshness.stale {
+        display: block;
+      }
+      .freshness b {
+        color: #e0b464;
       }
 
       .legend {
@@ -567,8 +623,8 @@
           <span class="grad">depends on work</span>.</span
         >
         <span class="ko"
-          >병렬 worktree 는 이제 기본이다. 갈리는 지점은 작업이
-          <span class="grad">작업에 얹힐 때</span>다.</span
+          >병렬 worktree 는 이제 기본입니다. 갈리는 지점은 작업이
+          <span class="grad">작업에 얹힐 때</span>입니다.</span
         >
       </h1>
       <p class="lede">
@@ -579,10 +635,34 @@
           table below comes from each project's own documentation.</span
         >
         <span class="ko"
-          >Conductor, Vibe Kanban, Claude Squad, Crystal, Emdash, Orca, Wooi 는 첫 단계가 전부 같다.
-          에이전트마다 격리된 git worktree 를 주고 N 개 작업을 한꺼번에 돌린다. 거기까지는 이미
-          정리된 얘기다. 이 페이지는 그 다음을 비교한다. 아래 표의 내용은 전부 각 프로젝트의 공식
-          문서에서 확인한 것이다.</span
+          >Conductor, Vibe Kanban, Claude Squad, Crystal, Emdash, Orca, Wooi 는 첫 단계가 전부
+          같습니다. 에이전트마다 격리된 git worktree 를 주고 N 개 작업을 한꺼번에 돌립니다.
+          거기까지는 이미 정리된 얘기입니다. 이 페이지는 그 다음을 비교합니다. 아래 표의 내용은 전부
+          각 프로젝트의 공식 문서에서 확인한 것입니다.</span
+        >
+      </p>
+
+      <!-- data-checked 를 갱신하는 것이 이 페이지를 "다시 확인했다"고 선언하는 유일한 방법이다. -->
+      <p class="freshness" id="freshness" data-checked="2026-08-03" data-stale-after="120">
+        <span class="en"
+          ><b>This comparison is <span data-age></span> days old.</b> It was last verified against
+          each project's documentation on 3 August 2026, and these projects ship fast. Treat every
+          "not documented" as a statement about that date, not about today — check the project's own
+          docs before you decide, and
+          <a href="https://github.com/youngminnnn/wooi/issues" target="_blank" rel="noopener"
+            >open an issue</a
+          >
+          if something here is now wrong.</span
+        >
+        <span class="ko"
+          ><b>이 비교는 <span data-age></span>일 지났습니다.</b> 2026년 8월 3일에 각 프로젝트 문서를
+          기준으로 마지막으로 확인했고, 여기 있는 프로젝트들은 빠르게 바뀝니다. "문서 없음"은 전부
+          그 날짜에 대한 진술이지 오늘에 대한 진술이 아닙니다. 결정하기 전에 각 프로젝트의 공식
+          문서를 확인하시고, 틀린 부분이 있으면
+          <a href="https://github.com/youngminnnn/wooi/issues" target="_blank" rel="noopener"
+            >이슈를 열어</a
+          >
+          주세요.</span
         >
       </p>
     </div>
@@ -602,8 +682,8 @@
             >
             <span class="ko"
               >서로 상관없는 버그 네 개에 에이전트 넷을 붙이는 일이라면, 여기 있는 어떤 도구를 써도
-              잘 굴러간다. 그림이 달라지는 건 B 작업이 A 작업의 코드 없이는 시작조차 못 하는
-              순간부터다.</span
+              잘 굴러갑니다. 그림이 달라지는 건 B 작업이 A 작업의 코드 없이는 시작조차 못 하는
+              순간부터입니다.</span
             >
           </p>
         </div>
@@ -617,7 +697,7 @@
           <span class="ko"
             ><b class="hl">스태킹.</b> 새 작업을 <code>main</code> 이 아니라 다른 작업의 브랜치에서
             딸 수 있는가? 이게 없으면 B 는 A 가 머지될 때까지 기다리거나, <code>main</code> 에서
-            시작해 A 의 변경을 다시 만들어 넣어야 자기 diff 가 말이 된다.</span
+            시작해 A 의 변경을 다시 만들어 넣어야 자기 diff 가 말이 됩니다.</span
           >
         </p>
         <p class="body">
@@ -629,10 +709,10 @@
             time.</span
           >
           <span class="ko"
-            ><b class="hl">머지된 다음.</b> 스택을 쌓는 건 쉬운 쪽이다. 어려운 쪽은 부모가 머지될
-            때다. 자식들은 이제 타깃 브랜치에 없는 커밋 위에 얹혀 있고, 자식 PR 은 전부 머지된 base
-            를 가리키고 있다. 누군가는 자식을 rebase 하고 PR base 를 다시 잡아야 한다. 도구가
-            하든지, 아니면 매번 사람이 순서대로 손으로 하든지.</span
+            ><b class="hl">머지된 다음.</b> 스택을 쌓는 건 쉬운 쪽입니다. 어려운 쪽은 부모가 머지될
+            때입니다. 자식들은 이제 타깃 브랜치에 없는 커밋 위에 얹혀 있고, 자식 PR 은 전부 머지된
+            base 를 가리키고 있습니다. 누군가는 자식을 rebase 하고 PR base 를 다시 잡아야 합니다.
+            도구가 하든지, 아니면 매번 사람이 순서대로 손으로 하든지.</span
           >
         </p>
         <p class="body">
@@ -644,9 +724,9 @@
           >
           <span class="ko"
             ><b class="hl">diff 위에서 하는 리뷰.</b> 여기 있는 도구 대부분은 diff 한 줄을 찍어 그걸
-            쓴 에이전트에게 메모를 보낼 수 있다. 내 작업을 다듬는 피드백 루프다. 그와는 별개로, 남이
-            열어 둔 pull request 를 불러와 GitHub 에 실제 리뷰 코멘트로 남길 수 있느냐는 또 다른
-            질문이다.</span
+            쓴 에이전트에게 메모를 보낼 수 있습니다. 내 작업을 다듬는 피드백 루프입니다. 그와는
+            별개로, 남이 열어 둔 pull request 를 불러와 GitHub 에 실제 리뷰 코멘트로 남길 수
+            있느냐는 또 다른 질문입니다.</span
           >
         </p>
       </div>
@@ -662,14 +742,18 @@
           </h2>
           <p class="section-sub">
             <span class="en"
-              >Verified against each project's own README and documentation on 3 August 2026. A dash
-              means we did not find the feature described there — not that it is impossible, and
-              undocumented behaviour may well exist.</span
+              >Verified against each project's own README and documentation on 3 August 2026; the
+              Orca column was re-verified on 9 August 2026. Every cell is a statement about what
+              those documents said <em>on that date</em> — these projects ship fast, so read "not
+              documented" as "not described then", never as "missing now". Undocumented behaviour
+              may well exist.</span
             >
             <span class="ko"
-              >2026년 8월 3일에 각 프로젝트의 README 와 공식 문서를 기준으로 확인했다. 가로줄은
-              문서에서 해당 기능을 찾지 못했다는 뜻이지, 불가능하다는 뜻이 아니다. 문서에 없는
-              동작이 실제로 있을 수 있다.</span
+              >2026년 8월 3일에 각 프로젝트의 README 와 공식 문서를 기준으로 확인했고, Orca 열은
+              2026년 8월 9일에 다시 확인했습니다. 표의 모든 칸은 <em>그 날짜에</em> 그 문서들이
+              무엇을 말했는지에 대한 진술입니다. 여기 있는 프로젝트들은 빠르게 바뀌므로, "문서
+              없음"은 "그때 문서에 없었다"로 읽어야지 "지금 없다"로 읽으면 안 됩니다. 문서에 없는
+              동작이 실제로 있을 수 있습니다.</span
             >
           </p>
         </div>
@@ -681,9 +765,20 @@
                 <th scope="col"><span class="en">Capability</span><span class="ko">기능</span></th>
                 <th scope="col" class="own">Wooi</th>
                 <th scope="col">Conductor</th>
-                <th scope="col">Vibe Kanban</th>
+                <th scope="col">
+                  Vibe Kanban
+                  <span class="col-status"
+                    ><span class="en">sunsetting</span><span class="ko">종료 예정</span></span
+                  >
+                </th>
                 <th scope="col">Claude Squad</th>
-                <th scope="col">Crystal</th>
+                <th scope="col">
+                  Crystal
+                  <span class="col-status"
+                    ><span class="en">v0.3.x · deprecated</span
+                    ><span class="ko">v0.3.x · 지원 종료</span></span
+                  >
+                </th>
                 <th scope="col">Emdash</th>
                 <th scope="col">Orca</th>
               </tr>
@@ -728,8 +823,16 @@
                 <td class="own"><span class="yes">Yes</span></td>
                 <td><span class="yes">Yes</span></td>
                 <td><span class="yes">Yes</span></td>
-                <td><span class="no">—</span><span class="note-mark">1</span></td>
-                <td><span class="no">—</span></td>
+                <td>
+                  <span class="no"
+                    ><span class="en">not documented</span><span class="ko">문서 없음</span></span
+                  ><span class="note-mark">1</span>
+                </td>
+                <td>
+                  <span class="no"
+                    ><span class="en">not documented</span><span class="ko">문서 없음</span></span
+                  >
+                </td>
                 <td><span class="yes">Yes</span></td>
                 <td><span class="yes">Yes</span></td>
               </tr>
@@ -741,9 +844,21 @@
                 <td class="own"><span class="yes">Yes</span></td>
                 <td><span class="yes">Yes</span></td>
                 <td><span class="yes">Yes</span></td>
-                <td><span class="no">—</span></td>
-                <td><span class="no">—</span></td>
-                <td><span class="no">—</span></td>
+                <td>
+                  <span class="no"
+                    ><span class="en">not documented</span><span class="ko">문서 없음</span></span
+                  >
+                </td>
+                <td>
+                  <span class="no"
+                    ><span class="en">not documented</span><span class="ko">문서 없음</span></span
+                  >
+                </td>
+                <td>
+                  <span class="no"
+                    ><span class="en">not documented</span><span class="ko">문서 없음</span></span
+                  >
+                </td>
                 <td><span class="yes">Yes</span></td>
               </tr>
 
@@ -761,11 +876,31 @@
                   <span class="hint ko">새 작업을 다른 작업의 브랜치에서 따기</span>
                 </th>
                 <td class="own"><span class="yes">Yes</span></td>
-                <td><span class="no">—</span></td>
-                <td><span class="no">—</span></td>
-                <td><span class="no">—</span></td>
-                <td><span class="no">—</span></td>
-                <td><span class="no">—</span></td>
+                <td>
+                  <span class="no"
+                    ><span class="en">not documented</span><span class="ko">문서 없음</span></span
+                  >
+                </td>
+                <td>
+                  <span class="no"
+                    ><span class="en">not documented</span><span class="ko">문서 없음</span></span
+                  >
+                </td>
+                <td>
+                  <span class="no"
+                    ><span class="en">not documented</span><span class="ko">문서 없음</span></span
+                  >
+                </td>
+                <td>
+                  <span class="no"
+                    ><span class="en">not documented</span><span class="ko">문서 없음</span></span
+                  >
+                </td>
+                <td>
+                  <span class="no"
+                    ><span class="en">not documented</span><span class="ko">문서 없음</span></span
+                  >
+                </td>
                 <td><span class="yes">Yes</span><span class="note-mark">2</span></td>
               </tr>
               <tr>
@@ -776,12 +911,36 @@
                   <span class="hint ko">체인 전체에 대해 자동으로</span>
                 </th>
                 <td class="own"><span class="yes">Yes</span></td>
-                <td><span class="no">—</span></td>
-                <td><span class="no">—</span></td>
-                <td><span class="no">—</span></td>
-                <td><span class="no">—</span></td>
-                <td><span class="no">—</span></td>
-                <td><span class="no">—</span></td>
+                <td>
+                  <span class="no"
+                    ><span class="en">not documented</span><span class="ko">문서 없음</span></span
+                  >
+                </td>
+                <td>
+                  <span class="no"
+                    ><span class="en">not documented</span><span class="ko">문서 없음</span></span
+                  >
+                </td>
+                <td>
+                  <span class="no"
+                    ><span class="en">not documented</span><span class="ko">문서 없음</span></span
+                  >
+                </td>
+                <td>
+                  <span class="no"
+                    ><span class="en">not documented</span><span class="ko">문서 없음</span></span
+                  >
+                </td>
+                <td>
+                  <span class="no"
+                    ><span class="en">not documented</span><span class="ko">문서 없음</span></span
+                  >
+                </td>
+                <td>
+                  <span class="no"
+                    ><span class="en">not documented</span><span class="ko">문서 없음</span></span
+                  >
+                </td>
               </tr>
               <tr>
                 <th scope="row">
@@ -791,12 +950,36 @@
                   <span class="hint ko">자식 PR 을 조부모 브랜치로 다시 겨냥</span>
                 </th>
                 <td class="own"><span class="yes">Yes</span></td>
-                <td><span class="no">—</span></td>
-                <td><span class="no">—</span></td>
-                <td><span class="no">—</span></td>
-                <td><span class="no">—</span></td>
-                <td><span class="no">—</span></td>
-                <td><span class="no">—</span></td>
+                <td>
+                  <span class="no"
+                    ><span class="en">not documented</span><span class="ko">문서 없음</span></span
+                  >
+                </td>
+                <td>
+                  <span class="no"
+                    ><span class="en">not documented</span><span class="ko">문서 없음</span></span
+                  >
+                </td>
+                <td>
+                  <span class="no"
+                    ><span class="en">not documented</span><span class="ko">문서 없음</span></span
+                  >
+                </td>
+                <td>
+                  <span class="no"
+                    ><span class="en">not documented</span><span class="ko">문서 없음</span></span
+                  >
+                </td>
+                <td>
+                  <span class="no"
+                    ><span class="en">not documented</span><span class="ko">문서 없음</span></span
+                  >
+                </td>
+                <td>
+                  <span class="no"
+                    ><span class="en">not documented</span><span class="ko">문서 없음</span></span
+                  >
+                </td>
               </tr>
               <tr>
                 <th scope="row">
@@ -806,12 +989,36 @@
                   <span class="hint ko">기존 PR 의 base 브랜치로 체인 복원</span>
                 </th>
                 <td class="own"><span class="yes">Yes</span></td>
-                <td><span class="no">—</span></td>
-                <td><span class="no">—</span></td>
-                <td><span class="no">—</span></td>
-                <td><span class="no">—</span></td>
-                <td><span class="no">—</span></td>
-                <td><span class="no">—</span></td>
+                <td>
+                  <span class="no"
+                    ><span class="en">not documented</span><span class="ko">문서 없음</span></span
+                  >
+                </td>
+                <td>
+                  <span class="no"
+                    ><span class="en">not documented</span><span class="ko">문서 없음</span></span
+                  >
+                </td>
+                <td>
+                  <span class="no"
+                    ><span class="en">not documented</span><span class="ko">문서 없음</span></span
+                  >
+                </td>
+                <td>
+                  <span class="no"
+                    ><span class="en">not documented</span><span class="ko">문서 없음</span></span
+                  >
+                </td>
+                <td>
+                  <span class="no"
+                    ><span class="en">not documented</span><span class="ko">문서 없음</span></span
+                  >
+                </td>
+                <td>
+                  <span class="no"
+                    ><span class="en">not documented</span><span class="ko">문서 없음</span></span
+                  >
+                </td>
               </tr>
               <tr>
                 <th scope="row">
@@ -823,12 +1030,32 @@
                   <span class="hint ko">전용 worktree, 코멘트는 GitHub 리뷰 코멘트로 게시</span>
                 </th>
                 <td class="own"><span class="yes">Yes</span></td>
-                <td><span class="no">—</span></td>
+                <td>
+                  <span class="no"
+                    ><span class="en">not documented</span><span class="ko">문서 없음</span></span
+                  >
+                </td>
                 <td><span class="unk">unverified</span><span class="note-mark">3</span></td>
-                <td><span class="no">—</span></td>
-                <td><span class="no">—</span></td>
-                <td><span class="no">—</span></td>
-                <td><span class="no">—</span></td>
+                <td>
+                  <span class="no"
+                    ><span class="en">not documented</span><span class="ko">문서 없음</span></span
+                  >
+                </td>
+                <td>
+                  <span class="no"
+                    ><span class="en">not documented</span><span class="ko">문서 없음</span></span
+                  >
+                </td>
+                <td>
+                  <span class="no"
+                    ><span class="en">not documented</span><span class="ko">문서 없음</span></span
+                  >
+                </td>
+                <td>
+                  <span class="part"
+                    ><span class="en">partial</span><span class="ko">일부</span></span
+                  ><span class="note-mark">6</span>
+                </td>
               </tr>
 
               <tr class="divider">
@@ -878,8 +1105,21 @@
             ><span class="ko">— 해당 프로젝트의 공식 문서나 README 에 적혀 있음</span></span
           >
           <span
-            ><b class="no">—</b> <span class="en">— not found in those sources</span
-            ><span class="ko">— 그 문서들에서 찾지 못함</span></span
+            ><b class="no"
+              ><span class="en">not documented</span><span class="ko">문서 없음</span></b
+            >
+            <span class="en"
+              >— not described in those sources on the date checked. Not a claim that the feature is
+              missing today</span
+            ><span class="ko"
+              >— 확인한 날짜 기준으로 그 문서들에 적혀 있지 않았다는 뜻입니다. 지금 그 기능이 없다는
+              뜻이 아닙니다</span
+            ></span
+          >
+          <span
+            ><b class="part"><span class="en">partial</span><span class="ko">일부</span></b>
+            <span class="en">— part of the capability is described, part is not; see the note</span
+            ><span class="ko">— 기능의 일부만 문서에 있음. 각주 참고</span></span
           >
           <span
             ><b class="unk">unverified</b>
@@ -895,8 +1135,8 @@
               its README does not describe opening the pull request itself.</span
             >
             <span class="ko"
-              >Claude Squad 는 브랜치를 커밋하고 GitHub 에 push 한다(메뉴의 <code>s</code>). pull
-              request 를 여는 것까지는 README 에 적혀 있지 않다.</span
+              >Claude Squad 는 브랜치를 커밋하고 GitHub 에 push 합니다(메뉴의 <code>s</code>). pull
+              request 를 여는 것까지는 README 에 적혀 있지 않습니다.</span
             >
           </li>
           <li>
@@ -910,11 +1150,11 @@
             >
             <span class="ko"
               >Orca 의 worktree 문서에는 "Another local branch — useful for stacking work on top of
-              a PR in review" 라는 선택지가 있고, CLI 에 부모/자식 worktree 계보가 있다 (<code
+              a PR in review" 라는 선택지가 있고, CLI 에 부모/자식 worktree 계보가 있습니다 (<code
                 >--parent-worktree</code
               >
               / <code>--no-parent</code>). 다만 부모가 머지된 뒤의 자동 rebase 나 PR 재타게팅은
-              문서에 없다.</span
+              문서에 없습니다.</span
             >
           </li>
           <li>
@@ -925,10 +1165,10 @@
               review comments could not be confirmed.</span
             >
             <span class="ko"
-              >Vibe Kanban 의 README 는 리뷰를 GitHub 로 넘긴다("open PRs with AI-generated
+              >Vibe Kanban 의 README 는 리뷰를 GitHub 로 넘깁니다("open PRs with AI-generated
               descriptions, review on GitHub, and merge"). 반면 웹사이트는 팀의 PR 리뷰와 PR 에서
-              worktree 를 띄우는 기능을 내세운다. 코멘트가 GitHub 리뷰 코멘트로 올라가는지는
-              확인하지 못했다.</span
+              worktree 를 띄우는 기능을 내세웁니다. 코멘트가 GitHub 리뷰 코멘트로 올라가는지는
+              확인하지 못했습니다.</span
             >
           </li>
           <li>
@@ -937,8 +1177,8 @@
               open source and community maintained."</span
             >
             <span class="ko"
-              >프로젝트 공지 그대로다. "Vibe Kanban is sunsetting. The project will continue as open
-              source and community maintained."</span
+              >프로젝트 공지 그대로입니다. "Vibe Kanban is sunsetting. The project will continue as
+              open source and community maintained."</span
             >
           </li>
           <li>
@@ -948,9 +1188,25 @@
               squash-onto-main but no stacking.</span
             >
             <span class="ko"
-              >Crystal 은 2026년 2월에 지원이 종료됐고 Nimbalyst 로 이어진다. 표의 Crystal 행은
-              문서가 남아 있는 마지막 릴리스(v0.3.x) 기준이다. rebase 와 squash-to-main 은 내장돼
-              있었지만 스태킹은 없었다.</span
+              >Crystal 은 2026년 2월에 지원이 종료됐고 Nimbalyst 로 이어집니다. 표의 Crystal 행은
+              문서가 남아 있는 마지막 릴리스(v0.3.x) 기준입니다. rebase 와 squash-to-main 은 내장돼
+              있었지만 스태킹은 없었습니다.</span
+            >
+          </li>
+          <li>
+            <span class="en"
+              >Orca documents both halves partly. A worktree can be created from a PR ("Creating a
+              worktree from a GitHub issue or PR opens the interactive workspace composer"), and
+              from the Checks panel "you can reply to any comment in a review thread, not only the
+              root comment". Authoring new comments on specific diff lines and submitting a review
+              verdict (approve / request changes) are not described.</span
+            >
+            <span class="ko"
+              >Orca 는 양쪽을 절반씩 문서화합니다. PR 에서 worktree 를 만들 수 있고("Creating a
+              worktree from a GitHub issue or PR opens the interactive workspace composer"), Checks
+              패널에서 "you can reply to any comment in a review thread, not only the root comment"
+              라고 적혀 있습니다. 다만 특정 diff 줄에 새 코멘트를 작성하는 것과 리뷰 판정(approve /
+              request changes) 제출은 문서에 없습니다.</span
             >
           </li>
         </ol>
@@ -972,8 +1228,8 @@
               you.</span
             >
             <span class="ko"
-              >여기 있는 건 전부 실제 문제를 풀려고 만든 좋은 도구다. 서로 같은 도구가 아니고, 지금
-              나를 물고 있는 문제가 무엇이냐에 따라 답이 달라진다.</span
+              >여기 있는 건 전부 실제 문제를 풀려고 만든 좋은 도구입니다. 서로 같은 도구가 아니고,
+              지금 나를 물고 있는 문제가 무엇이냐에 따라 답이 달라집니다.</span
             >
           </p>
         </div>
@@ -993,11 +1249,11 @@
                 tasks are independent, this is the shortest path.</span
               >
               <span class="ko"
-                >Claude Code, Codex, Cursor 를 감싸는 가장 매끄러운 네이티브 루프다. 작업마다
+                >Claude Code, Codex, Cursor 를 감싸는 가장 매끄러운 네이티브 루프입니다. 작업마다
                 워크스페이스가 생기고 — 브랜치, 파일, 터미널, diff, 리뷰 경로까지 — 그 밑을 git
-                worktree 가 받친다. diff 뷰어에서는 코멘트가 변경된 줄을 직접 가리켜서, 에이전트가
-                긴 채팅 대신 정확한 맥락을 받는다. 잘 다듬어진 맥 앱 하나면 되고 작업들이 서로
-                독립적이라면 이게 가장 빠른 길이다.</span
+                worktree 가 받칩니다. diff 뷰어에서는 코멘트가 변경된 줄을 직접 가리켜서, 에이전트가
+                긴 채팅 대신 정확한 맥락을 받습니다. 잘 다듬어진 맥 앱 하나면 되고 작업들이 서로
+                독립적이라면 이게 가장 빠른 길입니다.</span
               >
             </p>
           </div>
@@ -1020,10 +1276,10 @@
                 agent.</span
               >
               <span class="ko"
-                >병목을 계획 쪽으로 보는 도구다. 에이전트 위에 칸반 보드가 얹히고, 이슈는 하위
-                이슈로 쪼개지며, 에이전트가 일을 집어 들면 상태가 알아서 움직인다. worktree 와 셋업
-                스크립트를 대신 만들어 주고, 설명이 자동으로 붙은 PR 을 열고, diff 인라인 코멘트를
-                에이전트에게 곧장 돌려준다.</span
+                >병목을 계획 쪽으로 보는 도구입니다. 에이전트 위에 칸반 보드가 얹히고, 이슈는 하위
+                이슈로 쪼개지며, 에이전트가 일을 집어 들면 상태가 알아서 움직입니다. worktree 와
+                셋업 스크립트를 대신 만들어 주고, 설명이 자동으로 붙은 PR 을 열고, diff 인라인
+                코멘트를 에이전트에게 곧장 돌려줍니다.</span
               >
             </p>
             <span class="status">
@@ -1049,10 +1305,11 @@
                 live in tmux and want nothing between you and the agents, it is hard to beat.</span
               >
               <span class="ko"
-                >여기서 가장 가벼운 도구고, 일부러 그렇게 만들었다. 터미널 창 하나로 여러 에이전트 —
-                Claude Code, Codex, Gemini, Aider — 를 각자의 worktree 에서 관리하고, 자동 수락
-                모드를 포함해 백그라운드로 작업을 돌린다. diff 탭, 리뷰, 커밋, push. tmux 안에서
-                살고 에이전트 사이에 아무것도 끼우고 싶지 않다면 이걸 이기기 어렵다.</span
+                >여기서 가장 가벼운 도구고, 일부러 그렇게 만들었습니다. 터미널 창 하나로 여러
+                에이전트 — Claude Code, Codex, Gemini, Aider — 를 각자의 worktree 에서 관리하고,
+                자동 수락 모드를 포함해 백그라운드로 작업을 돌립니다. diff 탭, 리뷰, 커밋, push.
+                tmux 안에서 살고 에이전트 사이에 아무것도 끼우고 싶지 않다면 이걸 이기기
+                어렵습니다.</span
               >
             </p>
           </div>
@@ -1070,10 +1327,10 @@
                 takes for granted was normal here first.</span
               >
               <span class="ko"
-                >초기에 나와서 영향을 크게 남긴 접근이다. 여러 Claude Code · Codex 세션을 worktree
+                >초기에 나와서 영향을 크게 남긴 접근입니다. 여러 Claude Code · Codex 세션을 worktree
                 안에서 나란히 돌리고 살펴보고 테스트한 뒤, 마음에 드는 쪽을 앱 안에서 squash 해 main
-                으로 rebase 한다. 이 표의 나머지가 당연하게 여기는 것 중 상당수가 여기서 먼저
-                당연해졌다.</span
+                으로 rebase 합니다. 이 표의 나머지가 당연하게 여기는 것 중 상당수가 여기서 먼저
+                당연해졌습니다.</span
               >
             </p>
             <span class="status">
@@ -1098,10 +1355,10 @@
                 fast.</span
               >
               <span class="ko"
-                >개발 스택의 나머지 부분까지 가장 멀리 뻗는 도구다. 이미 쓰던 CLI 에이전트를 그대로
-                가져오고, Linear · GitHub · Jira · GitLab · Asana 등에서 할 일을 끌어오고, 로컬이든
-                SSH 로 붙은 원격 머신이든 거기서 돌린 다음, diff 리뷰와 PR 생성과 CI 체크 확인을 한
-                곳에서 한다. 오픈소스이고, 크로스 플랫폼이고, 빠르게 움직인다.</span
+                >개발 스택의 나머지 부분까지 가장 멀리 뻗는 도구입니다. 이미 쓰던 CLI 에이전트를
+                그대로 가져오고, Linear · GitHub · Jira · GitLab · Asana 등에서 할 일을 끌어오고,
+                로컬이든 SSH 로 붙은 원격 머신이든 거기서 돌린 다음, diff 리뷰와 PR 생성과 CI 체크
+                확인을 한 곳에서 합니다. 오픈소스이고, 크로스 플랫폼이고, 빠르게 움직입니다.</span
               >
             </p>
           </div>
@@ -1124,11 +1381,12 @@
                 PR that is still in review.</span
               >
               <span class="ko"
-                >이 중에서 다루는 범위가 가장 넓다. 프롬프트 하나를 다섯 worktree 의 다섯 에이전트에
-                뿌려 놓고 이긴 쪽을 머지하고, diff 아무 줄에나 코멘트를 달아 돌려보내고, worktree 를
-                SSH 로 원격에서 돌리고, 전체를 CLI 로 조종하고, iOS · Android 로 들고 다닌다. 여기서
-                문서에 스태킹을 직접 언급하는 유일한 다른 도구이기도 하다 — 아직 리뷰 중인 PR 위에
-                얹으려고 다른 로컬 브랜치에서 worktree 를 시작할 수 있다.</span
+                >이 중에서 다루는 범위가 가장 넓습니다. 프롬프트 하나를 다섯 worktree 의 다섯
+                에이전트에 뿌려 놓고 이긴 쪽을 머지하고, diff 아무 줄에나 코멘트를 달아 돌려보내고,
+                worktree 를 SSH 로 원격에서 돌리고, 전체를 CLI 로 조종하고, iOS · Android 로 들고
+                다닙니다. 여기서 문서에 스태킹을 직접 언급하는 유일한 다른 도구이기도 합니다 — 아직
+                리뷰 중인 PR 위에 얹으려고 다른 로컬 브랜치에서 worktree 를 시작할 수
+                있습니다.</span
               >
             </p>
           </div>
@@ -1153,14 +1411,14 @@
                 comments.</span
               >
               <span class="ko"
-                >출발점은 다른 도구들과 같다. 작업마다 worktree 하나, 브랜치 하나, 에이전트 하나가
-                병렬로 돈다. Wooi 가 더하는 건 그 다음 이야기다. 워크스페이스를 다른 워크스페이스의
-                브랜치 위에 스택으로 얹고, 부모 PR 이 머지되면 Wooi 가 각 자식 PR 의 base 를 조부모
-                브랜치로 다시 잡고 자식들을 그 위로 rebase 한다. 나머지 체인이 조용히 썩는 대신
-                멀쩡하게 남는다. <code>git checkout -b</code> 와 <code>gh pr create</code> 로 직접
-                쌓은 스택도 PR 의 base 브랜치를 읽어 복원한다. 남의 PR 리뷰는 사이드바에서 자기 줄과
-                자기 worktree 를 갖는다. 세 개의 패널, 모아서 보내는 코멘트, GitHub 에 실제 리뷰
-                코멘트로 게시.</span
+                >출발점은 다른 도구들과 같습니다. 작업마다 worktree 하나, 브랜치 하나, 에이전트
+                하나가 병렬로 돕니다. Wooi 가 더하는 건 그 다음 이야기입니다. 워크스페이스를 다른
+                워크스페이스의 브랜치 위에 스택으로 얹고, 부모 PR 이 머지되면 Wooi 가 각 자식 PR 의
+                base 를 조부모 브랜치로 다시 잡고 자식들을 그 위로 rebase 합니다. 나머지 체인이
+                조용히 썩는 대신 멀쩡하게 남습니다. <code>git checkout -b</code> 와
+                <code>gh pr create</code> 로 직접 쌓은 스택도 PR 의 base 브랜치를 읽어 복원합니다.
+                남의 PR 리뷰는 사이드바에서 자기 줄과 자기 worktree 를 갖습니다. 세 개의 패널,
+                모아서 보내는 코멘트, GitHub 에 실제 리뷰 코멘트로 게시.</span
               >
             </p>
           </div>
@@ -1174,13 +1432,13 @@
         <div class="section-head">
           <h2>
             <span class="en">Is Wooi the right pick?</span>
-            <span class="ko">Wooi 가 맞는 선택일까</span>
+            <span class="ko">Wooi 가 맞는 선택일까요</span>
           </h2>
           <p class="section-sub">
             <span class="en"
               >Worth being honest about, because for plenty of workflows the answer is no.</span
             >
-            <span class="ko">솔직하게 적어 둔다. 적지 않은 경우에 답은 "아니오"다.</span>
+            <span class="ko">솔직하게 적어 둡니다. 적지 않은 경우에 답은 "아니오"입니다.</span>
           </p>
         </div>
 
@@ -1194,8 +1452,8 @@
                   tired of rebasing them by hand in order.</span
                 >
                 <span class="ko"
-                  >작업이 자연스럽게 사슬로 온다. 스키마 다음 API 다음 UI. 그걸 매번 순서대로 손으로
-                  rebase 하는 데 질렸다.</span
+                  >작업이 자연스럽게 사슬로 옵니다. 스키마 다음 API 다음 UI. 그걸 매번 순서대로
+                  손으로 rebase 하는 데 질렸습니다.</span
                 >
               </li>
               <li>
@@ -1203,7 +1461,7 @@
                   >You already open stacked PRs and want the merge cascade handled for you.</span
                 >
                 <span class="ko"
-                  >이미 스택 PR 을 열고 있고, 머지 캐스케이드를 도구가 처리해 주길 원한다.</span
+                  >이미 스택 PR 을 열고 있고, 머지 캐스케이드를 도구가 처리해 주길 원합니다.</span
                 >
               </li>
               <li>
@@ -1211,11 +1469,13 @@
                   >Reviewing other people's PRs is a real part of your day, not an
                   afterthought.</span
                 >
-                <span class="ko">남의 PR 리뷰가 하루 일과의 실제 일부다. 곁다리가 아니다.</span>
+                <span class="ko"
+                  >남의 PR 리뷰가 하루 일과의 실제 일부입니다. 곁다리가 아닙니다.</span
+                >
               </li>
               <li>
                 <span class="en">You are on a Mac, using Claude Code or Codex.</span>
-                <span class="ko">맥을 쓰고, Claude Code 나 Codex 를 쓴다.</span>
+                <span class="ko">맥을 쓰고, Claude Code 나 Codex 를 씁니다.</span>
               </li>
             </ul>
           </div>
@@ -1231,8 +1491,8 @@
                   cross-platform; Claude Squad runs anywhere tmux does.</span
                 >
                 <span class="ko"
-                  >Windows 나 Linux 를 쓴다. Wooi 는 macOS 전용이다. Emdash 와 Orca 는 크로스
-                  플랫폼이고, Claude Squad 는 tmux 가 도는 곳이면 어디서든 돈다.</span
+                  >Windows 나 Linux 를 씁니다. Wooi 는 macOS 전용입니다. Emdash 와 Orca 는 크로스
+                  플랫폼이고, Claude Squad 는 tmux 가 도는 곳이면 어디서든 돕니다.</span
                 >
               </li>
               <li>
@@ -1241,8 +1501,8 @@
                   touch, and a lighter tool will feel better.</span
                 >
                 <span class="ko"
-                  >작업들이 정말로 서로 독립적이다. 그러면 스태킹은 평생 안 건드릴 장치고, 더 가벼운
-                  도구가 낫다.</span
+                  >작업들이 정말로 서로 독립적입니다. 그러면 스태킹은 평생 안 건드릴 장치고, 더
+                  가벼운 도구가 낫습니다.</span
                 >
               </li>
               <li>
@@ -1251,8 +1511,8 @@
                   and Orca do that; Wooi does not.</span
                 >
                 <span class="ko"
-                  >SSH 로 원격 머신에서, 또는 휴대폰에서 에이전트를 돌리고 싶다. Emdash 와 Orca 가
-                  그걸 한다. Wooi 는 안 한다.</span
+                  >SSH 로 원격 머신에서, 또는 휴대폰에서 에이전트를 돌리고 싶습니다. Emdash 와 Orca
+                  가 그걸 합니다. Wooi 는 안 합니다.</span
                 >
               </li>
               <li>
@@ -1260,7 +1520,7 @@
                   >You need a planning board and ticket sync more than you need branch
                   plumbing.</span
                 >
-                <span class="ko">브랜치 배관보다 계획 보드와 티켓 연동이 더 급하다.</span>
+                <span class="ko">브랜치 배관보다 계획 보드와 티켓 연동이 더 급합니다.</span>
               </li>
             </ul>
           </div>
@@ -1279,8 +1539,8 @@
             >Free and open source under Apache 2.0. Bring your own Claude Code or Codex.</span
           >
           <span class="ko"
-            >Apache 2.0 오픈소스, 무료다. Claude Code 나 Codex 는 쓰던 걸 그대로 가져오면
-            된다.</span
+            >Apache 2.0 오픈소스, 무료입니다. Claude Code 나 Codex 는 쓰던 걸 그대로 가져오면
+            됩니다.</span
           >
         </p>
         <a
@@ -1328,16 +1588,31 @@
             and it will be corrected.</span
           >
           <span class="ko"
-            >모든 제품명, 로고, 상표는 각 소유자의 자산이다. 비교 내용은 2026년 8월 3일에 각
-            프로젝트의 공개 문서에서 읽은 것이라 지금은 달라졌을 수 있다. 틀린 부분이 있으면
+            >모든 제품명, 로고, 상표는 각 소유자의 자산입니다. 비교 내용은 2026년 8월 3일에 각
+            프로젝트의 공개 문서에서 읽은 것이라 지금은 달라졌을 수 있습니다. 틀린 부분이 있으면
             <a href="https://github.com/youngminnnn/wooi/issues" target="_blank" rel="noopener"
               >이슈를 열어</a
             >
-            주면 고치겠다.</span
+            주시면 고치겠습니다.</span
           >
         </p>
       </div>
     </footer>
+
+    <script>
+      // 확인 날짜로부터 경과일을 계산해, 임계치를 넘겼을 때만 경고를 켠다.
+      ;(function () {
+        var el = document.getElementById('freshness')
+        if (!el) return
+        var checked = Date.parse(el.getAttribute('data-checked'))
+        if (isNaN(checked)) return
+        var days = Math.floor((Date.now() - checked) / 86400000)
+        if (days < Number(el.getAttribute('data-stale-after'))) return
+        var slots = el.querySelectorAll('[data-age]')
+        for (var i = 0; i < slots.length; i++) slots[i].textContent = String(days)
+        el.classList.add('stale')
+      })()
+    </script>
 
     <script>
       ;(function () {

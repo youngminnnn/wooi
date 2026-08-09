@@ -1,0 +1,65 @@
+{
+  "$comment": [
+    "docs/alternatives.html 의 표가 무엇을 근거로 쓰였는지에 대한 기록.",
+    "표의 모든 칸은 '이 문서들이 reviewedOn 날짜에 무엇을 말했는가'에 대한 진술이다.",
+    "sha 는 그날 기준으로 해당 파일을 마지막으로 건드린 커밋이다 — 사람이 실제로 읽은 판본.",
+    "scripts/check-comparison-sources.mjs 가 현재 커밋과 비교해, 업스트림이 움직였으면 알려 준다.",
+    "표를 다시 확인했다면 reviewedOn 과 sha 를 같이 갱신하고,",
+    "alternatives.html 의 #freshness data-checked 도 같은 날짜로 맞춘다(스크립트가 검사한다).",
+    "한 프로젝트만 다시 봤다면 그 프로젝트에 reviewedOn 을 따로 적는다. 최상위 reviewedOn 은",
+    "표 전체를 훑은 날이므로, 일부만 보고 그걸 올리면 안 본 열까지 다시 본 것처럼 된다."
+  ],
+  "reviewedOn": "2026-08-03",
+  "staleAfterDays": 120,
+  "projects": [
+    {
+      "name": "Conductor",
+      "repo": null,
+      "docs": ["https://conductor.build/"],
+      "note": "공개 저장소가 없어 자동 비교 대상이 아니다. reviewedOn 경과일로만 갱신 시점을 잡는다."
+    },
+    {
+      "name": "Vibe Kanban",
+      "repo": "BloopAI/vibe-kanban",
+      "path": "README.md",
+      "sha": "9f1015036c966e17a0518e1f29f116ad5852a66c",
+      "docs": ["https://github.com/BloopAI/vibe-kanban"]
+    },
+    {
+      "name": "Claude Squad",
+      "repo": "smtg-ai/claude-squad",
+      "path": "README.md",
+      "sha": "52aa2dd50f1a86494f0413aa04decb5a36e3ebb5",
+      "docs": ["https://github.com/smtg-ai/claude-squad"]
+    },
+    {
+      "name": "Crystal",
+      "repo": "stravu/crystal",
+      "path": "README.md",
+      "sha": "1ffa091fde5c0779ed4d5b08b7dacbc39eeb2224",
+      "docs": ["https://github.com/stravu/crystal"],
+      "note": "2026-02 지원 종료. 표의 행은 마지막 문서화된 릴리스(v0.3.x) 기준이라 업스트림이 움직일 일은 거의 없다."
+    },
+    {
+      "name": "Emdash",
+      "repo": "generalaction/emdash",
+      "path": "README.md",
+      "sha": "d9000410c9d39333310d8f4f9c277f139b06695a",
+      "docs": ["https://github.com/generalaction/emdash"]
+    },
+    {
+      "name": "Orca",
+      "repo": "stablyai/orca",
+      "path": "README.md",
+      "sha": "7c4c021aa60f397b95220f3fbf595bc3f61bf9ec",
+      "reviewedOn": "2026-08-09",
+      "docs": [
+        "https://github.com/stablyai/orca",
+        "https://www.onorca.dev/docs/model/worktrees",
+        "https://www.onorca.dev/docs/cli/reference",
+        "https://www.onorca.dev/docs/review/github"
+      ],
+      "note": "8/3 이후 README 가 움직여 8/9 에 다시 읽었다. README 변경 자체는 Android APK 버전 범프뿐이었지만, 다시 읽는 김에 확인해 보니 '남의 PR 리뷰' 행이 과했다 — PR 에서 worktree 를 만드는 것과 리뷰 스레드에 답글을 다는 것은 문서에 있다. '문서 없음' 에서 '일부' 로 고치고 각주 6 을 붙였다. 스태킹·자동 rebase·PR 재타게팅 행은 재확인 결과 그대로다."
+    }
+  ]
+}
