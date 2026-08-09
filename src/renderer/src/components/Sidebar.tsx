@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   FolderGit2,
   Plus,
@@ -60,6 +60,7 @@ import type {
   Workspace
 } from '@shared/types'
 import { STATUS_LABEL } from '../lib/review'
+import { OPEN_NEW_WORKSPACE_MENU_EVENT } from '../lib/newWorkspaceMenu'
 
 /** running 상태가 이 시간을 넘기면 사이드바에 "오래 실행 중" 힌트(멈춤일 수 있음)를 표시한다. */
 const RUNNING_STALE_MS = 5 * 60 * 1000
@@ -1282,6 +1283,20 @@ function NewWorkspaceButton({
 }): React.JSX.Element {
   const backends = useAvailableBackends()
   const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null)
+  const buttonRef = useRef<HTMLButtonElement>(null)
+
+  const openMenu = (): void => {
+    const r = buttonRef.current?.getBoundingClientRect()
+    if (r) setMenuAt({ x: r.right, y: r.bottom + 4 })
+  }
+
+  useEffect(() => {
+    const onOpen = (e: Event): void => {
+      if ((e as CustomEvent<string>).detail === repoId) openMenu()
+    }
+    window.addEventListener(OPEN_NEW_WORKSPACE_MENU_EVENT, onOpen)
+    return () => window.removeEventListener(OPEN_NEW_WORKSPACE_MENU_EVENT, onOpen)
+  }, [repoId])
 
   const multi = backends.length > 1
   const actions: RowAction[] = backends.length
@@ -1310,10 +1325,9 @@ function NewWorkspaceButton({
   return (
     <>
       <button
-        onClick={(e) => {
-          const r = e.currentTarget.getBoundingClientRect()
-          setMenuAt({ x: r.right, y: r.bottom + 4 })
-        }}
+        ref={buttonRef}
+        data-row-actions-trigger
+        onClick={openMenu}
         className="h-5 w-5 grid place-items-center rounded text-neutral-400 hover:bg-[var(--surface-2)] hover:text-neutral-100"
         title="New workspace or start from an issue"
         aria-haspopup="menu"
