@@ -2,7 +2,12 @@ import { openPullRequest } from './pullRequest'
 import { checkRelatedWork } from './relatedWork'
 import { initRegistry, registerAgentTool, type AgentToolDeps } from './registry'
 import { readScriptOutput, runScript, stopScript } from './script'
-import { checkStackedWork, createStackedWorkspace, reportToParent } from './stackedWorkspace'
+import {
+  checkStackedWork,
+  createStackedWorkspace,
+  notifyChild,
+  reportToParent
+} from './stackedWorkspace'
 import { runDelegateTool } from './subagent'
 import { archiveWorkspaceTool, createIndependentWorkspace } from './workspace'
 import { delegateToolName } from './catalog'
@@ -21,6 +26,7 @@ export function initAgentTools(deps: AgentToolDeps): void {
   initRegistry(deps)
   registerAgentTool('create_stacked_workspace', createStackedWorkspace)
   registerAgentTool('report_to_parent', reportToParent)
+  registerAgentTool('notify_child', notifyChild)
   registerAgentTool('check_stacked_work', checkStackedWork)
   // 위임 도구는 백엔드마다 하나다. 카탈로그도 같은 이름을 같은 규칙으로 만들므로(delegateToolName)
   // 백엔드가 늘면 정의와 실행부가 함께 늘어난다.

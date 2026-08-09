@@ -23,8 +23,8 @@ export const WOOI_MCP_SERVER_NAME = 'wooi'
  *
  * **매 요청 시스템 프롬프트에 실린다.** 도구 정의는 지연 로딩(alwaysLoad 를 켜지 않는다)이라
  * 검색될 때만 비용을 내지만, 이 문장은 스택을 한 번도 쓰지 않는 워크스페이스까지 전부 낸다.
- * 그래서 여기에는 **상시 알아야 하는 것만** 둔다 — "스택이라는 게 있고 도구는 지금 이 워크스페이스
- * 에만 작용한다". 한때 여기 같이 있던 인계 규약(자식이 보고한다 · 보고는 저절로 오지 않는다)은
+ * 그래서 여기에는 **상시 알아야 하는 것만** 둔다 — "스택이라는 게 있고, 대상을 받는 도구는
+ * 자기가 만든 것만 지목할 수 있다". 한때 여기 같이 있던 인계 규약(자식이 보고한다 · 보고는 저절로 오지 않는다)은
  * 필요한 쪽에 필요한 순간 전달하는 편이 싸고 정확해서 옮겼다. 부모는 create_stacked_workspace
  * 결과로, 자식은 인계 메시지로 받는다([[agent/tools/stackedWorkspace]]).
  */
@@ -114,10 +114,15 @@ export const AGENT_TOOLS: AgentToolSpec[] = [
       'blocked on. Call this when the task you were handed is done or cannot proceed — it is the',
       'only way the parent finds out, since nothing crosses between workspaces on its own.',
       '',
+      'Report once, for the task you were handed. That call closes the handoff, and whatever the',
+      'user asks you for afterwards is ordinary work in this workspace: report again only when the',
+      'parent has a decision waiting on the answer, not at the end of every turn. A later report',
+      'replaces the earlier one.',
+      '',
       'Write the summary for an agent that never saw your conversation: what changed, what you',
-      'decided and why, and anything it must know before building on your branch. Reporting again',
-      'replaces your previous report. This does not interrupt the parent — it reads the report on',
-      'its next turn, and the user is shown it in the parent’s conversation.'
+      'decided and why, and anything it must know before building on your branch. This does not',
+      'interrupt the parent — it reads the report on its next turn, and the user is shown it in',
+      'the parent’s conversation.'
     ].join(' '),
     inputSchema: {
       summary: z
@@ -134,14 +139,48 @@ export const AGENT_TOOLS: AgentToolSpec[] = [
     annotations: { title: 'Report to the parent workspace', readOnlyHint: false }
   },
   {
+    name: 'notify_child',
+    description: [
+      'Send a message to a workspace stacked directly on this one. Use it when something here',
+      'invalidates what that workspace is working from — a decision you reversed, an interface you',
+      'moved, review feedback that lands on its branch too. Its branch forks from yours, so it is',
+      'building on facts only you can update.',
+      '',
+      'This is not the mirror image of `report_to_parent`, and the difference matters: a report',
+      'only leaves a note, but this **starts a turn** in that workspace, because the user approves',
+      'the call. Unlike the other tools that take a workspace id, this one does not mind a busy',
+      'target — your message lands after its current turn rather than cutting it off.',
+      '',
+      'Call `check_stacked_work` first. That is where the ids come from, and it marks which',
+      'children you created yourself — you can only message those.',
+      '',
+      'Handing over a whole new piece of work is `create_stacked_workspace`, not this.'
+    ].join(' '),
+    inputSchema: {
+      workspaceId: z
+        .string()
+        .describe(
+          'Which workspace to message — an id from `check_stacked_work`, and one you created.'
+        ),
+      message: z
+        .string()
+        .describe(
+          'What that workspace needs to know, written for an agent that cannot see this ' +
+            'conversation: what changed, and what it should do differently because of it.'
+        )
+    },
+    annotations: { title: 'Message a stacked workspace', readOnlyHint: false }
+  },
+  {
     name: 'check_stacked_work',
     description: [
       'List the workspaces stacked directly on this one, with whether each is currently running,',
-      'its branch and pull request, and the last report it sent back.',
+      'whether you created it, its branch and pull request, and the last report it sent back.',
       '',
       'Reports never arrive in your conversation on their own, so call this when a child’s result',
       'would change what you do next — before building on its branch, before opening a pull',
-      'request that depends on it, or when the user asks how the stack is going.'
+      'request that depends on it, or when the user asks how the stack is going.',
+      'It is also where `notify_child` gets its workspace ids.'
     ].join(' '),
     inputSchema: {},
     annotations: { title: 'Check stacked workspaces', readOnlyHint: true }
