@@ -6,7 +6,7 @@
     <title>Wooi — Parallel Claude Code &amp; Codex agents, stacked PRs</title>
     <meta
       name="description"
-      content="Every orchestrator runs Claude Code and Codex in parallel git worktrees. Worktrees solve file collisions; they don't solve dependencies. Wooi stacks dependent work instead — agents can check what their siblings are touching and stack their own next PR — then rebases the chain and retargets PR bases when a parent merges, and lands every review as editable findings on the diff. Free, open source, macOS."
+      content="Running Claude Code and Codex in parallel git worktrees is table stakes. Worktrees solve file collisions; they don't solve dependencies. Wooi stacks dependent work instead — agents can check what their siblings are touching and stack their own next PR — then rebases the chain and retargets PR bases when a parent merges, and lands every review as editable findings on the diff. Free, open source, macOS."
     />
 
     <!-- Open Graph / social -->
@@ -68,7 +68,7 @@
           "priceCurrency": "USD"
         },
         "isAccessibleForFree": true,
-        "keywords": "parallel AI coding agents, git worktree, stacked PRs, self-stacking agents, Claude Code, Codex, pull request review, Conductor alternative",
+        "keywords": "parallel AI coding agents, git worktree, stacked PRs, self-stacking agents, Claude Code, Codex, pull request review, coding agent orchestrator",
         "featureList": [
           "Run AI coding agents in parallel, each in its own isolated git worktree and branch",
           "Stack a workspace on another workspace's branch for dependent work",
@@ -923,17 +923,17 @@
             </h3>
             <p>
               <span class="en"
-                >Everywhere else, conflicts between parallel branches get cleaned up after they
-                happen. Wooi's answer is structural: work that builds on other work branches off it
-                instead of off the default branch. When the parent merges, Wooi rebases the children
-                and retargets their PR bases — so the rest of the stack stays valid instead of
-                turning into a pile of conflicts.</span
+                >Conflicts between parallel branches usually get cleaned up after they happen.
+                Wooi's answer is structural: work that builds on other work branches off it instead
+                of off the default branch. When the parent merges, Wooi rebases the children and
+                retargets their PR bases — so the rest of the stack stays valid instead of turning
+                into a pile of conflicts.</span
               >
               <span class="ko"
-                >다른 도구에서 병렬 브랜치 충돌은 터진 뒤에 수습합니다. Wooi 의 답은 구조적입니다.
-                앞선 작업 위에서 이어지는 작업은 기본 브랜치가 아니라 그 작업의 브랜치에서
-                분기합니다. 부모가 병합되면 Wooi 가 자식들을 rebase 하고 PR base 를 옮깁니다. 남은
-                스택은 충돌 더미가 되는 대신 그대로 유효합니다.</span
+                >병렬 브랜치 충돌은 보통 터진 뒤에 수습합니다. Wooi 의 답은 구조적입니다. 앞선 작업
+                위에서 이어지는 작업은 기본 브랜치가 아니라 그 작업의 브랜치에서 분기합니다. 부모가
+                병합되면 Wooi 가 자식들을 rebase 하고 PR base 를 옮깁니다. 남은 스택은 충돌 더미가
+                되는 대신 그대로 유효합니다.</span
               >
             </p>
           </div>
