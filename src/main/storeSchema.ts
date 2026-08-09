@@ -30,7 +30,7 @@ const DEFAULT_MODEL = CLAUDE_DEFAULT_MODEL
  * 디스크 영속 형식의 현재 스키마 버전. 영속 데이터 모양이 바뀔 때마다 1 올리고,
  * MIGRATIONS 에 직전 버전 → 새 버전 변환 함수를 추가한다.
  */
-export const CURRENT_SCHEMA_VERSION = 18
+export const CURRENT_SCHEMA_VERSION = 19
 
 /**
  * v12 이하의 settings 모양. 그 시절엔 에이전트가 Claude 하나뿐이라 모델·effort·fast mode·
@@ -357,6 +357,21 @@ export const MIGRATIONS: Array<(raw: Record<string, unknown>) => Record<string, 
       effort: r.effort ?? null
     }))
     return { ...raw, reviews }
+  },
+
+  // v18 → v19: 워크스페이스가 자기를 만든 주체를 기억한다. 에이전트가 만든 워크스페이스만 그
+  // 에이전트가 아카이브할 수 있게 하려면([[agent/tools/target]]) 생성자를 알아야 하는데, 지금까지는
+  // 아무도 기록하지 않았다.
+  //
+  // 기존 워크스페이스는 전부 null 로 둔다. 부모가 있다고 해서 그 부모의 에이전트가 만들었다고
+  // 단정할 수 없고(사람이 UI 에서 만든 스택이 그렇다), 여기서 잘못 추측하면 에이전트가 사람의
+  // 워크스페이스를 지울 권한을 소급해 얻는다. 모를 때는 아무 권한도 주지 않는 쪽이 맞다.
+  (raw) => {
+    const workspaces = ((raw.workspaces as Partial<Workspace>[]) ?? []).map((w) => ({
+      ...w,
+      createdByWorkspaceId: w.createdByWorkspaceId ?? null
+    }))
+    return { ...raw, workspaces }
   }
 ]
 

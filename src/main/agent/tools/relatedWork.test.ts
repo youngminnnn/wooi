@@ -108,6 +108,46 @@ describe('check_related_work 의 relation 판정', () => {
   })
 })
 
+/**
+ * 이 목록이 모델이 다른 워크스페이스의 id 를 보는 유일한 곳이라, 대상을 받는 도구가 무엇을
+ * 받아 주는지도 여기서 읽혀야 한다([[agent/tools/target]]).
+ */
+describe('check_related_work 의 생성자 표시', () => {
+  it('자기가 만든 워크스페이스만 표시한다 — 스택이든 아니든', async () => {
+    state.workspaces = [
+      { ...me },
+      ws({
+        id: 'ws-stacked',
+        branch: 'a',
+        parentWorkspaceId: 'ws-me',
+        createdByWorkspaceId: 'ws-me'
+      }),
+      ws({ id: 'ws-indep', branch: 'b', createdByWorkspaceId: 'ws-me' }),
+      ws({ id: 'ws-theirs', branch: 'c', createdByWorkspaceId: 'ws-someone' })
+    ]
+
+    const result = (await check()) as { workspaces: Array<Record<string, unknown>> }
+    const byId = new Map(result.workspaces.map((w) => [w.workspaceId, w.createdByYou]))
+
+    expect(byId.get('ws-stacked')).toBe(true)
+    expect(byId.get('ws-indep')).toBe(true)
+    // 남의 것에는 아예 싣지 않는다 — 없는 것이 곧 "네 것이 아니다" 다.
+    expect(byId.get('ws-theirs')).toBeUndefined()
+  })
+
+  // relation 으로는 알 수 없다는 것이 이 필드가 있는 이유다.
+  it('사람이 만든 자식은 child 이지만 내 것이 아니다', async () => {
+    state.workspaces = [
+      { ...me },
+      ws({ id: 'ws-child', branch: 'a', parentWorkspaceId: 'ws-me', createdByWorkspaceId: null })
+    ]
+
+    const result = (await check()) as { workspaces: Array<Record<string, unknown>> }
+    expect(result.workspaces[0].relation).toBe('child')
+    expect(result.workspaces[0].createdByYou).toBeUndefined()
+  })
+})
+
 describe('check_related_work 의 겹침', () => {
   beforeEach(() => {
     state.workspaces = [{ ...me }, ws({ id: 'ws-sib', branch: 'feat/other', status: 'running' })]

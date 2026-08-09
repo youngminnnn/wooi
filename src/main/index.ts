@@ -110,10 +110,15 @@ process.env.WOOI_TOOL_SHIM = resolveToolShim()
 // Codex 의 app-server 는 MCP 도구에 대해 승인을 물어보지 않기 때문이다.
 initToolPermission({ dispatch: (request) => dispatch(IPC.evtPermission, request) })
 
+const terminals = new TerminalManager(dispatch)
+
 // 에이전트가 Wooi 자체를 조작하는 도구들의 실행부에 필요한 것을 넘긴다([[agent/tools]]).
-// scripts 가 만들어진 뒤여야 한다 — 워크스페이스를 만드는 도구가 셋업 스크립트를 돌린다.
+// scripts·terminals 가 만들어진 뒤여야 한다 — 워크스페이스를 만드는 도구가 셋업 스크립트를
+// 돌리고, 아카이브하는 도구가 그 워크스페이스의 터미널을 끊는다.
 initAgentTools({
   scripts,
+  sessions,
+  terminals,
   broadcastState: () => dispatch(IPC.evtState, getStore().getState()),
   sendMessage: (workspaceId, text) => sessions.sendMessage(workspaceId, text),
   emitChatEvent: (workspaceId, event) => dispatch(IPC.evtChat, { workspaceId, event }),
@@ -123,7 +128,6 @@ initAgentTools({
   }
 })
 
-const terminals = new TerminalManager(dispatch)
 // 듀얼 모니터를 위해 작업 패널·스크립트 패널을 별도 창으로 떼어 낼 수 있게 한다([[paneWindows]]).
 const panes = new PaneWindows(dispatch)
 

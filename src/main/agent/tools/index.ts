@@ -4,6 +4,7 @@ import { initRegistry, registerAgentTool, type AgentToolDeps } from './registry'
 import { readScriptOutput, runScript, stopScript } from './script'
 import { checkStackedWork, createStackedWorkspace, reportToParent } from './stackedWorkspace'
 import { runDelegateTool } from './subagent'
+import { archiveWorkspaceTool, createIndependentWorkspace } from './workspace'
 import { delegateToolName } from './catalog'
 import { AGENT_BACKEND_IDS } from '@shared/types'
 
@@ -31,4 +32,6 @@ export function initAgentTools(deps: AgentToolDeps): void {
   registerAgentTool('stop_script', stopScript)
   registerAgentTool('read_script_output', readScriptOutput)
   registerAgentTool('check_related_work', checkRelatedWork)
+  registerAgentTool('create_workspace', createIndependentWorkspace)
+  registerAgentTool('archive_workspace', archiveWorkspaceTool)
 }

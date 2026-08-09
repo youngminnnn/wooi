@@ -60,11 +60,13 @@ import { IPC, agentSettingsFor, isBranchStack, reorderById, workspaceStack } fro
 import { resolveToolPermission } from './agent/tools/permission'
 import { appendMemory } from './claude/memory'
 import {
+  archiveWorkspace,
   carryIntoNewWorktree,
   carrySuggestionsFor,
   createWorkspace,
   scriptEnvFor,
   syncPrBase,
+  type ArchiveWorkspaceDeps,
   type CreateWorkspaceDeps
 } from './workspaces'
 import type {
@@ -140,6 +142,13 @@ export function registerIpc(ctx: IpcContext): void {
 
   /** 워크스페이스 생성이 메인에서 필요로 하는 것들([[workspaces]] createWorkspace). */
   const workspaceDeps: CreateWorkspaceDeps = { scripts: ctx.scripts, broadcastState }
+  /** 아카이브는 워크스페이스에 매달린 것들까지 끊어야 해 더 넓다([[workspaces]] archiveWorkspace). */
+  const archiveDeps: ArchiveWorkspaceDeps = {
+    sessions: ctx.sessions,
+    scripts: ctx.scripts,
+    terminals: ctx.terminals,
+    broadcastState
+  }
 
   /**
    * 리포의 origin 리모트가 GitHub 이면 소유자 아바타를 받아 data URL 로 저장한다(best-effort).
@@ -373,46 +382,9 @@ export function registerIpc(ctx: IpcContext): void {
       createWorkspace(workspaceDeps, args)
   )
 
-  // 아카이브: 세션·스크립트를 정리하고 worktree 디렉토리를 제거하되 브랜치·대화 기록·세션 ID 는
-  // 유지한다 (언아카이브 시 worktree 를 다시 만들고 같은 세션을 이어갈 수 있다).
+  // 아카이브 절차 자체는 [[workspaces]] 에 있다 — 에이전트 도구도 같은 일을 해야 하기 때문이다.
   ipcMain.handle(IPC.workspaceArchive, async (_e, workspaceId: string) => {
-    const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
-    if (!ws) return
-    const repo = repoFor(ws.repoId)
-
-    ctx.sessions.dispose(workspaceId)
-    ctx.scripts.disposeWorkspace(workspaceId)
-    ctx.terminals.disposeWorkspace(workspaceId)
-    // 아카이브 스크립트는 worktree 가 아직 살아 있을 때 실행한다.
-    if (repo?.archiveScript.trim()) {
-      await ctx.scripts.runOnce(repo.archiveScript, ws.worktreePath)
-    }
-    // override 가 없으면 현재 표시 이름(PR 제목 등)을 worktree 제거 전에 보존한다.
-    // 아카이브 후에는 worktree·PR 조회가 불가능하므로, 같은 이름을 유지하려면 지금 스냅샷해야 한다.
-    let snapshotName: string | null = null
-    if (!ws.displayName?.trim()) {
-      const pr = await getPrStatus(ws.worktreePath).catch(() => null)
-      if (pr?.title?.trim()) snapshotName = pr.title.trim()
-    }
-    if (repo) await removeWorktree(repo.path, ws.worktreePath, ws.branch, false)
-    // worktree 가 사라졌으니 캐시된 PR 상태도 물어볼 근거가 없다(언아카이브하면 다시 조회된다).
-    invalidateWorkspacePr(workspaceId)
-
-    store.update((st) => {
-      const w = st.workspaces.find((x) => x.id === workspaceId)
-      if (w) {
-        w.archived = true
-        w.status = 'idle'
-        if (snapshotName && !w.displayName?.trim()) w.displayName = snapshotName
-        // 제안을 받아 아카이브했든 다른 경로(사이드바·단축키)로 했든 그 병합은 처리된 것이다.
-        // 해제로 기록해 두지 않으면 언아카이브했을 때 같은 제안이 곧바로 다시 뜬다.
-        if (w.archiveSuggest) {
-          w.archiveSuggestDismissed = w.archiveSuggest.mergedBranch
-          w.archiveSuggest = null
-        }
-      }
-    })
-    broadcastState()
+    await archiveWorkspace(archiveDeps, workspaceId)
   })
 
   /**

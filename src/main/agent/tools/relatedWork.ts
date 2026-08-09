@@ -97,6 +97,12 @@ export const checkRelatedWork: AgentToolHandler = async (_deps, workspaceId, arg
       // running 이면 지금 이 순간에도 파일이 늘어나는 중이다 — 목록이 곧 낡는다.
       running: r.ws.status === 'running',
       relation: relationTo(self, r.ws),
+      // 여기가 모델이 **다른 워크스페이스의 id 를 보는 유일한 곳**이다. 대상을 받는 도구는
+      // 자기가 만든 것만 받으므로([[agent/tools/target]]), 어느 것이 그에 해당하는지 여기서
+      // 말해 주지 않으면 모델은 찍어 보고 거절당하는 수밖에 없다. relation 으로는 알 수 없다 —
+      // 사람이 만든 스택 자식도 'child' 다.
+      // false 는 싣지 않는다. 목록이 길고, 없는 것이 곧 "네 것이 아니다" 다.
+      ...(r.ws.createdByWorkspaceId === workspaceId ? { createdByYou: true } : {}),
       changedPaths: r.paths.slice(0, MAX_PATHS_PER_WORKSPACE),
       ...(r.paths.length > MAX_PATHS_PER_WORKSPACE
         ? { truncatedPaths: r.paths.length - MAX_PATHS_PER_WORKSPACE }

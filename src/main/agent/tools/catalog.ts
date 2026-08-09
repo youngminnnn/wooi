@@ -32,7 +32,11 @@ export const WOOI_MCP_INSTRUCTIONS = [
   'These tools control Wooi itself — the desktop app hosting this conversation.',
   'Each workspace is a git worktree on its own branch, and workspaces can be stacked:',
   'one branches off another so their pull requests review as a chain.',
-  'The tools always act on the workspace you are running in; you cannot target another one.'
+  // 한때 "도구는 언제나 자기 자신에게만 작용한다" 였다. archive_workspace 가 대상을 인자로 받으면서
+  // 그 문장이 거짓이 됐고, 거짓인 채로 두면 모델은 남을 지목할 수 있다는 것도, 아무나 지목할 수는
+  // 없다는 것도 모른 채 시도하게 된다. 실제 경계를 그대로 적는다([[agent/tools/target]]).
+  'Most tools act on the workspace you are running in; the ones that take a workspace id can only',
+  'name a workspace you created yourself.'
 ].join(' ')
 
 export interface AgentToolSpec {
@@ -199,7 +203,8 @@ export const AGENT_TOOLS: AgentToolSpec[] = [
     description: [
       'List the other workspaces open on this repository — parents, children and unrelated',
       'siblings alike — with the file paths each is changing and which of those you also touch.',
-      'Paths only, never diffs.',
+      'Paths only, never diffs. Each entry says whether you created it, which is what decides',
+      'if you may act on it.',
       '',
       'Call it before starting a change that spans several files or a refactor, so you find out',
       'about a collision now instead of at merge time. It is not a per-turn check.'
@@ -214,6 +219,66 @@ export const AGENT_TOOLS: AgentToolSpec[] = [
         )
     },
     annotations: { title: 'Check related work', readOnlyHint: true }
+  },
+  {
+    name: 'create_workspace',
+    description: [
+      'Create a new Wooi workspace: a fresh git worktree on a new branch off the repository’s',
+      'default branch, so its pull request stands on its own.',
+      '',
+      'Choose between this and `create_stacked_workspace` by dependency: if the next piece builds',
+      'on the commits you just made, stack it; if it does not, use this. Stacking unrelated work',
+      'makes its pull request wait for yours to merge, and blocks it whenever yours stalls.',
+      '',
+      'Uncommitted changes here do not matter — the new branch forks from the remote, not from',
+      'this worktree. It starts with an empty conversation and does not steal the user’s screen,',
+      'so tell the user it is ready and what it is for.'
+    ].join(' '),
+    inputSchema: {
+      name: z
+        .string()
+        .optional()
+        .describe(
+          'Branch name for the new workspace, following the repository’s branch naming convention ' +
+            '(e.g. "feat/inline-login"). Omit to let Wooi generate one.'
+        ),
+      task: z
+        .string()
+        .optional()
+        .describe(
+          'The task to hand the new workspace, sent as its first message — it starts working on ' +
+            'this right away. Write it for an agent that cannot see this conversation and cannot ' +
+            'ask you anything: what to build, and anything you already decided that it should not ' +
+            'revisit.\n\n' +
+            'Hand over what you already learned so it does not pay to rediscover it: the files and ' +
+            'symbols involved (as `path:line` where you know them), the commands you ran and what ' +
+            'they reported, and the approaches you ruled out and why. Write down only what you ' +
+            'are sure of — a wrong path costs more than a missing one.\n\n' +
+            'Omit this parameter entirely only if the user will drive that workspace themselves.'
+        )
+    },
+    annotations: { title: 'Create a workspace', readOnlyHint: false }
+  },
+  {
+    name: 'archive_workspace',
+    description: [
+      'Archive a workspace you created from here, once its work is finished or abandoned, so it',
+      'stops cluttering the sidebar. Its worktree is removed; the branch, the pull request and the',
+      'conversation stay, so the user can restore it.',
+      '',
+      'This works on workspaces you created with `create_workspace` or `create_stacked_workspace`,',
+      'stacked or not. You cannot archive the workspace you are running in, or one the user made.',
+      'The target must have no uncommitted changes — those would be lost — and no turn in flight.'
+    ].join(' '),
+    inputSchema: {
+      workspaceId: z
+        .string()
+        .describe(
+          'The workspace to archive, as returned when you created it, or listed by ' +
+            '`check_stacked_work` / `check_related_work`.'
+        )
+    },
+    annotations: { title: 'Archive a workspace', readOnlyHint: false }
   }
 ]
 

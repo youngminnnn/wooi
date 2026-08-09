@@ -2,11 +2,14 @@ import { randomUUID } from 'node:crypto'
 import type { PermissionResult } from '@anthropic-ai/claude-agent-sdk'
 import {
   AGENT_BACKEND_LABELS,
+  workspaceDisplayName,
   type AgentBackendId,
   type PermissionDecision,
   type PermissionRequest,
+  type Repo,
   type Workspace
 } from '@shared/types'
+import { getStore } from '../../store'
 import { isReadOnlyToolName } from './catalog'
 import { resolvePrBase } from './pullRequest'
 import { scriptCommandFor } from './script'
@@ -155,7 +158,28 @@ const TOOL_LABELS: Record<string, string> = {
   report_to_parent: 'Report to the parent workspace',
   open_pull_request: 'Open a pull request',
   run_script: 'Run a repository script',
-  stop_script: 'Stop a repository script'
+  stop_script: 'Stop a repository script',
+  create_workspace: 'Create a workspace',
+  archive_workspace: 'Archive a workspace'
+}
+
+/** 카드가 지목된 대상을 이름으로 부를 수 있게 한다. 못 찾으면 핸들러가 어차피 거절한다. */
+function targetWorkspace(id: unknown): Workspace | undefined {
+  if (typeof id !== 'string' || !id.trim()) return undefined
+  return getStore()
+    .getState()
+    .workspaces.find((w) => w.id === id.trim())
+}
+
+function repoOf(workspace: Workspace): Repo | undefined {
+  return getStore()
+    .getState()
+    .repos.find((r) => r.id === workspace.repoId)
+}
+
+/** 독립 워크스페이스가 갈라질 브랜치. 핸들러와 같은 근거를 본다(workspaces.ts createWorkspace). */
+function defaultBranchFor(workspace: Workspace): string {
+  return repoOf(workspace)?.defaultBranch ?? 'the default branch'
 }
 
 /** 카드 한 줄 설명. 무엇이 일어나는지 사용자가 보고 판단할 수 있어야 한다. */
@@ -165,6 +189,24 @@ function titleFor(tool: string, args: unknown, workspace: Workspace): string {
     const name = typeof a.name === 'string' && a.name.trim() ? ` on \`${a.name.trim()}\`` : ''
     // 셋업 스크립트 실행은 사용자가 알고 승인해야 하는 부분이라 문장에 남긴다.
     return `The agent wants to create a stacked workspace${name} — this makes a branch, a worktree, and runs the repository's setup script.`
+  }
+  if (tool === 'create_workspace') {
+    const name = typeof a.name === 'string' && a.name.trim() ? ` on \`${a.name.trim()}\`` : ''
+    // 스택과 달리 "무엇 위에 쌓이는지" 가 없으므로, 사용자가 판단할 거리는 어디서 갈라지는가다.
+    return `The agent wants to create a new workspace${name} branching off \`${defaultBranchFor(workspace)}\` — this makes a branch, a worktree, and runs the repository's setup script.`
+  }
+  if (tool === 'archive_workspace') {
+    const target = targetWorkspace(a.workspaceId)
+    // 어느 워크스페이스인지가 이 카드의 전부다 — 잘못 지목된 호출을 사람이 잡을 수 있는 곳은
+    // 여기뿐이다. 이름과 브랜치를 함께 적어 같은 이름의 워크스페이스와 헷갈리지 않게 한다.
+    const which = target
+      ? `${workspaceDisplayName(target)} (\`${target.branch}\`)`
+      : 'another workspace'
+    // 아카이브 스크립트는 사용자가 알고 승인해야 하는 부분이라 문장에 남긴다
+    // (create_stacked_workspace 가 셋업 스크립트를 적는 것과 같은 이유).
+    const script = target ? repoOf(target)?.archiveScript.trim() : ''
+    const runs = script ? ` and runs the repository's archive script (\`${script}\`)` : ''
+    return `The agent wants to archive ${which} — this removes its worktree${runs}. Its branch and conversation are kept.`
   }
   if (tool === 'report_to_parent') {
     return 'The agent wants to report this workspace’s result back to the workspace it was stacked on.'
