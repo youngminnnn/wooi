@@ -1,14 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
-import rehypeHighlight from 'rehype-highlight'
 import {
   ChevronRight,
-  Wrench,
   Brain,
-  AlertTriangle,
   Check,
-  Copy,
   Loader2,
   ArrowDown,
   ArrowUp,
@@ -25,6 +19,7 @@ import {
 } from 'lucide-react'
 import { useStore } from '../store'
 import { DiffLine } from './DiffView'
+import { AgentMessage, ErrorRow, ToolUseRow, UserMessage } from './ChatPrimitives'
 import { formatTime } from '../lib/format'
 import { buildTaskCards, taskLabel, type TaskEntry } from '../lib/tasks'
 import type { ChatItem } from '@shared/types'
@@ -288,43 +283,31 @@ function Item({
   switch (item.type) {
     case 'user':
       return (
-        <div className="flex justify-end" title={time}>
-          <div className="max-w-[85%] bg-[var(--surface-4)] text-neutral-100 rounded-2xl rounded-br-md px-3.5 py-2 text-base">
-            {item.attachments && item.attachments.length > 0 && (
-              <div className="flex flex-wrap gap-1.5 mb-1.5">
-                {item.attachments.map((a, i) => (
-                  <span
-                    key={i}
-                    // 말풍선(--surface-4) 안에 얹히는 칩 — 다크에선 밝게, 라이트에선 어둡게
-                    // 갈리는 --border-2 를 써서 두 테마 모두에서 면이 구분되게 한다.
-                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-[var(--border-2)] text-xs text-neutral-300"
-                  >
-                    <ImageIcon size={11} className="text-neutral-400" />
-                    {a.name}
-                  </span>
-                ))}
-              </div>
-            )}
-            {item.text && <div className="whitespace-pre-wrap">{item.text}</div>}
-          </div>
-        </div>
+        <UserMessage text={item.text} title={time}>
+          {item.attachments && item.attachments.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mb-1.5">
+              {item.attachments.map((a, i) => (
+                <span
+                  key={i}
+                  // 말풍선(--surface-4) 안에 얹히는 칩 — 다크에선 밝게, 라이트에선 어둡게
+                  // 갈리는 --border-2 를 써서 두 테마 모두에서 면이 구분되게 한다.
+                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-[var(--border-2)] text-xs text-neutral-300"
+                >
+                  <ImageIcon size={11} className="text-neutral-400" />
+                  {a.name}
+                </span>
+              ))}
+            </div>
+          )}
+        </UserMessage>
       )
     case 'assistant':
       return (
-        <div className="group/msg relative md text-base text-neutral-200" title={time}>
-          <ReactMarkdown
-            remarkPlugins={[remarkGfm]}
-            rehypePlugins={[rehypeHighlight]}
-            components={{ a: ExternalLinkRenderer, pre: PreWithCopy }}
-          >
-            {item.text || (item.streaming ? '…' : '')}
-          </ReactMarkdown>
-          {item.text && !item.streaming && (
-            <div className="absolute -top-1 right-0 opacity-0 group-hover/msg:opacity-100 transition">
-              <CopyButton text={item.text} />
-            </div>
-          )}
-        </div>
+        <AgentMessage
+          text={item.text || (item.streaming ? '…' : '')}
+          title={time}
+          copyable={!!item.text && !item.streaming}
+        />
       )
     case 'thinking':
       return <Thinking text={item.text} />
@@ -342,12 +325,7 @@ function Item({
     case 'result':
       return <ResultFooter item={item} />
     case 'error':
-      return (
-        <div className="flex items-center gap-2 text-sm text-[var(--danger-400)] bg-[var(--danger-500)]/10 border border-[var(--danger-500)]/20 rounded-lg px-3 py-2">
-          <AlertTriangle size={14} className="shrink-0" />
-          <span className="whitespace-pre-wrap">{item.text}</span>
-        </div>
-      )
+      return <ErrorRow text={item.text} />
     case 'system':
       return <div className="text-xs text-neutral-500 text-center py-1">{item.text}</div>
     case 'bash':
@@ -687,33 +665,26 @@ function ToolUse({
   diff?: string
   pending: boolean
 }): React.JSX.Element {
-  const [open, setOpen] = useState(false)
-  const summary = summarizeToolInput(name, input)
   const stat = useMemo(() => (diff ? diffStat(diff) : null), [diff])
   return (
-    <div className="text-sm">
-      <button
-        onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-1.5 text-neutral-400 hover:text-neutral-200 w-full text-left"
-      >
-        {pending ? (
-          <Loader2 size={12} className="text-[var(--warning-500)]/80 shrink-0 animate-spin" />
-        ) : (
-          <Wrench size={12} className="text-[var(--warning-500)]/80 shrink-0" />
-        )}
-        <span className="font-medium text-neutral-300">{name}</span>
-        {summary && <span className="text-neutral-500 truncate">{summary}</span>}
-        {stat && (
+    <ToolUseRow
+      name={name}
+      summary={summarizeToolInput(name, input)}
+      pending={pending}
+      trailing={
+        stat && (
           <span className="shrink-0 tabular-nums text-xs">
             <span className="text-[var(--diff-add)]">+{stat.added}</span>{' '}
             <span className="text-[var(--diff-del)]">−{stat.removed}</span>
           </span>
-        )}
-        <ChevronRight
-          size={12}
-          className={(open ? 'rotate-90 ' : '') + 'ml-auto shrink-0 transition'}
-        />
-      </button>
+        )
+      }
+      details={
+        <pre className="mt-1 ml-4 text-xs bg-[var(--surface)] border border-[var(--border)] rounded-md p-2 overflow-x-auto text-neutral-400">
+          {JSON.stringify(input, null, 2)}
+        </pre>
+      }
+    >
       {/* 파일 변경은 diff 가 곧 내용이다 — 접지 않고 바로 보여 준다(원시 입력은 셰브런 뒤에 남는다). */}
       {diff && (
         <pre className="mt-1 ml-4 max-h-72 overflow-auto rounded-md bg-[var(--code-bg)] py-1 text-xs font-mono leading-[1.45]">
@@ -722,12 +693,7 @@ function ToolUse({
           ))}
         </pre>
       )}
-      {open && (
-        <pre className="mt-1 ml-4 text-xs bg-[var(--surface)] border border-[var(--border)] rounded-md p-2 overflow-x-auto text-neutral-400">
-          {JSON.stringify(input, null, 2)}
-        </pre>
-      )}
-    </div>
+    </ToolUseRow>
   )
 }
 
@@ -790,73 +756,6 @@ function ResultFooter({
     >
       {text}
     </div>
-  )
-}
-
-/** 클립보드 복사 버튼(체크 표시로 피드백). */
-function CopyButton({ text, className }: { text: string; className?: string }): React.JSX.Element {
-  const [copied, setCopied] = useState(false)
-  const copy = (): void => {
-    void navigator.clipboard.writeText(text).then(() => {
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1200)
-    })
-  }
-  return (
-    <button
-      onClick={copy}
-      title="Copy"
-      className={
-        'h-6 w-6 grid place-items-center rounded-md bg-[var(--surface-2)]/80 text-neutral-400 hover:text-neutral-100 ' +
-        (className ?? '')
-      }
-    >
-      {copied ? <Check size={12} className="text-[var(--success-400)]" /> : <Copy size={12} />}
-    </button>
-  )
-}
-
-/** 코드 블록에 복사 버튼을 얹는다. */
-function PreWithCopy({ children }: { children?: React.ReactNode }): React.JSX.Element {
-  return (
-    <div className="group/code relative">
-      <div className="absolute top-1.5 right-1.5 opacity-0 group-hover/code:opacity-100 transition">
-        <CopyButton text={extractText(children)} />
-      </div>
-      <pre>{children}</pre>
-    </div>
-  )
-}
-
-/** React 노드 트리에서 텍스트만 모은다(코드 복사용). */
-function extractText(node: React.ReactNode): string {
-  if (node == null || typeof node === 'boolean') return ''
-  if (typeof node === 'string' || typeof node === 'number') return String(node)
-  if (Array.isArray(node)) return node.map(extractText).join('')
-  if (typeof node === 'object' && 'props' in node) {
-    return extractText((node as { props: { children?: React.ReactNode } }).props.children)
-  }
-  return ''
-}
-
-/** 채팅 메시지 안의 링크는 항상 사용자의 기본 브라우저로 연다(앱 내 이동 방지). */
-function ExternalLinkRenderer({
-  href,
-  children
-}: {
-  href?: string
-  children?: React.ReactNode
-}): React.JSX.Element {
-  return (
-    <a
-      href={href}
-      onClick={(e) => {
-        e.preventDefault()
-        if (href) void window.api.openExternal(href)
-      }}
-    >
-      {children}
-    </a>
   )
 }
 

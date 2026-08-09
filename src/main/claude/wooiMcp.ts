@@ -1,6 +1,7 @@
 import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk'
 import type { McpSdkServerConfigWithInstance } from '@anthropic-ai/claude-agent-sdk'
-import { AGENT_TOOLS, WOOI_MCP_INSTRUCTIONS, WOOI_MCP_SERVER_NAME } from '../agent/tools/catalog'
+import { agentToolsFor, WOOI_MCP_INSTRUCTIONS, WOOI_MCP_SERVER_NAME } from '../agent/tools/catalog'
+import type { AgentBackendId } from '@shared/types'
 
 /**
  * 에이전트에게 Wooi 자체를 노출하는 인프로세스 MCP 서버.
@@ -13,13 +14,15 @@ import { AGENT_TOOLS, WOOI_MCP_INSTRUCTIONS, WOOI_MCP_SERVER_NAME } from '../age
  * 자기 왕복 함수를 넘긴다(host.ts callMain). 그래야 이 파일이 host 를 import 하지 않는다.
  */
 export function createWooiMcpServer(
-  callTool: (tool: string, args: unknown) => Promise<unknown>
+  callTool: (tool: string, args: unknown) => Promise<unknown>,
+  /** 이 워크스페이스가 띄울 수 있는 서브에이전트 종류. 비어 있으면 위임 도구가 없다. */
+  delegateBackends: AgentBackendId[] = []
 ): McpSdkServerConfigWithInstance {
   return createSdkMcpServer({
     name: WOOI_MCP_SERVER_NAME,
     version: '1.0.0',
     instructions: WOOI_MCP_INSTRUCTIONS,
-    tools: AGENT_TOOLS.map((spec) =>
+    tools: agentToolsFor(delegateBackends).map((spec) =>
       tool(
         spec.name,
         spec.description,

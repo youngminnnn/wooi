@@ -153,10 +153,13 @@ function describeAssistant(msg: Extract<SDKMessage, { type: 'assistant' }>): Rev
     if (b.type === 'text' && b.text?.trim()) {
       out.push({ id: randomUUID(), kind: 'text', text: b.text.trim(), ts: Date.now() })
     } else if (b.type === 'tool_use' && b.name) {
+      const detail = describeTool(b.input)
       out.push({
         id: randomUUID(),
         kind: 'tool',
-        text: describeTool(b.name, b.input),
+        name: b.name,
+        detail,
+        text: detail ? `${b.name}  ${detail}` : b.name,
         ts: Date.now()
       })
     }
@@ -164,8 +167,8 @@ function describeAssistant(msg: Extract<SDKMessage, { type: 'assistant' }>): Rev
   return out
 }
 
-/** 도구 호출을 한 줄로 요약한다. 인자 전체를 쏟아내면 진행 로그가 읽히지 않는다. */
-function describeTool(name: string, input: Record<string, unknown> | undefined): string {
+/** 도구 인자를 한 줄로 요약한다. 인자 전체를 쏟아내면 진행 로그가 읽히지 않는다. */
+function describeTool(input: Record<string, unknown> | undefined): string {
   const hint = describeArg(
     input?.file_path,
     input?.path,
@@ -174,5 +177,5 @@ function describeTool(name: string, input: Record<string, unknown> | undefined):
     input?.description,
     input?.prompt
   )
-  return hint ? `${name}  ${truncate(hint)}` : name
+  return hint ? truncate(hint) : ''
 }

@@ -75,7 +75,14 @@ function ensure(workspaceId: string, config: SessionConfig): ClaudeSession {
     additionalDirs: config.additionalDirs,
     // 워크스페이스마다 자기 것을 만든다 — 도구가 어느 워크스페이스에서 불렸는지는 이 클로저가
     // 유일한 근거다(모델이 인자로 지목할 수 없다는 뜻이기도 하다).
-    wooiMcp: createWooiMcpServer((tool, args) => callMain(workspaceId, tool, args)),
+    wooiMcp: createWooiMcpServer(
+      (tool, args) => callMain(workspaceId, tool, args),
+      config.delegateBackends
+    ),
+    delegateBackends: config.delegateBackends,
+    // 위임 시점의 config 가 아니라 세션 생성 시점의 값을 쓴다 — 위임 도구는 세션과 함께 살고,
+    // 모델·effort 를 바꾸면 어차피 매니저가 세션을 다시 연다.
+    agentDefaults: (backend) => config.agentDefaults[backend] ?? { model: null, effort: null },
     emit: (event: ChatEvent) => post({ type: 'event', workspaceId, event }),
     persist: (item: ChatItem) => post({ type: 'persist', workspaceId, item }),
     requestPermission: (req) =>

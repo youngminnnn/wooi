@@ -90,7 +90,9 @@ describe('v12 → v13 (백엔드별 에이전트 설정 분리)', () => {
 
   it('워크스페이스는 건드리지 않는다(백엔드·모델·모드 모양이 그대로다)', () => {
     const out = migrate(v12File(), 12)
-    expect(out.workspaces).toEqual(v12File().workspaces)
+    // 뒤 버전이 필드를 더하는 것까지 막을 이유는 없다(v19 의 createdByWorkspaceId). 이 테스트가
+    // 지키는 것은 v12 가 들고 있던 값이 그대로 남는가이므로 부분 일치로 본다.
+    expect(out.workspaces).toMatchObject(v12File().workspaces as object[])
   })
 
   it('설정이 비어 있어도 안전한 기본값을 만든다', () => {
@@ -212,6 +214,58 @@ describe('v16 → v17 (제출 기록에서 본문 빼기)', () => {
   it('리뷰가 없는 파일도 그대로 통과한다', () => {
     const out = migrate({ schemaVersion: 16, repos: [], workspaces: [] }, 16)
     expect(out.reviews).toEqual([])
+  })
+})
+
+describe('v17 → v18 (리뷰가 자기 모델·강도를 갖는다)', () => {
+  function v17File(review: Record<string, unknown>): Record<string, unknown> {
+    return { schemaVersion: 17, repos: [], workspaces: [], reviews: [review] }
+  }
+
+  const reviewOf = (out: Record<string, unknown>): Record<string, unknown> =>
+    (out.reviews as Record<string, unknown>[])[0]
+
+  /** 옛 리뷰가 무엇으로 돌았는지는 알 길이 없다 — 비워 두면 후속 턴이 전역 기본값으로 떨어진다. */
+  it('옛 리뷰는 모델·강도를 비운 채로 채운다', () => {
+    const out = migrate(v17File({ id: 'rv1', repoId: 'r1', prNumber: 3 }), 17)
+    expect(reviewOf(out)).toMatchObject({ model: null, effort: null })
+  })
+
+  it('이미 골라 둔 값은 덮어쓰지 않는다', () => {
+    const out = migrate(
+      v17File({ id: 'rv1', repoId: 'r1', prNumber: 3, model: 'gpt-5-codex', effort: 'high' }),
+      17
+    )
+    expect(reviewOf(out)).toMatchObject({ model: 'gpt-5-codex', effort: 'high' })
+  })
+
+  it('리뷰가 없는 파일도 그대로 통과한다', () => {
+    expect(migrate({ schemaVersion: 17, repos: [], workspaces: [] }, 17).reviews).toEqual([])
+  })
+})
+
+describe('v18 → v19 (워크스페이스 생성자 기록)', () => {
+  const v18File = (): Record<string, unknown> => ({
+    schemaVersion: 18,
+    repos: [],
+    workspaces: [
+      { id: 'w1', repoId: 'r1', name: 'alpha', parentWorkspaceId: null },
+      { id: 'w2', repoId: 'r1', name: 'beta', parentWorkspaceId: 'w1' }
+    ]
+  })
+
+  // 부모가 있다고 그 부모의 에이전트가 만든 것은 아니다(사람이 UI 에서 만든 스택이 그렇다).
+  // 여기서 추측하면 에이전트가 사람의 워크스페이스를 지울 권한을 소급해 얻는다.
+  it('부모가 있어도 생성자를 추측하지 않고 전부 null 로 둔다', () => {
+    const workspaces = migrate(v18File(), 18).workspaces as Partial<Workspace>[]
+
+    expect(workspaces.map((w) => w.createdByWorkspaceId)).toEqual([null, null])
+    // 부모 관계 자체는 그대로여야 한다 — 두 필드는 서로 다른 질문에 답한다.
+    expect(workspaces[1].parentWorkspaceId).toBe('w1')
+  })
+
+  it('워크스페이스가 없는 파일도 그대로 통과한다', () => {
+    expect(migrate({ schemaVersion: 18, repos: [], workspaces: [] }, 18).workspaces).toEqual([])
   })
 })
 

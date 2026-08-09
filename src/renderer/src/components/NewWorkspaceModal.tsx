@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { workspaceDisplayName } from '@shared/types'
+import { experimentsOf, workspaceDisplayName } from '@shared/types'
 import type { AgentBackendId } from '@shared/types'
 import { useStore } from '../store'
 import Modal, { inputClass, labelClass, primaryBtn, ghostBtn } from './Modal'
@@ -37,17 +37,33 @@ export default function NewWorkspaceModal({
       ? agentBackend
       : available[0].id
 
+  // 멀티 에이전트는 **모드**다 — 어떤 종류를 쓸지 여기서 고르지 않는다. 켜 두면 대화에서
+  // "Codex 한테 시켜줘" 라고 말하는 것으로 종류가 정해진다. 시작값은 전역 기본 설정을 따른다.
+  const [multiAgent, setMultiAgent] = useState(() => app.settings.defaultMultiAgent === true)
+  // 에이전트가 둘 이상 있고, 고른 메인이 조율하는 쪽이 될 수 있을 때만 모드를 제안한다.
+  const showModePicker =
+    experimentsOf(app.settings).multiAgent &&
+    available.length > 1 &&
+    Boolean(available.find((b) => b.id === effectiveBackend)?.capabilities.delegate)
+  // 메인을 조율 불가 백엔드로 바꾸면 모드도 함께 꺼진 것으로 읽는다(체크는 남겨 두고 되돌아오면 살아난다).
+  const effectiveMultiAgent = multiAgent && showModePicker
+
   // 닫고 즉시 사이드바에 스피너 행을 띄운다(worktree 준비는 백그라운드). 실패는 토스트로 알린다.
   const create = (): void => {
     if (!name.trim()) return
     const trimmed = name.trim()
-    void useStore
-      .getState()
-      .createWorkspace(
-        repoId,
-        { name: trimmed, parentWorkspaceId, agentBackend: effectiveBackend },
-        trimmed
-      )
+    void useStore.getState().createWorkspace(
+      repoId,
+      {
+        name: trimmed,
+        parentWorkspaceId,
+        agentBackend: effectiveBackend,
+        // 모드를 물어봤다면 **끈 것도 명시해서** 보낸다. 생략하면 main 이 전역 기본값으로
+        // 폴백하므로, 기본이 멀티일 때 사용자가 고른 "Single agent" 가 조용히 뒤집힌다.
+        ...(showModePicker ? { multiAgent: effectiveMultiAgent } : {})
+      },
+      trimmed
+    )
     onClose()
   }
 
@@ -84,9 +100,46 @@ export default function NewWorkspaceModal({
           )}
         </div>
 
+        {showModePicker && (
+          <div>
+            <label className={labelClass}>Mode</label>
+            <div className="flex gap-1.5">
+              {[
+                { on: false, label: 'Single agent', hint: 'One agent does the work.' },
+                {
+                  on: true,
+                  label: 'Multi-agent',
+                  hint: 'The main agent can run tasks with other agents.'
+                }
+              ].map((option) => (
+                <button
+                  key={option.label}
+                  type="button"
+                  onClick={() => setMultiAgent(option.on)}
+                  className={
+                    'flex-1 text-left text-sm px-3 py-2 rounded-lg border transition-colors ' +
+                    (effectiveMultiAgent === option.on
+                      ? 'border-[var(--info-500)] bg-[var(--info-600)]/15 text-neutral-100'
+                      : 'border-[var(--border)] text-neutral-300 hover:bg-[var(--surface-2)]')
+                  }
+                >
+                  <div className="font-medium">{option.label}</div>
+                  <div className="mt-0.5 text-xs text-neutral-500">{option.hint}</div>
+                </button>
+              ))}
+            </div>
+            {effectiveMultiAgent && (
+              <p className="mt-1.5 text-xs text-neutral-600">
+                Experimental. You don&apos;t pick the other agents here — just ask in the chat
+                (&ldquo;have Codex review this&rdquo;) and the main agent runs them for you.
+              </p>
+            )}
+          </div>
+        )}
+
         {showPicker && (
           <div>
-            <label className={labelClass}>Agent</label>
+            <label className={labelClass}>{effectiveMultiAgent ? 'Main agent' : 'Agent'}</label>
             <div className="flex gap-1.5">
               {available.map((b) => (
                 <button
@@ -106,7 +159,9 @@ export default function NewWorkspaceModal({
               ))}
             </div>
             <p className="mt-1.5 text-xs text-neutral-600">
-              A workspace stays on the agent it was created with.
+              {effectiveMultiAgent
+                ? 'The agent you talk to. It stays fixed for the life of the workspace.'
+                : 'A workspace stays on the agent it was created with.'}
             </p>
           </div>
         )}

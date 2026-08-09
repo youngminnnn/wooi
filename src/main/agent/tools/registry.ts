@@ -1,5 +1,5 @@
 import { log } from '../../logger'
-import type { ChatItem } from '@shared/types'
+import type { ChatEvent, ChatItem } from '@shared/types'
 import type { ScriptRunner } from '../../scripts'
 
 /**
@@ -32,6 +32,22 @@ export interface AgentToolDeps {
    * 그 워크스페이스의 모델이 읽지 않는다. 알림용으로만 쓴다.
    */
   postToTranscript: (workspaceId: string, item: ChatItem) => void
+  /**
+   * 워크스페이스 대화의 **휘발성 이벤트**를 렌더러로 보낸다(트랜스크립트에 남지 않음).
+   *
+   * postToTranscript 와 나눠 두는 이유: 위임 서브에이전트의 "지금 돌고 있음" 같은 것은 영속하면
+   * 안 되는 상태다. 세션이 끝나면 사라져야 하고, 다시 열었을 때 옛 스피너가 남아 있으면 안 된다.
+   */
+  emitChatEvent: (workspaceId: string, event: ChatEvent) => void
+  /**
+   * 워크스페이스를 아카이브할 때 그 워크스페이스에 매달린 것들을 끊는다([[workspaces]]
+   * archiveWorkspace 가 요구하는 것과 같은 모양).
+   *
+   * 구체 클래스가 아니라 쓰는 메서드만 적는다 — 도구가 오케스트레이터·터미널의 나머지 능력에
+   * 손을 뻗지 않아야 하고, 테스트가 이 둘을 흉내내는 값도 두 줄로 끝난다.
+   */
+  sessions: { dispose: (workspaceId: string) => void }
+  terminals: { disposeWorkspace: (workspaceId: string) => void }
 }
 
 /**

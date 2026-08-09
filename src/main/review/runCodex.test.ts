@@ -75,7 +75,13 @@ describe('codex exec JSONL 읽기', () => {
     })
     const { progress } = read([started])
     expect(progress).toHaveLength(1)
-    expect(progress[0]).toMatchObject({ kind: 'tool', text: "$ /bin/zsh -lc 'ls package.json'" })
+    // 이름과 인자를 나눠 싣는다 — 화면이 워크스페이스 대화와 같은 도구 행으로 그린다.
+    expect(progress[0]).toMatchObject({
+      kind: 'tool',
+      name: 'Bash',
+      detail: "/bin/zsh -lc 'ls package.json'",
+      text: "Bash  /bin/zsh -lc 'ls package.json'"
+    })
   })
 
   // 항목 하나가 started·completed 로 두 번 온다. 그대로 두면 진행 로그가 전부 겹쳐 보인다.
@@ -137,6 +143,30 @@ describe('codex exec JSONL 읽기', () => {
  * 리뷰가 시작하자마자 400 으로 죽는데(실제로 `startLine` 때문에 죽었다) 그 실패는 유닛
  * 테스트가 아니라 실행 중에만 드러난다 — 그래서 규칙 자체를 여기서 못 박아 둔다.
  */
+describe('parseArtifacts:false — 스키마 없이 돌리는 호출자(위임 실행)', () => {
+  /**
+   * 위임 실행은 `--output-schema` 를 주지 않으므로 최종 메시지가 그냥 답이다. 그런데
+   * coerceArtifact 는 `summary` 문자열만 있어도 아티팩트로 인정하기 때문에, 기본값(파싱 켬)으로
+   * 읽으면 JSON 으로 답한 서브런의 결과가 rawText 에 들어가지 못하고 통째로 사라진다.
+   */
+  function readRaw(lines: string[]): ReturnType<typeof createCodexReader>['out'] {
+    const r = createCodexReader(() => {}, { parseArtifacts: false })
+    for (const l of lines) r.push(`${l}\n`)
+    r.end()
+    return r.out
+  }
+
+  it('아티팩트로 보이는 JSON 답변도 결과 텍스트로 남긴다', () => {
+    const out = readRaw([THREAD, ARTIFACT])
+    expect(out.artifact).toBeNull()
+    expect(out.rawText).toContain('Looks good.')
+  })
+
+  it('기본값(켬)은 그대로다 — 리뷰 경로가 바뀌지 않았다', () => {
+    expect(read([THREAD, ARTIFACT]).out.artifact?.summary).toBe('Looks good.')
+  })
+})
+
 describe('strictSchema', () => {
   type Node = Record<string, unknown>
 

@@ -20,6 +20,7 @@ import { isReadOnlyWooiTool, WOOI_MCP_SERVER_NAME } from '../agent/tools/catalog
 import { fastModeReasonText, planApprovalMode, PLAN_OPTIONS } from '@shared/types'
 import { asClaudeMode, claudeEffort, claudeMode, type ClaudePermissionMode } from './protocol'
 import type {
+  AgentBackendId,
   ChatItem,
   ChatEvent,
   EffortSetting,
@@ -59,6 +60,19 @@ export interface SessionDeps {
    * 때문이다 — 모델은 그것을 인자로 지목할 수 없다.
    */
   wooiMcp: McpSdkServerConfigWithInstance
+  /**
+   * 이 세션이 위임할 수 있는 에이전트 종류. 없거나 비어 있으면 위임 도구를 아예 노출하지 않는다 —
+   * 기존 단일 에이전트 세션은 이 경로를 전혀 타지 않으므로 **없는 것이 기본**이다.
+   */
+  delegateBackends?: AgentBackendId[]
+  /**
+   * 위임받을 백엔드의 모델·effort 기본값. 메인이 설정에서 계산해 내려 준다.
+   * delegateBackends 가 비어 있으면 쓰이지 않으므로 함께 생략할 수 있다.
+   */
+  agentDefaults?: (backend: AgentBackendId) => {
+    model: string | null
+    effort: EffortSetting | null
+  }
   emit: (event: ChatEvent) => void
   persist: (item: ChatItem) => void
   requestPermission: (
@@ -500,6 +514,8 @@ export class ClaudeSession {
   async interrupt(): Promise<void> {
     // 사용자 의도로 끝난 턴은 자동 재시도 대상이 아니다(handleQueryDeath 가 이 플래그를 본다).
     this.interrupted = true
+    // 위임 실행은 별도 프로세스/query 라 부모 query 의 interrupt 로는 끊기지 않는다. 여기서
+    // 끊지 않으면 사용자가 멈춘 뒤에도 `codex exec` 가 계속 파일을 고친다.
     await this.q?.interrupt().catch(() => {})
   }
 
@@ -563,6 +579,8 @@ export class ClaudeSession {
   /** 입력 큐를 닫아 query 루프를 정상 종료시킨다. */
   dispose(): void {
     this.input.close()
+    // 위임 실행은 부모 query 와 수명이 따로다 — 여기서 끊지 않으면 워크스페이스를 닫아도
+    // 자식 프로세스가 남아 worktree 를 계속 건드린다.
     this.q?.interrupt().catch(() => {})
   }
 
@@ -1315,7 +1333,14 @@ export class ClaudeSession {
     this.deps.emit({ type: 'agents', agents: [...this.agentTasks.values()] })
   }
 
-  /** 추적 중인 서브에이전트를 모두 비우고 빈 목록을 방출한다(query 가 사라진 경로에서 호출). */
+  /**
+   * 추적 중인 서브에이전트를 모두 비우고 빈 목록을 방출한다(query 가 사라진 경로에서 호출).
+   *
+   * 네이티브 서브에이전트는 CLI 프로세스와 함께 죽으므로 목록만 비우면 되지만, **위임 실행은
+   * 별도 프로세스라 그냥 살아남는다.** query 가 사라지면 그 도구 호출의 결과를 돌려줄 곳이
+   * 없으므로(고아가 된다) 여기서 함께 끊는다 — 안 그러면 화면에서만 사라진 채 worktree 를
+   * 계속 고치는 프로세스가 남는다.
+   */
   private clearAgents(): void {
     if (this.agentTasks.size === 0) return
     this.agentTasks.clear()

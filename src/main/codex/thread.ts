@@ -13,6 +13,9 @@ import type {
 import type { RpcClient } from './jsonrpc'
 import { NOTIFY, RPC, type FileUpdateChange, type ThreadResult } from './wire'
 import { turnPolicyFor } from './modes'
+import { WOOI_MCP_SERVER_NAME } from '../agent/tools/catalog'
+import type { AgentBackendId } from '@shared/types'
+import { wooiToolServer } from './appServer'
 import {
   createMapperState,
   mapNotification,
@@ -265,7 +268,20 @@ export class CodexThread {
       model: this.config.model ?? undefined,
       sandbox: policy.sandboxMode,
       approvalPolicy: policy.approvalPolicy,
-      developerInstructions: wooiWorkspaceInstructions(this.workspaceId)
+      // 워크스페이스 안내와 위임 안내를 한 문자열로 합친다 — developerInstructions 는 하나뿐이라
+      // 나중에 쓰는 쪽이 앞의 것을 덮는다.
+      developerInstructions: [
+        wooiWorkspaceInstructions(this.workspaceId),
+        this.config.delegateInstructions
+      ]
+        .filter(Boolean)
+        .join('\n\n'),
+      // 위임 도구는 스레드 설정으로만 붙일 수 있다 — codex 에는 in-process MCP 서버가 없고,
+      // 프로세스 인자로 넣으면 app-server 를 공유하는 다른 워크스페이스까지 오염된다.
+      // 워크스페이스마다 도구 집합이 달라야 하므로(위임 도구는 멀티 에이전트에만) 스레드 단위로
+      // 같은 shim 을 한 번 더 선언한다. 스레드 config 는 `-c` 로 등록한 서버를 **덮으므로**(실측)
+      // 덮어쓰는 김에 위임 도구를 켠 설정으로 바꿔 놓는 셈이고, 서버 이름은 그대로 하나다.
+      ...delegateMcpConfig(this.config.delegateBackends)
     }
 
     const resume = this.config.resumeThreadId
@@ -431,4 +447,30 @@ function buildInput(text: string, images?: ImageAttachment[]): unknown[] {
 /** 파일명에서 경로 구분자를 제거해 임시 디렉터리 밖으로 새지 않게 한다. */
 function safeName(name: string): string {
   return name.replace(/[/\\]/g, '_') || 'image.png'
+}
+
+/**
+ * 위임 도구를 켠 Wooi shim 을 스레드 설정으로 다시 선언한다.
+ *
+ * `-c` 로 등록된 프로세스 전역 shim 은 위임 도구를 노출하지 않는다(그쪽 워크스페이스에는 없어야
+ * 하므로). 멀티 에이전트 워크스페이스만 여기서 같은 실행 파일을 `WOOI_TOOL_DELEGATE` 와 함께
+ * 다시 선언해, 그 스레드에서만 서브에이전트 도구가 보이게 한다.
+ *
+ * 서버 이름은 그대로 하나다 — 스레드 config 가 프로세스 등록을 덮으므로(실측) 둘이 공존하지
+ * 않고, 덮어쓰는 쪽이 더 넓은 도구 집합을 갖는다.
+ */
+function delegateMcpConfig(backends: AgentBackendId[]): Record<string, unknown> {
+  if (!backends.length) return {}
+  const server = wooiToolServer()
+  if (!server) return {}
+  return {
+    config: {
+      mcp_servers: {
+        [WOOI_MCP_SERVER_NAME]: {
+          ...server,
+          env: { ...server.env, WOOI_TOOL_DELEGATE: backends.join(',') }
+        }
+      }
+    }
+  }
 }

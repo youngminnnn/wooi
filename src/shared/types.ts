@@ -428,6 +428,18 @@ export interface AgentCapabilities {
   rateLimits: boolean
   /** /add-dir — worktree 밖 디렉토리를 작업 루트로 더 열어 줄 수 있는지. */
   addDirectory: boolean
+  /**
+   * 이 백엔드가 **메인일 때** 다른 종류의 에이전트에게 작업을 위임할 수 있는지(실험 기능).
+   *
+   * 위임 도구는 MCP 로 주입하는데, 그 배관이 백엔드마다 다르다 — Claude 는 SDK 의 in-process
+   * 서버를 그대로 꽂을 수 있지만, Codex 는 app-server 스레드에 MCP 설정을 주입하는 별도 경로가
+   * 필요하다. 그래서 이 값이 false 인 백엔드에서는 위임을 **UI 에서 아예 제안하지 않는다** —
+   * 켤 수는 있는데 아무 일도 안 일어나는 스위치가 제일 나쁘다.
+   *
+   * 위임 **대상**이 되는 것과는 무관하다. Codex 는 대상이 될 수 있고(`codex exec` 로 돌린다),
+   * 이 값은 "조율하는 쪽이 될 수 있는가"만 말한다.
+   */
+  delegate: boolean
 }
 
 /**
@@ -500,6 +512,17 @@ export interface Workspace {
   repoId: string
   /** 이 워크스페이스를 구동하는 에이전트 백엔드. 레거시 워크스페이스는 'claude' 로 마이그레이션된다. */
   agentBackend: AgentBackendId
+  /**
+   * 멀티 에이전트 워크스페이스인가. 없거나 false 면 **기존 단일 에이전트 워크스페이스**다.
+   *
+   * 켜져 있으면 메인 에이전트(`agentBackend`)가 대화 중에 **자연어로** 다른 종류의 에이전트를
+   * 서브에이전트로 띄울 수 있다. 어떤 종류를 쓸지 미리 고르지 않는 것이 요점이다 — 모드가
+   * 켜져 있으면 등록된 모든 에이전트가 대상이고, 선택은 대화에서 일어난다.
+   *
+   * 옵셔널로 두는 것도 요점이다 — 저장된 워크스페이스는 이 필드가 없으므로 마이그레이션 없이
+   * 전부 단일 모드로 읽히고, `agentBackend` 의 의미("이 워크스페이스의 메인 백엔드")도 그대로다.
+   */
+  multiAgent?: boolean
   /** worktree 이름. 생성 시 정해지는 기본 이름으로, 표시 이름의 최종 폴백이다. */
   name: string
   /**
@@ -520,6 +543,18 @@ export interface Workspace {
    * 기본 브랜치에서 바로 분기한 스택 뿌리면 null. 자식은 parentWorkspaceId 로 역산해 트리를 만든다.
    */
   parentWorkspaceId: string | null
+  /**
+   * 이 워크스페이스를 만든 **에이전트의 워크스페이스** id. 사람이 UI 에서 만들었으면 null.
+   *
+   * parentWorkspaceId 와 헷갈리기 쉽지만 묻는 것이 다르다 — 저쪽은 "어느 브랜치 위에 쌓였는가"
+   * (git 관계)이고, 이쪽은 "누가 만들었는가"(권한 관계)다. 스택이면 보통 둘이 같지만, 에이전트가
+   * 독립 워크스페이스를 만들면 부모는 null 인 채 생성자만 남고, 사람이 스택을 만들면 그 반대다.
+   *
+   * 대상을 인자로 받는 도구가 "남의 것에 손대지 못한다" 를 판정하는 근거가 이 필드다
+   * ([[agent/tools/target]]). 부모 관계로 대신 판정하면 사람이 만든 워크스페이스까지 에이전트가
+   * 지울 수 있게 된다.
+   */
+  createdByWorkspaceId: string | null
   /**
    * (현재 체크아웃된 브랜치의) 연결된 GitHub PR 번호(있으면). getPrStatus 로 발견되면 영속되어,
    * 부모 브랜치가 병합·삭제된 뒤에도 stack 관계·retarget 대상을 안정적으로 식별한다. 없으면 null.
@@ -543,6 +578,17 @@ export interface Workspace {
    * 브랜치명을 기억하는 이유는, 그 위에서 또 다른 병합이 일어나면 다시 알려야 하기 때문이다.
    */
   stackSyncDismissed?: string | null
+  /**
+   * PR 이 병합돼 이 워크스페이스가 사실상 끝났을 때의 정리 제안(감지만 — 아카이브는 사용자 승인 후).
+   * 없으면 null. 해소되면(아카이브했거나 사용자가 해제했으면) 지워진다.
+   */
+  archiveSuggest?: ArchiveSuggestion | null
+  /**
+   * 사용자가 해제한 제안의 병합 브랜치. 같은 병합으로 배너가 다시 뜨는 것을 막는다.
+   * 브랜치명을 기억하는 이유는 stackSyncDismissed 와 같다 — 그 뒤에 다른 브랜치가 병합되면
+   * 그건 새로운 사실이므로 다시 알려야 한다.
+   */
+  archiveSuggestDismissed?: string | null
   /**
    * PR 의 base 가 스택 관계와 어긋난 상태(감지만 — 리타겟은 사용자 승인 후). 없으면 null.
    * 해소되면(리타겟했거나 사용자가 그대로 두기로 했으면) 지워진다.
@@ -688,12 +734,58 @@ export function agentSettingsFor(settings: AppSettings, id: AgentBackendId): Age
   return settings.agents?.[id] ?? DEFAULT_AGENT_SETTINGS
 }
 
+/**
+ * 실험 기능 스위치를 꺼낸다. 항목이 통째로 없거나 일부만 저장된 설정(기능이 나중에 추가됨)에서도
+ * 빠진 스위치는 꺼진 것으로 읽는다 — 실험 기능이 사고로 켜지는 일은 없어야 한다.
+ */
+export function experimentsOf(settings: AppSettings | null | undefined): ExperimentSettings {
+  return { ...DEFAULT_EXPERIMENTS, ...(settings?.experiments ?? {}) }
+}
+
+/**
+ * 아직 정식 기능이 아닌 것들의 스위치. 기본값은 전부 꺼짐이고, 켠 사용자에게만 UI 가 열린다.
+ *
+ * 정식 승격 시에는 이 항목을 지우고 해당 기능을 상시 노출로 바꾼다 — 그때 저장된 값은 기본값
+ * 병합으로 조용히 사라지므로 마이그레이션이 필요 없다.
+ */
+export interface ExperimentSettings {
+  /**
+   * 멀티 에이전트 위임(메인과 다른 종류의 에이전트에게 작업을 넘김).
+   * 켜면 워크스페이스 생성 시 위임할 백엔드를 고를 수 있다.
+   */
+  multiAgent: boolean
+}
+
+/**
+ * 실험 기능의 기본 상태.
+ *
+ * multiAgent 를 켜 두는 것은 "안정적이다" 라는 뜻이 아니라 **보이게 두겠다**는 뜻이다 — 에이전트를
+ * 둘 이상 쓰는 사용자만 선택지를 보게 되고(피커·메뉴 모두 available >= 2 로 가드), 워크스페이스
+ * 단위로 다시 켜야 실제로 열린다. 즉 기본 동작은 그대로 단일 에이전트다.
+ */
+export const DEFAULT_EXPERIMENTS: ExperimentSettings = {
+  multiAgent: true
+}
+
 export interface AppSettings {
   /**
    * 새 워크스페이스가 기본으로 쓸 에이전트 백엔드. 사용자가 두 에이전트를 모두 보유했을 때만
    * 의미가 있으며, 하나뿐이면 그 하나로 자동 해석된다.
    */
   defaultAgentBackend: AgentBackendId
+  /**
+   * 새 워크스페이스를 멀티 에이전트 모드로 만들지(실험 기능).
+   *
+   * `defaultAgentBackend` 와 **직교한다** — 멀티 에이전트 워크스페이스도 대화 상대인 메인
+   * 에이전트가 하나 필요하고, 그건 여전히 위 값이다. 설정 UI 는 둘을 "Multi-agent · Claude Code"
+   * 처럼 한 선택지로 합쳐 보여 주지만, 저장은 나눠서 한다.
+   */
+  defaultMultiAgent?: boolean
+  /**
+   * 실험 기능 스위치. 저장된 설정에 없으면(구버전에서 올라옴) 기본값 병합으로 채워진다.
+   * 읽을 때는 항상 `experimentsOf(settings)` 를 거쳐 누락에 대비한다.
+   */
+  experiments?: ExperimentSettings
   /** 백엔드별 전역 기본값(모델·effort·권한 모드). */
   agents: Record<AgentBackendId, AgentSettings>
   /** UI 색상 테마(다크 기본). */
@@ -929,6 +1021,14 @@ export interface RunningAgent {
   taskId: string
   /** 서브에이전트 타입(SDK subagent_type). 예: 'Explore', 'code-reviewer'. */
   agentType: string
+  /**
+   * 이 서브에이전트를 실제로 돌리는 백엔드. 없으면 **부모 워크스페이스의 백엔드**로 읽는다.
+   *
+   * 네이티브 서브에이전트(Claude 의 Task · Codex 의 collab)는 정의상 부모와 같은 백엔드라 이
+   * 값을 싣지 않는다. 위임(delegate) 도구로 띄운 교차 백엔드 실행만 자기 백엔드를 명시하고,
+   * 사이드바는 그 값으로 브랜드 마크를 갈아 끼운다.
+   */
+  backend?: AgentBackendId
   /** 현재 수행 중인 일의 설명. task_progress 로 갱신된다. */
   description: string
   /** 시작 시각(epoch ms). 경과 시간 표시용. */
@@ -1224,6 +1324,23 @@ export interface StackSyncPlan {
 }
 
 /**
+ * PR 이 병합돼 이 워크스페이스에 남은 일이 없다고 앱이 판단한 상태.
+ *
+ * 판단을 에이전트에게 시키지 않는 이유: 앱은 이미 병합을 알고 있다(스택 캐스케이드가 그 신호로
+ * 돈다). 앱이 아는 사실을 굳이 턴을 태워 다시 추론시키면 비용이 들고 판단이 틀릴 수도 있다.
+ *
+ * 감지만 하고 실행하지 않는 것은 stackSync 와 같은 이유다 — 아카이브는 worktree 를
+ * `git worktree remove --force` 로 지우므로, 사용자 모르게 나가면 안 된다.
+ */
+export interface ArchiveSuggestion {
+  /** 이 제안을 띄우게 만든 병합 브랜치. 해제 기억(archiveSuggestDismissed)의 키이기도 하다. */
+  mergedBranch: string
+  /** 병합된 PR 번호(배너에 보여 준다). 번호를 알아내지 못했으면 null. */
+  prNumber: number | null
+  detectedAt: number
+}
+
+/**
  * 스택 워크스페이스의 PR 이 부모가 아닌 브랜치(대개 리포 기본 브랜치)를 향하고 있는 상태.
  *
  * `--base` 없이 `gh pr create` 를 실행하면 gh 가 리포 기본 브랜치를 고르기 때문에, 에이전트가
@@ -1385,6 +1502,13 @@ export interface PostedComment {
   kind: ReviewCommentKind
   /** ISO 8601. 이 이후에 달린 남의 코멘트만 새 활동으로 본다. */
   createdAt: string
+  /**
+   * 코멘트가 걸린 줄이 최신 diff 에서 사라졌는가(GitHub 의 "Outdated").
+   *
+   * 폴링이 갱신한다. 화면에서 이걸 알려주지 않으면, 상대가 이미 고쳐 놓은 자리를 두고
+   * 사용자는 아직 살아 있는 지적인 줄 안다.
+   */
+  outdated?: boolean
 }
 
 /**
@@ -1402,6 +1526,14 @@ export interface ReviewSession {
    * 후속 턴은 앞선 대화를 resume 하는데, 그 세션 id 는 그 백엔드에서만 유효하기 때문이다.
    */
   agentBackend: AgentBackendId
+  /**
+   * 이 리뷰를 돌리는 모델과 추론 강도. 에이전트와 마찬가지로 **시작할 때 정해져 고정**된다 —
+   * 후속 턴이 앞선 대화를 이어받는데 도중에 모델이 바뀌면 같은 리뷰의 판단 기준이 달라진다.
+   *
+   * 시작 시점에 전역 기본값으로 해석해 둔 값이다. null 이면 에이전트가 알아서 고른다.
+   */
+  model: string | null
+  effort: EffortSetting | null
   prNumber: number
   prUrl: string
   prTitle: string
@@ -1457,7 +1589,16 @@ export interface ReviewSubmission {
 export interface ReviewProgressItem {
   id: string
   kind: 'text' | 'tool' | 'error'
+  /** 한 줄 요약. 도구 항목이면 `name  detail` 을 합친 문자열이다. */
   text: string
+  /**
+   * 도구 항목의 이름·인자 요약을 나눠 담는다(kind === 'tool' 일 때만).
+   *
+   * 화면이 워크스페이스 대화와 **같은 도구 행**으로 그리려면 이름과 인자가 분리돼 있어야
+   * 한다. `text` 는 합쳐 둔 값이라 옛 기록·폴백용으로만 남긴다.
+   */
+  name?: string
+  detail?: string
   ts: number
 }
 
@@ -1467,7 +1608,7 @@ export interface ReviewProgressItem {
  */
 export type ReviewActivityItem =
   | { id: string; kind: 'turn'; role: 'user' | 'agent'; text: string; ts: number }
-  | { id: string; kind: 'tool'; text: string; ts: number }
+  | { id: string; kind: 'tool'; text: string; name?: string; detail?: string; ts: number }
   | {
       id: string
       kind: 'reply'
@@ -1537,6 +1678,8 @@ export const IPC = {
   repoListBranches: 'repo:listBranches',
   workspaceCreate: 'workspace:create',
   workspaceArchive: 'workspace:archive',
+  /** 병합된 PR 로 뜬 아카이브 제안을 해제한다(같은 병합은 다시 제안하지 않는다). */
+  workspaceArchiveSuggestDismiss: 'workspace:archiveSuggestDismiss',
   workspaceUnarchive: 'workspace:unarchive',
   workspaceRemove: 'workspace:remove',
   /** 한 레포의 아카이브된 워크스페이스를 한 번에 영구 삭제한다(브랜치·기록 포함). */
@@ -1555,6 +1698,7 @@ export const IPC = {
   agentListModels: 'agent:listModels',
   /** 워크스페이스별 알림 음소거 토글. */
   workspaceSetMuted: 'workspace:setMuted',
+  workspaceSetMultiAgent: 'workspace:setMultiAgent',
   workspaceRename: 'workspace:rename',
   /** 사이드바 드래그 앤 드롭으로 워크스페이스 표시 순서를 바꾼다(같은 레포·같은 stack 부모끼리만). */
   workspaceReorder: 'workspace:reorder',
@@ -1850,10 +1994,20 @@ export interface CreateWorkspaceArgs {
    */
   parentWorkspaceId?: string | null
   /**
+   * 만든 주체가 다른 워크스페이스의 에이전트면 그 워크스페이스 id. 렌더러(사람)는 넘기지 않는다.
+   * 나중에 그 에이전트가 이 워크스페이스를 아카이브할 수 있는지의 근거가 된다.
+   */
+  createdByWorkspaceId?: string | null
+  /**
    * 이 워크스페이스를 구동할 에이전트. 생성 시 한 번 정해져 세션 내내 고정된다.
    * 생략하면 전역 기본 백엔드(AppSettings.defaultAgentBackend)를 쓴다.
    */
   agentBackend?: AgentBackendId
+  /**
+   * 멀티 에이전트 워크스페이스로 만들지. 생략하면 평범한 단일 에이전트 워크스페이스다.
+   * 실험 기능이 꺼져 있으면 저장은 되지만 세션에 반영되지 않는다(delegateBackendsFor 가 접는다).
+   */
+  multiAgent?: boolean
 }
 
 /**
@@ -2084,6 +2238,12 @@ export interface ContextUsageInfo {
  * 양쪽이 어긋나면 세션 리셋 카운트다운이 조용히 사라지므로 SSOT 로 둔다.
  */
 export const SESSION_RATE_LIMIT_LABEL = '5-hour'
+
+/**
+ * 주간 창의 label. Codex 의 durationLabel 이 붙이고 renderer 가 상태줄 대표 창을 고르는 데 쓴다
+ * (SESSION_RATE_LIMIT_LABEL 과 같은 이유로 SSOT).
+ */
+export const WEEKLY_RATE_LIMIT_LABEL = 'Weekly'
 
 /** /usage — 세션 비용 + (가능하면) 요금제 사용률 창. */
 export interface UsageInfo {

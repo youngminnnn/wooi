@@ -503,6 +503,47 @@ export async function createPrWeb(
   return {}
 }
 
+/** 만들어진 PR 의 최소 식별자. 번호는 store 에, URL 은 모델·사용자에게 필요하다. */
+export interface CreatedPr {
+  number: number
+  url: string
+}
+
+/**
+ * PR 을 **실제로** 만든다(`gh pr create`).
+ *
+ * createPrWeb 과 갈라 둔 이유: 저쪽은 `--web` 이라 브라우저를 열 뿐 PR 을 만들지 않는다.
+ * 에이전트는 사용자 화면을 뺏지 않고 스스로 끝내야 하므로 생성까지 여기서 한다.
+ *
+ * 본문은 인자가 아니라 stdin(`--body-file -`)으로 넘긴다 — 모델이 쓴 임의의 마크다운을 명령
+ * 문자열에 끼워 넣으면 따옴표 하나로 셸 인용이 뚫린다(runLoginShell 의 stdin 주석과 같은 이유).
+ * 나머지 인자는 작은따옴표로 감싸되, 내부 작은따옴표까지 탈출시킨다 — 제목도 모델이 쓴 문자열이라
+ * 브랜치명처럼 sanitize 돼 있다고 가정할 수 없다.
+ *
+ * runGhWrite 를 쓰므로 열린 PR 캐시가 곧바로 무효화된다 — 방금 만든 PR 이 다음 상태 갱신에
+ * 바로 잡혀야 사이드바가 몇 초 동안 "PR 없음" 으로 남지 않는다.
+ */
+export async function createPr(
+  worktreePath: string,
+  opts: { base: string; title: string; body: string; draft?: boolean }
+): Promise<{ pr?: CreatedPr; error?: string }> {
+  if (!(await connectedFresh())) return { error: NOT_CONNECTED }
+  const draftFlag = opts.draft ? ' --draft' : ''
+  const { stdout, stderr, code } = await runGhWrite(
+    `gh pr create --base ${shellQuote(opts.base)} --title ${shellQuote(opts.title)} --body-file -${draftFlag}`,
+    worktreePath,
+    { stdin: opts.body }
+  )
+  if (code !== 0) return { error: lastError(stderr, 'Failed to open the pull request.') }
+
+  // gh 는 만든 PR 의 URL 을 stdout 마지막 줄에 찍는다. 번호를 여기서 뽑는 이유는, 곧바로 다시
+  // 조회하면 방금 만든 PR 이 아직 목록에 안 잡히는 경합이 생기기 때문이다.
+  const url = stdout.trim().split('\n').filter(Boolean).pop() ?? ''
+  const m = url.match(/\/pull\/(\d+)/)
+  if (!m) return { error: 'The pull request was created, but Wooi could not read its URL.' }
+  return { pr: { number: parseInt(m[1], 10), url } }
+}
+
 /**
  * PR base 를 newBase 로 바꾼다(`gh pr edit [selector] --base`). selector 를 주면 그 PR(브랜치/번호)을,
  * 없으면 현재 브랜치의 PR 을 대상으로 한다. 부모 PR 이 병합돼 자식 PR 을 조부모로 옮길 때 쓴다.
@@ -529,14 +570,24 @@ function lastError(stderr: string, fallback: string): string {
 }
 
 /**
+ * 명령 문자열에 끼워 넣을 값을 작은따옴표로 감싼다. 내부 작은따옴표는 POSIX 방식('\'')으로
+ * 닫았다 다시 여는데, 이게 있어야 감싸기가 실제로 방어가 된다 — 그냥 감싸기만 하면 따옴표
+ * 하나로 인용이 끝나고 뒤가 명령으로 해석된다.
+ */
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`
+}
+
+/**
  * PR 을 바꾸는 gh 명령 실행기. 실행 뒤 열린 PR 목록 캐시를 버린다 — 방금 만들거나 병합·종료한 PR 이
  * 다음 상태 갱신에 곧바로 반영돼야 한다. 실패했더라도 버린다(한 번 더 조회할 뿐, 잘못될 여지가 없다).
  */
 async function runGhWrite(
   command: string,
-  cwd: string
+  cwd: string,
+  opts?: { stdin?: string }
 ): Promise<{ stdout: string; stderr: string; code: number | null }> {
-  const res = await runLoginShell(command, cwd)
+  const res = await runLoginShell(command, cwd, opts)
   invalidateOpenPrs()
   return res
 }
@@ -717,6 +768,8 @@ export interface PostedCommentResult {
   url?: string
   /** ISO 8601. 이 시각 이후의 남의 코멘트만 새 활동으로 본다. */
   createdAt?: string
+  /** 답글이면 GitHub 이 정해 준 **스레드 루트** id. 어느 스레드에 붙었는지의 유일한 근거다. */
+  inReplyToId?: number
   error?: string
 }
 
@@ -750,8 +803,14 @@ async function ghApiPost(
       id?: number
       html_url?: string
       created_at?: string
+      in_reply_to_id?: number | null
     }
-    return { id: created.id, url: created.html_url, createdAt: created.created_at }
+    return {
+      id: created.id,
+      url: created.html_url,
+      createdAt: created.created_at,
+      inReplyToId: created.in_reply_to_id ?? undefined
+    }
   } catch {
     // 게시 자체는 성공했으므로 식별자만 비운다.
     return {}
@@ -828,6 +887,8 @@ export interface GhReviewComment {
   /** 코멘트가 붙은 줄. diff 에서 밀려나면 null 이 온다 → original_line 으로 폴백. */
   line?: number | null
   original_line?: number | null
+  /** diff 안에서의 위치. 코멘트가 밀려나면(= GitHub 의 Outdated) null 이 온다. */
+  position?: number | null
   html_url: string
 }
 

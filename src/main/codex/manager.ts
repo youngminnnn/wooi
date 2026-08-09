@@ -12,6 +12,9 @@ import { getTranscripts } from '../transcripts'
 import { log } from '../logger'
 import { IPC, agentSettingsFor, normalizePermissionMode, workspaceDisplayName } from '@shared/types'
 import { CODEX_META, type AgentBackend } from '../agent/backend'
+import { delegateBackendsFor } from '../agent/multiAgent'
+import { delegateThreadInstructions } from '../subagent/catalog'
+import { abortAllSubAgents, abortSubAgents } from '../agent/tools/subagent'
 import { durationLabel } from './rateLimits'
 import type { CodexCommand, CodexConfig, CodexEvent } from './protocol'
 import type {
@@ -225,7 +228,11 @@ export class CodexSessionManager implements AgentBackend {
 
   /** store 에서 스레드 생성/재개에 필요한 설정을 계산한다. */
   private configFor(ws: Workspace): CodexConfig {
-    const defaults = agentSettingsFor(getStore().getState().settings, CODEX_META.id)
+    const settings = getStore().getState().settings
+    const defaults = agentSettingsFor(settings, CODEX_META.id)
+    // 위임이 닫혀 있으면 소켓을 띄우지도 않는다 — 단일 에이전트 사용자에게 유닉스 소켓이 하나
+    // 생길 이유가 없다(socketPath() 가 첫 호출에서 리슨을 시작한다).
+    const backends = delegateBackendsFor(ws, settings)
     return {
       cwd: ws.worktreePath,
       model: ws.model ?? defaults.model,
@@ -233,7 +240,9 @@ export class CodexSessionManager implements AgentBackend {
       fastMode: ws.fastMode ?? defaults.fastMode,
       // 다른 백엔드에서 넘어온 모드가 정책 변환으로 새지 않도록 여기서 걸러 낸다.
       permissionMode: normalizePermissionMode(CODEX_META, ws.permissionMode),
-      resumeThreadId: ws.sessionId
+      resumeThreadId: ws.sessionId,
+      delegateBackends: backends,
+      delegateInstructions: backends.length ? delegateThreadInstructions(backends) : null
     }
   }
 
@@ -280,6 +289,8 @@ export class CodexSessionManager implements AgentBackend {
 
   async interrupt(workspaceId: string): Promise<void> {
     this.sendIfHost({ type: 'interrupt', workspaceId })
+    // 위임 서브런은 세션이 아니라 메인에서 돈다 — 스레드 인터럽트로는 끊기지 않으므로 여기서 끊는다.
+    abortSubAgents(workspaceId)
     // 스레드가 없거나 끊긴 경우에도 사이드바가 '진행 중'에 갇히지 않도록 idle 로 확정한다.
     this.forceIdle(workspaceId)
   }
@@ -381,6 +392,9 @@ export class CodexSessionManager implements AgentBackend {
 
   dispose(workspaceId: string): void {
     this.sendIfHost({ type: 'dispose', workspaceId })
+    // 위임 서브런은 메인에서 돌므로 dispose 로 끊기지 않는다. 여기서 안 끊으면 워크스페이스를
+    // 닫아도 자식 프로세스가 남아 worktree 를 계속 건드린다.
+    abortSubAgents(workspaceId)
     // 스레드가 사라지면 그 스레드가 기다리던 승인 요청은 응답받을 수 없으므로 거둔다.
     for (const [requestId, wsId] of this.pendingPermissions) {
       if (wsId !== workspaceId) continue
@@ -392,6 +406,7 @@ export class CodexSessionManager implements AgentBackend {
 
   disposeAll(): void {
     this.sendIfHost({ type: 'disposeAll' })
+    abortAllSubAgents()
     for (const requestId of this.pendingPermissions.keys()) {
       this.dispatch(IPC.evtPermissionCancel, requestId)
     }

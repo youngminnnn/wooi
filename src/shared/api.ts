@@ -97,6 +97,11 @@ export interface WooiApi {
   workspace: {
     create(args: CreateWorkspaceArgs): Promise<CreateWorkspaceResult>
     archive(workspaceId: string): Promise<void>
+    /**
+     * 병합된 PR 로 뜬 아카이브 제안을 해제한다(같은 병합으로는 다시 제안하지 않는다).
+     * 아카이브 자체는 위 archive 를 그대로 쓴다 — 제안은 그 입구일 뿐이다.
+     */
+    dismissArchiveSuggest(workspaceId: string): Promise<void>
     unarchive(workspaceId: string): Promise<{
       error?: string
       carryFailures?: CarryFailure[]
@@ -116,6 +121,13 @@ export interface WooiApi {
     setFastMode(workspaceId: string, fastMode: boolean | null): Promise<void>
     /** 워크스페이스별 알림 음소거를 설정한다. */
     setMuted(workspaceId: string, muted: boolean): Promise<void>
+    /**
+     * 멀티 에이전트 모드를 켜고 끈다(실험 기능).
+     *
+     * 세션이 이미 열려 있으면 다음 세션부터 반영된다 — 위임 도구는 query 를 열 때 options 에
+     * 실리는 값이라, 도는 중에 더하거나 뺄 수 없다(`/add-dir` 과 같은 성질).
+     */
+    setMultiAgent(workspaceId: string, multiAgent: boolean): Promise<void>
     /** 표시 이름 override 를 지정한다. 빈 문자열이면 override 를 지워 기본 규칙으로 되돌린다. */
     rename(workspaceId: string, name: string): Promise<void>
     /**

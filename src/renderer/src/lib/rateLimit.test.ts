@@ -8,6 +8,7 @@ import {
   normalizeUtilization,
   resetLabel,
   shouldShowRateLimits,
+  statusWindow,
   tightestWindow
 } from './rateLimit'
 
@@ -40,6 +41,37 @@ describe('tightestWindow', () => {
   it('값이 있는 창이 하나도 없으면 null', () => {
     expect(tightestWindow([win('5-hour', null)])).toBeNull()
     expect(tightestWindow([])).toBeNull()
+  })
+})
+
+describe('statusWindow', () => {
+  it('Claude 는 사용률과 무관하게 항상 5시간 세션 창을 보여 준다', () => {
+    const windows = [win('5-hour', 12), win('7-day', 91), win('7-day (Opus)', 40)]
+    expect(statusWindow('claude', windows)?.label).toBe('5-hour')
+    // 순서가 바뀌거나 세션 창이 가장 뜨거워도 같은 창이어야 한다.
+    expect(statusWindow('claude', [win('7-day', 3), win('5-hour', 99)])?.label).toBe('5-hour')
+  })
+
+  it('Codex 는 5시간 창이 있어도 주간 창을 보여 준다', () => {
+    expect(statusWindow('codex', [win('5-hour', 88), win('Weekly', 12)])?.label).toBe('Weekly')
+    expect(statusWindow('codex', [win('5-hour', 88), win('2-week', 12)])?.label).toBe('2-week')
+  })
+
+  it('정해 둔 창이 없으면 가장 많이 소진된 창으로 폴백한다', () => {
+    // 창 이름이 기대와 다른 응답에서도 빈 자리를 남기지 않는다.
+    expect(statusWindow('codex', [win('Primary', 10), win('Secondary', 44)])?.label).toBe(
+      'Secondary'
+    )
+    expect(statusWindow('claude', [win('7-day', 44), win('7-day (Opus)', 60)])?.label).toBe(
+      '7-day (Opus)'
+    )
+  })
+
+  it('사용률이 없는 창은 고르지 않는다', () => {
+    // 5시간 창 값이 비었다고 0% 를 보여 주느니, 값이 있는 창으로 폴백한다.
+    expect(statusWindow('claude', [win('5-hour', null), win('7-day', 30)])?.label).toBe('7-day')
+    expect(statusWindow('claude', [win('5-hour', null)])).toBeNull()
+    expect(statusWindow('codex', [])).toBeNull()
   })
 })
 

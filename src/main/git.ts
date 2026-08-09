@@ -332,8 +332,100 @@ export async function getStatus(worktreePath: string, baseBranch: string): Promi
   return { branch, ahead, behind, changedFiles, conflicted }
 }
 
+/**
+ * base 대비 이 워크트리가 건드린 파일 경로들(커밋된 것 + 아직 커밋 안 한 것을 합친 집합).
+ *
+ * 둘 다 봐야 한다 — 옆 워크스페이스가 **방금 고쳤지만 아직 커밋하지 않은** 파일이 가장 위험하다.
+ * 커밋된 것만 보면 그게 통째로 안 보인다.
+ *
+ * getStatus 와 같은 방식으로, base ref 가 없는 등의 실패는 조용히 빈 배열로 떨어뜨린다 — 남의
+ * 워크스페이스를 훑는 조회라 하나가 실패했다고 전체를 세울 이유가 없다.
+ */
+export async function listChangedPaths(
+  worktreePath: string,
+  baseBranch: string
+): Promise<string[]> {
+  const paths = new Set<string>()
+
+  const committed = await gitTry(worktreePath, ['diff', '--name-only', `${baseBranch}...HEAD`])
+  if (committed.ok) {
+    for (const line of committed.stdout.split('\n')) if (line.trim()) paths.add(line.trim())
+  }
+
+  const working = await gitTry(worktreePath, ['status', '--porcelain'])
+  if (working.ok) {
+    for (const line of working.stdout.split('\n')) {
+      const path = parsePorcelainPath(line)
+      if (path) paths.add(path)
+    }
+  }
+
+  return [...paths]
+}
+
+/**
+ * `git status --porcelain` 한 줄에서 경로만 뽑는다.
+ * 형식은 `XY <path>` 이고, 이름이 바뀐 항목은 `R  <old> -> <new>` 로 온다(바뀐 뒤 이름을 쓴다).
+ */
+function parsePorcelainPath(line: string): string | null {
+  if (line.length < 4) return null
+  const rest = line.slice(3).trim()
+  if (!rest) return null
+  const arrow = rest.indexOf(' -> ')
+  const path = arrow >= 0 ? rest.slice(arrow + 4) : rest
+  // 공백이 든 경로는 git 이 따옴표로 감싼다.
+  return path.replace(/^"(.*)"$/, '$1')
+}
+
 export function repoNameFromPath(path: string): string {
   return basename(path)
+}
+
+// ── PR 을 열기 전에 확인해야 하는 것들 ──────────────────────────────────────
+
+/**
+ * origin 에 이 브랜치가 이미 올라가 있는가. 아래 restack 의 remoteBranchExists 와 달리 로컬의
+ * `origin/<branch>` ref 가 아니라 **origin 에 직접** 물어본다 — PR 을 열기 직전의 판단이라,
+ * fetch 를 안 한 사이 다른 곳에서 올라간 브랜치를 "없다" 고 보면 헛된 push 를 시도하게 된다.
+ *
+ * 조회 자체가 실패하면(origin 없음·오프라인) false 로 떨어뜨린다 — 그러면 호출부가 push 를
+ * 시도하고, 진짜 원인은 push 의 에러 메시지로 드러난다. 여기서 에러를 지어내는 것보다 구체적이다.
+ */
+export async function originHasBranch(worktreePath: string, branch: string): Promise<boolean> {
+  const r = await gitTry(worktreePath, ['ls-remote', '--heads', 'origin', branch])
+  return r.ok && r.stdout.length > 0
+}
+
+/**
+ * 현재 브랜치를 origin 에 올리고 업스트림을 잡는다.
+ *
+ * 실패를 삼키지 않고 stderr 를 그대로 돌려주는 것이 요점이다 — 이 리포처럼 브랜치 이름 규칙
+ * pre-push 훅이 걸린 곳에서는 그 문장이 "무엇을 어떻게 고쳐야 하는가" 그 자체다.
+ */
+export async function pushCurrentBranch(
+  worktreePath: string
+): Promise<{ ok: boolean; error: string }> {
+  const r = await gitTry(worktreePath, ['push', '-u', 'origin', 'HEAD'])
+  return { ok: r.ok, error: r.ok ? '' : r.stderr || r.stdout || 'git push failed.' }
+}
+
+/**
+ * base 대비 HEAD 에만 있는 커밋 수. 0 이면 리뷰할 것이 없다는 뜻이다.
+ *
+ * 로컬 ref 가 없으면 origin/<base> 로 한 번 더 시도하고, 그래도 못 세면 null(판단 보류)이다 —
+ * 세지 못했다는 이유만으로 PR 을 막지는 않는다.
+ */
+export async function countCommitsAhead(
+  worktreePath: string,
+  base: string
+): Promise<number | null> {
+  for (const ref of [base, `origin/${base}`]) {
+    const r = await gitTry(worktreePath, ['rev-list', '--count', `${ref}..HEAD`])
+    if (!r.ok) continue
+    const n = parseInt(r.stdout, 10)
+    if (Number.isFinite(n)) return n
+  }
+  return null
 }
 
 /**
@@ -565,6 +657,107 @@ export async function getDiff(worktreePath: string, baseBranch: string): Promise
 
   files.sort((a, b) => a.path.localeCompare(b.path))
   return { baseBranch, files }
+}
+
+/** 커밋 목록과 변경 파일 목록. 어느 쪽이든 잘렸으면 omitted 에 남는다. */
+export interface BranchSummary {
+  /** "d86b7e2 feat: 계산 엔진 구현" 형태, 최신이 먼저. */
+  commits: string[]
+  /** "src/calc.js (+82 −4)" 형태, 변경량이 큰 것이 먼저. */
+  files: string[]
+  omittedCommits: number
+  omittedFiles: number
+}
+
+// 인계 메시지에 실릴 크기라 상한을 둔다. 리팩터 한 번에 200개 파일이 바뀌는 브랜치가 있고,
+// 그걸 다 적으면 정작 읽어야 할 작업 지시가 목록에 묻힌다.
+const SUMMARY_MAX_COMMITS = 20
+const SUMMARY_MAX_FILES = 40
+
+/**
+ * 브랜치가 base 이후로 무엇을 했는지 한 눈에 보이게 요약한다.
+ *
+ * 스택 인계에 쓴다 — 자식은 부모의 커밋된 tip 에서 갈라지므로, 이 요약이 곧 "네가 물려받은
+ * 코드에 이미 들어 있는 것" 이다. 모델을 부르지 않고 git 으로만 만들기 때문에 정확하고 공짜다.
+ *
+ * base 가 분기 후 전진했어도 base 쪽 커밋이 섞이지 않도록 merge-base 를 기준으로 삼는다
+ * (getDiff 와 같은 이유·같은 방식).
+ *
+ * 요약할 것이 없거나 git 이 실패하면 null — 인계는 요약 없이도 성립해야 하므로 던지지 않는다.
+ */
+/**
+ * 분기점을 고른다 — 로컬 base ref 와 그 upstream 중 **더 최근**을 쓴다.
+ *
+ * Wooi 의 워크트리는 base 브랜치를 절대 체크아웃하지 않으므로 로컬 `main` 은 대개 낡아 있다.
+ * 그 낡은 ref 로만 merge-base 를 잡으면, 워크스페이스가 base 에서 당겨 온 커밋들이 "이 브랜치가
+ * 한 일" 로 둔갑한다(실측: 로컬 main 이 한 커밋 뒤처져 릴리즈 커밋이 브랜치 몫으로 잡혔다).
+ * 자식에게 남의 작업을 물려준 것처럼 알려 주는 셈이라, 요약의 쓸모가 바로 무너진다.
+ *
+ * resolveBaseStartPoint 처럼 `origin/<base>` 를 무조건 우선하지 않는다 — 리모트가 로컬보다
+ * 뒤처진 경우(아직 push 안 한 부모 브랜치 위에 쌓기)에는 그쪽이 틀리기 때문에, 어느 쪽이든
+ * **뒤에 있는 분기점**을 고르게 둔다.
+ */
+async function branchPoint(worktreePath: string, baseBranch: string): Promise<string | null> {
+  const upstream = await git(worktreePath, [
+    'rev-parse',
+    '--abbrev-ref',
+    `${baseBranch}@{upstream}`
+  ]).catch(() => null)
+
+  const candidates = [baseBranch, ...(upstream ? [upstream] : [])]
+  const points = (
+    await Promise.all(
+      candidates.map((ref) => git(worktreePath, ['merge-base', ref, 'HEAD']).catch(() => null))
+    )
+  ).filter((p): p is string => !!p)
+
+  let best: string | null = null
+  for (const point of points) {
+    // best 가 point 의 조상이면 point 쪽이 더 앞선 분기점이다.
+    if (!best || (await gitTry(worktreePath, ['merge-base', '--is-ancestor', best, point])).ok) {
+      best = point
+    }
+  }
+  return best
+}
+
+export async function summarizeBranch(
+  worktreePath: string,
+  baseBranch: string
+): Promise<BranchSummary | null> {
+  const from = await branchPoint(worktreePath, baseBranch)
+  if (!from) return null
+
+  const range = `${from}..HEAD`
+  const log = await gitTry(worktreePath, ['log', '--oneline', '--no-decorate', range])
+  const numstat = await gitTry(worktreePath, ['diff', '--numstat', range])
+  if (!log.ok && !numstat.ok) return null
+
+  const allCommits = log.stdout.split('\n').filter(Boolean)
+
+  // --numstat 은 "추가\t삭제\t경로". 바이너리는 추가/삭제가 "-" 로 오므로 숫자 대신 그대로 쓴다.
+  const parsed = numstat.stdout
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => {
+      const [added = '', deleted = '', ...rest] = line.split('\t')
+      const path = rest.join('\t')
+      const churn = (Number(added) || 0) + (Number(deleted) || 0)
+      const counts = added === '-' || deleted === '-' ? 'binary' : `+${added} −${deleted}`
+      return { path, churn, label: `${path} (${counts})` }
+    })
+    .filter((f) => f.path)
+    // 변경량이 큰 파일이 대개 그 브랜치의 요점이다 — 잘릴 때 남아야 할 쪽이다.
+    .sort((a, b) => b.churn - a.churn)
+
+  if (!allCommits.length && !parsed.length) return null
+
+  return {
+    commits: allCommits.slice(0, SUMMARY_MAX_COMMITS),
+    files: parsed.slice(0, SUMMARY_MAX_FILES).map((f) => f.label),
+    omittedCommits: Math.max(0, allCommits.length - SUMMARY_MAX_COMMITS),
+    omittedFiles: Math.max(0, parsed.length - SUMMARY_MAX_FILES)
+  }
 }
 
 /** 통합 diff 출력을 파일 단위로 쪼갠다. */

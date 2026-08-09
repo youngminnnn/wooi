@@ -48,6 +48,15 @@ const GROUPS: { title: string; items: { keys: string[]; label: string }[] }[] = 
     ]
   },
   {
+    title: 'Pull request review',
+    items: [
+      { keys: ['⇧⌘R'], label: 'Review a pull request' },
+      { keys: ['n', '/', 'p'], label: 'Next / previous comment on the diff' },
+      { keys: ['⌥⌘↓', '/', '⌥⌘↑'], label: 'Next / previous comment — same thing, with modifiers' },
+      { keys: ['⇧⌘⌫'], label: 'Archive the review you have open' }
+    ]
+  },
+  {
     title: 'Conversation',
     items: [
       { keys: ['⌘F'], label: 'Search the conversation' },

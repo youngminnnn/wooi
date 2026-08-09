@@ -1,5 +1,10 @@
 import { CLAUDE_DEFAULT_MODEL } from './agent/backend'
-import { BASE_DEV_PORT, DEFAULT_AGENT_BACKEND, DEFAULT_NOTIFICATION_SETTINGS } from '@shared/types'
+import {
+  BASE_DEV_PORT,
+  DEFAULT_AGENT_BACKEND,
+  DEFAULT_EXPERIMENTS,
+  DEFAULT_NOTIFICATION_SETTINGS
+} from '@shared/types'
 import type {
   AppState,
   AppSettings,
@@ -25,7 +30,7 @@ const DEFAULT_MODEL = CLAUDE_DEFAULT_MODEL
  * 디스크 영속 형식의 현재 스키마 버전. 영속 데이터 모양이 바뀔 때마다 1 올리고,
  * MIGRATIONS 에 직전 버전 → 새 버전 변환 함수를 추가한다.
  */
-export const CURRENT_SCHEMA_VERSION = 17
+export const CURRENT_SCHEMA_VERSION = 19
 
 /**
  * v12 이하의 settings 모양. 그 시절엔 에이전트가 Claude 하나뿐이라 모델·effort·fast mode·
@@ -68,6 +73,12 @@ function normalizeMode(mode: unknown): PermissionMode {
 
 export const DEFAULT_SETTINGS: AppSettings = {
   defaultAgentBackend: DEFAULT_AGENT_BACKEND,
+  // 새 워크스페이스는 단일 에이전트로 시작한다 — 멀티 에이전트는 사용자가 고르는 것이지
+  // 기본으로 열어 줄 것이 아니다(위임된 Codex 실행은 승인 프롬프트 없이 파일을 고칠 수 있다).
+  defaultMultiAgent: false,
+  // 실험 스위치의 기본값은 DEFAULT_EXPERIMENTS 가 정한다. 기존 사용자도 load 의 기본값 병합으로
+  // 같은 값을 받으므로 schemaVersion 을 올릴 필요가 없다.
+  experiments: DEFAULT_EXPERIMENTS,
   agents: {
     // Claude 는 검증된 기본 모델을 지정한다(1M 윈도를 잡는 `[1m]` 접미사 포함).
     claude: { model: DEFAULT_MODEL, effort: null, permissionMode: 'default', fastMode: false },
@@ -334,6 +345,33 @@ export const MIGRATIONS: Array<(raw: Record<string, unknown>) => Record<string, 
       return { ...r, lastSubmission: rest }
     })
     return { ...raw, reviews }
+  },
+
+  // v17 → v18: 리뷰가 자기 모델·추론 강도를 들고 다닌다(시작할 때 고른 값으로 후속 턴까지 돈다).
+  // 옛 리뷰는 무엇으로 돌았는지 알 길이 없으므로 비워 두고, 후속 턴은 지금까지처럼 전역
+  // 기본값으로 떨어진다.
+  (raw) => {
+    const reviews = ((raw.reviews as Partial<ReviewSession>[]) ?? []).map((r) => ({
+      ...r,
+      model: r.model ?? null,
+      effort: r.effort ?? null
+    }))
+    return { ...raw, reviews }
+  },
+
+  // v18 → v19: 워크스페이스가 자기를 만든 주체를 기억한다. 에이전트가 만든 워크스페이스만 그
+  // 에이전트가 아카이브할 수 있게 하려면([[agent/tools/target]]) 생성자를 알아야 하는데, 지금까지는
+  // 아무도 기록하지 않았다.
+  //
+  // 기존 워크스페이스는 전부 null 로 둔다. 부모가 있다고 해서 그 부모의 에이전트가 만들었다고
+  // 단정할 수 없고(사람이 UI 에서 만든 스택이 그렇다), 여기서 잘못 추측하면 에이전트가 사람의
+  // 워크스페이스를 지울 권한을 소급해 얻는다. 모를 때는 아무 권한도 주지 않는 쪽이 맞다.
+  (raw) => {
+    const workspaces = ((raw.workspaces as Partial<Workspace>[]) ?? []).map((w) => ({
+      ...w,
+      createdByWorkspaceId: w.createdByWorkspaceId ?? null
+    }))
+    return { ...raw, workspaces }
   }
 ]
 

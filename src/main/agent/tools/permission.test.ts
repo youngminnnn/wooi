@@ -1,5 +1,13 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import type { PermissionRequest, Workspace } from '@shared/types'
+import type { PermissionRequest, Repo, Workspace } from '@shared/types'
+
+// 카드 문구가 PR base 를 앱과 **같은 규칙**으로 구하므로 store 를 들여다본다([[agent/tools/pullRequest]]).
+const state = vi.hoisted(() => ({
+  workspaces: [] as Partial<Workspace>[],
+  repos: [] as Partial<Repo>[]
+}))
+vi.mock('../../store', () => ({ getStore: () => ({ getState: () => state, update: vi.fn() }) }))
+
 import {
   cancelToolPermissions,
   ensureToolApproved,
@@ -19,10 +27,22 @@ beforeEach(() => {
   cards.length = 0
   cancelToolPermissions()
   initToolPermission({ dispatch: (r) => cards.push(r) })
+  state.workspaces = [{ id: 'ws-parent', branch: 'feat/base' }]
+  state.repos = [
+    { id: 'repo-1', defaultBranch: 'main', setupScript: 'npm install', devScript: 'npm run dev' }
+  ]
 })
 
 function workspace(over: Partial<Workspace> = {}): Workspace {
-  return { id: 'ws-1', permissionMode: 'default', ...over } as Workspace
+  return {
+    id: 'ws-1',
+    repoId: 'repo-1',
+    branch: 'feat/next',
+    baseBranch: 'main',
+    parentWorkspaceId: null,
+    permissionMode: 'default',
+    ...over
+  } as Workspace
 }
 
 /** 카드가 뜨면 그 결정으로 답한다(렌더러 역할). */
@@ -54,6 +74,48 @@ describe('ensureToolApproved', () => {
     answer('deny')
 
     await expect(pending).rejects.toThrow(/declined/)
+  })
+
+  it('PR 카드는 앱이 정한 base 를 보여 준다 — 사용자가 판단하는 지점이다', async () => {
+    const pending = ensureToolApproved(
+      workspace({ parentWorkspaceId: 'ws-parent' }),
+      'open_pull_request',
+      { title: 'Add the form', body: 'x' }
+    )
+    await vi.waitFor(() => expect(cards).toHaveLength(1))
+
+    expect(cards[0].title).toContain('`feat/base`')
+    expect(cards[0].title).toContain('`feat/next`')
+
+    answer('allow')
+    await expect(pending).resolves.toBeUndefined()
+  })
+
+  it('스택이 아니면 카드에도 리포 기본 브랜치가 뜬다', async () => {
+    const pending = ensureToolApproved(workspace(), 'open_pull_request', { title: 't', body: 'b' })
+    await vi.waitFor(() => expect(cards).toHaveLength(1))
+
+    expect(cards[0].title).toContain('`main`')
+
+    answer('allow')
+    await expect(pending).resolves.toBeUndefined()
+  })
+
+  it('스크립트 카드는 실제로 돌아갈 명령을 보여 준다', async () => {
+    const pending = ensureToolApproved(workspace(), 'run_script', { kind: 'dev' })
+    await vi.waitFor(() => expect(cards).toHaveLength(1))
+
+    expect(cards[0].title).toContain('`npm run dev`')
+
+    answer('allow')
+    await expect(pending).resolves.toBeUndefined()
+  })
+
+  it('스크립트 출력 읽기는 묻지 않는다 — 매번 카드가 뜨면 검증 루프를 못 쓴다', async () => {
+    await expect(
+      ensureToolApproved(workspace(), 'read_script_output', { kind: 'dev' })
+    ).resolves.toBeUndefined()
+    expect(cards).toHaveLength(0)
   })
 
   it('읽기 전용 도구는 묻지 않는다', async () => {

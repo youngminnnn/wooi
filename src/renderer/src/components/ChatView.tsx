@@ -24,6 +24,7 @@ import {
   Pencil,
   AlertTriangle,
   RotateCw,
+  Users,
   X,
   type LucideIcon
 } from 'lucide-react'
@@ -39,10 +40,12 @@ import PrActionsMenu from './PrActionsMenu'
 import StackPopover from './StackPopover'
 import StackSyncBanner from './StackSyncBanner'
 import StackBaseBanner from './StackBaseBanner'
+import ArchiveSuggestBanner from './ArchiveSuggestBanner'
 import ExportMenu from './ExportMenu'
 import HeaderButton from './HeaderButton'
 import { AgentBackendMark, GithubMark } from './BrandIcons'
 import { useGithubDisconnected } from '../lib/github'
+import { useMultiAgent } from '../lib/multiAgent'
 import { openFileQuickOpen } from '../lib/fileViewer'
 import { workspaceDisplayName } from '@shared/types'
 import type { PrState, Workspace } from '@shared/types'
@@ -180,6 +183,8 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
   const showAgentBadge = backends.filter((b) => b.available).length > 1
   const agentLabel =
     backends.find((b) => b.id === workspace.agentBackend)?.label ?? workspace.agentBackend
+  // 사이드바 배지와 같은 판단을 쓴다 — 두 화면이 갈라지면 어느 쪽이 맞는지 알 수 없다.
+  const multiAgent = useMultiAgent(workspace)
 
   const archiveWorkspace = async (): Promise<void> => {
     const ok = await confirm({
@@ -316,6 +321,18 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
             </div>
           )}
           <div className="flex items-center gap-1.5 text-xs text-neutral-500">
+            {/* 멀티 에이전트는 이름 옆 브랜드 마크만으로는 드러나지 않는다 — 그 마크는 메인
+                에이전트일 뿐이라, 이 워크스페이스에서 다른 종류도 돌 수 있다는 사실은 따로
+                말해 줘야 한다. 위임이 실제로 열려 있을 때만 뜬다(useMultiAgent). */}
+            {multiAgent.active && (
+              <span
+                className="shrink-0 flex items-center gap-1 rounded px-1.5 py-0.5 bg-[var(--surface-2)] text-neutral-400"
+                title={`Multi-agent — ask ${agentLabel} to run a task with another agent (e.g. “have Codex review this”)`}
+              >
+                <Users size={10} className="multi-agent-mark" />
+                Multi-agent
+              </span>
+            )}
             <GitBranch size={11} />
             <span className="truncate">{workspace.branch}</span>
             {git && (
@@ -514,6 +531,9 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
 
       {/* PR 이 부모가 아닌 브랜치를 향할 때(에이전트가 --base 없이 연 PR) 되돌릴지 묻는 배너. */}
       <StackBaseBanner workspace={workspace} />
+
+      {/* PR 이 병합돼 할 일이 남지 않았을 때 정리를 제안하는 배너(worktree 제거는 승인 후에만). */}
+      <ArchiveSuggestBanner workspace={workspace} />
 
       {/* 대화 */}
       <MessageList workspaceId={workspace.id} running={running} />

@@ -32,6 +32,7 @@ import {
   NOTIFICATION_CHANNEL_LABELS,
   NOTIFICATION_EVENT_LABELS,
   agentSettingsFor,
+  experimentsOf,
   normalizePermissionMode
 } from '@shared/types'
 import type {
@@ -383,6 +384,8 @@ function GeneralPage({
     applyTheme(theme)
     save({ theme })
   }
+  // 저장된 설정에 항목이 없을 수 있으므로(구버전에서 올라옴) 항상 기본값과 병합해 읽는다.
+  const experiments = experimentsOf(settings)
   return (
     <PageFrame title="General" description="Choose how Wooi looks and how new workspaces start.">
       <SettingGroup title="Appearance">
@@ -435,6 +438,20 @@ function GeneralPage({
           </select>
         </SettingRow>
       </SettingGroup>
+      <SettingGroup title="Experimental">
+        <SettingRow
+          title="Multi-agent delegation"
+          description="Let a workspace hand tasks to a different coding agent — Claude Code delegating to Codex, or the reverse. Rough edges expected."
+        >
+          <Switch
+            label="Multi-agent delegation"
+            checked={experiments.multiAgent}
+            // 실험 스위치는 켜고 끄는 즉시 다음 세션부터 반영된다. 이미 만들어 둔 멀티 에이전트
+            // 워크스페이스의 설정은 지우지 않으므로, 껐다 켜면 그대로 살아난다.
+            onChange={(value) => save({ experiments: { ...experiments, multiAgent: value } })}
+          />
+        </SettingRow>
+      </SettingGroup>
     </PageFrame>
   )
 }
@@ -447,7 +464,15 @@ function AgentsPage({
   save: (patch: Partial<AppSettings>) => void
 }): React.JSX.Element {
   const availableBackends = useAvailableBackends()
+  const experiments = experimentsOf(settings)
   const [editing, setEditing] = useState<AgentBackendId>(settings.defaultAgentBackend)
+  // 멀티 항목은 조율할 수 있는 백엔드에만 있다. 저장된 조합이 그렇지 않으면(설정 손편집, 실험을
+  // 끈 뒤, 나중에 capability 가 바뀐 경우) 존재하지 않는 value 를 가리켜 select 가 빈 칸이 되므로,
+  // 그때는 평범한 백엔드 선택으로 되돌려 보여 준다.
+  const multiOption =
+    experiments.multiAgent &&
+    settings.defaultMultiAgent === true &&
+    availableBackends.some((b) => b.id === settings.defaultAgentBackend && b.capabilities.delegate)
   const backend = useBackend(editing)
   const models = useModels(editing)
   const agent = agentSettingsFor(settings, editing)
@@ -467,15 +492,25 @@ function AgentsPage({
         <SettingGroup title="Default agent">
           <SettingRow
             title="Agent for new workspaces"
-            description="Each workspace stays with the agent it was created with."
+            description={
+              multiOption
+                ? 'New workspaces start in multi-agent mode — the main agent can run tasks with other agents. Each workspace keeps the agent it was created with.'
+                : 'Each workspace stays with the agent it was created with.'
+            }
           >
             <select
-              className={inputClass + ' w-48 text-sm'}
-              value={settings.defaultAgentBackend}
+              className={inputClass + ' w-60 text-sm'}
+              value={
+                multiOption ? `multi:${settings.defaultAgentBackend}` : settings.defaultAgentBackend
+              }
               onChange={(event) => {
-                const next = event.target.value as AgentBackendId
+                // 값 하나에 두 설정을 실어 보낸다 — 사용자에게는 한 줄의 선택이지만 저장은
+                // 메인 에이전트와 모드로 나뉜다(둘은 직교한다).
+                const raw = event.target.value
+                const multiAgent = raw.startsWith('multi:')
+                const next = (multiAgent ? raw.slice('multi:'.length) : raw) as AgentBackendId
                 setEditing(next)
-                save({ defaultAgentBackend: next })
+                save({ defaultAgentBackend: next, defaultMultiAgent: multiAgent })
               }}
             >
               {availableBackends.map((item) => (
@@ -483,6 +518,16 @@ function AgentsPage({
                   {item.label}
                 </option>
               ))}
+              {/* 멀티 에이전트는 메인 에이전트를 함께 정해야 의미가 있으므로, 조율할 수 있는
+                  백엔드마다 한 줄씩 낸다 — "Multi-agent" 만 있으면 대화 상대가 누구인지 감춰진다. */}
+              {experiments.multiAgent &&
+                availableBackends
+                  .filter((item) => item.capabilities.delegate)
+                  .map((item) => (
+                    <option key={`multi:${item.id}`} value={`multi:${item.id}`}>
+                      Multi-agent · {item.label}
+                    </option>
+                  ))}
             </select>
           </SettingRow>
         </SettingGroup>
