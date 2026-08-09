@@ -1340,11 +1340,12 @@ export function matchLocal(text: string, allowClaudeOnly: boolean): LocalCommand
 }
 
 /**
- * `#` 로 시작하면 메시지가 아니라 CLAUDE.md 에 남길 한 줄 기억이다(터미널 Claude Code 의 `#`).
- * `##` 로 시작하는 마크다운 제목은 평범한 메시지이므로 건드리지 않는다.
+ * `#` 로 시작하는 **한 줄**이면 CLAUDE.md 에 남길 기억이다(터미널 Claude Code 의 `#`).
+ * `##` 로 시작하는 마크다운 제목과 여러 줄 프롬프트는 평범한 메시지로 둔다. 특히 이슈에서
+ * 만든 초안은 `#123 제목`으로 시작하므로, 줄 수를 보지 않으면 전송 대신 기억 카드가 뜬다.
  */
 export function matchMemory(text: string): string | null {
-  const m = /^#(?!#)\s*([\s\S]+)$/.exec(text)
+  const m = /^#(?!#)\s*([^\r\n]+)$/.exec(text)
   return m ? m[1].trim() || null : null
 }
 
