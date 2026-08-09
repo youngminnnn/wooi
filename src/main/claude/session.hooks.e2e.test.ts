@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { AddressInfo } from 'node:net'
 import type { ChatEvent, ChatItem } from '@shared/types'
-import { testWooiMcp as wooiMcp } from './testWooiMcp'
+import { e2eWooiMcp } from './testWooiMcp'
 
 /**
  * 훅(.claude/settings.json 의 `hooks`)이 Wooi 세션에서도 터미널 `claude` 와 똑같이 도는지 확인한다.
@@ -61,7 +61,7 @@ describe.skipIf(!process.env.WOOI_E2E)('ClaudeSession hooks', () => {
       autoCompact: false,
       resumeSessionId: null,
       additionalDirs: [],
-      wooiMcp,
+      wooiMcp: await e2eWooiMcp(),
       emit: (e) => events.push(e),
       persist: (i) => items.push(i),
       requestPermission: async () => ({ behavior: 'deny' }),
@@ -125,7 +125,7 @@ describe.skipIf(!process.env.WOOI_E2E)('ClaudeSession hooks', () => {
       autoCompact: false,
       resumeSessionId: null,
       additionalDirs: [],
-      wooiMcp,
+      wooiMcp: await e2eWooiMcp(),
       emit: () => {},
       persist: (i) => items.push(i),
       requestPermission: async () => ({ behavior: 'deny' }),

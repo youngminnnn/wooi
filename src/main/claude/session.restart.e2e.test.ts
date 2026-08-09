@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import type { ChatEvent, ChatItem } from '@shared/types'
-import { testWooiMcp as wooiMcp } from './testWooiMcp'
+import { e2eWooiMcp } from './testWooiMcp'
 
 /**
  * 실패한 턴을 프로세스를 갈아 끼워 1회 다시 돌리는 경로의 종단 테스트.
@@ -52,7 +52,7 @@ describe.skipIf(!process.env.WOOI_E2E)('ClaudeSession failed-turn restart', () =
       autoCompact: false,
       resumeSessionId: null,
       additionalDirs: [],
-      wooiMcp,
+      wooiMcp: await e2eWooiMcp(),
       emit: (e) => events.push(e),
       persist: (i) => items.push(i),
       requestPermission: async () => ({ behavior: 'deny' }),
