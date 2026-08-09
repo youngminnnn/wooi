@@ -567,6 +567,107 @@ export async function getDiff(worktreePath: string, baseBranch: string): Promise
   return { baseBranch, files }
 }
 
+/** 커밋 목록과 변경 파일 목록. 어느 쪽이든 잘렸으면 omitted 에 남는다. */
+export interface BranchSummary {
+  /** "d86b7e2 feat: 계산 엔진 구현" 형태, 최신이 먼저. */
+  commits: string[]
+  /** "src/calc.js (+82 −4)" 형태, 변경량이 큰 것이 먼저. */
+  files: string[]
+  omittedCommits: number
+  omittedFiles: number
+}
+
+// 인계 메시지에 실릴 크기라 상한을 둔다. 리팩터 한 번에 200개 파일이 바뀌는 브랜치가 있고,
+// 그걸 다 적으면 정작 읽어야 할 작업 지시가 목록에 묻힌다.
+const SUMMARY_MAX_COMMITS = 20
+const SUMMARY_MAX_FILES = 40
+
+/**
+ * 브랜치가 base 이후로 무엇을 했는지 한 눈에 보이게 요약한다.
+ *
+ * 스택 인계에 쓴다 — 자식은 부모의 커밋된 tip 에서 갈라지므로, 이 요약이 곧 "네가 물려받은
+ * 코드에 이미 들어 있는 것" 이다. 모델을 부르지 않고 git 으로만 만들기 때문에 정확하고 공짜다.
+ *
+ * base 가 분기 후 전진했어도 base 쪽 커밋이 섞이지 않도록 merge-base 를 기준으로 삼는다
+ * (getDiff 와 같은 이유·같은 방식).
+ *
+ * 요약할 것이 없거나 git 이 실패하면 null — 인계는 요약 없이도 성립해야 하므로 던지지 않는다.
+ */
+/**
+ * 분기점을 고른다 — 로컬 base ref 와 그 upstream 중 **더 최근**을 쓴다.
+ *
+ * Wooi 의 워크트리는 base 브랜치를 절대 체크아웃하지 않으므로 로컬 `main` 은 대개 낡아 있다.
+ * 그 낡은 ref 로만 merge-base 를 잡으면, 워크스페이스가 base 에서 당겨 온 커밋들이 "이 브랜치가
+ * 한 일" 로 둔갑한다(실측: 로컬 main 이 한 커밋 뒤처져 릴리즈 커밋이 브랜치 몫으로 잡혔다).
+ * 자식에게 남의 작업을 물려준 것처럼 알려 주는 셈이라, 요약의 쓸모가 바로 무너진다.
+ *
+ * resolveBaseStartPoint 처럼 `origin/<base>` 를 무조건 우선하지 않는다 — 리모트가 로컬보다
+ * 뒤처진 경우(아직 push 안 한 부모 브랜치 위에 쌓기)에는 그쪽이 틀리기 때문에, 어느 쪽이든
+ * **뒤에 있는 분기점**을 고르게 둔다.
+ */
+async function branchPoint(worktreePath: string, baseBranch: string): Promise<string | null> {
+  const upstream = await git(worktreePath, [
+    'rev-parse',
+    '--abbrev-ref',
+    `${baseBranch}@{upstream}`
+  ]).catch(() => null)
+
+  const candidates = [baseBranch, ...(upstream ? [upstream] : [])]
+  const points = (
+    await Promise.all(
+      candidates.map((ref) => git(worktreePath, ['merge-base', ref, 'HEAD']).catch(() => null))
+    )
+  ).filter((p): p is string => !!p)
+
+  let best: string | null = null
+  for (const point of points) {
+    // best 가 point 의 조상이면 point 쪽이 더 앞선 분기점이다.
+    if (!best || (await gitTry(worktreePath, ['merge-base', '--is-ancestor', best, point])).ok) {
+      best = point
+    }
+  }
+  return best
+}
+
+export async function summarizeBranch(
+  worktreePath: string,
+  baseBranch: string
+): Promise<BranchSummary | null> {
+  const from = await branchPoint(worktreePath, baseBranch)
+  if (!from) return null
+
+  const range = `${from}..HEAD`
+  const log = await gitTry(worktreePath, ['log', '--oneline', '--no-decorate', range])
+  const numstat = await gitTry(worktreePath, ['diff', '--numstat', range])
+  if (!log.ok && !numstat.ok) return null
+
+  const allCommits = log.stdout.split('\n').filter(Boolean)
+
+  // --numstat 은 "추가\t삭제\t경로". 바이너리는 추가/삭제가 "-" 로 오므로 숫자 대신 그대로 쓴다.
+  const parsed = numstat.stdout
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => {
+      const [added = '', deleted = '', ...rest] = line.split('\t')
+      const path = rest.join('\t')
+      const churn = (Number(added) || 0) + (Number(deleted) || 0)
+      const counts = added === '-' || deleted === '-' ? 'binary' : `+${added} −${deleted}`
+      return { path, churn, label: `${path} (${counts})` }
+    })
+    .filter((f) => f.path)
+    // 변경량이 큰 파일이 대개 그 브랜치의 요점이다 — 잘릴 때 남아야 할 쪽이다.
+    .sort((a, b) => b.churn - a.churn)
+
+  if (!allCommits.length && !parsed.length) return null
+
+  return {
+    commits: allCommits.slice(0, SUMMARY_MAX_COMMITS),
+    files: parsed.slice(0, SUMMARY_MAX_FILES).map((f) => f.label),
+    omittedCommits: Math.max(0, allCommits.length - SUMMARY_MAX_COMMITS),
+    omittedFiles: Math.max(0, parsed.length - SUMMARY_MAX_FILES)
+  }
+}
+
 /** 통합 diff 출력을 파일 단위로 쪼갠다. */
 function parseUnifiedDiff(raw: string): FileDiff[] {
   if (!raw.trim()) return []
