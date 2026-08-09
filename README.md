@@ -167,7 +167,8 @@ those chains itself with plain `git` and `gh` — no extra stacking CLI needed.
   before it starts rather than resolving the collision afterwards.
   `create_stacked_workspace` opens the next workspace on top of the current branch when
   the work just finished is a complete, reviewable unit, and `report_to_parent` hands the
-  result back up the chain.
+  result back up the chain. See the [built-in MCP reference](docs/built-in-mcp.md) for
+  every Wooi tool and its safety constraints.
 - **Stack overview** — a **Stack** button appears in the header whenever the current
   workspace is part of a chain. It lists every branch in the stack with its PR state
   (draft / review required / changes requested / ready to merge / conflict / merged), PR
