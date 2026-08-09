@@ -586,9 +586,7 @@ function WorkspaceRow({
       key: 'stack',
       label: githubDisconnected
         ? 'Stack a new workspace — Connect GitHub'
-        : showAgent
-          ? `Stack a new workspace · ${AGENT_BACKEND_LABELS[workspace.agentBackend]}`
-          : 'Stack a new workspace',
+        : 'Stack a new workspace',
       icon: githubDisconnected ? <GithubMark size={12} /> : <GitBranchPlus size={13} />,
       // agent 를 생략하면 main 의 단일 생성 규칙이 부모 agent 를 상속한다.
       onSelect: () => stack()
