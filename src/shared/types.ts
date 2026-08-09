@@ -1385,6 +1385,13 @@ export interface PostedComment {
   kind: ReviewCommentKind
   /** ISO 8601. 이 이후에 달린 남의 코멘트만 새 활동으로 본다. */
   createdAt: string
+  /**
+   * 코멘트가 걸린 줄이 최신 diff 에서 사라졌는가(GitHub 의 "Outdated").
+   *
+   * 폴링이 갱신한다. 화면에서 이걸 알려주지 않으면, 상대가 이미 고쳐 놓은 자리를 두고
+   * 사용자는 아직 살아 있는 지적인 줄 안다.
+   */
+  outdated?: boolean
 }
 
 /**
@@ -1402,6 +1409,14 @@ export interface ReviewSession {
    * 후속 턴은 앞선 대화를 resume 하는데, 그 세션 id 는 그 백엔드에서만 유효하기 때문이다.
    */
   agentBackend: AgentBackendId
+  /**
+   * 이 리뷰를 돌리는 모델과 추론 강도. 에이전트와 마찬가지로 **시작할 때 정해져 고정**된다 —
+   * 후속 턴이 앞선 대화를 이어받는데 도중에 모델이 바뀌면 같은 리뷰의 판단 기준이 달라진다.
+   *
+   * 시작 시점에 전역 기본값으로 해석해 둔 값이다. null 이면 에이전트가 알아서 고른다.
+   */
+  model: string | null
+  effort: EffortSetting | null
   prNumber: number
   prUrl: string
   prTitle: string
@@ -1457,7 +1472,16 @@ export interface ReviewSubmission {
 export interface ReviewProgressItem {
   id: string
   kind: 'text' | 'tool' | 'error'
+  /** 한 줄 요약. 도구 항목이면 `name  detail` 을 합친 문자열이다. */
   text: string
+  /**
+   * 도구 항목의 이름·인자 요약을 나눠 담는다(kind === 'tool' 일 때만).
+   *
+   * 화면이 워크스페이스 대화와 **같은 도구 행**으로 그리려면 이름과 인자가 분리돼 있어야
+   * 한다. `text` 는 합쳐 둔 값이라 옛 기록·폴백용으로만 남긴다.
+   */
+  name?: string
+  detail?: string
   ts: number
 }
 
@@ -1467,7 +1491,7 @@ export interface ReviewProgressItem {
  */
 export type ReviewActivityItem =
   | { id: string; kind: 'turn'; role: 'user' | 'agent'; text: string; ts: number }
-  | { id: string; kind: 'tool'; text: string; ts: number }
+  | { id: string; kind: 'tool'; text: string; name?: string; detail?: string; ts: number }
   | {
       id: string
       kind: 'reply'

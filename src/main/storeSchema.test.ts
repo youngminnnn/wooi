@@ -215,6 +215,33 @@ describe('v16 → v17 (제출 기록에서 본문 빼기)', () => {
   })
 })
 
+describe('v17 → v18 (리뷰가 자기 모델·강도를 갖는다)', () => {
+  function v17File(review: Record<string, unknown>): Record<string, unknown> {
+    return { schemaVersion: 17, repos: [], workspaces: [], reviews: [review] }
+  }
+
+  const reviewOf = (out: Record<string, unknown>): Record<string, unknown> =>
+    (out.reviews as Record<string, unknown>[])[0]
+
+  /** 옛 리뷰가 무엇으로 돌았는지는 알 길이 없다 — 비워 두면 후속 턴이 전역 기본값으로 떨어진다. */
+  it('옛 리뷰는 모델·강도를 비운 채로 채운다', () => {
+    const out = migrate(v17File({ id: 'rv1', repoId: 'r1', prNumber: 3 }), 17)
+    expect(reviewOf(out)).toMatchObject({ model: null, effort: null })
+  })
+
+  it('이미 골라 둔 값은 덮어쓰지 않는다', () => {
+    const out = migrate(
+      v17File({ id: 'rv1', repoId: 'r1', prNumber: 3, model: 'gpt-5-codex', effort: 'high' }),
+      17
+    )
+    expect(reviewOf(out)).toMatchObject({ model: 'gpt-5-codex', effort: 'high' })
+  })
+
+  it('리뷰가 없는 파일도 그대로 통과한다', () => {
+    expect(migrate({ schemaVersion: 17, repos: [], workspaces: [] }, 17).reviews).toEqual([])
+  })
+})
+
 describe('레거시 파일 전체 경로', () => {
   it('v0(버전 필드 없음) 파일을 현재 스키마까지 끝까지 변환한다', () => {
     const legacy = {

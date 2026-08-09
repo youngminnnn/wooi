@@ -28,7 +28,7 @@ import {
 } from '../github'
 import { log } from '../logger'
 import { getStore } from '../store'
-import { detectNewActivity } from './activity'
+import { detectNewActivity, detectOutdatedComments } from './activity'
 import { parseReviewDiff, resolveAnchor } from './diff'
 import { getReviewBundles } from './store'
 import { runReview } from './run'
@@ -116,6 +116,9 @@ export class ReviewManager {
       id: reviewId,
       repoId: repo.id,
       agentBackend: args.agentBackend,
+      // 시작할 때 해석해 둔 값을 그대로 박는다 — 후속 턴이 같은 모델·강도로 이어져야 한다.
+      model: args.model,
+      effort: args.effort,
       prNumber: meta.number,
       prUrl: meta.url,
       prTitle: meta.title,
@@ -477,14 +480,32 @@ export class ReviewManager {
     // 항목 id 가 안정적이라(reply-<코멘트id>) 다시 폴링해도 중복으로 쌓이지 않는다.
     for (const item of items) this.addActivity(reviewId, item)
 
+    // 내가 단 코멘트가 최신 diff 에서 밀려났는지도 같은 응답으로 알 수 있다 — 이걸 안 보면
+    // 상대가 이미 고쳐 놓은 자리를 두고 사용자는 아직 살아 있는 지적으로 착각한다.
+    const outdated = reviewComments
+      ? detectOutdatedComments(
+          reviewComments,
+          session.postedComments.filter((c) => c.kind === 'inline').map((c) => c.commentId)
+        )
+      : new Map<number, boolean>()
+    const outdatedChanged = session.postedComments.some(
+      (c) => outdated.has(c.commentId) && !!c.outdated !== outdated.get(c.commentId)
+    )
+
     if (
       items.length > 0 ||
+      outdatedChanged ||
       nextSince !== session.lastSeenAt ||
       nextHeadSha !== session.lastSeenHeadSha
     ) {
       this.patch(reviewId, (r) => {
         r.lastSeenAt = nextSince
         r.lastSeenHeadSha = nextHeadSha
+        if (outdatedChanged) {
+          r.postedComments = r.postedComments.map((c) =>
+            outdated.has(c.commentId) ? { ...c, outdated: outdated.get(c.commentId) } : c
+          )
+        }
         if (items.length > 0) r.unread = true
       })
     }
@@ -515,10 +536,14 @@ export class ReviewManager {
 
     // 내가 쓴 답장도 타임라인에 남긴다 — 폴링은 남의 것만 가져오므로 여기서 넣지 않으면
     // 방금 보낸 말이 화면에서 사라진 것처럼 보인다.
+    //
+    // 스레드는 **GitHub 이 알려준 루트**로 묶는다. 답글에 답장하면 내가 넘긴 commentId 는
+    // 스레드 루트가 아니라 그 답글이라, 그대로 쓰면 내 말만 다른 스레드로 떨어져 나간다
+    // (폴링은 내 코멘트를 걸러내므로 영영 바로잡히지 않는다).
     this.addActivity(reviewId, {
       id: res.id ? `reply-${res.id}` : `local-reply-${Date.now()}`,
       kind: 'reply',
-      threadRootId: commentId,
+      threadRootId: res.inReplyToId ?? commentId,
       commentId: res.id ?? 0,
       author: (await getViewerLogin(repoPath)) ?? 'you',
       body: body.trim(),

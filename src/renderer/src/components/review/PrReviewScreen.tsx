@@ -1,6 +1,8 @@
-import { useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Archive,
+  ChevronDown,
+  ChevronUp,
   ExternalLink,
   FileCheck,
   Loader2,
@@ -11,7 +13,13 @@ import {
 } from 'lucide-react'
 import type { ReviewVerdict } from '@shared/types'
 import { useStore } from '../../store'
-import { countByFile, selectionSummary, STATUS_LABEL } from '../../lib/review'
+import {
+  countByFile,
+  orderedAnchoredFindings,
+  selectionSummary,
+  stepFinding,
+  STATUS_LABEL
+} from '../../lib/review'
 import ReviewDiffView from './ReviewDiffView'
 import ReviewActivityPanel from './ReviewActivityPanel'
 import ReviewOverviewPanel from './ReviewOverviewPanel'
@@ -35,11 +43,61 @@ export default function PrReviewScreen({ reviewId }: { reviewId: string }): Reac
   const toggleAllFindings = useStore((s) => s.toggleAllFindings)
   const setReviewTab = useStore((s) => s.setReviewTab)
   const [submitOpen, setSubmitOpen] = useState(false)
+  /** 지금 지목한 코멘트. diff 가 여기로 스크롤하고 그 카드에 테두리를 준다. */
+  const [focusedId, setFocusedId] = useState<string | null>(null)
   // 탭은 스토어가 리뷰별로 들고 있다 — 워크스페이스를 오가면 이 화면은 언마운트되므로
   // 로컬 state 로 두면 돌아올 때마다 findings 로 되돌아간다.
   const tab = view?.tab ?? 'findings'
 
   const counts = useMemo(() => countByFile(view?.findings ?? []), [view?.findings])
+  const ordered = useMemo(
+    () => orderedAnchoredFindings(view?.diff ?? null, view?.findings ?? []),
+    [view?.diff, view?.findings]
+  )
+  const focusedIndex = focusedId ? ordered.findIndex((f) => f.id === focusedId) : -1
+
+  const step = useCallback(
+    (delta: 1 | -1) => {
+      if (ordered.length === 0) {
+        // 눌렀는데 아무 일도 안 일어나면 단축키가 고장 난 줄 안다 — 갈 곳이 없다고 말해 준다.
+        useStore.getState().pushToast('info', 'No comments on the diff to jump to yet.')
+        return
+      }
+      setFocusedId((current) => stepFinding(ordered, current, delta) ?? current)
+    },
+    [ordered]
+  )
+
+  /**
+   * 코멘트 사이 이동 단축키. **이 화면이 직접 듣는다** — 리뷰가 떠 있을 때만 마운트되므로
+   * 전역 핸들러의 긴 분기를 거칠 이유가 없다.
+   *
+   * 두 벌을 받는다: `n`/`p` 는 아무 수식키도 타지 않아 OS·메뉴·창 관리 앱이 가로챌 여지가
+   * 없고(diff 를 훑는 손이 홈 포지션에 있기도 하다), ⌥⌘↑/↓ 는 파일 뷰어의 ⌥⌘←/→ 와 같은
+   * "열려 있는 화면 안에서 이동" 어휘를 잇는다.
+   */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      const st = useStore.getState()
+      // 제출 모달은 이 화면이 직접 띄우므로 store 의 overlayOpen 에 잡히지 않는다.
+      if (submitOpen || st.overlayOpen || st.confirmState) return
+
+      let delta: 1 | -1 | null = null
+      if (e.metaKey && e.altKey && !e.shiftKey && !e.ctrlKey) {
+        // 한글 IME 등에서 e.key 가 흔들릴 수 있어 물리 키(e.code)도 함께 본다.
+        if (e.key === 'ArrowDown' || e.code === 'ArrowDown') delta = 1
+        else if (e.key === 'ArrowUp' || e.code === 'ArrowUp') delta = -1
+      } else if (!e.metaKey && !e.altKey && !e.ctrlKey && !isTyping()) {
+        if (e.code === 'KeyN') delta = 1
+        else if (e.code === 'KeyP') delta = -1
+      }
+      if (delta === null) return
+      e.preventDefault()
+      step(delta)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [step, submitOpen])
 
   // 레코드는 상태 방송으로 도착한다. 리뷰를 막 시작한 직후에는 activeReviewId 가 먼저
   // 세팅될 수 있으므로, 그 짧은 틈에 본문이 빈 화면이 되지 않도록 자리를 지켜 준다.
@@ -71,6 +129,35 @@ export default function PrReviewScreen({ reviewId }: { reviewId: string }): Reac
 
         {/* 마지막으로 낸 판정. 다시 내려면 제출 화면에서 새 본문을 쓰면 된다. */}
         {session.lastSubmission && <VerdictChip verdict={session.lastSubmission.verdict} />}
+
+        {/* 코멘트 사이 이동. 긴 diff 에서는 지적이 화면 밖에 흩어져 있어, 스크롤로 찾는 것이
+            리뷰에서 가장 많이 하는 헛일이다. */}
+        {ordered.length > 0 && (
+          <div className="flex shrink-0 items-center gap-0.5 rounded-md border border-[var(--border-2)] px-0.5">
+            <button
+              onClick={() => step(-1)}
+              title="Previous comment (p or ⌥⌘↑)"
+              aria-label="Previous comment"
+              className="grid h-6 w-6 place-items-center rounded text-neutral-400 hover:bg-[var(--surface-2)] hover:text-neutral-100 active:scale-90"
+            >
+              <ChevronUp size={14} />
+            </button>
+            <span
+              className="px-0.5 text-xs tabular-nums text-neutral-500"
+              title={`${ordered.length} comment${ordered.length === 1 ? '' : 's'} on the diff`}
+            >
+              {focusedIndex >= 0 ? `${focusedIndex + 1}/${ordered.length}` : ordered.length}
+            </span>
+            <button
+              onClick={() => step(1)}
+              title="Next comment (n or ⌥⌘↓)"
+              aria-label="Next comment"
+              className="grid h-6 w-6 place-items-center rounded text-neutral-400 hover:bg-[var(--surface-2)] hover:text-neutral-100 active:scale-90"
+            >
+              <ChevronDown size={14} />
+            </button>
+          </div>
+        )}
 
         {running && (
           <button
@@ -148,7 +235,13 @@ export default function PrReviewScreen({ reviewId }: { reviewId: string }): Reac
           {running && view.findings.length === 0 ? (
             <ReviewProgressPane status={session.status} view={view} />
           ) : view.diff ? (
-            <ReviewDiffView session={session} view={view} files={view.diff.files} />
+            <ReviewDiffView
+              session={session}
+              view={view}
+              files={view.diff.files}
+              focusedId={focusedId}
+              onFocusFinding={setFocusedId}
+            />
           ) : (
             <p className="p-8 text-center text-sm text-neutral-500">
               Couldn&rsquo;t load the diff.
@@ -157,7 +250,8 @@ export default function PrReviewScreen({ reviewId }: { reviewId: string }): Reac
         </main>
 
         {/* 우: 총평·전반 지적 / 활동 타임라인 */}
-        <aside className="flex w-80 shrink-0 flex-col overflow-hidden border-l border-[var(--border)]">
+        {/* 대화가 워크스페이스와 같은 말풍선·도구 행으로 그려지므로 그만한 폭이 필요하다. */}
+        <aside className="flex w-[22rem] shrink-0 flex-col overflow-hidden border-l border-[var(--border)]">
           <div className="flex h-9 shrink-0 items-center gap-1 border-b border-[var(--border)] px-2">
             {(['findings', 'activity'] as const).map((t) => (
               <button
@@ -251,6 +345,12 @@ export default function PrReviewScreen({ reviewId }: { reviewId: string }): Reac
       {submitOpen && <ReviewSubmitModal session={session} onClose={() => setSubmitOpen(false)} />}
     </div>
   )
+}
+
+/** 글을 쓰는 중인가. 수식키 없는 단축키(n/p)가 입력을 가로채지 않도록. */
+function isTyping(): boolean {
+  const el = document.activeElement as HTMLElement | null
+  return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)
 }
 
 const VERDICT_CHIP: Record<ReviewVerdict, { label: string; className: string }> = {

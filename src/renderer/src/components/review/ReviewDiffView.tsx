@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronDown, ChevronRight, FileMinus2, FilePen, FilePlus2, FileCode } from 'lucide-react'
 import type { DiffRow, ReviewFileDiff, ReviewFinding, ReviewSession } from '@shared/types'
 import {
@@ -19,14 +19,55 @@ import ReviewFindingCard from './ReviewFindingCard'
 export default function ReviewDiffView({
   session,
   view,
-  files
+  files,
+  focusedId,
+  onFocusFinding
 }: {
   session: ReviewSession
   view: ReviewViewState
   files: ReviewFileDiff[]
+  /** 지금 지목한 지적. 그 카드로 스크롤하고 테두리를 준다. */
+  focusedId?: string | null
+  /** 카드를 직접 눌렀을 때. 다음/이전 이동이 그 자리에서 이어지게 한다. */
+  onFocusFinding?: (id: string) => void
 }): React.JSX.Element {
   const index = useMemo(() => indexFindingsByRow(view.findings), [view.findings])
   const counts = useMemo(() => countByFile(view.findings), [view.findings])
+
+  /**
+   * 사용자가 직접 접거나 편 파일. FileBlock 안이 아니라 여기서 들고 있어야, 코멘트 사이를
+   * 오갈 때 **접혀 있는 파일도 펼쳐 보여 줄 수** 있다(그러지 않으면 다음 코멘트가 있는데도
+   * 화면은 그대로여서 이동이 먹히지 않은 것처럼 보인다).
+   */
+  const [openFiles, setOpenFiles] = useState<Record<string, boolean>>({})
+  const focusedFile = focusedId
+    ? view.findings.find((f) => f.id === focusedId)?.anchor?.file
+    : undefined
+
+  const isOpen = (file: ReviewFileDiff): boolean => {
+    const chosen = openFiles[file.path]
+    if (chosen !== undefined) return chosen
+    // 손대지 않은 파일이라면, 지목된 코멘트가 그 안에 있을 때 펼쳐 준다. 직접 접은 파일은
+    // 접힌 채로 둔다 — 사용자가 방금 내린 결정을 이동이 뒤집으면 안 된다.
+    return file.path === focusedFile || defaultOpen(file, counts[file.path] ?? 0)
+  }
+
+  // 카드가 화면에 놓인 뒤에 옮겨간다. 같은 코멘트를 두 번 끌고 가지 않도록 마지막 것을 기억한다.
+  const scrolledTo = useRef<string | null>(null)
+  useEffect(() => {
+    if (!focusedId || scrolledTo.current === focusedId) return
+    const el = document.getElementById(`finding-${focusedId}`)
+    if (!el) return
+    scrolledTo.current = focusedId
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }, [focusedId, openFiles])
+
+  // 직접 누른 카드는 이미 눈앞에 있다 — 지목만 옮기고 화면은 건드리지 않는다(눌렀는데 화면이
+  // 덜컥 움직이면 손이 미끄러진 것처럼 느껴진다).
+  const focusFromClick = (id: string): void => {
+    scrolledTo.current = id
+    onFocusFinding?.(id)
+  }
 
   return (
     <div className="space-y-3 p-3">
@@ -38,10 +79,21 @@ export default function ReviewDiffView({
           view={view}
           index={index}
           findingCount={counts[file.path] ?? 0}
+          focusedId={focusedId ?? null}
+          onFocusFinding={focusFromClick}
+          open={isOpen(file)}
+          onToggle={() =>
+            setOpenFiles((prev) => ({ ...prev, [file.path]: !(prev[file.path] ?? isOpen(file)) }))
+          }
         />
       ))}
     </div>
   )
+}
+
+/** 지적이 달린 파일과 짧은 파일은 펼친 채로 연다 — 리뷰에서 가장 먼저 보고 싶은 것들이다. */
+function defaultOpen(file: ReviewFileDiff, findingCount: number): boolean {
+  return findingCount > 0 || file.additions + file.deletions <= 300
 }
 
 function FileBlock({
@@ -49,24 +101,29 @@ function FileBlock({
   session,
   view,
   index,
-  findingCount
+  findingCount,
+  focusedId,
+  onFocusFinding,
+  open,
+  onToggle
 }: {
   file: ReviewFileDiff
   session: ReviewSession
   view: ReviewViewState
   index: Map<string, ReviewFinding[]>
   findingCount: number
+  focusedId: string | null
+  onFocusFinding: (id: string) => void
+  open: boolean
+  onToggle: () => void
 }): React.JSX.Element {
-  // 지적이 달린 파일은 펼쳐서 보여준다. 리뷰 화면에서 사용자가 가장 먼저 보고 싶은 것이다.
-  const [open, setOpen] = useState(findingCount > 0 || file.additions + file.deletions <= 300)
-
   return (
     <div
       className="rounded-lg border border-[var(--border)] overflow-hidden"
       id={`file-${file.path}`}
     >
       <button
-        onClick={() => setOpen((v) => !v)}
+        onClick={onToggle}
         className="w-full flex items-center gap-2 px-3 py-2 bg-[var(--bg-3)] hover:bg-[var(--surface)] text-left"
       >
         {open ? (
@@ -105,6 +162,8 @@ function FileBlock({
                   session={session}
                   view={view}
                   findings={findingsForRow(index, file.path, row)}
+                  focusedId={focusedId}
+                  onFocusFinding={onFocusFinding}
                 />
               ))}
             </div>
@@ -119,12 +178,16 @@ function Row({
   row,
   session,
   view,
-  findings
+  findings,
+  focusedId,
+  onFocusFinding
 }: {
   row: DiffRow
   session: ReviewSession
   view: ReviewViewState
   findings: ReviewFinding[]
+  focusedId: string | null
+  onFocusFinding: (id: string) => void
 }): React.JSX.Element {
   const tone =
     row.kind === 'add'
@@ -148,7 +211,15 @@ function Row({
         <span className="whitespace-pre-wrap break-all pr-3">{row.text || ' '}</span>
       </div>
       {findings.map((f) => (
-        <ReviewFindingCard key={f.id} session={session} view={view} finding={f} compact />
+        <ReviewFindingCard
+          key={f.id}
+          session={session}
+          view={view}
+          finding={f}
+          compact
+          focused={f.id === focusedId}
+          onFocus={() => onFocusFinding(f.id)}
+        />
       ))}
     </>
   )
