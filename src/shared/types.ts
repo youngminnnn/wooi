@@ -2222,6 +2222,12 @@ export interface ContextUsageInfo {
  */
 export const SESSION_RATE_LIMIT_LABEL = '5-hour'
 
+/**
+ * 주간 창의 label. Codex 의 durationLabel 이 붙이고 renderer 가 상태줄 대표 창을 고르는 데 쓴다
+ * (SESSION_RATE_LIMIT_LABEL 과 같은 이유로 SSOT).
+ */
+export const WEEKLY_RATE_LIMIT_LABEL = 'Weekly'
+
 /** /usage — 세션 비용 + (가능하면) 요금제 사용률 창. */
 export interface UsageInfo {
   totalCostUsd: number

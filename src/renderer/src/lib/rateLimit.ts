@@ -1,5 +1,10 @@
-import { RATE_LIMIT_STALE_AFTER_MS, RATE_LIMIT_WARN_THRESHOLD } from '@shared/types'
-import type { RateLimitSnapshot } from '@shared/types'
+import {
+  RATE_LIMIT_STALE_AFTER_MS,
+  RATE_LIMIT_WARN_THRESHOLD,
+  SESSION_RATE_LIMIT_LABEL,
+  WEEKLY_RATE_LIMIT_LABEL
+} from '@shared/types'
+import type { AgentBackendId, RateLimitSnapshot } from '@shared/types'
 
 /** 레이트리밋 창 1개(스냅샷에 담긴 모양 그대로). */
 export type RateLimitWindow = RateLimitSnapshot['windows'][number]
@@ -13,6 +18,37 @@ export function tightestWindow(windows: RateLimitWindow[]): RateLimitWindow | nu
   const withValues = windows.filter((w) => w.utilization != null)
   if (!withValues.length) return null
   return withValues.reduce((a, b) => ((b.utilization ?? 0) > (a.utilization ?? 0) ? b : a))
+}
+
+/**
+ * 상태줄에 요약할 대표 창을 **backend 별로 고정**한다.
+ *
+ * 예전에는 tightestWindow 로 "가장 많이 쓴 창"을 골랐는데, 그러면 같은 워크스페이스에서도
+ * 사용률 순위가 바뀔 때마다 5시간 창과 주간 창이 번갈아 나와 무슨 숫자를 보고 있는지 알 수 없었다.
+ * 그래서 백엔드마다 항상 같은 창을 보여 준다:
+ *
+ * - Claude: 5시간 세션 창 — 실제로 세션을 멈추는 건 이쪽이고, 사용자도 이 숫자로 페이스를 잡는다.
+ * - Codex: 주간 창 — 요금제가 사실상 주 단위로 메기고, 5시간 창은 금방 리셋돼 페이스 판단에 덜 쓰인다.
+ *
+ * 정해 둔 창이 응답에 없을 때만 tightestWindow 로 폴백한다(빈 자리를 남기느니 다른 숫자라도 보여 준다).
+ * 다 찬 다른 창을 놓치지 않게 하는 건 호출부의 경고색 몫이다.
+ */
+export function statusWindow(
+  backend: AgentBackendId,
+  windows: RateLimitWindow[]
+): RateLimitWindow | null {
+  const usable = windows.filter((w) => w.utilization != null)
+  if (!usable.length) return null
+  const preferred =
+    backend === 'codex'
+      ? usable.find((w) => isWeeklyLabel(w.label))
+      : usable.find((w) => w.label === SESSION_RATE_LIMIT_LABEL)
+  return preferred ?? tightestWindow(usable)
+}
+
+/** 'Weekly'·'2-week' 처럼 주 단위 창인지(Codex 의 durationLabel 이 만드는 이름 기준). */
+function isWeeklyLabel(label: string): boolean {
+  return label === WEEKLY_RATE_LIMIT_LABEL || /\bweeks?\b/i.test(label)
 }
 
 /** 0–100 으로 정규화한 사용률(범위를 벗어난 값도 안전하게 자른다). null 이면 null. */
