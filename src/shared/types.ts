@@ -1640,6 +1640,11 @@ export interface ReviewBundle {
   diff: ReviewDiff | null
   findings: ReviewFinding[]
   activity: ReviewActivityItem[]
+  /**
+   * "봤음" 표시한 파일 경로 → 그때의 내용 지문. 지문이 지금 diff 와 어긋나면 그 사이 파일이
+   * 바뀐 것이라 안 본 것으로 친다(`@shared/reviewViewed` 의 isFileViewed).
+   */
+  viewed: Record<string, string>
 }
 
 export type ReviewEvent =
@@ -1793,6 +1798,8 @@ export const IPC = {
   reviewClose: 'review:close',
   /** 리뷰 화면 진입 시 사이드카(diff·지적·활동)를 읽어온다. */
   reviewLoad: 'review:load',
+  /** 파일 1건의 "봤음" 표시를 켜고 끈다. */
+  reviewSetFileViewed: 'review:setFileViewed',
   /** 워크트리는 지우고 결과·ref 는 남긴다(되살리기 가능). */
   reviewArchive: 'review:archive',
   /** 아카이브된 리뷰의 워크트리를 다시 만든다. */

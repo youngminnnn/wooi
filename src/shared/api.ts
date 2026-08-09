@@ -253,6 +253,15 @@ export interface WooiApi {
     close(reviewId: string): Promise<void>
     /** 리뷰 화면 진입 시 diff·지적·활동을 한 번에 읽어온다. */
     load(reviewId: string): Promise<ReviewBundle>
+    /**
+     * 파일 1건을 "봤음" 으로 표시하거나 표시를 끈다. 켤 때는 그 시점 내용의 지문을 함께
+     * 남기고 그 지문을 돌려준다 — 파일이 바뀌면 표시가 저절로 풀린다.
+     */
+    setFileViewed(
+      reviewId: string,
+      path: string,
+      viewed: boolean
+    ): Promise<{ hash?: string; error?: string }>
     /** 워크트리만 지우고 결과·ref 는 남긴다(되살리기 가능). */
     archive(reviewId: string): Promise<void>
     /** 아카이브된 리뷰의 워크트리를 다시 만든다. */

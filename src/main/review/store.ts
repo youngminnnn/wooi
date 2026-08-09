@@ -25,9 +25,25 @@ type ReviewRecord =
    */
   | { id: string; rec: 'finding-dismissed' }
   | { id: string; rec: 'activity'; item: ReviewActivityItem }
+  /**
+   * "이 파일은 봤다" 표시. **그때의 내용 지문을 함께 남긴다** — 새 커밋으로 파일이 바뀌면
+   * 지문이 어긋나 자동으로 안 본 것이 된다([[reviewViewed]]).
+   */
+  | { id: string; rec: 'file-viewed'; path: string; hash: string }
+  /** 표시를 끈 묘비. 지적의 묘비와 같은 결로 **표시와 같은 id 를 쓴다**. */
+  | { id: string; rec: 'file-unviewed'; path: string }
 
 /** diff 레코드의 고정 id — 새 diff 를 append 하면 이전 것을 덮어쓴다. */
 const DIFF_ID = '__diff__'
+
+/** 파일별 viewed 레코드의 id. 같은 파일을 다시 토글하면 이 id 로 덮어써진다. */
+function viewedId(path: string): string {
+  return `viewed:${path}`
+}
+
+function emptyBundle(): ReviewBundle {
+  return { diff: null, findings: [], activity: [], viewed: {} }
+}
 
 function serialize(rec: ReviewRecord): string {
   return JSON.stringify(rec) + '\n'
@@ -54,13 +70,15 @@ function parseJsonl(text: string): ReviewRecord[] {
 }
 
 function toBundle(records: ReviewRecord[]): ReviewBundle {
-  const bundle: ReviewBundle = { diff: null, findings: [], activity: [] }
+  const bundle: ReviewBundle = emptyBundle()
   for (const rec of records) {
     // 종류를 하나씩 확인한다 — "나머지는 활동" 으로 두면 묘비 같은 새 레코드가 활동
     // 타임라인에 undefined 로 섞여 들어간다.
     if (rec.rec === 'diff') bundle.diff = rec.diff
     else if (rec.rec === 'finding') bundle.findings.push(rec.finding)
     else if (rec.rec === 'activity') bundle.activity.push(rec.item)
+    else if (rec.rec === 'file-viewed') bundle.viewed[rec.path] = rec.hash
+    else if (rec.rec === 'file-unviewed') delete bundle.viewed[rec.path]
   }
   return bundle
 }
@@ -112,6 +130,20 @@ class ReviewBundleStore {
     })
   }
 
+  /**
+   * 파일의 "봤음" 표시를 켜거나(hash) 끈다(null).
+   * 같은 id 로 덮어쓰므로 토글이 그대로 last-wins 로 풀린다.
+   */
+  setFileViewed(reviewId: string, path: string, hash: string | null): void {
+    const rec: ReviewRecord = hash
+      ? { id: viewedId(path), rec: 'file-viewed', path, hash }
+      : { id: viewedId(path), rec: 'file-unviewed', path }
+    this.append(reviewId, rec, (b) => {
+      if (hash) b.viewed[path] = hash
+      else delete b.viewed[path]
+    })
+  }
+
   addActivity(reviewId: string, item: ReviewActivityItem): void {
     this.append(reviewId, { id: item.id, rec: 'activity', item }, (b) => {
       const idx = b.activity.findIndex((a) => a.id === item.id)
@@ -139,11 +171,11 @@ class ReviewBundleStore {
 
   private readFromDisk(reviewId: string): ReviewBundle {
     const file = this.fileFor(reviewId)
-    if (!existsSync(file)) return { diff: null, findings: [], activity: [] }
+    if (!existsSync(file)) return emptyBundle()
     try {
       return toBundle(parseJsonl(readFileSync(file, 'utf-8')))
     } catch {
-      return { diff: null, findings: [], activity: [] }
+      return emptyBundle()
     }
   }
 
@@ -166,4 +198,4 @@ export function getReviewBundles(): ReviewBundleStore {
 }
 
 // 테스트용 — Electron 없이 파싱 규칙만 검증할 수 있게 노출한다.
-export const __test = { parseJsonl, toBundle, serialize, DIFF_ID }
+export const __test = { parseJsonl, toBundle, serialize, DIFF_ID, viewedId }

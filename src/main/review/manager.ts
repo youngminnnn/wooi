@@ -14,6 +14,7 @@ import type {
   ReviewVerdict
 } from '@shared/types'
 import { EMPTY_RESUBMIT_BLOCKED, SELF_REVIEW_BLOCKED } from '@shared/types'
+import { fileDiffHash } from '@shared/reviewViewed'
 import {
   getPrDiffRaw,
   getPrHeadSha,
@@ -228,6 +229,30 @@ export class ReviewManager {
   /** 리뷰 화면 진입 시 사이드카를 통째로 읽어 준다. */
   loadBundle(reviewId: string): ReviewBundle {
     return getReviewBundles().load(reviewId)
+  }
+
+  /**
+   * 파일 1건의 "봤음" 표시를 켜고 끈다.
+   *
+   * 지문은 **여기 있는 diff 로 계산한다** — 표시를 켜는 순간의 내용이 기준이어야, 그 뒤 새
+   * 커밋으로 파일이 바뀌었을 때 표시가 풀린다. 계산된 지문을 돌려주므로, 렌더러가 아직 못 받은
+   * 새 diff 가 main 에 먼저 도착해 있어도 양쪽이 같은 값으로 맞춰진다.
+   */
+  setFileViewed(
+    reviewId: string,
+    path: string,
+    viewed: boolean
+  ): { hash?: string; error?: string } {
+    const bundles = getReviewBundles()
+    if (!viewed) {
+      bundles.setFileViewed(reviewId, path, null)
+      return {}
+    }
+    const file = bundles.load(reviewId).diff?.files.find((f) => f.path === path)
+    if (!file) return { error: 'That file is no longer part of this diff.' }
+    const hash = fileDiffHash(file)
+    bundles.setFileViewed(reviewId, path, hash)
+    return { hash }
   }
 
   // ── 수명 관리 ───────────────────────────────────────────────────────────

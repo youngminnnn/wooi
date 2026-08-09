@@ -1,10 +1,28 @@
 import { describe, it, expect } from 'vitest'
-import type { ReviewActivityItem, ReviewDiff, ReviewFinding } from '@shared/types'
+import type { ReviewActivityItem, ReviewDiff, ReviewFileDiff, ReviewFinding } from '@shared/types'
+import { fileDiffHash, isFileViewed, viewedFilePaths } from '@shared/reviewViewed'
 import { __test } from './store'
 
-const { parseJsonl, toBundle, serialize, DIFF_ID } = __test
+const { parseJsonl, toBundle, serialize, DIFF_ID, viewedId } = __test
 
 const DIFF: ReviewDiff = { files: [] }
+
+function fileDiff(path: string, text = 'a'): ReviewFileDiff {
+  return {
+    path,
+    oldPath: null,
+    status: 'modified',
+    additions: 1,
+    deletions: 0,
+    binary: false,
+    hunks: [
+      {
+        header: '@@ -1 +1 @@',
+        rows: [{ kind: 'add', text, oldLine: null, newLine: 1 }]
+      }
+    ]
+  }
+}
 
 function finding(id: string, title = id): ReviewFinding {
   return { id, severity: 'minor', title, body: 'b', anchor: null }
@@ -81,7 +99,7 @@ describe('사이드카 JSONL', () => {
 
   it('빈 내용은 빈 번들', () => {
     const b = toBundle(parseJsonl(''))
-    expect(b).toEqual({ diff: null, findings: [], activity: [] })
+    expect(b).toEqual({ diff: null, findings: [], activity: [], viewed: {} })
   })
 
   it('id 없는 줄은 무시한다', () => {
@@ -111,5 +129,88 @@ describe('사이드카 JSONL', () => {
     )
     const b = toBundle(parseJsonl(text))
     expect(b.findings.map((f) => f.title)).toEqual(['back', 'f2'])
+  })
+})
+
+describe('파일 봤음 표시', () => {
+  const A = fileDiff('a.ts')
+
+  it('표시를 켜고 끄기를 되풀이해도 마지막 줄이 이긴다', () => {
+    const id = viewedId('a.ts')
+    const hash = fileDiffHash(A)
+    const text = jsonl(
+      { id, rec: 'file-viewed', path: 'a.ts', hash },
+      { id, rec: 'file-unviewed', path: 'a.ts' },
+      { id, rec: 'file-viewed', path: 'a.ts', hash }
+    )
+    expect(toBundle(parseJsonl(text)).viewed).toEqual({ 'a.ts': hash })
+
+    // 마지막이 해제면 표시가 남지 않는다.
+    const off = text + jsonl({ id, rec: 'file-unviewed', path: 'a.ts' })
+    expect(toBundle(parseJsonl(off)).viewed).toEqual({})
+  })
+
+  /** 이 방식의 존재 이유 — 새 커밋으로 파일이 바뀌면 리셋 코드 없이 표시가 풀려야 한다. */
+  it('내용이 바뀌면 남아 있는 표시를 무시한다', () => {
+    const b = toBundle(
+      parseJsonl(
+        jsonl({ id: viewedId('a.ts'), rec: 'file-viewed', path: 'a.ts', hash: fileDiffHash(A) })
+      )
+    )
+    expect(isFileViewed(b.viewed, A)).toBe(true)
+
+    const changed = fileDiff('a.ts', 'a changed')
+    expect(isFileViewed(b.viewed, changed)).toBe(false)
+    expect(viewedFilePaths(b.viewed, [changed])).toEqual(new Set())
+  })
+
+  it('경로가 같아도 다른 파일의 표시는 서로 건드리지 않는다', () => {
+    const B = fileDiff('b.ts')
+    const text = jsonl(
+      { id: viewedId('a.ts'), rec: 'file-viewed', path: 'a.ts', hash: fileDiffHash(A) },
+      { id: viewedId('b.ts'), rec: 'file-viewed', path: 'b.ts', hash: fileDiffHash(B) },
+      { id: viewedId('a.ts'), rec: 'file-unviewed', path: 'a.ts' }
+    )
+    expect(viewedFilePaths(toBundle(parseJsonl(text)).viewed, [A, B])).toEqual(new Set(['b.ts']))
+  })
+
+  /** toBundle 주석이 경고하는 함정 — 종류를 안 가리면 새 레코드가 활동 타임라인에 샌다. */
+  it('viewed 레코드가 활동 타임라인에 섞이지 않는다', () => {
+    const text = jsonl(
+      { id: 'a1', rec: 'activity', item: turn('a1', 'hello') },
+      { id: viewedId('a.ts'), rec: 'file-viewed', path: 'a.ts', hash: fileDiffHash(A) },
+      { id: viewedId('b.ts'), rec: 'file-unviewed', path: 'b.ts' }
+    )
+    const b = toBundle(parseJsonl(text))
+    expect(b.activity.map((a) => a.id)).toEqual(['a1'])
+    expect(b.findings).toEqual([])
+  })
+
+  it('손상된 줄이 섞여도 나머지 표시를 살린다', () => {
+    const text =
+      jsonl({ id: viewedId('a.ts'), rec: 'file-viewed', path: 'a.ts', hash: fileDiffHash(A) }) +
+      '{"id":"viewed:b.ts","rec":"file-vie\n' +
+      jsonl({ id: 'f1', rec: 'finding', finding: finding('f1') })
+    const b = toBundle(parseJsonl(text))
+    expect(b.viewed).toEqual({ 'a.ts': fileDiffHash(A) })
+    expect(b.findings.map((f) => f.id)).toEqual(['f1'])
+  })
+
+  /**
+   * 지문은 main(저장)과 렌더러(표시)가 각자 계산한다 — 같은 내용이면 반드시 같은 값이어야
+   * 하고, 조금이라도 달라지면 달라져야 한다.
+   */
+  it('지문은 내용에만 달려 있다', () => {
+    expect(fileDiffHash(fileDiff('a.ts'))).toBe(fileDiffHash(fileDiff('b.ts')))
+    expect(fileDiffHash(A)).not.toBe(fileDiffHash(fileDiff('a.ts', 'a ')))
+
+    // 바이너리는 hunks 가 비어 있어 hunks 만 보면 무엇이 바뀌어도 같은 값이 나온다.
+    const bin = (additions: number): ReviewFileDiff => ({
+      ...fileDiff('img.png'),
+      binary: true,
+      hunks: [],
+      additions
+    })
+    expect(fileDiffHash(bin(1))).not.toBe(fileDiffHash(bin(2)))
   })
 })

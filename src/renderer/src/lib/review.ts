@@ -41,6 +41,11 @@ export interface ReviewViewState {
    */
   posting: Record<string, { state: 'posting' | 'failed'; error?: string }>
   /**
+   * "봤음" 표시한 파일 경로 → 표시할 때의 내용 지문. 지금 diff 와 지문이 어긋나면(새 커밋으로
+   * 파일이 바뀌었다면) 안 본 것으로 그린다 — `@shared/reviewViewed` 의 isFileViewed.
+   */
+  viewed: Record<string, string>
+  /**
    * 오른쪽 패널에서 마지막으로 보던 탭. 화면 상태이면서도 리뷰마다 따로 기억해야 한다 —
    * 워크스페이스를 오가면 리뷰 화면이 통째로 언마운트되는데, 그때마다 findings 로 되돌아가면
    * 답글을 주고받던 흐름이 매번 끊긴다.
@@ -59,6 +64,7 @@ export function emptyView(): ReviewViewState {
     edits: {},
     selected: {},
     posting: {},
+    viewed: {},
     tab: 'findings'
   }
 }
