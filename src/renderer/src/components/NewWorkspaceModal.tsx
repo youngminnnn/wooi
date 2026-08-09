@@ -10,11 +10,14 @@ import { AgentBackendMark } from './BrandIcons'
 export default function NewWorkspaceModal({
   repoId,
   parentWorkspaceId = null,
+  initialAgentBackend,
   onClose
 }: {
   repoId: string
   /** 지정하면 이 워크스페이스 위에 stacked 로 만든다(base = 부모 브랜치). */
   parentWorkspaceId?: string | null
+  /** 사이드바에서 특정 에이전트의 + 버튼을 눌렀다면 그 선택을 생성 모달까지 유지한다. */
+  initialAgentBackend?: AgentBackendId
   onClose: () => void
 }): React.JSX.Element {
   const app = useStore((s) => s.app)!
@@ -28,7 +31,7 @@ export default function NewWorkspaceModal({
   // 물어볼 이유가 없으므로 피커를 감추고 그 하나로 만든다.
   const available = useAvailableBackends()
   const [agentBackend, setAgentBackend] = useState<AgentBackendId>(
-    () => parent?.agentBackend ?? app.settings.defaultAgentBackend
+    () => initialAgentBackend ?? parent?.agentBackend ?? app.settings.defaultAgentBackend
   )
   const showPicker = available.length > 1
   // 기본 백엔드를 쓸 수 없으면(CLI 제거 등) 쓸 수 있는 것으로 대체한다.
@@ -102,14 +105,14 @@ export default function NewWorkspaceModal({
 
         {showModePicker && (
           <div>
-            <label className={labelClass}>Mode</label>
+            <label className={labelClass}>Work mode</label>
             <div className="flex gap-1.5">
               {[
-                { on: false, label: 'Single agent', hint: 'One agent does the work.' },
+                { on: false, label: 'Solo', hint: 'One agent does the work.' },
                 {
                   on: true,
-                  label: 'Multi-agent',
-                  hint: 'The main agent can run tasks with other agents.'
+                  label: 'Agent team',
+                  hint: 'The lead agent can delegate tasks.'
                 }
               ].map((option) => (
                 <button
@@ -130,8 +133,8 @@ export default function NewWorkspaceModal({
             </div>
             {effectiveMultiAgent && (
               <p className="mt-1.5 text-xs text-neutral-600">
-                Experimental. You don&apos;t pick the other agents here — just ask in the chat
-                (&ldquo;have Codex review this&rdquo;) and the main agent runs them for you.
+                Teammates are selected from your available agents. You can also ask directly in
+                chat, for example: &ldquo;have Codex review this&rdquo;.
               </p>
             )}
           </div>
@@ -139,7 +142,7 @@ export default function NewWorkspaceModal({
 
         {showPicker && (
           <div>
-            <label className={labelClass}>{effectiveMultiAgent ? 'Main agent' : 'Agent'}</label>
+            <label className={labelClass}>{effectiveMultiAgent ? 'Lead agent' : 'Agent'}</label>
             <div className="flex gap-1.5">
               {available.map((b) => (
                 <button

@@ -324,14 +324,21 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
             {/* 멀티 에이전트는 이름 옆 브랜드 마크만으로는 드러나지 않는다 — 그 마크는 메인
                 에이전트일 뿐이라, 이 워크스페이스에서 다른 종류도 돌 수 있다는 사실은 따로
                 말해 줘야 한다. 위임이 실제로 열려 있을 때만 뜬다(useMultiAgent). */}
-            {multiAgent.active && (
-              <span
-                className="shrink-0 flex items-center gap-1 rounded px-1.5 py-0.5 bg-[var(--surface-2)] text-neutral-400"
-                title={`Multi-agent — ask ${agentLabel} to run a task with another agent (e.g. “have Codex review this”)`}
+            {multiAgent.canUse && (
+              <button
+                onClick={() =>
+                  void window.api.workspace.setMultiAgent(workspace.id, !multiAgent.active)
+                }
+                className="shrink-0 flex items-center gap-1 rounded px-1.5 py-0.5 bg-[var(--surface-2)] text-neutral-400 hover:text-neutral-200 hover:bg-[var(--surface-3)]"
+                title={
+                  multiAgent.active
+                    ? `Agent team led by ${agentLabel}. Click to switch to Solo; applies from the next message.`
+                    : 'Solo workspace. Click to let the lead agent delegate tasks; applies from the next message.'
+                }
               >
-                <Users size={10} className="multi-agent-mark" />
-                Multi-agent
-              </span>
+                <Users size={10} className={multiAgent.active ? 'multi-agent-mark' : ''} />
+                {multiAgent.active ? 'Agent team' : 'Solo'}
+              </button>
             )}
             <GitBranch size={11} />
             <span className="truncate">{workspace.branch}</span>
