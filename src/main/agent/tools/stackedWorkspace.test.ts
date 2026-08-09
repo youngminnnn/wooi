@@ -50,6 +50,8 @@ const child: Partial<Workspace> = {
   name: 'next',
   worktreePath: '/tmp/wt-child',
   parentWorkspaceId: 'ws-parent',
+  // 대상을 받는 도구의 권한 근거는 부모 관계가 아니라 생성자다([[agent/tools/target]]).
+  createdByWorkspaceId: 'ws-parent',
   archived: false,
   status: 'idle',
   prNumber: null
@@ -79,6 +81,14 @@ async function report(
 async function check(from = 'ws-parent'): Promise<Record<string, unknown>> {
   const { checkStackedWork } = await import('./stackedWorkspace')
   return checkStackedWork(deps, from, {}) as Promise<Record<string, unknown>>
+}
+
+async function notify(
+  args: Record<string, unknown>,
+  from = 'ws-parent'
+): Promise<Record<string, unknown>> {
+  const { notifyChild } = await import('./stackedWorkspace')
+  return notifyChild(deps, from, args) as Promise<Record<string, unknown>>
 }
 
 describe('create_stacked_workspace', () => {
@@ -177,6 +187,16 @@ describe('create_stacked_workspace 의 작업 인계', () => {
     expect(text).toContain('report_to_parent')
     // 자식은 자기가 어디에 쌓였는지도 알아야 PR base 를 이해한다.
     expect(text).toContain('feat/base')
+  })
+
+  it('보고 의무를 이 작업 하나로 묶는다', async () => {
+    // "끝나면 보고하라" 만 남기면 이 문장이 자식 맥락에 영원히 살아, 인계가 끝난 뒤 사용자와
+    // 나누는 평범한 대화의 매 턴 끝마다 보고가 나간다.
+    await create_({ task: 'Add the login form.' })
+
+    const [, text] = sendMessage.mock.calls[0]
+    expect(text).toContain('once')
+    expect(text).toContain('closes the handoff')
   })
 
   it('task 가 없으면 아무것도 보내지 않고 그 사실을 알려 준다', async () => {
@@ -294,6 +314,21 @@ describe('report_to_parent', () => {
     expect(state.workspaces.find((w) => w.id === 'ws-child')?.handoff?.summary).toBe('second')
   })
 
+  it('최초 1회 보고가 인계를 닫는다고 알려 준다', async () => {
+    // 의무가 계속 살아 있으면 자식은 인계가 끝난 뒤에도 매 턴 끝마다 보고하고, 부모에는 같은
+    // 카드가, 사용자에게는 승인 카드가 계속 쌓인다.
+    const result = await report({ summary: 'Added the form.' })
+    expect(result.note).toMatch(/closes the handoff/)
+  })
+
+  it('두 번째부터는 덮어썼다고만 말한다 — 다시 의무를 지우지 않는다', async () => {
+    await report({ summary: 'first' })
+    const result = await report({ summary: 'second' })
+
+    expect(result.note).toMatch(/replaced your earlier report/)
+    expect(result.note).not.toMatch(/closes the handoff/)
+  })
+
   it('빈 요약은 거부한다 — 알림만 뜨고 내용이 없으면 부모가 할 수 있는 게 없다', async () => {
     await expect(report({ summary: '   ' })).rejects.toThrow(/empty/)
     expect(postToTranscript).not.toHaveBeenCalled()
@@ -306,6 +341,90 @@ describe('report_to_parent', () => {
   it('부모가 사라졌으면 던진다', async () => {
     state.workspaces = [{ ...child }]
     await expect(report({ summary: 'x' })).rejects.toThrow(/parent workspace no longer exists/)
+  })
+})
+
+describe('notify_child', () => {
+  beforeEach(() => {
+    state.workspaces = [{ ...parent }, { ...child }]
+  })
+
+  it('자식을 깨운다 — 부모 → 자식 방향은 기록이 아니라 메시지다', async () => {
+    await notify({ workspaceId: 'ws-child', message: 'I moved the auth helper to src/auth.ts.' })
+
+    expect(sendMessage).toHaveBeenCalledTimes(1)
+    const [target, text] = sendMessage.mock.calls[0]
+    expect(target).toBe('ws-child')
+    expect(text).toContain('I moved the auth helper to src/auth.ts.')
+  })
+
+  it('부모에게서 온 말이라는 것을 자식이 알 수 있게 한다', async () => {
+    // 자식 쪽에는 사용자 메시지로 도착한다. 출처를 밝히지 않으면 자식은 사람이 시킨 새 작업으로
+    // 읽고, 하던 일을 버린다.
+    await notify({ workspaceId: 'ws-child', message: 'Schema changed.' })
+
+    const [, text] = sendMessage.mock.calls[0]
+    expect(text).toContain('feat/base')
+    expect(text).toContain('not from the user')
+  })
+
+  it('도는 중이면 현재 턴 뒤에 읽힌다고 알려 준다', async () => {
+    state.workspaces = [{ ...parent }, { ...child, status: 'running' }]
+
+    const result = await notify({ workspaceId: 'ws-child', message: 'Schema changed.' })
+    expect(result.note).toMatch(/current turn ends/)
+    // 도는 중이라고 막지는 않는다 — 낡은 전제로 일하는 중일 때가 바로 알려야 할 때다.
+    expect(sendMessage).toHaveBeenCalledTimes(1)
+  })
+
+  it('자기가 만들지 않은 워크스페이스는 거부한다 — 대상 경계는 target.ts 가 정한다', async () => {
+    // 가드를 이 도구가 다시 발명하지 않는다는 것이 요점이다. 사람이 UI 에서 만든 스택 자식은
+    // 부모가 있어도 생성자가 없으므로 여기서 걸린다.
+    state.workspaces = [{ ...parent }, { ...child, createdByWorkspaceId: null }]
+
+    await expect(notify({ workspaceId: 'ws-child', message: 'hi' })).rejects.toThrow(
+      /not created by this workspace/
+    )
+    expect(sendMessage).not.toHaveBeenCalled()
+  })
+
+  it('내가 만들었어도 내 위에 쌓인 게 아니면 거부한다', async () => {
+    // 권한이 아니라 문장의 참이다 — 통지문은 "네 아래 브랜치에서 온 소식" 이라고 말하는데,
+    // 독립 워크스페이스(create_workspace)에 그 문장을 보내면 거짓말이 된다.
+    state.workspaces = [
+      { ...parent },
+      { ...child, id: 'ws-solo', parentWorkspaceId: null, createdByWorkspaceId: 'ws-parent' }
+    ]
+
+    await expect(notify({ workspaceId: 'ws-solo', message: 'hi' })).rejects.toThrow(
+      /not stacked on this workspace/
+    )
+    expect(sendMessage).not.toHaveBeenCalled()
+  })
+
+  it('모르는 id 는 거부한다', async () => {
+    await expect(notify({ workspaceId: 'ws-nope', message: 'hi' })).rejects.toThrow(
+      /No Wooi workspace has the id/
+    )
+  })
+
+  it('아카이브된 자식에는 보내지 않는다 — worktree 도 세션도 없다', async () => {
+    state.workspaces = [{ ...parent }, { ...child, archived: true }]
+
+    await expect(notify({ workspaceId: 'ws-child', message: 'hi' })).rejects.toThrow(/archived/)
+    expect(sendMessage).not.toHaveBeenCalled()
+  })
+
+  it('빈 메시지는 거부한다 — 자식의 턴만 쓰고 아무것도 전하지 못한다', async () => {
+    await expect(notify({ workspaceId: 'ws-child', message: '  \n ' })).rejects.toThrow(/empty/)
+    expect(sendMessage).not.toHaveBeenCalled()
+  })
+
+  it('부모가 사라졌으면 던진다', async () => {
+    state.workspaces = [{ ...child }]
+    await expect(notify({ workspaceId: 'ws-child', message: 'hi' })).rejects.toThrow(
+      /no longer exists/
+    )
   })
 })
 
@@ -331,6 +450,21 @@ describe('check_stacked_work', () => {
       running: false,
       report: { status: 'done', summary: 'shipped' }
     })
+  })
+
+  it('지목할 수 있는 자식인지 함께 알려 준다', async () => {
+    // 모델이 자식의 id 를 보는 곳이 여기다. 무엇을 지목할 수 있는지도 여기서 읽히지 않으면
+    // notify_child 를 불러 보고 거절당하는 것으로만 알게 된다.
+    state.workspaces = [
+      { ...parent },
+      { ...child },
+      { ...child, id: 'ws-by-human', branch: 'feat/human', createdByWorkspaceId: null }
+    ]
+
+    const result = (await check()) as { children: Array<Record<string, unknown>> }
+
+    expect(result.children[0]).toMatchObject({ branch: 'feat/next', createdByYou: true })
+    expect(result.children[1]).toMatchObject({ branch: 'feat/human', createdByYou: false })
   })
 
   it('손자(자식의 자식)는 세지 않는다 — 직계만 본다', async () => {

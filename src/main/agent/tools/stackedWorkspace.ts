@@ -5,14 +5,18 @@ import type { BranchSummary } from '../../git'
 import { getStore } from '../../store'
 import { createWorkspace } from '../../workspaces'
 import type { AgentToolHandler } from './registry'
+import { resolveTargetWorkspace } from './target'
 
 /**
  * 스택 워크스페이스 사이의 작업 인계.
  *
- * 두 방향이 비대칭인 것이 핵심이다. 부모 → 자식은 **깨운다**(빈 워크스페이스에 최초 작업을
- * 넘기는 것이고, 사용자가 그 도구 호출을 방금 승인했다). 자식 → 부모는 **기록만 한다** —
- * 부모는 사람과 대화 중일 수 있고, 승인하지 않은 턴 비용을 자식이 일으켜서는 안 된다.
- * 부모는 check_stacked_work 로 직접 읽는다.
+ * 두 방향이 비대칭인 것이 핵심이다. 부모 → 자식은 **깨운다**(create_stacked_workspace 의 최초
+ * 작업도, notify_child 의 뒤늦은 소식도 마찬가지다 — 사용자가 그 도구 호출을 방금 승인했으므로
+ * 턴 비용이 승인된 비용이다). 자식 → 부모는 **기록만 한다** — 부모는 사람과 대화 중일 수 있고,
+ * 승인하지 않은 턴 비용을 자식이 일으켜서는 안 된다. 부모는 check_stacked_work 로 직접 읽는다.
+ *
+ * 비대칭을 뒤집지 않는 이유는 승인의 유무 하나다. 자식의 보고에는 사용자가 승인할 자리가 없다
+ * (자식 화면에서 승인해도 비용은 부모에서 난다). 부모의 통지에는 있다.
  */
 
 function workspaceOf(workspaceId: string): Workspace {
@@ -59,9 +63,15 @@ function handoffMessage(task: string, parent: Workspace, summary: BranchSummary 
     '---',
     `This workspace was created by Wooi as a stacked branch on top of \`${parent.branch}\`, ` +
       'so its pull request will target that branch rather than the default one.',
+    // 의무를 **이 작업 하나로** 묶는다. "끝나면 보고하라" 만 적어 두면 이 문장이 자식의 맥락에
+    // 영원히 남아, 인계가 끝난 뒤 사용자와 나누는 평범한 대화의 매 턴 끝마다 보고가 나간다 —
+    // 부모에게는 같은 카드가 쌓이고 사용자에게는 승인 카드가 계속 뜬다.
     'When you finish this task — or if you get stuck and need a decision — call ' +
-      '`mcp__wooi__report_to_parent` with a summary. That is the only way the parent workspace ' +
-      'finds out; nothing crosses between workspaces on its own.',
+      '`mcp__wooi__report_to_parent` once with a summary. That is the only way the parent ' +
+      'workspace finds out; nothing crosses between workspaces on its own.',
+    'That one report closes the handoff. Anything the user asks you for afterwards is ordinary ' +
+      'work in this workspace — report again only when the parent has a decision waiting on the ' +
+      'answer, not at the end of every turn.',
     ...(summary ? inheritedWorkSection(summary) : [])
   ].join('\n')
 }
@@ -147,6 +157,9 @@ export const reportToParent: AgentToolHandler = async (deps, workspaceId, args) 
   if (!summary) throw new Error('The summary is empty — say what you did or what you are stuck on.')
   const status: StackedHandoffStatus = args.status === 'blocked' ? 'blocked' : 'done'
   const at = Date.now()
+  // 인계를 닫는 **최초 1회** 인가. 이 뒤의 보고는 막지 않지만(부모의 판단이 걸려 있으면 필요하다)
+  // 의무가 아니라는 것을 결과로 말해 준다 — 인계문의 문장만으로는 맥락이 길어질수록 흐려진다.
+  const first = !ws.handoff
 
   getStore().update((st) => {
     const self = st.workspaces.find((w) => w.id === workspaceId)
@@ -173,7 +186,74 @@ export const reportToParent: AgentToolHandler = async (deps, workspaceId, args) 
   return {
     reportedTo: { workspaceId: parentId, branch: parent.branch },
     status,
-    note: 'The parent was not interrupted — it reads this on its next turn.'
+    note: first
+      ? 'The parent was not interrupted — it reads this on its next turn. This closes the ' +
+        'handoff: keep working here as normal and do not report again unless the parent has a ' +
+        'decision waiting on the answer.'
+      : 'This replaced your earlier report. The parent was not interrupted — it reads it on its ' +
+        'next turn.'
+  }
+}
+
+/**
+ * 자식에게 도착하는 통지문.
+ *
+ * 출처를 밝히는 문단을 앱이 붙인다. 이 메시지는 자식 쪽에 **사용자 메시지로** 들어가므로
+ * (인계문과 같은 통로다), 부모가 쓴 문장만 보내면 자식은 사람이 시킨 새 작업으로 읽고 하던 일을
+ * 버린다. 부모 모델의 문장 실력에 맡길 수 없는 부분이라 여기서 보장한다.
+ */
+function notificationMessage(message: string, parent: Workspace): string {
+  return [
+    message,
+    '',
+    '---',
+    `This came from \`${parent.branch}\` — the workspace this one is stacked on — and not from ` +
+      'the user. It is news about the branch underneath you, so fold it into what you are doing ' +
+      'rather than treating it as a new task. Use `mcp__wooi__report_to_parent` if it needs an answer.'
+  ].join('\n')
+}
+
+/**
+ * 부모가 자식에게 뒤늦은 소식을 전한다. 부모 → 자식이므로 **깨운다**(모듈 첫머리의 비대칭).
+ *
+ * 대상 검증은 [[agent/tools/target]] 에 맡긴다 — 대상을 받는 도구가 가드를 각자 발명하면
+ * 빠뜨린 가드가 곧 남의 워크스페이스를 건드리는 구멍이 된다. 다만 running 은 허용한다:
+ * 세션 입력 큐가 현재 턴 뒤로 붙여 주므로 하던 일이 끊기지 않고, 자식이 이미 낡은 전제로
+ * 일하는 중일 때가 바로 알려야 할 때다.
+ *
+ * 그 위에 "내 위에 쌓였는가" 를 하나 더 본다. 이건 권한이 아니라 **문장의 참**이다 — 통지문은
+ * "네 아래 브랜치에서 온 소식" 이라고 말하는데, 스택이 아닌 워크스페이스에 그 문장을 보내면
+ * 거짓말이 된다. 내가 만들었지만 독립인 워크스페이스(create_workspace)가 여기 걸린다.
+ */
+export const notifyChild: AgentToolHandler = async (deps, workspaceId, args) => {
+  const parent = workspaceOf(workspaceId)
+
+  const message = typeof args.message === 'string' ? args.message.trim() : ''
+  if (!message) {
+    throw new Error('The message is empty — say what the other workspace needs to know.')
+  }
+
+  const child = resolveTargetWorkspace(workspaceId, args.workspaceId, { allowRunning: true })
+  if (child.parentWorkspaceId !== workspaceId) {
+    throw new Error(
+      `${workspaceDisplayName(child)} is not stacked on this workspace, so there is no branch ` +
+        'underneath it to report news about. This tool only reaches the workspaces stacked ' +
+        'directly on this one — call `check_stacked_work` for that list.'
+    )
+  }
+
+  deps.sendMessage(child.id, notificationMessage(message, parent))
+
+  return {
+    notified: {
+      workspaceId: child.id,
+      name: workspaceDisplayName(child),
+      branch: child.branch
+    },
+    note:
+      child.status === 'running'
+        ? 'That workspace is mid-turn, so it reads this when the current turn ends.'
+        : 'That workspace was idle, so this starts a turn there right away.'
   }
 }
 
@@ -188,6 +268,10 @@ export const checkStackedWork: AgentToolHandler = async (_deps, workspaceId) => 
       name: workspaceDisplayName(c),
       // running 이면 아직 도는 중이다 — 보고가 없다고 실패한 것이 아니다.
       running: c.status === 'running',
+      // 지목할 수 있는 대상인가([[agent/tools/target]]). 여기가 모델이 자식의 id 를 보는 곳이므로
+      // 무엇을 지목할 수 있는지도 여기서 읽혀야 한다 — check_related_work 가 같은 값을 준다.
+      // 사람이 UI 에서 만든 스택 자식은 부모가 있어도 false 다.
+      createdByYou: c.createdByWorkspaceId === workspaceId,
       archived: c.archived,
       prNumber: c.prNumber,
       report: c.handoff

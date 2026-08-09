@@ -41,12 +41,25 @@ export function callerWorkspace(workspaceId: string): Workspace {
  *    지울 권한을 준다. 반대로 에이전트가 만든 독립 워크스페이스는 부모가 없어 빠져나간다 —
  *    양쪽으로 다 틀린다. 그래서 생성자를 따로 기록한다(Workspace.createdByWorkspaceId).
  * 3. 이미 아카이브됨 — 되돌릴 수 있는 동작이라도 두 번 하면 사용자가 되살린 것을 다시 지운다.
+ *    (아카이브는 워크트리를 지우고 세션을 정리하므로, 말을 거는 쪽에도 똑같이 대상이 없다.)
  * 4. **running** — 남이 지금 도는 턴을 죽이는 것이다. 사용자가 지켜보는 작업이 이유 없이
  *    중간에 끊기고, 그 워크스페이스의 에이전트는 자기가 왜 죽었는지 남길 기회조차 없다.
+ *
+ * 넷 중 running 만 도구에 따라 갈린다(allowRunning). 나머지 셋은 어느 도구에서도 같은 사고를
+ * 막으므로 끄는 길을 두지 않는다.
  */
 export function resolveTargetWorkspace(
   callerWorkspaceId: string,
-  targetWorkspaceId: unknown
+  targetWorkspaceId: unknown,
+  /**
+   * 도는 중인 대상을 허용한다.
+   *
+   * 기본이 거부인 이유는 4번이 **턴을 죽이는** 동작을 전제하기 때문이다(archive_workspace).
+   * 메시지를 보내는 것은 그렇지 않다 — 세션 입력 큐가 현재 턴 뒤로 붙여 주므로 하던 일이
+   * 끊기지 않고, 오히려 낡은 전제로 일하는 중일 때가 알려야 할 때다(notify_child).
+   * 그래서 "도는 중" 이라는 사실 하나로 묶지 않고, 대상에게 무엇을 하는지로 가른다.
+   */
+  options: { allowRunning?: boolean } = {}
 ): Workspace {
   const id = typeof targetWorkspaceId === 'string' ? targetWorkspaceId.trim() : ''
   if (!id) throw new Error('No workspace id was given — say which workspace you mean.')
@@ -66,7 +79,7 @@ export function resolveTargetWorkspace(
     )
   }
   if (target.archived) throw new Error(`${workspaceDisplayName(target)} is already archived.`)
-  if (target.status === 'running') {
+  if (target.status === 'running' && !options.allowRunning) {
     throw new Error(
       `${workspaceDisplayName(target)} is running a turn right now. Wait for it to finish — ` +
         'acting on it now would kill work in progress.'

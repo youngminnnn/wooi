@@ -156,6 +156,7 @@ function clampForCard(input: Record<string, unknown>): Record<string, unknown> {
 const TOOL_LABELS: Record<string, string> = {
   create_stacked_workspace: 'Create a stacked workspace',
   report_to_parent: 'Report to the parent workspace',
+  notify_child: 'Message a stacked workspace',
   open_pull_request: 'Open a pull request',
   run_script: 'Run a repository script',
   stop_script: 'Stop a repository script',
@@ -210,6 +211,16 @@ function titleFor(tool: string, args: unknown, workspace: Workspace): string {
   }
   if (tool === 'report_to_parent') {
     return 'The agent wants to report this workspace’s result back to the workspace it was stacked on.'
+  }
+  if (tool === 'notify_child') {
+    // 사용자가 판단할 지점은 "어디를 깨우는가" 다 — archive_workspace 와 같은 이유로 이름과
+    // 브랜치를 함께 적는다. 대상 검증은 핸들러가 하므로 여기서는 조회만 한다(잘못 지목된
+    // 호출이면 승인을 받은 뒤 도구 오류로 떨어진다).
+    const target = targetWorkspace(a.workspaceId)
+    const which = target
+      ? `${workspaceDisplayName(target)} (\`${target.branch}\`)`
+      : 'another workspace stacked on this one'
+    return `The agent wants to send a message to ${which} — that starts a turn there.`
   }
   if (tool === 'open_pull_request') {
     const draft = a.draft === true ? 'draft ' : ''
