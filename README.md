@@ -11,10 +11,12 @@ parallel, each on its own isolated git worktree. Each task runs in its own dedic
 worktree + branch + agent session, and every session starts with **an empty input box
 and no automatic prompt** — nothing runs until you send your first message.
 
-Running agents in isolated worktrees is table stakes now. The unsolved half is
-downstream: **every agent you add is one more branch to rebase and one more PR waiting
-on a reviewer.** Wooi stacks dependent work so it never collides in the first place, and
-turns each review into a diff you work on instead of a transcript you read.
+Running agents in isolated worktrees is table stakes now. **Worktrees solve file
+collisions; they don't solve dependencies** — when task B builds on task A's schema
+change, isolation is the thing in the way. And every agent you add is one more branch to
+rebase and one more PR waiting on a reviewer. Wooi stacks dependent work so it never
+collides in the first place, and turns each review into a diff you work on instead of a
+transcript you read.
 
 > **Agent support** — Since v1.4.0, Wooi supports both **Claude Code** (via the
 > Claude Agent SDK) and **OpenAI Codex** (via the Codex CLI). Choose an agent when
@@ -24,9 +26,15 @@ turns each review into a diff you work on instead of a transcript you read.
 
 - 🧱 **Dependent work stacks instead of conflicting** — everywhere else, conflicts
   between parallel branches get cleaned up after they happen. Wooi's answer is
-  structural: stack one agent's workspace on another's branch, and when the parent
-  merges, Wooi rebases the children and retargets their PR bases — so the rest of the
-  stack stays valid instead of turning into a pile of conflicts.
+  structural: work that builds on other work branches off it instead of off the default
+  branch. When the parent merges, Wooi rebases the children and retargets their PR
+  bases — so the rest of the stack stays valid instead of turning into a pile of
+  conflicts.
+- 🤖 **Agents stack their own work** — you can stack a workspace yourself, or the agent
+  can do it. It can see which files the other workspaces are already changing *before*
+  it starts, and open the next workspace on top of its own branch when what it just
+  finished is a complete, reviewable unit. One prompt can end up as a three-PR stack you
+  never arranged.
 - 🔍 **PR review, on the diff** — when agents write code faster, review becomes the
   constraint. Every agent can review a PR; what's missing is somewhere to work the
   result. Findings land inline on the diff they're about, each one editable,
@@ -153,6 +161,13 @@ those chains itself with plain `git` and `gh` — no extra stacking CLI needed.
 - **Stack a workspace** — pick **Stack a new workspace** from a workspace's menu. The new
   workspace branches off that workspace's branch, and its PR targets that branch instead
   of the repo's default branch.
+- **Or let the agent stack it** — agents get Wooi's own tools alongside their usual ones.
+  `check_related_work` lists the other workspaces open on this repo and the file paths
+  each is changing (paths only, never diffs), so an agent can steer clear of a sibling
+  before it starts rather than resolving the collision afterwards.
+  `create_stacked_workspace` opens the next workspace on top of the current branch when
+  the work just finished is a complete, reviewable unit, and `report_to_parent` hands the
+  result back up the chain.
 - **Stack overview** — a **Stack** button appears in the header whenever the current
   workspace is part of a chain. It lists every branch in the stack with its PR state
   (draft / review required / changes requested / ready to merge / conflict / merged), PR

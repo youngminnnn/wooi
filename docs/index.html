@@ -6,7 +6,7 @@
     <title>Wooi — Parallel Claude Code &amp; Codex agents, stacked PRs</title>
     <meta
       name="description"
-      content="Every orchestrator runs Claude Code and Codex in parallel git worktrees. Wooi handles what they hand back: dependent work stacks instead of conflicting — rebasing the chain and retargeting PR bases when a parent merges — and every PR review lands as editable findings on the diff. Free, open source, macOS."
+      content="Every orchestrator runs Claude Code and Codex in parallel git worktrees. Worktrees solve file collisions; they don't solve dependencies. Wooi stacks dependent work instead — agents can check what their siblings are touching and stack their own next PR — then rebases the chain and retargets PR bases when a parent merges, and lands every review as editable findings on the diff. Free, open source, macOS."
     />
 
     <!-- Open Graph / social -->
@@ -17,7 +17,7 @@
     />
     <meta
       property="og:description"
-      content="Every agent you add is one more branch to rebase and one more PR waiting on a reviewer. Wooi stacks dependent work so it never collides, and turns every review into a diff you work on."
+      content="Worktrees solve file collisions; they don't solve dependencies. Wooi stacks dependent work so it never collides — and agents stack their own — then turns every review into a diff you work on."
     />
     <meta property="og:image" content="https://youngminnnn.github.io/wooi/og.png?v=6" />
     <meta name="theme-color" content="#0a0b0d" />
@@ -46,7 +46,7 @@
         "@context": "https://schema.org",
         "@type": "SoftwareApplication",
         "name": "Wooi",
-        "description": "Wooi is a macOS app for running AI coding agents in parallel — each in its own git worktree. When work builds on work, stack the agents and Wooi keeps the PR chain rebased and retargeted.",
+        "description": "Wooi is a macOS app for running AI coding agents in parallel — each in its own git worktree. Worktrees solve file collisions, not dependencies: when work builds on work, stack it — yourself or by letting the agent stack its own — and Wooi keeps the PR chain rebased and retargeted.",
         "applicationCategory": "DeveloperApplication",
         "applicationSubCategory": "Developer Tools",
         "operatingSystem": "macOS",
@@ -68,10 +68,11 @@
           "priceCurrency": "USD"
         },
         "isAccessibleForFree": true,
-        "keywords": "parallel AI coding agents, git worktree, stacked PRs, Claude Code, Codex, pull request review, Conductor alternative",
+        "keywords": "parallel AI coding agents, git worktree, stacked PRs, self-stacking agents, Claude Code, Codex, pull request review, Conductor alternative",
         "featureList": [
           "Run AI coding agents in parallel, each in its own isolated git worktree and branch",
           "Stack a workspace on another workspace's branch for dependent work",
+          "Agents stack their own work: check which files sibling workspaces are changing before starting, then open the next stacked workspace",
           "Rebase child branches and retarget their PR bases when a parent PR merges",
           "Review pull requests on the diff and post the comments back to GitHub",
           "Claude Code and Codex as interchangeable agent backends"
@@ -900,13 +901,15 @@
           <p class="section-sub">
             <span class="en"
               >Running agents in isolated worktrees is table stakes now — every orchestrator does
-              it. The unsolved half is downstream: branches that were written in parallel and have
-              to land in sequence, and a review queue that grows as fast as the agents write.</span
+              it. But worktrees solve file collisions; they don't solve dependencies. The unsolved
+              half is downstream: branches that were written in parallel and have to land in
+              sequence, and a review queue that grows as fast as the agents write.</span
             >
             <span class="ko"
               >격리된 worktree 에서 에이전트를 돌리는 건 이제 기본입니다 — 어느 오케스트레이터나
-              합니다. 안 풀린 쪽은 그 다음입니다. 병렬로 쓰였지만 순서대로 머지돼야 하는 브랜치들,
-              그리고 에이전트가 코드를 쓰는 속도만큼 쌓이는 리뷰 대기열.</span
+              합니다. 하지만 worktree 는 파일 충돌은 막아도 의존성은 못 풉니다. 안 풀린 쪽은 그
+              다음입니다. 병렬로 쓰였지만 순서대로 머지돼야 하는 브랜치들, 그리고 에이전트가 코드를
+              쓰는 속도만큼 쌓이는 리뷰 대기열.</span
             >
           </p>
         </div>
@@ -921,16 +924,38 @@
             <p>
               <span class="en"
                 >Everywhere else, conflicts between parallel branches get cleaned up after they
-                happen. Wooi's answer is structural: stack one agent's workspace on another's
-                branch, and when the parent merges, Wooi rebases the children and retargets their PR
-                bases — so the rest of the stack stays valid instead of turning into a pile of
-                conflicts.</span
+                happen. Wooi's answer is structural: work that builds on other work branches off it
+                instead of off the default branch. When the parent merges, Wooi rebases the children
+                and retargets their PR bases — so the rest of the stack stays valid instead of
+                turning into a pile of conflicts.</span
               >
               <span class="ko"
                 >다른 도구에서 병렬 브랜치 충돌은 터진 뒤에 수습합니다. Wooi 의 답은 구조적입니다.
-                에이전트 워크스페이스를 다른 워크스페이스의 브랜치 위에 쌓고, 부모가 병합되면 Wooi
-                가 자식들을 rebase 하고 PR base 를 옮깁니다. 남은 스택은 충돌 더미가 되는 대신
-                그대로 유효합니다.</span
+                앞선 작업 위에서 이어지는 작업은 기본 브랜치가 아니라 그 작업의 브랜치에서
+                분기합니다. 부모가 병합되면 Wooi 가 자식들을 rebase 하고 PR base 를 옮깁니다. 남은
+                스택은 충돌 더미가 되는 대신 그대로 유효합니다.</span
+              >
+            </p>
+          </div>
+          <div class="why-card">
+            <div class="emoji">🤖</div>
+            <h3>
+              <span class="en">Agents stack their own work</span
+              ><span class="ko">에이전트가 스스로 쌓습니다</span>
+            </h3>
+            <p>
+              <span class="en"
+                >You can stack a workspace yourself, or the agent can do it. It can see which files
+                the other workspaces are already changing <em>before</em> it starts, and open the
+                next workspace on top of its own branch when what it just finished is a complete,
+                reviewable unit. One prompt can end up as a three-PR stack you never arranged.</span
+              >
+              <span class="ko"
+                >워크스페이스는 직접 쌓을 수도 있고, 에이전트가 쌓게 둘 수도 있습니다. 에이전트는
+                다른 워크스페이스가 지금 어떤 파일을 건드리고 있는지 <em>시작하기 전에</em> 확인할
+                수 있고, 방금 끝낸 작업이 리뷰 가능한 한 덩어리면 자기 브랜치 위에 다음
+                워크스페이스를 엽니다. 프롬프트 하나가 직접 짜지 않은 3단 PR 스택이 되기도
+                합니다.</span
               >
             </p>
           </div>
@@ -1245,6 +1270,31 @@
                   >워크스페이스 메뉴에서 <strong>Stack a new workspace</strong> 를 고르면 그
                   브랜치에서 분기한 워크스페이스가 생기고, PR 도 기본 브랜치가 아닌 그 부모 브랜치를
                   대상으로 열립니다.</span
+                >
+              </li>
+              <li>
+                <strong
+                  ><span class="en">Or let the agent stack it</span
+                  ><span class="ko">에이전트가 쌓게 두기</span></strong
+                >
+                —
+                <span class="en"
+                  >agents get Wooi's own tools alongside their usual ones.
+                  <code>check_related_work</code> lists the other workspaces open on this repo and
+                  the file paths each is changing (paths only, never diffs), so an agent can steer
+                  clear of a sibling before it starts rather than resolving the collision
+                  afterwards. <code>create_stacked_workspace</code> opens the next workspace on top
+                  of the current branch when the work just finished is a complete, reviewable unit,
+                  and <code>report_to_parent</code> hands the result back up the chain.</span
+                >
+                <span class="ko"
+                  >에이전트는 자기 도구 외에 Wooi 의 도구도 함께 씁니다.
+                  <code>check_related_work</code> 는 이 리포에 열려 있는 다른 워크스페이스와 각각이
+                  바꾸고 있는 파일 경로를 알려 줍니다(경로만, diff 는 절대 넘기지 않습니다). 충돌을
+                  나중에 수습하는 대신 시작 전에 피할 수 있습니다.
+                  <code>create_stacked_workspace</code> 는 방금 끝낸 작업이 리뷰 가능한 한 덩어리일
+                  때 현재 브랜치 위에 다음 워크스페이스를 열고, <code>report_to_parent</code> 로
+                  결과를 부모에게 돌려 줍니다.</span
                 >
               </li>
               <li>
