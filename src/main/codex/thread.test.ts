@@ -24,6 +24,8 @@ function makeThread() {
       effort: null,
       fastMode: false,
       permissionMode: 'default',
+      delegateBackends: [],
+      delegateInstructions: null,
       resumeThreadId: null
     },
     {

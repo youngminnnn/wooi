@@ -548,6 +548,18 @@ export function registerIpc(ctx: IpcContext): void {
     broadcastState()
   })
 
+  /**
+   * 멀티 에이전트 모드 전환(실험 기능). 세션 옵션에 실리는 값이라 **다음 세션부터** 적용된다 —
+   * 여기서 세션을 끊지 않는 이유는, 도는 중인 턴을 설정 변경만으로 죽이는 편이 더 놀랍기 때문이다.
+   */
+  ipcMain.handle(IPC.workspaceSetMultiAgent, (_e, workspaceId: string, multiAgent: boolean) => {
+    store.update((st) => {
+      const w = st.workspaces.find((x) => x.id === workspaceId)
+      if (w) w.multiAgent = multiAgent
+    })
+    broadcastState()
+  })
+
   // 표시 이름 수정: 사용자 override(displayName)만 바꾼다. worktree 이름(name)·브랜치는 그대로 둔다.
   // 빈 문자열을 넘기면 override 를 지워 기본 규칙(worktree 이름 → PR 제목)으로 되돌린다.
   ipcMain.handle(IPC.workspaceRename, (_e, workspaceId: string, name: string) => {

@@ -1,5 +1,5 @@
 import { log } from '../../logger'
-import type { ChatItem } from '@shared/types'
+import type { ChatEvent, ChatItem } from '@shared/types'
 import type { ScriptRunner } from '../../scripts'
 
 /**
@@ -32,6 +32,13 @@ export interface AgentToolDeps {
    * 그 워크스페이스의 모델이 읽지 않는다. 알림용으로만 쓴다.
    */
   postToTranscript: (workspaceId: string, item: ChatItem) => void
+  /**
+   * 워크스페이스 대화의 **휘발성 이벤트**를 렌더러로 보낸다(트랜스크립트에 남지 않음).
+   *
+   * postToTranscript 와 나눠 두는 이유: 위임 서브에이전트의 "지금 돌고 있음" 같은 것은 영속하면
+   * 안 되는 상태다. 세션이 끝나면 사라져야 하고, 다시 열었을 때 옛 스피너가 남아 있으면 안 된다.
+   */
+  emitChatEvent: (workspaceId: string, event: ChatEvent) => void
 }
 
 /**
