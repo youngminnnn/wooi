@@ -23,7 +23,8 @@ import {
   ArrowUpDown,
   GitPullRequest,
   Square,
-  X
+  X,
+  Hourglass
 } from 'lucide-react'
 import { useStore } from '../store'
 import RowActionsMenu, { type RowAction } from './RowActionsMenu'
@@ -48,7 +49,7 @@ import { orderRowsWithPending } from '../lib/sidebarRows'
 import { useGithubDisconnected } from '../lib/github'
 import { WorkspaceAgents } from './WorkspaceAgents'
 import { useNow } from '../lib/useNow'
-import { formatDuration } from '../lib/format'
+import { formatCountdown, formatDuration } from '../lib/format'
 import { useDragReorder, type DragReorder } from '../lib/useDragReorder'
 import type {
   AgentBackendId,
@@ -110,8 +111,10 @@ export default function Sidebar({
 
   // 실행 중인 세션이 하나라도 있으면 1초마다 갱신해 경과 시간을 흐르게 하고("오래 실행 중" 힌트도
   // 같은 틱으로 갱신), 없으면 틱을 멈춰 불필요한 재렌더를 막는다.
-  const anyRunning = app.workspaces.some((w) => !w.archived && w.status === 'running')
-  const now = useNow(1000, anyRunning)
+  const anyRunningOrRateLimited = app.workspaces.some(
+    (w) => !w.archived && (w.status === 'running' || Boolean(w.pendingRateLimitResume))
+  )
+  const now = useNow(1000, anyRunningOrRateLimited)
 
   // ⌘1–9 단축키(App.tsx)와 똑같은 순서 함수로 번호를 매긴다 — 화면에서 위에서 n번째 행이
   // 항상 ⌘n 이 되도록(레포가 여러 개여도 1,2,3… 순서가 위에서부터 이어진다).
@@ -710,6 +713,7 @@ function WorkspaceRow({
           compacting={compacting}
           stale={stale}
           runningMs={runningMs}
+          pendingRateLimitResume={workspace.pendingRateLimitResume}
           pr={pr}
         />
         <div className="relative flex-1 min-w-0">
@@ -786,6 +790,17 @@ function WorkspaceRow({
                 title="Running time of the current turn"
               >
                 · {formatDuration(now - runningSince)}
+              </span>
+            )}
+            {workspace.pendingRateLimitResume && (
+              <span
+                className="text-[var(--warning-400)]/90 shrink-0 tabular-nums"
+                title={`Usage limit reached — scheduled to resume at ${new Date(
+                  workspace.pendingRateLimitResume.retryAt
+                ).toLocaleString()}`}
+              >
+                · rate limit · resumes in{' '}
+                {formatCountdown(workspace.pendingRateLimitResume.retryAt - now)}
               </span>
             )}
           </div>
@@ -1224,6 +1239,7 @@ export function StatusDot({
   compacting,
   stale,
   runningMs,
+  pendingRateLimitResume,
   pr
 }: {
   status: Workspace['status']
@@ -1231,6 +1247,7 @@ export function StatusDot({
   compacting: boolean
   stale: boolean
   runningMs: number
+  pendingRateLimitResume?: Workspace['pendingRateLimitResume']
   pr?: PrStatus | null
 }): React.JSX.Element {
   // 권한 대기는 가장 행동 가능한 상태라 다른 표시보다 우선한다.
@@ -1256,6 +1273,23 @@ export function StatusDot({
     return (
       <span title={title} className="shrink-0 grid place-items-center">
         <Loader2 size={13} className={`${color} animate-spin`} />
+      </span>
+    )
+  }
+  // 자동 재개 예약은 단순 idle 이 아니라 provider 제한이 풀리기를 기다리는 중이다. PR 상태보다
+  // 우선해 표시하되, 위의 권한 대기·실행 중처럼 지금 일어나고 있는 상태에는 양보한다.
+  if (pendingRateLimitResume) {
+    const retryAt = new Date(pendingRateLimitResume.retryAt).toLocaleString()
+    return (
+      <span
+        title={`Paused by usage limit — scheduled to resume at ${retryAt}`}
+        className="shrink-0 grid place-items-center"
+      >
+        <Hourglass
+          size={12}
+          className="text-[var(--warning-400)]"
+          aria-label="Paused by usage limit"
+        />
       </span>
     )
   }
