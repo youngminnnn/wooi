@@ -1,5 +1,5 @@
 import { app, ipcMain } from 'electron'
-import { IPC, type AppNotice, type NoticeLevel } from '@shared/types'
+import { IPC, type AppNotice, type NoticeAction, type NoticeLevel } from '@shared/types'
 import { log } from './logger'
 
 /**
@@ -51,6 +51,7 @@ interface RawNotice {
   level?: unknown
   message?: unknown
   link?: unknown
+  action?: unknown
   /** ISO 8601. 이 시각 전에는 안 띄운다. */
   startsAt?: unknown
   /** ISO 8601. 이 시각 후에는 안 띄운다. */
@@ -60,6 +61,8 @@ interface RawNotice {
   /** 이 버전 이하에서만 노출(포함). 구버전 사용자에게만 알릴 때 쓴다. */
   maxVersion?: unknown
 }
+
+const NOTICE_ACTIONS: readonly NoticeAction[] = ['enableAutoResumeAfterRateLimit']
 
 function isNonEmptyString(v: unknown): v is string {
   return typeof v === 'string' && v.trim().length > 0
@@ -126,6 +129,15 @@ function parseLink(v: unknown): AppNotice['link'] | undefined {
   }
 }
 
+/** 원격 JSON이 임의 설정을 바꾸지 못하도록 앱에 내장된 동작만 통과시킨다. */
+function parseAction(v: unknown): AppNotice['action'] | undefined {
+  if (!v || typeof v !== 'object') return undefined
+  const raw = v as { type?: unknown; label?: unknown }
+  if (!isNonEmptyString(raw.type) || !isNonEmptyString(raw.label)) return undefined
+  if (!NOTICE_ACTIONS.includes(raw.type as NoticeAction)) return undefined
+  return { type: raw.type as NoticeAction, label: raw.label.trim().slice(0, 40) }
+}
+
 /**
  * 원격 JSON 본문을 화면에 띄울 공지 목록으로 바꾼다.
  *
@@ -167,7 +179,8 @@ export function parseNotices(body: string, now: number, version: string): AppNot
       id,
       level: LEVELS.includes(raw.level as NoticeLevel) ? (raw.level as NoticeLevel) : 'info',
       message: raw.message.trim().slice(0, MAX_MESSAGE_LEN),
-      link: parseLink(raw.link)
+      link: parseLink(raw.link),
+      action: parseAction(raw.action)
     })
     if (out.length >= MAX_NOTICES) break
   }

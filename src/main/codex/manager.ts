@@ -16,6 +16,7 @@ import { delegateBackendsFor } from '../agent/multiAgent'
 import { delegateThreadInstructions } from '../subagent/catalog'
 import { abortAllSubAgents, abortSubAgents } from '../agent/tools/subagent'
 import { durationLabel } from './rateLimits'
+import { RATE_LIMIT_CONTINUATION, RateLimitResumeCoordinator } from '../rateLimitResume'
 import type { CodexCommand, CodexConfig, CodexEvent } from './protocol'
 import type {
   AgentAuthStatus,
@@ -90,11 +91,21 @@ export class CodexSessionManager implements AgentBackend {
     string,
     { resolve: (v: unknown) => void; reject: (e: Error) => void }
   >()
+  private readonly rateLimitResume: RateLimitResumeCoordinator
 
   constructor(
     private dispatch: Dispatch,
     private getWindow: () => BrowserWindow | null
-  ) {}
+  ) {
+    this.rateLimitResume = new RateLimitResumeCoordinator({
+      backend: CODEX_META.id,
+      refreshLimits: () => this.refreshRateLimits(true),
+      sendContinuation: (workspaceId) => this.sendContinuation(workspaceId),
+      emitItem: (workspaceId, item) =>
+        this.dispatch(IPC.evtChat, { workspaceId, event: { type: 'item', item } })
+    })
+    this.rateLimitResume.restore()
+  }
 
   // ── 호스트 프로세스 ──────────────────────────────────────────────────────
 
@@ -180,6 +191,9 @@ export class CodexSessionManager implements AgentBackend {
       case 'sessionId':
         this.onSessionId(msg.workspaceId, msg.sessionId)
         break
+      case 'rateLimit':
+        void this.rateLimitResume.schedule(msg.workspaceId)
+        break
       case 'settleIdle':
         this.forceIdle(msg.workspaceId)
         break
@@ -238,6 +252,7 @@ export class CodexSessionManager implements AgentBackend {
       model: ws.model ?? defaults.model,
       effort: ws.effort ?? defaults.effort,
       fastMode: ws.fastMode ?? defaults.fastMode,
+      autoResumeAfterRateLimit: settings.autoResumeAfterRateLimit,
       // 다른 백엔드에서 넘어온 모드가 정책 변환으로 새지 않도록 여기서 걸러 낸다.
       permissionMode: normalizePermissionMode(CODEX_META, ws.permissionMode),
       resumeThreadId: ws.sessionId,
@@ -261,6 +276,7 @@ export class CodexSessionManager implements AgentBackend {
   }
 
   sendMessage(workspaceId: string, text: string, images?: ImageAttachment[]): void {
+    this.rateLimitResume.cancel(workspaceId)
     const ws = this.getWorkspace(workspaceId)
     if (!ws) return
 
@@ -287,7 +303,19 @@ export class CodexSessionManager implements AgentBackend {
     this.send({ type: 'send', workspaceId, config: this.configFor(ws), text, images })
   }
 
+  private sendContinuation(workspaceId: string): void {
+    const ws = this.getWorkspace(workspaceId)
+    if (!ws) return
+    this.send({
+      type: 'send',
+      workspaceId,
+      config: this.configFor(ws),
+      text: RATE_LIMIT_CONTINUATION
+    })
+  }
+
   async interrupt(workspaceId: string): Promise<void> {
+    this.rateLimitResume.cancel(workspaceId, true)
     this.sendIfHost({ type: 'interrupt', workspaceId })
     // 위임 서브런은 세션이 아니라 메인에서 돈다 — 스레드 인터럽트로는 끊기지 않으므로 여기서 끊는다.
     abortSubAgents(workspaceId)
@@ -379,6 +407,7 @@ export class CodexSessionManager implements AgentBackend {
    * 트랜스크립트는 건드리지 않는다 — 화면 비우기는 렌더러의 resetTranscript 가 맡는다(Claude 와 동일).
    */
   clearSession(workspaceId: string): void {
+    this.rateLimitResume.cancel(workspaceId)
     this.dispose(workspaceId)
     getStore().update((st) => {
       const w = st.workspaces.find((x) => x.id === workspaceId)
@@ -391,6 +420,7 @@ export class CodexSessionManager implements AgentBackend {
   }
 
   dispose(workspaceId: string): void {
+    this.rateLimitResume.cancel(workspaceId)
     this.sendIfHost({ type: 'dispose', workspaceId })
     // 위임 서브런은 메인에서 돌므로 dispose 로 끊기지 않는다. 여기서 안 끊으면 워크스페이스를
     // 닫아도 자식 프로세스가 남아 worktree 를 계속 건드린다.
@@ -402,6 +432,10 @@ export class CodexSessionManager implements AgentBackend {
       this.sendIfHost({ type: 'permissionResponse', requestId, decision: { behavior: 'deny' } })
       this.dispatch(IPC.evtPermissionCancel, requestId)
     }
+  }
+
+  cancelAllRateLimitResumes(): void {
+    this.rateLimitResume.cancelAll()
   }
 
   disposeAll(): void {
@@ -428,6 +462,7 @@ export class CodexSessionManager implements AgentBackend {
   }
 
   private stopAll(note: string | null): void {
+    this.rateLimitResume.cancelAll()
     const running = this.runningCodexWorkspaces()
     this.disposeAll()
     for (const w of running) {

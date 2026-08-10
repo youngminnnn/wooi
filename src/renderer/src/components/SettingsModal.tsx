@@ -628,6 +628,16 @@ function AgentsPage({
 
       <SettingGroup title="Conversations">
         <SettingRow
+          title="Continue after rate limits"
+          description="Waits for Claude or Codex account usage limits to reset, then continues the unfinished task in the same conversation."
+        >
+          <Switch
+            label="Continue after rate limits"
+            checked={settings.autoResumeAfterRateLimit}
+            onChange={(value) => save({ autoResumeAfterRateLimit: value })}
+          />
+        </SettingRow>
+        <SettingRow
           title="Auto-compact long conversations"
           description="A global Wooi setting. Summarizes context near its limit so sessions can continue."
         >

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { AlertTriangle, ExternalLink, Info, OctagonAlert, X } from 'lucide-react'
+import { AlertTriangle, ExternalLink, Info, OctagonAlert, Power, X } from 'lucide-react'
 import type { AppNotice, NoticeLevel } from '@shared/types'
 import { useStore } from '../store'
 import { noticeDismissedFlag, readUiFlag, setUiFlag } from '../lib/uiFlags'
@@ -34,6 +34,7 @@ const STYLES: Record<NoticeLevel, { wrap: string; Icon: typeof Info }> = {
 
 export function NoticeBanner(): React.JSX.Element | null {
   const notices = useStore((s) => s.notices)
+  const enabled = useStore((s) => s.app?.settings.autoResumeAfterRateLimit === true)
   // localStorage 는 React 밖의 값이라, 닫는 즉시 다시 그리려면 이 세션의 기억도 따로 들고 있어야 한다.
   const [dismissed, setDismissed] = useState<string[]>([])
 
@@ -47,6 +48,13 @@ export function NoticeBanner(): React.JSX.Element | null {
   const dismiss = (): void => {
     setUiFlag(noticeDismissedFlag(notice.id), true)
     setDismissed((prev) => [...prev, notice.id])
+  }
+
+  const runAction = (): void => {
+    if (notice.action?.type === 'enableAutoResumeAfterRateLimit') {
+      void window.api.settings.update({ autoResumeAfterRateLimit: true })
+      dismiss()
+    }
   }
 
   return (
@@ -64,6 +72,15 @@ export function NoticeBanner(): React.JSX.Element | null {
         >
           {notice.link.label}
           <ExternalLink size={11} />
+        </button>
+      )}
+      {notice.action && !enabled && (
+        <button
+          onClick={runAction}
+          className="shrink-0 inline-flex items-center gap-1 font-medium underline underline-offset-2 hover:opacity-80"
+        >
+          <Power size={11} />
+          {notice.action.label}
         </button>
       )}
       <button

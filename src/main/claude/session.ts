@@ -49,6 +49,8 @@ export interface SessionDeps {
   permissionMode: ClaudePermissionMode
   /** true 면 컨텍스트 사용률이 임계치를 넘었을 때 턴 종료 후 /compact 를 자동 주입한다. */
   autoCompact: boolean
+  /** 계정 사용량 제한을 오류로 끝내지 않고 메인의 자동 재개 scheduler에 넘길지. */
+  autoResumeAfterRateLimit?: boolean
   /** 이전 실행에서 이어갈 Claude 세션 ID. 없으면 새 세션. */
   resumeSessionId: string | null
   /** `/add-dir` 로 더해진 작업 루트(절대 경로). cwd 밖의 코드를 함께 읽고 고칠 수 있게 한다. */
@@ -79,6 +81,8 @@ export interface SessionDeps {
     req: Omit<PermissionRequest, 'requestId' | 'workspaceId'>
   ) => Promise<PermissionDecision>
   onSessionId: (id: string) => void
+  /** 계정 사용량 제한으로 턴이 중단됐다. 메인이 reset 이후 자동 재개를 예약한다. */
+  onRateLimit?: () => void
   /**
    * 세션이 스스로 권한 모드를 바꿨음을 알린다(계획 승인 → acceptEdits/default).
    * 모드는 workspace 상태의 일부라 메인이 store 에 반영하고 UI 로 방송해야 한다.
@@ -169,6 +173,10 @@ const PLAN_MODE_SETTLE_MS = PLAN_MODE_APPLY_DELAY_MS + 750
  */
 const RESTARTABLE_AUTH_ERROR =
   /\b(?:auth\w*|unauthorized|forbidden|401|403|oauth|credentials?|api[_ -]?key|access[_ -]?token|refresh[_ -]?token|bearer|revoked|not logged in|log ?in again|sign ?in again)\b/i
+
+/** fast-mode cooldown이 아닌 계정 전체 사용량 제한 문구만 좁게 식별한다. */
+export const RATE_LIMIT_ERROR =
+  /(?:usage limit|rate limit|quota).*(?:reached|exceeded|reset|available)|(?:reached|exceeded).*(?:usage limit|rate limit|quota)|hit your limit/i
 
 /**
  * 콜드 resume preflight 의 getContextUsage 상한. 따뜻한 세션의 미터 갱신(5초)보다 넉넉히 둔다 —
@@ -1523,6 +1531,22 @@ export class ClaudeSession {
     // inFlight 를 비우지 않고 running 도 유지해, 사용자 눈에는 하나의 연속된 턴으로 보인다.
     if (this.shouldRestartAfterFailedTurn(msg.subtype)) {
       this.requestRestart(msg.subtype)
+      return
+    }
+
+    if (
+      this.deps.autoResumeAfterRateLimit &&
+      this.turnError &&
+      RATE_LIMIT_ERROR.test(this.turnError)
+    ) {
+      this.pendingFailureItems = []
+      this.beginTurn()
+      this.inFlight.shift()
+      this.deps.onSessionId(msg.session_id)
+      this.active = false
+      this.busy = false
+      this.deps.onRateLimit?.()
+      this.deps.settleIdle()
       return
     }
 

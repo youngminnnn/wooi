@@ -82,6 +82,7 @@ export interface SessionConfig {
   fastMode: boolean
   permissionMode: ClaudePermissionMode
   autoCompact: boolean
+  autoResumeAfterRateLimit?: boolean
   resumeSessionId: string | null
   /** `/add-dir` 로 더해진 작업 루트(절대 경로). 비어 있으면 cwd 만 쓴다. */
   additionalDirs: string[]
@@ -179,6 +180,7 @@ export type HostEvent =
   | { type: 'event'; workspaceId: string; event: ChatEvent }
   | { type: 'persist'; workspaceId: string; item: ChatItem }
   | { type: 'sessionId'; workspaceId: string; sessionId: string }
+  | { type: 'rateLimit'; workspaceId: string }
   // 턴이 정상 result 없이 끝나(예: CLI 가 턴 도중 죽음) 'running' 에 갇혔을 때, 완료 알림 없이
   // workspace 를 idle 로 확정하도록 메인에 요청한다(메인의 forceIdle 로 연결).
   | { type: 'settleIdle'; workspaceId: string }

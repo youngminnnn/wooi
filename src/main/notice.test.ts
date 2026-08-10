@@ -27,7 +27,9 @@ describe('parseVersion / compareVersions', () => {
 describe('parseNotices', () => {
   it('id 와 message 가 있는 공지를 통과시키고 level 기본값은 info 다', () => {
     const out = parseNotices(doc({ id: 'a', message: '점검 예정' }), NOW, VERSION)
-    expect(out).toEqual([{ id: 'a', level: 'info', message: '점검 예정', link: undefined }])
+    expect(out).toEqual([
+      { id: 'a', level: 'info', message: '점검 예정', link: undefined, action: undefined }
+    ])
   })
 
   it('id 나 message 가 없거나 level 이 이상한 항목은 버리거나 정규화한다', () => {
@@ -98,6 +100,26 @@ describe('parseNotices', () => {
       VERSION
     )
     expect(ok[0].link).toEqual({ label: 'go', url: 'https://wooi.app/blog' })
+  })
+
+  it('내장 allowlist 동작만 통과시킨다', () => {
+    const ok = parseNotices(
+      doc({
+        id: 'a',
+        message: 'x',
+        action: { type: 'enableAutoResumeAfterRateLimit', label: 'Enable' }
+      }),
+      NOW,
+      VERSION
+    )
+    expect(ok[0].action).toEqual({ type: 'enableAutoResumeAfterRateLimit', label: 'Enable' })
+
+    const bad = parseNotices(
+      doc({ id: 'b', message: 'x', action: { type: 'setAnySetting', label: 'Run' } }),
+      NOW,
+      VERSION
+    )
+    expect(bad[0].action).toBeUndefined()
   })
 
   it('같은 id 가 두 번 오면 첫 건만 남는다(닫음 기억이 섞이지 않게)', () => {

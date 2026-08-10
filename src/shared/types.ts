@@ -642,6 +642,8 @@ export interface Workspace {
    * Claude Code 의 session id, Codex 의 thread id. 아직 세션을 시작하지 않았으면 null.
    */
   sessionId: string | null
+  /** 계정 사용량 제한이 풀린 뒤 같은 대화를 자동으로 이어가기 위한 영속 예약. */
+  pendingRateLimitResume?: PendingRateLimitResume | null
   permissionMode: PermissionMode
   status: WorkspaceStatus
   /** 이 workspace 전용 모델 오버라이드. null 이면 전역 설정(AppSettings.model) 을 따른다. */
@@ -862,6 +864,8 @@ export interface AppSettings {
    * 임계치는 Claude Code 가 모델별로 알려주는 값을 그대로 쓴다(session.ts 의 overAutoCompactThreshold).
    */
   autoCompact: boolean
+  /** Claude/Codex 계정 사용량 제한이 풀리면 중단된 작업을 같은 세션에서 자동으로 이어간다. */
+  autoResumeAfterRateLimit: boolean
   /**
    * true 면 새 workspace 생성 시 이름·베이스 브랜치를 직접 입력하는 모달을 띄운다.
    * false(기본) 면 이름을 자동 생성하고 베이스는 리포 기본 브랜치(main/origin)로 즉시 만든다.
@@ -2093,6 +2097,19 @@ export interface AppNotice {
   message: string
   /** 오른쪽에 붙는 링크 버튼. 외부 브라우저로 열린다(http/https 만 허용). */
   link?: { label: string; url: string }
+  /** 원격 공지가 실행할 수 있는 앱 내부 동작. 파서의 고정 allowlist에 있는 값만 허용한다. */
+  action?: { type: NoticeAction; label: string }
+}
+
+export type NoticeAction = 'enableAutoResumeAfterRateLimit'
+
+/** 워크스페이스별 자동 재개 예약. 앱을 재시작해도 store에서 복원한다. */
+export interface PendingRateLimitResume {
+  backend: AgentBackendId
+  sessionId: string
+  detectedAt: number
+  retryAt: number
+  attempt: number
 }
 
 export interface CreateWorkspaceArgs {

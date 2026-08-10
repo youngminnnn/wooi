@@ -200,6 +200,14 @@ export class AgentOrchestrator {
 
   /** 저장된 Codex 워크스페이스가 있으면 app-server 를 백그라운드에서 미리 준비한다. */
   prewarm(): void {
+    const pendingBackends = new Set(
+      getStore()
+        .getState()
+        .workspaces.flatMap((workspace) =>
+          workspace.pendingRateLimitResume ? [workspace.pendingRateLimitResume.backend] : []
+        )
+    )
+    for (const backend of pendingBackends) this.get(backend)
     const hasCodexWorkspace = getStore()
       .getState()
       .workspaces.some((workspace) => workspace.agentBackend === 'codex' && !workspace.archived)
@@ -262,6 +270,14 @@ export class AgentOrchestrator {
     // 프로세스가 갈리므로 살아 있던 세션도 함께 사라진다 — 다음 전송이 다시 만든다.
     this.lastUsedAt.clear()
     for (const backend of this.backends.values()) backend.recycleAll()
+  }
+
+  cancelAllRateLimitResumes(): void {
+    for (const backend of this.backends.values()) backend.cancelAllRateLimitResumes?.()
+    // 아직 인스턴스화되지 않은 backend의 영속 예약도 함께 제거한다.
+    getStore().update((state) => {
+      for (const ws of state.workspaces) ws.pendingRateLimitResume = null
+    })
   }
 
   // ── capability-게이트 (지원 백엔드에만 위임) ──────────────────────────────
