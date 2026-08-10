@@ -295,7 +295,8 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
             />
           ) : (
             <div className="group/name flex items-center gap-1 min-w-0">
-              {/* 어떤 에이전트가 이 워크스페이스를 돌리는지 — 생성 시 고정돼 바뀌지 않는다.
+              {/* 어떤 에이전트가 이 워크스페이스를 돌리는지 — 첫 메시지를 보내는 순간 고정된다
+                  (그 전에는 입력창 상태줄이나 /agent 로 바꿀 수 있다, [[canSwitchAgentBackend]]).
                   에이전트가 하나뿐인 사용자에게는 정보가 아니라 잡음이라 감춘다. */}
               {showAgentBadge && (
                 <span

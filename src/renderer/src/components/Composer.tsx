@@ -36,11 +36,19 @@ import { permissionModeFooter } from '../lib/permission'
 import { modelLabel, modelSupportsFastMode } from '../lib/models'
 import { effortLabel, effortOptionsFor } from '../lib/effort'
 import { FAST_MODE_HINT, fastModeLabel, fastModeStatus } from '../lib/fastMode'
-import { useAgentSettings, useModels, useWorkspaceBackend } from '../lib/backends'
 import {
+  useAgentSettings,
+  useAvailableBackends,
+  useModels,
+  useWorkspaceBackend
+} from '../lib/backends'
+import { AgentBackendMark } from './BrandIcons'
+import {
+  AGENT_BACKEND_LABELS,
   INTERACTIVE_COMMANDS,
   MENTION_DROP_HINT_BYTES,
-  MENTION_TRUNCATE_HINT_BYTES
+  MENTION_TRUNCATE_HINT_BYTES,
+  canSwitchAgentBackend
 } from '@shared/types'
 import { useNow } from '../lib/useNow'
 import {
@@ -135,6 +143,8 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
   const supportsSideQuestion = backend?.capabilities.sideQuestion ?? false
   // 지원하지 않는 백엔드에서는 /fast 도 상태줄 표시도 감춘다.
   const supportsFastMode = backend?.capabilities.fastMode ?? false
+  // 첫 메시지 전이면 메인 에이전트를 아직 바꿀 수 있다 — 상태줄 칩과 /agent 가 같은 판단을 쓴다.
+  const agentSwitchable = useAgentSwitchable(workspace)
 
   // 슬래시 명령 자동완성: 명령 목록(워크스페이스당 1회 조회)과 메뉴 선택 인덱스.
   const [commands, setCommands] = useState<SlashCommandInfo[] | null>(null)
@@ -146,7 +156,7 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
 
   // /mcp·/context 등 인터랙티브 명령 결과 카드(임시 표시, 닫으면 사라짐).
   const [commandCard, setCommandCard] = useState<CommandCardState | null>(null)
-  // /model·/effort·/fast 선택 카드(로컬 처리, 닫으면 사라짐).
+  // /model·/effort·/fast·/agent 선택 카드(로컬 처리, 닫으면 사라짐).
   const [pickerCard, setPickerCard] = useState<PickerKind | null>(null)
   // `#` 로 적은 기억. 어느 CLAUDE.md 에 남길지 고르는 동안만 들고 있는다.
   const [memoryDraft, setMemoryDraft] = useState<string | null>(null)
@@ -185,7 +195,7 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
     setCaret(0)
   }, [workspace.id])
 
-  /** /model·/effort·/fast 선택 카드를 연다(다른 카드는 비켜 준다). 상태줄 클릭·슬래시 명령 공용. */
+  /** /model·/effort·/fast·/agent 선택 카드를 연다(다른 카드는 비켜 준다). 상태줄 클릭·슬래시 명령 공용. */
   const openPicker = (kind: PickerKind): void => {
     setSideAnswer(null)
     setCommandCard(null)
@@ -462,8 +472,8 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
       return
     }
 
-    // /model·/effort·/fast 는 백엔드 왕복 없이 로컬 선택 카드로 처리한다(첨부가 있으면 일반 전송).
-    const picker = images.length ? null : matchPicker(trimmed, supportsFastMode)
+    // /model·/effort·/fast·/agent 는 백엔드 왕복 없이 로컬 선택 카드로 처리한다(첨부가 있으면 일반 전송).
+    const picker = images.length ? null : matchPicker(trimmed, supportsFastMode, agentSwitchable)
     if (picker) {
       openPicker(picker)
       setText('')
@@ -845,7 +855,7 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
             }}
           />
         )}
-        {/* 입력창 위 상태줄: 브랜치 · 디렉토리 · 모델 · effort · 컨텍스트 사용량(항상 노출). */}
+        {/* 입력창 위 상태줄: 브랜치 · 디렉토리 · (교체 가능하면 에이전트) · 모델 · effort · 컨텍스트 사용량. */}
         <StatusLine workspace={workspace} onPick={openPicker} />
         {queue.length > 0 && (
           <div className="mb-2 space-y-1">
@@ -1285,16 +1295,24 @@ function SideAnswerCard({
 }
 
 /**
- * "/model"·"/effort"·"/fast" 면 그 종류를 돌려준다(뒤따르는 인자는 무시하고 선택 카드를 연다).
+ * "/model"·"/effort"·"/fast"·"/agent" 면 그 종류를 돌려준다(뒤따르는 인자는 무시하고 선택 카드를 연다).
  *
  * `allowFast` 는 이 워크스페이스의 백엔드가 fast mode 를 지원하는지다 — 지원하지 않으면(Codex)
  * 가로채지 않고 일반 텍스트로 흘려보낸다. 아무 일도 안 하는 카드를 띄우는 것보다 낫다.
+ * `allowAgent` 도 같은 이유다 — 대화가 시작된 뒤에는 에이전트를 바꿀 수 없으므로
+ * ([[canSwitchAgentBackend]]) 그때의 "/agent" 는 에이전트에게 보내는 평범한 메시지로 둔다.
  */
-function matchPicker(text: string, allowFast: boolean): PickerKind | null {
-  const m = /^\/(model|effort|fast)(?:\s.*)?$/.exec(text)
+export function matchPicker(
+  text: string,
+  allowFast: boolean,
+  allowAgent: boolean
+): PickerKind | null {
+  const m = /^\/(model|effort|fast|agent)(?:\s.*)?$/.exec(text)
   if (!m) return null
   const kind = m[1] as PickerKind
-  return kind === 'fast' && !allowFast ? null : kind
+  if (kind === 'fast' && !allowFast) return null
+  if (kind === 'agent' && !allowAgent) return null
+  return kind
 }
 
 /**
@@ -2054,6 +2072,22 @@ function Empty({ children }: { children: React.ReactNode }): React.JSX.Element {
 }
 
 /**
+ * 지금 이 워크스페이스의 메인 에이전트를 바꿀 수 있는가(상태줄 칩 · /agent 공용 판단).
+ *
+ * 규칙 자체는 shared 의 [[canSwitchAgentBackend]] 가 갖고 있고, 여기서는 렌더러 쪽 재료만 모은다 —
+ * 고를 대상이 둘 이상인지, 그리고 이 워크스페이스의 대화 기록을 실제로 읽었는지.
+ *
+ * 기록을 아직 못 읽은 상태는 "대화가 없다" 가 아니라 "모른다" 다. 그 구분을 안 하면 기록을
+ * 불러오는 짧은 순간 동안 대화가 쌓인 워크스페이스에도 교체 UI 가 깜빡인다.
+ */
+function useAgentSwitchable(workspace: Workspace): boolean {
+  const available = useAvailableBackends()
+  const loaded = useStore((s) => s.loadedTranscripts[workspace.id] ?? false)
+  const messageCount = useStore((s) => s.transcripts[workspace.id]?.length ?? 0)
+  return available.length > 1 && loaded && canSwitchAgentBackend(workspace, messageCount)
+}
+
+/**
  * 입력창 바로 위에 항상 노출되는 상태줄.
  * 현재 브랜치 · worktree 디렉토리명 · 컨텍스트 사용량을 한 줄로 보여 준다(옵셔널/토글 없음).
  * 컨텍스트는 Claude Code CLI 의 컨텍스트 게이지에 대응 — 막대 + 퍼센트로 표시하고,
@@ -2081,6 +2115,10 @@ function StatusLine({
   const defaults = useAgentSettings(workspace.agentBackend)
   // fast mode 는 Claude Code 전용이라, 지원하지 않는 백엔드에서는 상태줄에서도 감춘다.
   const supportsFastMode = backend?.capabilities.fastMode ?? false
+  // 에이전트 칩은 **바꿀 수 있는 동안에만** 띄운다. 어떤 에이전트가 도는지는 헤더의 브랜드 마크가
+  // 늘 말해 주므로, 여기서까지 반복하면 아무 데도 이어지지 않는 라벨이 하나 더 늘 뿐이다.
+  const agentSwitchable = useAgentSwitchable(workspace)
+  const agentLabel = backend?.label ?? AGENT_BACKEND_LABELS[workspace.agentBackend]
 
   // worktree 절대 경로의 마지막 구간(디렉토리명). 비정상 경로면 전체 경로로 폴백한다.
   const dirName = workspace.worktreePath.split('/').filter(Boolean).pop() ?? workspace.worktreePath
@@ -2113,6 +2151,16 @@ function StatusLine({
         <Folder size={11} className="shrink-0 text-neutral-600" />
         <span className="truncate">{dirName}</span>
       </span>
+      {agentSwitchable && (
+        <button
+          onClick={() => onPick('agent')}
+          className="flex items-center gap-1 min-w-0 shrink hover:text-neutral-300 transition-colors"
+          title={`Agent: ${agentLabel} — click or type /agent to change (only before the first message)`}
+        >
+          <AgentBackendMark backend={workspace.agentBackend} size={11} />
+          <span className="truncate">{agentLabel}</span>
+        </button>
+      )}
       <button
         onClick={() => onPick('model')}
         className="flex items-center gap-1 min-w-0 shrink hover:text-neutral-300 transition-colors"
@@ -2156,10 +2204,16 @@ function StatusLine({
 }
 
 /** 선택 카드 1개의 옵션. value '' = 전역 설정 따름(Default). */
-type PickerOption = { value: string; label: string; hint?: string }
+type PickerOption = {
+  value: string
+  label: string
+  hint?: string
+  /** 있으면 라벨 앞에 그 에이전트의 브랜드 마크를 그린다(/agent 카드). */
+  mark?: AgentBackendId
+}
 
 /** 상태줄 클릭·슬래시 명령으로 여는 로컬 선택 카드의 종류. */
-type PickerKind = 'model' | 'effort' | 'fast'
+type PickerKind = 'model' | 'effort' | 'fast' | 'agent'
 
 /**
  * 입력창 위에 뜨는 /model·/effort 선택 카드. 백엔드 왕복 없이 로컬에서 값을 고른다 —
@@ -2167,6 +2221,9 @@ type PickerKind = 'model' | 'effort' | 'fast'
  * 포커스는 textarea 에 남으므로 document 캡처 단계에서 키를 가로챈다, McpPanel 과 동일한 방식).
  * 모델/effort 는 query 시작 시점에 고정되므로 변경 시 세션이 재시작된다 — 그래서 턴 진행 중에는
  * 적용을 막고 안내만 보여 준다(헤더 드롭다운 시절의 동작과 동일).
+ *
+ * /agent 만 성질이 다르다. 로컬에서 끝나지 않고 main 이 다시 판정하며(대화가 시작됐으면 거절),
+ * 잠기는 조건도 "턴이 도는 중" 이 아니라 "첫 메시지가 이미 나갔는가" 다.
  */
 function PickerCard({
   kind,
@@ -2182,8 +2239,19 @@ function PickerCard({
   const backend = useWorkspaceBackend(workspace)
   const models = useModels(workspace.agentBackend)
   const defaults = useAgentSettings(workspace.agentBackend)
+  const pushToast = useStore((s) => s.pushToast)
+  // 에이전트 교체는 이 카드가 유일한 경로가 아니다(main 이 같은 규칙으로 다시 판정한다).
+  // 여기서는 카드가 떠 있는 동안 조건이 무너지는 경우(다른 창에서 첫 메시지가 나갔다든지)를 본다.
+  const availableAgents = useAvailableBackends()
+  const agentSwitchable = useAgentSwitchable(workspace)
 
   const options = useMemo<PickerOption[]>(() => {
+    if (kind === 'agent') {
+      // 교체는 "지금 쓸 수 있는" 에이전트로만 — 설치되지 않은 CLI 를 고르게 하면 첫 메시지에서야
+      // 실패한다. 기본값(전역 설정 따름) 항목이 없는 것도 요점이다: 워크스페이스의 에이전트는
+      // 항상 확정된 값이라, "안 고름" 이라는 상태가 존재하지 않는다.
+      return availableAgents.map((b) => ({ value: b.id, label: b.label, mark: b.id }))
+    }
     if (kind === 'fast') {
       return [
         { value: '', label: 'Default', hint: fastModeLabel(defaults.fastMode) },
@@ -2212,19 +2280,30 @@ function PickerCard({
         hint: e.hint
       }))
     ]
-  }, [kind, backend, models, defaults.model, defaults.effort, defaults.fastMode, workspace.model])
+  }, [
+    kind,
+    backend,
+    models,
+    availableAgents,
+    defaults.model,
+    defaults.effort,
+    defaults.fastMode,
+    workspace.model
+  ])
 
   // 현재 값: fast 는 boolean|null 을 'on'/'off'/''(전역 따름) 문자열로 환산해 다른 카드와 같게 다룬다.
   const current =
-    kind === 'model'
-      ? (workspace.model ?? '')
-      : kind === 'effort'
-        ? (workspace.effort ?? '')
-        : workspace.fastMode === null
-          ? ''
-          : workspace.fastMode
-            ? 'on'
-            : 'off'
+    kind === 'agent'
+      ? workspace.agentBackend
+      : kind === 'model'
+        ? (workspace.model ?? '')
+        : kind === 'effort'
+          ? (workspace.effort ?? '')
+          : workspace.fastMode === null
+            ? ''
+            : workspace.fastMode
+              ? 'on'
+              : 'off'
   const currentIdx = Math.max(
     0,
     options.findIndex((o) => o.value === current)
@@ -2232,10 +2311,20 @@ function PickerCard({
   const [cursor, setCursor] = useState(currentIdx)
   const activeRef = useRef<HTMLButtonElement | null>(null)
 
+  // 에이전트 교체는 조건이 살아 있을 때만 — 나머지 항목은 턴 진행 중에만 잠긴다.
+  const locked = kind === 'agent' ? !agentSwitchable : running
+
   const apply = (value: string): void => {
-    if (running) return // 턴 진행 중에는 세션 재시작을 막는다(안내만).
+    if (locked) return // 잠긴 동안에는 안내만 보여 준다.
     if (value !== current) {
-      if (kind === 'model') void window.api.workspace.setModel(workspace.id, value || null)
+      if (kind === 'agent') {
+        // 교체는 main 이 최종 판정한다 — 거절 사유(대화가 이미 시작됨·CLI 미설치)는 토스트로 알린다.
+        void window.api.workspace
+          .setAgentBackend(workspace.id, value as AgentBackendId)
+          .then((res) => {
+            if (res?.error) pushToast('error', res.error)
+          })
+      } else if (kind === 'model') void window.api.workspace.setModel(workspace.id, value || null)
       else if (kind === 'effort')
         void window.api.workspace.setEffort(workspace.id, (value || null) as EffortSetting | null)
       else void window.api.workspace.setFastMode(workspace.id, value ? value === 'on' : null)
@@ -2266,19 +2355,30 @@ function PickerCard({
     activeRef.current?.scrollIntoView({ block: 'nearest' })
   }, [cursor])
 
-  const title = kind === 'model' ? '/model' : kind === 'effort' ? '/effort' : '/fast'
+  const title =
+    kind === 'agent'
+      ? '/agent'
+      : kind === 'model'
+        ? '/model'
+        : kind === 'effort'
+          ? '/effort'
+          : '/fast'
   const description =
-    kind === 'model'
-      ? 'Model for this workspace'
-      : kind === 'effort'
-        ? 'Reasoning effort for this workspace'
-        : 'Fast mode for this workspace — same model, faster output'
+    kind === 'agent'
+      ? 'Main agent for this workspace — fixed once you send the first message'
+      : kind === 'model'
+        ? 'Model for this workspace'
+        : kind === 'effort'
+          ? 'Reasoning effort for this workspace'
+          : 'Fast mode for this workspace — same model, faster output'
   // /fast 카드에서만: 지금 쓰는 모델이 fast mode 를 지원하지 않으면 켜도 소용없으므로 미리 알린다.
   const effectiveModel = workspace.model ?? workspace.lastModel ?? defaults.model
   const fastUnsupported = kind === 'fast' && !modelSupportsFastMode(models, effectiveModel)
   const iconProps = { size: 13, className: 'text-[var(--accent-400)] shrink-0' }
   const icon =
-    kind === 'model' ? (
+    kind === 'agent' ? (
+      <Bot {...iconProps} />
+    ) : kind === 'model' ? (
       <Cpu {...iconProps} />
     ) : kind === 'effort' ? (
       <Zap {...iconProps} />
@@ -2316,7 +2416,7 @@ function PickerCard({
                 e.preventDefault() // textarea blur 방지
                 apply(opt.value)
               }}
-              disabled={running}
+              disabled={locked}
               className={
                 'w-full flex items-baseline gap-2 px-3 py-1.5 text-left disabled:cursor-not-allowed ' +
                 (active ? 'bg-[var(--surface-3)]' : 'hover:bg-[var(--surface)]')
@@ -2329,6 +2429,11 @@ function PickerCard({
                   (selected ? 'text-[var(--accent-400)]' : 'text-transparent')
                 }
               />
+              {opt.mark && (
+                <span className="shrink-0 translate-y-0.5 text-neutral-400">
+                  <AgentBackendMark backend={opt.mark} size={13} />
+                </span>
+              )}
               <span className="text-sm font-medium text-neutral-100 shrink-0">{opt.label}</span>
               {opt.hint && <span className="text-xs text-neutral-500 truncate">{opt.hint}</span>}
             </button>
@@ -2341,8 +2446,17 @@ function PickerCard({
           4.8 with /model.
         </div>
       )}
+      {kind === 'agent' && !locked && (
+        <div className="px-3 py-1.5 text-xs text-neutral-600 border-t border-[var(--border)]">
+          Switching resets the model, reasoning effort, and fast mode to this agent&apos;s defaults.
+        </div>
+      )}
       <div className="px-3 py-1.5 text-xs text-neutral-600 border-t border-[var(--border)]">
-        {running ? 'Stop the current turn to change it.' : '↑↓ navigate · ↵ select · esc close'}
+        {locked
+          ? kind === 'agent'
+            ? 'The agent is fixed once the conversation starts — /clear, or create a new workspace.'
+            : 'Stop the current turn to change it.'
+          : '↑↓ navigate · ↵ select · esc close'}
       </div>
     </div>
   )

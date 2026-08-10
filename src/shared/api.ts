@@ -132,6 +132,13 @@ export interface WooiApi {
     setEffort(workspaceId: string, effort: EffortSetting | null): Promise<void>
     /** fast mode(`/fast`) 오버라이드. null 이면 전역 설정(settings.fastMode)을 따른다. */
     setFastMode(workspaceId: string, fastMode: boolean | null): Promise<void>
+    /**
+     * 메인 에이전트를 바꾼다. 아직 아무것도 보내지 않은 워크스페이스에서만 통한다
+     * ([[canSwitchAgentBackend]]) — 대화가 시작됐거나 그 에이전트를 쓸 수 없으면 이유를 담은
+     * error 로 돌아온다. 성공하면 모델·effort·fast mode 오버라이드는 새 백엔드 기준으로
+     * 초기화된다(백엔드마다 값 자체가 다르다).
+     */
+    setAgentBackend(workspaceId: string, agentBackend: AgentBackendId): Promise<{ error?: string }>
     /** 워크스페이스별 알림 음소거를 설정한다. */
     setMuted(workspaceId: string, muted: boolean): Promise<void>
     /**

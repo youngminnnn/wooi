@@ -674,6 +674,35 @@ export interface Workspace {
 }
 
 /**
+ * 이 워크스페이스의 메인 에이전트를 아직 바꿀 수 있는가.
+ *
+ * 에이전트는 생성 시점에 정해져 세션 내내 고정된다. 대화가 시작된 뒤에 바꾸면 지금까지의
+ * 맥락(sessionId)이 다른 CLI 의 것이라 이어지지 않고, 모델·effort·권한 모드도 백엔드마다 값이
+ * 달라 조용히 어긋난다. 그래서 **아직 아무것도 보내지 않은** 동안에만 연다 — 그때는 버릴 맥락이
+ * 없어서 교체가 "새로 만드는 것"과 같은 일이 된다. 기본 설정에서는 워크스페이스가 모달 없이
+ * 만들어지므로, 에이전트가 잘못 걸린 걸 알아채는 시점이 대개 이 구간이다.
+ *
+ * `messageCount` 는 이 워크스페이스의 트랜스크립트 항목 수다(main 은 기록 파일, 렌더러는 불러온
+ * 기록에서 읽는다). sessionId 만으로는 부족하다 — 유휴 세션이 정리된 워크스페이스에도 sessionId
+ * 는 resume 용으로 남아 있고([[agent/orchestrator]]), 반대로 /clear 로 비운 워크스페이스는
+ * sessionId 가 없어도 대화가 있었던 곳이라 트랜스크립트로 함께 판정해야 한다.
+ *
+ * 규칙을 여기(shared)에 두는 이유는 렌더러와 main 이 같은 답을 내야 하기 때문이다. 렌더러는 이
+ * 값으로 선택 UI 를 노출할지 정하고, main 은 같은 값으로 요청을 거절한다.
+ */
+export function canSwitchAgentBackend(
+  workspace: Pick<Workspace, 'archived' | 'sessionId' | 'status'>,
+  messageCount: number
+): boolean {
+  return (
+    !workspace.archived &&
+    workspace.status !== 'running' &&
+    workspace.sessionId === null &&
+    messageCount === 0
+  )
+}
+
+/**
  * 약관·개인정보처리방침의 현재 버전. 문서를 사용자 권리에 영향을 주도록 개정하면 1 올린다.
  * settings.acceptedTermsVersion 이 이 값과 다르면 온보딩에서 재동의를 요구한다.
  */
@@ -1767,6 +1796,11 @@ export const IPC = {
   agentListBackends: 'agent:listBackends',
   /** 백엔드의 모델 선택지. Codex 는 app-server 의 model/list 를 조회하므로 비동기·동적이다. */
   agentListModels: 'agent:listModels',
+  /**
+   * 메인 에이전트 교체. 아직 아무것도 보내지 않은 워크스페이스에서만 통한다
+   * ([[canSwitchAgentBackend]]) — 그 외에는 이유를 담은 error 로 돌아온다.
+   */
+  workspaceSetAgentBackend: 'workspace:setAgentBackend',
   /** 워크스페이스별 알림 음소거 토글. */
   workspaceSetMuted: 'workspace:setMuted',
   workspaceSetMultiAgent: 'workspace:setMultiAgent',

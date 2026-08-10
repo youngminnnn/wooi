@@ -43,6 +43,8 @@ const api: WooiApi = {
       ipcRenderer.invoke(IPC.workspaceSetEffort, workspaceId, effort),
     setFastMode: (workspaceId, fastMode) =>
       ipcRenderer.invoke(IPC.workspaceSetFastMode, workspaceId, fastMode),
+    setAgentBackend: (workspaceId, agentBackend) =>
+      ipcRenderer.invoke(IPC.workspaceSetAgentBackend, workspaceId, agentBackend),
     setMuted: (workspaceId, muted) => ipcRenderer.invoke(IPC.workspaceSetMuted, workspaceId, muted),
     setMultiAgent: (workspaceId, multiAgent) =>
       ipcRenderer.invoke(IPC.workspaceSetMultiAgent, workspaceId, multiAgent),
