@@ -62,6 +62,7 @@ const GROUPS: { title: string; items: { keys: string[]; label: string }[] }[] = 
     title: 'Conversation',
     items: [
       { keys: ['⌘F'], label: 'Search the conversation' },
+      { keys: ['⇧⌘↓'], label: 'Jump to the latest message' },
       { keys: ['↑', '/', '↓'], label: 'Recall previous messages (in the input box)' },
       { keys: ['⏎'], label: 'Send message — queues it while a turn is running' },
       { keys: ['⌘⏎'], label: 'Stop the current turn and send the message now' },

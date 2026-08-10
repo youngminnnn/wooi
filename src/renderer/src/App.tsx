@@ -457,7 +457,7 @@ export default function App(): React.JSX.Element {
           e.preventDefault()
           void st.selectWorkspace(list[idx].id)
         }
-      } else if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !e.altKey) {
+      } else if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !e.shiftKey && !e.altKey) {
         // ⌘↑/⌘↓ 로 사이드바 순서를 위/아래로 훑는다. 세로 목록이라 방향키가 공간적으로
         // 직관적이고, 괄호 키와 달리 키보드 레이아웃을 타지 않는다. 별칭이던 ⌘[ / ⌘] 는
         // 뺐다 — ⌘[ 는 방문 기록 뒤로가기가 됐고, 홀로 남은 ⌘] 는 짝 없는 군더더기였다.
