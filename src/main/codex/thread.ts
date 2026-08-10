@@ -40,6 +40,7 @@ export interface ThreadDeps {
   persist: (item: ChatItem) => void
   /** 확정된 threadId 를 메인에 알린다(resume 토큰으로 저장된다). */
   onThreadId: (id: string) => void
+  onRateLimit?: () => void
   /** 턴이 정상 종료 없이 끝났을 때 상태를 idle 로 확정한다. */
   settleIdle: () => void
 }
@@ -336,6 +337,17 @@ export class CodexThread {
     const turn = (params as { turn?: { id?: string; status?: string } })?.turn
     if (method === 'turn/started' && turn?.id) this.activeTurnId = turn.id
     if (method === 'turn/completed' || method === 'turn/failed') this.activeTurnId = null
+
+    const errorInfo = (params as { turn?: { error?: { codexErrorInfo?: string } } })?.turn?.error
+      ?.codexErrorInfo
+    if (
+      this.config.autoResumeAfterRateLimit &&
+      method === NOTIFY.turnCompleted &&
+      errorInfo === 'UsageLimitExceeded'
+    ) {
+      this.deps.onRateLimit?.()
+      return
+    }
 
     const mapped = mapNotification(method, params, this.state, (what) => this.warnOnce(what))
     for (const event of mapped.events) {

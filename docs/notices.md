@@ -22,6 +22,7 @@ that machine.
       "level": "warn",
       "message": "Anthropic is having an outage — agents may fail to start.",
       "link": { "label": "Status", "url": "https://status.anthropic.com" },
+      "action": { "type": "enableAutoResumeAfterRateLimit", "label": "Enable" },
       "startsAt": "2026-08-02T09:00:00Z",
       "endsAt": "2026-08-02T18:00:00Z",
       "minVersion": "1.0.0",
@@ -37,6 +38,7 @@ that machine.
 | `message`    | yes      | Plain text, one line. Truncated at 300 characters.                             |
 | `level`      | no       | `info` (default) · `warn` · `critical`. Picks the banner color and icon.       |
 | `link`       | no       | `{ label, url }` button. `http`/`https` only; opens in the external browser.   |
+| `action`     | no       | Allowlisted action. Currently only `enableAutoResumeAfterRateLimit`.           |
 | `startsAt`   | no       | ISO 8601. Hidden before this instant.                                          |
 | `endsAt`     | no       | ISO 8601. Hidden after this instant.                                           |
 | `minVersion` | no       | Shown only on this app version or newer (inclusive).                           |
@@ -54,6 +56,7 @@ there is nothing to say, leave `notices` as `[]`.
 - **Set `endsAt`** for anything time-boxed. A stale banner is worse than no banner — expired notices
   disappear on their own.
 - **Plain text only.** The message is rendered as text, never as markdown or HTML.
+- **Actions are allowlisted.** Remote JSON can select a compiled-in action, never arbitrary settings.
 
 ## Testing a notice before you commit it
 

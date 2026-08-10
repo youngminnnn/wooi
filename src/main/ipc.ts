@@ -1893,6 +1893,7 @@ export function registerIpc(ctx: IpcContext): void {
 
   ipcMain.handle(IPC.settingsUpdate, (_e, patch: Partial<AppSettings>) => {
     store.update((st) => Object.assign(st.settings, patch))
+    if (patch.autoResumeAfterRateLimit === false) ctx.sessions.cancelAllRateLimitResumes()
     broadcastState()
   })
 

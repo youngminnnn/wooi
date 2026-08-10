@@ -30,6 +30,7 @@ export interface CodexConfig {
   effort: EffortSetting | null
   /** Codex Fast service tier. */
   fastMode: boolean
+  autoResumeAfterRateLimit?: boolean
   permissionMode: PermissionMode
   /** 이어갈 codex thread id(= workspace.sessionId). 없으면 새 스레드. */
   resumeThreadId: string | null
@@ -98,6 +99,7 @@ export type CodexEvent =
   | { type: 'persist'; workspaceId: string; item: ChatItem }
   /** 확정된 thread id — 메인이 workspace.sessionId 에 저장해 다음 실행에서 resume 한다. */
   | { type: 'sessionId'; workspaceId: string; sessionId: string }
+  | { type: 'rateLimit'; workspaceId: string }
   /** 턴이 정상 종료 없이 끝났을 때 'running' 에 갇히지 않도록 idle 로 확정한다. */
   | { type: 'settleIdle'; workspaceId: string }
   | { type: 'permissionRequest'; request: PermissionRequest }

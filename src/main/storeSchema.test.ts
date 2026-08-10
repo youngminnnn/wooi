@@ -43,6 +43,12 @@ const settingsOf = (out: Record<string, unknown>): AppSettings => out.settings a
 const agentsOf = (out: Record<string, unknown>): Record<string, AgentSettings> =>
   settingsOf(out).agents
 
+describe('current defaults', () => {
+  it('rate-limit 자동 재개는 명시적으로 켜기 전까지 꺼져 있다', () => {
+    expect(DEFAULT_SETTINGS.autoResumeAfterRateLimit).toBe(false)
+  })
+})
+
 describe('v12 → v13 (백엔드별 에이전트 설정 분리)', () => {
   it('전역 모델·effort·권한 모드를 agents.claude 로 옮긴다', () => {
     const out = migrate(v12File(), 12)

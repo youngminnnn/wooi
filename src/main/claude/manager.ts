@@ -17,6 +17,7 @@ import { CLAUDE_META, CLAUDE_MODELS, type AgentBackend } from '../agent/backend'
 import { agentDefaultsFor, delegateBackendsFor } from '../agent/multiAgent'
 import { claudeMode, type HostCommand, type HostEvent, type SessionConfig } from './protocol'
 import { runAgentTool } from '../agent/tools'
+import { RATE_LIMIT_CONTINUATION, RateLimitResumeCoordinator } from '../rateLimitResume'
 import type {
   AgentSettings,
   ChatEvent,
@@ -90,11 +91,21 @@ export class SessionManager implements AgentBackend {
   private rateLimitInflightForced = false
   private rateLimitDebounce: ReturnType<typeof setTimeout> | null = null
   private rateLimitPoll: ReturnType<typeof setInterval> | null = null
+  private readonly rateLimitResume: RateLimitResumeCoordinator
 
   constructor(
     private dispatch: Dispatch,
     private getWindow: () => BrowserWindow | null
-  ) {}
+  ) {
+    this.rateLimitResume = new RateLimitResumeCoordinator({
+      backend: CLAUDE_META.id,
+      refreshLimits: () => this.refreshRateLimits(true),
+      sendContinuation: (workspaceId) => this.sendContinuation(workspaceId),
+      emitItem: (workspaceId, item) =>
+        this.dispatch(IPC.evtChat, { workspaceId, event: { type: 'item', item } })
+    })
+    this.rateLimitResume.restore()
+  }
 
   // ── 호스트 프로세스 ──────────────────────────────────────────────────────
 
@@ -197,6 +208,9 @@ export class SessionManager implements AgentBackend {
       case 'sessionId':
         this.onSessionId(msg.workspaceId, msg.sessionId)
         break
+      case 'rateLimit':
+        void this.rateLimitResume.schedule(msg.workspaceId)
+        break
       case 'settleIdle':
         this.forceIdle(msg.workspaceId)
         break
@@ -285,6 +299,7 @@ export class SessionManager implements AgentBackend {
       // 다른 백엔드에서 넘어온 값(전역 기본값 이관 등)이 SDK 로 새지 않도록 여기서 걸러 낸다.
       permissionMode: claudeMode(ws.permissionMode),
       autoCompact: settings.autoCompact,
+      autoResumeAfterRateLimit: settings.autoResumeAfterRateLimit,
       resumeSessionId: ws.sessionId,
       additionalDirs: ws.additionalDirs ?? [],
       delegateBackends: delegateBackendsFor(ws, settings),
@@ -304,9 +319,21 @@ export class SessionManager implements AgentBackend {
   // ── 공개 API (IPC 핸들러가 호출) ──────────────────────────────────────────
 
   sendMessage(workspaceId: string, text: string, images?: ImageAttachment[]): void {
+    this.rateLimitResume.cancel(workspaceId)
     const ws = this.getWorkspace(workspaceId)
     if (!ws) return
     this.send({ type: 'send', workspaceId, config: this.configFor(ws), text, images })
+  }
+
+  private sendContinuation(workspaceId: string): void {
+    const ws = this.getWorkspace(workspaceId)
+    if (!ws) return
+    this.send({
+      type: 'send',
+      workspaceId,
+      config: this.configFor(ws),
+      text: RATE_LIMIT_CONTINUATION
+    })
   }
 
   /** /btw 사이드 질문. 메인 세션과 분리된 임시 query 로 호스트가 처리한다. */
@@ -381,6 +408,7 @@ export class SessionManager implements AgentBackend {
    * (트랜스크립트 파일 삭제는 ipc 가 broadcastState 와 함께 처리한다.)
    */
   clearSession(workspaceId: string): void {
+    this.rateLimitResume.cancel(workspaceId)
     this.dispose(workspaceId)
     getStore().update((st) => {
       const w = st.workspaces.find((x) => x.id === workspaceId)
@@ -406,6 +434,7 @@ export class SessionManager implements AgentBackend {
   }
 
   async interrupt(workspaceId: string): Promise<void> {
+    this.rateLimitResume.cancel(workspaceId, true)
     this.sendIfHost({ type: 'interrupt', workspaceId })
     // 세션이 없거나 끊긴 경우에도 사이드바가 '진행 중'에 갇히지 않도록 idle 로 확정한다.
     this.forceIdle(workspaceId)
@@ -498,6 +527,7 @@ export class SessionManager implements AgentBackend {
   }
 
   dispose(workspaceId: string): void {
+    this.rateLimitResume.cancel(workspaceId)
     this.sendIfHost({ type: 'dispose', workspaceId })
     // 세션이 사라지면 그 세션이 기다리던 권한 요청은 응답받을 수 없으므로 거둔다.
     for (const [requestId, wsId] of this.pendingPermissions) {
@@ -506,6 +536,10 @@ export class SessionManager implements AgentBackend {
       this.sendIfHost({ type: 'permissionResponse', requestId, decision: { behavior: 'deny' } })
       this.dispatch(IPC.evtPermissionCancel, requestId)
     }
+  }
+
+  cancelAllRateLimitResumes(): void {
+    this.rateLimitResume.cancelAll()
   }
 
   disposeAll(): void {
@@ -545,6 +579,7 @@ export class SessionManager implements AgentBackend {
    * note 가 있으면 턴이 끊긴 workspace 의 트랜스크립트에 안내를 남긴다.
    */
   private stopAll(note: string | null): void {
+    this.rateLimitResume.cancelAll()
     const running = getStore()
       .getState()
       .workspaces.filter((w) => w.status === 'running')

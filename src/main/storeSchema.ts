@@ -100,6 +100,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   // CLI 와 동일하게 자동 압축을 기본 켜둔다(autoCompactEnabled). 압축을 트리거하는 임계치는
   // Claude Code 가 모델별로 알려주는 값을 그대로 쓴다(session.ts 의 overAutoCompactThreshold).
   autoCompact: true,
+  // 자동 실행은 명시적인 opt-in 이어야 한다. 출시 공지와 설정에서 사용자가 직접 켠다.
+  autoResumeAfterRateLimit: false,
   manualWorkspaceSetup: false,
   onboarded: false,
   // 아직 기본값을 고르지 않음 — 기존 사용자도 load 의 기본값 병합으로 false 가 되어,
