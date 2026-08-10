@@ -5,6 +5,7 @@ import type {
   AppState,
   AppSettings,
   AgentRateLimits,
+  ArchiveScriptFailure,
   AuthStatus,
   CarryFailure,
   ChatItem,
@@ -100,7 +101,11 @@ export interface WooiApi {
 
   workspace: {
     create(args: CreateWorkspaceArgs): Promise<CreateWorkspaceResult>
-    archive(workspaceId: string): Promise<void>
+    /**
+     * 아카이브는 스크립트가 실패해도 끝까지 진행된다 — worktree 가 사라진 뒤라 되돌릴 것이
+     * 없기 때문이다. 실패는 여기 실려 오고, 렌더러가 토스트로 알린다(전문은 main 로그).
+     */
+    archive(workspaceId: string): Promise<{ archiveScriptFailure?: ArchiveScriptFailure }>
     /**
      * 병합된 PR 로 뜬 아카이브 제안을 해제한다(같은 병합으로는 다시 제안하지 않는다).
      * 아카이브 자체는 위 archive 를 그대로 쓴다 — 제안은 그 입구일 뿐이다.
@@ -115,7 +120,11 @@ export interface WooiApi {
     restack(workspaceId: string): Promise<RestackResult>
     /** 모델 B: worktree 내부 스택의 다른 브랜치로 체크아웃 전환한다(clean 워킹트리 필요). */
     switchBranch(workspaceId: string, branch: string): Promise<{ error?: string }>
-    remove(workspaceId: string, deleteBranch: boolean): Promise<void>
+    /** 아직 아카이브되지 않은 워크스페이스를 지울 때는 아카이브 스크립트도 돈다 — archive 와 같다. */
+    remove(
+      workspaceId: string,
+      deleteBranch: boolean
+    ): Promise<{ archiveScriptFailure?: ArchiveScriptFailure }>
     /** 한 레포의 아카이브된 워크스페이스를 모두 영구 삭제한다(브랜치·기록 포함). 삭제된 개수를 반환. */
     removeArchived(repoId: string): Promise<{ count: number }>
     setPermissionMode(workspaceId: string, mode: PermissionMode): Promise<void>

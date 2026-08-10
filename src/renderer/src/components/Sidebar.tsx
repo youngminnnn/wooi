@@ -518,6 +518,7 @@ function WorkspaceRow({
   const runningSince = useStore((s) => s.runningSince[workspace.id])
   const restack = useStore((s) => s.restackWorkspace)
   const confirm = useStore((s) => s.confirm)
+  const reportArchiveScriptFailure = useStore((s) => s.reportArchiveScriptFailure)
   const requestDelete = useStore((s) => s.requestDeleteWorkspace)
   const requireGithub = useStore((s) => s.requireGithub)
   const githubDisconnected = useGithubDisconnected()
@@ -558,7 +559,8 @@ function WorkspaceRow({
       danger: true
     })
     if (!ok) return
-    await window.api.workspace.archive(workspace.id)
+    const { archiveScriptFailure } = await window.api.workspace.archive(workspace.id)
+    reportArchiveScriptFailure(archiveScriptFailure)
     if (active) void select(null)
   }
 

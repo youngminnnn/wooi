@@ -19,8 +19,27 @@ const PENDING_LIMIT = 512 * 1024
  * 이미 흘려보낸 출력을 다시 읽을 수 있게 보관하는 꼬리 버퍼의 상한.
  * 출력은 이벤트로만 나가므로, 나중에 뜬 창(분리한 스크립트 패널)은 이 버퍼가 없으면
  * 돌고 있는 dev 서버의 로그를 "No output yet." 로 보게 된다.
+ *
+ * runOnce 가 모으는 출력도 같은 상한을 쓴다 — 둘 다 "무한정 자라면 안 되는 로그 꼬리" 로
+ * 성질이 같아서, 상한이 갈라지면 한쪽만 조용히 메모리를 먹는다.
  */
-const HISTORY_LIMIT = 256 * 1024
+export const HISTORY_LIMIT = 256 * 1024
+
+/** 꼬리 버퍼에 이어 붙인다. 상한을 넘으면 앞을 잘라 최신 부분만 남긴다. */
+function appendTail(prev: string, chunk: string): string {
+  const next = prev + chunk
+  return next.length > HISTORY_LIMIT ? next.slice(-HISTORY_LIMIT) : next
+}
+
+/** 일회성 명령(runOnce)의 실행 결과. */
+export interface RunOnceResult {
+  /** 종료 코드. 시작 자체가 실패했거나 타임아웃으로 죽인 경우 null. */
+  code: number | null
+  /** timeoutMs 를 넘겨 강제 종료했는지 — 정상 종료와 구분해야 메시지가 정확해진다. */
+  timedOut: boolean
+  /** stdout·stderr 를 시간 순으로 합친 출력의 꼬리(HISTORY_LIMIT 상한). */
+  output: string
+}
 
 interface Running {
   proc: ChildProcess
@@ -145,8 +164,7 @@ export class ScriptRunner {
 
   /** 내보낸 출력을 꼬리 버퍼에 누적한다(상한을 넘으면 앞을 잘라 최신 부분만 남긴다). */
   private remember(key: string, chunk: string): void {
-    const next = (this.history.get(key) ?? '') + chunk
-    this.history.set(key, next.length > HISTORY_LIMIT ? next.slice(-HISTORY_LIMIT) : next)
+    this.history.set(key, appendTail(this.history.get(key) ?? '', chunk))
   }
 
   /** 다음 flush 가 예약돼 있지 않으면 하나 예약한다(주기적으로 묶어 보냄). */
@@ -182,30 +200,45 @@ export class ScriptRunner {
   /**
    * 일회성 명령을 실행하고 종료까지 기다린다(아카이브 스크립트 등).
    * timeout 초과 시 종료를 강제하고 resolve 한다 — 아카이브가 무한정 멈추지 않게.
+   *
+   * 출력과 종료 코드를 돌려준다. 이 결과를 버리면 `docker compose down` 이 실패해도
+   * 아무 데도 남지 않아, 사용자는 컨테이너가 살아 있는 걸 한참 뒤에나 알게 된다.
+   * 출력을 실제로 읽는 것은 진단용만이 아니다 — stdio 는 어차피 pipe 로 열리므로,
+   * 읽지 않으면 파이프 버퍼가 차는 순간 자식이 write 에서 멈춰 타임아웃까지 끌려간다.
    */
-  runOnce(command: string, cwd: string, timeoutMs = 120_000): Promise<void> {
-    if (!command.trim()) return Promise.resolve()
+  runOnce(command: string, cwd: string, timeoutMs = 120_000): Promise<RunOnceResult> {
+    if (!command.trim()) return Promise.resolve({ code: 0, timedOut: false, output: '' })
     return new Promise((resolve) => {
       const shell = process.env.SHELL || '/bin/zsh'
+      // run() 과 같은 이유로 detached — 자식이 띄운 손자까지 그룹 단위로 정리한다.
       const proc = spawn(shell, ['-lc', command], { cwd, detached: true })
+      let output = ''
+      let timedOut = false
       let done = false
-      const finish = (): void => {
+      const finish = (code: number | null): void => {
         if (done) return
         done = true
-        resolve()
+        clearTimeout(timer)
+        resolve({ code, timedOut, output })
       }
       const timer = setTimeout(() => {
+        timedOut = true
         killProcessGroup(proc)
-        finish()
+        // 그룹을 죽였으니 close 를 더 기다리지 않는다 — 여기까지 모은 출력이 진단의 전부다.
+        finish(null)
       }, timeoutMs)
-      proc.on('error', () => {
-        clearTimeout(timer)
-        finish()
+      proc.stdout?.on('data', (data: Buffer) => {
+        output = appendTail(output, data.toString())
       })
-      proc.on('close', () => {
-        clearTimeout(timer)
-        finish()
+      proc.stderr?.on('data', (data: Buffer) => {
+        output = appendTail(output, data.toString())
       })
+      proc.on('error', (err) => {
+        // 셸을 띄우지도 못한 경우 — 종료 코드가 없으므로 실패로 보이도록 null 로 끝낸다.
+        output = appendTail(output, `\n[wooi] failed to start: ${err.message}\n`)
+        finish(null)
+      })
+      proc.on('close', (code) => finish(code))
     })
   }
 

@@ -77,7 +77,8 @@ beforeEach(() => {
   state.repos = [{ ...repo }]
   clean.mockResolvedValue(true)
   create.mockResolvedValue({ workspaceId: 'ws-new', name: 'feat/other', branch: 'feat/other' })
-  archive.mockResolvedValue(undefined)
+  // 아카이브는 결과 객체를 돌려준다 — 스크립트가 실패했을 때만 내용이 찬다.
+  archive.mockResolvedValue({})
 })
 
 async function create_(args: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
