@@ -11,41 +11,58 @@ parallel, each on its own isolated git worktree. Each task runs in its own dedic
 worktree + branch + agent session, and every session starts with **an empty input box
 and no automatic prompt** — nothing runs until you send your first message.
 
-Running agents in isolated worktrees is table stakes now. **Worktrees solve file
-collisions; they don't solve dependencies** — when task B builds on task A's schema
-change, isolation is the thing in the way. And every agent you add is one more branch to
-rebase and one more PR waiting on a reviewer. Wooi stacks dependent work so it never
-collides in the first place, and turns each review into a diff you work on instead of a
-transcript you read.
+Running agents side by side is the *horizontal* axis, and isolated worktrees already
+cover it. **Worktrees solve file collisions; they don't solve dependencies** — when task
+B builds on task A's schema change, isolation is the thing in the way. Wooi adds the
+*vertical* axis: dependent work branches off the work it depends on, and Wooi keeps the
+whole chain valid as parents merge. Agents can build those chains themselves through
+Wooi's built-in tools, and every review lands on the diff instead of in a transcript.
 
 > **Agent support** — Since v1.4.0, Wooi supports both **Claude Code** (via the
 > Claude Agent SDK) and **OpenAI Codex** (via the Codex CLI). Choose an agent when
-> creating a workspace; that workspace keeps the selected agent for its lifetime.
+> creating a workspace; the choice is still open until you send the first message, and
+> the workspace keeps that agent from then on.
 
 ## Why Wooi
 
-- 🧱 **Dependent work stacks instead of conflicting** — everywhere else, conflicts
-  between parallel branches get cleaned up after they happen. Wooi's answer is
-  structural: work that builds on other work branches off it instead of off the default
-  branch. When the parent merges, Wooi rebases the children and retargets their PR
-  bases — so the rest of the stack stays valid instead of turning into a pile of
-  conflicts.
-- 🤖 **Agents stack their own work** — you can stack a workspace yourself, or the agent
-  can do it. It can see which files the other workspaces are already changing *before*
-  it starts, and open the next workspace on top of its own branch when what it just
-  finished is a complete, reviewable unit. One prompt can end up as a three-PR stack you
-  never arranged.
-- 🔍 **PR review, on the diff** — when agents write code faster, review becomes the
-  constraint. Every agent can review a PR; what's missing is somewhere to work the
-  result. Findings land inline on the diff they're about, each one editable,
-  discardable, and postable on its own or as a batch.
-- 🧵 **True parallelism** — kick off a refactor, a feature, and a bugfix at the same
-  time, and watch all three from one sidebar.
-- 🔒 **Isolated by default** — a separate worktree + branch per task means agents never
-  collide in a shared working tree.
-- 🚢 **Straight from diff to PR** — open a GitHub PR for an agent's work in one click,
-  without switching to the browser first.
-- 🕵️ **No telemetry** — no servers of its own; transcripts stored locally only.
+- 🧱 **Stacked PRs are a first-class citizen** — the whole app knows what a chain is, not
+  just the branch you're standing on. Work that builds on other work branches off it
+  instead of off the default branch. **Restack** rebases onto the latest parent and
+  pushes with `--force-with-lease`; when a parent merges, a **merge cascade** retargets
+  each child PR to the grandparent and rebases the children onto it; a PR that drifts
+  onto the wrong base gets **flagged instead of silently accepted**. And if an agent
+  builds a chain by hand with `git checkout -b` and `gh pr create`, Wooi **reconstructs
+  the stack from the PRs' base links** and shows it the same way.
+- 🤖 **Agents orchestrate the app, not just the repo** — every session gets a built-in
+  MCP server. `check_related_work` shows which files the other workspaces are touching
+  *before* an agent starts, `create_workspace` / `create_stacked_workspace` let it split
+  a task into a chain of reviewable PRs, and `report_to_parent` / `notify_child` carry
+  results and updates along that chain. It's fenced in: an agent can only target
+  workspaces it created itself, and sibling *paths* are shared — never diffs. One prompt
+  can end up as a three-PR stack you never arranged. See the
+  [built-in MCP reference](docs/built-in-mcp.md).
+- 🔍 **Review is a workspace, not a paragraph** — every agent can review a PR now; what's
+  missing is somewhere to work the result. A Wooi review is its own entity with its own
+  worktree, so the agent reads past the changed hunks without touching your checkout.
+  Findings are **anchored to diff lines** with a severity badge, editable, discardable,
+  and postable one at a time or as a batch. Files carry a **viewed** mark that
+  auto-clears when a new commit changes that file, replies to your comments are polled so
+  you can ask a follow-up, and verdicts are guarded — approve is hidden on your own PR,
+  and a verdict is held back if the findings it rests on failed to post.
+- 🎛️ **Two agent backends, integrated deeply** — Claude Code and OpenAI Codex, each
+  supported down to the details rather than reduced to a lowest common denominator:
+  `/rewind` and `/btw` where the backend has them, per-backend permission modes,
+  reasoning effort and fast mode, account rate limits normalized into one readable
+  status line, and your own MCP servers inherited from your CLI config. See
+  [agent backends](docs/agent-backends.md).
+- 🔒 **Quiet where it counts** — **no telemetry** and no servers of its own; transcripts
+  stay local. Updates can wait for **"restart when work finishes"** instead of killing a
+  running turn. Ignored-but-needed files like `.env` are **carried into every new
+  worktree**, and sessions resume across restarts.
+
+Wondering how this lines up with other tools? See the
+[comparison page](https://youngminnnn.github.io/wooi/alternatives.html), where every
+claim is sourced and dated.
 
 **[Download the latest release →](https://github.com/youngminnnn/wooi/releases/latest/download/Wooi-arm64.dmg)**
 
@@ -84,8 +101,10 @@ brew install --cask --adopt youngminnnn/tap/wooi
 ## Updating
 
 Wooi updates itself: it checks GitHub Releases on launch, downloads new versions
-in the background, and shows a **"Restart to update"** banner when ready. You can
-also check manually in **Settings → About**.
+in the background, and shows a **"Restart to update"** banner when ready. Restarting
+mid-turn would cut an agent off, so the banner also offers **"Restart when work
+finishes"** — Wooi then waits until every workspace is idle and restarts on its own. You
+can also check manually in **Settings → About**.
 
 > **On v1.0.0?** That build predates auto-update, so it won't update on its own —
 > download **v1.0.1 (or later) once** from the Releases page. Every version from
@@ -135,23 +154,7 @@ An API key is not required when you sign in with a Claude or ChatGPT account.
 
 ## Features
 
-### Workspaces
-
-- **No default prompt** — the input box starts empty; the session begins only when you
-  send your first message.
-- **Automatic creation** — workspaces get an auto-generated name (like
-  `witty-otter`) and branch off the repo's default branch. Turn on **manual setup** in
-  Settings to choose the name and base branch yourself. Rename a workspace by
-  double-clicking its name in the header.
-- **Choose Claude Code or Codex** when creating a workspace. Agent-specific models,
-  reasoning levels, permission modes, commands, and account usage are shown
-  automatically. The selected agent cannot be changed after creation.
-- **Per-workspace model & reasoning effort** — set from the status line above the input
-  box, or by typing `/model` and `/effort`. When unset they follow the global settings;
-  changing them resumes the same conversation. Available models and effort levels
-  depend on the selected agent and model.
-- **Sessions resume across restarts** — your conversation context is restored, so the
-  next message after a restart continues where you left off.
+Ordered by what sets Wooi apart, not by what you click first.
 
 ### Stacked PRs
 
@@ -161,14 +164,9 @@ those chains itself with plain `git` and `gh` — no extra stacking CLI needed.
 - **Stack a workspace** — pick **Stack a new workspace** from a workspace's menu. The new
   workspace branches off that workspace's branch, and its PR targets that branch instead
   of the repo's default branch.
-- **Or let the agent stack it** — agents get Wooi's own tools alongside their usual ones.
-  `check_related_work` lists the other workspaces open on this repo and the file paths
-  each is changing (paths only, never diffs), so an agent can steer clear of a sibling
-  before it starts rather than resolving the collision afterwards.
-  `create_stacked_workspace` opens the next workspace on top of the current branch when
-  the work just finished is a complete, reviewable unit, and `report_to_parent` hands the
-  result back up the chain. See the [built-in MCP reference](docs/built-in-mcp.md) for
-  every Wooi tool and its safety constraints.
+- **Or let the agent stack it** — `create_stacked_workspace` opens the next workspace on
+  top of the current branch when the work just finished is a complete, reviewable unit.
+  See [Agent orchestration](#agent-orchestration-built-in-mcp) below.
 - **Stack overview** — a **Stack** button appears in the header whenever the current
   workspace is part of a chain. It lists every branch in the stack with its PR state
   (draft / review required / changes requested / ready to merge / conflict / merged), PR
@@ -188,6 +186,38 @@ those chains itself with plain `git` and `gh` — no extra stacking CLI needed.
   agent's — targets the parent branch instead of the repo's default branch. If a PR
   still ends up on the wrong base, Wooi says so and offers to retarget it rather than
   quietly accepting it and dropping the stack.
+
+### Agent orchestration (built-in MCP)
+
+Wooi attaches a built-in MCP server named `wooi` to every Claude Code and Codex session
+it starts — nothing to install or configure. The agent doesn't just edit files in its
+worktree; it can drive Wooi itself: split a task, open the workspaces for the pieces,
+stack them in dependency order, and pass results along the chain.
+
+- **See the neighbours first** — `check_related_work` lists the other workspaces open on
+  this repo and the file paths each one is changing, flags the overlaps with what this
+  agent plans to touch, and tells it to check with you before editing those paths. Paths
+  only — **diffs are never shared between workspaces**.
+- **Fan out or stack up** — `create_workspace` starts an independent workspace off the
+  default branch; `create_stacked_workspace` starts a child off the committed tip of the
+  current branch, so its PR targets the current branch. Either can be handed a first
+  message that starts the new agent's turn immediately.
+- **Talk along the chain** — `report_to_parent` records a result for the workspace this
+  one was stacked on (it doesn't interrupt the parent), `check_stacked_work` lists the
+  children with their branch, PR, and latest report, and `notify_child` sends an update
+  that starts a turn in a child — queued behind its current turn if it's busy.
+- **Plus the everyday ones** — `open_pull_request` (Wooi picks the base: the parent
+  branch when stacked, the default branch otherwise), `list_issues`, `archive_workspace`,
+  and `run_script` / `stop_script` / `read_script_output` for the repo scripts you
+  configured.
+- **Fenced in** — most tools act only on the calling workspace; tools that take a
+  `workspaceId` can only name a workspace that the caller created, `archive_workspace`
+  can't archive its caller, and `notify_child` is limited to a direct stacked child.
+  Read-only tools run without a prompt; state-changing ones follow the workspace's
+  permission mode and show an approval card.
+
+Every tool, input, and constraint is documented in the
+[built-in MCP reference](docs/built-in-mcp.md).
 
 ### PR review
 
@@ -210,6 +240,10 @@ runs alongside your workspaces instead of taking one over.
   ones you don't want, **Comment** posts that finding on its own. Or tick the ones you want
   and post the batch; each goes out as its own review comment, and posted cards go quiet
   with a link to the comment on GitHub.
+- **Keep your place in a big diff** — tick a file as **viewed** and it collapses out of
+  your way. The mark is stored against a fingerprint of that file's contents, so when a
+  new commit changes the file it goes back to unviewed on its own — and files that didn't
+  change stay checked.
 - **Start a review** — **Review PR** on the Overview board. Pick a repo, choose one of its
   open PRs (or type a number / URL), and say what you want looked at.
 - **Claude or Codex** — pick the agent when you start. A review stays on the agent it was
@@ -229,13 +263,51 @@ runs alongside your workspaces instead of taking one over.
 - **Persistent** — reviews survive restarts and can be archived, restored, or deleted;
   deleting cleans up the review worktree too.
 
-### Permissions
+### Agent backends
 
-- **Cycle permission modes with Shift+Tab.** Claude Code offers default, accept edits,
+Wooi supports two coding agents — **Claude Code** (Claude Agent SDK) and **OpenAI Codex**
+(Codex CLI) — and follows each one down to its own controls instead of flattening both
+into a shared subset. The renderer reads what the selected backend can do, so a workspace
+only ever shows controls that actually work there.
+
+- **Backend-specific controls** — models, reasoning-effort levels, permission modes,
+  slash commands, and account details all come from the selected backend.
+- **Permission modes, cycled with Shift+Tab** — Claude Code offers default, accept edits,
   plan, and auto; Codex offers read only, auto, full access, and plan. The current mode
-  is shown below the input box.
-- Permission prompts offer **"Always allow"** (auto-approve that tool for the rest of
-  the session) alongside Allow/Deny — Enter = Allow, Esc = Deny.
+  is shown below the input box. Permission prompts offer **"Always allow"**
+  (auto-approve that tool for the rest of the session) alongside Allow/Deny —
+  Enter = Allow, Esc = Deny.
+- **Capabilities that only one side has** — `/rewind` (roll code back to a file
+  checkpoint) and `/btw` (ask a side question without derailing the turn) show up where
+  the backend supports them, and mid-turn steering is used where it exists instead of
+  being queued.
+- **Fast mode & effort** — pick them per workspace from the status line or with `/model`,
+  `/effort`, and `/fast`; options that the current model doesn't support are marked
+  rather than silently ignored.
+- **Rate limits, normalized** — account usage from either backend is shown in one status
+  line, pinned to the window that actually paces you (Claude's 5-hour session window,
+  Codex's weekly window) so the number doesn't swap out from under you.
+- **Your MCP servers come along** — servers configured in your own Claude/Codex CLI setup
+  are resolved and injected into the session alongside Wooi's own `wooi` server.
+
+See [agent backends](docs/agent-backends.md) for the full capability matrix.
+
+### Workspaces
+
+- **No default prompt** — the input box starts empty; the session begins only when you
+  send your first message.
+- **Automatic creation** — workspaces get an auto-generated name (like
+  `witty-otter`) and branch off the repo's default branch. Turn on **manual setup** in
+  Settings to choose the name and base branch yourself. Rename a workspace by
+  double-clicking its name in the header.
+- **Choose Claude Code or Codex** when creating a workspace — and change your mind with
+  `/agent` any time before the first message. After that the workspace keeps that agent,
+  and stacked workspaces inherit their parent's.
+- **Per-workspace model & reasoning effort** — set from the status line above the input
+  box, or by typing `/model` and `/effort`. When unset they follow the global settings;
+  changing them resumes the same conversation.
+- **Sessions resume across restarts** — your conversation context is restored, so the
+  next message after a restart continues where you left off.
 
 ### Parallel-session visibility
 
@@ -288,6 +360,13 @@ A tabbed panel on top plus an interactive terminal below (resizable split):
 
 ### Convenience
 
+- **Carried files** — a new worktree only contains git-tracked files, so ignored ones
+  (`.env`, `CLAUDE.local.md`, …) would be missing. List them per repo and Wooi brings
+  them into every new workspace: **Copy** for files each workspace needs its own version
+  of (like `.env` with a per-workspace `$PORT`), **Link** to share one original.
+- **Updates that wait for you** — when a new version is ready you can install it now, or
+  pick **Restart when work finishes** and Wooi holds the restart until every workspace is
+  idle, then counts down before restarting.
 - **Open in editor / Reveal in Finder** — header buttons open the worktree in VS Code
   (`code`, falling back to Finder) or reveal it in Finder.
 
