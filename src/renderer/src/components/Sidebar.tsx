@@ -23,6 +23,7 @@ import {
   ArrowUpDown,
   GitPullRequest,
   MessagesSquare,
+  Copy,
   Square,
   X,
   Hourglass
@@ -49,7 +50,9 @@ import {
   AGENT_BACKEND_LABELS,
   DEFAULT_PEER_INBOUND,
   activeRateLimitPause,
+  fanoutGroupOf,
   orderVisibleWorkspaces,
+  unresolvedFanoutGroups,
   workspaceDisplayName
 } from '@shared/types'
 import { orderRowsWithPending } from '../lib/sidebarRows'
@@ -60,6 +63,7 @@ import { formatCountdown, formatDuration } from '../lib/format'
 import { useDragReorder, type DragReorder } from '../lib/useDragReorder'
 import type {
   AgentBackendId,
+  FanoutGroup,
   PrState,
   PrStatus,
   RateLimitPause,
@@ -82,11 +86,14 @@ const WORKSPACE_MIME = 'application/x-wooi-workspace'
 export default function Sidebar({
   onNewWorkspace,
   onNewFromIssue,
+  onFanout,
   onStackWorkspace,
   onOpenQuickSwitch
 }: {
   onNewWorkspace: (repoId: string, agentBackend?: AgentBackendId) => void
   onNewFromIssue: (repoId: string) => void
+  /** 같은 프롬프트를 후보 여럿에게 뿌리는 생성 모달을 연다. */
+  onFanout: (repoId: string, agentBackend?: AgentBackendId) => void
   onStackWorkspace: (
     repoId: string,
     parentWorkspaceId: string,
@@ -378,8 +385,16 @@ export default function Sidebar({
                   repoId={repo.id}
                   onNewWorkspace={onNewWorkspace}
                   onNewFromIssue={onNewFromIssue}
+                  onFanout={onFanout}
                 />
               </div>
+
+              {/* fan-out 그룹은 워크스페이스 행 위에 따로 놓는다. 행 사이에 끼워 넣으면 ⌘1–9
+                  번호가 매겨지는 순서(orderVisibleWorkspaces)와 화면 순서가 어긋난다 — 리뷰
+                  구역을 따로 뺀 것과 같은 이유다. 채택이 끝난 그룹은 여기 나오지 않는다. */}
+              {unresolvedFanoutGroups(app.fanoutGroups, repo.id).map((group) => (
+                <FanoutGroupRow key={group.id} group={group} />
+              ))}
 
               <div className="mt-0.5 space-y-0.5">
                 {active.length === 0 && repoPending.length === 0 && (
@@ -584,6 +599,9 @@ function WorkspaceRow({
   // store 구독이 하나 더 늘어나므로(워크스페이스가 많을수록 손해) 한 번 읽어 나눠 쓴다.
   const multiAgent = useMultiAgent(workspace)
 
+  const fanoutGroup = useStore((s) => fanoutGroupOf(s.app?.fanoutGroups, workspace.id))
+  const openFanoutCompare = useStore((s) => s.openFanoutCompare)
+
   // 행당 액션이 5개까지 늘어나 아이콘을 나열하면 제목 폭을 계속 잠식한다. 그래서 1차 액션
   // (뒤처진 stacked 워크스페이스의 restack)만 인라인으로 승격하고 나머지는 이 메뉴로 모은다.
   const stack = (agentBackend?: AgentBackendId): void =>
@@ -599,6 +617,19 @@ function WorkspaceRow({
       icon: <Pencil size={13} />,
       onSelect: () => setEditingName(displayName)
     },
+    // 이 워크스페이스가 fan-out 후보라면 형제들과 견주는 화면으로 가는 길을 여기에도 둔다 —
+    // 그룹 행이 사이드바 위쪽에 따로 있지만, 후보의 대화를 읽다가 "다른 쪽은 어떻게 했지" 가
+    // 되는 순간은 바로 이 행 위에서 온다.
+    ...(fanoutGroup
+      ? [
+          {
+            key: 'fanout',
+            label: `Compare fan-out · ${fanoutGroup.name}`,
+            icon: <Copy size={13} />,
+            onSelect: () => openFanoutCompare(fanoutGroup.id)
+          }
+        ]
+      : []),
     // 스택은 stacked PR 을 전제로 한 기능이라 gh 가 필요하다 — 미연결이면 라벨을 "Connect GitHub"
     // 로 바꿔 노출하고(숨기지 않는다), 눌렀을 때 연결 모달을 띄운 뒤 이어서 실행한다.
     {
@@ -1396,6 +1427,105 @@ export function StatusDot({
 }
 
 /**
+ * fan-out 그룹 한 줄 — 후보들을 형제로 묶어 보여 주고, 누르면 비교 화면을 연다.
+ *
+ * 후보들은 워크스페이스 목록에도 각자 자기 행으로 그대로 나온다. 여기가 더하는 것은 **묶여
+ * 있다는 사실과 서로의 진행 상황**이다: 어느 후보가 아직 돌고 있고 어느 쪽이 얼마나 고쳤는지를
+ * 한 자리에서 견줄 수 없으면, 비교 화면을 열어 볼 시점 자체를 알 수 없다.
+ */
+function FanoutGroupRow({ group }: { group: FanoutGroup }): React.JSX.Element | null {
+  const workspaces = useStore((s) => s.app?.workspaces)
+  const open = useStore((s) => s.openFanoutCompare)
+  const active = useStore((s) => s.activeFanoutGroupId === group.id)
+
+  const candidates = group.workspaceIds
+    .map((id) => workspaces?.find((w) => w.id === id))
+    .filter((w): w is Workspace => !!w)
+  if (candidates.length === 0) return null
+
+  const running = candidates.filter((w) => !w.archived && w.status === 'running').length
+
+  return (
+    <div className="mt-0.5 mb-1 rounded-md border border-[var(--border)] overflow-hidden">
+      <button
+        onClick={() => open(group.id)}
+        aria-current={active ? 'page' : undefined}
+        title={`Compare the ${candidates.length} candidates of “${group.name}”`}
+        className={`w-full flex items-center gap-1.5 px-2 py-1.5 text-sm transition-colors ${
+          active
+            ? 'bg-[var(--surface-2)] text-neutral-100'
+            : 'text-neutral-300 hover:bg-[var(--surface)]'
+        }`}
+      >
+        <Copy size={13} className="shrink-0 text-neutral-500" />
+        <span className="flex-1 min-w-0 truncate text-left font-medium">{group.name}</span>
+        {running > 0 ? (
+          <span className="flex items-center gap-1 shrink-0 text-xs text-[var(--info-400)]/80">
+            <Loader2 size={10} className="animate-spin" />
+            {running}
+          </span>
+        ) : (
+          <span className="shrink-0 text-xs text-neutral-600">{candidates.length}</span>
+        )}
+      </button>
+      <div className="border-t border-[var(--border)]">
+        {candidates.map((w, i) => (
+          <FanoutCandidateLine key={w.id} workspace={w} index={i} />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/** 그룹 안의 후보 한 줄 — 실행 상태와 base 대비 요약(N changed · ↑ahead)을 나란히 놓는다. */
+function FanoutCandidateLine({
+  workspace,
+  index
+}: {
+  workspace: Workspace
+  index: number
+}): React.JSX.Element {
+  const git = useStore((s) => s.gitStatus[workspace.id])
+  const select = useStore((s) => s.selectWorkspace)
+  const selected = useStore((s) => s.selectedWorkspaceId === workspace.id)
+
+  return (
+    <button
+      onClick={() => void select(workspace.id)}
+      title={`Open ${workspaceDisplayName(workspace)}`}
+      className={`w-full flex items-center gap-1.5 px-2 py-1 text-xs transition-colors ${
+        selected ? 'bg-[var(--surface-2)]' : 'hover:bg-[var(--surface)]'
+      }`}
+    >
+      <span className="shrink-0 w-3 text-right text-neutral-600">{index + 1}</span>
+      {workspace.archived ? (
+        <Archive size={10} className="shrink-0 text-neutral-600" />
+      ) : workspace.status === 'running' ? (
+        <Loader2 size={10} className="shrink-0 animate-spin text-[var(--info-400)]" />
+      ) : workspace.status === 'error' ? (
+        <AlertTriangle size={10} className="shrink-0 text-[var(--danger-400)]" />
+      ) : (
+        <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-neutral-600" />
+      )}
+      <span
+        className={`flex-1 min-w-0 truncate text-left ${
+          workspace.archived ? 'text-neutral-600 line-through' : 'text-neutral-400'
+        }`}
+      >
+        {workspaceDisplayName(workspace)}
+      </span>
+      {!workspace.archived && (
+        <span className="shrink-0 text-neutral-600">
+          {git?.changedFiles ? `${git.changedFiles} changed` : ''}
+          {git?.changedFiles && git?.ahead ? ' · ' : ''}
+          {git?.ahead ? `↑${git.ahead}` : ''}
+        </span>
+      )}
+    </button>
+  )
+}
+
+/**
  * 새 워크스페이스 "+" 버튼.
  *
  * 쓸 수 있는 에이전트가 하나뿐이면 예전처럼 즉시 만든다 — 선택지를 보여 줄 이유가 없다.
@@ -1406,11 +1536,13 @@ export function StatusDot({
 function NewWorkspaceButton({
   repoId,
   onNewWorkspace,
-  onNewFromIssue
+  onNewFromIssue,
+  onFanout
 }: {
   repoId: string
   onNewWorkspace: (repoId: string, agentBackend?: AgentBackendId) => void
   onNewFromIssue: (repoId: string) => void
+  onFanout: (repoId: string, agentBackend?: AgentBackendId) => void
 }): React.JSX.Element {
   const backends = useAvailableBackends()
   const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null)
@@ -1451,6 +1583,15 @@ function NewWorkspaceButton({
     icon: <GithubMark size={12} />,
     onSelect: () => onNewFromIssue(repoId),
     separatorBefore: true
+  })
+  // fan-out 은 "워크스페이스 하나 더" 가 아니라 "같은 질문을 여럿에게" 다. 그래도 만드는
+  // 동작이므로 다른 진입점을 새로 만들지 않고 이 메뉴 안에 둔다 — 어떻게 시작하든 새
+  // 워크스페이스를 만드는 곳은 여기 하나여야 찾을 수 있다.
+  actions.push({
+    key: 'fanout',
+    label: 'Fan out one prompt…',
+    icon: <Copy size={13} />,
+    onSelect: () => onFanout(repoId)
   })
 
   return (
