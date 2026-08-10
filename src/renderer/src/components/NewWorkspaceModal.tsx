@@ -22,6 +22,7 @@ export default function NewWorkspaceModal({
 }): React.JSX.Element {
   const app = useStore((s) => s.app)!
   const repo = app.repos.find((r) => r.id === repoId)!
+  const manualSetup = app.settings.manualWorkspaceSetup
   const parent = parentWorkspaceId
     ? app.workspaces.find((w) => w.id === parentWorkspaceId)
     : undefined
@@ -53,19 +54,22 @@ export default function NewWorkspaceModal({
 
   // 닫고 즉시 사이드바에 스피너 행을 띄운다(worktree 준비는 백그라운드). 실패는 토스트로 알린다.
   const create = (): void => {
-    if (!name.trim()) return
     const trimmed = name.trim()
+    if (manualSetup && !trimmed) return
     void useStore.getState().createWorkspace(
       repoId,
       {
-        name: trimmed,
+        // 자동 설정에서는 이름을 비워 main 의 고유 이름 생성기를 그대로 사용한다. 이 모달은
+        // 멀티 에이전트 모드 선택 때문에 열릴 수도 있으므로, 모달 표시 자체가 수동 네이밍을
+        // 뜻하지는 않는다.
+        ...(manualSetup ? { name: trimmed } : {}),
         parentWorkspaceId,
         agentBackend: effectiveBackend,
         // 모드를 물어봤다면 **끈 것도 명시해서** 보낸다. 생략하면 main 이 전역 기본값으로
         // 폴백하므로, 기본이 멀티일 때 사용자가 고른 "Single agent" 가 조용히 뒤집힌다.
         ...(showModePicker ? { multiAgent: effectiveMultiAgent } : {})
       },
-      trimmed
+      manualSetup ? trimmed : undefined
     )
     onClose()
   }
@@ -79,29 +83,31 @@ export default function NewWorkspaceModal({
           <button className={ghostBtn} onClick={onClose}>
             Cancel
           </button>
-          <button className={primaryBtn} onClick={create} disabled={!name.trim()}>
+          <button className={primaryBtn} onClick={create} disabled={manualSetup && !name.trim()}>
             Create
           </button>
         </>
       }
     >
       <div className="space-y-4">
-        <div>
-          <label className={labelClass}>Name</label>
-          <input
-            autoFocus
-            className={inputClass}
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && create()}
-            placeholder="e.g. fix login bug"
-          />
-          {name.trim() && (
-            <p className="mt-1.5 text-xs text-neutral-600">
-              Creates branch <span className="text-neutral-400">{sanitizePreview(name)}</span>.
-            </p>
-          )}
-        </div>
+        {manualSetup && (
+          <div>
+            <label className={labelClass}>Name</label>
+            <input
+              autoFocus
+              className={inputClass}
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && create()}
+              placeholder="e.g. fix login bug"
+            />
+            {name.trim() && (
+              <p className="mt-1.5 text-xs text-neutral-600">
+                Creates branch <span className="text-neutral-400">{sanitizePreview(name)}</span>.
+              </p>
+            )}
+          </div>
+        )}
 
         {showModePicker && (
           <div>
