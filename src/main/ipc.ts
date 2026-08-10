@@ -64,6 +64,7 @@ import {
   IPC,
   SETUP_SCRIPT_ID,
   agentSettingsFor,
+  agentSwitchDiscardsContext,
   canSwitchAgentBackend,
   isBranchStack,
   normalizePermissionMode,
@@ -91,6 +92,7 @@ import type {
   AppSettings,
   CarryFailure,
   CarryItem,
+  ChatItem,
   CodexLoginMethod,
   CommandPanelKind,
   CommandResult,
@@ -594,36 +596,54 @@ export function registerIpc(ctx: IpcContext): void {
   })
 
   /**
-   * 메인 에이전트 교체. 생성 시 골랐어야 할 값을, **아직 아무것도 보내지 않은** 동안에만 고쳐 준다
-   * ([[canSwitchAgentBackend]]).
+   * 메인 에이전트 교체([[canSwitchAgentBackend]]). 대화 도중에도 되지만, 그때는 에이전트 쪽
+   * 맥락을 버리게 되므로([[agentSwitchDiscardsContext]]) 렌더러가 사용자에게 확인받았다는 표시
+   * (`discardContext`)를 함께 보내야 한다.
    *
    * 규칙은 렌더러와 같은 함수를 쓰지만 판정 재료는 여기서 다시 읽는다 — 렌더러의 화면이 낡았거나
-   * (교체 직전에 첫 메시지가 나갔거나) 다른 창에서 이미 대화가 시작됐을 수 있고, 그때 그대로
-   * 바꿔 주면 남의 대화 맥락을 다른 CLI 로 넘기게 된다.
+   * (경고를 띄우지 않던 사이에 첫 메시지가 나갔거나) 다른 창에서 이미 대화가 시작됐을 수 있고,
+   * 그때 그대로 바꿔 주면 사용자가 경고를 본 적 없는 채로 맥락이 사라진다.
    */
   ipcMain.handle(
     IPC.workspaceSetAgentBackend,
-    async (_e, workspaceId: string, agentBackend: AgentBackendId): Promise<{ error?: string }> => {
+    async (
+      _e,
+      workspaceId: string,
+      agentBackend: AgentBackendId,
+      opts?: { discardContext?: boolean }
+    ): Promise<{ error?: string }> => {
       const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
       if (!ws) return { error: 'Workspace not found.' }
       if (ws.agentBackend === agentBackend) return {}
-      if (!canSwitchAgentBackend(ws, getTranscripts().load(workspaceId).length)) {
+      if (!canSwitchAgentBackend(ws)) {
+        return {
+          error: ws.archived
+            ? 'This workspace is archived.'
+            : 'Stop the current turn before switching agents.'
+        }
+      }
+
+      const discardsContext = agentSwitchDiscardsContext(
+        ws,
+        getTranscripts().load(workspaceId).length
+      )
+      if (discardsContext && !opts?.discardContext) {
         return {
           error:
-            'The agent is fixed once the conversation starts. Clear the conversation (/clear) or create a new workspace.'
+            'This conversation has already started — switching agents drops its context. Confirm the switch to continue.'
         }
       }
 
       // 등록 여부·가용성(CLI 설치·버전)을 카탈로그에서 확인한다. 쓸 수 없는 에이전트로 갈아타면
-      // 워크스페이스가 첫 메시지에서야 실패하므로, 그 전에 이유를 그대로 돌려준다.
+      // 워크스페이스가 다음 메시지에서야 실패하므로, 그 전에 이유를 그대로 돌려준다.
       const target = (await ctx.sessions.listBackends()).find((b) => b.id === agentBackend)
       if (!target) return { error: 'Unknown agent.' }
       if (!target.available) {
         return { error: target.unavailableReason ?? `${target.label} is not available.` }
       }
 
-      // 세션은 첫 전송에서야 생기므로 보통 아무것도 없지만, 남아 있다면 **바꾸기 전에** 정리한다 —
-      // agentBackend 를 바꾸고 나면 라우팅이 새 백엔드로 가서 옛 세션에 손이 닿지 않는다.
+      // 살아 있는 세션은 **바꾸기 전에** 정리한다 — agentBackend 를 바꾸고 나면 라우팅이 새
+      // 백엔드로 가서 옛 세션(과 그 CLI 프로세스)에 손이 닿지 않는다.
       ctx.sessions.dispose(workspaceId)
 
       const settings = store.getState().settings
@@ -631,6 +651,10 @@ export function registerIpc(ctx: IpcContext): void {
         const w = st.workspaces.find((x) => x.id === workspaceId)
         if (!w) return
         w.agentBackend = agentBackend
+        // sessionId 는 옛 백엔드의 것이라 새 백엔드에서는 의미가 없다. 그대로 두면 다음 메시지가
+        // 남의 세션 id 로 resume 을 시도해 실패한다(claude/manager 의 resumeSessionId,
+        // codex/manager 의 resumeThreadId). 비워서 빈 맥락의 새 세션으로 시작하게 한다.
+        w.sessionId = null
         // 모델·effort·fast mode 는 백엔드마다 값 자체가 다르다(Claude 의 모델 ID 를 Codex 에 줄 수
         // 없다). 그대로 들고 가면 조용히 무시되거나 거부되므로 새 백엔드의 기본값으로 되돌린다.
         w.model = null
@@ -644,6 +668,21 @@ export function registerIpc(ctx: IpcContext): void {
           agentSettingsFor(settings, agentBackend).permissionMode
         )
       })
+
+      // 대화가 있던 워크스페이스라면 경계를 기록에 남긴다. 트랜스크립트는 그대로 남아 있는데
+      // 새 에이전트는 그중 아무것도 못 보므로, 이 줄이 없으면 나중에 대화를 다시 열었을 때
+      // "왜 이 지점부터 앞의 내용을 모르는지" 를 설명해 주는 것이 화면에 하나도 없다.
+      if (discardsContext) {
+        const item: ChatItem = {
+          id: `system:agent-switch:${Date.now()}`,
+          type: 'system',
+          text: `Switched to ${target.label}. It starts with an empty context — nothing above this line is visible to it.`,
+          ts: Date.now()
+        }
+        getTranscripts().upsert(workspaceId, item)
+        dispatch(IPC.evtChat, { workspaceId, event: { type: 'item', item } })
+      }
+
       broadcastState()
       return {}
     }

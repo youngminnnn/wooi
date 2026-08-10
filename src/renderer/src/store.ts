@@ -437,6 +437,11 @@ interface UIState {
   setDraft: (workspaceId: string, text: string) => void
   /** /clear — 해당 workspace 의 대화 기록·컨텍스트 사용량을 화면에서 비운다(맥락 초기화). */
   resetTranscript: (workspaceId: string) => void
+  /**
+   * 대화 기록은 그대로 두고 컨텍스트 사용량 표시만 비운다(/agent 교체처럼 세션만 새로 시작할 때).
+   * 다음 턴이 값을 다시 보내 줄 때까지 상태줄은 "—" 로 돌아간다.
+   */
+  resetContextUsage: (workspaceId: string) => void
   setScrollPosition: (workspaceId: string, top: number) => void
   setScriptPanelOpen: (workspaceId: string, open: boolean) => void
   /** 해당 workspace 의 에이전트 목록 접힘 상태를 뒤집는다. */
@@ -1684,6 +1689,13 @@ export const useStore = create<UIState>((set, get) => ({
         contextUsage,
         compacting
       }
+    }),
+
+  resetContextUsage: (workspaceId) =>
+    set((s) => {
+      const contextUsage = { ...s.contextUsage }
+      delete contextUsage[workspaceId]
+      return { contextUsage }
     }),
 
   setScrollPosition: (workspaceId, top) =>

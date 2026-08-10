@@ -559,8 +559,9 @@ export class CodexSessionManager implements AgentBackend {
       { name: 'model', description: 'Choose the model' },
       { name: 'effort', description: 'Choose reasoning effort' },
       { name: 'fast', description: 'Toggle Fast service tier' },
-      // Wooi 가 로컬에서 처리하는 명령. 첫 메시지 전에만 통한다(그 뒤에는 평범한 메시지로 나간다).
-      { name: 'agent', description: 'Switch this workspace’s agent (before the first message)' },
+      // Wooi 가 로컬에서 처리하는 명령. 고를 에이전트가 둘 이상일 때만 통한다
+      // (하나뿐이면 평범한 메시지로 나간다).
+      { name: 'agent', description: 'Switch this workspace’s agent' },
       { name: 'mcp', description: 'Show MCP servers and tools' },
       { name: 'context', description: 'Show context usage' },
       { name: 'usage', description: 'Show plan usage' },
