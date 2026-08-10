@@ -23,6 +23,9 @@ import { AgentMessage, ErrorRow, ToolUseRow, UserMessage } from './ChatPrimitive
 import { formatTime } from '../lib/format'
 import { buildTaskCards, taskLabel, type TaskEntry } from '../lib/tasks'
 import { useTranscriptJump } from '../lib/transcriptJump'
+import { useAvailableBackends } from '../lib/backends'
+import { AgentBackendMark } from './BrandIcons'
+import { AGENT_BACKEND_LABELS, canSwitchAgentBackend } from '@shared/types'
 import type { ChatItem } from '@shared/types'
 
 export default function MessageList({
@@ -33,6 +36,9 @@ export default function MessageList({
   running: boolean
 }): React.JSX.Element {
   const items = useStore((s) => s.transcripts[workspaceId]) ?? EMPTY
+  // 빈 화면에서만 쓰는 값들 — 이 워크스페이스를 돌릴 에이전트를 아직 고를 수 있는지 판단한다.
+  const workspace = useStore((s) => s.app?.workspaces.find((w) => w.id === workspaceId))
+  const availableAgents = useAvailableBackends()
   // 스크롤 위치는 저장만 하고 구독하지 않는다(스크롤마다 재렌더 방지). 복원은 마운트 시 1회.
   const setScroll = useStore((s) => s.setScrollPosition)
   const bottomRef = useRef<HTMLDivElement>(null)
@@ -156,6 +162,15 @@ export default function MessageList({
   }
 
   if (items.length === 0) {
+    // 첫 메시지를 보내면 에이전트가 고정되므로([[canSwitchAgentBackend]]), 아직 바꿀 수 있다는
+    // 사실은 바로 이 화면에서만 의미가 있다. 고를 대상이 둘 이상일 때만 알린다.
+    const switchable =
+      availableAgents.length > 1 && !!workspace && canSwitchAgentBackend(workspace, 0)
+    const agentLabel = workspace
+      ? (availableAgents.find((b) => b.id === workspace.agentBackend)?.label ??
+        AGENT_BACKEND_LABELS[workspace.agentBackend])
+      : ''
+
     return (
       <div ref={containerRef} className="flex-1 overflow-y-auto grid place-items-center px-8">
         <div className="flex flex-col items-center text-center max-w-sm">
@@ -174,6 +189,18 @@ export default function MessageList({
             </kbd>{' '}
             to run a terminal command.
           </p>
+          {switchable && workspace && (
+            <p className="mt-3 flex items-center gap-1.5 text-xs text-neutral-600">
+              <AgentBackendMark backend={workspace.agentBackend} size={12} />
+              <span>
+                Running on <span className="text-neutral-400">{agentLabel}</span> — type{' '}
+                <kbd className="rounded bg-[var(--surface-2)] px-1 py-0.5 text-xs text-neutral-300">
+                  /agent
+                </kbd>{' '}
+                to switch while nothing has been sent.
+              </span>
+            </p>
+          )}
         </div>
       </div>
     )

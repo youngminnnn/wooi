@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { matchLocal, matchMemory, matchSideQuestion } from './Composer'
+import { matchLocal, matchMemory, matchPicker, matchSideQuestion } from './Composer'
 
 describe('백엔드 전용 composer 명령', () => {
   it('Codex에서는 Claude 전용 /memory를 로컬 명령으로 가로채지 않는다', () => {
@@ -20,6 +20,25 @@ describe('백엔드 전용 composer 명령', () => {
   it('Claude 백엔드에서만 /add-dir을 가로챈다', () => {
     expect(matchLocal('/add-dir ~/notes', false)).toBeNull()
     expect(matchLocal('/add-dir ~/notes', true)).toBe('add-dir')
+  })
+})
+
+describe('선택 카드 슬래시 명령', () => {
+  it('에이전트를 바꿀 수 있을 때만 /agent 를 가로챈다', () => {
+    expect(matchPicker('/agent', true, true)).toBe('agent')
+    // 대화가 시작된 뒤의 "/agent" 는 카드가 아니라 에이전트에게 보내는 평범한 메시지다.
+    expect(matchPicker('/agent', true, false)).toBeNull()
+  })
+
+  it('fast mode 미지원 백엔드에서는 /fast 를 가로채지 않는다', () => {
+    expect(matchPicker('/fast', false, true)).toBeNull()
+    expect(matchPicker('/fast', true, true)).toBe('fast')
+  })
+
+  it('/model·/effort 는 뒤따르는 인자와 무관하게 카드를 연다', () => {
+    expect(matchPicker('/model opus', false, false)).toBe('model')
+    expect(matchPicker('/effort high', false, false)).toBe('effort')
+    expect(matchPicker('/models', false, false)).toBeNull()
   })
 })
 

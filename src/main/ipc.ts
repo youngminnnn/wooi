@@ -64,7 +64,9 @@ import {
   IPC,
   SETUP_SCRIPT_ID,
   agentSettingsFor,
+  canSwitchAgentBackend,
   isBranchStack,
+  normalizePermissionMode,
   reorderById,
   workspaceStack
 } from '@shared/types'
@@ -590,6 +592,62 @@ export function registerIpc(ctx: IpcContext): void {
     ctx.sessions.setFastMode(workspaceId, fastMode)
     broadcastState()
   })
+
+  /**
+   * 메인 에이전트 교체. 생성 시 골랐어야 할 값을, **아직 아무것도 보내지 않은** 동안에만 고쳐 준다
+   * ([[canSwitchAgentBackend]]).
+   *
+   * 규칙은 렌더러와 같은 함수를 쓰지만 판정 재료는 여기서 다시 읽는다 — 렌더러의 화면이 낡았거나
+   * (교체 직전에 첫 메시지가 나갔거나) 다른 창에서 이미 대화가 시작됐을 수 있고, 그때 그대로
+   * 바꿔 주면 남의 대화 맥락을 다른 CLI 로 넘기게 된다.
+   */
+  ipcMain.handle(
+    IPC.workspaceSetAgentBackend,
+    async (_e, workspaceId: string, agentBackend: AgentBackendId): Promise<{ error?: string }> => {
+      const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
+      if (!ws) return { error: 'Workspace not found.' }
+      if (ws.agentBackend === agentBackend) return {}
+      if (!canSwitchAgentBackend(ws, getTranscripts().load(workspaceId).length)) {
+        return {
+          error:
+            'The agent is fixed once the conversation starts. Clear the conversation (/clear) or create a new workspace.'
+        }
+      }
+
+      // 등록 여부·가용성(CLI 설치·버전)을 카탈로그에서 확인한다. 쓸 수 없는 에이전트로 갈아타면
+      // 워크스페이스가 첫 메시지에서야 실패하므로, 그 전에 이유를 그대로 돌려준다.
+      const target = (await ctx.sessions.listBackends()).find((b) => b.id === agentBackend)
+      if (!target) return { error: 'Unknown agent.' }
+      if (!target.available) {
+        return { error: target.unavailableReason ?? `${target.label} is not available.` }
+      }
+
+      // 세션은 첫 전송에서야 생기므로 보통 아무것도 없지만, 남아 있다면 **바꾸기 전에** 정리한다 —
+      // agentBackend 를 바꾸고 나면 라우팅이 새 백엔드로 가서 옛 세션에 손이 닿지 않는다.
+      ctx.sessions.dispose(workspaceId)
+
+      const settings = store.getState().settings
+      store.update((st) => {
+        const w = st.workspaces.find((x) => x.id === workspaceId)
+        if (!w) return
+        w.agentBackend = agentBackend
+        // 모델·effort·fast mode 는 백엔드마다 값 자체가 다르다(Claude 의 모델 ID 를 Codex 에 줄 수
+        // 없다). 그대로 들고 가면 조용히 무시되거나 거부되므로 새 백엔드의 기본값으로 되돌린다.
+        w.model = null
+        w.lastModel = null
+        w.effort = null
+        w.fastMode = null
+        w.fastModeState = null
+        w.fastModeReason = null
+        w.permissionMode = normalizePermissionMode(
+          target,
+          agentSettingsFor(settings, agentBackend).permissionMode
+        )
+      })
+      broadcastState()
+      return {}
+    }
+  )
 
   ipcMain.handle(IPC.workspaceSetMuted, (_e, workspaceId: string, muted: boolean) => {
     store.update((st) => {
