@@ -4,6 +4,7 @@ import { WOOI_MCP_SERVER_NAME } from '../agent/tools/catalog'
 import { log } from '../logger'
 import { RpcClient, type ServerRequestHandler } from './jsonrpc'
 import { RPC, type InitializeResult } from './wire'
+import { withWooiCodexConfig } from './config'
 
 /**
  * `codex app-server` 자식 프로세스 1개 + 그 위의 JSON-RPC 연결.
@@ -114,11 +115,15 @@ export class AppServer {
   }
 
   private async start(): Promise<void> {
-    const child = spawn(this.opts.executable, ['app-server', ...wooiToolArgs()], {
-      stdio: ['pipe', 'pipe', 'pipe'],
-      // 사용자 셸에서 하이드레이트된 PATH·자격증명 환경을 그대로 물려준다.
-      env: process.env
-    })
+    const child = spawn(
+      this.opts.executable,
+      withWooiCodexConfig(['app-server', ...wooiToolArgs()]),
+      {
+        stdio: ['pipe', 'pipe', 'pipe'],
+        // 사용자 셸에서 하이드레이트된 PATH·자격증명 환경을 그대로 물려준다.
+        env: process.env
+      }
+    )
     this.child = child
 
     // stderr 는 프로토콜이 아니라 진단용 로그다. 조용히 버리면 기동 실패 원인을 못 찾는다.

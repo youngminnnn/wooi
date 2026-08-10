@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process'
 import type { EffortSetting } from '@shared/types'
 import { log } from '../logger'
+import { withWooiCodexConfig } from './config'
 
 /**
  * `codex exec` 서브프로세스 구동 — 비대화형 1회 실행의 공통 배관.
@@ -45,7 +46,7 @@ export function execCodex(
   reader: CodexStreamReader
 ): Promise<CodexExecOutcome> {
   return new Promise((resolve) => {
-    const child = spawn(executable, args, {
+    const child = spawn(executable, withWooiCodexConfig(args), {
       cwd: deps.cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
       // 사용자 셸에서 하이드레이트된 PATH·자격증명 환경을 그대로 물려준다.
