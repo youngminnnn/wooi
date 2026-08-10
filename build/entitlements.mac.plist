@@ -12,6 +12,11 @@
     <true/>
     <key>com.apple.security.cs.allow-dyld-environment-variables</key>
     <true/>
+    <!-- Wooi 가 실행한 에이전트/도구의 Apple Events 요청은 macOS 에서 Wooi 의
+         요청으로 귀속된다. 이 entitlement 가 없으면 TCC 가 승인을 저장할 수 없어
+         같은 대상 앱에 대한 요청이 반복될 수 있다. -->
+    <key>com.apple.security.automation.apple-events</key>
+    <true/>
     <!-- node-pty spawn-helper 등 자식 프로세스 실행 허용 -->
     <key>com.apple.security.inherit</key>
     <true/>
