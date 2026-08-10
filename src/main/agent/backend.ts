@@ -250,7 +250,7 @@ export const CODEX_PERMISSION_MODES: PermissionModeInfo[] = [
     id: 'default',
     label: 'Auto',
     description: 'Edit and run inside the workspace — ask to go beyond it',
-    footer: null
+    footer: { symbol: '⏵⏵', text: 'auto mode on' }
   },
   {
     id: 'fullAccess',
