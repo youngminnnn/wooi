@@ -224,6 +224,7 @@ export default function QuickSwitcher({ onClose }: { onClose: () => void }): Rea
                     compacting={compacting[ws.id] ?? false}
                     stale={false}
                     runningMs={0}
+                    pendingRateLimitResume={ws.pendingRateLimitResume}
                     pr={prStatus[ws.id]}
                   />
                 ) : entry.kind === 'repoSettings' ? (
