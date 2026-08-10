@@ -842,6 +842,84 @@ export const DEFAULT_EXPERIMENTS: ExperimentSettings = {
   multiAgent: true
 }
 
+// ── MCP 서버 (Wooi 스코프) ────────────────────────────────────────────────
+//
+// 사용자가 `claude` CLI 로 등록한 서버는 ~/.claude.json 에 있고, Wooi 는 그 파일을 **읽기만**
+// 한다 — 다른 도구(CLI·다른 GUI)와 소유권이 겹치는 파일을 앱이 고쳐 쓰면, 한쪽의 편집이 다른
+// 쪽의 포맷·주석·병합 규칙을 조용히 뭉갠다. 대신 Wooi 는 자기 설정 파일(wooi.json)에 자체
+// 목록을 두고, 세션을 열 때 승계 목록과 합쳐 주입한다([[main/claude/mcp]]).
+
+/** Wooi 스코프 MCP 서버 1개의 전송 방식별 접속 정보. */
+export type WooiMcpTransport =
+  | { transport: 'stdio'; command: string; args: string[]; env: Record<string, string> }
+  | { transport: 'http' | 'sse'; url: string; headers: Record<string, string> }
+
+/** 설정 화면에서 사용자가 직접 만드는 Wooi 스코프 MCP 서버. */
+export type WooiMcpServer = {
+  /** 목록 안에서만 쓰는 안정 키(이름을 바꿔도 행이 갈리지 않게). */
+  id: string
+  /** 에이전트에게 노출되는 서버 이름. 도구 이름 접두사가 되므로 공백 없이 짧게. */
+  name: string
+  /** false 면 세션에 주입하지 않는다(설정은 그대로 남는다). */
+  enabled: boolean
+} & WooiMcpTransport
+
+/** MCP 관련 앱 설정 묶음. */
+export interface McpSettings {
+  /** Wooi 가 소유·편집하는 서버 목록. */
+  servers: WooiMcpServer[]
+  /**
+   * 주입에서 빼 둘 ~/.claude.json 승계 서버의 **이름**. 그 파일은 우리가 고치지 않으므로,
+   * "끄기" 는 파일이 아니라 우리 쪽 제외 목록으로 표현한다.
+   */
+  disabledInherited: string[]
+}
+
+/**
+ * MCP 서버 이름 규칙. 이름은 에이전트에게 노출되는 도구 이름의 접두사이자 Codex 설정의 TOML
+ * 점 표기 키로 그대로 들어가므로, 공백·점·따옴표를 허용하면 조용한 오작동이나 파싱 오류가 된다.
+ */
+export const MCP_SERVER_NAME_PATTERN = /^[A-Za-z0-9_-]+$/
+
+export function isValidMcpServerName(name: string): boolean {
+  return MCP_SERVER_NAME_PATTERN.test(name.trim())
+}
+
+/**
+ * MCP 설정을 꺼낸다. 항목이 통째로 없거나(이 기능 이전 버전에서 올라옴) 일부만 저장된
+ * 파일에서도 안전한 빈 목록을 돌려준다 — 설정 하나가 비었다고 세션 생성이 막히면 안 된다.
+ */
+export function mcpSettingsOf(settings: AppSettings | null | undefined): McpSettings {
+  return {
+    servers: settings?.mcp?.servers ?? [],
+    disabledInherited: settings?.mcp?.disabledInherited ?? []
+  }
+}
+
+/** 목록에서 서버 1개의 출처를 나타내는 배지. */
+export type McpServerOrigin = 'user' | 'project' | 'wooi'
+
+/** ~/.claude.json 에서 읽어 온 서버 1개(표시 전용 — 편집은 그 파일에서 한다). */
+export interface InheritedMcpServer {
+  name: string
+  /** 'user' = 파일 최상위 mcpServers, 'project' = projects[<경로>].mcpServers. */
+  origin: 'user' | 'project'
+  /** project 스코프일 때 그 항목이 걸려 있는 리포 경로. */
+  projectPath?: string
+  transport: 'stdio' | 'http' | 'sse' | 'unknown'
+  /** stdio 면 실행 명령줄, http/sse 면 엔드포인트 URL. 알 수 없으면 빈 문자열. */
+  detail: string
+}
+
+/** 설정 화면이 "무엇이 주입되는가" 를 그리기 위해 필요한 전부. */
+export interface McpInventory {
+  /** 승계 목록의 출처 파일 경로(없어도 "이 파일을 여세요" 안내에 쓴다). */
+  configPath: string
+  configExists: boolean
+  /** ~/.claude.json 의 서버들. Wooi 가 등록한 리포에 걸린 project 항목만 포함한다. */
+  inherited: InheritedMcpServer[]
+}
+
 export interface AppSettings {
   /**
    * 새 워크스페이스가 기본으로 쓸 에이전트 백엔드. 사용자가 두 에이전트를 모두 보유했을 때만
@@ -863,6 +941,11 @@ export interface AppSettings {
   experiments?: ExperimentSettings
   /** 백엔드별 전역 기본값(모델·effort·권한 모드). */
   agents: Record<AgentBackendId, AgentSettings>
+  /**
+   * MCP 서버 설정(Wooi 스코프 목록 + 승계 서버 제외 목록).
+   * 저장된 설정에 없으면(이 기능 이전 버전에서 올라옴) `mcpSettingsOf` 가 빈 목록으로 읽는다.
+   */
+  mcp?: McpSettings
   /** UI 색상 테마(다크 기본). */
   theme: ThemePreference
   /**
@@ -2042,6 +2125,10 @@ export const IPC = {
   reviewFollowUp: 'review:followUp',
   openExternal: 'shell:openExternal',
   settingsUpdate: 'settings:update',
+  /** 설정 화면의 MCP 목록 — ~/.claude.json 에서 승계되는 서버들을 읽어 온다. */
+  mcpInventory: 'mcp:inventory',
+  /** 승계 서버를 고치려면 그 파일을 직접 열어야 한다(우리는 쓰지 않는다). */
+  mcpOpenConfig: 'mcp:openConfig',
   authGetStatus: 'auth:getStatus',
   /** 앱 내부 PTY 에서 `claude auth login` 을 시작한다(별도 Terminal 창 없이). */
   authClaudeLoginStart: 'auth:claudeLoginStart',

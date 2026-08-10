@@ -2,6 +2,9 @@ import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { McpServerConfig, SettingSource } from '@anthropic-ai/claude-agent-sdk'
+import { isValidMcpServerName } from '@shared/types'
+import type { InheritedMcpServer, McpInventory, WooiMcpServer } from '@shared/types'
+import { wooiMcpSettings } from '../mcpSettings'
 import { log } from '../logger'
 
 /**
@@ -14,7 +17,7 @@ import { log } from '../logger'
 export const MCP_SETTING_SOURCES: SettingSource[] = ['user', 'project', 'local']
 
 /** claude CLI 와 동일한 규칙으로 ~/.claude.json 위치를 정한다(CLAUDE_CONFIG_DIR 우선). */
-function configPath(): string {
+export function claudeConfigPath(): string {
   const dir = process.env.CLAUDE_CONFIG_DIR?.trim() || homedir()
   return join(dir, '.claude.json')
 }
@@ -24,36 +27,127 @@ type ClaudeJson = {
   projects?: Record<string, { mcpServers?: Record<string, McpServerConfig> }>
 }
 
-/**
- * 사용자가 `claude` CLI 용으로 등록해 둔 MCP 서버를 SDK 로 그대로 흘려보내기 위해
- * ~/.claude.json 에서 추려 병합한다.
- *
- * 왜 직접 읽나: wooi 는 worktree 경로를 cwd 로 주는데, SDK 는 그 cwd 기준으로만 project/local
- * 스코프 MCP 를 찾는다 — 새로 만든 worktree 경로는 ~/.claude.json 의 projects 에 없으니
- * 사용자가 원본 repo 에 등록한 서버가 통째로 누락된다(그래서 "CLI 에선 되는데 wooi 에선 안 됨").
- * 원본 repo 경로(repoPath)의 project/local 스코프 서버를 직접 읽어 user 스코프와 합쳐
- * mcpServers 옵션으로 명시 주입하면, 스코프와 무관하게 동일하게 동작한다. stdio·http·sse 정의가
- * 모두 McpServerConfig 와 같은 형태라 변환 없이 그대로 넘긴다. claude.ai 커넥터처럼 계정에
- * 묶여 파일에 없는 서버는 settingSources(user)+동일 바이너리+동일 HOME 으로 SDK 가 로드한다.
- *
- * 이름이 겹치면 더 좁은 스코프(project/local)가 user 를 덮는다 — claude CLI 우선순위와 동일.
- * 파일이 없거나 파싱에 실패해도 빈 객체를 돌려 세션 생성을 막지 않는다.
- */
-export function resolveUserMcpServers(repoPath: string | null): Record<string, McpServerConfig> {
+/** ~/.claude.json 을 읽는다. 없거나 깨졌으면 빈 객체 — 세션 생성을 막지 않는다. */
+function readClaudeJson(): ClaudeJson {
   try {
-    const path = configPath()
+    const path = claudeConfigPath()
     if (!existsSync(path)) return {}
-    const raw = JSON.parse(readFileSync(path, 'utf8')) as ClaudeJson
-    const user = raw.mcpServers ?? {}
-    const project = (repoPath && raw.projects?.[repoPath]?.mcpServers) || {}
-    const merged = { ...user, ...project }
-    const names = Object.keys(merged)
-    if (names.length) {
-      log.info(`mcp: injected ${names.length} user-config server(s) [${names.join(', ')}]`)
-    }
-    return merged
+    return JSON.parse(readFileSync(path, 'utf8')) as ClaudeJson
   } catch (err) {
     log.warn('mcp: failed to read ~/.claude.json; no user MCP servers injected', err)
     return {}
   }
+}
+
+/** Wooi 스코프 항목을 SDK 가 받는 형태로 옮긴다. 이름은 호출 측이 키로 쓴다. */
+function toSdkConfig(server: WooiMcpServer): McpServerConfig {
+  if (server.transport === 'stdio') {
+    return {
+      type: 'stdio',
+      command: server.command,
+      args: server.args,
+      // 빈 객체를 넘겨도 SDK 는 부모 환경을 그대로 물려주므로 굳이 걸러내지 않는다.
+      env: server.env
+    }
+  }
+  return { type: server.transport, url: server.url, headers: server.headers }
+}
+
+/**
+ * 사용자가 `claude` CLI 용으로 등록해 둔 MCP 서버 + Wooi 스코프 서버를 세션에 주입할 형태로 합친다.
+ *
+ * 왜 ~/.claude.json 을 직접 읽나: wooi 는 worktree 경로를 cwd 로 주는데, SDK 는 그 cwd 기준으로만
+ * project/local 스코프 MCP 를 찾는다 — 새로 만든 worktree 경로는 ~/.claude.json 의 projects 에
+ * 없으니 사용자가 원본 repo 에 등록한 서버가 통째로 누락된다(그래서 "CLI 에선 되는데 wooi 에선
+ * 안 됨"). 원본 repo 경로(repoPath)의 project/local 스코프 서버를 직접 읽어 user 스코프와 합쳐
+ * mcpServers 옵션으로 명시 주입하면, 스코프와 무관하게 동일하게 동작한다. stdio·http·sse 정의가
+ * 모두 McpServerConfig 와 같은 형태라 변환 없이 그대로 넘긴다. claude.ai 커넥터처럼 계정에
+ * 묶여 파일에 없는 서버는 settingSources(user)+동일 바이너리+동일 HOME 으로 SDK 가 로드한다.
+ *
+ * 우선순위 — 이름이 겹칠 때:
+ *  1. project/local(`projects[repoPath]`)이 user 를 덮는다 — claude CLI 와 같은 규칙.
+ *  2. **~/.claude.json 이 Wooi 스코프를 이긴다.** 사용자가 CLI 로 등록해 둔 설정이 앱 설정
+ *     때문에 조용히 다른 서버로 바뀌는 편보다, 앱 쪽이 물러서고 UI 에서 "가려짐" 을 알리는 편이
+ *     예측 가능하다. 다만 그 승계 항목을 설정에서 꺼 두면(disabledInherited) 이름이 비므로,
+ *     같은 이름의 Wooi 서버가 그 자리를 대신한다 — 그게 "덮어쓰기" 의 명시적 경로다.
+ */
+export function resolveUserMcpServers(repoPath: string | null): Record<string, McpServerConfig> {
+  const raw = readClaudeJson()
+  const mcp = wooiMcpSettings()
+  const disabled = new Set(mcp.disabledInherited)
+
+  const inherited = {
+    ...(raw.mcpServers ?? {}),
+    ...((repoPath && raw.projects?.[repoPath]?.mcpServers) || {})
+  }
+  const merged: Record<string, McpServerConfig> = {}
+  for (const [name, config] of Object.entries(inherited)) {
+    if (disabled.has(name)) continue
+    merged[name] = config
+  }
+
+  const shadowed: string[] = []
+  for (const server of mcp.servers) {
+    const name = server.name.trim()
+    if (!server.enabled || !isValidMcpServerName(name)) continue
+    if (merged[name]) {
+      shadowed.push(name)
+      continue
+    }
+    merged[name] = toSdkConfig(server)
+  }
+  if (shadowed.length) {
+    log.warn(
+      `mcp: Wooi-managed server(s) [${shadowed.join(', ')}] are shadowed by ~/.claude.json — ` +
+        `disable the inherited entry in Settings → MCP servers to use yours instead`
+    )
+  }
+
+  const names = Object.keys(merged)
+  if (names.length) {
+    log.info(`mcp: injected ${names.length} configured server(s) [${names.join(', ')}]`)
+  }
+  return merged
+}
+
+/** stdio/http/sse 판별 + 한 줄 요약. 형태를 모르는 항목도 목록에서 사라지지 않게 한다. */
+function describeInherited(config: unknown): Pick<InheritedMcpServer, 'transport' | 'detail'> {
+  const value = (config ?? {}) as Record<string, unknown>
+  const type = typeof value.type === 'string' ? value.type : null
+  if (typeof value.command === 'string' && (type === null || type === 'stdio')) {
+    const args = Array.isArray(value.args) ? value.args.filter((a) => typeof a === 'string') : []
+    return { transport: 'stdio', detail: [value.command, ...args].join(' ') }
+  }
+  if (typeof value.url === 'string' && (type === 'http' || type === 'sse')) {
+    return { transport: type, detail: value.url }
+  }
+  if (typeof value.url === 'string') return { transport: 'http', detail: value.url }
+  return { transport: 'unknown', detail: '' }
+}
+
+/**
+ * 설정 화면이 그릴 승계 목록. user 스코프는 모든 세션에 들어가므로 그대로 싣고, project 스코프는
+ * **Wooi 에 등록된 리포 경로만** 싣는다 — ~/.claude.json 의 projects 에는 CLI 를 한 번이라도 띄운
+ * 모든 디렉터리가 쌓여 있어서, 거르지 않으면 이 앱에서 절대 주입되지 않는 항목이 목록을 덮는다.
+ */
+export function mcpInventory(repoPaths: string[]): McpInventory {
+  const path = claudeConfigPath()
+  const raw = readClaudeJson()
+  const inherited: InheritedMcpServer[] = []
+
+  for (const [name, config] of Object.entries(raw.mcpServers ?? {})) {
+    inherited.push({ name, origin: 'user', ...describeInherited(config) })
+  }
+  for (const repoPath of repoPaths) {
+    for (const [name, config] of Object.entries(raw.projects?.[repoPath]?.mcpServers ?? {})) {
+      inherited.push({
+        name,
+        origin: 'project',
+        projectPath: repoPath,
+        ...describeInherited(config)
+      })
+    }
+  }
+
+  return { configPath: path, configExists: existsSync(path), inherited }
 }

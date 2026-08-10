@@ -15,7 +15,7 @@ import { NOTIFY, RPC, type FileUpdateChange, type ThreadResult } from './wire'
 import { turnPolicyFor } from './modes'
 import { WOOI_MCP_SERVER_NAME } from '../agent/tools/catalog'
 import type { AgentBackendId } from '@shared/types'
-import { wooiToolServer } from './appServer'
+import { wooiMcpServerTable, wooiToolServer } from './appServer'
 import {
   createMapperState,
   mapNotification,
@@ -480,6 +480,10 @@ function safeName(name: string): string {
  *
  * 서버 이름은 그대로 하나다 — 스레드 config 가 프로세스 등록을 덮으므로(실측) 둘이 공존하지
  * 않고, 덮어쓰는 쪽이 더 넓은 도구 집합을 갖는다.
+ *
+ * 같은 이유로 **Wooi 스코프 MCP 서버도 여기서 다시 선언한다**. 그 서버들은 `-c` 로 프로세스에
+ * 등록돼 있는데, 이 config 가 테이블을 통째로 덮으므로 다시 싣지 않으면 멀티 에이전트
+ * 워크스페이스에서만 조용히 사라진다.
  */
 /**
  * 이 스레드가 쓸 Wooi 도구 서버. **스레드마다** 선언해 `-c` 로 등록된 공용 서버를 덮는다(실측).
@@ -501,6 +505,7 @@ function wooiMcpConfig(workspaceId: string, backends: AgentBackendId[]): Record<
   return {
     config: {
       mcp_servers: {
+        ...wooiMcpServerTable(),
         [WOOI_MCP_SERVER_NAME]: {
           ...server,
           env: {

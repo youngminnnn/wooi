@@ -2,6 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { WOOI_MCP_SERVER_NAME } from '../agent/tools/catalog'
 import { log } from '../logger'
+import { enabledWooiMcpServers } from '../mcpSettings'
 import { RpcClient, type ServerRequestHandler } from './jsonrpc'
 import { RPC, type InitializeResult } from './wire'
 import { withWooiCodexConfig } from './config'
@@ -95,6 +96,54 @@ function toml(value: string): string {
   return JSON.stringify(value)
 }
 
+/** codex 설정의 `mcp_servers` 테이블 한 항목(stdio 전용). */
+type CodexMcpServer = { command: string; args: string[]; env: Record<string, string> }
+
+/**
+ * Wooi 스코프 MCP 서버를 codex 가 이해하는 형태로 옮긴다.
+ *
+ * **stdio 만** 옮긴다. codex 의 원격(HTTP/SSE) MCP 지원은 실험 플래그
+ * (`experimental_use_rmcp_client`) 뒤에 있고 스키마도 Claude 쪽과 다르다 — 조용히 어긋난
+ * 설정을 밀어 넣느니 목록에서 빼고 UI 에서 "Claude Code 에만 주입됨" 으로 알리는 편이 낫다.
+ *
+ * 이름이 Wooi 내장 도구 서버와 겹치면 건너뛴다. 그 이름을 뺏기면 앱 조작 통로가 통째로
+ * 남의 서버로 바뀐다(Claude 쪽 session.ts 와 같은 판단).
+ */
+export function wooiMcpServerTable(): Record<string, CodexMcpServer> {
+  const table: Record<string, CodexMcpServer> = {}
+  const skipped: string[] = []
+  for (const server of enabledWooiMcpServers()) {
+    const name = server.name.trim()
+    if (name === WOOI_MCP_SERVER_NAME) continue
+    if (server.transport !== 'stdio') {
+      skipped.push(name)
+      continue
+    }
+    table[name] = { command: server.command, args: server.args, env: server.env }
+  }
+  if (skipped.length) {
+    log.warn(
+      `codex: Wooi-managed HTTP/SSE MCP server(s) [${skipped.join(', ')}] are not injected — ` +
+        `codex only takes stdio servers from Wooi`
+    )
+  }
+  return table
+}
+
+/** 같은 테이블을 app-server spawn 용 `-c` 인자로 편다(사용자의 config.toml 은 건드리지 않는다). */
+function wooiMcpConfigArgs(): string[] {
+  return Object.entries(wooiMcpServerTable()).flatMap(([name, server]) => [
+    '-c',
+    `mcp_servers.${name}.command=${toml(server.command)}`,
+    '-c',
+    `mcp_servers.${name}.args=[${server.args.map(toml).join(', ')}]`,
+    ...Object.entries(server.env).flatMap(([key, value]) => [
+      '-c',
+      `mcp_servers.${name}.env.${key}=${toml(value)}`
+    ])
+  ])
+}
+
 export interface AppServerOptions {
   /** codex 실행 파일 절대 경로. */
   executable: string
@@ -124,9 +173,11 @@ export class AppServer {
   }
 
   private async start(): Promise<void> {
+    // Wooi 스코프 서버는 프로세스가 뜰 때 한 번 고정된다 — 설정을 바꾸면 앱을 다시 켜야
+    // 반영된다(app-server 는 모든 워크스페이스가 공유하는 단일 프로세스라 재기동이 곧 전면 중단).
     const child = spawn(
       this.opts.executable,
-      withWooiCodexConfig(['app-server', ...wooiToolArgs()]),
+      withWooiCodexConfig(['app-server', ...wooiToolArgs(), ...wooiMcpConfigArgs()]),
       {
         stdio: ['pipe', 'pipe', 'pipe'],
         // 사용자 셸에서 하이드레이트된 PATH·자격증명 환경을 그대로 물려준다.

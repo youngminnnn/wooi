@@ -26,6 +26,7 @@ import type {
   GithubLoginEvent,
   ImageAttachment,
   McpAction,
+  McpInventory,
   McpServerInfo,
   ModelOption,
   MemoryScope,
@@ -493,6 +494,17 @@ export interface WooiApi {
 
   settings: {
     update(patch: Partial<AppSettings>): Promise<void>
+  }
+
+  /**
+   * MCP 서버 설정 화면용. Wooi 스코프 목록 자체는 AppSettings.mcp 에 있어 `settings.update` 로
+   * 고치고, 여기서는 우리가 소유하지 않는 ~/.claude.json 쪽만 다룬다.
+   */
+  mcp: {
+    /** ~/.claude.json 에서 승계되는 서버 목록(표시 전용). */
+    inventory(): Promise<McpInventory>
+    /** ~/.claude.json 을 기본 편집기로 연다(없으면 담긴 폴더를 연다). */
+    openConfig(): Promise<void>
   }
 
   auth: {

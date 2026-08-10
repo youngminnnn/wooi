@@ -222,6 +222,11 @@ const api: WooiApi = {
     update: (patch) => ipcRenderer.invoke(IPC.settingsUpdate, patch)
   },
 
+  mcp: {
+    inventory: () => ipcRenderer.invoke(IPC.mcpInventory),
+    openConfig: () => ipcRenderer.invoke(IPC.mcpOpenConfig)
+  },
+
   auth: {
     getStatus: () => ipcRenderer.invoke(IPC.authGetStatus),
     claudeLoginStart: () => ipcRenderer.invoke(IPC.authClaudeLoginStart),
