@@ -157,8 +157,10 @@ const PLAN_MODE_SETTLE_MS = PLAN_MODE_APPLY_DELAY_MS + 750
  * `assistant.error` 만으로 실패한 턴을 프로세스 교체로 다시 돌릴 가치가 있는지 가리는 패턴.
  *
  * SDK 는 API 레벨 실패를 예외로 던지지 않고 두 가지 모양으로 실어 온다(관측 확인):
- * - **result 의 비-success subtype**(예: error_during_execution) — 원인 문자열이 없다. 실제
- *   인증 실패가 이 모양으로 오므로, 산출 없는 실패면 원인을 따지지 않고 1회 재시도한다.
+ * - **result 의 비-success subtype**(예: error_during_execution) — 대개 원인 문자열이 없다. 실제
+ *   인증 실패가 이 모양으로 오므로, 별도 `assistant.error` 가 없는 산출 없는 실패는 1회 재시도한다.
+ *   다만 최신 CLI 는 session limit 같은 원인을 result 직전 `assistant.error` 로 주기도 한다. 이때
+ *   알려진 비인증 오류까지 재시도하면 같은 요청을 즉시 한 번 더 보내 동일 오류가 중복된다.
  * - **`assistant.error` + result:success**(예: model_not_found) — 원인 코드가 있다. 이쪽은
  *   프로세스를 갈아도 대개 그대로이므로(없는 모델은 재시도해도 없다) 자격증명류만 고른다.
  *
@@ -812,9 +814,10 @@ export class ClaudeSession {
     if (this.autoRetried || this.interrupted || this.input.isClosed) return false
     // 되살릴 입력이 없으면 재시도해도 의미가 없다. 자동 압축 턴은 기존 로직에 맡긴다.
     if (this.inFlight.length === 0 || this.autoCompactInFlight) return false
-    // result 자체가 실패면(원인 문자열 없음) 무조건 1회 재시도한다.
-    if (subtype !== 'success') return true
-    // result 는 성공인데 assistant.error 만 실린 경우는 자격증명류일 때만 재시도한다.
+    // 원인을 주지 않은 result 실패는 옛 자격증명 프로세스일 수 있어 1회 재시도한다. 반대로
+    // assistant.error 로 원인이 주어졌다면 result subtype 과 무관하게 자격증명류만 재시도한다.
+    // 특히 session/rate limit 은 프로세스를 바꿔도 풀리지 않으므로 즉시 사용자에게 표시한다.
+    if (subtype !== 'success' && this.turnError === null) return true
     return this.turnError !== null && RESTARTABLE_AUTH_ERROR.test(this.turnError)
   }
 
