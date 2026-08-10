@@ -161,6 +161,26 @@ export default function MessageList({
     bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
   }
 
+  // ⇧⌘↓ — 현재 대화의 최신 메시지로 이동. ⌘↓는 다음 워크스페이스 이동에
+  // 이미 쓰이므로 Shift를 더한다. 버튼과 같은 함수를 써서 스크롤 동작을 항상 맞춘다.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (
+        e.metaKey &&
+        e.shiftKey &&
+        !e.ctrlKey &&
+        !e.altKey &&
+        e.key === 'ArrowDown' &&
+        !useStore.getState().overlayOpen
+      ) {
+        e.preventDefault()
+        jumpToBottom()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
   if (items.length === 0) {
     // 첫 메시지를 보내면 에이전트가 고정되므로([[canSwitchAgentBackend]]), 아직 바꿀 수 있다는
     // 사실은 바로 이 화면에서만 의미가 있다. 고를 대상이 둘 이상일 때만 알린다.
@@ -279,7 +299,7 @@ export default function MessageList({
       {showJump && (
         <button
           onClick={jumpToBottom}
-          title="Jump to latest"
+          title="Jump to latest (⇧⌘↓)"
           className="absolute bottom-3 right-4 h-8 w-8 grid place-items-center rounded-full bg-[var(--surface-2)] border border-[var(--border-3)] text-neutral-300 hover:text-neutral-100 shadow-lg"
         >
           <ArrowDown size={15} />
