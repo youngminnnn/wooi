@@ -35,6 +35,16 @@ describe('createWooiMcpServer', () => {
       expect(spec.inputSchema).toBeTypeOf('object')
     }
   })
+
+  /**
+   * 상시 로딩은 프롬프트 예산을 매 요청 쓰므로 조용히 늘어나면 안 되고, 반대로 조용히 꺼지면
+   * 그 도구는 "이름을 이미 아는 모델" 에게만 보이게 된다 — check_related_work 가 안 불리던
+   * 원인이 정확히 그것이었다. 어느 쪽이든 눈에 띄도록 목록을 고정한다.
+   */
+  it('상시 로딩하는 도구는 정해진 것뿐이다', () => {
+    const always = AGENT_TOOLS.filter((t) => t.alwaysLoad).map((t) => t.name)
+    expect(always).toEqual(['check_related_work'])
+  })
 })
 
 describe('isReadOnlyWooiTool', () => {

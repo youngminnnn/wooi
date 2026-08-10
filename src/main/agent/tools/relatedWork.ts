@@ -74,13 +74,13 @@ export const checkRelatedWork: AgentToolHandler = async (_deps, workspaceId, arg
   // 겹치는 워크스페이스를 먼저 놓고 자른다 — 상한에 걸려 잘리는 쪽은 항상 덜 위험한 쪽이어야 한다.
   rows.sort((a, b) => b.overlapping.length - a.overlapping.length)
   const shown = rows.slice(0, MAX_WORKSPACES)
+  const colliding = rows.filter((r) => r.overlapping.length > 0)
 
   return {
     branch: self.branch,
     comparedPaths: mine.size,
     // 모델이 두 목록을 직접 대조하게 두지 않는다 — 겹친 것은 여기 모아 준다.
-    overlaps: rows
-      .filter((r) => r.overlapping.length > 0)
+    overlaps: colliding
       // 정렬이 겹침 많은 순이라 잘려도 가장 위험한 것부터 남는다.
       .slice(0, MAX_WORKSPACES)
       .map((r) => ({
@@ -109,8 +109,26 @@ export const checkRelatedWork: AgentToolHandler = async (_deps, workspaceId, arg
         : {})
     })),
     ...(rows.length > MAX_WORKSPACES ? { truncatedWorkspaces: rows.length - MAX_WORKSPACES } : {}),
-    ...(mine.size === 0
-      ? { note: 'This workspace has not changed anything yet, so no overlap could be computed.' }
-      : {})
+    ...noteFor(mine.size, colliding.length)
+  }
+}
+
+/**
+ * 결과를 어떻게 읽어야 하는지 한 줄로 말해 준다.
+ *
+ * 목록만 돌려주면 겹침을 찾고도 그냥 편집을 이어가는 일이 생긴다 — 그러면 부른 보람이 없다.
+ * 특히 **여기서는 남의 diff 를 볼 수 없다**는 사실이 중요하다: 겹친 파일이 정말 충돌하는지는
+ * 이 도구가 판단할 수 없고, 모델도 판단할 수 없다. 그러니 조용히 넘기지 말고 사람에게 말해야 한다.
+ */
+function noteFor(comparedPaths: number, collidingWorkspaces: number): { note?: string } {
+  if (comparedPaths === 0)
+    return { note: 'This workspace has not changed anything yet, so no overlap could be computed.' }
+  if (collidingWorkspaces === 0)
+    return { note: 'Nothing you are changing is being changed elsewhere right now.' }
+  return {
+    note:
+      `${collidingWorkspaces} other workspace(s) are changing files you are changing too. ` +
+      'Tell the user which workspace and which paths before you edit them — you cannot see the ' +
+      'other side’s diff, so you cannot tell on your own whether the two changes conflict.'
   }
 }

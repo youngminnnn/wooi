@@ -89,7 +89,12 @@ with the caller's paths.
 
 Each result identifies the relationship, running state, branch, and whether the caller
 created that workspace. Results are capped at 20 workspaces and 50 paths per workspace;
-overlapping workspaces are prioritized.
+overlapping workspaces are prioritized. A `note` states whether anything overlaps and, when
+it does, directs the caller to tell the user before editing those paths.
+
+This tool's definition is always loaded into the system prompt (`alwaysLoad`). Left behind
+tool search like the others, it is only reachable by an agent that already suspects an
+overlap — which is exactly the agent that does not need it.
 
 ## Stacked-workspace coordination
 
