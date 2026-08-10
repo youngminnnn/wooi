@@ -27,6 +27,7 @@ import type {
 } from '@shared/types'
 import type { NotificationChannel, NotificationEvent } from '@shared/types'
 import { AGENT_BACKEND_IDS, cascadeProblems, workspaceDisplayName } from '@shared/types'
+import { fileDiffHash, isFileViewed } from '@shared/reviewViewed'
 import { playNotification } from './lib/sound'
 import { carrySuggestShownFlag, readUiFlag, setUiFlag } from './lib/uiFlags'
 import { openRepoSettings } from './lib/repoSettings'
@@ -488,6 +489,8 @@ interface UIState {
   followUpReview: (reviewId: string, text: string) => Promise<void>
   /** 오른쪽 패널의 탭을 바꾼다(리뷰별로 기억된다). */
   setReviewTab: (reviewId: string, tab: ReviewTab) => void
+  /** 파일 1건의 "봤음" 표시를 뒤집는다. */
+  toggleFileViewed: (reviewId: string, path: string) => Promise<void>
 }
 
 let initialized = false
@@ -1769,7 +1772,8 @@ export const useStore = create<UIState>((set, get) => ({
       loaded: true,
       diff: bundle.diff ?? v.diff,
       findings: bundle.findings,
-      activity: bundle.activity
+      activity: bundle.activity,
+      viewed: bundle.viewed ?? {}
     }))
   },
 
@@ -1950,8 +1954,49 @@ export const useStore = create<UIState>((set, get) => ({
     patchReview(set, get, reviewId, () => ({ tab }))
     // 활동을 열어 봤으니 미확인 점을 끈다.
     if (tab === 'activity') void window.api.review.markSeen(reviewId)
+  },
+
+  toggleFileViewed: async (reviewId, path) => {
+    const view = get().reviewViews[reviewId]
+    const file = view?.diff?.files.find((f) => f.path === path)
+    if (!view || !file) return
+    const on = !isFileViewed(view.viewed, file)
+
+    // 체크박스는 누른 즉시 뒤집혀야 한다 — 먼저 화면을 바꾸고, 실패하면 되돌린다.
+    const wasHash = view.viewed[path] ?? null
+    patchReview(set, get, reviewId, (v) => ({
+      viewed: withViewed(v.viewed, path, on ? fileDiffHash(file) : null)
+    }))
+
+    const res = await window.api.review.setFileViewed(reviewId, path, on)
+    if (res.error) {
+      get().pushToast('error', res.error)
+      patchReview(set, get, reviewId, (v) => ({ viewed: withViewed(v.viewed, path, wasHash) }))
+      return
+    }
+    // main 이 자기 diff 로 계산한 지문이 권위다 — 새 커밋이 방금 들어와 이쪽 diff 가 한 박자
+    // 뒤처져 있으면 두 값이 갈린다. 그 사이 사용자가 다시 껐으면 건드리지 않는다.
+    const hash = res.hash
+    if (hash) {
+      patchReview(set, get, reviewId, (v) =>
+        v.viewed[path] === undefined ? {} : { viewed: withViewed(v.viewed, path, hash) }
+      )
+    }
   }
 }))
+
+/** viewed 맵 1칸을 불변 갱신한다. hash 가 null 이면 지운다. */
+function withViewed(
+  viewed: Record<string, string>,
+  path: string,
+  hash: string | null
+): Record<string, string> {
+  if (hash === null) {
+    const { [path]: _dropped, ...rest } = viewed
+    return rest
+  }
+  return { ...viewed, [path]: hash }
+}
 
 /** 리뷰 세션 1개를 불변 갱신한다. 세션이 없으면(이미 닫힘) 아무것도 하지 않는다. */
 function patchReview(

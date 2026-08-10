@@ -12,6 +12,7 @@ import {
   X
 } from 'lucide-react'
 import type { ReviewVerdict } from '@shared/types'
+import { viewedFilePaths } from '@shared/reviewViewed'
 import { useStore } from '../../store'
 import {
   countByFile,
@@ -21,6 +22,7 @@ import {
   STATUS_LABEL
 } from '../../lib/review'
 import ReviewDiffView from './ReviewDiffView'
+import ReviewViewedToggle from './ReviewViewedToggle'
 import ReviewActivityPanel from './ReviewActivityPanel'
 import ReviewOverviewPanel from './ReviewOverviewPanel'
 import ReviewProgressPane from './ReviewProgressPane'
@@ -42,6 +44,7 @@ export default function PrReviewScreen({ reviewId }: { reviewId: string }): Reac
   const postFindings = useStore((s) => s.postFindings)
   const toggleAllFindings = useStore((s) => s.toggleAllFindings)
   const setReviewTab = useStore((s) => s.setReviewTab)
+  const toggleFileViewed = useStore((s) => s.toggleFileViewed)
   const [submitOpen, setSubmitOpen] = useState(false)
   /** 지금 지목한 코멘트. diff 가 여기로 스크롤하고 그 카드에 테두리를 준다. */
   const [focusedId, setFocusedId] = useState<string | null>(null)
@@ -50,6 +53,12 @@ export default function PrReviewScreen({ reviewId }: { reviewId: string }): Reac
   const tab = view?.tab ?? 'findings'
 
   const counts = useMemo(() => countByFile(view?.findings ?? []), [view?.findings])
+  const files = useMemo(() => view?.diff?.files ?? [], [view?.diff])
+  // 파일마다 diff 를 해시하므로 한 번만 계산해 목록·헤더가 나눠 쓴다.
+  const viewedPaths = useMemo(
+    () => viewedFilePaths(view?.viewed ?? {}, files),
+    [view?.viewed, files]
+  )
   const ordered = useMemo(
     () => orderedAnchoredFindings(view?.diff ?? null, view?.findings ?? []),
     [view?.diff, view?.findings]
@@ -205,29 +214,56 @@ export default function PrReviewScreen({ reviewId }: { reviewId: string }): Reac
       <div className="flex min-h-0 flex-1">
         {/* 좌: 변경 파일 */}
         <nav className="w-48 shrink-0 overflow-y-auto border-r border-[var(--border)] p-2">
-          <h2 className="px-1 pb-1.5 text-xs font-medium text-neutral-500">
-            Files {view.diff ? `(${view.diff.files.length})` : ''}
-          </h2>
-          {view.diff?.files.map((f) => (
-            <button
-              key={f.path}
-              onClick={() =>
-                document
-                  .getElementById(`file-${f.path}`)
-                  ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-              }
-              className="flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-left text-xs text-neutral-400 hover:bg-[var(--surface-2)] hover:text-neutral-100"
-            >
-              <span className="min-w-0 flex-1 truncate font-mono" title={f.path}>
-                {f.path}
+          <h2 className="flex items-center gap-1 px-1 pb-1.5 text-xs font-medium text-neutral-500">
+            <span>Files</span>
+            {files.length > 0 && (
+              <span
+                className="ml-auto shrink-0 tabular-nums"
+                title={`${viewedPaths.size} of ${files.length} files marked as viewed`}
+              >
+                {viewedPaths.size}/{files.length} viewed
               </span>
-              {(counts[f.path] ?? 0) > 0 && (
-                <span className="shrink-0 rounded-full bg-[var(--info-500)]/20 px-1.5 text-[10px] text-[var(--info-300)]">
-                  {counts[f.path]}
-                </span>
-              )}
-            </button>
-          ))}
+            )}
+          </h2>
+          {files.map((f) => {
+            const isViewed = viewedPaths.has(f.path)
+            return (
+              // 체크와 "그 파일로 이동" 은 다른 행동이라 버튼을 나눈다(버튼 안에 버튼을 넣을 수도 없다).
+              <div
+                key={f.path}
+                className={
+                  'flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-xs hover:bg-[var(--surface-2)] ' +
+                  // 본 파일은 눌러 둔다 — 목록을 훑을 때 남은 것이 먼저 눈에 들어와야 한다.
+                  (isViewed ? 'text-neutral-600' : 'text-neutral-400')
+                }
+              >
+                <ReviewViewedToggle
+                  viewed={isViewed}
+                  path={f.path}
+                  onToggle={() => void toggleFileViewed(reviewId, f.path)}
+                />
+                <button
+                  onClick={() =>
+                    document
+                      .getElementById(`file-${f.path}`)
+                      ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                  }
+                  className={
+                    'min-w-0 flex-1 truncate text-left font-mono hover:text-neutral-100 ' +
+                    (isViewed ? 'line-through decoration-neutral-700' : '')
+                  }
+                  title={f.path}
+                >
+                  {f.path}
+                </button>
+                {(counts[f.path] ?? 0) > 0 && (
+                  <span className="shrink-0 rounded-full bg-[var(--info-500)]/20 px-1.5 text-[10px] text-[var(--info-300)]">
+                    {counts[f.path]}
+                  </span>
+                )}
+              </div>
+            )
+          })}
         </nav>
 
         {/* 중앙: 실행 중에는 진행 상황, 끝나면 diff + 인라인 카드 */}
@@ -241,6 +277,8 @@ export default function PrReviewScreen({ reviewId }: { reviewId: string }): Reac
               files={view.diff.files}
               focusedId={focusedId}
               onFocusFinding={setFocusedId}
+              viewedPaths={viewedPaths}
+              onToggleViewed={(path) => void toggleFileViewed(reviewId, path)}
             />
           ) : (
             <p className="p-8 text-center text-sm text-neutral-500">

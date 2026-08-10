@@ -8,6 +8,7 @@ import {
   type ReviewViewState
 } from '../../lib/review'
 import ReviewFindingCard from './ReviewFindingCard'
+import ReviewViewedToggle from './ReviewViewedToggle'
 
 /**
  * 리뷰용 diff 뷰.
@@ -21,7 +22,9 @@ export default function ReviewDiffView({
   view,
   files,
   focusedId,
-  onFocusFinding
+  onFocusFinding,
+  viewedPaths,
+  onToggleViewed
 }: {
   session: ReviewSession
   view: ReviewViewState
@@ -30,6 +33,9 @@ export default function ReviewDiffView({
   focusedId?: string | null
   /** 카드를 직접 눌렀을 때. 다음/이전 이동이 그 자리에서 이어지게 한다. */
   onFocusFinding?: (id: string) => void
+  /** 지금 diff 기준으로 "봤음" 인 경로들. 해시 계산을 화면당 한 번만 하려고 위에서 받는다. */
+  viewedPaths: Set<string>
+  onToggleViewed: (path: string) => void
 }): React.JSX.Element {
   const index = useMemo(() => indexFindingsByRow(view.findings), [view.findings])
   const counts = useMemo(() => countByFile(view.findings), [view.findings])
@@ -81,6 +87,8 @@ export default function ReviewDiffView({
           findingCount={counts[file.path] ?? 0}
           focusedId={focusedId ?? null}
           onFocusFinding={focusFromClick}
+          viewed={viewedPaths.has(file.path)}
+          onToggleViewed={() => onToggleViewed(file.path)}
           open={isOpen(file)}
           onToggle={() =>
             setOpenFiles((prev) => ({ ...prev, [file.path]: !(prev[file.path] ?? isOpen(file)) }))
@@ -104,6 +112,8 @@ function FileBlock({
   findingCount,
   focusedId,
   onFocusFinding,
+  viewed,
+  onToggleViewed,
   open,
   onToggle
 }: {
@@ -114,6 +124,8 @@ function FileBlock({
   findingCount: number
   focusedId: string | null
   onFocusFinding: (id: string) => void
+  viewed: boolean
+  onToggleViewed: () => void
   open: boolean
   onToggle: () => void
 }): React.JSX.Element {
@@ -122,31 +134,38 @@ function FileBlock({
       className="rounded-lg border border-[var(--border)] overflow-hidden"
       id={`file-${file.path}`}
     >
-      <button
-        onClick={onToggle}
-        className="w-full flex items-center gap-2 px-3 py-2 bg-[var(--bg-3)] hover:bg-[var(--surface)] text-left"
-      >
-        {open ? (
-          <ChevronDown size={13} className="shrink-0 text-neutral-500" />
-        ) : (
-          <ChevronRight size={13} className="shrink-0 text-neutral-500" />
-        )}
-        <StatusIcon status={file.status} />
-        <span className="flex-1 truncate text-sm font-mono text-neutral-200">{file.path}</span>
-        {findingCount > 0 && (
-          <span className="shrink-0 rounded-full bg-[var(--info-500)]/20 px-2 py-0.5 text-[10px] font-medium text-[var(--info-300)]">
-            {findingCount}
-          </span>
-        )}
-        {file.binary ? (
-          <span className="text-xs text-neutral-500">binary</span>
-        ) : (
-          <span className="shrink-0 font-mono text-xs">
-            <span className="text-[var(--success-400)]">+{file.additions}</span>{' '}
-            <span className="text-[var(--danger-400)]">−{file.deletions}</span>
-          </span>
-        )}
-      </button>
+      {/* 접기(헤더 전체)와 "봤음" 체크는 다른 행동이라 버튼을 나눈다 — 버튼 안에 버튼을 둘 수도 없다. */}
+      <div className="w-full flex items-center gap-2 px-3 py-2 bg-[var(--bg-3)] hover:bg-[var(--surface)]">
+        <button
+          onClick={onToggle}
+          className={
+            'flex min-w-0 flex-1 items-center gap-2 text-left ' + (viewed ? 'opacity-50' : '')
+          }
+        >
+          {open ? (
+            <ChevronDown size={13} className="shrink-0 text-neutral-500" />
+          ) : (
+            <ChevronRight size={13} className="shrink-0 text-neutral-500" />
+          )}
+          <StatusIcon status={file.status} />
+          <span className="flex-1 truncate text-sm font-mono text-neutral-200">{file.path}</span>
+          {findingCount > 0 && (
+            <span className="shrink-0 rounded-full bg-[var(--info-500)]/20 px-2 py-0.5 text-[10px] font-medium text-[var(--info-300)]">
+              {findingCount}
+            </span>
+          )}
+          {file.binary ? (
+            <span className="text-xs text-neutral-500">binary</span>
+          ) : (
+            <span className="shrink-0 font-mono text-xs">
+              <span className="text-[var(--success-400)]">+{file.additions}</span>{' '}
+              <span className="text-[var(--danger-400)]">−{file.deletions}</span>
+            </span>
+          )}
+        </button>
+        {/* 스크롤하며 읽다가 그 자리에서 체크하는 게 실제 흐름이라, 목록만이 아니라 여기에도 둔다. */}
+        <ReviewViewedToggle viewed={viewed} path={file.path} onToggle={onToggleViewed} size="md" />
+      </div>
 
       {open && !file.binary && (
         <div className="bg-[var(--code-bg)] text-xs font-mono leading-[1.5]">

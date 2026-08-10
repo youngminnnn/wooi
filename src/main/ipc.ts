@@ -1599,6 +1599,10 @@ export function registerIpc(ctx: IpcContext): void {
 
   ipcMain.handle(IPC.reviewLoad, (_e, reviewId: string) => reviewManager.loadBundle(reviewId))
 
+  ipcMain.handle(IPC.reviewSetFileViewed, (_e, reviewId: string, path: string, viewed: boolean) =>
+    reviewManager.setFileViewed(reviewId, path, viewed)
+  )
+
   ipcMain.handle(IPC.reviewArchive, async (_e, reviewId: string) => {
     await reviewManager.archive(reviewId)
   })
