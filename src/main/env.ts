@@ -24,6 +24,10 @@ export function hydrateEnvFromLoginShell(): void {
       // PATH 는 fallback 병합을 위해 아래에서 따로 처리. PWD/SHLVL 등 프로브 셸의 일시적
       // 상태 변수는 Electron 프로세스에 넣으면 잘못된 값이 되므로 제외한다.
       if (TRANSIENT_VARS.has(key)) continue
+      // WOOI_* 는 이 프로세스가 자기 자식에게 넘기려고 스스로 정한 값이다(userData·로그 이름·
+      // 도구 소켓). 프로브 셸이 되돌려 준 값으로 덮으면, Wooi 안에서 띄운 dev 인스턴스가
+      // 설치본의 경로를 물려받는 사고가 다시 열린다([[index]] 의 WOOI_USER_DATA 주석).
+      if (key.startsWith('WOOI_')) continue
       if (process.env[key] !== value) {
         process.env[key] = value
         applied++
