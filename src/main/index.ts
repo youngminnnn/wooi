@@ -34,7 +34,14 @@ applyDevPaths()
 // logger 와 agent-host(유틸리티 프로세스)는 electron `app` 없이 userData 경로를 알아야 하므로
 // (ESM 에서 유틸리티 프로세스가 electron 을 import 하면 로드 시 throw) 가장 먼저 env 로 박아 둔다.
 // app.getPath 는 ready 이전에도 사용 가능하다. host fork 시 이 값을 그대로 물려준다.
-process.env.WOOI_USER_DATA ||= app.getPath('userData')
+//
+// 물려받은 값이 있어도 **덮어쓴다**. Wooi 안의 에이전트·터미널에서 `npm run dev` 를 띄우면 그
+// 셸은 설치본이 host fork 에 넣어 둔 WOOI_USER_DATA(설치본 경로)와 WOOI_LOG_NAME(host.log)을
+// 그대로 물려받고, dev 인스턴스가 그 값을 쓰면 설치본의 로그 파일에 섞여 쓴다([[paths]] 의
+// 대소문자 함정과 같은 부류다). 이 프로세스의 userData 는 언제나 app.getPath 가 진실이다.
+process.env.WOOI_USER_DATA = app.getPath('userData')
+// 메인은 언제나 main.log 에 적는다. WOOI_LOG_NAME 은 host fork 에게만 주는 값이다.
+delete process.env.WOOI_LOG_NAME
 
 // 배포 빌드는 콘솔이 보이지 않으므로, 처리되지 않은 오류를 파일 로그로 남겨 진단 가능하게 한다.
 process.on('uncaughtException', (err) => log.error('uncaughtException', err))
