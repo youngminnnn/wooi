@@ -21,8 +21,9 @@ export const WOOI_MCP_SERVER_NAME = 'wooi'
  * 시스템 프롬프트(systemPrompt.ts)에 적지 않는다 — 거기는 Claude Code 기본 프롬프트를 얇게
  * 보정하는 자리이고, 도구 설명으로 불리면 그 의도가 무너진다.
  *
- * **매 요청 시스템 프롬프트에 실린다.** 도구 정의는 지연 로딩(alwaysLoad 를 켜지 않는다)이라
- * 검색될 때만 비용을 내지만, 이 문장은 스택을 한 번도 쓰지 않는 워크스페이스까지 전부 낸다.
+ * **매 요청 시스템 프롬프트에 실린다.** 도구 정의는 대체로 지연 로딩이라(alwaysLoad 는 모델이
+ * 이름을 모른 채로 도달해야 하는 몇 개만 켠다) 검색될 때만 비용을 내지만, 이 문장은 스택을
+ * 한 번도 쓰지 않는 워크스페이스까지 전부 낸다.
  * 그래서 여기에는 **상시 알아야 하는 것만** 둔다 — "스택이라는 게 있고, 대상을 받는 도구는
  * 자기가 만든 것만 지목할 수 있다". 한때 여기 같이 있던 인계 규약(자식이 보고한다 · 보고는 저절로 오지 않는다)은
  * 필요한 쪽에 필요한 순간 전달하는 편이 싸고 정확해서 옮겼다. 부모는 create_stacked_workspace
@@ -52,6 +53,10 @@ export interface AgentToolSpec {
   /**
    * true 면 매 요청 시스템 프롬프트에 정의가 항상 실린다. 기본은 지연 로딩(tool search)이다 —
    * 도구가 늘수록 프롬프트 비용이 선형으로 늘기 때문에, 항상 보여야 할 것만 켠다.
+   *
+   * 기준은 "유용한가" 가 아니라 **"모델이 이름을 모른 채로 도달해야 하는가"** 다. 검색은 이미
+   * 무엇을 찾는지 알 때 통하는 경로라, 그 단어가 떠오르지 않는 순간이 곧 실패 지점인 도구
+   * (`claude_subagent` · `check_related_work`)만 켠다. 나머지는 필요할 때 찾아오면 된다.
    */
   alwaysLoad?: boolean
 }
@@ -241,13 +246,20 @@ export const AGENT_TOOLS: AgentToolSpec[] = [
   {
     name: 'check_related_work',
     description: [
-      'List the other workspaces open on this repository — parents, children and unrelated',
-      'siblings alike — with the file paths each is changing and which of those you also touch.',
-      'Paths only, never diffs. Each entry says whether you created it, which is what decides',
-      'if you may act on it.',
+      'Find out whether another workspace is already changing the files you are about to touch.',
+      'This repository has several workspaces open at once, each in its own worktree on its own',
+      'branch — parents, children and unrelated siblings alike. Files you have not touched can be',
+      'changing under you, and nothing tells you unless you ask; a collision you miss surfaces at',
+      'merge time, when untangling it costs far more than asking now.',
       '',
-      'Call it before starting a change that spans several files or a refactor, so you find out',
-      'about a collision now instead of at merge time. It is not a per-turn check.'
+      'Call it before you start editing, whenever any of these is true: the change spans more than',
+      'a file or two, it is a refactor, a rename or a move, it touches something much of the',
+      'codebase depends on, or the user mentions other work in flight. Pass `paths` with what you',
+      'plan to change and you get the answer before the first edit; omit it to compare against what',
+      'this workspace has already changed. Once per piece of work is enough — not every turn.',
+      '',
+      'You get paths only, never diffs. Each entry says whether you created that workspace, which',
+      'is what decides whether you may act on it.'
     ].join(' '),
     inputSchema: {
       paths: z
@@ -258,7 +270,15 @@ export const AGENT_TOOLS: AgentToolSpec[] = [
             'workspace has already changed.'
         )
     },
-    annotations: { title: 'Check related work', readOnlyHint: true }
+    annotations: { title: 'Check related work', readOnlyHint: true },
+    // 지연 로딩(tool search) 뒤에 두지 않는다. 이 도구는 **모델이 부르려고 마음먹는 순간**이 곧
+    // 실패 지점이다 — 겹침의 존재를 모르는 채로 편집을 시작하는 것이 정확히 이 도구가 막으려는
+    // 상황인데, 그 상태의 모델에게는 검색해 볼 단어가 없다. 위임 도구에서 겪은 "존재를 모른다"
+    // 와 같은 실패다(delegateToolSpecs). 이름을 이미 아는 사람만 찾아오는 도구는 소용이 없다.
+    //
+    // 상시 비용은 이 설명 하나(≈150 토큰)이고, 놓친 충돌 하나가 양쪽 diff 를 다 읽게 만드는
+    // 비용보다 훨씬 싸다. 대신 설명은 "언제 부르는가" 부터 시작해 그 값을 하도록 쓴다.
+    alwaysLoad: true
   },
   {
     name: 'list_issues',

@@ -178,6 +178,30 @@ describe('check_related_work 의 겹침', () => {
     expect(result.workspaces).toHaveLength(1)
   })
 
+  // 겹침을 찾고도 그냥 편집을 이어가면 부른 보람이 없다. 남의 diff 는 볼 수 없으니 판단은
+  // 사람 몫이라는 것까지 결과에 실린다.
+  it('겹치면 사람에게 말하라고 결과에 적어 준다', async () => {
+    pathsBy({ '/tmp/ws-me': ['src/b.ts'], '/tmp/ws-sib': ['src/b.ts'] })
+
+    const result = (await check()) as { note: string }
+    expect(result.note).toMatch(/1 other workspace/)
+    expect(result.note).toMatch(/Tell the user/)
+  })
+
+  it('겹치지 않으면 겹치지 않는다고 말해 준다 — 빈 overlaps 를 해석하게 두지 않는다', async () => {
+    pathsBy({ '/tmp/ws-me': ['src/a.ts'], '/tmp/ws-sib': ['src/z.ts'] })
+
+    const result = (await check()) as { note: string }
+    expect(result.note).toMatch(/Nothing you are changing/)
+  })
+
+  it('내가 아직 아무것도 안 고쳤으면 겹침 안내 대신 그 사실을 말해 준다', async () => {
+    pathsBy({ '/tmp/ws-me': [], '/tmp/ws-sib': ['src/b.ts'] })
+
+    const result = (await check()) as { note: string }
+    expect(result.note).toMatch(/has not changed anything yet/)
+  })
+
   it('paths 인자를 주면 아직 고치지 않은 파일로도 물어볼 수 있다', async () => {
     pathsBy({ '/tmp/ws-me': [], '/tmp/ws-sib': ['src/router.ts'] })
 
