@@ -272,6 +272,8 @@ export default function QuickSwitcher({ onClose }: { onClose: () => void }): Rea
           <span>↑↓ navigate</span>
           <span>⏎ open</span>
           <span>esc close</span>
+          {/* 이 팔레트는 이름만 본다. 내용을 찾으러 온 사람이 헛돌지 않게 옆 문을 알려 둔다. */}
+          <span className="ml-auto">⇧⌘K search conversations</span>
         </div>
       </div>
     </div>

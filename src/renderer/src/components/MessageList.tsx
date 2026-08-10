@@ -22,6 +22,7 @@ import { DiffLine } from './DiffView'
 import { AgentMessage, ErrorRow, ToolUseRow, UserMessage } from './ChatPrimitives'
 import { formatTime } from '../lib/format'
 import { buildTaskCards, taskLabel, type TaskEntry } from '../lib/tasks'
+import { useTranscriptJump } from '../lib/transcriptJump'
 import type { ChatItem } from '@shared/types'
 
 export default function MessageList({
@@ -106,7 +107,11 @@ export default function MessageList({
     el?.scrollIntoView({ block: 'center', behavior: 'smooth' })
   }, [safeIdx, matches, searchOpen])
 
-  const activeMatchId = searchOpen ? matches[safeIdx] : undefined
+  // 워크스페이스를 가로지르는 검색(⇧⌘K)에서 넘어온 이동. 도착한 항목은 ⌘F 매치와 같은
+  // 강조를 잠시 두른다 — 하이라이트 경로가 이미 있으니 그 위에 얹는다.
+  const jumpedId = useTranscriptJump(workspaceId, containerRef)
+
+  const activeMatchId = searchOpen ? matches[safeIdx] : jumpedId
   const stepMatch = (dir: 1 | -1): void => {
     if (!matches.length) return
     setActiveIdx((i) => (i + dir + matches.length) % matches.length)

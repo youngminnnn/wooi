@@ -48,7 +48,7 @@ import {
   fetchOwnerAvatarDataUrl
 } from './github'
 import { ReviewManager } from './review/manager'
-import type { ReviewVerdict } from '@shared/types'
+import type { ReviewVerdict, TranscriptSearchResult } from '@shared/types'
 import { cascadeRetarget, cascadeRestackBranchStack, stepFromRestack } from './cascade'
 import {
   getAuthStatus,
@@ -711,6 +711,21 @@ export function registerIpc(ctx: IpcContext): void {
   ipcMain.handle(IPC.chatGetHistory, (_e, workspaceId: string) => {
     return getTranscripts().load(workspaceId)
   })
+
+  // 워크스페이스를 가로지르는 대화 검색. 훑는 일은 전부 여기서 끝내고 렌더러에는 스니펫만
+  // 넘긴다 — 워크스페이스가 수십 개일 때 원문을 넘기면 검색 한 번에 힙이 수백 MB 로 뛴다.
+  // 아카이브된 워크스페이스도 기본 포함이다("그 결정 어디서 했더라" 의 답은 대개 거기 있다).
+  ipcMain.handle(
+    IPC.chatSearch,
+    (_e, query: string, opts?: { includeArchived?: boolean }): Promise<TranscriptSearchResult> => {
+      const includeArchived = opts?.includeArchived ?? true
+      const ids = store
+        .getState()
+        .workspaces.filter((w) => includeArchived || !w.archived)
+        .map((w) => w.id)
+      return getTranscripts().search(query, ids)
+    }
+  )
 
   ipcMain.handle(IPC.permissionRespond, (_e, requestId: string, decision: PermissionDecision) => {
     ctx.sessions.respondPermission(requestId, decision)

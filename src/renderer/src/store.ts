@@ -277,6 +277,13 @@ interface UIState {
   fileViewer: FileViewerState | null
   /** 큰 파일 뷰어 왼쪽 트리의 너비(px). */
   fileViewerTreeWidth: number
+  /**
+   * 대화 검색(⇧⌘K)에서 고른 결과로 데려갈 항목. 대화창이 그 자리로 스크롤하고 나면 지운다.
+   *
+   * seq 는 같은 항목을 연달아 고를 때도 이동이 다시 일어나게 하는 토큰이다(값이 같으면
+   * 리액트가 변화를 못 보고 두 번째 선택이 조용히 무시된다).
+   */
+  jumpTarget: { workspaceId: string; itemId: string; seq: number } | null
   toasts: Toast[]
   confirmState: ConfirmState | null
   /**
@@ -423,6 +430,13 @@ interface UIState {
    * 큰 파일 뷰어를 연다. 이미 열려 있으면 그 파일로 이동하고 방문 기록에 쌓는다.
    * line 을 주면 그 줄로 스크롤한다.
    */
+  /**
+   * 대화 검색 결과로 이동한다 — 해당 워크스페이스를 열고 그 항목까지 스크롤한다.
+   * 아카이브된 워크스페이스는 대화창이 없으므로 안내만 하고 이동하지 않는다.
+   */
+  jumpToTranscriptItem: (workspaceId: string, itemId: string) => Promise<void>
+  /** 이동이 끝났다(또는 대상을 못 찾았다) — 대기 중인 목적지를 지운다. */
+  clearJumpTarget: () => void
   openFileViewer: (workspaceId: string, path: string, line?: number) => void
   closeFileViewer: () => void
   /** 방문 기록에서 delta 만큼 이동(-1 뒤로, +1 앞으로). 범위를 벗어나면 아무것도 하지 않는다. */
@@ -595,6 +609,7 @@ export const useStore = create<UIState>((set, get) => ({
   detachedPanes: { work: false, scripts: false },
   fileViewer: null,
   fileViewerTreeWidth: 260,
+  jumpTarget: null,
   toasts: [],
   confirmState: null,
   overlayOpen: false,
@@ -1662,6 +1677,25 @@ export const useStore = create<UIState>((set, get) => ({
 
   // 터미널 비율 — 패널/터미널 어느 쪽도 사라지지 않도록 0.15~0.85 로 클램프한다.
   setTerminalRatio: (ratio) => set({ terminalRatio: Math.max(0.15, Math.min(0.85, ratio)) }),
+
+  jumpToTranscriptItem: async (workspaceId, itemId) => {
+    const s = get()
+    const ws = s.app?.workspaces.find((w) => w.id === workspaceId)
+    // 아카이브된 워크스페이스는 대화창이 뜨지 않는다(worktree 가 없다). 검색 결과의 스니펫으로
+    // 답이 됐을 수도 있으니 실패로 취급하지 말고, 열려면 무엇이 필요한지 알려 준다.
+    if (ws?.archived) {
+      s.pushToast(
+        'info',
+        `"${workspaceDisplayName(ws)}" is archived — unarchive it in the sidebar to open the conversation.`
+      )
+      return
+    }
+    // 목적지를 먼저 세워 둔다 — 대화창은 마운트되자마자 이 값을 보고 그 항목으로 스크롤한다.
+    set((st) => ({ jumpTarget: { workspaceId, itemId, seq: (st.jumpTarget?.seq ?? 0) + 1 } }))
+    await s.selectWorkspace(workspaceId)
+  },
+
+  clearJumpTarget: () => set((s) => (s.jumpTarget ? { jumpTarget: null } : {})),
 
   openFileViewer: (workspaceId, path, line) =>
     set((s) => {

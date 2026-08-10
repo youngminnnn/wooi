@@ -988,6 +988,37 @@ export type ChatItem =
     }
 
 /**
+ * 워크스페이스를 가로지르는 대화 검색의 결과 1건.
+ *
+ * 항목 원문은 담지 않는다 — main 이 트랜스크립트를 훑고 **매치 주변 스니펫만** 렌더러로
+ * 넘긴다. 대화 전체를 렌더러 힙에 올리지 않기 위한 경계다([[TranscriptStore]] 주석 참고).
+ */
+export interface TranscriptHit {
+  workspaceId: string
+  /** ChatItem.id — 결과를 고르면 이 항목으로 스크롤한다. */
+  itemId: string
+  /** 항목 종류(user·assistant·tool_use …). 결과 행의 라벨에 쓴다. */
+  kind: ChatItem['type']
+  ts: number
+  /** 매치 주변 한 줄 발췌(공백은 한 칸으로 눌렀고, 잘린 쪽에는 … 이 붙는다). */
+  snippet: string
+  /** snippet 안에서 매치가 시작하는 위치와 길이 — 하이라이트용. */
+  matchStart: number
+  matchLength: number
+}
+
+export interface TranscriptSearchResult {
+  /** 워크스페이스는 최근 매치가 있는 쪽부터, 그 안에서는 대화 순서. */
+  hits: TranscriptHit[]
+  /** 상한에 걸려 일부가 빠졌다. UI 는 이를 반드시 알린다 — 조용한 절단 금지. */
+  truncated: boolean
+  /** 실제로 훑은 워크스페이스 수. */
+  scanned: number
+  /** 상한을 이미 채워 아예 훑지 못한 워크스페이스 수. */
+  skipped: number
+}
+
+/**
  * 자식이 보고하는 상태.
  * - done: 목적한 작업을 끝냈다.
  * - blocked: 막혔고 부모(또는 사람)의 판단이 필요하다.
@@ -1743,6 +1774,8 @@ export const IPC = {
   chatSideQuestion: 'chat:sideQuestion',
   /** /clear — 트랜스크립트를 비우고 세션을 새로 시작한다(워크스페이스는 유지). */
   chatClear: 'chat:clear',
+  /** 워크스페이스를 가로지르는 대화 검색. 결과는 스니펫만 담긴다(원문은 main 에 남는다). */
+  chatSearch: 'chat:search',
   permissionRespond: 'permission:respond',
   scriptRun: 'script:run',
   scriptStop: 'script:stop',
