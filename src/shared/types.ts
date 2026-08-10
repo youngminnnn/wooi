@@ -1076,9 +1076,116 @@ export interface AppSettings {
   paneWindowBounds?: Partial<Record<PaneKind, WindowBounds>>
 }
 
+// ── fan-out (같은 프롬프트를 여러 워크스페이스에 동시에) ────────────────────
+//
+// 스택(부모-자식)과 **섞이지 않는다**. 스택은 한 작업을 이어 쌓는 수직 관계라 자식의 base 가
+// 부모 브랜치지만, fan-out 형제는 같은 질문에 대한 서로 다른 답이라 전부 리포 기본 브랜치에서
+// 갈라진다(parentWorkspaceId 는 항상 null). 둘을 한 축으로 합치면 "형제" 라는 말이 두 가지를
+// 뜻하게 되고, restack·캐스케이드가 fan-out 형제까지 건드리게 된다.
+
+/** fan-out 으로 만들 수 있는 후보 수의 하한·상한. */
+export const FANOUT_MIN_SLOTS = 2
+export const FANOUT_MAX_SLOTS = 4
+
+/**
+ * 같은 프롬프트로 한꺼번에 만든 워크스페이스 묶음.
+ *
+ * 멤버십의 단일 출처는 이 `workspaceIds` 다 — 워크스페이스에 groupId 를 같이 심어 두면 둘이
+ * 갈라지는 날이 오고, 그때 어느 쪽이 맞는지 판정할 방법이 없다. 역방향 조회는
+ * [[fanoutGroupOf]] 가 맡는다(그룹 수는 사람이 만든 만큼이라 선형 조회로 충분하다).
+ */
+export interface FanoutGroup {
+  id: string
+  repoId: string
+  /** 후보 브랜치들의 공통 뿌리 이름. 화면에서 이 그룹을 부르는 이름이기도 하다. */
+  name: string
+  /** 모든 후보에게 똑같이 보낸 첫 프롬프트. 비교 화면이 "무엇을 물었는지" 를 다시 보여 준다. */
+  prompt: string
+  /** 후보 워크스페이스 id(생성 순서 = 표시 순서). 아카이브돼도 목록에는 남는다. */
+  workspaceIds: string[]
+  /**
+   * 채택한 후보. 아직 고르지 않았으면 null. 채택은 "이 그룹의 질문은 끝났다" 는 표시이고,
+   * 나머지 형제의 아카이브는 그 결과로 따로 일어난다(이 필드가 아카이브를 뜻하지는 않는다).
+   */
+  adoptedWorkspaceId: string | null
+  createdAt: number
+}
+
+/** 이 워크스페이스가 속한 fan-out 그룹(없으면 undefined). */
+export function fanoutGroupOf(
+  groups: FanoutGroup[] | undefined,
+  workspaceId: string
+): FanoutGroup | undefined {
+  return groups?.find((g) => g.workspaceIds.includes(workspaceId))
+}
+
+/**
+ * 아직 결론이 나지 않은 그룹만. 채택이 끝난 그룹은 사이드바에서 감춘다 — 남겨 두면 "고를 것이
+ * 남아 있다" 는 신호가 영원히 켜져 있게 된다(기록 자체는 비교 화면에서 계속 열어 볼 수 있다).
+ */
+export function unresolvedFanoutGroups(
+  groups: FanoutGroup[] | undefined,
+  repoId?: string
+): FanoutGroup[] {
+  return (groups ?? []).filter(
+    (g) => g.adoptedWorkspaceId === null && (repoId === undefined || g.repoId === repoId)
+  )
+}
+
+/**
+ * 후보 i 의 워크스페이스 이름. 뒤에 붙는 번호가 곧 화면에서의 순번이라, 브랜치 이름만 봐도
+ * 어느 후보인지 알 수 있다. 실제 브랜치는 main 이 중복을 피해 접미사를 더 붙일 수 있다
+ * ([[git]] resolveUniqueWorktree) — 그래도 순번은 이름 안에 남는다.
+ */
+export function fanoutSlotName(base: string, index: number): string {
+  return `${base.trim() || 'fanout'}-${index + 1}`
+}
+
+/** fan-out 생성 요청. 슬롯 하나가 후보 하나이며, 슬롯마다 다른 에이전트를 고를 수 있다. */
+export interface CreateFanoutArgs {
+  repoId: string
+  /** 후보 이름의 공통 뿌리. 비어 있으면 main 이 자동 생성한다. */
+  name?: string
+  /** 모든 후보에게 똑같이 보낼 프롬프트. 비어 있으면 후보들은 유휴 상태로 만들어진다. */
+  prompt: string
+  /** 후보별 설정. 길이가 곧 후보 수다(FANOUT_MIN_SLOTS ~ FANOUT_MAX_SLOTS). */
+  slots: FanoutSlot[]
+}
+
+export interface FanoutSlot {
+  /** 이 후보를 구동할 에이전트. 생략하면 전역 기본 백엔드. */
+  agentBackend?: AgentBackendId
+  /** 이 후보를 멀티 에이전트 모드로 만들지. 생략하면 전역 기본값. */
+  multiAgent?: boolean
+}
+
+export interface CreateFanoutResult {
+  groupId?: string
+  workspaceIds?: string[]
+  /** 요청 전체가 불가능했던 이유(리포 없음·슬롯 수 이상 등). 하나라도 만들었으면 비어 있다. */
+  error?: string
+  /** 일부 후보만 실패했을 때 그 사유들. 나머지 후보는 정상적으로 만들어졌다. */
+  failures?: string[]
+  carryFailures?: CarryFailure[]
+  carrySuggestions?: string[]
+}
+
+/** 채택 결과. 아카이브된 형제와, 그 과정에서 실패한 아카이브 스크립트를 함께 싣는다. */
+export interface AdoptFanoutResult {
+  error?: string
+  /** 아카이브한 형제 워크스페이스의 표시 이름들(토스트 문구용). */
+  archived?: string[]
+  archiveScriptFailures?: ArchiveScriptFailure[]
+}
+
 export interface AppState {
   repos: Repo[]
   workspaces: Workspace[]
+  /**
+   * 같은 프롬프트로 한꺼번에 만든 워크스페이스 묶음(fan-out). 워크스페이스와 같은 상태 방송에
+   * 실어, 사이드바·비교 화면이 별도 조회 없이 형제 관계를 알 수 있게 한다.
+   */
+  fanoutGroups: FanoutGroup[]
   /**
    * PR 리뷰 세션(메타데이터만). 워크스페이스와 나란히 사이드바가 그리므로 같은 상태 방송에
    * 실어 보낸다 — 덕분에 아카이브 UI 가 워크스페이스 것과 같은 모양으로 나온다.
@@ -2143,6 +2250,12 @@ export const IPC = {
   workspacePeerInboxDismiss: 'workspace:peerInboxDismiss',
   /** 다른 워크스페이스에서 오는 메시지를 받는 방식([[PeerInboundPolicy]])을 바꾼다. */
   workspaceSetPeerInbound: 'workspace:setPeerInbound',
+  /** 같은 프롬프트로 후보 워크스페이스 N 개를 한 번에 만들고 한 그룹으로 묶는다. */
+  fanoutCreate: 'fanout:create',
+  /** 승자 후보를 채택하고 나머지 형제를 아카이브한다(확인은 렌더러가 먼저 받는다). */
+  fanoutAdopt: 'fanout:adopt',
+  /** 그룹 기록을 지운다. 워크스페이스에는 손대지 않는다 — 묶음만 잊는다. */
+  fanoutForget: 'fanout:forget',
   workspaceSetPermissionMode: 'workspace:setPermissionMode',
   workspaceSetModel: 'workspace:setModel',
   workspaceSetEffort: 'workspace:setEffort',

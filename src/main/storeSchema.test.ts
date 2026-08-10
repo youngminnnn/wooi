@@ -311,6 +311,26 @@ describe('v19 → v20 (다중 run script)', () => {
   })
 })
 
+describe('v20 → v21 (fan-out 그룹)', () => {
+  it('기존 워크스페이스를 그룹으로 묶어 추측하지 않는다', () => {
+    // 나란히 만들어졌다는 이유로 묶으면, 사용자가 만든 적 없는 "채택" 대상이 생긴다 —
+    // 그리고 채택은 형제를 아카이브하는 동작이다.
+    const out = migrate(
+      {
+        schemaVersion: 20,
+        repos: [{ id: 'r1' }],
+        workspaces: [
+          { id: 'w1', repoId: 'r1', name: 'alpha' },
+          { id: 'w2', repoId: 'r1', name: 'alpha-2' }
+        ]
+      },
+      20
+    )
+    expect(out.fanoutGroups).toEqual([])
+    expect((out.workspaces as Workspace[]).map((w) => w.id)).toEqual(['w1', 'w2'])
+  })
+})
+
 describe('레거시 파일 전체 경로', () => {
   it('v0(버전 필드 없음) 파일을 현재 스키마까지 끝까지 변환한다', () => {
     const legacy = {
@@ -391,12 +411,20 @@ describe('normalizeShape (구버전 빌드가 남긴 레코드 메우기)', () =
     expect((out.workspaces as Workspace[])[0].ports).toEqual({ s1: 3100 })
   })
 
-  it('repos·workspaces 자체가 없어도 빈 배열로 돌려준다', () => {
+  it('repos·workspaces·fanoutGroups 자체가 없어도 빈 배열로 돌려준다', () => {
     expect(normalizeShape({ schemaVersion: CURRENT_SCHEMA_VERSION })).toEqual({
       schemaVersion: CURRENT_SCHEMA_VERSION,
       repos: [],
-      workspaces: []
+      workspaces: [],
+      fanoutGroups: []
     })
+  })
+
+  it('이미 있는 fan-out 그룹은 그대로 둔다', () => {
+    // v21 이전 빌드가 최신 버전 파일에 이어서 쓰면 이 배열이 통째로 사라진다. 없으면 채우되,
+    // 있는 것을 비우면 사용자가 만든 묶음이 조용히 사라지므로 값은 건드리지 않는다.
+    const groups = [{ id: 'g1', workspaceIds: ['w1', 'w2'] }]
+    expect(normalizeShape({ fanoutGroups: groups }).fanoutGroups).toEqual(groups)
   })
 
   it('마이그레이션을 건너뛰는 최신 버전 파일에도 적용된다', () => {
