@@ -157,19 +157,29 @@ const api: WooiApi = {
   },
 
   terminal: {
-    start: (workspaceId, cols, rows) =>
-      ipcRenderer.invoke(IPC.terminalStart, workspaceId, cols, rows),
-    input: (workspaceId, data) => ipcRenderer.invoke(IPC.terminalInput, workspaceId, data),
+    start: (workspaceId, terminalId, cols, rows) =>
+      ipcRenderer.invoke(IPC.terminalStart, workspaceId, terminalId, cols, rows),
+    input: (workspaceId, terminalId, data) =>
+      ipcRenderer.invoke(IPC.terminalInput, workspaceId, terminalId, data),
     runCommand: (workspaceId, command) =>
       ipcRenderer.invoke(IPC.terminalRunCommand, workspaceId, command),
     exec: (workspaceId, command) => ipcRenderer.invoke(IPC.terminalExec, workspaceId, command),
     killInline: (workspaceId, itemId) =>
       ipcRenderer.invoke(IPC.terminalKillInline, workspaceId, itemId),
-    resize: (workspaceId, cols, rows) =>
-      ipcRenderer.invoke(IPC.terminalResize, workspaceId, cols, rows),
+    resize: (workspaceId, terminalId, cols, rows) =>
+      ipcRenderer.invoke(IPC.terminalResize, workspaceId, terminalId, cols, rows),
     kill: (workspaceId) => ipcRenderer.invoke(IPC.terminalKill, workspaceId),
+    tabs: (workspaceId) => ipcRenderer.invoke(IPC.terminalTabs, workspaceId),
+    createTab: (workspaceId) => ipcRenderer.invoke(IPC.terminalTabCreate, workspaceId),
+    closeTab: (workspaceId, terminalId) =>
+      ipcRenderer.invoke(IPC.terminalTabClose, workspaceId, terminalId),
+    renameTab: (workspaceId, terminalId, title) =>
+      ipcRenderer.invoke(IPC.terminalTabRename, workspaceId, terminalId, title),
+    selectTab: (workspaceId, terminalId) =>
+      ipcRenderer.invoke(IPC.terminalTabSelect, workspaceId, terminalId),
     onData: (cb) => subscribe(IPC.evtTerminalData, cb),
-    onExit: (cb) => subscribe(IPC.evtTerminalExit, cb)
+    onExit: (cb) => subscribe(IPC.evtTerminalExit, cb),
+    onTabs: (cb) => subscribe(IPC.evtTerminalTabs, cb)
   },
 
   pane: {

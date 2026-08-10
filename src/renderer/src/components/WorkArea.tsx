@@ -42,7 +42,9 @@ export default function WorkArea({ workspace }: { workspace: Workspace }): React
         onDelta={(_dx, dy) => containerH && setRatio(base.current - dy / containerH)}
       />
       <div style={{ height: terminalHeight }} className="shrink-0">
-        <TerminalPane workspaceId={workspace.id} />
+        {/* 워크스페이스가 바뀌면 탭 구성·화면을 새로 잡도록 통째로 다시 마운트한다
+            (PTY 는 메인에 남아 있어 돌아오면 그대로 복원된다). */}
+        <TerminalPane key={workspace.id} workspaceId={workspace.id} />
       </div>
     </div>
   )

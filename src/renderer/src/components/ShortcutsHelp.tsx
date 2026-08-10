@@ -41,6 +41,15 @@ const GROUPS: { title: string; items: { keys: string[]; label: string }[] }[] = 
     ]
   },
   {
+    title: 'Terminal tabs',
+    items: [
+      { keys: ['⌃⇧T'], label: 'New terminal tab' },
+      { keys: ['⌃⇧W'], label: 'Close the terminal tab you are on' },
+      { keys: ['⌃⇥', '/', '⇧⌃⇥'], label: 'Next / previous terminal tab' },
+      { keys: ['Double-click'], label: 'Rename a tab' }
+    ]
+  },
+  {
     title: 'File viewer',
     items: [
       { keys: ['⇧⌘O'], label: 'Open a file — type a path, add #L42 to jump to a line' },

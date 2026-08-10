@@ -1843,14 +1843,17 @@ export function registerIpc(ctx: IpcContext): void {
 
   // ── 인터랙티브 터미널 (worktree PTY) ─────────────────────────────────────
 
-  ipcMain.handle(IPC.terminalStart, (_e, workspaceId: string, cols: number, rows: number) => {
-    const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
-    if (!ws || ws.archived) return
-    ctx.terminals.start(workspaceId, ws.worktreePath, cols, rows)
-  })
+  ipcMain.handle(
+    IPC.terminalStart,
+    (_e, workspaceId: string, terminalId: string, cols: number, rows: number) => {
+      const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
+      if (!ws || ws.archived) return
+      ctx.terminals.start(workspaceId, terminalId, ws.worktreePath, cols, rows)
+    }
+  )
 
-  ipcMain.handle(IPC.terminalInput, (_e, workspaceId: string, data: string) => {
-    ctx.terminals.write(workspaceId, data)
+  ipcMain.handle(IPC.terminalInput, (_e, workspaceId: string, terminalId: string, data: string) => {
+    ctx.terminals.write(workspaceId, terminalId, data)
   })
 
   ipcMain.handle(IPC.terminalRunCommand, (_e, workspaceId: string, command: string) => {
@@ -1869,13 +1872,39 @@ export function registerIpc(ctx: IpcContext): void {
     ctx.terminals.killInline(workspaceId, itemId)
   })
 
-  ipcMain.handle(IPC.terminalResize, (_e, workspaceId: string, cols: number, rows: number) => {
-    ctx.terminals.resize(workspaceId, cols, rows)
-  })
+  ipcMain.handle(
+    IPC.terminalResize,
+    (_e, workspaceId: string, terminalId: string, cols: number, rows: number) => {
+      ctx.terminals.resize(workspaceId, terminalId, cols, rows)
+    }
+  )
 
   ipcMain.handle(IPC.terminalKill, (_e, workspaceId: string) => {
     ctx.terminals.disposeWorkspace(workspaceId)
   })
+
+  // 탭 구성 — 변경은 메인이 소유하고(단일 진실 원천) 결과를 모든 창에 방송한다.
+  // 요청한 창에는 방송과 별개로 최신 구성을 곧바로 돌려줘, 왕복 순서와 무관하게 화면이 따라온다.
+
+  ipcMain.handle(IPC.terminalTabs, (_e, workspaceId: string) => ctx.terminals.tabs(workspaceId))
+
+  ipcMain.handle(IPC.terminalTabCreate, (_e, workspaceId: string) =>
+    ctx.terminals.createTab(workspaceId)
+  )
+
+  ipcMain.handle(IPC.terminalTabClose, (_e, workspaceId: string, terminalId: string) =>
+    ctx.terminals.closeTab(workspaceId, terminalId)
+  )
+
+  ipcMain.handle(
+    IPC.terminalTabRename,
+    (_e, workspaceId: string, terminalId: string, title: string) =>
+      ctx.terminals.renameTab(workspaceId, terminalId, title)
+  )
+
+  ipcMain.handle(IPC.terminalTabSelect, (_e, workspaceId: string, terminalId: string) =>
+    ctx.terminals.selectTab(workspaceId, terminalId)
+  )
 
   // ── Dock 미확인 배지 ─────────────────────────────────────────────────────
 
