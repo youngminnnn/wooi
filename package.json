@@ -73,6 +73,9 @@
       "gatekeeperAssess": false,
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist",
+      "extendInfo": {
+        "NSAppleEventsUsageDescription": "Wooi runs coding agents and tools that may automate another app when you ask them to."
+      },
       "notarize": true
     },
     "dmg": {
