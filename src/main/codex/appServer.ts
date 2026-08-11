@@ -22,6 +22,15 @@ const CLIENT_INFO = {
   version: process.env.npm_package_version ?? '1.1.0'
 }
 
+/**
+ * Wooi가 실제로 처리하는 app-server 확장 기능. 특히 request_plugin_install은 Codex Apps
+ * MCP의 openai/form elicitation을 사용하므로 이 선언이 없으면 설치 확인 단계에 도달하지 못한다.
+ */
+export const CLIENT_CAPABILITIES = {
+  experimentalApi: true,
+  mcpServerOpenaiFormElicitation: true
+} as const
+
 /** 종료 요청 후 이 시간까지 안 죽으면 SIGKILL 한다(고아 프로세스 방지). */
 const KILL_GRACE_MS = 2_000
 
@@ -159,7 +168,7 @@ export class AppServer {
       clientInfo: CLIENT_INFO,
       // Plan 모드(collaborationMode)가 실험 API 표면에만 있어 opt-in 한다. 안정 필드는 그대로
       // 동작하고, 실험 필드는 서버가 모르면 조용히 무시되므로 최악의 경우 Plan 모드만 degrade 된다.
-      capabilities: { experimentalApi: true }
+      capabilities: CLIENT_CAPABILITIES
     })
     client.notify(RPC.initialized)
     log.info(

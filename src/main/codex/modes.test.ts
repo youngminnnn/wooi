@@ -13,7 +13,8 @@ describe('turnPolicyFor', () => {
     expect(turnPolicyFor('readOnly', WORKTREE)).toEqual({
       sandboxPolicy: { type: 'readOnly' },
       sandboxMode: 'read-only',
-      approvalPolicy: 'on-request'
+      approvalPolicy: 'on-request',
+      approvalsReviewer: 'user'
     })
   })
 
@@ -25,7 +26,8 @@ describe('turnPolicyFor', () => {
         networkAccess: false
       },
       sandboxMode: 'workspace-write',
-      approvalPolicy: 'on-request'
+      approvalPolicy: 'on-request',
+      approvalsReviewer: 'auto_review'
     })
   })
 
@@ -33,7 +35,8 @@ describe('turnPolicyFor', () => {
     expect(turnPolicyFor('fullAccess', WORKTREE)).toEqual({
       sandboxPolicy: { type: 'dangerFullAccess' },
       sandboxMode: 'danger-full-access',
-      approvalPolicy: 'never'
+      approvalPolicy: 'never',
+      approvalsReviewer: 'user'
     })
   })
 
@@ -42,6 +45,7 @@ describe('turnPolicyFor', () => {
       sandboxPolicy: { type: 'readOnly' },
       sandboxMode: 'read-only',
       approvalPolicy: 'on-request',
+      approvalsReviewer: 'user',
       collaborationMode: 'plan'
     })
   })

@@ -138,6 +138,7 @@ export class CodexThread {
         cwd: this.config.cwd,
         sandboxPolicy: policy.sandboxPolicy,
         approvalPolicy: policy.approvalPolicy,
+        approvalsReviewer: policy.approvalsReviewer,
         // collaborationMode 는 실험 API 라 initialize 에서 opt-in 해야 전달된다. 서버가 무시하면
         // Plan 모드는 읽기 전용 샌드박스만으로 동작한다(계획 지침 없이도 실행은 막힌다).
         ...(policy.collaborationMode
@@ -269,6 +270,7 @@ export class CodexThread {
       model: this.config.model ?? undefined,
       sandbox: policy.sandboxMode,
       approvalPolicy: policy.approvalPolicy,
+      approvalsReviewer: policy.approvalsReviewer,
       // 워크스페이스 안내와 위임 안내를 한 문자열로 합친다 — developerInstructions 는 하나뿐이라
       // 나중에 쓰는 쪽이 앞의 것을 덮는다.
       developerInstructions: [
