@@ -21,6 +21,7 @@ export type SandboxPolicy =
 
 /** app-server 의 approvalPolicy(AskForApproval) 파라미터. */
 export type ApprovalPolicy = 'never' | 'untrusted' | 'on-failure' | 'on-request'
+export type ApprovalsReviewer = 'user' | 'auto_review' | 'guardian_subagent'
 
 /**
  * `thread/start` 가 받는 단순 샌드박스 모드.
@@ -35,6 +36,8 @@ export interface CodexTurnPolicy {
   /** thread/start 용. 같은 의도를 문자열 모드로 표현한 것. */
   sandboxMode: SandboxMode
   approvalPolicy: ApprovalPolicy
+  /** 승인 요청을 사용자에게 바로 띄울지 Codex의 네이티브 위험 검토에 먼저 맡길지. */
+  approvalsReviewer: ApprovalsReviewer
   /**
    * 협업 모드 이름. 'plan' 은 Codex 의 Plan 프리셋(읽기 전용 + 계획 수립 지침)을 켠다.
    * undefined 면 기본 모드.
@@ -59,7 +62,8 @@ export function turnPolicyFor(
       return {
         sandboxPolicy: { type: 'readOnly' },
         sandboxMode: 'read-only',
-        approvalPolicy: 'on-request'
+        approvalPolicy: 'on-request',
+        approvalsReviewer: 'user'
       }
 
     // Plan 모드 — 읽기 전용은 같고, 협업 모드가 "실행하지 말고 계획하라"는 지침을 얹는다.
@@ -68,6 +72,7 @@ export function turnPolicyFor(
         sandboxPolicy: { type: 'readOnly' },
         sandboxMode: 'read-only',
         approvalPolicy: 'on-request',
+        approvalsReviewer: 'user',
         collaborationMode: 'plan'
       }
 
@@ -76,10 +81,12 @@ export function turnPolicyFor(
       return {
         sandboxPolicy: { type: 'dangerFullAccess' },
         sandboxMode: 'danger-full-access',
-        approvalPolicy: 'never'
+        approvalPolicy: 'never',
+        approvalsReviewer: 'user'
       }
 
-    // 기본(Auto): worktree 안에서는 자유롭게, 벗어나거나 네트워크가 필요하면 승인.
+    // 기본(Auto): worktree 안에서는 자유롭게, 벗어나거나 네트워크가 필요하면 Codex가 위험을
+    // 자동 검토한다. 안전하다고 판단한 요청은 계속 진행하고 사용자 판단이 필요한 경우만 묻는다.
     // networkAccess 를 false 로 두는 것이 중요하다 — 켜면 샌드박스 안이라도 외부로 나갈 수 있다.
     case 'default':
     default:
@@ -90,7 +97,8 @@ export function turnPolicyFor(
           networkAccess: false
         },
         sandboxMode: 'workspace-write',
-        approvalPolicy: 'on-request'
+        approvalPolicy: 'on-request',
+        approvalsReviewer: 'auto_review'
       }
   }
 }

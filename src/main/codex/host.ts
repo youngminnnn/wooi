@@ -240,6 +240,19 @@ async function answerElicitation(params: unknown): Promise<{
       options: [{ label: p.url ?? '', description: p.url ?? '' }]
     })
   }
+  // openai/form은 의도적으로 opaque한 확장 포맷이다. JSON Schema `properties`가 없더라도
+  // request_plugin_install 같은 확인 요청은 반드시 사용자가 수락/거절할 수 있어야 한다.
+  // 폼 payload 자체는 Codex Apps MCP가 이미 가지고 있으므로 확인 응답에는 빈 객체면 충분하다.
+  if (questions.length === 0) {
+    questions.push({
+      question: p.message || `${p.serverName ?? 'MCP server'} requests confirmation`,
+      header: p.mode === 'openai/form' ? 'Confirm' : 'Request',
+      options: [
+        { label: 'Allow', description: 'Continue with this request' },
+        { label: 'Cancel', description: 'Do not continue' }
+      ]
+    })
+  }
   const decision = await prompt(params, {
     kind: 'question',
     toolName: 'McpElicitation',
