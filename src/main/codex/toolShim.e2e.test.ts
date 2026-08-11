@@ -97,7 +97,7 @@ describe.skipIf(!existsSync(SHIM))('codex tool shim', () => {
     expect(list.tools.map((t) => t.name)).toEqual(agentToolsFor().map((t) => t.name))
   })
 
-  it('모든 도구 스키마에 workspaceId 를 필수로 더한다', async () => {
+  it('모든 도구 스키마에 callerWorkspaceId 를 필수로 더한다', async () => {
     // 이 전송 계층은 "누가 불렀는가" 를 실어 주지 못한다 — 그래서 인자로 받는다.
     // 빠지면 메인이 호출자를 특정할 수 없어 전부 거절된다.
     const h = start({ ok: true })
@@ -106,8 +106,8 @@ describe.skipIf(!existsSync(SHIM))('codex tool shim', () => {
       tools: Array<{ inputSchema: { properties: Record<string, unknown>; required: string[] } }>
     }
     for (const tool of list.tools) {
-      expect(tool.inputSchema.properties).toHaveProperty('workspaceId')
-      expect(tool.inputSchema.required).toContain('workspaceId')
+      expect(tool.inputSchema.properties).toHaveProperty('callerWorkspaceId')
+      expect(tool.inputSchema.required).toContain('callerWorkspaceId')
     }
   })
 
@@ -119,21 +119,54 @@ describe.skipIf(!existsSync(SHIM))('codex tool shim', () => {
     }
     const create = list.tools.find((t) => t.name === 'create_stacked_workspace')!
     expect(Object.keys(create.inputSchema.properties).sort()).toEqual([
+      'callerWorkspaceId',
       'name',
-      'task',
-      'workspaceId'
+      'task'
     ])
   })
 
-  it('호출을 메인으로 넘기며 workspaceId 를 인자에서 떼어 낸다', async () => {
-    // 메인의 핸들러는 Claude 와 공유하므로 workspaceId 가 args 에 섞여 들어가면 안 된다.
+  it('대상을 인자로 받는 도구의 workspaceId 를 전송용 인자가 잡아먹지 않는다', async () => {
+    // 전송용 인자가 `workspaceId` 이던 시절, 이 세 도구는 Codex 에서 언제나 실패했다 — 모델에게는
+    // 키가 하나뿐이라 호출자와 대상을 동시에 적을 수 없었고, 구조분해가 대상을 호출자로 먹었다.
+    const h = start({ ok: true })
+    h.send({ id: 1, method: 'tools/list', params: {} })
+    const list = (await h.next(1)).result as {
+      tools: Array<{ name: string; inputSchema: { properties: Record<string, unknown> } }>
+    }
+    for (const name of ['send_to_workspace', 'notify_child', 'archive_workspace']) {
+      const props = Object.keys(list.tools.find((t) => t.name === name)!.inputSchema.properties)
+      expect(props).toContain('workspaceId')
+      expect(props).toContain('callerWorkspaceId')
+    }
+  })
+
+  it('호출자와 대상이 둘 다 있으면 대상만 메인의 args 로 간다', async () => {
+    const h = start({ ok: true, data: { delivered: false } })
+    h.send({
+      id: 1,
+      method: 'tools/call',
+      params: {
+        name: 'send_to_workspace',
+        arguments: { callerWorkspaceId: 'ws-me', workspaceId: 'ws-them', message: 'heads up' }
+      }
+    })
+    await h.next(1)
+    expect(h.forwarded()).toEqual({
+      workspaceId: 'ws-me',
+      tool: 'send_to_workspace',
+      args: { workspaceId: 'ws-them', message: 'heads up' }
+    })
+  })
+
+  it('호출을 메인으로 넘기며 callerWorkspaceId 를 인자에서 떼어 낸다', async () => {
+    // 메인의 핸들러는 Claude 와 공유하므로 전송용 인자가 args 에 섞여 들어가면 안 된다.
     const h = start({ ok: true, data: { branch: 'feat/next' } })
     h.send({
       id: 1,
       method: 'tools/call',
       params: {
         name: 'create_stacked_workspace',
-        arguments: { workspaceId: 'ws-1', name: 'feat/next', task: 'do it' }
+        arguments: { callerWorkspaceId: 'ws-1', name: 'feat/next', task: 'do it' }
       }
     })
     const res = (await h.next(1)).result as { content: Array<{ text: string }> }
@@ -152,7 +185,7 @@ describe.skipIf(!existsSync(SHIM))('codex tool shim', () => {
     h.send({
       id: 1,
       method: 'tools/call',
-      params: { name: 'create_stacked_workspace', arguments: { workspaceId: 'ws-1' } }
+      params: { name: 'create_stacked_workspace', arguments: { callerWorkspaceId: 'ws-1' } }
     })
     const res = (await h.next(1)).result as { isError: boolean; content: Array<{ text: string }> }
 

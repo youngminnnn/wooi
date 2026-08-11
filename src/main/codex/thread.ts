@@ -432,8 +432,10 @@ function codexEffort(effort: EffortSetting | null): string | undefined {
 function wooiWorkspaceInstructions(workspaceId: string): string {
   return (
     `You are running inside Wooi workspace \`${workspaceId}\`. ` +
-    'Whenever you call a `wooi` MCP tool, pass exactly that id as `workspaceId` — ' +
-    'it identifies you, and calls claiming any other workspace are rejected.'
+    'Whenever you call a `wooi` MCP tool, pass exactly that id as `callerWorkspaceId` — ' +
+    'it identifies you, and calls claiming any other workspace are rejected. ' +
+    'It is never the workspace a tool acts on: tools that operate on another workspace take ' +
+    'its id in their own `workspaceId` argument, which you fill in separately.'
   )
 }
 

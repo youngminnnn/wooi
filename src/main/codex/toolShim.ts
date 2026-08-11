@@ -55,14 +55,21 @@ function inputSchemaOf(shape: z.ZodRawShape): Record<string, unknown> {
       ...properties,
       // 전송 계층이 맥락을 실어 주지 못해 생긴 인자다. 카탈로그에는 넣지 않는다 — Claude 쪽에
       // 이 인자가 보이면 모델이 남의 워크스페이스를 지목할 길이 생긴다.
-      workspaceId: {
+      //
+      // 이름이 `workspaceId` 가 **아닌** 것이 중요하다. 한때 그랬는데, 대상을 인자로 받는 도구
+      // (`send_to_workspace` · `notify_child` · `archive_workspace`)가 같은 이름을 쓰는 바람에
+      // 아래 dispatch 의 구조분해가 **대상 id 를 호출자 id 로 먹어 버렸다.** 모델에게는 키가
+      // 하나뿐이라 둘 중 하나만 채울 수 있어, Codex 워크스페이스에서 그 세 도구가 언제나
+      // 실패했다(대상을 적으면 "호출자가 턴을 돌고 있지 않다", 자기를 적으면 "대상 id 가 없다").
+      // 전송용 인자는 카탈로그가 절대 쓰지 않을 이름을 가져야 한다.
+      callerWorkspaceId: {
         type: 'string',
         description:
-          'The Wooi workspace you are running in. Use the id given in your instructions — ' +
-          'calls from any other workspace are rejected.'
+          'The Wooi workspace you are running in — not the workspace a tool acts on. Use the id ' +
+          'given in your instructions; calls claiming any other workspace are rejected.'
       }
     },
-    required: [...required, 'workspaceId']
+    required: [...required, 'callerWorkspaceId']
   }
 }
 
@@ -119,9 +126,11 @@ async function handle(msg: JsonRpcMessage): Promise<void> {
   if (method === 'tools/call') {
     const name = String(params?.name ?? '')
     const args = (params?.arguments ?? {}) as Record<string, unknown>
-    const { workspaceId, ...rest } = args
+    // 전송용 인자만 떼어 낸다. 나머지는 도구가 정의한 그대로 메인으로 간다 — 대상 id 를 받는
+    // 도구의 `workspaceId` 도 여기 남아야 한다(위 스키마 주석).
+    const { callerWorkspaceId, ...rest } = args
     try {
-      const data = await callMain(String(workspaceId ?? ''), name, rest)
+      const data = await callMain(String(callerWorkspaceId ?? ''), name, rest)
       return send({
         id,
         result: { content: [{ type: 'text', text: JSON.stringify(data ?? null) }] }

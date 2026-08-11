@@ -34,10 +34,11 @@ backend is available for delegation.
   workspace's permission mode and normally show an approval card before running. Full
   Access runs them without approval.
 - Claude's in-process server knows the caller from the session. The Codex transport
-  adds a required `workspaceId` transport argument. Codex receives the correct value in
-  its instructions, and Wooi rejects values that do not identify the workspace whose
-  turn is currently running. This argument is transport metadata and is omitted from
-  the logical inputs below.
+  adds a required `callerWorkspaceId` transport argument. Codex receives the correct value
+  in its instructions, and Wooi rejects values that do not identify the workspace whose
+  turn is currently running. It is deliberately not named `workspaceId`, which several
+  tools use for the workspace they act on; the two must be fillable at the same time.
+  This argument is transport metadata and is omitted from the logical inputs below.
 - Tool failures are returned to the agent as readable MCP errors so it can correct the
   request and retry.
 
