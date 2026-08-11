@@ -845,9 +845,9 @@
           review lands on the diff instead of in a transcript.</span
         >
         <span class="ko"
-          >에이전트를 나란히 돌리는 건 가로축입니다. Wooi 는 세로축을 더합니다 — 이어지는 작업은
+          >에이전트를 나란히 돌리는 건 가로축입니다. Wooi 는 세로축을 더합니다. 이어지는 작업은
           자기가 딛고 선 작업에서 분기하고, 부모가 병합돼도 체인 전체가 유효하게 남습니다. 그 체인은
-          에이전트가 내장 도구로 직접 쌓고, 리뷰는 읽고 마는 기록이 아니라 diff 위에 붙습니다.</span
+          에이전트가 내장 도구로 직접 쌓고, 리뷰는 채팅 로그가 아니라 diff 위에 붙습니다.</span
         >
       </p>
 
@@ -920,7 +920,7 @@
             <div class="emoji">🧱</div>
             <h3>
               <span class="en">Stacked PRs are a first-class citizen</span
-              ><span class="ko">Stacked PR 이 1급 시민입니다</span>
+              ><span class="ko">Stacked PR 이 곁다리가 아니라 기본입니다</span>
             </h3>
             <p>
               <span class="en"
@@ -936,9 +936,9 @@
               <span class="ko"
                 >지금 서 있는 브랜치뿐 아니라 앱 전체가 "체인"을 압니다. 앞선 작업 위에서 이어지는
                 작업은 기본 브랜치가 아니라 그 작업의 브랜치에서 분기합니다.
-                <strong>Restack</strong> 은 최신 부모 위로 rebase 하고, 부모가 병합되면
+                <strong>Restack</strong> 은 최신 부모 위로 rebase 합니다. 부모가 병합되면
                 <strong>병합 캐스케이드</strong>가 자식 PR 의 base 를 조부모로 옮기고 자식들을 그
-                위로 rebase 합니다. base 가 어긋난 PR 은 조용히 받아들이는 대신 알려 줍니다.
+                위로 rebase 합니다. base 가 어긋난 PR 은 조용히 넘어가지 않고 알려 줍니다.
                 <code>git checkout -b</code> 와 <code>gh pr create</code> 로 손수 만든 체인도 PR 의
                 base 링크에서 복원해 똑같이 보여 줍니다.</span
               >
@@ -948,7 +948,7 @@
             <div class="emoji">🤖</div>
             <h3>
               <span class="en">Agents orchestrate the app, not just the repo</span
-              ><span class="ko">에이전트가 리포가 아니라 앱을 조종합니다</span>
+              ><span class="ko">에이전트가 앱을 조종합니다</span>
             </h3>
             <p>
               <span class="en"
@@ -962,11 +962,11 @@
               >
               <span class="ko"
                 >모든 세션에 내장 MCP 서버가 붙습니다. <code>check_related_work</code> 로 다른
-                워크스페이스가 건드리는 파일을 <em>시작하기 전에</em> 확인하고,
+                워크스페이스가 건드리는 파일을 <em>시작하기 전에</em> 확인합니다.
                 <code>create_workspace</code>·<code>create_stacked_workspace</code> 로 작업을 리뷰
-                가능한 PR 체인으로 쪼개며, <code>report_to_parent</code>·<code>notify_child</code>
-                로 결과를 체인을 따라 주고받습니다. 울타리도 있습니다 — 자기가 만든 워크스페이스만
-                겨냥할 수 있고, 형제와 공유되는 건 <em>파일 경로뿐</em>, diff 는 절대 넘기지
+                가능한 PR 체인으로 쪼개고, <code>report_to_parent</code>·<code>notify_child</code>
+                로 결과를 체인을 따라 주고받습니다. 울타리도 있습니다. 자기가 만든 워크스페이스만
+                겨냥할 수 있고, 형제와 공유되는 건 <em>파일 경로뿐</em>입니다. diff 는 절대 넘기지
                 않습니다.</span
               >
             </p>
@@ -975,7 +975,7 @@
             <div class="emoji">🔍</div>
             <h3>
               <span class="en">Review is a workspace, not a paragraph</span
-              ><span class="ko">리뷰는 한 문단이 아니라 작업 공간입니다</span>
+              ><span class="ko">리뷰 자체가 하나의 작업 공간입니다</span>
             </h3>
             <p>
               <span class="en"
@@ -988,9 +988,9 @@
               <span class="ko"
                 >PR 리뷰는 이제 어떤 에이전트든 합니다. 없는 건 그 결과를 다룰 자리입니다. Wooi 의
                 리뷰는 전용 worktree 를 가진 독립 엔티티입니다. 지적은 심각도 배지와 함께 diff 줄에
-                앵커되고 — 고치고, 버리고, 낱개로든 한꺼번에든 게시합니다. 파일의
-                <strong>봤음</strong> 표시는 새 커밋이 그 파일을 바꾸면 저절로 풀리고, 답글은 주기적
-                으로 가져와 이어서 물어볼 수 있으며, 판정에는 가드가 있습니다.</span
+                앵커됩니다. 고치고 버리고 낱개로든 한꺼번에든 게시합니다. 파일의
+                <strong>봤음</strong> 표시는 새 커밋이 그 파일을 바꾸면 저절로 풀립니다. 답글은
+                주기적으로 가져와 이어서 물어볼 수 있고, 판정에는 가드가 있습니다.</span
               >
             </p>
           </div>
@@ -1009,7 +1009,7 @@
                 status line, and your own MCP servers inherited from your CLI config.</span
               >
               <span class="ko"
-                >Claude Code 와 OpenAI Codex 를 최소 공통분모로 깎는 대신 각자의 조작 방식까지
+                >Claude Code 와 OpenAI Codex 를 최소 공통분모로 합치지 않고 각자의 조작 방식까지
                 따라갑니다. 백엔드가 지원할 때의 <code>/rewind</code>·<code>/btw</code>, 백엔드별
                 권한 모드, reasoning effort 와 fast mode, 상태줄 하나로 정규화한 계정 레이트리밋,
                 그리고 사용자가 CLI 에 설정해 둔 MCP 서버 승계까지.</span
@@ -1030,10 +1030,10 @@
                 carried into every new worktree, and sessions resume across restarts.</span
               >
               <span class="ko"
-                >텔레메트리도, 자체 서버도 없습니다 — 설정과 대화 기록은 내 컴퓨터에만 남습니다.
-                업데이트는 돌아가는 턴을 끊는 대신 <strong>"작업이 다 끝나면 재시작"</strong> 을
-                기다릴 수 있고, <code>.env</code> 처럼 git 이 추적하지 않지만 꼭 필요한 파일은 새
-                worktree 마다 전달됩니다. 세션은 앱을 껐다 켜도 복원됩니다.</span
+                >텔레메트리도, 자체 서버도 없습니다. 설정과 대화 기록은 내 컴퓨터에만 남습니다.
+                업데이트는 돌아가는 턴을 끊지 않고 <strong>"작업이 다 끝나면 재시작"</strong> 을
+                기다릴 수 있습니다. <code>.env</code> 처럼 git 이 추적하지 않지만 꼭 필요한 파일은
+                새 worktree 마다 전달됩니다. 세션은 앱을 껐다 켜도 복원됩니다.</span
               >
             </p>
           </div>
@@ -1309,9 +1309,9 @@
                 >
                 <span class="ko"
                   >Wooi 가 띄우는 모든 Claude Code·Codex 세션에 <code>wooi</code> 서버가 붙습니다.
-                  에이전트는 자기 worktree 의 파일만 고치는 게 아니라 Wooi 자체를 조종합니다 —
-                  작업을 쪼개고, 조각마다 워크스페이스를 열고, 의존 순서대로 쌓고, 결과를 체인을
-                  따라 넘깁니다.</span
+                  에이전트는 자기 worktree 의 파일만 고치지 않습니다. Wooi 자체를 조종합니다. 작업을
+                  쪼개고, 조각마다 워크스페이스를 열고, 의존 순서대로 쌓고, 결과를 체인을 따라
+                  넘깁니다.</span
                 >
               </li>
               <li>
@@ -1327,10 +1327,10 @@
                   workspaces.</span
                 >
                 <span class="ko"
-                  ><code>check_related_work</code> 는 이 리포에 열려 있는 다른 워크스페이스와 각각이
-                  바꾸는 경로를 알려 주고, 이 에이전트가 건드리려는 경로와 겹치면 사용자에게 먼저
-                  물어보라고 안내합니다. 넘어가는 건 경로뿐 — diff 는 워크스페이스 사이를 넘지
-                  않습니다.</span
+                  ><code>check_related_work</code> 는 이 리포에 열려 있는 다른 워크스페이스가 각각
+                  어떤 경로를 바꾸는지 알려 줍니다. 이 에이전트가 건드리려는 경로와 겹치면
+                  사용자에게 먼저 물어보라고 안내합니다. 넘어가는 건 경로뿐입니다. diff 는
+                  워크스페이스 사이를 넘지 않습니다.</span
                 >
               </li>
               <li>
@@ -1346,7 +1346,7 @@
                   agent's turn immediately.</span
                 >
                 <span class="ko"
-                  ><code>create_workspace</code> 는 기본 브랜치에서 독립 워크스페이스를,
+                  ><code>create_workspace</code> 는 기본 브랜치에서 독립 워크스페이스를 만듭니다.
                   <code>create_stacked_workspace</code> 는 현재 브랜치의 커밋된 끝에서 자식
                   워크스페이스를 만듭니다. 둘 다 첫 메시지를 함께 넘겨 새 에이전트의 턴을 바로
                   시작할 수 있습니다.</span
@@ -1365,8 +1365,8 @@
                   that starts a turn in a child.</span
                 >
                 <span class="ko"
-                  ><code>report_to_parent</code> 은 부모의 턴을 끊지 않고 결과를 기록하고,
-                  <code>check_stacked_work</code> 는 자식들의 브랜치·PR 상태·최신 보고를 나열하며,
+                  ><code>report_to_parent</code> 은 부모의 턴을 끊지 않고 결과를 기록합니다.
+                  <code>check_stacked_work</code> 는 자식들의 브랜치·PR 상태·최신 보고를 나열합니다.
                   <code>notify_child</code> 는 자식에게 소식을 보내 턴을 시작합니다.</span
                 >
               </li>
@@ -1379,9 +1379,9 @@
                   card.</span
                 >
                 <span class="ko"
-                  >대부분의 도구는 호출한 워크스페이스에만 작용하고, 워크스페이스 id 를 받는 도구는
-                  호출자가 직접 만든 것만 겨냥할 수 있습니다. 읽기 전용 도구는 승인 없이 돌고,
-                  상태를 바꾸는 도구는 권한 모드를 따라 승인 카드를 띄웁니다.</span
+                  >대부분의 도구는 호출한 워크스페이스에만 작용합니다. 워크스페이스 id 를 받는
+                  도구는 호출자가 직접 만든 것만 겨냥할 수 있습니다. 읽기 전용 도구는 승인 없이
+                  돌고, 상태를 바꾸는 도구는 권한 모드를 따라 승인 카드를 띄웁니다.</span
                 >
               </li>
             </ul>
@@ -1463,7 +1463,7 @@
                 >
                 <span class="ko"
                   >파일에 <strong>봤음</strong> 표시를 하면 접혀 비켜 줍니다. 이 표시는 파일 내용의
-                  지문과 함께 저장되므로, 새 커밋이 그 파일을 바꾸면 저절로 안 본 상태로 돌아가고
+                  지문과 함께 저장되므로 새 커밋이 그 파일을 바꾸면 저절로 안 본 상태로 돌아갑니다.
                   바뀌지 않은 파일은 표시가 그대로 남습니다.</span
                 >
               </li>
@@ -1595,7 +1595,7 @@
                 <span class="ko"
                   >Claude Code 는 default·accept edits·plan·auto 를, Codex 는 read only·auto·full
                   access·plan 을 제공합니다. 권한 프롬프트는 Allow/Deny 외에 "Always allow" 도
-                  제공합니다 — Enter=Allow / Esc=Deny.</span
+                  제공합니다(Enter=Allow / Esc=Deny).</span
                 >
               </li>
               <li>
@@ -1612,8 +1612,8 @@
                 >
                 <span class="ko"
                   ><code>/rewind</code>(파일 체크포인트로 되돌리기)와 <code>/btw</code>(턴을
-                  흐트러뜨리지 않는 곁가지 질문)는 백엔드가 지원할 때 나타나고, 턴 중간 steering 도
-                  되는 쪽에서는 큐잉 대신 그대로 씁니다.</span
+                  흐트러뜨리지 않는 곁가지 질문)는 백엔드가 지원할 때 나타납니다. 턴 중간 steering
+                  도 되는 쪽에서는 큐잉 없이 그대로 씁니다.</span
                 >
               </li>
               <li>
@@ -1628,8 +1628,8 @@
                   the number doesn't swap out from under you.</span
                 >
                 <span class="ko"
-                  >양쪽 백엔드의 계정 사용량을 상태줄 하나로 보여 주되, 실제로 페이스를 좌우하는
-                  창에 고정합니다(Claude 는 5시간 세션 창, Codex 는 주간 창). 볼 때마다 다른 숫자로
+                  >양쪽 백엔드의 계정 사용량을 상태줄 하나로 보여 주되 실제로 페이스를 좌우하는 창에
+                  고정합니다(Claude 는 5시간 세션 창, Codex 는 주간 창). 볼 때마다 다른 숫자로
                   바뀌지 않습니다.</span
                 >
               </li>
@@ -1700,7 +1700,7 @@
                   keeps that agent, and stacked workspaces inherit their parent's.</span
                 >
                 <span class="ko"
-                  >워크스페이스를 만들 때 코딩 에이전트를 고르고, 첫 메시지 전까지는
+                  >워크스페이스를 만들 때 코딩 에이전트를 고르고 첫 메시지 전까지는
                   <code>/agent</code> 로 바꿀 수 있습니다. 그 뒤로는 그 에이전트를 유지하며,
                   스택으로 만든 워크스페이스는 부모의 에이전트를 물려받습니다.</span
                 >
@@ -1838,8 +1838,8 @@
                   every workspace is idle, then restarts on its own.</span
                 >
                 <span class="ko"
-                  >턴이 도는 중에 재시작하면 에이전트가 끊깁니다. 그래서 준비된 업데이트를 지금 설치
-                  하거나 <strong>Restart when work finishes</strong> 로 미룰 수 있습니다 — 모든
+                  >턴이 도는 중에 재시작하면 에이전트가 끊깁니다. 그래서 준비된 업데이트를 지금
+                  설치하거나 <strong>Restart when work finishes</strong> 로 미룰 수 있습니다. 모든
                   워크스페이스가 잠잠해지면 알아서 재시작합니다.</span
                 >
               </li>
