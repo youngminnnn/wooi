@@ -174,7 +174,9 @@ const api: WooiApi = {
     mcpAction: (workspaceId, serverName, action) =>
       ipcRenderer.invoke(IPC.mcpAction, workspaceId, serverName, action),
     rewindAction: (workspaceId, userMessageId) =>
-      ipcRenderer.invoke(IPC.commandRewindAction, workspaceId, userMessageId)
+      ipcRenderer.invoke(IPC.commandRewindAction, workspaceId, userMessageId),
+    wooiRun: (workspaceId, name, rest) =>
+      ipcRenderer.invoke(IPC.wooiCommandRun, workspaceId, name, rest)
   },
 
   rateLimits: {

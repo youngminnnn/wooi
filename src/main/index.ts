@@ -5,6 +5,7 @@ import { IPC } from '@shared/types'
 import { applyDevPaths, isDevIsolated, wooiHome } from './paths'
 import { AgentOrchestrator } from './agent/orchestrator'
 import { initAgentTools } from './agent/tools'
+import { wooiPluginDir, writeWooiPlugin } from './agent/plugin'
 import { cancelToolPermissions, initToolPermission } from './agent/tools/permission'
 import { startToolSocket, stopToolSocket } from './agent/tools/socket'
 import { setCodexStatusProvider } from './auth'
@@ -140,6 +141,16 @@ initAgentTools({
     dispatch(IPC.evtChat, { workspaceId, event: { type: 'item', item } })
   }
 })
+
+// `/wooi:*` 슬래시 명령을 담은 Claude 플러그인을 디스크에 만든다([[agent/plugin]]).
+// 매번 다시 쓴다 — 카탈로그가 SSOT 이므로 앱을 업데이트하면 명령도 함께 바뀌어야 한다.
+// 실패해도 앱은 정상 동작한다 — 그 명령들만 없다(resolveWooiPlugin 이 존재 여부로 거른다).
+try {
+  const dir = wooiPluginDir()
+  if (dir) writeWooiPlugin(dir)
+} catch (err) {
+  log.warn('plugin: failed to write /wooi:* slash commands; they will not be available', err)
+}
 
 // 듀얼 모니터를 위해 작업 패널·스크립트 패널을 별도 창으로 떼어 낼 수 있게 한다([[paneWindows]]).
 const panes = new PaneWindows(dispatch)

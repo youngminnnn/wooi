@@ -301,9 +301,53 @@ Solo 워크스페이스를 에이전트 팀으로 바꿉니다. 아래의 서브
 Claude 는 Wooi 서브에이전트 도구 여러 개를 동시에 시작할 수 있습니다. 현재 Codex 는 MCP 도구
 호출을 직렬화하므로 위임 여러 건이 차례로 완료됩니다.
 
+## 슬래시 명령
+
+각 도구에는 슬래시 명령도 있습니다. 에이전트가 스스로 호출하기를 기다리지 않고 직접 부를 수
+있습니다. 명령은 플러그인 이름으로 네임스페이스가 붙어 사용자의 기존 명령과 겹치지 않습니다 —
+`/wooi:pr`, `/wooi:children` 같은 형태입니다. 카탈로그는 `src/shared/wooiCommands.ts` 입니다.
+
+| 명령 | 도구 | 실행 방식 |
+| --- | --- | --- |
+| `/wooi:pr [추가 지시]` | `open_pull_request` | 에이전트 |
+| `/wooi:new <할 일>` | `create_workspace` | 에이전트 |
+| `/wooi:stack <할 일>` | `create_stacked_workspace` | 에이전트 |
+| `/wooi:report [보고 내용]` | `report_to_parent` | 에이전트 |
+| `/wooi:notify <바뀐 것>` | `notify_child` | 에이전트 |
+| `/wooi:children` | `check_stacked_work` | 즉시 |
+| `/wooi:related [경로…]` | `check_related_work` | 즉시 |
+| `/wooi:issues [개수]` | `list_issues` | 즉시 |
+| `/wooi:run <이름>` | `run_script` | 즉시 |
+| `/wooi:stop <이름>` | `stop_script` | 즉시 |
+| `/wooi:logs <이름> [줄 수]` | `read_script_output` | 즉시 |
+| `/wooi:archive <워크스페이스 id>` | `archive_workspace` | 즉시 |
+
+**즉시** 명령은 메인 프로세스에서 도구를 그대로 실행하고 결과를 카드로 보여 줍니다. 턴도 토큰도
+쓰지 않고, 승인 카드도 뜨지 않습니다 — 사용자가 직접 이름을 쳐서 부른 것이라 확인할 것이 없기
+때문입니다. 위 표에 있는 명령만 이 경로로 실행되고, 인자도 파서를 통과한 것만 도구에 닿습니다.
+
+**에이전트** 명령은 요청을 에이전트에게 넘깁니다. 인자가 대화 맥락을 읽어야 쓸 수 있는 산문이기
+때문입니다 — PR 본문, 인계문, 보고서가 그렇습니다. 명령은 "이 도구를 부르라"는 프롬프트로
+확장됩니다.
+
+### 백엔드별 처리
+
+Wooi 는 시작할 때 카탈로그에서 Claude Code 플러그인을 만들어 `userData` 아래에 씁니다
+(`src/main/agent/plugin.ts`). 이 플러그인은 `skipMcpDiscovery` 와 함께 세션에 전달됩니다 —
+`wooi` MCP 서버는 Wooi 가 이미 인프로세스로 제공하기 때문입니다. 그 뒤로는 Claude Code 가
+자동완성 항목과 프롬프트 확장을 모두 맡으므로, 명령 목록을 어디에도 하드코딩하지 않습니다.
+
+Codex 는 같은 플러그인 포맷을 읽지만 슬래시 명령 처리가 TUI 쪽에 있고, Wooi 가 사용하는
+app-server 프로토콜에는 명령을 나열하거나 확장하는 RPC 가 없습니다. 그래서 Codex 에서는 Wooi 가
+자동완성 항목을 직접 싣고 프롬프트도 직접 확장합니다(`src/main/codex/manager.ts`). 즉시 명령은
+입력창에서 가로채므로 두 백엔드에서 동일하게 동작합니다.
+
 ## 구현 위치
 
 도구 카탈로그와 스키마는 `src/main/agent/tools/catalog.ts`, 핸들러 등록은
 `src/main/agent/tools/index.ts` 에 있습니다. Claude 는 `src/main/claude/wooiMcp.ts` 의 인프로세스
 어댑터를, Codex 는 `src/main/codex/toolShim.ts` 의 stdio 어댑터를 사용합니다. 두 전송 계층 모두
 실행을 같은 registry 와 `src/main/agent/tools/` 아래 핸들러로 전달합니다.
+
+슬래시 명령 카탈로그는 `src/shared/wooiCommands.ts`, 생성되는 Claude 플러그인은
+`src/main/agent/plugin.ts`, 즉시 실행은 `src/main/ipc.ts` 의 `command:wooiRun` 핸들러가 맡습니다.

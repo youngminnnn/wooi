@@ -2300,6 +2300,11 @@ export const IPC = {
   /** /rewind 패널에서 고른 체크포인트로 코드를 되돌린다(SDK rewindFiles). */
   commandRewindAction: 'command:rewindAction',
   /**
+   * `/wooi:*` 중 즉시 실행 명령을 에이전트를 거치지 않고 메인에서 바로 실행한다
+   * ([[shared/wooiCommands]] 의 mode: 'direct'). 턴도 토큰도 쓰지 않는다.
+   */
+  wooiCommandRun: 'command:wooiRun',
+  /**
    * 계정 레이트리밋 스냅샷을 즉시 다시 조회한다(상태줄 팝오버의 수동 갱신).
    * 평소 갱신은 턴 종료·주기 폴링이 알아서 하므로, 이건 stale 을 본 사용자가 누르는 탈출구다.
    */

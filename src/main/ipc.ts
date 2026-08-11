@@ -88,6 +88,8 @@ import {
   workspaceStack
 } from '@shared/types'
 import { resolveToolPermission } from './agent/tools/permission'
+import { runAgentTool } from './agent/tools'
+import { parseWooiCommandArgs, WOOI_COMMANDS } from '@shared/wooiCommands'
 import { appendMemory } from './claude/memory'
 import { claudeConfigPath, mcpInventory } from './claude/mcp'
 import {
@@ -2121,6 +2123,38 @@ export function registerIpc(ctx: IpcContext): void {
         const servers = await ctx.sessions.mcpAction(workspaceId, serverName, action)
         return { servers }
       } catch (err) {
+        return { error: err instanceof Error ? err.message : String(err) }
+      }
+    }
+  )
+
+  /**
+   * `/wooi:*` 즉시 실행 명령 — 에이전트를 거치지 않고 도구를 그대로 돌린다.
+   *
+   * 승인 카드를 띄우지 않는다. 승인은 "모델이 하려는 일을 사람이 확인한다" 는 장치인데 여기서는
+   * 사람이 직접 이름을 쳐서 부른 것이라 물을 것이 없다 — `/diff`·`/add-dir` 이 묻지 않는 것과 같다.
+   * 대신 실행할 수 있는 것은 [[shared/wooiCommands]] 의 `direct` 목록으로 닫혀 있고, 인자도
+   * 그 파서를 통과한 것만 도구에 닿는다. 렌더러가 임의의 도구 이름을 흘려보낼 수 없다.
+   */
+  ipcMain.handle(
+    IPC.wooiCommandRun,
+    async (
+      _e,
+      workspaceId: string,
+      name: string,
+      rest: string
+    ): Promise<{ result?: unknown; error?: string }> => {
+      const spec = WOOI_COMMANDS.find((c) => c.name === name && c.mode === 'direct')
+      if (!spec) return { error: `Unknown Wooi command: /wooi:${name}` }
+
+      const parsed = parseWooiCommandArgs(spec.name, rest ?? '')
+      if ('error' in parsed) return { error: parsed.error }
+
+      try {
+        return { result: await runAgentTool(workspaceId, spec.tool, parsed.args) }
+      } catch (err) {
+        // 도구가 던지는 문장은 사람이 읽도록 쓰여 있다(예: "커밋하고 다시 호출하라").
+        // 모델에게 갈 때와 같은 문장을 카드에 그대로 보여 준다.
         return { error: err instanceof Error ? err.message : String(err) }
       }
     }

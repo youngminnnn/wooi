@@ -3,6 +3,7 @@ import type { SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
 import { AsyncQueue } from './asyncQueue'
 import { resolveClaudeExecutable } from './executable'
 import { MCP_SETTING_SOURCES } from './mcp'
+import { resolveWooiPlugin } from '../agent/plugin'
 import { INTERACTIVE_COMMANDS } from '@shared/types'
 import type { SlashCommandInfo } from '@shared/types'
 
@@ -87,12 +88,18 @@ async function fetchCommands(cwd: string): Promise<SlashCommandInfo[]> {
   // session.ts 와 동일 — 패키징 빌드에서 app.asar 내부 경로로 CLI 를 spawn 해 ENOTDIR 로
   // 실패하면 명령 목록이 빈 채로 와 자동완성이 안 뜨므로, unpacked 바이너리 경로를 명시한다.
   const claudeExecutable = resolveClaudeExecutable()
+  // 세션과 같은 플러그인을 물린다 — 그래야 `/wooi:*` 가 이 목록에 실려 자동완성에 뜬다.
+  // 여기서 빠뜨리면 세션에서는 동작하는데 입력창에서는 보이지 않는, 찾기 어려운 어긋남이 된다.
+  const wooiPlugin = resolveWooiPlugin()
   const q = query({
     prompt: input,
     options: {
       cwd,
       // 프로젝트/유저 스코프 슬래시 명령·스킬이 자동완성에 뜨도록 CLI 와 동일하게 설정을 로드.
       settingSources: MCP_SETTING_SOURCES,
+      ...(wooiPlugin
+        ? { plugins: [{ type: 'local' as const, path: wooiPlugin, skipMcpDiscovery: true }] }
+        : {}),
       ...(claudeExecutable ? { pathToClaudeCodeExecutable: claudeExecutable } : {})
     }
   })

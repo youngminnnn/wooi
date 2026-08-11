@@ -18,6 +18,7 @@ import { log } from '../logger'
 import { MCP_SETTING_SOURCES, resolveUserMcpServers } from './mcp'
 import { isReadOnlyWooiTool, WOOI_MCP_SERVER_NAME } from '../agent/tools/catalog'
 import { delegateShellAttempt, delegateShellGuidance } from '../agent/delegateShell'
+import { resolveWooiPlugin } from '../agent/plugin'
 import { fastModeReasonText, planApprovalMode, PLAN_OPTIONS } from '@shared/types'
 import { asClaudeMode, claudeEffort, claudeMode, type ClaudePermissionMode } from './protocol'
 import type {
@@ -684,6 +685,7 @@ export class ClaudeSession {
       // effort 옵션으로 그대로 넘기고, null 이면 아무것도 넘기지 않아 모델 기본 동작을 따른다.
       const ultracode = this.deps.effort === 'ultracode'
       const sdkEffort = claudeEffort(this.deps.effort)
+      const wooiPlugin = resolveWooiPlugin()
       this.q = query({
         prompt: this.promptStream(this.input),
         options: {
@@ -746,6 +748,12 @@ export class ClaudeSession {
             ? { additionalDirectories: this.deps.additionalDirs }
             : {}),
           ...(Object.keys(mcpServers).length ? { mcpServers } : {}),
+          // `/wooi:*` 슬래시 명령을 싣는 로컬 플러그인([[agent/plugin]]). 명령만 가져오고 MCP
+          // 탐색은 건너뛴다 — `wooi` 서버는 바로 위에서 인프로세스로 직접 넘기고 있으므로,
+          // CLI 가 플러그인 쪽에서 같은 서버를 또 찾게 두면 안 된다.
+          ...(wooiPlugin
+            ? { plugins: [{ type: 'local' as const, path: wooiPlugin, skipMcpDiscovery: true }] }
+            : {}),
           ...(claudeExecutable ? { pathToClaudeCodeExecutable: claudeExecutable } : {}),
           ...(this.deps.model ? { model: this.deps.model } : {}),
           // reasoning effort 가 지정돼 있으면 그대로 전달한다(ultracode 는 settings 로 처리하므로 제외).
