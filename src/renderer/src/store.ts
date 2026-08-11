@@ -9,6 +9,7 @@ import type {
   CarryFailure,
   ChatEnvelope,
   ChatItem,
+  ComposerAttachment,
   EffortSetting,
   GitStatus,
   ImageAttachment,
@@ -50,7 +51,7 @@ export const scriptKey = (workspaceId: string, scriptId: string): string =>
   `${workspaceId}:${scriptId}`
 
 /** 대기 중인 첨부가 없을 때 돌려주는 고정 배열(매번 새 배열을 만들면 구독자가 헛되이 다시 그린다). */
-const EMPTY_ATTACHMENTS: ImageAttachment[] = []
+const EMPTY_ATTACHMENTS: ComposerAttachment[] = []
 
 /**
  * 일괄 승인(⇧⌘A)이 대신 눌러 줘도 되는 요청인지.
@@ -237,7 +238,7 @@ interface UIState {
    * (Preview 는 분리한 work 창에서도 돈다). 지금 보고 있지 않은 워크스페이스로 찍었더라도
    * 그 워크스페이스로 돌아가면 컴포저가 그때 집어 간다.
    */
-  composerAttachments: Record<string, ImageAttachment[]>
+  composerAttachments: Record<string, ComposerAttachment[]>
   gitStatus: Record<string, GitStatus | null>
   prStatus: Record<string, PrStatus | null>
   /** workspace 별 PR 상태 조회 진행 여부(브랜치 전환·새로고침 중 헤더에 로딩 표시). */
@@ -436,7 +437,7 @@ interface UIState {
    */
   seedScriptOutput: (workspaceId: string, scriptId: string) => Promise<void>
   /** 대기 중인 첨부를 컴포저로 넘긴다(꺼내면 목록에서 사라진다 — 두 번 붙지 않게). */
-  takeComposerAttachments: (workspaceId: string) => ImageAttachment[]
+  takeComposerAttachments: (workspaceId: string) => ComposerAttachment[]
   refreshAuth: () => Promise<void>
   /** 에이전트 백엔드 메타 + 백엔드별 모델 목록을 다시 읽는다(가용성은 실행 중에도 바뀐다). */
   refreshAgents: () => Promise<void>
@@ -1107,11 +1108,11 @@ export const useStore = create<UIState>((set, get) => ({
 
     // Preview 스크린샷. 방송은 모든 창이 받지만 컴포저는 메인 창에만 있으므로 여기서만 모은다
     // (분리한 창에서 모으면 아무도 집어 가지 않는 이미지가 그 창의 메모리에 쌓인다).
-    window.api.onComposerAttach(({ workspaceId, image }) => {
+    window.api.onComposerAttach(({ workspaceId, ...attachment }) => {
       set((s) => ({
         composerAttachments: {
           ...s.composerAttachments,
-          [workspaceId]: [...(s.composerAttachments[workspaceId] ?? []), image]
+          [workspaceId]: [...(s.composerAttachments[workspaceId] ?? []), attachment]
         }
       }))
     })

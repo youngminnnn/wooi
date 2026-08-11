@@ -218,8 +218,9 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
   }
 
   /**
-   * Preview 스크린샷 받기. 캡처는 다른 창(분리한 work 창)에서 일어날 수 있어 store 를 우편함처럼
-   * 쓴다 — 도착한 이미지를 여기서 꺼내 붙여넣기와 같은 대기 첨부로 올린다.
+   * Preview 가 보내온 것(스크린샷·고른 요소) 받기. 캡처와 픽커는 다른 창(분리한 work 창)에서
+   * 일어날 수 있어 store 를 우편함처럼 쓴다 — 도착한 것을 여기서 꺼내 이미지는 붙여넣기와 같은
+   * 대기 첨부로, 텍스트는 초안 끝으로 올린다.
    *
    * 위의 "워크스페이스 전환 시 비우기" 이펙트보다 **뒤에** 있어야 한다. 앞에 두면 워크스페이스를
    * 옮기는 순간 방금 꺼낸 첨부가 그 초기화에 함께 지워진다(이펙트는 선언 순서대로 실행된다).
@@ -229,15 +230,27 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
   useEffect(() => {
     if (!pendingAttachments?.length) return
     const taken = takeAttachments(workspace.id)
-    setImages((prev) => [
-      ...prev,
-      ...taken.map((img) => ({
-        ...img,
-        id: `img:${imgSeq.current++}`,
-        previewUrl: `data:${img.mediaType};base64,${img.dataBase64}`
-      }))
-    ])
-  }, [pendingAttachments, takeAttachments, workspace.id])
+
+    const images = taken.map((a) => a.image).filter((img) => img != null)
+    if (images.length)
+      setImages((prev) => [
+        ...prev,
+        ...images.map((img) => ({
+          ...img,
+          id: `img:${imgSeq.current++}`,
+          previewUrl: `data:${img.mediaType};base64,${img.dataBase64}`
+        }))
+      ])
+
+    // 초안은 store 가 들고 있으므로 최신 값을 그때 읽어 이어 붙인다 — 이 이펙트의 클로저가 본
+    // text 로 덮어쓰면 그사이 사용자가 친 글자가 사라진다.
+    const blocks = taken.map((a) => a.text).filter((t) => t != null && t.trim() !== '')
+    if (blocks.length) {
+      const current = useStore.getState().drafts[workspace.id] ?? ''
+      setDraft(workspace.id, [current.trimEnd(), ...blocks].filter(Boolean).join('\n\n') + '\n\n')
+      taRef.current?.focus()
+    }
+  }, [pendingAttachments, takeAttachments, setDraft, workspace.id])
 
   /** 클립보드의 이미지를 첨부로 받는다. 이미지가 하나라도 있으면 기본 텍스트 붙여넣기를 막는다. */
   const onPaste = (e: React.ClipboardEvent<HTMLTextAreaElement>): void => {

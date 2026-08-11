@@ -138,7 +138,7 @@ import type {
 } from '@shared/types'
 import type { AgentOrchestrator } from './agent/orchestrator'
 import type { PaneWindows } from './paneWindows'
-import { capturePreview } from './preview'
+import { cancelPreviewPick, capturePreview, pickPreviewElement } from './preview'
 import type { ScriptRunner } from './scripts'
 import type { TerminalManager } from './terminal'
 
@@ -1030,6 +1030,21 @@ export function registerIpc(ctx: IpcContext): void {
     if (error || !image) return { error: error ?? 'Could not capture the preview.' }
     dispatch(IPC.evtComposerAttach, { workspaceId, image })
     return {}
+  })
+
+  // 요소 픽커. 사용자가 고를 때까지(또는 취소·타임아웃까지) 이 핸들러가 매달려 있는다 —
+  // 렌더러는 그동안 "고르는 중" 을 보여 주고, 결과는 캡처와 같은 우편함으로 흘러간다.
+  ipcMain.handle(IPC.previewPickElement, async (_e, workspaceId: string, webContentsId: number) => {
+    const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
+    if (!ws) return { error: 'That workspace is gone.' }
+    const { attachment, error } = await pickPreviewElement(ws.previewUrl ?? '', webContentsId)
+    if (error || !attachment) return { error: error ?? 'Could not read that element.' }
+    dispatch(IPC.evtComposerAttach, { workspaceId, ...attachment })
+    return {}
+  })
+
+  ipcMain.handle(IPC.previewCancelPick, (_e, webContentsId: number) => {
+    cancelPreviewPick(webContentsId)
   })
 
   // ── 분리한 패널 창 ─────────────────────────────────────────────────────

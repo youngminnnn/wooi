@@ -1,7 +1,10 @@
 import { app, session, shell, webContents } from 'electron'
+import type { WebContents } from 'electron'
 import { PREVIEW_PARTITION } from '@shared/types'
-import type { ImageAttachment, PreviewCaptureResult } from '@shared/types'
+import type { ComposerAttachment, ImageAttachment, PreviewCaptureResult } from '@shared/types'
 import { previewLabel } from '@shared/devUrl'
+import { formatPickedElement } from '@shared/previewPick'
+import { cancelPick, pickElement } from './previewPicker'
 import { log } from './logger'
 
 /**
@@ -75,23 +78,30 @@ export function initPreview(): void {
 }
 
 /**
- * Preview 화면을 PNG 로 캡처한다.
+ * webContents id 로 Preview 게스트를 찾는다. 못 찾거나 Preview 가 아니면 에러 문구를 돌려준다.
  *
- * webContents id 를 렌더러에서 받지만 그대로 믿지 않는다 — id 는 그냥 숫자라, 확인 없이 캡처하면
- * "아무 webContents 나 찍어 달라" 는 요청이 된다(다른 워크스페이스의 화면이든 앱 자신이든).
- * 그래서 대상이 정말 Preview 게스트인지(type + 파티션) 확인한 뒤에만 찍는다.
+ * 렌더러가 준 id 를 그대로 믿지 않는 것이 요점이다 — id 는 그냥 숫자라, 확인 없이 받으면
+ * "아무 webContents 나 찍어(뒤져) 달라" 는 요청이 된다(다른 워크스페이스의 화면이든 앱 자신이든).
+ * 캡처와 요소 픽커가 같은 관문을 쓰도록 한곳에 둔다.
  */
+function resolveGuest(webContentsId: number): { guest: WebContents } | { error: string } {
+  const guest = webContents.fromId(webContentsId)
+  if (!guest || guest.isDestroyed()) return { error: 'The preview is not ready yet.' }
+  if (guest.getType() !== 'webview' || guest.session !== session.fromPartition(PREVIEW_PARTITION))
+    return { error: 'Refused to inspect that view.' }
+  return { guest }
+}
+
+/** Preview 화면을 PNG 로 캡처한다. */
 export async function capturePreview(
   url: string,
   webContentsId: number
 ): Promise<PreviewCaptureResult & { image?: ImageAttachment }> {
-  const target = webContents.fromId(webContentsId)
-  if (!target || target.isDestroyed()) return { error: 'The preview is not ready yet.' }
-  if (target.getType() !== 'webview' || target.session !== session.fromPartition(PREVIEW_PARTITION))
-    return { error: 'Refused to capture that view.' }
+  const target = resolveGuest(webContentsId)
+  if ('error' in target) return target
 
   try {
-    let image = await target.capturePage()
+    let image = await target.guest.capturePage()
     if (image.isEmpty()) return { error: 'There is nothing to capture yet.' }
     if (image.getSize().width > MAX_CAPTURE_WIDTH)
       image = image.resize({ width: MAX_CAPTURE_WIDTH })
@@ -106,4 +116,42 @@ export async function capturePreview(
     log.error('preview: capturePage failed', err)
     return { error: err instanceof Error ? err.message : 'Could not capture the preview.' }
   }
+}
+
+/**
+ * 요소 픽커를 켜고, 사용자가 고른 요소를 컴포저에 넣을 형태로 만들어 돌려준다.
+ *
+ * 그림과 설명을 **한 건**으로 묶어 내보내는 것이 요점이다([[shared/types]] ComposerAttachment) —
+ * 크롭 이미지와 그 요소의 HTML·CSS 는 짝이라, 따로 흘려보내면 컴포저에서 순서가 갈린다.
+ */
+export async function pickPreviewElement(
+  url: string,
+  webContentsId: number
+): Promise<PreviewCaptureResult & { attachment?: ComposerAttachment }> {
+  const target = resolveGuest(webContentsId)
+  if ('error' in target) return target
+
+  const picked = await pickElement(target.guest)
+  if ('error' in picked) return picked
+
+  return {
+    attachment: {
+      text: formatPickedElement(picked, url),
+      ...(picked.cropBase64
+        ? {
+            image: {
+              name: `element-${previewLabel(url)}.png`,
+              mediaType: 'image/png',
+              dataBase64: picked.cropBase64
+            }
+          }
+        : {})
+    }
+  }
+}
+
+/** 진행 중인 픽을 취소한다. 대상이 Preview 게스트가 아니면 아무 일도 하지 않는다. */
+export function cancelPreviewPick(webContentsId: number): void {
+  if ('error' in resolveGuest(webContentsId)) return
+  cancelPick(webContentsId)
 }

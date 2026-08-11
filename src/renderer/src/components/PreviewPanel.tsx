@@ -5,6 +5,7 @@ import {
   Camera,
   ExternalLink,
   Loader2,
+  MousePointerClick,
   RotateCw,
   TriangleAlert,
   X
@@ -70,6 +71,8 @@ export default function PreviewPanel({
   const [failure, setFailure] = useState<string | null>(null)
   const [nav, setNav] = useState({ back: false, forward: false })
   const [capturing, setCapturing] = useState(false)
+  // 요소 픽커가 켜져 있는 동안(사용자가 게스트에서 요소를 고르는 중).
+  const [picking, setPicking] = useState(false)
 
   /** 첫 로드 주소. mount 이후 prop 이 바뀌어도 다시 로드하지 않도록 처음 값을 고정한다. */
   const initialUrl = useRef(navTarget?.url ?? workspace.previewUrl ?? '')
@@ -181,6 +184,52 @@ export default function PreviewPanel({
     remember(next)
   }
 
+  /**
+   * 요소 픽커를 켠다. main 이 CDP 로 게스트에 붙어 사용자가 고를 때까지 기다리므로([[main/previewPicker]])
+   * 이 호출은 고르거나 취소할 때까지 돌아오지 않는다 — 그동안 화면에 안내줄을 띄운다.
+   */
+  const pick = async (): Promise<void> => {
+    const view = viewRef.current
+    if (!view || !ready || picking) return
+    setPicking(true)
+    try {
+      const { error } = await window.api.preview.pickElement(workspace.id, view.getWebContentsId())
+      // 취소는 사용자가 한 일이라 에러로 떠들지 않는다.
+      if (error && error !== 'cancelled') pushToast('error', error)
+      else if (!error)
+        pushToast(
+          'success',
+          isPaneWindow
+            ? 'Element added to the composer in the main window.'
+            : 'Element added to the composer.'
+        )
+    } finally {
+      setPicking(false)
+    }
+  }
+
+  const cancelPick = (): void => {
+    const view = viewRef.current
+    if (view && picking) void window.api.preview.cancelPick(view.getWebContentsId())
+  }
+
+  // 픽커를 켠 채 패널이 사라지면(탭·워크스페이스 전환, 창 닫기) main 쪽 CDP 세션이 매달린다.
+  // 최신 상태를 ref 로 들고 있다가 언마운트 때 한 번 정리한다.
+  const cancelRef = useRef(cancelPick)
+  cancelRef.current = cancelPick
+  useEffect(() => () => cancelRef.current(), [])
+
+  // 픽커 중 Esc 로 취소. 게스트가 포커스를 쥐고 있으면 이 창의 keydown 이 오지 않을 수 있어
+  // 안내줄의 Cancel 버튼도 함께 둔다.
+  useEffect(() => {
+    if (!picking) return
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') cancelRef.current()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [picking])
+
   /** 지금 화면을 찍어 컴포저에 첨부한다. 이미지는 main 을 거쳐 컴포저가 있는 창으로 간다. */
   const capture = async (): Promise<void> => {
     const view = viewRef.current
@@ -245,8 +294,15 @@ export default function PreviewPanel({
         )}
 
         <NavButton
+          label="Pick an element and describe it to the agent"
+          disabled={!ready || !url || !active || picking}
+          onClick={() => void pick()}
+          icon={MousePointerClick}
+          activeState={picking}
+        />
+        <NavButton
           label="Attach a screenshot to the composer"
-          disabled={!ready || !url || !active || capturing}
+          disabled={!ready || !url || !active || capturing || picking}
           onClick={() => void capture()}
           icon={capturing ? Loader2 : Camera}
           spin={capturing}
@@ -258,6 +314,21 @@ export default function PreviewPanel({
           icon={ExternalLink}
         />
       </div>
+
+      {picking && (
+        <div className="shrink-0 flex items-center gap-2 px-3 py-1.5 border-b border-[var(--border)] bg-[var(--info-500)]/10">
+          <MousePointerClick size={12} className="shrink-0 text-[var(--info-400)]" />
+          <span className="min-w-0 flex-1 text-xs text-neutral-300">
+            Click an element in the preview to describe it to the agent.
+          </span>
+          <button
+            onClick={cancelPick}
+            className="shrink-0 text-xs px-2 py-0.5 rounded-md bg-[var(--surface-2)] text-neutral-300 hover:bg-[var(--surface-3)]"
+          >
+            Cancel
+          </button>
+        </div>
+      )}
 
       <div className="relative flex-1 min-h-0 bg-white">
         {/* 게스트는 항상 붙여 둔다 — 빈 화면일 때 안내를 그 위에 덮는다. 여기서 언마운트하면
@@ -284,22 +355,31 @@ function NavButton({
   disabled,
   onClick,
   icon: Icon,
-  spin
+  spin,
+  activeState
 }: {
   label: string
   disabled?: boolean
   onClick: () => void
   icon: React.ComponentType<{ size?: number; className?: string }>
   spin?: boolean
+  /** 켜져 있는 모드(요소 픽커)임을 눌린 상태로 보여 준다. */
+  activeState?: boolean
 }): React.JSX.Element {
   return (
     <button
       type="button"
       title={label}
       aria-label={label}
+      aria-pressed={activeState}
       disabled={disabled}
       onClick={onClick}
-      className="shrink-0 h-6 w-6 grid place-items-center rounded-md text-neutral-400 hover:bg-[var(--surface-2)] hover:text-neutral-100 disabled:text-neutral-700 disabled:hover:bg-transparent"
+      className={
+        'shrink-0 h-6 w-6 grid place-items-center rounded-md disabled:hover:bg-transparent ' +
+        (activeState
+          ? 'bg-[var(--info-600)] text-white disabled:text-white'
+          : 'text-neutral-400 hover:bg-[var(--surface-2)] hover:text-neutral-100 disabled:text-neutral-700')
+      }
     >
       <Icon size={13} className={spin ? 'animate-spin' : undefined} />
     </button>
