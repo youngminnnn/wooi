@@ -424,3 +424,32 @@ export function migrate(
   }
   return migrated
 }
+
+/**
+ * 마이그레이션이 손대지 못한 레코드를 현재 모양으로 메운다.
+ *
+ * 마이그레이션만으로는 부족한 경우가 실제로 있다. `schemaVersion` 이 이미 최신인 파일에
+ * **구버전 빌드가 이어서 쓰면** 그 빌드가 만든 레코드는 옛 모양인데, 버전은 최신이라 다음
+ * 부팅에서 마이그레이션이 돌지 않는다. Wooi 개발 중에는 흔한 조합이다 — `npm run dev` 는
+ * 브랜치가 달라도 같은 `Wooi (dev)` 를 쓰므로, 신·구 브랜치를 오가면 바로 이 상태가 된다.
+ *
+ * 실제로 v20 이전 빌드가 만든 워크스페이스에는 `ports` 가 없어, 새 워크스페이스를 만들 때
+ * `Object.values(w.ports)` 가 "Cannot convert undefined or null to object" 로 터졌다.
+ * 그래서 버전과 무관하게, **읽을 때마다** 컬렉션 필드가 비어 있지 않음을 보장한다.
+ *
+ * 값이 있는 필드는 절대 건드리지 않는다 — 미래 버전 파일을 구버전이 읽는 상황(다운그레이드)에서
+ * 여기서 값을 덮으면 데이터가 손상된다. 없는 것을 채우기만 한다.
+ */
+export function normalizeShape(raw: Record<string, unknown>): Record<string, unknown> {
+  const repos = ((raw.repos as Array<Record<string, unknown>>) ?? []).map((repo) =>
+    Array.isArray(repo.runScripts) ? repo : { ...repo, runScripts: [] }
+  )
+  const workspaces = ((raw.workspaces as Array<Record<string, unknown>>) ?? []).map((workspace) =>
+    isRecord(workspace.ports) ? workspace : { ...workspace, ports: {} }
+  )
+  return { ...raw, repos, workspaces }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}

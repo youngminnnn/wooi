@@ -8,6 +8,7 @@ import {
   EMPTY_STATE,
   DEFAULT_SETTINGS,
   migrate,
+  normalizeShape,
   type PersistedState
 } from './storeSchema'
 import type { AppSettings, AppState, Repo, ReviewSession, Workspace } from '@shared/types'
@@ -95,7 +96,9 @@ class Store {
         typeof rawVersion === 'number' && Number.isInteger(rawVersion) && rawVersion >= 0
           ? rawVersion
           : 0
-      const migrated = migrate(raw, version)
+      // 마이그레이션 뒤에 모양을 한 번 더 메운다 — 버전이 이미 최신인 파일에 구버전 빌드가
+      // 이어서 쓴 레코드는 마이그레이션이 손대지 못하고 지나간다([[storeSchema]] normalizeShape).
+      const migrated = normalizeShape(migrate(raw, version))
 
       // 부팅 시점엔 살아 있는 Claude 세션이 하나도 없다(세션은 첫 메시지 때 lazy 생성).
       // 따라서 직전 종료/크래시 때 'running' 으로 남은 상태는 실제로는 진행되지 않는 유령

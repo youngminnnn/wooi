@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { CURRENT_SCHEMA_VERSION, DEFAULT_SETTINGS, migrate } from './storeSchema'
+import { CURRENT_SCHEMA_VERSION, DEFAULT_SETTINGS, migrate, normalizeShape } from './storeSchema'
 import type { AgentSettings, AppSettings, Repo, Workspace } from '@shared/types'
 
 /**
@@ -358,5 +358,50 @@ describe('레거시 파일 전체 경로', () => {
 
     const again = migrate({ ...migrated, schemaVersion: 12 }, 12)
     expect(agentsOf(again).claude.permissionMode).toBe('auto')
+  })
+})
+
+/**
+ * 마이그레이션이 못 메우는 구멍을 막는 안전망. 실제로 터진 적이 있다 — `schemaVersion` 이 이미
+ * 20 인 `Wooi (dev)` 파일에 v20 이전 빌드가 워크스페이스를 이어서 쓰자(브랜치를 오가며
+ * `npm run dev` 하면 나는 상황) `ports` 없는 레코드가 남았고, 그 뒤로 워크스페이스를 만들 때마다
+ * `Object.values(w.ports)` 가 "Cannot convert undefined or null to object" 로 터졌다.
+ */
+describe('normalizeShape (구버전 빌드가 남긴 레코드 메우기)', () => {
+  it('ports 없는 워크스페이스에 빈 레코드를 채운다', () => {
+    const out = normalizeShape({
+      schemaVersion: CURRENT_SCHEMA_VERSION,
+      repos: [],
+      workspaces: [{ id: 'w1', name: 'old', devPort: 3100 }]
+    })
+    expect((out.workspaces as Workspace[])[0].ports).toEqual({})
+  })
+
+  it('runScripts 없는 리포에 빈 배열을 채운다', () => {
+    const out = normalizeShape({ repos: [{ id: 'r1', name: 'demo' }], workspaces: [] })
+    expect((out.repos as Repo[])[0].runScripts).toEqual([])
+  })
+
+  it('이미 있는 값은 건드리지 않는다 — 다운그레이드 상황에서 덮으면 데이터가 손상된다', () => {
+    const out = normalizeShape({
+      repos: [{ id: 'r1', runScripts: [{ id: 's1', name: 'Dev', command: 'npm run dev' }] }],
+      workspaces: [{ id: 'w1', ports: { s1: 3100 } }]
+    })
+    expect((out.repos as Repo[])[0].runScripts).toHaveLength(1)
+    expect((out.workspaces as Workspace[])[0].ports).toEqual({ s1: 3100 })
+  })
+
+  it('repos·workspaces 자체가 없어도 빈 배열로 돌려준다', () => {
+    expect(normalizeShape({ schemaVersion: CURRENT_SCHEMA_VERSION })).toEqual({
+      schemaVersion: CURRENT_SCHEMA_VERSION,
+      repos: [],
+      workspaces: []
+    })
+  })
+
+  it('마이그레이션을 건너뛰는 최신 버전 파일에도 적용된다', () => {
+    const raw = { schemaVersion: CURRENT_SCHEMA_VERSION, repos: [], workspaces: [{ id: 'w1' }] }
+    const out = normalizeShape(migrate(raw, CURRENT_SCHEMA_VERSION))
+    expect((out.workspaces as Workspace[])[0].ports).toEqual({})
   })
 })
