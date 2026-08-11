@@ -37,7 +37,13 @@ export const WOOI_MCP_INSTRUCTIONS = [
   // 그 문장이 거짓이 됐고, 거짓인 채로 두면 모델은 남을 지목할 수 있다는 것도, 아무나 지목할 수는
   // 없다는 것도 모른 채 시도하게 된다. 실제 경계를 그대로 적는다([[agent/tools/target]]).
   'Most tools act on the workspace you are running in; the ones that take a workspace id can only',
-  'name a workspace you created yourself.'
+  'name a workspace you created yourself.',
+  // 이 한 줄이 없으면 `send_to_workspace` 는 사실상 없는 도구다. 도구 검색은 **이미 무엇을 찾는지
+  // 알 때** 통하는 경로인데, 다른 워크스페이스에 말을 걸 수 있다는 것 자체를 모르는 모델에게는
+  // 검색해 볼 단어가 없다 — check_related_work 를 alwaysLoad 로 둔 것과 같은 실패다. 정의 전체를
+  // 상시 싣는 대신(그쪽은 ≈250 토큰) 능력의 존재만 알린다.
+  'One exception: `send_to_workspace` can message any open workspace, in any repository —',
+  'use it instead of asking the user to relay something to work happening elsewhere.'
 ].join(' ')
 
 export interface AgentToolSpec {
@@ -279,6 +285,60 @@ export const AGENT_TOOLS: AgentToolSpec[] = [
     // 상시 비용은 이 설명 하나(≈150 토큰)이고, 놓친 충돌 하나가 양쪽 diff 를 다 읽게 만드는
     // 비용보다 훨씬 싸다. 대신 설명은 "언제 부르는가" 부터 시작해 그 값을 하도록 쓴다.
     alwaysLoad: true
+  },
+  {
+    name: 'list_workspace_peers',
+    description: [
+      'List the other Wooi workspaces open right now — across every repository, not just this',
+      'one — with their branch, whether they are running, and whether a message would reach them',
+      'immediately or wait for the user to approve it.',
+      '',
+      'This is where `send_to_workspace` gets its ids. Unlike `check_stacked_work`, which only sees',
+      'workspaces stacked on this one, this sees every open workspace: siblings you have no',
+      'relationship with, and work in other repositories.'
+    ].join(' '),
+    inputSchema: {},
+    annotations: { title: 'List workspace peers', readOnlyHint: true }
+  },
+  {
+    name: 'send_to_workspace',
+    description: [
+      'Send a short plain-text message to another open workspace — any of them, including ones in',
+      'other repositories and ones you did not create.',
+      '',
+      'Use it when something you just learned changes what another workspace is working from: an',
+      'interface you moved that its branch also calls, a decision the user made here that applies',
+      'there too, a bug you already diagnosed that it is about to hit. Prefer it over telling the',
+      'user to relay the message themselves.',
+      '',
+      'Only text crosses. The other workspace cannot see this conversation, your files, or your',
+      'diff, so write the message so it stands on its own — what changed, and what they should do',
+      'differently. Point at commits and `path:line` rather than pasting code.',
+      '',
+      'Whether it arrives right away is the **receiving** workspace’s choice: most hold the message',
+      'until the user approves it, because delivering it starts a paid turn there. Call',
+      '`list_workspace_peers` first — it tells you which ones are immediate. Never block waiting for',
+      'a reply; say what you sent and keep working.',
+      '',
+      'Use this rather than the built-in `SendMessage` tool for anything inside Wooi. Wooi',
+      'workspaces are also Claude Code sessions, so they show up in `ListAgents` too, but reaching',
+      'them that way skips the approval the user is shown here and most of them will simply drop',
+      'the message. `SendMessage` is for sessions outside Wooi, such as the user’s own terminal.',
+      '',
+      'Handing over a whole new piece of work is `create_workspace`, not this.'
+    ].join(' '),
+    inputSchema: {
+      workspaceId: z
+        .string()
+        .describe('Which workspace to message — an id from `list_workspace_peers`.'),
+      message: z
+        .string()
+        .describe(
+          'What that workspace needs to know, written for an agent that cannot see this ' +
+            'conversation and cannot ask you anything back.'
+        )
+    },
+    annotations: { title: 'Message another workspace', readOnlyHint: false }
   },
   {
     name: 'list_issues',

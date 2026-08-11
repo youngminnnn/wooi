@@ -620,6 +620,21 @@ export interface Workspace {
    * 스택 뿌리(parentWorkspaceId 가 null)에는 채워지지 않는다.
    */
   handoff?: StackedHandoff | null
+  /**
+   * 다른 워크스페이스에서 온 메시지를 받는 방식([[PeerInboundPolicy]]). 없으면 `hold`.
+   *
+   * 옵셔널로 두는 것이 요점이다 — 저장된 워크스페이스는 이 필드가 없으므로 마이그레이션 없이
+   * 전부 안전한 기본값(`hold`)으로 읽힌다.
+   */
+  peerInbound?: PeerInboundPolicy
+  /**
+   * 승인을 기다리는 peer 메시지(`hold` 로 받아 둔 것). 없거나 비어 있으면 대기 중인 것이 없다.
+   *
+   * 발신자가 아니라 **수신자에게** 쌓는 이유는 handoff 를 자식 레코드에 두는 것과 같다 —
+   * 사용자가 이 워크스페이스를 열었을 때 답해야 하는 질문이 "나에게 온 것이 있나" 이고,
+   * 워크스페이스가 사라지면 그 앞으로 온 메시지도 함께 사라지는 것이 맞다.
+   */
+  peerInbox?: PendingPeerMessage[]
   /** worktree 절대 경로 */
   worktreePath: string
   /**
@@ -1088,6 +1103,108 @@ export interface StackedHandoff {
   /** 자식이 무엇을 했는지. 부모 에이전트가 이 문장을 그대로 읽는다. */
   summary: string
   at: number
+}
+
+/**
+ * 다른 워크스페이스에서 온 메시지를 이 워크스페이스가 어떻게 받을 것인가.
+ *
+ * 이 값이 **수신 쪽에** 있는 것이 설계의 핵심이다. 스택에서는 발신을 제한해 왔지만
+ * (`notify_child` 는 자기가 만든 직계 자식만), peer 는 리포까지 가로지르므로 같은 방식으로는
+ * 막을 수 없다 — 형제도 남의 리포도 정당한 대상이다. 그래서 "누가 보낼 수 있는가" 대신
+ * **"내가 받아서 턴을 돌릴 것인가"** 를 대상이 정한다.
+ *
+ * - `hold`(기본): 받아 두되 전달하지 않는다. 사용자가 승인해야 턴이 시작된다.
+ * - `accept`: 바로 전달한다. 스택 자식처럼 깨어나는 것이 당연한 관계에 쓴다.
+ * - `refuse`: 받지 않는다. 발신자에게 거절로 알린다.
+ *
+ * `hold` 가 기본인 이유는 비용 하나다 — 전달은 곧 턴이고, 사용자가 승인하지 않은 턴 비용을
+ * 남의 워크스페이스가 일으켜서는 안 된다([[agent/tools/stackedWorkspace]] 의 비대칭과 같은 근거).
+ */
+export type PeerInboundPolicy = 'accept' | 'hold' | 'refuse'
+
+/** 수신 정책을 정하지 않은 워크스페이스의 기본값. 레거시 레코드(필드 없음)도 이 값으로 읽힌다. */
+export const DEFAULT_PEER_INBOUND: PeerInboundPolicy = 'hold'
+
+/**
+ * 전달을 기다리는 peer 메시지 1건. **수신 워크스페이스 레코드에** 쌓인다.
+ *
+ * 발신자 정보를 id 가 아니라 **이름·브랜치·리포까지 스냅샷**해 둔다. 승인은 몇 시간 뒤일 수
+ * 있고 그 사이 발신 워크스페이스가 아카이브되거나 이름이 바뀔 수 있는데, 그때 카드가
+ * "누가 보냈는지 모를 메시지" 가 되면 사용자는 승인도 거절도 판단할 수 없다.
+ */
+export interface PendingPeerMessage {
+  /** 승인·거절이 지목하는 키. */
+  id: string
+  fromWorkspaceId: string
+  /** 표시용 발신자 이름(수신 시점 스냅샷). */
+  fromName: string
+  fromBranch: string
+  /** 발신 리포 이름. 리포를 가로지른 메시지인지가 여기서 읽힌다. */
+  fromRepoName: string
+  /** 발신 워크스페이스와 같은 리포인가. 다르면 카드가 리포 이름을 앞세운다. */
+  crossRepo: boolean
+  /** 에이전트가 쓴 본문(평문). 대기 카드가 사용자에게 보여 주는 것이 이 문장이다. */
+  message: string
+  /**
+   * 승인되면 대상 대화에 실제로 들어갈 완성된 문장 — 출처 문단까지 이미 씌운 것.
+   *
+   * 승인 시점에 다시 만들지 않고 **받은 순간의 것을 그대로 보관한다.** 두 가지가 걸려 있다:
+   * 도구마다 출처 문단이 다르고(`notify_child` 는 "네 아래 브랜치에서 온 소식" 이라고 말한다),
+   * 승인은 몇 시간 뒤라 그때는 발신 워크스페이스가 사라져 문단을 다시 만들 근거가 없을 수 있다.
+   */
+  text: string
+  at: number
+}
+
+/** 워크스페이스 1곳이 쌓아 둘 수 있는 대기 메시지 수. 넘으면 가장 오래된 것부터 버린다. */
+export const MAX_PEER_INBOX = 20
+
+/**
+ * Claude Code 세션이 **바깥에서 불릴 이름**(`--name`).
+ *
+ * Wooi 워크스페이스도 결국 하나의 Claude Code 세션이라, 2.1.224+ 의 cross-session messaging 은
+ * 사용자의 다른 터미널 세션에서 `/list-agents` 로 이것을 본다. 이름을 우리가 정하지 않으면 CLI 가
+ * 작업 디렉터리 이름으로 지어 버리는데, Wooi 의 워크트리는 전부 랜덤 이름이라(`fluffy-hornbill`)
+ * 사용자가 목록에서 어느 것이 무슨 작업인지 알 수 없다.
+ *
+ * `wooi/` 접두사는 그 세션이 앱 안에 있다는 표시다 — 터미널에서 띄운 세션과 섞이는 목록에서
+ * "여기에 보내면 Wooi 창이 뜬다" 를 읽히게 한다.
+ *
+ * 64 코드포인트 상한과 제어문자 제거는 CLI 가 표시명에 적용하는 정규화를 미리 맞춘 것이다.
+ * 잘라도 코드포인트 경계에서 자른다 — 이모지가 든 브랜치 이름을 바이트로 자르면 깨진 문자가 남는다.
+ */
+export function peerSessionName(repoName: string, branch: string): string {
+  // 카테고리 Cc/Cf/Cs/Zl/Zp — 양방향 제어문자·제로폭·태그 문자를 걷어낸다.
+  const clean = (s: string): string =>
+    Array.from(s)
+      .filter((ch) => !/\p{Cc}|\p{Cf}|\p{Cs}|\p{Zl}|\p{Zp}/u.test(ch))
+      .join('')
+      .trim()
+  const full = `wooi/${clean(repoName)}/${clean(branch)}`
+  const points = Array.from(full)
+  return points.length <= 64 ? full : points.slice(0, 63).join('') + '…'
+}
+
+/**
+ * Wooi 의 수신 정책을 **네이티브** cross-session messaging 의 `crossSessionInbound` 로 옮긴다.
+ *
+ * 세 값을 두 값으로 접는데, 접히는 자리가 `hold` 다. 네이티브의 `hold` 는 CLI 가 승인 다이얼로그를
+ * 그려야 풀리는데 SDK 세션은 그것을 띄울 수 없고 풀어 줄 API 도 없다 — 즉 `hold` 로 넘기면
+ * 메시지가 영영 갇힌다(사용자에게는 "보냈는데 아무 일도 안 일어남" 으로 보인다).
+ *
+ * 그래서 `hold` 는 `refuse` 로 접는다. Wooi 의 승인 배너는 **앱 안의** peer 메시지만 다루고,
+ * 앱 바깥 세션이 보내는 것은 우리가 붙잡아 둘 방법이 없으므로, 승인을 원한다는 뜻은 곧
+ * "승인 없이 들어오게 두지 않는다" 로 읽는 것이 맞다. 열려면 사용자가 명시적으로 자동 수신을
+ * 켠 것(`accept`)이어야 한다.
+ *
+ * 이 접기가 **승인 배너를 우회하는 구멍도 함께 막는다.** Wooi 워크스페이스도 같은 머신의
+ * Claude Code 세션이라 네이티브 `ListAgents` 에 그대로 보이므로, 모델이 우리 도구 대신 네이티브
+ * `SendMessage` 로 옆 워크스페이스를 직접 찔러 볼 수 있다. 그 경로로 온 메시지도 결국 수신 쪽의
+ * `crossSessionInbound` 를 통과해야 하는데, `hold` 워크스페이스는 여기서 `refuse` 가 되므로
+ * 배너를 건너뛴 전달이 성립하지 않는다. 두 경로가 같은 정책 하나로 수렴한다.
+ */
+export function nativePeerInbound(policy: PeerInboundPolicy): 'accept' | 'refuse' {
+  return policy === 'accept' ? 'accept' : 'refuse'
 }
 
 /**
@@ -1788,6 +1905,12 @@ export const IPC = {
   workspaceRemove: 'workspace:remove',
   /** 한 레포의 아카이브된 워크스페이스를 한 번에 영구 삭제한다(브랜치·기록 포함). */
   workspaceRemoveArchived: 'workspace:removeArchived',
+  /** 대기 중인 peer 메시지를 전달한다(그 워크스페이스에서 턴이 시작된다). */
+  workspacePeerInboxDeliver: 'workspace:peerInboxDeliver',
+  /** 대기 중인 peer 메시지를 버린다. 전달되지 않고 사라진다. */
+  workspacePeerInboxDismiss: 'workspace:peerInboxDismiss',
+  /** 다른 워크스페이스에서 오는 메시지를 받는 방식([[PeerInboundPolicy]])을 바꾼다. */
+  workspaceSetPeerInbound: 'workspace:setPeerInbound',
   workspaceSetPermissionMode: 'workspace:setPermissionMode',
   workspaceSetModel: 'workspace:setModel',
   workspaceSetEffort: 'workspace:setEffort',

@@ -22,6 +22,7 @@ import {
   Search,
   ArrowUpDown,
   GitPullRequest,
+  MessagesSquare,
   Square,
   X,
   Hourglass
@@ -44,7 +45,12 @@ import {
   switchClickCount
 } from '../lib/uiFlags'
 import { OPEN_REPO_SETTINGS_EVENT, openRepoSettings } from '../lib/repoSettings'
-import { AGENT_BACKEND_LABELS, orderVisibleWorkspaces, workspaceDisplayName } from '@shared/types'
+import {
+  AGENT_BACKEND_LABELS,
+  DEFAULT_PEER_INBOUND,
+  orderVisibleWorkspaces,
+  workspaceDisplayName
+} from '@shared/types'
 import { orderRowsWithPending } from '../lib/sidebarRows'
 import { useGithubDisconnected } from '../lib/github'
 import { WorkspaceAgents } from './WorkspaceAgents'
@@ -637,6 +643,39 @@ function WorkspaceRow({
       onSelect: () => void window.api.workspace.setMuted(workspace.id, !workspace.muted),
       separatorBefore: true
     },
+    // 다른 워크스페이스가 보내는 메시지를 받는 방식. 기본(hold)은 승인 배너를 거치므로 대부분은
+    // 건드릴 일이 없고, 여기 있는 것은 양극단 둘이다 — 늘 깨워도 되는 워크스페이스와,
+    // 아예 방해받고 싶지 않은 워크스페이스.
+    {
+      key: 'peer-inbound',
+      label:
+        (workspace.peerInbound ?? DEFAULT_PEER_INBOUND) === 'accept'
+          ? 'Hold messages to approve'
+          : 'Auto-accept messages',
+      icon: <MessagesSquare size={13} />,
+      onSelect: () =>
+        void window.api.workspace.setPeerInbound(
+          workspace.id,
+          (workspace.peerInbound ?? DEFAULT_PEER_INBOUND) === 'accept' ? 'hold' : 'accept'
+        )
+    },
+    ...((workspace.peerInbound ?? DEFAULT_PEER_INBOUND) === 'refuse'
+      ? [
+          {
+            key: 'peer-unblock',
+            label: 'Allow workspace messages',
+            icon: <MessagesSquare size={13} />,
+            onSelect: () => void window.api.workspace.setPeerInbound(workspace.id, 'hold')
+          }
+        ]
+      : [
+          {
+            key: 'peer-refuse',
+            label: 'Block workspace messages',
+            icon: <BellOff size={13} />,
+            onSelect: () => void window.api.workspace.setPeerInbound(workspace.id, 'refuse')
+          }
+        ]),
     {
       key: 'archive',
       label: 'Archive workspace',
@@ -878,6 +917,15 @@ function WorkspaceRow({
               <span
                 className="h-2 w-2 rounded-full bg-[var(--info-500)]"
                 title="Completed response — unread"
+              />
+            )}
+            {/* 다른 워크스페이스가 보낸 메시지가 승인을 기다린다. 배너는 이 워크스페이스를 열어야
+                보이므로, 열지 않은 채로도 알아챌 수 있는 자리가 여기뿐이다. */}
+            {(workspace.peerInbox?.length ?? 0) > 0 && (
+              <MessagesSquare
+                size={12}
+                className="text-[var(--info-400)]"
+                aria-label="Message waiting from another workspace"
               />
             )}
             {workspace.muted && (

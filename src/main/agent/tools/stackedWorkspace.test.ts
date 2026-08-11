@@ -358,6 +358,17 @@ describe('notify_child', () => {
     expect(text).toContain('I moved the auth helper to src/auth.ts.')
   })
 
+  it('자식이 수신을 닫아 뒀으면 스택이라도 뚫지 못한다', async () => {
+    // 배달을 peer 경로와 한 곳에서 하는 이유가 이것이다([[agent/tools/peer]] deliverOrHold).
+    // 여기서 직접 sendMessage 를 부르면 사용자가 그은 선을 이 도구만 무시하게 된다.
+    state.workspaces = [{ ...parent }, { ...child, peerInbound: 'refuse' }]
+
+    await expect(notify({ workspaceId: 'ws-child', message: 'news' })).rejects.toThrow(
+      /not accepting messages/
+    )
+    expect(sendMessage).not.toHaveBeenCalled()
+  })
+
   it('부모에게서 온 말이라는 것을 자식이 알 수 있게 한다', async () => {
     // 자식 쪽에는 사용자 메시지로 도착한다. 출처를 밝히지 않으면 자식은 사람이 시킨 새 작업으로
     // 읽고, 하던 일을 버린다.

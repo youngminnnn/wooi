@@ -50,6 +50,7 @@ describe.skipIf(!process.env.WOOI_E2E)('ClaudeSession failed-turn restart', () =
       fastMode: false,
       permissionMode: 'default',
       autoCompact: false,
+      peer: { name: 'wooi/repo/test', inbound: 'refuse' },
       resumeSessionId: null,
       additionalDirs: [],
       wooiMcp: await e2eWooiMcp(),

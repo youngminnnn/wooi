@@ -16,7 +16,7 @@ Tools normally appear to the agent as `mcp__wooi__<tool-name>`. Most tool defini
 are loaded on demand, so a tool may not be visible in the model's initial context even
 though it is available through tool search.
 
-The 12 core tools are available in every workspace. `claude_subagent` and
+The 14 core tools are available in every workspace. `claude_subagent` and
 `codex_subagent` are added only when multi-agent mode is enabled and the corresponding
 backend is available for delegation.
 
@@ -27,6 +27,9 @@ backend is available for delegation.
 - Tools that accept a target `workspaceId` can target only a workspace created by the
   calling workspace. `archive_workspace` cannot archive its caller, and
   `notify_child` is further limited to a direct stacked child.
+- `send_to_workspace` is the exception, and it moves the boundary instead of removing it:
+  any open workspace can be addressed, in any repository, but the **receiving** workspace
+  decides whether the message is delivered. See [Peer messages](#peer-messages).
 - Read-only tools run without an approval prompt. State-changing tools follow the
   workspace's permission mode and normally show an approval card before running. Full
   Access runs them without approval.
@@ -130,6 +133,88 @@ Sends a message to a direct stacked child created by the caller.
 
 Unlike a report, this starts a turn in the child. If the child is busy, the message is
 queued after its current turn.
+
+## Peer messages
+
+Stacked coordination runs along one axis: a parent wakes its children, and children only
+leave a note. Peer messages are the other axis — any open workspace can send a short
+plain-text message to any other, including workspaces in a different repository and ones
+it did not create.
+
+Only text crosses. Conversation history, files, and diffs never do.
+
+### Inbound policy
+
+Because sending is open, the boundary sits on the receiving side. Each workspace has an
+inbound policy, changed from its sidebar row menu:
+
+| Policy | Behaviour |
+| --- | --- |
+| `hold` (default) | Wooi keeps the message and shows an approval banner. Nothing reaches the agent until you deliver it. |
+| `accept` | The message is delivered immediately, starting a turn. |
+| `refuse` | The message is rejected and the sender is told. |
+
+The default is `hold` because delivering a message starts a paid turn in the receiving
+workspace, and that cost should be approved by you rather than by another workspace's
+agent. Declining a held message discards it; the sender is not told.
+
+One exception: a workspace delivers immediately to a workspace **it created**, since you
+already approved that relationship when you approved the creating tool call. `refuse`
+overrides even that. `notify_child` follows the same rules.
+
+Wooi drops an identical message repeated to the same target within a minute, and a
+workspace holds at most 20 pending messages, discarding the oldest beyond that.
+
+### `list_workspace_peers`
+
+Lists every open workspace except the caller, across all repositories, with its branch,
+repository, running state, and whether a message would arrive immediately or wait for
+approval. It takes no input and is read-only. Results are capped at 30, with
+same-repository workspaces first.
+
+### `send_to_workspace`
+
+Sends a plain-text message to another open workspace.
+
+| Input | Type | Required | Description |
+| --- | --- | --- | --- |
+| `workspaceId` | string | Yes | Target id from `list_workspace_peers`. |
+| `message` | string | Yes | Self-contained text: what changed and what the other workspace should do differently. |
+
+Wooi wraps the message with its origin before delivering it, so the receiving agent reads
+it as news from another workspace rather than as a new task from the user. The wrapper
+also states that the message carries no authority: it cannot approve anything, and the
+receiving agent should not change settings or project instructions because another
+workspace asked it to.
+
+The result says whether the message was delivered or held. A held message may never
+arrive, so an agent should never block waiting for a reply.
+
+### Sessions outside Wooi
+
+Claude Code 2.1.224+ lets sessions on one machine message each other directly, and a Wooi
+workspace is such a session. Wooi configures that channel rather than leaving it to
+defaults:
+
+- Each workspace announces itself as `wooi/<repository>/<branch>`, so it is recognisable
+  in `/list-agents` from your own terminal instead of showing a random worktree name.
+- Inbound native messages follow the same workspace policy, collapsed to two values:
+  `accept` stays `accept`, and both `hold` and `refuse` become `refuse`. Wooi cannot hold
+  a message that arrives outside its own channel — the approval dialog belongs to the
+  terminal UI, which an app-hosted session has no way to show — so wanting approval is
+  read as not letting it through unapproved. This also closes the obvious bypass: a Wooi
+  workspace is reachable by native `SendMessage` too, but a held workspace refuses there
+  as well, so both routes converge on one policy.
+- Messages leaving this machine require your approval (`isolatePeerMachines`), because
+  cross-machine delivery travels through Anthropic's servers while same-machine delivery
+  does not.
+- A native message that does arrive is recorded in the conversation with its sender.
+  Without that it would reach the model but appear nowhere, and the agent would look like
+  it changed course for no reason.
+
+Agents should use `send_to_workspace` for other Wooi workspaces and the built-in
+`SendMessage` only for sessions outside the app. Codex workspaces have no native
+equivalent, which is why the Wooi tools exist for both backends.
 
 ## Pull requests and GitHub issues
 

@@ -95,6 +95,7 @@ async function start(autoCompact: boolean): Promise<Harness> {
     fastMode: false,
     permissionMode: 'default',
     autoCompact,
+    peer: { name: 'wooi/repo/test', inbound: 'refuse' },
     resumeSessionId: null,
     additionalDirs: [],
     wooiMcp,

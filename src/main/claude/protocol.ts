@@ -84,6 +84,13 @@ export interface SessionConfig {
   autoCompact: boolean
   autoResumeAfterRateLimit?: boolean
   resumeSessionId: string | null
+  /**
+   * 네이티브 cross-session messaging(Claude Code 2.1.224+)에서 이 세션의 정체와 수신 정책.
+   *
+   * 메인이 계산해 실어 보낸다 — 호스트에는 store 가 없어 리포 이름도 워크스페이스 정책도 모른다.
+   * `inbound` 가 두 값뿐인 이유는 [[types]] nativePeerInbound 에 있다.
+   */
+  peer: { name: string; inbound: 'accept' | 'refuse' }
   /** `/add-dir` 로 더해진 작업 루트(절대 경로). 비어 있으면 cwd 만 쓴다. */
   additionalDirs: string[]
   /**

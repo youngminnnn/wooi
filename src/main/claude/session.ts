@@ -51,6 +51,11 @@ export interface SessionDeps {
   autoCompact: boolean
   /** 계정 사용량 제한을 오류로 끝내지 않고 메인의 자동 재개 scheduler에 넘길지. */
   autoResumeAfterRateLimit?: boolean
+  /**
+   * 네이티브 cross-session messaging(Claude Code 2.1.224+)에서의 이 세션의 정체와 수신 정책.
+   * 메인이 워크스페이스에서 계산해 내려 준다([[claude/protocol]] SessionConfig).
+   */
+  peer: { name: string; inbound: 'accept' | 'refuse' }
   /** 이전 실행에서 이어갈 Claude 세션 ID. 없으면 새 세션. */
   resumeSessionId: string | null
   /** `/add-dir` 로 더해진 작업 루트(절대 경로). cwd 밖의 코드를 함께 읽고 고칠 수 있게 한다. */
@@ -676,10 +681,25 @@ export class ClaudeSession {
           // 됐다. 압축 시점은 모델 윈도를 따르는 게 맞으므로 Claude Code 의 모델별 공식 임계치를
           // 그대로 쓴다(overAutoCompactThreshold). 낮추고 싶은 사용자는 자기 settings.json 에
           // autoCompactWindow 를 적으면 되고, settingSources 로 그대로 로드된다.
+          //
+          // crossSessionInbound — 앱 **바깥** 세션(사용자 터미널의 claude, 다른 머신)이 이 세션에
+          // 말을 걸 수 있는가. 기본이 refuse 인 이유는 Wooi 가 그것을 붙잡아 둘 수 없기 때문이다 —
+          // 앱 안의 peer 메시지는 승인 배너를 거치지만, 바깥에서 오는 것은 CLI 가 곧바로 모델에게
+          // 넘겨 승인 없는 턴 비용을 만든다. 사용자가 그 워크스페이스의 자동 수신을 켜 둔 경우에만
+          // 연다([[types]] nativePeerInbound 가 hold→refuse 로 접는 이유도 같다).
+          //
+          // isolatePeerMachines — 이 머신 밖으로 나가는 SendMessage 에 승인을 요구한다. 머신 간
+          // 전달은 Anthropic 서버를 거치므로(같은 머신은 소켓으로 직접 간다) 데스크톱 앱이 조용히
+          // 열어 둘 경로가 아니다. 승인은 Wooi 의 권한 카드로 뜬다(canUseTool).
           settings: {
             ...(ultracode ? { enableWorkflows: true, ultracode: true } : {}),
-            ...(this.deps.fastMode ? { fastMode: true } : {})
+            ...(this.deps.fastMode ? { fastMode: true } : {}),
+            crossSessionInbound: this.deps.peer.inbound,
+            isolatePeerMachines: true
           },
+          // 사용자의 다른 터미널 세션이 `/list-agents` 에서 보는 이름. 지정하지 않으면 CLI 가
+          // 작업 디렉터리 이름으로 짓는데, Wooi 워크트리는 전부 랜덤 이름이라 목록이 읽히지 않는다.
+          extraArgs: { name: this.deps.peer.name },
           // /add-dir 로 더한 작업 루트. query 시작 시점에 고정되므로 목록이 바뀌면 매니저가
           // 세션을 새로 연다(resume 으로 대화 맥락은 이어진다).
           ...(this.deps.additionalDirs.length
@@ -1503,6 +1523,25 @@ export class ClaudeSession {
       if (this.checkpoints.length > 100) this.checkpoints.shift()
     }
 
+    // 다른 Claude Code 세션이 보낸 메시지(네이티브 cross-session messaging). CLI 는 이것을
+    // 사용자 메시지로 모델에게 넘기는데, Wooi 는 보낸 적이 없으므로 **아무도 트랜스크립트에
+    // 남기지 않는다** — 그대로 두면 사용자에게는 에이전트가 난데없이 다른 일을 시작한 것으로
+    // 보인다. 여기서 출처를 밝혀 기록한다.
+    //
+    // 앱 안의 peer 메시지는 이 경로로 오지 않는다 — 그쪽은 Wooi 가 직접 넣으므로 origin 이
+    // 'human' 이고, 보내는 순간 이미 사용자 항목으로 기록된다([[agent/tools/peer]]).
+    const origin = msg.origin
+    if (origin?.kind === 'peer') {
+      const from = origin.name?.trim() || origin.from
+      const body = origin.body ?? textOf(content)
+      this.emitItem({
+        id: `peer:${uuid ?? Date.now()}`,
+        type: 'system',
+        text: `Message from ${from} (another Claude Code session)\n\n${clampText(body)}`,
+        ts: Date.now()
+      })
+    }
+
     if (!Array.isArray(content)) return
 
     for (const block of content as Block[]) {
@@ -1765,6 +1804,21 @@ function formatTokens(n: number): string {
 }
 
 /** tool_result 의 content(string | 블록 배열)를 표시용 텍스트로 정규화한다. */
+/**
+ * user 메시지 content 에서 사람이 읽을 본문만 뽑는다.
+ *
+ * 네이티브 peer 메시지의 폴백 경로에만 쓴다 — SDK 가 봉투를 벗긴 `origin.body` 를 주면 그쪽이
+ * 언제나 정확하고(도착한 것과 바이트 단위로 같다), 이건 옛 발신자라 그 필드가 없을 때만 쓴다.
+ */
+function textOf(content: unknown): string {
+  if (typeof content === 'string') return content
+  if (!Array.isArray(content)) return ''
+  return content
+    .filter((b) => b && typeof b === 'object' && (b as { type?: string }).type === 'text')
+    .map((b) => String((b as { text?: unknown }).text ?? ''))
+    .join('\n')
+}
+
 function normalizeToolResult(content: unknown): string {
   if (typeof content === 'string') return content
   if (Array.isArray(content)) {
