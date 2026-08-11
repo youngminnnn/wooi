@@ -41,6 +41,7 @@ import type {
   PrChecks,
   PrEditable,
   PreviewCaptureResult,
+  PreviewIssueCountEvent,
   PreviewOpenEvent,
   PrMergeMethod,
   PrStatus,
@@ -66,6 +67,7 @@ import type {
   UpdateStatus,
   WorkspaceDiff
 } from './types'
+import type { PreviewIssue } from './previewIssues'
 
 /**
  * preload 가 `window.api` 로 노출하는 표면. preload 구현과 renderer 소비가
@@ -255,7 +257,17 @@ export interface WooiApi {
     pickElement(workspaceId: string, webContentsId: number): Promise<PreviewCaptureResult>
     /** 진행 중인 픽을 취소한다. 켜져 있지 않으면 아무 일도 하지 않는다. */
     cancelPick(webContentsId: number): Promise<void>
+    /** 이 게스트의 콘솔·네트워크 문제를 이 워크스페이스 것으로 모으기 시작한다. */
+    watchIssues(workspaceId: string, webContentsId: number): Promise<void>
+    /** 수집을 멈춘다(패널이 사라질 때). */
+    unwatchIssues(webContentsId: number): Promise<void>
+    /** 모아 둔 문제 목록. 개수만 방송되므로 패널을 열 때 이걸로 채운다. */
+    listIssues(workspaceId: string): Promise<PreviewIssue[]>
+    clearIssues(workspaceId: string): Promise<void>
+    /** 고른 문제들을 컴포저에 넣는다(결과는 onComposerAttach 로 온다). */
+    sendIssues(workspaceId: string, issueIds: string[]): Promise<PreviewCaptureResult>
     onOpen(cb: (e: PreviewOpenEvent) => void): () => void
+    onIssues(cb: (e: PreviewIssueCountEvent) => void): () => void
   }
 
   git: {

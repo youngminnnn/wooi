@@ -5,6 +5,7 @@ import type { ComposerAttachment, ImageAttachment, PreviewCaptureResult } from '
 import { previewLabel } from '@shared/devUrl'
 import { formatPickedElement } from '@shared/previewPick'
 import { cancelPick, pickElement } from './previewPicker'
+import { PreviewIssueCollector } from './previewIssues'
 import { log } from './logger'
 
 /**
@@ -28,12 +29,26 @@ function isWebUrl(url: string): boolean {
 }
 
 /**
+ * 콘솔·네트워크 문제 수집기. main 이 소유하고 개수만 렌더러로 흘린다([[previewIssues]]).
+ * 모듈 수준에 두는 이유는 세션 배선(webRequest)이 앱 전체에 하나뿐이기 때문이다.
+ */
+let issues: PreviewIssueCollector
+
+/** 수집기 접근자 — ipc 계층이 목록 조회·비우기·회신에 쓴다. */
+export function previewIssues(): PreviewIssueCollector {
+  return issues
+}
+
+/**
  * Preview 세션과 webview 울타리를 세운다(앱 기동 시 1회).
  *
  * `web-contents-created` 하나로 모든 창을 덮는 것이 요점이다 — 메인 창과 분리한 패널 창이
  * 각각 webview 를 붙일 수 있는데, 가드를 창마다 걸면 나중에 생긴 창에서 조용히 빠진다.
  */
-export function initPreview(): void {
+export function initPreview(dispatch: (channel: string, payload: unknown) => void): void {
+  issues = new PreviewIssueCollector(dispatch)
+  issues.initSession()
+
   const previewSession = session.fromPartition(PREVIEW_PARTITION)
   // 미리보는 페이지에 카메라·마이크·알림·위치를 줄 이유가 없다. 물어보지도 않고 전부 거절한다.
   previewSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false))
@@ -154,4 +169,14 @@ export async function pickPreviewElement(
 export function cancelPreviewPick(webContentsId: number): void {
   if ('error' in resolveGuest(webContentsId)) return
   cancelPick(webContentsId)
+}
+
+/**
+ * 이 게스트의 콘솔·네트워크 문제를 이 워크스페이스 것으로 모으기 시작한다.
+ * 렌더러가 dom-ready 에서 부른다 — 실제 페이지가 로드되기 전이라 첫 줄부터 놓치지 않는다.
+ */
+export function watchPreviewIssues(workspaceId: string, webContentsId: number): void {
+  const target = resolveGuest(webContentsId)
+  if ('error' in target) return
+  issues.watch(workspaceId, target.guest)
 }

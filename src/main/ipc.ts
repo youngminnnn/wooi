@@ -7,6 +7,7 @@ import { getStore } from './store'
 import { getTranscripts } from './transcripts'
 import { buildHandoffPrompt, estimateHandoffTokens, formatHandoffTokens } from '@shared/handoff'
 import { listDir, readFileInRoot, searchFiles } from './fsbrowse'
+import { formatIssues } from '@shared/previewIssues'
 import { log } from './logger'
 import {
   abortMerge,
@@ -138,7 +139,13 @@ import type {
 } from '@shared/types'
 import type { AgentOrchestrator } from './agent/orchestrator'
 import type { PaneWindows } from './paneWindows'
-import { cancelPreviewPick, capturePreview, pickPreviewElement } from './preview'
+import {
+  cancelPreviewPick,
+  capturePreview,
+  pickPreviewElement,
+  previewIssues,
+  watchPreviewIssues
+} from './preview'
 import type { ScriptRunner } from './scripts'
 import type { TerminalManager } from './terminal'
 
@@ -1045,6 +1052,39 @@ export function registerIpc(ctx: IpcContext): void {
 
   ipcMain.handle(IPC.previewCancelPick, (_e, webContentsId: number) => {
     cancelPreviewPick(webContentsId)
+  })
+
+  // 콘솔·네트워크 문제 수집. 목록은 여기서 당겨 가고, 개수만 evtPreviewIssues 로 방송된다
+  // — 매 콘솔 줄을 IPC 로 밀면 폭주하는 dev 로그가 메인 힙을 밀어 올린다([[main/previewIssues]]).
+  ipcMain.handle(IPC.previewWatchIssues, (_e, workspaceId: string, webContentsId: number) => {
+    watchPreviewIssues(workspaceId, webContentsId)
+  })
+
+  ipcMain.handle(IPC.previewUnwatchIssues, (_e, webContentsId: number) => {
+    previewIssues().unwatch(webContentsId)
+  })
+
+  ipcMain.handle(IPC.previewListIssues, (_e, workspaceId: string) =>
+    previewIssues().list(workspaceId)
+  )
+
+  ipcMain.handle(IPC.previewClearIssues, (_e, workspaceId: string) => {
+    previewIssues().clear(workspaceId)
+  })
+
+  ipcMain.handle(IPC.previewSendIssues, (_e, workspaceId: string, issueIds: string[]) => {
+    const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
+    if (!ws) return { error: 'That workspace is gone.' }
+    const wanted = new Set(issueIds)
+    const picked = previewIssues()
+      .list(workspaceId)
+      .filter((i) => wanted.has(i.id))
+    if (!picked.length) return { error: 'Nothing to send.' }
+    dispatch(IPC.evtComposerAttach, {
+      workspaceId,
+      text: formatIssues(picked, ws.previewUrl ?? '')
+    })
+    return {}
   })
 
   // ── 분리한 패널 창 ─────────────────────────────────────────────────────
