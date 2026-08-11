@@ -23,6 +23,7 @@ import { log } from './logger'
 import { hydrateEnvFromLoginShell } from './env'
 import { initUpdater } from './updater'
 import { initNotice } from './notice'
+import { initPreview } from './preview'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -227,6 +228,9 @@ app.whenReady().then(() => {
   // 미설치로 보이거나 child 프로세스가 토큰/설정을 못 읽는 일이 없게 한다.
   hydrateEnvFromLoginShell()
   applyContentSecurityPolicy()
+  // Preview 게스트의 울타리는 창보다 먼저 세운다 — will-attach-webview 를 놓치면 그 webview 는
+  // 우리가 강제하려던 설정 없이 붙는다([[preview]]).
+  initPreview()
   registerIpc({ sessions, scripts, terminals, panes, getWindow: () => mainWindow })
   createWindow()
   sessions.prewarm()

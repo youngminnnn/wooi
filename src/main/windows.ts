@@ -15,7 +15,11 @@ export function rendererWebPreferences(): Electron.WebPreferences {
     preload: join(import.meta.dirname, '../preload/index.mjs'),
     sandbox: false,
     contextIsolation: true,
-    nodeIntegration: false
+    nodeIntegration: false,
+    // Preview 탭이 `<webview>` 로 워크트리의 dev 서버를 그린다([[preview]]). 메인 창뿐 아니라
+    // 분리한 work 창도 같은 패널을 그리므로 창을 가리지 않고 켠다. 게스트 쪽 설정(파티션·샌드박스·
+    // preload 제거)은 태그 속성이 아니라 main 의 will-attach-webview 가 강제한다.
+    webviewTag: true
   }
 }
 

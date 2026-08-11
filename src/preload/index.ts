@@ -88,6 +88,14 @@ const api: WooiApi = {
     getOutput: (workspaceId, kind) => ipcRenderer.invoke(IPC.scriptGetOutput, workspaceId, kind)
   },
 
+  preview: {
+    setUrl: (workspaceId, url) => ipcRenderer.invoke(IPC.previewSetUrl, workspaceId, url),
+    open: (workspaceId, url) => ipcRenderer.invoke(IPC.previewOpen, workspaceId, url),
+    capture: (workspaceId, webContentsId) =>
+      ipcRenderer.invoke(IPC.previewCapture, workspaceId, webContentsId),
+    onOpen: (cb) => subscribe(IPC.evtPreviewOpen, cb)
+  },
+
   git: {
     status: (workspaceId) => ipcRenderer.invoke(IPC.gitStatus, workspaceId),
     diff: (workspaceId) => ipcRenderer.invoke(IPC.gitDiff, workspaceId),
@@ -260,6 +268,7 @@ const api: WooiApi = {
   onPermissionCancel: (cb) => subscribe(IPC.evtPermissionCancel, cb),
   onScriptOutput: (cb) => subscribe(IPC.evtScriptOutput, cb),
   onScriptExit: (cb) => subscribe(IPC.evtScriptExit, cb),
+  onComposerAttach: (cb) => subscribe(IPC.evtComposerAttach, cb),
   onState: (cb) => subscribe(IPC.evtState, cb),
   onReview: (cb) => subscribe(IPC.evtReview, cb),
   onSelectWorkspace: (cb) => subscribe(IPC.evtSelectWorkspace, cb),

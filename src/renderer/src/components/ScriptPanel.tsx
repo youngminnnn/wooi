@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
-import { Check, Play, Settings2, Square, SquareArrowOutUpRight, X } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { Check, MonitorPlay, Play, Settings2, Square, SquareArrowOutUpRight, X } from 'lucide-react'
 import { SETUP_SCRIPT_ID } from '@shared/types'
+import { detectDevUrl } from '@shared/devUrl'
 import { openRepoSettings } from '../lib/repoSettings'
 import { scriptKey, useStore } from '../store'
 
@@ -31,6 +32,10 @@ export default function ScriptPanel({
   const running = status?.state === 'running'
   const setupDone = current.setup && ws.setupState === 'success'
   const out = output[scriptKey(workspaceId, current.id)] ?? ''
+
+  // dev 서버가 스스로 찍은 주소. 포트를 스캔하지 않고 출력만 읽는다([[shared/devUrl]]).
+  // 돌고 있는 스크립트에만 붙인다 — 죽은 서버 주소로 Preview 를 여는 건 도움이 안 된다.
+  const devUrl = useMemo(() => (running ? detectDevUrl(out) : null), [running, out])
 
   useEffect(() => {
     void seed(workspaceId, current.id)
@@ -133,6 +138,20 @@ export default function ScriptPanel({
             {running && <Square size={10} />}
             {setupDone && <Check size={10} />}
           </div>
+          {devUrl && (
+            <div className="shrink-0 flex items-center gap-2 px-3 py-1.5 border-b border-[var(--border)] bg-[var(--info-500)]/5">
+              <MonitorPlay size={12} className="shrink-0 text-[var(--info-400)]" />
+              <span className="min-w-0 flex-1 truncate text-xs text-neutral-400">
+                Dev server at <span className="font-mono text-neutral-300">{devUrl}</span>
+              </span>
+              <button
+                onClick={() => void window.api.preview.open(workspaceId, devUrl)}
+                className="shrink-0 text-xs px-2 py-0.5 rounded-md bg-[var(--info-600)] text-white hover:bg-[var(--info-500)]"
+              >
+                Open in Preview
+              </button>
+            </div>
+          )}
           <pre className="flex-1 overflow-auto px-3 py-2 text-xs font-mono text-neutral-400 whitespace-pre-wrap">
             {current.command.trim()
               ? out || 'No output yet.'
