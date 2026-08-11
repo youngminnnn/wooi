@@ -89,7 +89,12 @@ export function runDelegateTool(backend: AgentBackendId) {
     // 에이전트 모드를 껐을 수 있다.
     if (!delegateBackendsFor(ws, settings).includes(backend)) {
       throw new Error(
-        `This workspace is not set up to run ${AGENT_BACKEND_LABELS[backend]} subagents.`
+        `This workspace is not set up to run ${AGENT_BACKEND_LABELS[backend]} subagents. ` +
+          // 켜는 길을 함께 적는다 — 이 실패를 보는 모델은 위임하려던 참이고, 그 길이 있다는
+          // 것을 모르면 사용자에게 "할 수 없다" 고 답하고 끝낸다(Codex 경로는 도구가 늘 보이므로
+          // 모드가 꺼진 채로 여기까지 온다).
+          'If the user asked for the work to be split across agents, call ' +
+          '`switch_to_agent_team` first.'
       )
     }
 

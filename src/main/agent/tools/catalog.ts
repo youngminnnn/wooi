@@ -406,6 +406,36 @@ export const AGENT_TOOLS: AgentToolSpec[] = [
     annotations: { title: 'Create a workspace', readOnlyHint: false }
   },
   {
+    name: 'switch_to_agent_team',
+    description: [
+      'Turn this workspace from Solo into an agent team, so you can delegate work to subagents',
+      'that run other agent products — Claude Code, Codex — as well as your own.',
+      '',
+      'Call this when the user explicitly asks for the work to be split across several agents:',
+      'by product ("get Codex to review this", "run two Claude subagents") or by shape ("split',
+      'this between agents and run them in parallel"). A workspace created as Solo has no',
+      '`*_subagent` tools at all, and this is the only way to get them — asking the user to flip',
+      'the toggle themselves is not needed.',
+      '',
+      'The teammate tools arrive on your **next** turn, not this one: Wooi reopens the session to',
+      'load them and this conversation carries over. So finish the turn right after calling this',
+      '— say what you will delegate and ask the user to reply — and delegate from the turn after.',
+      '',
+      'This changes the workspace itself, not one task; it stays a team until the user switches it',
+      'back from the header. Do not call it to reach for your own built-in subagents, which you',
+      'already have: this is for running the other agent products.'
+    ].join(' '),
+    inputSchema: {
+      reason: z
+        .string()
+        .describe(
+          'One sentence on why this workspace needs teammates — what you plan to delegate, and ' +
+            'to which agent. The user reads this on the approval card.'
+        )
+    },
+    annotations: { title: 'Switch to an agent team', readOnlyHint: false }
+  },
+  {
     name: 'archive_workspace',
     description: [
       'Archive a workspace you created from here, once its work is finished or abandoned, so it',

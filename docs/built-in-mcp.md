@@ -16,7 +16,7 @@ Tools normally appear to the agent as `mcp__wooi__<tool-name>`. Most tool defini
 are loaded on demand, so a tool may not be visible in the model's initial context even
 though it is available through tool search.
 
-The 14 core tools are available in every workspace. `claude_subagent` and
+The 15 core tools are available in every workspace. `claude_subagent` and
 `codex_subagent` are added only when multi-agent mode is enabled and the corresponding
 backend is available for delegation.
 
@@ -279,6 +279,32 @@ read-only.
 
 Output keeps the end of the log, is limited to approximately 8 KiB, and reports whether
 it was truncated.
+
+## Agent team mode
+
+### `switch_to_agent_team`
+
+Turns a Solo workspace into an agent team, which is what makes the subagent tools below
+exist. Use it when the user explicitly asks for the work to be split across agents in a
+workspace that was created Solo.
+
+| Input | Type | Required | Description |
+| --- | --- | --- | --- |
+| `reason` | string | Yes | One sentence on what the agent plans to delegate and to which agent. Shown on the approval card. |
+
+The switch is one-way: there is no tool that returns a workspace to Solo, because that
+takes away a capability nobody asked to lose. The user can switch back from the
+conversation header.
+
+Subagent tools are bound to a session when that session opens, so they do not appear in
+the turn that made the call. Wooi reopens the session before the next message and resumes
+the same conversation, which means the tools are available from the following turn. The
+tool result says so; an agent that calls it should end its turn and delegate afterwards.
+
+Calling it in a workspace that is already a team changes nothing and does not reopen the
+session. The call fails when multi-agent mode is turned off in Settings → Experiments, or
+when the workspace's main agent cannot coordinate a team, because in both cases the switch
+would produce a team with no usable teammates.
 
 ## Optional subagent tools
 

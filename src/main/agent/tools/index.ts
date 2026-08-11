@@ -1,3 +1,4 @@
+import { switchToAgentTeam } from './agentTeam'
 import { listWorkspacePeers, sendToWorkspace } from './peer'
 import { openPullRequest } from './pullRequest'
 import { checkRelatedWork } from './relatedWork'
@@ -45,4 +46,5 @@ export function initAgentTools(deps: AgentToolDeps): void {
   registerAgentTool('list_issues', listIssues)
   registerAgentTool('create_workspace', createIndependentWorkspace)
   registerAgentTool('archive_workspace', archiveWorkspaceTool)
+  registerAgentTool('switch_to_agent_team', switchToAgentTeam)
 }

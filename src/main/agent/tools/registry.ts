@@ -47,7 +47,17 @@ export interface AgentToolDeps {
    * 구체 클래스가 아니라 쓰는 메서드만 적는다 — 도구가 오케스트레이터·터미널의 나머지 능력에
    * 손을 뻗지 않아야 하고, 테스트가 이 둘을 흉내내는 값도 두 줄로 끝난다.
    */
-  sessions: { dispose: (workspaceId: string) => void }
+  sessions: {
+    dispose: (workspaceId: string) => void
+    /**
+     * 다음 전송에서 세션을 다시 열게 예약한다(대화 맥락은 resume 으로 이어진다).
+     *
+     * dispose 와 나눠 두는 이유는 **시점**이다. 세션을 열 때 고정되는 것을 바꾼 도구
+     * (switch_to_agent_team 의 위임 도구 목록)는 재시작이 필요한데, 그 도구는 지금 도는 턴
+     * 안에서 불린다 — 여기서 dispose 하면 자기 호출의 결과가 돌아갈 세션을 자기가 죽인다.
+     */
+    restartBeforeNextMessage: (workspaceId: string) => void
+  }
   terminals: { disposeWorkspace: (workspaceId: string) => void }
 }
 
