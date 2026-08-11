@@ -3,15 +3,18 @@ import {
   ArrowLeft,
   ArrowRight,
   Camera,
+  CircleAlert,
   ExternalLink,
   Loader2,
   MousePointerClick,
+  Trash2,
   RotateCw,
   TriangleAlert,
   X
 } from 'lucide-react'
 import { PREVIEW_PARTITION } from '@shared/types'
 import { isLocalUrl, normalizeInputUrl } from '@shared/devUrl'
+import type { PreviewIssue } from '@shared/previewIssues'
 import { useStore } from '../store'
 import { isPaneWindow } from '../lib/paneWindow'
 import type { PreviewWebview, WebviewFailLoadEvent, WebviewNavigateEvent } from '../lib/webview'
@@ -73,6 +76,9 @@ export default function PreviewPanel({
   const [capturing, setCapturing] = useState(false)
   // 요소 픽커가 켜져 있는 동안(사용자가 게스트에서 요소를 고르는 중).
   const [picking, setPicking] = useState(false)
+  // 콘솔·네트워크 문제. 개수만 방송되므로(폭주 방지) 목록은 패널을 열 때 당겨 온다.
+  const [issueCount, setIssueCount] = useState({ errors: 0, warnings: 0 })
+  const [issues, setIssues] = useState<PreviewIssue[] | null>(null)
 
   /** 첫 로드 주소. mount 이후 prop 이 바뀌어도 다시 로드하지 않도록 처음 값을 고정한다. */
   const initialUrl = useRef(navTarget?.url ?? workspace.previewUrl ?? '')
@@ -113,6 +119,12 @@ export default function PreviewPanel({
     const onDomReady = (): void => {
       setReady(true)
       syncNav()
+      // 실제 페이지가 로드되기 **전**(about:blank 단계)에 등록해야 첫 콘솔 줄부터 잡힌다.
+      try {
+        void window.api.preview.watchIssues(workspace.id, view.getWebContentsId())
+      } catch {
+        /* 게스트가 이미 사라졌다. */
+      }
     }
     const onStart = (): void => {
       setLoading(true)
@@ -172,6 +184,59 @@ export default function PreviewPanel({
     navigate(navTarget.url)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [navTarget, ready])
+
+  // 개수 방송 구독. 목록은 사용자가 패널을 열 때만 당겨 온다(방송에 목록을 싣지 않는 이유는
+  // [[main/previewIssues]] 참고 — 폭주하는 dev 로그가 IPC 홍수가 된다).
+  useEffect(() => {
+    return window.api.preview.onIssues((e) => {
+      if (e.workspaceId !== workspace.id) return
+      setIssueCount({ errors: e.errors, warnings: e.warnings })
+      // 목록을 펼쳐 둔 채라면 새로 들어온 것까지 보이게 갱신한다.
+      setIssues((prev) => {
+        if (prev === null) return prev
+        void window.api.preview.listIssues(workspace.id).then(setIssues)
+        return prev
+      })
+    })
+  }, [workspace.id])
+
+  // 패널이 사라지면 수집도 멈춘다 — 안 그러면 죽은 게스트의 리스너가 main 에 남는다.
+  const unwatchRef = useRef<() => void>(() => {})
+  unwatchRef.current = () => {
+    const view = viewRef.current
+    if (!view) return
+    try {
+      void window.api.preview.unwatchIssues(view.getWebContentsId())
+    } catch {
+      /* 게스트가 이미 사라졌다 — main 의 destroyed 처리가 알아서 치운다. */
+    }
+  }
+  useEffect(() => () => unwatchRef.current(), [])
+
+  const toggleIssues = (): void => {
+    if (issues !== null) return setIssues(null)
+    void window.api.preview.listIssues(workspace.id).then(setIssues)
+  }
+
+  /** 모아 둔 문제를 컴포저로 보낸다. */
+  const sendIssues = async (list: PreviewIssue[]): Promise<void> => {
+    if (!list.length) return
+    const { error } = await window.api.preview.sendIssues(
+      workspace.id,
+      list.map((i) => i.id)
+    )
+    if (error) {
+      pushToast('error', error)
+      return
+    }
+    setIssues(null)
+    pushToast(
+      'success',
+      isPaneWindow
+        ? `${list.length} issue(s) added to the composer in the main window.`
+        : `${list.length} issue(s) added to the composer.`
+    )
+  }
 
   const submit = (e: React.FormEvent): void => {
     e.preventDefault()
@@ -293,6 +358,32 @@ export default function PreviewPanel({
           </span>
         )}
 
+        {issueCount.errors + issueCount.warnings > 0 && (
+          <button
+            type="button"
+            onClick={toggleIssues}
+            aria-pressed={issues !== null}
+            title="Console and network errors from this page"
+            className={
+              'shrink-0 flex items-center gap-1 h-6 px-1.5 rounded-md text-xs tabular-nums ' +
+              (issues !== null
+                ? 'bg-[var(--surface-3)] text-neutral-100'
+                : 'text-neutral-400 hover:bg-[var(--surface-2)]')
+            }
+          >
+            <CircleAlert
+              size={12}
+              className={
+                issueCount.errors ? 'text-[var(--danger-400)]' : 'text-[var(--warning-400)]'
+              }
+            />
+            {issueCount.errors > 0 && <span>{issueCount.errors}</span>}
+            {issueCount.warnings > 0 && (
+              <span className="text-[var(--warning-400)]">{issueCount.warnings}</span>
+            )}
+          </button>
+        )}
+
         <NavButton
           label="Pick an element and describe it to the agent"
           disabled={!ready || !url || !active || picking}
@@ -328,6 +419,18 @@ export default function PreviewPanel({
             Cancel
           </button>
         </div>
+      )}
+
+      {issues !== null && (
+        <IssueList
+          issues={issues}
+          onSend={() => void sendIssues(issues)}
+          onClear={() => {
+            void window.api.preview.clearIssues(workspace.id)
+            setIssues(null)
+          }}
+          onClose={() => setIssues(null)}
+        />
       )}
 
       <div className="relative flex-1 min-h-0 bg-white">
@@ -383,6 +486,92 @@ function NavButton({
     >
       <Icon size={13} className={spin ? 'animate-spin' : undefined} />
     </button>
+  )
+}
+
+/**
+ * 모아 둔 콘솔·네트워크 문제 목록.
+ *
+ * 자동으로 에이전트에게 보내지 않는 것이 요점이다 — dev 서버는 멀쩡히 도는 중에도 경고를 쏟아
+ * 내는데, 그게 매번 턴을 소비하면 대화가 잡음으로 덮인다. 무엇을 보낼지는 사람이 정한다.
+ */
+function IssueList({
+  issues,
+  onSend,
+  onClear,
+  onClose
+}: {
+  issues: PreviewIssue[]
+  onSend: () => void
+  onClear: () => void
+  onClose: () => void
+}): React.JSX.Element {
+  return (
+    <div className="shrink-0 max-h-56 flex flex-col border-b border-[var(--border)] bg-[var(--bg-2)]">
+      <div className="shrink-0 flex items-center gap-2 px-3 py-1.5 border-b border-[var(--border)]">
+        <span className="text-xs text-neutral-400">
+          {issues.length} issue{issues.length === 1 ? '' : 's'} from this page
+        </span>
+        <div className="flex-1" />
+        <button
+          onClick={onSend}
+          disabled={!issues.length}
+          className="text-xs px-2 py-0.5 rounded-md bg-[var(--info-600)] text-white hover:bg-[var(--info-500)] disabled:bg-[var(--border)] disabled:text-neutral-600"
+        >
+          Send to agent
+        </button>
+        <button
+          onClick={onClear}
+          title="Clear collected issues"
+          className="h-6 w-6 grid place-items-center rounded-md text-neutral-500 hover:bg-[var(--surface-2)] hover:text-neutral-200"
+        >
+          <Trash2 size={12} />
+        </button>
+        <button
+          onClick={onClose}
+          title="Hide"
+          className="h-6 w-6 grid place-items-center rounded-md text-neutral-500 hover:bg-[var(--surface-2)] hover:text-neutral-200"
+        >
+          <X size={13} />
+        </button>
+      </div>
+      <div className="flex-1 overflow-auto">
+        {issues.length === 0 ? (
+          <div className="px-3 py-3 text-xs text-neutral-500">No issues collected.</div>
+        ) : (
+          issues.map((issue) => (
+            <div
+              key={issue.id}
+              className="flex items-start gap-2 px-3 py-1.5 border-b border-[var(--border)]/40 last:border-0"
+            >
+              <span
+                className={
+                  'shrink-0 mt-0.5 text-[10px] font-mono uppercase ' +
+                  (issue.level === 'error'
+                    ? 'text-[var(--danger-400)]'
+                    : 'text-[var(--warning-400)]')
+                }
+              >
+                {issue.level === 'error' ? 'err' : 'warn'}
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="text-xs font-mono text-neutral-300 break-words">{issue.text}</div>
+                {issue.source && (
+                  <div className="text-[11px] font-mono text-neutral-600 truncate">
+                    {issue.source}
+                  </div>
+                )}
+              </div>
+              {issue.count > 1 && (
+                <span className="shrink-0 text-[11px] tabular-nums text-neutral-500">
+                  ×{issue.count}
+                </span>
+              )}
+            </div>
+          ))
+        )}
+      </div>
+    </div>
   )
 }
 
