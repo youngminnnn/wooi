@@ -282,7 +282,7 @@ export class CodexThread {
       // 워크스페이스마다 도구 집합이 달라야 하므로(위임 도구는 멀티 에이전트에만) 스레드 단위로
       // 같은 shim 을 한 번 더 선언한다. 스레드 config 는 `-c` 로 등록한 서버를 **덮으므로**(실측)
       // 덮어쓰는 김에 위임 도구를 켠 설정으로 바꿔 놓는 셈이고, 서버 이름은 그대로 하나다.
-      ...delegateMcpConfig(this.config.delegateBackends)
+      ...wooiMcpConfig(this.workspaceId, this.config.delegateBackends)
     }
 
     const resume = this.config.resumeThreadId
@@ -426,16 +426,17 @@ function codexEffort(effort: EffortSetting | null): string | undefined {
  * MCP 서버는 모든 워크스페이스가 공유하는 프로세스 하나뿐이라 그럴 수 없다(자세한 사정은
  * [[codex/toolShim]]). 그래서 값을 여기서 알려 주고 인자로 받는다.
  *
- * 이 문장이 신뢰의 근거는 아니다 — 모델이 다른 id 를 적을 수도 있으므로, 메인이 "실재하고 지금
- * 턴이 도는 워크스페이스인가" 로 다시 좁힌다([[agent/tools/socket]]).
+ * 호출자 식별은 이 문장이 하지 않는다 — 그건 스레드 env 가 실어 나른다([[wooiMcpConfig]]).
+ * 여기서 워크스페이스 id 를 알려 주는 것은 모델이 **자기를 가리켜 말할 수 있도록** 하기 위해서다
+ * (사용자에게 "이 워크스페이스" 를 설명하거나, 대상 id 와 자기 id 를 구분해야 할 때).
+ * 두 번째 문장이 더 중요하다: 옛 지침을 들고 있는 스레드가 `workspaceId` 에 자기 id 를 적어
+ * 넣으면 남이 아니라 자기를 지목한 꼴이 되므로, 그 인자의 뜻을 못박아 둔다.
  */
 function wooiWorkspaceInstructions(workspaceId: string): string {
   return (
     `You are running inside Wooi workspace \`${workspaceId}\`. ` +
-    'Whenever you call a `wooi` MCP tool, pass exactly that id as `callerWorkspaceId` — ' +
-    'it identifies you, and calls claiming any other workspace are rejected. ' +
-    'It is never the workspace a tool acts on: tools that operate on another workspace take ' +
-    'its id in their own `workspaceId` argument, which you fill in separately.'
+    'Wooi knows that already when you call a `wooi` MCP tool, so you never pass your own id. ' +
+    'A `workspaceId` argument on one of those tools always means the workspace it acts on.'
   )
 }
 
@@ -473,8 +474,21 @@ function safeName(name: string): string {
  * 서버 이름은 그대로 하나다 — 스레드 config 가 프로세스 등록을 덮으므로(실측) 둘이 공존하지
  * 않고, 덮어쓰는 쪽이 더 넓은 도구 집합을 갖는다.
  */
-function delegateMcpConfig(backends: AgentBackendId[]): Record<string, unknown> {
-  if (!backends.length) return {}
+/**
+ * 이 스레드가 쓸 Wooi 도구 서버. **스레드마다** 선언해 `-c` 로 등록된 공용 서버를 덮는다(실측).
+ *
+ * 덮어쓰는 진짜 이유는 위임 도구가 아니라 `WOOI_TOOL_WORKSPACE` 다. 이 shim 은 우리 프로세스
+ * 밖에 있어 "누가 부르는가" 를 맥락으로 알 수 없는데, 한때 그 답을 **모델에게 물었다** — 모든
+ * 도구 스키마에 인자를 하나 덧붙여 자기 워크스페이스 id 를 적게 했다. 두 가지가 잘못됐다.
+ *
+ * 첫째, 대상을 지목하는 도구(`send_to_workspace` 등)와 이름이 겹쳐 모델이 호출자와 대상을
+ * 동시에 적을 수 없었다. 둘째, 이름을 바꿔도 지침은 스레드 생성 시점에 박히므로 **이미 열려 있던
+ * 대화는 옛 이름을 계속 썼다** — 고쳐도 기존 대화에서는 계속 실패했다.
+ *
+ * 스레드 env 로 내리면 둘 다 사라진다. 모델은 이 값을 볼 수도 적을 수도 없고, `thread/resume`
+ * 도 같은 params 를 받으므로 재개된 대화에도 즉시 적용된다.
+ */
+function wooiMcpConfig(workspaceId: string, backends: AgentBackendId[]): Record<string, unknown> {
   const server = wooiToolServer()
   if (!server) return {}
   return {
@@ -482,7 +496,12 @@ function delegateMcpConfig(backends: AgentBackendId[]): Record<string, unknown> 
       mcp_servers: {
         [WOOI_MCP_SERVER_NAME]: {
           ...server,
-          env: { ...server.env, WOOI_TOOL_DELEGATE: backends.join(',') }
+          env: {
+            ...server.env,
+            WOOI_TOOL_WORKSPACE: workspaceId,
+            // 위임 도구는 멀티 에이전트 워크스페이스에만 노출한다 — 빈 값이면 shim 이 안 싣는다.
+            ...(backends.length ? { WOOI_TOOL_DELEGATE: backends.join(',') } : {})
+          }
         }
       }
     }

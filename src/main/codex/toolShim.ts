@@ -29,6 +29,15 @@ const SOCKET = process.env.WOOI_TOOL_SOCKET ?? ''
  * 다른 도구 집합을 보이려면 **그 워크스페이스 전용 shim** 을 스레드 설정으로 한 번 더 띄우는
  * 수밖에 없다. 그때 이 값으로 무엇을 노출할지 정한다([[codex/thread]]).
  */
+/**
+ * 이 shim 이 대신 말하는 워크스페이스. 스레드마다 다른 값이 env 로 내려온다
+ * ([[codex/thread]] wooiMcpConfig).
+ *
+ * 모델에게 묻지 않는 것이 요점이다 — 모델이 적는 값은 도구 인자와 이름이 겹칠 수 있고,
+ * 그 이름을 알려 주는 지침은 스레드 생성 시점에 굳어 나중에 고칠 수 없다.
+ */
+const WORKSPACE = process.env.WOOI_TOOL_WORKSPACE ?? ''
+
 const DELEGATE_BACKENDS = (process.env.WOOI_TOOL_DELEGATE ?? '')
   .split(',')
   .map((id) => id.trim())
@@ -49,27 +58,15 @@ function inputSchemaOf(shape: z.ZodRawShape): Record<string, unknown> {
   const schema = z.toJSONSchema(z.object(shape), { io: 'input' }) as Record<string, unknown>
   const properties = (schema.properties ?? {}) as Record<string, unknown>
   const required = (schema.required ?? []) as string[]
+  // 카탈로그가 정의한 그대로 내보낸다. 한때 여기에 호출자 id 인자를 하나 덧붙였는데, 그것이
+  // 대상을 지목하는 도구의 `workspaceId` 와 이름이 겹쳐 Codex 에서 그 도구들이 언제나 실패했다.
+  // 호출자는 이제 스레드 env 로 온다([[codex/thread]] wooiMcpConfig).
   return {
     type: 'object',
     properties: {
-      ...properties,
-      // 전송 계층이 맥락을 실어 주지 못해 생긴 인자다. 카탈로그에는 넣지 않는다 — Claude 쪽에
-      // 이 인자가 보이면 모델이 남의 워크스페이스를 지목할 길이 생긴다.
-      //
-      // 이름이 `workspaceId` 가 **아닌** 것이 중요하다. 한때 그랬는데, 대상을 인자로 받는 도구
-      // (`send_to_workspace` · `notify_child` · `archive_workspace`)가 같은 이름을 쓰는 바람에
-      // 아래 dispatch 의 구조분해가 **대상 id 를 호출자 id 로 먹어 버렸다.** 모델에게는 키가
-      // 하나뿐이라 둘 중 하나만 채울 수 있어, Codex 워크스페이스에서 그 세 도구가 언제나
-      // 실패했다(대상을 적으면 "호출자가 턴을 돌고 있지 않다", 자기를 적으면 "대상 id 가 없다").
-      // 전송용 인자는 카탈로그가 절대 쓰지 않을 이름을 가져야 한다.
-      callerWorkspaceId: {
-        type: 'string',
-        description:
-          'The Wooi workspace you are running in — not the workspace a tool acts on. Use the id ' +
-          'given in your instructions; calls claiming any other workspace are rejected.'
-      }
+      ...properties
     },
-    required: [...required, 'callerWorkspaceId']
+    required
   }
 }
 
@@ -126,11 +123,9 @@ async function handle(msg: JsonRpcMessage): Promise<void> {
   if (method === 'tools/call') {
     const name = String(params?.name ?? '')
     const args = (params?.arguments ?? {}) as Record<string, unknown>
-    // 전송용 인자만 떼어 낸다. 나머지는 도구가 정의한 그대로 메인으로 간다 — 대상 id 를 받는
-    // 도구의 `workspaceId` 도 여기 남아야 한다(위 스키마 주석).
-    const { callerWorkspaceId, ...rest } = args
+    // 인자는 도구가 정의한 그대로 넘긴다. 호출자는 이 프로세스가 env 로 알고 있다.
     try {
-      const data = await callMain(String(callerWorkspaceId ?? ''), name, rest)
+      const data = await callMain(WORKSPACE, name, args)
       return send({
         id,
         result: { content: [{ type: 'text', text: JSON.stringify(data ?? null) }] }

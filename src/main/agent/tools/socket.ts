@@ -24,7 +24,7 @@ export function toolSocketPath(userDataDir: string): string {
 }
 
 export interface ToolSocketRequest {
-  /** 호출자가 주장하는 워크스페이스. Codex 는 맥락을 실어 주지 않아 인자로 받는다(아래 검증). */
+  /** 호출자 워크스페이스. Codex shim 이 자기 env 에서 읽어 싣는다(아래 검증). */
   workspaceId: string
   tool: string
   args: unknown
@@ -33,12 +33,13 @@ export interface ToolSocketRequest {
 /**
  * 주장된 워크스페이스가 지금 이 호출을 낼 수 있는 상태인지 확인한다.
  *
- * Codex 경로에서는 workspaceId 가 **모델이 말한 값**이다(스레드의 developerInstructions 로 심어
- * 주지만, 모델이 다른 값을 적을 수는 있다). Claude 처럼 맥락으로 못 받는 이상 신뢰할 수 없으므로
- * 여기서 좁힌다 — 실재하고, 아카이브되지 않았고, **지금 턴이 돌고 있는** 워크스페이스여야 한다.
+ * 이제 이 값은 모델이 아니라 shim 프로세스의 env 에서 온다([[codex/thread]] wooiMcpConfig) —
+ * 모델은 볼 수도 적을 수도 없다. 그래도 검증은 남긴다: shim 은 우리 프로세스 밖에 있고 소켓은
+ * 같은 사용자면 누구나 붙을 수 있으므로, 여기가 마지막 관문이다.
  *
- * 마지막 조건이 핵심이다. 도구는 에이전트가 도는 중에만 불릴 수 있으므로 정상 호출은 항상
- * 통과하지만, 엉뚱한 id 를 적으면 그 워크스페이스가 마침 동시에 돌고 있지 않는 한 걸린다.
+ * 실재하고, 아카이브되지 않았고, **지금 턴이 돌고 있는** 워크스페이스여야 한다. 마지막 조건이
+ * 핵심이다 — 도구는 에이전트가 도는 중에만 불리므로 정상 호출은 항상 통과하지만, 엉뚱한 id 는
+ * 그 워크스페이스가 마침 동시에 돌고 있지 않는 한 걸린다.
  */
 function verifyCaller(workspaceId: string): Workspace {
   const ws = getStore()
@@ -47,10 +48,7 @@ function verifyCaller(workspaceId: string): Workspace {
   if (!ws) throw new Error(`Unknown Wooi workspace: ${workspaceId}`)
   if (ws.archived) throw new Error('That workspace is archived.')
   if (ws.status !== 'running') {
-    throw new Error(
-      `Workspace ${workspaceId} is not running a turn, so it cannot be the caller. ` +
-        'Pass the workspace id you were given in your instructions.'
-    )
+    throw new Error(`Workspace ${workspaceId} is not running a turn, so it cannot be the caller.`)
   }
   return ws
 }
