@@ -157,6 +157,35 @@ export const WOOI_COMMANDS: WooiCommandSpec[] = [
     ].join('\n')
   },
   {
+    name: 'send',
+    tool: 'send_to_workspace',
+    mode: 'agent',
+    description: 'Send a message to another open workspace',
+    argumentHint: '<what changed>',
+    prompt: [
+      'Message another open workspace by calling the `mcp__wooi__send_to_workspace` tool.',
+      '',
+      'Call `mcp__wooi__list_workspace_peers` first — that is where the ids come from, and it tells',
+      'you which workspaces would receive the message right away rather than holding it for the',
+      'user. Write the message for an agent that cannot see this conversation, your files, or your',
+      'diff: what changed, and what they should do differently. Point at commits and `path:line`',
+      'rather than pasting code. Do not block waiting for a reply.',
+      '',
+      'If the user did not say which workspace, pick the ones the message actually affects and say',
+      'which you chose.',
+      '',
+      'What they need to know: $ARGUMENTS'
+    ].join('\n')
+  },
+  {
+    name: 'peers',
+    tool: 'list_workspace_peers',
+    mode: 'direct',
+    description: 'List every other open workspace, across all repositories',
+    prompt:
+      'Call `mcp__wooi__list_workspace_peers` and summarize what each open workspace is working on.'
+  },
+  {
     name: 'children',
     tool: 'check_stacked_work',
     mode: 'direct',
@@ -231,6 +260,7 @@ export function parseWooiCommandArgs(name: string, raw: string): WooiCommandArgs
   const rest = raw.trim()
   switch (name) {
     case 'children':
+    case 'peers':
       return { args: {} }
 
     case 'related': {

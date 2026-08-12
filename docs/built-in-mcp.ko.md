@@ -314,6 +314,8 @@ Claude 는 Wooi 서브에이전트 도구 여러 개를 동시에 시작할 수 
 | `/wooi:stack <할 일>` | `create_stacked_workspace` | 에이전트 |
 | `/wooi:report [보고 내용]` | `report_to_parent` | 에이전트 |
 | `/wooi:notify <바뀐 것>` | `notify_child` | 에이전트 |
+| `/wooi:send <바뀐 것>` | `send_to_workspace` | 에이전트 |
+| `/wooi:peers` | `list_workspace_peers` | 즉시 |
 | `/wooi:children` | `check_stacked_work` | 즉시 |
 | `/wooi:related [경로…]` | `check_related_work` | 즉시 |
 | `/wooi:issues [개수]` | `list_issues` | 즉시 |

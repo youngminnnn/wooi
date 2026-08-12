@@ -10,7 +10,7 @@ import {
 
 describe('catalog', () => {
   it('covers every Wooi tool exactly once', () => {
-    // 커맨드는 도구 12개의 사람 쪽 입구다. 도구가 늘었는데 커맨드를 잊으면 이 테스트가 잡는다.
+    // 커맨드는 도구의 사람 쪽 입구다. 도구가 늘었는데 커맨드를 잊으면 이 테스트가 잡는다.
     expect(WOOI_COMMANDS.map((c) => c.tool).sort()).toEqual(AGENT_TOOLS.map((t) => t.name).sort())
   })
 
@@ -58,6 +58,7 @@ describe('expandWooiCommand', () => {
 describe('parseWooiCommandArgs', () => {
   it('takes no arguments where the tool takes none', () => {
     expect(parseWooiCommandArgs('children', '')).toEqual({ args: {} })
+    expect(parseWooiCommandArgs('peers', '')).toEqual({ args: {} })
   })
 
   it('splits paths for /wooi:related and omits them when empty', () => {
