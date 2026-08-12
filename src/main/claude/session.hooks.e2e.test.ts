@@ -54,6 +54,7 @@ describe.skipIf(!process.env.WOOI_E2E)('ClaudeSession hooks', () => {
     const session = new ClaudeSession({
       cwd,
       repoPath: null,
+      mcpSettings: { servers: [], disabledInherited: [] },
       model: null,
       effort: null,
       fastMode: false,
@@ -119,6 +120,7 @@ describe.skipIf(!process.env.WOOI_E2E)('ClaudeSession hooks', () => {
     const session = new ClaudeSession({
       cwd,
       repoPath: null,
+      mcpSettings: { servers: [], disabledInherited: [] },
       model: null,
       effort: null,
       fastMode: false,

@@ -5,6 +5,7 @@ import { MCP_SETTING_SOURCES, resolveUserMcpServers } from '../claude/mcp'
 import { claudeEffort, claudeMode } from '../claude/protocol'
 import { CLAUDE_CODE_SYSTEM_PROMPT } from '../claude/systemPrompt'
 import { log } from '../logger'
+import { wooiMcpSettings } from '../mcpSettings'
 import { describeArg, truncate } from '../review/artifact'
 import type { SubAgentActivity, SubAgentPermission, SubAgentRunDeps, SubAgentResult } from './run'
 
@@ -28,7 +29,8 @@ const MAX_TURNS = 120
  * (저장된 always-allow 규칙·auto 모드·파일 변경 diff 가 그대로 적용된다).
  */
 export async function runClaudeSubAgent(deps: SubAgentRunDeps): Promise<SubAgentResult> {
-  const mcpServers = resolveUserMcpServers(deps.repoPath)
+  // 위임 실행은 메인 프로세스에서 돈다(호스트는 toolCall 로 메인에 넘긴다) — store 를 읽어도 된다.
+  const mcpServers = resolveUserMcpServers(deps.repoPath, wooiMcpSettings())
   // 'ultracode' 는 effort 레벨이 아니라 별도 모드다. 위임 실행에 그 모드를 통째로 켜면 서브런이
   // 또 워크플로우를 조율하기 시작하므로, effort 성분(xhigh)만 취한다.
   const effort = deps.effort === 'ultracode' ? 'xhigh' : claudeEffort(deps.effort)

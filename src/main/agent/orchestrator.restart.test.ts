@@ -59,7 +59,9 @@ describe('restartBeforeNextMessage', () => {
     expect(backend.dispose.mock.invocationCallOrder[0]).toBeLessThan(
       backend.sendMessage.mock.invocationCallOrder[0]
     )
-    expect(backend.sendMessage).toHaveBeenCalledWith('ws-1', 'go', undefined)
+    // 4번째 인자는 에이전트 교체 인수인계 프롬프트다. 예약이 없었으니 undefined 여야 한다 —
+    // 여기서 값이 생기면 없던 인수인계가 메시지 앞에 얹힌다는 뜻이다([[agent/orchestrator]]).
+    expect(backend.sendMessage).toHaveBeenCalledWith('ws-1', 'go', undefined, undefined)
   })
 
   it('한 번만 쓰인다 — 그다음 전송은 멀쩡한 세션을 끊지 않는다', async () => {

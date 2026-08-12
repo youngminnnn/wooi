@@ -15,6 +15,7 @@ import type {
   ContextUsageInfo,
   McpAction,
   McpServerInfo,
+  McpSettings,
   UsageInfo
 } from '@shared/types'
 
@@ -136,11 +137,12 @@ export function readPermissions(config: SessionConfig): CommandResult {
 export async function runCommandShortLived(
   kind: CommandPanelKind,
   cwd: string,
-  repoPath: string | null
+  repoPath: string | null,
+  mcpSettings: McpSettings
 ): Promise<CommandResult> {
   const input = new AsyncQueue<SDKUserMessage>()
   const claudeExecutable = resolveClaudeExecutable()
-  const mcpServers = resolveUserMcpServers(repoPath)
+  const mcpServers = resolveUserMcpServers(repoPath, mcpSettings)
   const q = query({
     prompt: input,
     options: {

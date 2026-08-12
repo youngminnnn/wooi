@@ -10,6 +10,7 @@ import {
   type UtilityProcess
 } from 'electron'
 import { getStore } from '../store'
+import { wooiMcpSettings } from '../mcpSettings'
 import { getTranscripts } from '../transcripts'
 import { log } from '../logger'
 import {
@@ -315,6 +316,9 @@ export class SessionManager implements AgentBackend {
       fastMode: ws.fastMode ?? defaults.fastMode,
       // 다른 백엔드에서 넘어온 값(전역 기본값 이관 등)이 SDK 로 새지 않도록 여기서 걸러 낸다.
       permissionMode: claudeMode(ws.permissionMode),
+      // store 를 읽는 것은 메인뿐이다 — 호스트가 직접 읽으려 들면 electron 에 매인 모듈이
+      // 딸려 들어와 로드 시점에 죽는다([[claude/protocol]] mcpSettings).
+      mcpSettings: wooiMcpSettings(),
       autoCompact: settings.autoCompact,
       autoResumeAfterRateLimit: settings.autoResumeAfterRateLimit,
       // 네이티브 cross-session messaging 용. 이름은 사용자의 다른 터미널 세션이 `/list-agents` 로
@@ -725,12 +729,19 @@ export class SessionManager implements AgentBackend {
 
     // 단명 쿼리 폴백에 쓸 작업 디렉토리. 아카이브되지 않은 워크스페이스 아무거나면 된다 —
     // 레이트리밋은 계정 단위라 어디서 물어도 같은 값이 나온다.
-    let fallback: { cwd: string; repoPath: string | null } | null = null
+    let fallback: Extract<HostCommand, { type: 'refreshUsage' }>['fallback'] = null
     if (allowShortLived) {
       const ws = getStore()
         .getState()
         .workspaces.find((w) => !w.archived)
-      if (ws) fallback = { cwd: ws.worktreePath, repoPath: this.configFor(ws).repoPath }
+      if (ws) {
+        const config = this.configFor(ws)
+        fallback = {
+          cwd: ws.worktreePath,
+          repoPath: config.repoPath,
+          mcpSettings: config.mcpSettings
+        }
+      }
     }
 
     let usage: UsageInfo | null

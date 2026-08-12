@@ -6,6 +6,7 @@ import { resolveClaudeExecutable } from '../claude/executable'
 import { MCP_SETTING_SOURCES, resolveUserMcpServers } from '../claude/mcp'
 import { claudeEffort } from '../claude/protocol'
 import { log } from '../logger'
+import { wooiMcpSettings } from '../mcpSettings'
 import { coerceArtifact, describeArg, extractFencedJson, truncate } from './artifact'
 import { REVIEW_OUTPUT_SCHEMA } from './prompt'
 import type { ReviewRunDeps, ReviewRunResult } from './run'
@@ -32,7 +33,8 @@ export async function runClaudeReview(
   deps: ReviewRunDeps,
   prompt: string
 ): Promise<ReviewRunResult> {
-  const mcpServers = resolveUserMcpServers(deps.repoPath)
+  // 리뷰는 메인 프로세스에서 돈다 — 호스트와 달리 store 를 직접 읽어도 된다.
+  const mcpServers = resolveUserMcpServers(deps.repoPath, wooiMcpSettings())
   // 'ultracode' 는 effort 레벨이 아니라 별도 모드다 — 리뷰에는 그 별도 경로가 없으므로 effort
   // 성분(xhigh)만 취한다. 나머지는 공용 변환을 그대로 쓴다(Codex 전용 'minimal' → 'low' 등).
   const effort = deps.effort === 'ultracode' ? 'xhigh' : claudeEffort(deps.effort)

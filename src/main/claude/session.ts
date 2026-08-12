@@ -28,6 +28,7 @@ import type {
   FastModeDisabledReason,
   FastModeState,
   ImageAttachment,
+  McpSettings,
   PermissionRequest,
   PermissionDecision,
   RewindPoint,
@@ -39,6 +40,11 @@ export interface SessionDeps {
   cwd: string
   /** worktree 의 원본 repo 절대 경로. ~/.claude.json 의 project 스코프 MCP 조회에 쓴다(없으면 user 스코프만). */
   repoPath: string | null
+  /**
+   * Wooi 스코프 MCP 설정. 메인이 store 에서 읽어 내려 준다 — 호스트에는 store 가 없다
+   * ([[claude/protocol]] SessionConfig.mcpSettings).
+   */
+  mcpSettings: McpSettings
   model: string | null
   /** reasoning effort 선택값(ultracode 포함). null 이면 effort 를 지정하지 않아 모델 기본 동작을 따른다. */
   effort: EffortSetting | null
@@ -663,7 +669,7 @@ export class ClaudeSession {
     try {
       // 사용자가 claude CLI 용으로 등록한 MCP 서버(user/project/local 스코프)를 명시 주입한다.
       // cwd 가 worktree 라 SDK 자동 탐색만으로는 원본 repo 의 project 스코프 서버가 누락되기 때문.
-      const userServers = resolveUserMcpServers(this.deps.repoPath)
+      const userServers = resolveUserMcpServers(this.deps.repoPath, this.deps.mcpSettings)
       // Wooi 자체를 조작하는 도구는 우리가 이긴다 — 같은 이름을 쓰는 사용자 서버가 있으면 앱
       // 조작 통로가 통째로 남의 것으로 바뀌므로, 덮어쓰되 조용히 넘어가지 않는다.
       if (userServers[WOOI_MCP_SERVER_NAME]) {

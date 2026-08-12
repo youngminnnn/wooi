@@ -59,6 +59,7 @@ async function runFirstTurn(autoCompact: boolean, usage: typeof contextUsage) {
   const session = new ClaudeSession({
     cwd: process.cwd(),
     repoPath: null,
+    mcpSettings: { servers: [], disabledInherited: [] },
     model: null,
     effort: null,
     fastMode: true,

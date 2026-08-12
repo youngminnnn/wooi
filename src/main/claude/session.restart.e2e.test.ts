@@ -45,6 +45,7 @@ describe.skipIf(!process.env.WOOI_E2E)('ClaudeSession failed-turn restart', () =
     const session = new ClaudeSession({
       cwd: process.cwd(),
       repoPath: null,
+      mcpSettings: { servers: [], disabledInherited: [] },
       model: null,
       effort: null,
       fastMode: false,
