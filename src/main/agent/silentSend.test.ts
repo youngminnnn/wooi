@@ -30,6 +30,7 @@ vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
     setPermissionMode: async () => {},
     async *[Symbol.asyncIterator]() {
       await prompt.next()
+      yield* []
     }
   })
 }))
