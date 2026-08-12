@@ -62,7 +62,9 @@ export default function PeerInboxBanner({
               </span>
             )}
           </div>
-          <div className="mt-1 whitespace-pre-wrap text-neutral-300">{pending.message}</div>
+          <div className="mt-1 whitespace-pre-wrap break-words text-neutral-300">
+            {pending.message}
+          </div>
           <div className="mt-1 text-neutral-500">
             Delivering starts a turn here, so Wooi held it for you. The agent has not seen it.
           </div>
