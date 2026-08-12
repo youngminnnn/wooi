@@ -373,6 +373,12 @@ interface UIState {
   setOverlayOpen: (open: boolean) => void
   /** 생성 중인 workspace 의 자리표시 행(repoId 로 사이드바에 배치). */
   pending: PendingWorkspace[]
+  /** 아카이브 IPC가 끝나기를 기다리는 workspace. 오래 걸리는 archive script 중에도 사이드바에 남겨 표시한다. */
+  archivingWorkspaces: Record<string, boolean>
+  /** 모든 renderer 진입점이 공유하는 아카이브 실행 경로. */
+  archiveWorkspace: (
+    workspaceId: string
+  ) => Promise<{ archiveScriptFailure?: ArchiveScriptFailure }>
 
   /**
    * 열려 있는 PR 리뷰. null 이 아니면 전체 화면 리뷰 모드다(사이드바·대화창을 대체).
@@ -791,10 +797,27 @@ export const useStore = create<UIState>((set, get) => ({
     if (get().overlayOpen !== open) set({ overlayOpen: open })
   },
   pending: [],
+  archivingWorkspaces: {},
   activeReviewId: null,
   activeFanoutGroupId: null,
   adoptingFanoutWorkspaceId: null,
   reviewViews: {},
+
+  archiveWorkspace: async (workspaceId) => {
+    if (get().archivingWorkspaces[workspaceId]) return {}
+    set((s) => ({
+      archivingWorkspaces: { ...s.archivingWorkspaces, [workspaceId]: true }
+    }))
+    try {
+      return await window.api.workspace.archive(workspaceId)
+    } finally {
+      set((s) => {
+        const next = { ...s.archivingWorkspaces }
+        delete next[workspaceId]
+        return { archivingWorkspaces: next }
+      })
+    }
+  },
 
   init: async () => {
     if (initialized) return
@@ -1459,13 +1482,26 @@ export const useStore = create<UIState>((set, get) => ({
     /** 진행 표시를 켜고 채택을 돌린다. 실패해도 표시는 반드시 꺼야 한다 — 켜진 채로 남으면
      *  다시 시도할 방법이 없다. */
     const adopt = async (): Promise<AdoptFanoutResult> => {
-      set({ adoptingFanoutWorkspaceId: workspaceId })
+      const archivingIds = group.workspaceIds.filter(
+        (id) => id !== workspaceId && !s.app?.workspaces.find((w) => w.id === id)?.archived
+      )
+      set((state) => ({
+        adoptingFanoutWorkspaceId: workspaceId,
+        archivingWorkspaces: archivingIds.reduce(
+          (next, id) => ({ ...next, [id]: true }),
+          state.archivingWorkspaces
+        )
+      }))
       try {
         return await window.api.fanout.adopt(groupId, workspaceId)
       } catch (err) {
         return { error: err instanceof Error ? err.message : String(err) }
       } finally {
-        set({ adoptingFanoutWorkspaceId: null })
+        set((state) => {
+          const archivingWorkspaces = { ...state.archivingWorkspaces }
+          for (const id of archivingIds) delete archivingWorkspaces[id]
+          return { adoptingFanoutWorkspaceId: null, archivingWorkspaces }
+        })
       }
     }
 

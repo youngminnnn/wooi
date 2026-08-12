@@ -526,6 +526,8 @@ function WorkspaceRow({
   const pr = useStore((s) => s.prStatus[workspace.id])
   const unread = useStore((s) => s.unread[workspace.id])
   const compacting = useStore((s) => s.compacting[workspace.id] ?? false)
+  const archiving = useStore((s) => s.archivingWorkspaces[workspace.id] ?? false)
+  const archiveWorkspace = useStore((s) => s.archiveWorkspace)
   const runningSince = useStore((s) => s.runningSince[workspace.id])
   const restack = useStore((s) => s.restackWorkspace)
   const restackBusy = useStore(
@@ -576,7 +578,7 @@ function WorkspaceRow({
       danger: true
     })
     if (!ok) return
-    const { archiveScriptFailure } = await window.api.workspace.archive(workspace.id)
+    const { archiveScriptFailure } = await archiveWorkspace(workspace.id)
     reportArchiveScriptFailure(archiveScriptFailure)
     if (active) void select(null)
   }
@@ -770,16 +772,24 @@ function WorkspaceRow({
               (menuAt ? 'bg-[var(--surface)]' : ''))
         }
       >
-        <StatusDot
-          status={workspace.status}
-          awaitingPermission={awaitingPermission}
-          compacting={compacting}
-          stale={stale}
-          runningMs={runningMs}
-          pendingRateLimitResume={workspace.pendingRateLimitResume}
-          rateLimited={rateLimited}
-          pr={pr}
-        />
+        {archiving ? (
+          <Loader2
+            size={12}
+            className="shrink-0 animate-spin text-neutral-400"
+            aria-label="Archiving workspace"
+          />
+        ) : (
+          <StatusDot
+            status={workspace.status}
+            awaitingPermission={awaitingPermission}
+            compacting={compacting}
+            stale={stale}
+            runningMs={runningMs}
+            pendingRateLimitResume={workspace.pendingRateLimitResume}
+            rateLimited={rateLimited}
+            pr={pr}
+          />
+        )}
         <div className="relative flex-1 min-w-0">
           {editingName !== null ? (
             <input
@@ -813,12 +823,17 @@ function WorkspaceRow({
             </div>
           )}
           <div className="flex items-center gap-1 text-xs text-neutral-500 truncate">
+            {archiving && (
+              <span className="shrink-0 text-neutral-400" title="Running archive cleanup">
+                Archiving…
+              </span>
+            )}
             {/* 어떤 에이전트가 이 워크스페이스를 돌리는지. 생성 시 고정되고 바꿀 수 없으므로,
                 여러 개를 병렬로 돌릴 때 어느 쪽인지 한눈에 보여야 한다. 에이전트가 하나뿐인
                 사용자에게는 정보가 아니라 잡음이라 감춘다.
                 멀티 에이전트면 마크 옆에 사람 아이콘을 붙여 "이 마크는 메인일 뿐이고 다른 종류도
                 돈다"를 알린다 — 마크만 보고 단일 에이전트로 오해하지 않게 한다. */}
-            {showAgent && (
+            {!archiving && showAgent && (
               <span
                 className="shrink-0 flex items-center gap-0.5 text-neutral-500"
                 title={
@@ -837,8 +852,8 @@ function WorkspaceRow({
                 {multiAgent.active && <Users size={10} className="multi-agent-mark" />}
               </span>
             )}
-            <GitBranch size={10} className="shrink-0" />
-            <span className="truncate">{workspace.branch}</span>
+            {!archiving && <GitBranch size={10} className="shrink-0" />}
+            {!archiving && <span className="truncate">{workspace.branch}</span>}
             {/* base 대비 ahead/behind 커밋 수(↑N ↓N)도 여기 있었지만, 변경 파일 수 배지와 같은
                 이유로 걷어냈다 — 행이 좁아 브랜치 이름을 잘라먹으면서까지 보여 줄 만큼 자주
                 행동으로 이어지지 않는다. behind 는 restack 버튼(아래)과 그 툴팁이, 정확한
