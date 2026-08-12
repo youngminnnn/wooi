@@ -89,6 +89,9 @@ function resolveToolShim(): string {
 }
 
 const sessions = new AgentOrchestrator(dispatch, () => mainWindow)
+// 첫 세션 직전까지 설치 스냅샷이 비어 fail-open 상태로 남는 시간을 줄인다. listBackends 가 원래
+// 포커스·설정 열기 때 하던 탐지만 재사용하므로 새 프로세스 탐지 경로를 만들지 않는다.
+void sessions.listBackends()
 // Codex 의 로그인 상태는 app-server 만 정확히 안다(자격증명이 OS 키체인에 있을 수 있다).
 // auth 계층이 에이전트 구현에 의존하지 않도록, 조회 함수만 주입해 준다.
 setCodexStatusProvider(async () => {

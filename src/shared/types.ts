@@ -418,11 +418,13 @@ export function orderVisibleWorkspaces<
  * 이 워크스페이스를 구동하는 AI 코딩 에이전트 백엔드 식별자.
  * - claude: Claude Code (Claude Agent SDK)
  * - codex: OpenAI Codex (`codex app-server` JSON-RPC)
+ * - copilot: GitHub Copilot CLI (ACP stdio, teammate-only)
  *
- * 워크스페이스는 생성 시 하나를 골라 **그 세션 동안 고정**한다. 백엔드별 기능 지원 여부
- * (capabilities)·권한 모드·기본 모델 등 메타데이터는 main 의 agent 레지스트리가 보유한다.
+ * 워크스페이스는 mainAgent=true 인 항목만 생성 시 골라 **그 세션 동안 고정**한다. Copilot 은
+ * 같은 닫힌 유니온에 있지만 teammate-only 라 워크스페이스를 구동하지 않는다. 백엔드별 기능 지원
+ * 여부(capabilities)·권한 모드·기본 모델 등 메타데이터는 main 의 agent 레지스트리가 보유한다.
  */
-export type AgentBackendId = 'claude' | 'codex'
+export type AgentBackendId = 'claude' | 'codex' | 'copilot'
 
 /** `unknown` 항목의 id. 같은 종류를 대화당 한 장으로 합치는 키다(백엔드의 dedupe 기준과 동일). */
 export function unknownItemId(backend: AgentBackendId, what: string): string {
@@ -430,7 +432,7 @@ export function unknownItemId(backend: AgentBackendId, what: string): string {
 }
 
 /** 전체 백엔드 식별자 목록(등록 순서 = UI 표시 순서). */
-export const AGENT_BACKEND_IDS: AgentBackendId[] = ['claude', 'codex']
+export const AGENT_BACKEND_IDS: AgentBackendId[] = ['claude', 'codex', 'copilot']
 
 /** 백엔드를 지정하지 않은(레거시·신규) 워크스페이스의 기본 백엔드. */
 export const DEFAULT_AGENT_BACKEND: AgentBackendId = 'claude'
@@ -443,7 +445,8 @@ export const DEFAULT_AGENT_BACKEND: AgentBackendId = 'claude'
  */
 export const AGENT_BACKEND_LABELS: Record<AgentBackendId, string> = {
   claude: 'Claude Code',
-  codex: 'Codex'
+  codex: 'Codex',
+  copilot: 'GitHub Copilot CLI'
 }
 
 /**
@@ -451,6 +454,8 @@ export const AGENT_BACKEND_LABELS: Record<AgentBackendId, string> = {
  * 렌더러는 명령·버튼 노출 여부를 판단한다.
  */
 export interface AgentCapabilities {
+  /** 워크스페이스의 대화를 직접 구동할 수 있는가. delegate 는 팀 조율, 이 값은 메인 자격이다. */
+  mainAgent: boolean
   /** /btw 사이드 질문 */
   sideQuestion: boolean
   /** /rewind 파일 체크포인트 되돌리기 */

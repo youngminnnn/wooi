@@ -82,4 +82,36 @@ describe.skipIf(!ENABLED)('위임 실행 (실제 CLI)', () => {
     },
     180_000
   )
+
+  it.skipIf(!installed('copilot'))(
+    'Copilot(ACP) 위임이 매달리지 않고 결과를 돌려준다',
+    async () => {
+      const activities: SubAgentActivity[] = []
+      const result = await runSubAgent({
+        backend: 'copilot',
+        cwd: process.cwd(),
+        repoPath: process.cwd(),
+        // ACP v1 은 모델 선택 경로가 없다(runAcp.ts 참고). 값을 줘도 무시되는 것이 정상이다.
+        model: 'ignored-by-acp',
+        effort: 'low',
+        // 읽기 전용으로 — 이 테스트가 저장소를 건드릴 이유가 없다.
+        permissionMode: 'readOnly',
+        prompt: 'Reply with exactly the word BANANA and nothing else. Do not use any tools.',
+        abort: new AbortController(),
+        onActivity: (a) => activities.push(a),
+        canUseTool: async (_toolName, input) => ({ behavior: 'allow', updatedInput: input })
+      })
+
+      // 여기서 고정하는 것은 모델의 답이 아니라 **배선**이다: 핸드셰이크 → session/new →
+      // session/prompt → stop 이 실제로 끝까지 돈다는 것. 계정 정책이 모델 호출을 막아도
+      // (조직 정책으로 Copilot CLI 가 잠긴 계정이 있다) 서버는 그 사실을 텍스트로 돌려주므로,
+      // 이 테스트는 "매달리지 않고 사람이 읽을 것이 남는다" 를 본다.
+      expect(result.sessionId).toBeTruthy()
+      expect(result.text || result.error).toBeTruthy()
+      // 활동은 도구를 쓰지 않는 프롬프트라 0건일 수 있다. 개수가 아니라 모양만 본다 —
+      // toolName 이 비어 오면 사이드바가 빈 줄을 그린다.
+      expect(activities.every((a) => a.kind !== 'tool' || Boolean(a.toolName))).toBe(true)
+    },
+    180_000
+  )
 })

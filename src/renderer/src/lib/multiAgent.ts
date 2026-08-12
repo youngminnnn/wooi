@@ -1,5 +1,5 @@
 import { type AgentBackendId, type Workspace } from '@shared/types'
-import { useAvailableBackends } from './backends'
+import { useAvailableBackends, useTeammateBackends } from './backends'
 
 /**
  * 멀티 에이전트 모드의 렌더러 쪽 해석.
@@ -29,6 +29,7 @@ export interface MultiAgentState {
 
 export function useMultiAgent(workspace: Workspace): MultiAgentState {
   const available = useAvailableBackends()
+  const teammates = useTeammateBackends()
   // 위임 도구를 꽂을 경로가 있는 백엔드에서만(capabilities.delegate). 없으면 모드를 켜 봤자
   // 아무 일도 일어나지 않으므로 제안조차 하지 않는다.
   const canCoordinate = Boolean(
@@ -36,9 +37,9 @@ export function useMultiAgent(workspace: Workspace): MultiAgentState {
   )
   // 에이전트가 하나뿐이면 팀이라고 말해 봐야 보여 줄 팀원이 없다 — 저장된 플래그가 켜져
   // 있어도(다른 머신에서 켰다거나, CLI 를 지웠다거나) 화면은 평범한 워크스페이스로 읽는다.
-  const active = canCoordinate && available.length > 1 && workspace.multiAgent === true
+  const active = canCoordinate && teammates.length > 1 && workspace.multiAgent === true
   return {
     active,
-    others: active ? available.filter((b) => b.id !== workspace.agentBackend).map((b) => b.id) : []
+    others: active ? teammates.filter((b) => b.id !== workspace.agentBackend).map((b) => b.id) : []
   }
 }

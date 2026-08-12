@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { DEFAULT_SETTINGS } from '../../storeSchema'
-import type { AppSettings, Workspace } from '@shared/types'
+import { AGENT_BACKEND_IDS, type AppSettings, type Workspace } from '@shared/types'
+import { delegateToolName } from './catalog'
 import type { AgentToolDeps } from './registry'
 
 /**
@@ -91,7 +92,7 @@ describe('switch_to_agent_team', () => {
   it('생긴 도구 이름과, 다음 턴이 저절로 시작된다는 사실을 알려 준다', async () => {
     const result = await switch_()
 
-    expect(result.teammateTools).toEqual(['claude_subagent', 'codex_subagent'])
+    expect(result.teammateTools).toEqual(AGENT_BACKEND_IDS.map(delegateToolName))
     // 배관이 이어 보내는데 모델이 대답을 기다리면 마찰은 그대로다. 기다리라고 시키지 않는지까지 본다.
     expect(String(result.next)).toMatch(/continues on its own/)
     expect(String(result.next)).toMatch(/Do not ask the user to reply/)

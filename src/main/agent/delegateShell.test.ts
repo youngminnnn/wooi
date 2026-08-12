@@ -23,7 +23,9 @@ describe('delegateShellAttempt', () => {
     ['codex review --base main', 'codex'],
     ['claude -p "리팩터링해 줘"', 'claude'],
     ['claude --print "리팩터링해 줘"', 'claude'],
-    ['claude --model opus -p "일해"', 'claude']
+    ['claude --model opus -p "일해"', 'claude'],
+    ['copilot -p "리팩터링해 줘"', 'copilot'],
+    ['copilot --model ignored --prompt="일해"', 'copilot']
   ])('%s → %s', (command, backend) => {
     expect(delegateShellAttempt(command)).toBe(backend)
   })
@@ -36,12 +38,20 @@ describe('delegateShellAttempt', () => {
 
   // 조사는 막지 않는다. 여기서 막으면 모델은 "이 환경에 codex 가 없다" 로 잘못 배우고,
   // 그건 우리가 유도하려는 결론과 정반대다.
-  it.each(['codex --version', 'codex --help', 'which codex', 'claude --version', 'man codex'])(
-    '조사는 그냥 둔다: %s',
-    (command) => {
-      expect(delegateShellAttempt(command)).toBeNull()
-    }
-  )
+  it.each([
+    'codex --version',
+    'codex --help',
+    'which codex',
+    'claude --version',
+    'man codex',
+    'copilot --version',
+    'copilot --help',
+    'copilot',
+    'copilot --acp',
+    'gh copilot suggest "일해"'
+  ])('조사는 그냥 둔다: %s', (command) => {
+    expect(delegateShellAttempt(command)).toBeNull()
+  })
 
   it.each([
     'git commit -m "codex exec 관련 수정"',

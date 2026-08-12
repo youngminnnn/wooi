@@ -34,6 +34,21 @@ export function CodexMark({ size = 18 }: { size?: number }): React.JSX.Element {
   )
 }
 
+export function CopilotMark({ size = 18 }: { size?: number }): React.JSX.Element {
+  // 작은 실행 행에서 GitHub 계열임을 읽을 수 있는 단순한 고글·브래킷 실루엣만 쓴다.
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-label="Copilot">
+      <path
+        d="M7 7.5 4 9v6l3 1.5M17 7.5 20 9v6l-3 1.5M7 8.5h10v7H7zM9.5 11.5h.01M14.5 11.5h.01M9 18h6"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
 export function GithubMark({ size = 18 }: { size?: number }): React.JSX.Element {
   return (
     <svg width={size} height={size} viewBox="0 0 16 16" fill="currentColor" aria-label="GitHub">
@@ -52,7 +67,8 @@ export function GithubMark({ size = 18 }: { size?: number }): React.JSX.Element 
  */
 const BACKEND_MARKS: Record<AgentBackendId, (props: { size?: number }) => React.JSX.Element> = {
   claude: ClaudeMark,
-  codex: CodexMark
+  codex: CodexMark,
+  copilot: CopilotMark
 }
 
 export function AgentBackendMark({

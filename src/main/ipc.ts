@@ -155,6 +155,8 @@ import type {
 } from '@shared/types'
 import type { AgentOrchestrator } from './agent/orchestrator'
 import { deliverApprovedPeerMessage } from './agent/tools/peer'
+// 메타만 있는 모듈이라 매니저 그래프를 끌어오지 않는다(agent/backend.ts 주석 참고).
+import { backendMeta } from './agent/backend'
 import type { PaneWindows } from './paneWindows'
 import {
   cancelPreviewPick,
@@ -825,6 +827,9 @@ export function registerIpc(ctx: IpcContext): void {
       const backends = await ctx.sessions.listBackends()
       const target = backends.find((b) => b.id === agentBackend)
       if (!target) return { error: 'Unknown agent.' }
+      if (!target.capabilities.mainAgent) {
+        return { error: `${target.label} can only be used as a teammate.` }
+      }
       if (!target.available) {
         return { error: target.unavailableReason ?? `${target.label} is not available.` }
       }
@@ -2121,6 +2126,13 @@ export function registerIpc(ctx: IpcContext): void {
       if (!repo) return { error: '리포를 찾을 수 없습니다.' }
       const settings = store.getState().settings
       const agentBackend = args.agentBackend ?? settings.defaultAgentBackend
+      // 리뷰 러너는 claude·codex 만 안다(review/run.ts). teammate-only 백엔드가 흘러들면 조용히
+      // Claude 로 떨어져 **사용자가 고른 것과 다른 제품**이 도는데, 그건 실패보다 나쁘다.
+      // 피커는 이미 mainAgent 로 걸리지만 IPC 는 렌더러에서 직접 닿는 표면이라 여기서도 막는다.
+      const backendForReview = backendMeta(agentBackend)
+      if (!backendForReview.capabilities.mainAgent) {
+        return { error: `${backendForReview.label} can only be used as a teammate.` }
+      }
       // 모델·effort 는 고른 에이전트의 전역 기본값을 따른다(백엔드마다 모델 ID 가 다르므로
       // 다른 백엔드의 값을 흘리면 CLI 가 거부한다).
       const defaults = agentSettingsFor(settings, agentBackend)

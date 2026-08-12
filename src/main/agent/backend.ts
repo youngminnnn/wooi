@@ -274,6 +274,7 @@ export const CLAUDE_META: AgentBackendMeta = {
   autonomousPermissionMode: 'auto',
   efforts: CLAUDE_EFFORTS,
   capabilities: {
+    mainAgent: true,
     sideQuestion: true,
     rewind: true,
     mcp: true,
@@ -370,6 +371,7 @@ export const CODEX_META: AgentBackendMeta = {
   autonomousPermissionMode: 'default',
   efforts: CODEX_EFFORTS,
   capabilities: {
+    mainAgent: true,
     sideQuestion: false,
     rewind: false,
     mcp: true,
@@ -395,6 +397,36 @@ export const CODEX_META: AgentBackendMeta = {
 }
 
 /**
+ * Copilot 은 ACP 일회성 위임만 구현한다. 아래 선택지는 워크스페이스 UI 가 읽지 않지만 메타 계약을
+ * 정직하게 채우기 위한 최소값이며, 메인 에이전트 경로로 승격시키는 폴백이 아니다.
+ */
+export const COPILOT_META: AgentBackendMeta = {
+  id: 'copilot',
+  label: 'GitHub Copilot CLI',
+  defaultModel: null,
+  permissionModes: CODEX_PERMISSION_MODES.filter((mode) => mode.id === 'readOnly'),
+  defaultPermissionMode: 'readOnly',
+  autonomousPermissionMode: null,
+  efforts: [],
+  capabilities: {
+    mainAgent: false,
+    sideQuestion: false,
+    rewind: false,
+    mcp: false,
+    effort: false,
+    fastMode: false,
+    interactiveCommands: [],
+    slashCommands: false,
+    steering: false,
+    inAppLogin: false,
+    rateLimits: false,
+    addDirectory: false,
+    delegate: false
+  },
+  available: false
+}
+
+/**
  * 식별자별 백엔드 메타데이터 카탈로그. 새 백엔드는 여기에 메타를 추가한다.
  *
  * 구현(SessionManager 등)을 아는 registry.ts 가 아니라 **메타만 아는 이 파일**에 둔다 —
@@ -403,7 +435,8 @@ export const CODEX_META: AgentBackendMeta = {
  */
 export const AGENT_BACKENDS: Record<AgentBackendId, AgentBackendMeta> = {
   claude: CLAUDE_META,
-  codex: CODEX_META
+  codex: CODEX_META,
+  copilot: COPILOT_META
 }
 
 /** 알 수 없는/누락 식별자의 폴백 백엔드. */

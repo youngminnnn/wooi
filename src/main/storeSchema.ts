@@ -74,7 +74,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
     claude: { model: DEFAULT_MODEL, effort: null, permissionMode: 'default', fastMode: false },
     // Codex 는 카탈로그 기본 모델·기본 effort 를 그대로 따른다(null = 백엔드 기본).
     // 모델과 effort는 Codex 카탈로그 기본값을 따르고 fast tier는 기본적으로 끈다.
-    codex: { model: null, effort: null, permissionMode: null, fastMode: false }
+    codex: { model: null, effort: null, permissionMode: null, fastMode: false },
+    // Copilot 은 메인 UI 가 읽지 않으며 옛 파일의 누락도 agentSettingsFor 가 기본값으로 보완한다.
+    // 과거 파일 모양을 재현하는 v12→v13 마이그레이션 리터럴까지 고칠 이유가 없다.
+    copilot: { model: null, effort: null, permissionMode: null, fastMode: false }
   },
   // 기본 다크 — 기존 사용자도 load 의 기본값 병합으로 다크를 유지한다.
   theme: 'dark',

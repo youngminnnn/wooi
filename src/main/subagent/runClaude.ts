@@ -25,8 +25,8 @@ const MAX_TURNS = 120
  * (review/runClaude.ts)가 같은 이유로 같은 선택을 했다.
  *
  * 리뷰와 다른 점은 둘이다: 결과를 구조화 출력이 아니라 **자유 텍스트**로 받고(위임의 답은
- * 형식이 정해져 있지 않다), 권한을 고정 정책이 아니라 **부모 세션의 canUseTool** 에 넘긴다
- * (저장된 always-allow 규칙·auto 모드·파일 변경 diff 가 그대로 적용된다).
+ * 형식이 정해져 있지 않다), 권한은 호출부의 askSubAgentPermission 브리지로 부모 워크스페이스에
+ * 매번 묻는다. fullAccess 만 즉시 통과하며 저장 규칙·auto 모드는 이 경로에 적용되지 않는다.
  */
 export async function runClaudeSubAgent(deps: SubAgentRunDeps): Promise<SubAgentResult> {
   // 위임 실행은 메인 프로세스에서 돈다(호스트는 toolCall 로 메인에 넘긴다) — store 를 읽어도 된다.

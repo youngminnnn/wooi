@@ -53,5 +53,11 @@ export function useAgentSettings(id: AgentBackendId | undefined): AgentSettings 
  */
 export function useAvailableBackends(): AgentBackendMeta[] {
   const backends = useStore((s) => s.backends)
+  return useMemo(() => backends.filter((b) => b.available && b.capabilities.mainAgent), [backends])
+}
+
+/** 설치되어 서브에이전트가 될 수 있는 전체 목록. 메인 자격과는 별개의 질문이다. */
+export function useTeammateBackends(): AgentBackendMeta[] {
+  const backends = useStore((s) => s.backends)
   return useMemo(() => backends.filter((b) => b.available), [backends])
 }
