@@ -187,6 +187,83 @@ export interface WarningParams {
   summary?: string
 }
 
+/**
+ * turn/diff/updated — 턴이 도는 동안 누적된 **전체 통합 diff**.
+ *
+ * 턴마다 여러 번 온다(실측: 파일을 건드릴 때마다 3~4회). 우리는 diff 본문을 화면의 정본으로
+ * 쓰지 않는다 — 이유는 [[mapping]] 의 해당 case 주석 참고.
+ */
+export interface TurnDiffParams {
+  threadId?: ThreadId
+  turnId?: string
+  diff?: string
+}
+
+/**
+ * mcpServer/startupStatus/updated — MCP 서버 기동 상태.
+ *
+ * `threadId` 가 스키마상 optional 이다. 실측으로는 항상 실려 왔지만(스레드를 열 때 서버가 뜨므로),
+ * 없으면 호스트의 라우팅이 버린다([[host]] routeNotification).
+ */
+export interface McpServerStatusParams {
+  name?: string
+  /** 'starting' | 'ready' | 'failed' | 'cancelled'. 새 값이 생겨도 파싱은 성공해야 한다. */
+  status?: string
+  error?: string | null
+  /** 지금은 'reauthenticationRequired' 하나뿐이다. */
+  failureReason?: string | null
+  threadId?: ThreadId | null
+}
+
+/** item/mcpToolCall/progress — 긴 MCP 호출이 살아 있음을 알리는 진행 메시지. */
+export interface McpToolProgressParams {
+  threadId?: ThreadId
+  turnId?: string
+  itemId?: string
+  message?: string
+}
+
+/** item/fileChange/patchUpdated — 승인 대기 중 패치 내용이 갱신됐다. */
+export interface FileChangePatchParams {
+  threadId?: ThreadId
+  turnId?: string
+  itemId?: string
+  changes?: FileUpdateChange[]
+}
+
+/**
+ * 훅 실행 1회의 요약. hook/started 와 hook/completed 가 같은 모양을 쓴다.
+ *
+ * `id` 로 시작과 완료가 짝지어지므로 카드 하나를 upsert 할 수 있다.
+ */
+export interface HookRunSummary {
+  id?: string
+  /** 'preToolUse' · 'userPromptSubmit' · 'stop' 등. */
+  eventName?: string
+  /** 'running' | 'completed' | 'failed' | 'blocked' | 'stopped' */
+  status?: string
+  /** 'sync' 인 훅만 턴을 붙들고 있다. */
+  executionMode?: string
+  /** 'command' | 'prompt' | 'agent' */
+  handlerType?: string
+  statusMessage?: string | null
+  durationMs?: number | null
+  entries?: { kind?: string; text?: string }[]
+}
+
+/** hook/started · hook/completed */
+export interface HookParams {
+  threadId?: ThreadId
+  turnId?: string | null
+  run?: HookRunSummary
+}
+
+/** guardianWarning — 사용자에게 그대로 보여 주면 되는 짧은 경고. */
+export interface GuardianWarningParams {
+  threadId?: ThreadId
+  message?: string
+}
+
 // ── 서버 → 클라이언트 **요청** (반드시 응답해야 진행된다) ───────────────
 
 /** 명령 실행 승인 요청. */
@@ -339,7 +416,18 @@ export const NOTIFY = {
   rateLimitsUpdated: 'account/rateLimits/updated',
   threadCompacted: 'thread/compacted',
   modelRerouted: 'model/rerouted',
-  deprecationNotice: 'deprecationNotice'
+  deprecationNotice: 'deprecationNotice',
+  /** 턴 누적 diff. Changes 패널을 턴 중에도 살아 있게 하는 신호로 쓴다. */
+  turnDiffUpdated: 'turn/diff/updated',
+  /** MCP 서버 기동 상태. 실패만 사용자에게 보여 준다. */
+  mcpStartupStatus: 'mcpServer/startupStatus/updated',
+  /** 긴 MCP 호출의 진행 메시지. */
+  mcpToolProgress: 'item/mcpToolCall/progress',
+  /** 승인 대기 중 패치 갱신. */
+  fileChangePatchUpdated: 'item/fileChange/patchUpdated',
+  hookStarted: 'hook/started',
+  hookCompleted: 'hook/completed',
+  guardianWarning: 'guardianWarning'
 } as const
 
 /** 서버가 우리에게 보내는 **요청** 메서드(응답 필수). */

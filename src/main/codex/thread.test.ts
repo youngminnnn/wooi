@@ -79,6 +79,31 @@ describe('승인용 diff 추적', () => {
     expect(thread.fileChanges('f1')).toEqual(CHANGES)
     expect(thread.fileChanges('f2')).toEqual(other)
   })
+
+  // 이게 없으면 사용자가 옛 diff 를 보고 새 내용을 승인하게 된다.
+  it('패치가 갱신되면 승인에 실을 diff 도 새것으로 바뀐다', () => {
+    const { thread } = makeThread()
+    thread.handleNotification(NOTIFY.itemStarted, {
+      item: { id: 'f1', type: 'fileChange', changes: CHANGES }
+    })
+    const revised = [{ path: 'a.ts', kind: 'update', diff: '@@ -1 +1 @@\n-old\n+revised' }]
+    thread.handleNotification(NOTIFY.fileChangePatchUpdated, {
+      threadId: 'thr_1',
+      turnId: 't1',
+      itemId: 'f1',
+      changes: revised
+    })
+    expect(thread.fileChanges('f1')).toEqual(revised)
+  })
+
+  it('빈 갱신은 붙잡아 둔 diff 를 지우지 않는다', () => {
+    const { thread } = makeThread()
+    thread.handleNotification(NOTIFY.itemStarted, {
+      item: { id: 'f1', type: 'fileChange', changes: CHANGES }
+    })
+    thread.handleNotification(NOTIFY.fileChangePatchUpdated, { itemId: 'f1', changes: [] })
+    expect(thread.fileChanges('f1')).toEqual(CHANGES)
+  })
 })
 
 describe('컨텍스트 사용량 추적', () => {

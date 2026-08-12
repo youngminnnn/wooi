@@ -5,11 +5,17 @@ import { NOTIFY, type CodexDecision, type FileUpdateChange, type ThreadItem } fr
 import type {
   CommandApprovalParams,
   DeltaParams,
+  FileChangePatchParams,
+  GuardianWarningParams,
+  HookParams,
   ItemParams,
+  McpServerStatusParams,
+  McpToolProgressParams,
   PlanUpdatedParams,
   RequestUserInputParams,
   FileChangeApprovalParams,
   TokenUsageParams,
+  TurnDiffParams,
   TurnParams,
   WarningParams
 } from './wire'
@@ -49,10 +55,32 @@ export interface MapperState {
   agents: Map<string, { taskId: string; agentType: string; description: string; startedAt: number }>
   /** 로컬에 즉시 표시한 사용자 입력. app-server echo 를 중복 표시하지 않기 위한 서명. */
   pendingUserEchoes: string[]
+  /**
+   * codex itemId → 그 MCP 도구 카드의 이름과 인자.
+   *
+   * 진행 알림(item/mcpToolCall/progress)에는 도구 이름도 인자도 없다. 그것만으로 카드를 다시
+   * 그리면 이미 보여 주던 내용이 지워지므로, 시작 시점의 스냅샷을 붙잡아 둔다(명령 실행의
+   * `command` 맵과 같은 이유다).
+   */
+  tools: Map<string, { name: string; input: unknown }>
+  /**
+   * 이미 보여 준 MCP 기동 실패(`서버이름\n오류`).
+   *
+   * 같은 실패가 반복해서 온다 — 실측으로 서버 하나가 `starting`→`failed` 를 두 번 냈다.
+   * 대화에 같은 카드를 두 장 쌓지 않기 위한 기록이다.
+   */
+  mcpFailures: Set<string>
 }
 
 export function createMapperState(): MapperState {
-  return { output: new Map(), command: new Map(), agents: new Map(), pendingUserEchoes: [] }
+  return {
+    output: new Map(),
+    command: new Map(),
+    agents: new Map(),
+    pendingUserEchoes: [],
+    tools: new Map(),
+    mcpFailures: new Set()
+  }
 }
 
 /** CodexThread 가 낙관적으로 표시한 입력을 서버 echo 와 짝짓는다. */
@@ -180,6 +208,56 @@ export function mapNotification(
     case NOTIFY.threadCompacted:
       return { events: [{ type: 'compacting', active: false, trigger: 'auto' }], persist: [] }
 
+    /**
+     * 턴 누적 diff. **본문은 쓰지 않고 "바뀌었다" 는 사실만** 흘려보낸다.
+     *
+     * 이 diff 는 에이전트가 만든 변경만 담는다 — 사용자가 직접 편집한 것도, Claude 백엔드의
+     * 변경도 없다. Changes 패널의 정본으로 삼으면 백엔드마다 다른 것을 보여 주게 되므로,
+     * 정본은 git 하나로 두고 갱신 시점만 알린다([[types]] workingTreeChanged).
+     */
+    case NOTIFY.turnDiffUpdated: {
+      const p = params as TurnDiffParams
+      if (!p?.diff) return NOTHING
+      return { events: [{ type: 'workingTreeChanged' }], persist: [] }
+    }
+
+    case NOTIFY.mcpStartupStatus:
+      return mapMcpStartup(params as McpServerStatusParams, state, ts)
+
+    case NOTIFY.mcpToolProgress:
+      return mapMcpProgress(params as McpToolProgressParams, state, ts)
+
+    /**
+     * 승인 대기 중 패치가 갱신됐다. 카드를 최신 내용으로 다시 그린다.
+     *
+     * 승인 프롬프트에 실리는 diff 는 호출부가 따로 붙잡아 둔다([[thread]] pendingPatches) —
+     * 이 계층은 I/O 도 상태 밖의 부수효과도 갖지 않으므로 카드만 책임진다.
+     */
+    case NOTIFY.fileChangePatchUpdated: {
+      const p = params as FileChangePatchParams
+      if (!p?.itemId || !p.changes?.length) return NOTHING
+      return mapFileChange({ changes: p.changes }, itemId(p.itemId, 'fileChange'), false, ts)
+    }
+
+    case NOTIFY.hookStarted:
+    case NOTIFY.hookCompleted:
+      return mapHook(method, params as HookParams, ts)
+
+    case NOTIFY.guardianWarning: {
+      const p = params as GuardianWarningParams
+      if (!p?.message) return NOTHING
+      const item: ChatItem = { id: `codex:guardian:${ts}`, type: 'system', text: p.message, ts }
+      return { events: [{ type: 'item', item }], persist: [item] }
+    }
+
+    /**
+     * `thread/status/changed` 는 **일부러 매핑하지 않는다.**
+     *
+     * 서버가 idle 을 직접 알려 주므로 Wooi 의 추론(settleIdle)을 대신할 것처럼 보이지만, 실측하면
+     * `{type:'idle'}` 이 `turn/completed` 와 **같은 밀리초에** 온다. 둘 다 status:'idle' 로 옮기면
+     * 이벤트가 두 번 나가고, 매니저는 idle 마다 완료 알림을 울리므로([[manager]] emit) 턴 하나에
+     * 완료음이 두 번 난다. 서버 값이 더 정확한 것도 아니라 얻는 것 없이 회귀만 남는다.
+     */
     default:
       // 구독하지 않는 알림(계정·rate limit·MCP 상태 등)은 상위 계층이 따로 처리한다.
       return NOTHING
@@ -326,15 +404,16 @@ function mapItem(
     case 'fileChange':
       return mapFileChange(item, id, done, ts)
 
-    case 'mcpToolCall':
-      return mapTool(
-        id,
-        `${item.server ?? 'mcp'}/${item.tool ?? 'tool'}`,
-        item.arguments,
-        item,
-        done,
-        ts
-      )
+    case 'mcpToolCall': {
+      const name = `${item.server ?? 'mcp'}/${item.tool ?? 'tool'}`
+      // 진행 알림에는 이름도 인자도 없다 — 그때 카드를 다시 그릴 수 있도록 여기서 붙잡아 둔다.
+      const key = item.id
+      if (key) {
+        if (done) state.tools.delete(key)
+        else state.tools.set(key, { name, input: item.arguments })
+      }
+      return mapTool(id, name, item.arguments, item, done, ts)
+    }
 
     case 'dynamicToolCall':
       return mapTool(
@@ -604,6 +683,105 @@ function describeResult(result: unknown): string {
   if (result === undefined || result === null) return 'Done.'
   if (typeof result === 'string') return result
   return JSON.stringify(result, null, 2)
+}
+
+// ── MCP 서버 · 훅 ───────────────────────────────────────────────────────
+
+/**
+ * MCP 서버 기동 상태 → **실패만** 대화에 남긴다.
+ *
+ * 성공 경로를 버리는 것이 이 함수의 요점이다. 실측으로 턴 하나에 이 알림이 12~23번 왔는데
+ * 대부분 `starting`→`ready` 진동이었다 — 전부 카드로 만들면 대화가 그것만으로 덮인다.
+ * 반대로 실패는 지금 Wooi 가 알 방법이 아예 없다. `error` 에 원인 문장이 그대로 실려 온다:
+ * "MCP client for `x` failed to start: MCP startup failed: No such file or directory (os error 2)".
+ *
+ * `cancelled` 도 남기지 않는다 — 사용자가 껐거나 재기동 중이라 조치할 것이 없다.
+ */
+function mapMcpStartup(params: McpServerStatusParams, state: MapperState, ts: number): Mapped {
+  if (params?.status !== 'failed') return NOTHING
+  const name = params.name ?? 'MCP server'
+  const reason = params.error?.trim() || 'The server did not start.'
+  // 같은 실패가 반복해서 온다(실측: 서버 하나가 failed 를 두 번). 한 번만 보여 준다.
+  const key = `${name}\n${reason}`
+  if (state.mcpFailures.has(key)) return NOTHING
+  state.mcpFailures.add(key)
+
+  // 재인증은 사용자가 할 수 있는 일이 분명하므로 한 줄 덧붙인다.
+  const hint =
+    params.failureReason === 'reauthenticationRequired'
+      ? '\n\nSign in to this server again in Settings → Integrations.'
+      : ''
+  const item: ChatItem = {
+    id: `codex:mcp:${name}:${ts}`,
+    type: 'error',
+    text: `MCP server "${name}" failed to start.\n\n${reason}${hint}`,
+    ts
+  }
+  return { events: [{ type: 'item', item }], persist: [item] }
+}
+
+/**
+ * 긴 MCP 호출의 진행 메시지 → 이미 떠 있는 도구 카드를 갱신한다.
+ *
+ * 진행 알림에는 도구 이름도 인자도 없어서, 시작 시점에 붙잡아 둔 스냅샷과 합쳐야 카드가
+ * 지워지지 않는다. 아직 시작을 못 본 itemId 면(알림 순서가 어긋난 경우) 조용히 버린다 —
+ * 이름 없는 카드를 새로 만드는 것보다 낫다.
+ */
+function mapMcpProgress(params: McpToolProgressParams, state: MapperState, ts: number): Mapped {
+  const key = params?.itemId
+  const message = params?.message?.trim()
+  if (!key || !message) return NOTHING
+  const meta = state.tools.get(key)
+  if (!meta) return NOTHING
+
+  const use: ChatItem = {
+    id: itemId(key, 'mcp'),
+    type: 'tool_use',
+    toolId: itemId(key, 'mcp'),
+    name: meta.name,
+    input: { ...((meta.input ?? {}) as Record<string, unknown>), progress: message },
+    ts
+  }
+  // 진행 스냅샷은 화면에만 — 확정 아이템이 뒤이어 트랜스크립트에 남는다.
+  return { events: [{ type: 'item', item: use }], persist: [] }
+}
+
+/**
+ * 사용자 훅 실행 → 시스템 카드 하나(실행 id 기준 upsert).
+ *
+ * 훅이 턴을 붙들고 있을 때 지금은 화면이 완전히 조용하다. 시작 카드는 그 침묵을 메우는 것이
+ * 목적이라 **트랜스크립트에는 남기지 않는다**(완료 카드가 같은 id 로 덮어쓴다).
+ *
+ * 남기는 것은 정상 종료가 아닌 경우뿐이다 — 훅이 매 턴 도는 것이 정상인데 성공까지 기록하면
+ * 트랜스크립트가 훅 로그가 된다. 반대로 `failed`·`blocked`·`stopped` 는 턴의 결과를 바꾼
+ * 사건이라 남아야 한다.
+ */
+function mapHook(method: string, params: HookParams, ts: number): Mapped {
+  const run = params?.run
+  if (!run) return NOTHING
+  const label = run.eventName ?? 'hook'
+  const id = `codex:hook:${run.id ?? label}`
+
+  if (method === NOTIFY.hookStarted) {
+    const detail = run.statusMessage?.trim()
+    const text = `Hook ${label} is running…${detail ? `\n\n${detail}` : ''}`
+    return { events: [{ type: 'item', item: { id, type: 'system', text, ts } }], persist: [] }
+  }
+
+  const status = run.status ?? 'completed'
+  const failed = status === 'failed' || status === 'blocked' || status === 'stopped'
+  // 훅이 남긴 출력. 사용자가 원인을 알 수 있는 유일한 단서라 실패 시엔 그대로 싣는다.
+  const output = (run.entries ?? [])
+    .map((entry) => entry.text?.trim())
+    .filter(Boolean)
+    .join('\n')
+  const took = typeof run.durationMs === 'number' ? ` in ${Math.round(run.durationMs)}ms` : ''
+  const headline = failed ? `Hook ${label} ${status}${took}.` : `Hook ${label} finished${took}.`
+  const detail = run.statusMessage?.trim() || output
+  const text = detail ? `${headline}\n\n${clampText(detail)}` : headline
+
+  const item: ChatItem = { id, type: failed ? 'error' : 'system', text, ts }
+  return { events: [{ type: 'item', item }], persist: failed ? [item] : [] }
 }
 
 // ── 사용량 · 플랜 ───────────────────────────────────────────────────────

@@ -677,3 +677,209 @@ describe('권한 결정 → codex decision', () => {
     )
   })
 })
+
+/**
+ * 여기 있는 페이로드는 전부 codex 0.146.0 스키마(`codex app-server generate-json-schema`)에서
+ * 필드명과 필수 여부를 확인한 것이다. 관측한 값이 있으면 관측한 모양 그대로 썼다.
+ */
+describe('턴 누적 diff', () => {
+  // 본문을 카드로 만들지 않는 것이 핵심이다 — Changes 패널의 정본은 git 하나로 둔다.
+  it('turn/diff/updated 는 본문 없이 갱신 신호만 낸다', () => {
+    const r = map(NOTIFY.turnDiffUpdated, {
+      threadId: 'thr_1',
+      turnId: 't1',
+      diff: 'diff --git a/math.js b/math.js\n+export function subtract() {}\n'
+    })
+    expect(r.events).toEqual([{ type: 'workingTreeChanged' }])
+    expect(r.persist).toEqual([])
+  })
+
+  it('diff 가 비면 아무것도 하지 않는다', () => {
+    expect(map(NOTIFY.turnDiffUpdated, { threadId: 'thr_1', turnId: 't1' }).events).toEqual([])
+  })
+})
+
+describe('MCP 서버 기동 상태', () => {
+  // 실측: 턴 하나에 12~23번 오고 대부분 starting→ready 진동이다. 전부 카드로 만들면 대화가 덮인다.
+  it('starting·ready·cancelled 는 버린다', () => {
+    const state = createMapperState()
+    for (const status of ['starting', 'ready', 'cancelled']) {
+      expect(map(NOTIFY.mcpStartupStatus, { name: 'srv', status }, state).events).toEqual([])
+    }
+  })
+
+  it('failed 는 서버 이름과 원인을 담은 에러 카드를 남긴다', () => {
+    const r = map(NOTIFY.mcpStartupStatus, {
+      threadId: 'thr_1',
+      name: 'broken-probe',
+      status: 'failed',
+      error: 'MCP client for `broken-probe` failed to start: No such file or directory (os error 2)'
+    })
+    const item = items(r)[0]
+    expect(item.type).toBe('error')
+    expect(item).toMatchObject({ type: 'error' })
+    expect((item as Extract<ChatItem, { type: 'error' }>).text).toContain('broken-probe')
+    expect((item as Extract<ChatItem, { type: 'error' }>).text).toContain('No such file')
+    expect(r.persist).toHaveLength(1)
+  })
+
+  // 실측으로 서버 하나가 같은 failed 를 두 번 보냈다.
+  it('같은 실패를 두 번 보여 주지 않는다', () => {
+    const state = createMapperState()
+    const params = { name: 'srv', status: 'failed', error: 'boom' }
+    expect(map(NOTIFY.mcpStartupStatus, params, state).events).toHaveLength(1)
+    expect(map(NOTIFY.mcpStartupStatus, params, state).events).toEqual([])
+  })
+
+  it('재인증이 원인이면 무엇을 해야 하는지 덧붙인다', () => {
+    const r = map(NOTIFY.mcpStartupStatus, {
+      name: 'srv',
+      status: 'failed',
+      error: 'unauthorized',
+      failureReason: 'reauthenticationRequired'
+    })
+    expect((items(r)[0] as Extract<ChatItem, { type: 'error' }>).text).toContain('Sign in')
+  })
+
+  it('오류 문구가 비어도 카드는 남긴다', () => {
+    const r = map(NOTIFY.mcpStartupStatus, { name: 'srv', status: 'failed', error: null })
+    expect((items(r)[0] as Extract<ChatItem, { type: 'error' }>).text).toContain('did not start')
+  })
+})
+
+describe('MCP 호출 진행 메시지', () => {
+  /** 진행 알림에는 도구 이름도 인자도 없다 — 시작 스냅샷과 합쳐야 카드가 지워지지 않는다. */
+  function withStartedCall(state: MapperState): void {
+    map(
+      NOTIFY.itemStarted,
+      {
+        item: {
+          id: 'i1',
+          type: 'mcpToolCall',
+          server: 'github',
+          tool: 'search',
+          arguments: { q: 'wooi' }
+        }
+      },
+      state
+    )
+  }
+
+  it('진행 메시지가 와도 도구 이름과 인자를 잃지 않는다', () => {
+    const state = createMapperState()
+    withStartedCall(state)
+    const r = map(NOTIFY.mcpToolProgress, { itemId: 'i1', message: 'Fetching page 3…' }, state)
+    const item = items(r)[0] as Extract<ChatItem, { type: 'tool_use' }>
+    expect(item.name).toBe('github/search')
+    expect(item.input).toMatchObject({ q: 'wooi', progress: 'Fetching page 3…' })
+    // 진행 스냅샷은 화면에만 — 확정 아이템이 뒤이어 트랜스크립트에 남는다.
+    expect(r.persist).toEqual([])
+  })
+
+  // 이름 없는 카드를 새로 만드는 것보다 버리는 편이 낫다.
+  it('시작을 못 본 itemId 는 조용히 버린다', () => {
+    expect(map(NOTIFY.mcpToolProgress, { itemId: 'ghost', message: 'hi' }).events).toEqual([])
+  })
+
+  it('호출이 끝나면 스냅샷을 놓아 준다', () => {
+    const state = createMapperState()
+    withStartedCall(state)
+    map(NOTIFY.itemCompleted, { item: { id: 'i1', type: 'mcpToolCall', result: 'ok' } }, state)
+    expect(map(NOTIFY.mcpToolProgress, { itemId: 'i1', message: 'late' }, state).events).toEqual([])
+  })
+})
+
+describe('패치 갱신', () => {
+  it('item/fileChange/patchUpdated 는 카드를 최신 내용으로 다시 그린다', () => {
+    const r = map(NOTIFY.fileChangePatchUpdated, {
+      threadId: 'thr_1',
+      turnId: 't1',
+      itemId: 'i9',
+      changes: [{ path: 'src/a.ts', kind: { type: 'update' }, diff: '@@ -1 +1 @@' }]
+    })
+    const item = items(r)[0] as Extract<ChatItem, { type: 'tool_use' }>
+    expect(item.name).toBe('Apply patch')
+    expect(item.input).toMatchObject({ paths: ['src/a.ts'] })
+    // 아직 확정이 아니므로 트랜스크립트에는 남기지 않는다.
+    expect(r.persist).toEqual([])
+  })
+
+  it('변경이 비면 아무것도 하지 않는다', () => {
+    expect(map(NOTIFY.fileChangePatchUpdated, { itemId: 'i9', changes: [] }).events).toEqual([])
+  })
+})
+
+describe('사용자 훅', () => {
+  it('hook/started 는 진행 카드를 띄우되 트랜스크립트에는 남기지 않는다', () => {
+    const r = map(NOTIFY.hookStarted, {
+      threadId: 'thr_1',
+      run: { id: 'h1', eventName: 'preToolUse', status: 'running', executionMode: 'sync' }
+    })
+    const item = items(r)[0] as Extract<ChatItem, { type: 'system' }>
+    expect(item.type).toBe('system')
+    expect(item.text).toContain('preToolUse')
+    expect(r.persist).toEqual([])
+  })
+
+  // 시작과 완료가 같은 id 를 쓰므로 카드 한 장이 갱신된다(두 장 쌓이지 않는다).
+  it('완료 카드가 시작 카드를 덮어쓴다', () => {
+    const started = map(NOTIFY.hookStarted, { run: { id: 'h1', eventName: 'stop' } })
+    const completed = map(NOTIFY.hookCompleted, {
+      run: { id: 'h1', eventName: 'stop', status: 'completed', durationMs: 12 }
+    })
+    expect(items(started)[0].id).toBe(items(completed)[0].id)
+  })
+
+  // 훅이 매 턴 도는 것이 정상이라, 성공까지 남기면 트랜스크립트가 훅 로그가 된다.
+  it('정상 종료는 트랜스크립트에 남기지 않는다', () => {
+    const r = map(NOTIFY.hookCompleted, {
+      run: { id: 'h1', eventName: 'postToolUse', status: 'completed', durationMs: 40 }
+    })
+    expect(items(r)[0].type).toBe('system')
+    expect(r.persist).toEqual([])
+  })
+
+  it('턴을 막은 훅은 에러로 남기고 훅 출력을 싣는다', () => {
+    const r = map(NOTIFY.hookCompleted, {
+      run: {
+        id: 'h2',
+        eventName: 'preToolUse',
+        status: 'blocked',
+        entries: [{ kind: 'stderr', text: 'denied: rm -rf is not allowed' }]
+      }
+    })
+    const item = items(r)[0] as Extract<ChatItem, { type: 'error' }>
+    expect(item.type).toBe('error')
+    expect(item.text).toContain('blocked')
+    expect(item.text).toContain('rm -rf is not allowed')
+    expect(r.persist).toHaveLength(1)
+  })
+
+  it('run 이 없으면 아무것도 하지 않는다', () => {
+    expect(map(NOTIFY.hookCompleted, { threadId: 'thr_1' }).events).toEqual([])
+  })
+})
+
+describe('guardian 경고', () => {
+  it('guardianWarning 은 문구 그대로 보여 준다', () => {
+    const r = map(NOTIFY.guardianWarning, { threadId: 'thr_1', message: 'Careful with that.' })
+    expect(items(r)[0]).toMatchObject({ type: 'system', text: 'Careful with that.' })
+    expect(r.persist).toHaveLength(1)
+  })
+
+  it('메시지가 없으면 빈 카드를 만들지 않는다', () => {
+    expect(map(NOTIFY.guardianWarning, { threadId: 'thr_1' }).events).toEqual([])
+  })
+})
+
+/**
+ * 서버가 idle 을 직접 알려 주지만 `turn/completed` 와 같은 밀리초에 온다(실측). 둘 다 옮기면
+ * 완료 이벤트가 두 번 나가고 매니저가 완료음을 두 번 울린다 — 그래서 일부러 매핑하지 않는다.
+ */
+describe('thread/status/changed 는 의도적으로 매핑하지 않는다', () => {
+  it('idle 을 받아도 상태 이벤트를 내지 않는다', () => {
+    const r = map('thread/status/changed', { threadId: 'thr_1', status: { type: 'idle' } })
+    expect(r.events).toEqual([])
+    expect(r.persist).toEqual([])
+  })
+})

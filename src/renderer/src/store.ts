@@ -1110,6 +1110,10 @@ export const useStore = create<UIState>((set, get) => ({
           w.fastModeState = event.state
           w.fastModeReason = event.reason ?? null
         })
+      } else if (event.type === 'workingTreeChanged') {
+        // 턴이 끝나기를 기다리지 않고 Changes 패널을 따라가게 한다(패널은 gitStatus 의 변경 파일
+        // 수가 바뀌면 diff 를 다시 읽는다). 파일을 건드릴 때마다 오므로 턴당 서너 번 수준이다.
+        void get().refreshGit(workspaceId)
       } else if (event.type === 'agents') {
         // REPLACE 시맨틱 — 전량이 실려 오므로 병합하지 않는다. 빈 배열이면 키를 지워, 사이드바가
         // 워크스페이스를 세는 자리에서 "빈 배열이 있는 키"를 따로 걸러내지 않아도 되게 한다.

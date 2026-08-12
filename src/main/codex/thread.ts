@@ -22,7 +22,7 @@ import {
   rememberOptimisticUser,
   type MapperState
 } from './mapping'
-import type { ItemParams } from './wire'
+import type { FileChangePatchParams, ItemParams } from './wire'
 import type { CodexConfig } from './protocol'
 import { unknownItemId } from '@shared/types'
 
@@ -348,6 +348,15 @@ export class CodexThread {
     if (item?.type === 'fileChange' && item.id) {
       if (method === NOTIFY.itemCompleted) this.pendingPatches.delete(item.id)
       else this.pendingPatches.set(item.id, item.changes ?? [])
+    }
+
+    // 승인 대기 중에 패치가 바뀌면 붙잡아 둔 것도 갱신한다 — 그러지 않으면 사용자가 옛 diff 를
+    // 보고 새 내용을 승인하게 된다.
+    if (method === NOTIFY.fileChangePatchUpdated) {
+      const patch = params as FileChangePatchParams
+      if (patch?.itemId && patch.changes?.length) {
+        this.pendingPatches.set(patch.itemId, patch.changes)
+      }
     }
 
     // 턴 id 추적 — steer 대상과 interrupt 대상을 알기 위해 필요하다.
