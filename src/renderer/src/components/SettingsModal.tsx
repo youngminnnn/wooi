@@ -78,7 +78,7 @@ function PermissionModeHelp({
       >
         ?
       </summary>
-      <div className="absolute right-0 z-20 mt-2 w-80 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-3 shadow-xl">
+      <div className="absolute right-0 z-30 mt-2 w-80 rounded-lg border border-[var(--border-strong)] bg-[var(--surface)] p-3 shadow-xl">
         <div className="mb-2 text-xs font-medium text-neutral-300">Permission modes</div>
         <div className="space-y-2.5">
           {permissionModesFor(backend).map((item) => (
