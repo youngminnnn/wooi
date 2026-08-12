@@ -19,26 +19,11 @@
       "note": "공개 저장소가 없어 자동 비교 대상이 아니다. reviewedOn 경과일로만 갱신 시점을 잡는다."
     },
     {
-      "name": "Vibe Kanban",
-      "repo": "BloopAI/vibe-kanban",
-      "path": "README.md",
-      "sha": "9f1015036c966e17a0518e1f29f116ad5852a66c",
-      "docs": ["https://github.com/BloopAI/vibe-kanban"]
-    },
-    {
       "name": "Claude Squad",
       "repo": "smtg-ai/claude-squad",
       "path": "README.md",
       "sha": "52aa2dd50f1a86494f0413aa04decb5a36e3ebb5",
       "docs": ["https://github.com/smtg-ai/claude-squad"]
-    },
-    {
-      "name": "Crystal",
-      "repo": "stravu/crystal",
-      "path": "README.md",
-      "sha": "1ffa091fde5c0779ed4d5b08b7dacbc39eeb2224",
-      "docs": ["https://github.com/stravu/crystal"],
-      "note": "2026-02 지원 종료. 표의 행은 마지막 문서화된 릴리스(v0.3.x) 기준이라 업스트림이 움직일 일은 거의 없다."
     },
     {
       "name": "Emdash",

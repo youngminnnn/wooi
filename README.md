@@ -7,9 +7,8 @@
 ![Wooi demo](docs/demo.svg)
 
 Wooi is a macOS desktop app for orchestrating multiple **AI coding agents** in
-parallel, each on its own isolated git worktree. Each task runs in its own dedicated
-worktree + branch + agent session, and every session starts with **an empty input box
-and no automatic prompt** — nothing runs until you send your first message.
+parallel, each on its own isolated git worktree. Each task gets its own worktree,
+branch, and agent session.
 
 Running agents side by side is the *horizontal* axis, and isolated worktrees already
 cover it. **Worktrees solve file collisions; they don't solve dependencies** — when task
@@ -25,47 +24,22 @@ Wooi's built-in tools, and every review lands on the diff instead of in a transc
 
 ## Why Wooi
 
-- 🧱 **The whole stacked-PR lifecycle** — the whole app knows what a chain is, not
-  just the branch you're standing on. Work that builds on other work branches off it
-  instead of off the default branch. **Restack** rebases onto the latest parent and
-  pushes with `--force-with-lease`; when a parent merges, a **merge cascade** retargets
-  each child PR to the grandparent and rebases the children onto it; a PR that drifts
-  onto the wrong base gets **flagged instead of silently accepted**. And if an agent
-  builds a chain outside Wooi, the app reads GitHub's stack object first and falls back
-  to reconstructing it from the PRs' base links. It can then **review every layer as one
-  stack**, restack it, and keep the remainder valid as layers merge.
-- 🤖 **Agents orchestrate the app, not just the repo** — every session gets a built-in
-  MCP server. `check_related_work` shows which files the other workspaces are touching
-  *before* an agent starts, `create_workspace` / `create_stacked_workspace` let it split
-  a task into a chain of reviewable PRs, and `report_to_parent` / `notify_child` carry
-  results and updates along that chain. An agent can also ask to turn a solo workspace
-  into an **agent team**, or send a text message to another workspace under that
-  workspace's receive policy. Files, diffs, and transcripts never cross that boundary.
-  One prompt can end up as a three-PR stack you never arranged. See the
-  [built-in MCP reference](docs/built-in-mcp.md).
-- 🔍 **The diff and the stack are the review surface** — every agent can review a PR now; what's
-  missing is somewhere to work the result. A Wooi review is its own entity with its own
-  worktree, so the agent reads past the changed hunks without touching your checkout.
-  Findings are **anchored to diff lines** with a severity badge, editable, discardable,
-  and postable one at a time or as a batch. Files carry a **viewed** mark that
-  auto-clears when a new commit changes that file, replies to your comments are polled so
-  you can ask a follow-up, and verdicts are guarded — approve is hidden on your own PR,
-  and a verdict is held back if the findings it rests on failed to post. A stacked review
-  reads all layers in one session to find ordering, boundary, and cross-layer dependency
-  problems; in an ordinary workspace, you can comment on a diff line and send that exact
-  location back to the agent.
-- 🎛️ **Two agent backends, integrated deeply** — Claude Code and OpenAI Codex, each
-  supported down to the details rather than reduced to a lowest common denominator:
-  `/rewind` and `/btw` where the backend has them, per-backend permission modes,
-  reasoning effort and fast mode, account rate limits normalized into one readable
-  status line, and your own MCP servers inherited from your CLI config. You can switch
-  the main agent during a conversation, with Wooi carrying the existing context into the
-  next message. See
+- 🧱 **The whole stacked-PR lifecycle** — build dependent work as a PR stack, import
+  stacks from GitHub, review every layer together, and keep the chain valid through
+  restacks and merge cascades.
+- 🤖 **Agents orchestrate the app, not just the repo** — built-in tools let agents split
+  work, build stacks, form teams, and message other workspaces within explicit permission
+  and receive policies. See the [built-in MCP reference](docs/built-in-mcp.md).
+- 🔍 **The diff and the stack are the review surface** — each review gets its own
+  worktree, findings stay anchored to diff lines, and stack reviews read every layer
+  together.
+- 🎛️ **Two agent backends, integrated deeply** — Wooi exposes each backend's models,
+  permissions, effort, fast mode, rate limits, and MCP servers. Switch between Claude
+  Code and Codex mid-conversation without losing context. See
   [agent backends](docs/agent-backends.md).
-- 🔒 **Quiet where it counts** — **no telemetry** and no servers of its own; transcripts
-  stay local. Updates can wait for **"restart when work finishes"** instead of killing a
-  running turn. Ignored-but-needed files like `.env` are **carried into every new
-  worktree**, and sessions resume across restarts.
+- 🔒 **Quiet where it counts** — no telemetry or servers of its own. Settings and
+  transcripts stay local; updates wait for active work, carry files follow new
+  worktrees, and sessions survive restarts.
 
 Wondering how this lines up with other tools? See the
 [comparison page](https://youngminnnn.github.io/wooi/alternatives.html), where every
