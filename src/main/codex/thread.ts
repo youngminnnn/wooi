@@ -321,6 +321,11 @@ export class CodexThread {
         })
         const id = result?.thread?.id ?? resume
         this.adoptThread(id)
+        // active 알림이 resume 응답보다 먼저 오면 아직 이 객체가 threadId 를 소유하지 않아 host
+        // 라우터가 버린다. 응답의 상태도 함께 읽어 그 순서에서도 running 을 복구한다.
+        if (threadStatusType(result?.thread?.status) === 'active') {
+          this.deps.emit({ type: 'status', status: 'running' })
+        }
         return id
       } catch (err) {
         // 재개 실패(rollout 파일 삭제·형식 변경 등)로 대화를 아예 못 하게 두지 않는다.
@@ -352,6 +357,19 @@ export class CodexThread {
 
   /** 호스트가 이 스레드 앞으로 라우팅한 알림을 처리한다. */
   handleNotification(method: string, params: unknown): void {
+    // 앱 재시작은 저장돼 있던 running 을 idle 로 초기화하지만, Codex app-server 는 resume 한
+    // 스레드의 기존 턴을 계속 이어 갈 수 있다. 그 턴의 turn/started 는 재시작 전에 이미 지나가
+    // 다시 오지 않으므로, 서버가 알려 주는 active 상태로 사이드바 상태를 복구한다.
+    //
+    // idle 은 여기서 옮기지 않는다. 정상 종료 때 turn/completed 와 같은 시점에 함께 와서 idle 을
+    // 두 번 내보내면 매니저의 완료 알림도 두 번 울린다([[mapping]] 의 같은 규칙).
+    if (
+      method === NOTIFY.threadStatusChanged &&
+      threadStatusType((params as { status?: unknown })?.status) === 'active'
+    ) {
+      this.deps.emit({ type: 'status', status: 'running' })
+    }
+
     // 파일 변경 승인 요청에는 diff 가 실려 오지 않는다 — 같은 itemId 의 fileChange 아이템이
     // 먼저 도착하므로 그때 붙잡아 둔다. 아이템이 확정되면 더 필요 없으니 버린다.
     const item = (params as ItemParams)?.item
@@ -441,6 +459,14 @@ export class CodexThread {
     this.deps.persist(item)
     this.deps.emit({ type: 'item', item })
   }
+}
+
+/** app-server 버전별 thread status 모양을 한 문자열로 좁힌다. */
+export function threadStatusType(status: unknown): string | null {
+  if (typeof status === 'string') return status
+  if (!status || typeof status !== 'object') return null
+  const type = (status as { type?: unknown }).type
+  return typeof type === 'string' ? type : null
 }
 
 function errorItem(text: string): ChatItem {
