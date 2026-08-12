@@ -382,7 +382,14 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
                 </button>
               </span>
             ) : (
-              git && <BaseSyncControl workspace={workspace} git={git} refresh={refresh} />
+              git && (
+                <BaseSyncControl
+                  workspace={workspace}
+                  git={git}
+                  prNeedsBaseUpdate={pr?.needsBaseUpdate}
+                  refresh={refresh}
+                />
+              )
             )}
             {setupFailed && (
               <button

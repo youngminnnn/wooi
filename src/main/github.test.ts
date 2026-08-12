@@ -139,7 +139,8 @@ describe('gh 연결됨 (무회귀)', () => {
       url: 'https://github.com/o/r/pull/7',
       title: 'Add thing',
       state: 'approved',
-      label: 'Ready to merge'
+      label: 'Ready to merge',
+      needsBaseUpdate: false
     })
     // 연결돼 있으면 확인용 셸을 추가로 띄우지 않는다.
     expect(commands).toEqual([
@@ -177,6 +178,27 @@ describe('gh 연결됨 (무회귀)', () => {
     })
 
     await expect(getPrStatus('/tmp/wt')).resolves.toMatchObject({ state, label })
+  })
+
+  it('GitHub 가 Update branch 를 요구하면 base 업데이트 필요 상태를 보존한다', async () => {
+    reply = () => ({
+      code: 0,
+      stdout: JSON.stringify({
+        number: 9,
+        url: 'https://github.com/o/r/pull/9',
+        title: 'Behind base',
+        state: 'OPEN',
+        isDraft: false,
+        reviewDecision: 'APPROVED',
+        mergeable: 'MERGEABLE',
+        mergeStateStatus: 'BEHIND'
+      })
+    })
+
+    await expect(getPrStatus('/tmp/wt')).resolves.toMatchObject({
+      state: 'open',
+      needsBaseUpdate: true
+    })
   })
 
   it('쓰기 액션은 확인 없이 바로 gh 를 실행한다', async () => {
@@ -330,7 +352,8 @@ describe('브랜치별 PR 상태를 리포 목록에서 찾기', () => {
       url: 'https://gh/pr/7',
       title: '제목',
       state: 'approved',
-      label: 'Ready to merge'
+      label: 'Ready to merge',
+      needsBaseUpdate: false
     })
     expect(results[1]).toEqual(results[0])
     expect(results[2]).toEqual(results[0])

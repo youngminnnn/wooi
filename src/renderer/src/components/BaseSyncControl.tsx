@@ -6,10 +6,12 @@ import { useStore } from '../store'
 export default function BaseSyncControl({
   workspace,
   git,
+  prNeedsBaseUpdate,
   refresh
 }: {
   workspace: Workspace
   git: GitStatus
+  prNeedsBaseUpdate?: boolean
   refresh: () => Promise<void>
 }): React.JSX.Element | null {
   const progress = useStore((s) => s.stackProgress[workspace.id])
@@ -49,7 +51,14 @@ export default function BaseSyncControl({
   }, [menuOpen])
 
   const busy = !!progress && !progress.finished
-  if (git.behind <= 0 && !workspace.stackSync && !busy && !showFinished) return null
+  if (
+    git.behind <= 0 &&
+    !prNeedsBaseUpdate &&
+    !workspace.stackSync &&
+    !busy &&
+    !showFinished
+  )
+    return null
 
   const doneBranches = new Set(progress?.done.map((step) => step.branch) ?? []).size
   const problems = progress?.done.filter((step) =>
