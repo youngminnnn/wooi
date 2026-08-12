@@ -483,7 +483,7 @@ describe('알 수 없는 입력에 견디기', () => {
       createMapperState(),
       (what) => seen.push(what)
     )
-    expect(seen[0]).toContain('someFutureThing')
+    expect(seen).toEqual(['item type "someFutureThing"'])
   })
 
   it('모르는 알림 메서드는 조용히 넘긴다', () => {

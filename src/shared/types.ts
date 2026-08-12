@@ -424,6 +424,11 @@ export function orderVisibleWorkspaces<
  */
 export type AgentBackendId = 'claude' | 'codex'
 
+/** `unknown` 항목의 id. 같은 종류를 대화당 한 장으로 합치는 키다(백엔드의 dedupe 기준과 동일). */
+export function unknownItemId(backend: AgentBackendId, what: string): string {
+  return `unknown:${backend}:${what}`
+}
+
 /** 전체 백엔드 식별자 목록(등록 순서 = UI 표시 순서). */
 export const AGENT_BACKEND_IDS: AgentBackendId[] = ['claude', 'codex']
 
@@ -1284,6 +1289,27 @@ export type ChatItem =
     }
   | { id: string; type: 'error'; text: string; ts: number }
   | { id: string; type: 'system'; text: string; ts: number }
+  /**
+   * Wooi 가 백엔드에서 받은 것 중 **해석하지 못한 것**을 알리는 카드.
+   *
+   * 매핑하지 못한 입력을 버리는 것 자체는 맞다 — throw 하면 대화가 통째로 멈춘다. 문제는
+   * 조용히 버리면 사용자가 대화에 구멍이 났다는 사실조차 모른다는 것이다. 그 구멍을 눈에
+   * 보이게 만드는 것이 이 항목의 존재 이유다(매핑을 늘리는 것과는 별개의 문제다).
+   *
+   * id 를 `unknown:<backend>:<what>` 로 고정해 같은 종류는 대화당 한 장으로 합친다(upsert).
+   * 백엔드 쪽 dedupe 기준(warned Set)과 같은 키를 쓴다.
+   */
+  | {
+      id: string
+      type: 'unknown'
+      /** 어느 백엔드가 못 알아봤는가. */
+      backend: AgentBackendId
+      /** 못 알아본 대상. 예: `item type "webSearch"`, `content block "server_tool_use"`. */
+      what: string
+      /** 사용자가 할 수 있는 일이 있으면. 예: codex 업데이트 안내. */
+      hint?: string
+      ts: number
+    }
   /**
    * 명령 1회 실행 카드. 두 가지 출처를 같은 모양으로 그린다:
    * - 사용자의 `!명령` (Claude Code CLI bash 모드) — `agent` 없음

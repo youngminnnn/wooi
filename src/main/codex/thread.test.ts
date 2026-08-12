@@ -1,7 +1,8 @@
 import { describe, it, expect, vi } from 'vitest'
 import { CodexThread } from './thread'
-import { NOTIFY } from './wire'
+import { NOTIFY, RPC } from './wire'
 import type { ChatEvent, ChatItem } from '@shared/types'
+import type { RpcClient } from './jsonrpc'
 
 /**
  * 승인 프롬프트에 실을 diff 는 **승인 요청에 들어 있지 않다** — 같은 itemId 의 fileChange
@@ -109,13 +110,63 @@ describe('턴 추적', () => {
 })
 
 describe('알 수 없는 입력', () => {
-  it('모르는 아이템 타입을 만나도 던지지 않고 한 번만 경고한다', () => {
-    const { thread } = makeThread()
+  it('같은 종류는 unknown 아이템을 한 번만 방출하고 저장한다', () => {
+    const { thread, events, persisted } = makeThread()
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     expect(() => {
       thread.handleNotification(NOTIFY.itemCompleted, { item: { id: 'x', type: 'brandNewThing' } })
       thread.handleNotification(NOTIFY.itemCompleted, { item: { id: 'y', type: 'brandNewThing' } })
     }).not.toThrow()
+    expect(events.filter((e) => e.type === 'item' && e.item.type === 'unknown')).toHaveLength(1)
+    expect(persisted.filter((item) => item.type === 'unknown')).toHaveLength(1)
     warn.mockRestore()
   })
+
+  it.each([
+    { supported: false, expected: 1 },
+    { supported: true, expected: 0 }
+  ])(
+    'steer 지원 여부가 $supported 이면 unknown 카드가 $expected개다',
+    async ({ supported, expected }) => {
+      const events: ChatEvent[] = []
+      const persisted: ChatItem[] = []
+      const rpc = {
+        supports: vi.fn(() => supported),
+        tryRequest: vi.fn(async () => undefined),
+        request: vi.fn(async (method: string) => {
+          if (method === RPC.threadStart) return { thread: { id: 'thr1' } }
+          if (method === RPC.turnStart) return { turn: { id: 'turn2' } }
+          return {}
+        })
+      } as unknown as RpcClient
+      const thread = new CodexThread(
+        'ws1',
+        {
+          cwd: '/tmp/wt',
+          model: null,
+          effort: null,
+          fastMode: false,
+          permissionMode: 'default',
+          delegateBackends: [],
+          delegateInstructions: null,
+          resumeThreadId: null
+        },
+        {
+          rpc: async () => rpc,
+          emit: (event) => events.push(event),
+          persist: (item) => persisted.push(item),
+          onThreadId: () => {},
+          settleIdle: () => {}
+        }
+      )
+      thread.handleNotification(NOTIFY.turnStarted, { turn: { id: 'turn1' } })
+
+      await thread.send('follow-up')
+
+      expect(events.filter((e) => e.type === 'item' && e.item.type === 'unknown')).toHaveLength(
+        expected
+      )
+      expect(persisted.filter((item) => item.type === 'unknown')).toHaveLength(expected)
+    }
+  )
 })

@@ -19,7 +19,7 @@ import { MCP_SETTING_SOURCES, resolveUserMcpServers } from './mcp'
 import { isReadOnlyWooiTool, WOOI_MCP_SERVER_NAME } from '../agent/tools/catalog'
 import { delegateShellAttempt, delegateShellGuidance } from '../agent/delegateShell'
 import { resolveWooiPlugin } from '../agent/plugin'
-import { fastModeReasonText, planApprovalMode, PLAN_OPTIONS } from '@shared/types'
+import { fastModeReasonText, planApprovalMode, PLAN_OPTIONS, unknownItemId } from '@shared/types'
 import { asClaudeMode, claudeEffort, claudeMode, type ClaudePermissionMode } from './protocol'
 import type {
   AgentBackendId,
@@ -276,6 +276,8 @@ export class ClaudeSession {
   private currentApiMsgId: string | null = null
   /** 사용자가 "always allow" 한 도구 이름. 이 세션 동안 다시 묻지 않는다. */
   private alwaysAllow = new Set<string>()
+  /** 모르는 블록을 종류당 한 번만 알리기 위한 기록(Codex 쪽 CodexThread.warned 와 같은 역할). */
+  private warned = new Set<string>()
   /**
    * 자동 압축 /compact 를 주입해 두고 그 결과(result)를 기다리는 중인지.
    * 압축 턴의 result·boundary 가 다시 임계치를 넘겨 무한 압축 루프를 도는 것을 막는다.
@@ -1575,8 +1577,28 @@ export class ClaudeSession {
           ...(diff ? { diff: clampText(diff) } : {}),
           ts: Date.now()
         })
+      } else {
+        this.noticeUnknown(`content block "${String(block.type)}"`)
       }
     }
+  }
+
+  /**
+   * 해석하지 못한 입력을 사용자에게 한 번만 알린다(Codex 쪽 CodexThread.notice 와 같은 규약).
+   * 버리는 동작은 유지한다 — 여기서 throw 하면 대화가 멈춘다. 버리되 흔적을 남기는 게 목적이다.
+   */
+  private noticeUnknown(what: string, hint?: string): void {
+    if (this.warned.has(what)) return
+    this.warned.add(what)
+    log.warn(`claude: unmapped ${what} — ignoring (Claude Code may be newer than this Wooi build)`)
+    this.emitItem({
+      id: unknownItemId('claude', what),
+      type: 'unknown',
+      backend: 'claude',
+      what,
+      ...(hint ? { hint } : {}),
+      ts: Date.now()
+    })
   }
 
   /** user 메시지(프롬프트 echo 또는 tool_result 블록)를 처리한다. */

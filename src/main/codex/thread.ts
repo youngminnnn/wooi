@@ -24,6 +24,7 @@ import {
 } from './mapping'
 import type { ItemParams } from './wire'
 import type { CodexConfig } from './protocol'
+import { unknownItemId } from '@shared/types'
 
 /**
  * 워크스페이스 1개 = Codex 스레드 1개.
@@ -133,7 +134,14 @@ export class CodexThread {
           .tryRequest<{ turnId?: string }>(RPC.turnSteer, { threadId, input })
           .catch(() => undefined)
         if (steered) return
-        // steer 를 못 쓰는 버전이거나 서버가 거절하면(리뷰·수동 압축 턴) 새 턴으로 떨어진다.
+        // steer 를 못 쓰는 버전이면 사용자에게 알린다 — 서버가 거절한 경우(리뷰·수동 압축 턴)는
+        // 정상 폴백이므로 알리지 않는다. 이 구분이 없으면 정상 동작에도 카드가 떠 노이즈가 된다.
+        if (!rpc.supports(RPC.turnSteer)) {
+          this.noticeUnknown(
+            'method "turn/steer"',
+            'Update the Codex CLI to use this: npm i -g @openai/codex'
+          )
+        }
       }
 
       const turn = await rpc.request<{ turn?: { id?: string } }>(RPC.turnStart, {
@@ -357,7 +365,7 @@ export class CodexThread {
       if (this.config.autoResumeAfterRateLimit) return
     }
 
-    const mapped = mapNotification(method, params, this.state, (what) => this.warnOnce(what))
+    const mapped = mapNotification(method, params, this.state, (what) => this.noticeUnknown(what))
     for (const event of mapped.events) {
       // /context 카드는 조회 API 가 없어 흘러가는 사용량 이벤트를 붙잡아 두어야 답할 수 있다.
       if (event.type === 'context') {
@@ -372,10 +380,24 @@ export class CodexThread {
     for (const item of mapped.persist) this.deps.persist(item)
   }
 
-  private warnOnce(what: string): void {
+  /**
+   * 해석하지 못한 입력을 사용자에게 한 번만 알린다(Claude 쪽 ClaudeSession.noticeUnknown 과 같은 규약).
+   * 버리는 동작은 유지한다 — 여기서 throw 하면 대화가 멈춘다. 버리되 흔적을 남기는 게 목적이다.
+   */
+  private noticeUnknown(what: string, hint?: string): void {
     if (this.warned.has(what)) return
     this.warned.add(what)
     log.warn(`codex: unmapped ${what} — ignoring (codex may be newer than this Wooi build)`)
+    const item: ChatItem = {
+      id: unknownItemId('codex', what),
+      type: 'unknown',
+      backend: 'codex',
+      what,
+      ...(hint ? { hint } : {}),
+      ts: Date.now()
+    }
+    this.deps.emit({ type: 'item', item })
+    this.deps.persist(item)
   }
 
   // ── 오류 표시 ───────────────────────────────────────────────────────
