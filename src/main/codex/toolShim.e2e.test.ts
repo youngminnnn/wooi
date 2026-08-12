@@ -170,14 +170,29 @@ describe.skipIf(!existsSync(SHIM))('codex tool shim', () => {
    * dev 실행도 멀쩡했다 — 그 조합은 패키징에서만 드러난다.
    */
   it('shim 이 끌어오는 것까지 asarUnpack 범위 안에 있다', () => {
-    const source = readFileSync(SHIM, 'utf8')
-    const imports = [...source.matchAll(/from\s*["'](\.[^"']+)["']/g)].map((m) => m[1])
+    const pending = [SHIM]
+    const visited = new Set<string>()
 
-    // 상대 import 는 전부 out/main 아래로 떨어져야 한다(그 디렉터리를 통째로 푸는 것이 전제).
-    for (const spec of imports) {
-      const target = resolve(dirname(SHIM), spec)
-      expect(existsSync(target), `${spec} → ${target}`).toBe(true)
-      expect(target.startsWith(resolve('out/main'))).toBe(true)
+    // 패키징된 shim 은 일반 Node 프로세스가 실행하므로 app.asar 안의 node_modules 를 읽지
+    // 못한다. 상대 import 는 모두 unpack 범위에 있어야 하고, node: 외의 bare import 는 빌드에
+    // 남아 있으면 안 된다. 진입점만 보면 공유 청크 안의 외부 의존성을 놓치므로 재귀해서 본다.
+    while (pending.length > 0) {
+      const file = pending.pop()!
+      if (visited.has(file)) continue
+      visited.add(file)
+
+      const source = readFileSync(file, 'utf8')
+      const imports = [
+        ...source.matchAll(/^import\s+(?:[^"']+\s+from\s+)?["']([^"']+)["']/gm)
+      ].map((m) => m[1])
+      for (const spec of imports) {
+        if (spec.startsWith('node:')) continue
+        expect(spec.startsWith('.'), `${file} has unpackaged dependency ${spec}`).toBe(true)
+        const target = resolve(dirname(file), spec)
+        expect(existsSync(target), `${spec} → ${target}`).toBe(true)
+        expect(target.startsWith(resolve('out/main'))).toBe(true)
+        pending.push(target)
+      }
     }
 
     const pkg = JSON.parse(readFileSync('package.json', 'utf8')) as {
