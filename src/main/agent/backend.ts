@@ -39,7 +39,17 @@ export interface AgentBackend {
   prewarm?(): void
 
   // ── 핵심 (모든 백엔드 필수) ──────────────────────────────────────────────
-  sendMessage(workspaceId: string, text: string, images?: ImageAttachment[]): void
+  /**
+   * `opts.prefix` 는 모델에게 보낼 때 `text` 앞에 붙는 맥락이다(기록에는 남지 않는다). 사용자가
+   * 쓴 말이 아니라 Wooi 가 대신 넣는 것일 때 쓴다 — 에이전트 교체 시의 인수인계
+   * ([[shared/handoff]])가 그렇다.
+   */
+  sendMessage(
+    workspaceId: string,
+    text: string,
+    images?: ImageAttachment[],
+    opts?: { prefix?: string }
+  ): void
   interrupt(workspaceId: string): Promise<void>
   setPermissionMode(workspaceId: string, mode: PermissionMode): Promise<void>
   setModel(workspaceId: string, model: string | null): void

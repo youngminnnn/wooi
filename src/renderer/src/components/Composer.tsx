@@ -48,8 +48,10 @@ import {
   INTERACTIVE_COMMANDS,
   MENTION_DROP_HINT_BYTES,
   MENTION_TRUNCATE_HINT_BYTES,
+  agentSwitchNeedsHandoff,
   canSwitchAgentBackend
 } from '@shared/types'
+import { buildHandoffPrompt, estimateHandoffTokens, formatHandoffTokens } from '@shared/handoff'
 import { useNow } from '../lib/useNow'
 import {
   agoLabel,
@@ -143,8 +145,8 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
   const supportsSideQuestion = backend?.capabilities.sideQuestion ?? false
   // 지원하지 않는 백엔드에서는 /fast 도 상태줄 표시도 감춘다.
   const supportsFastMode = backend?.capabilities.fastMode ?? false
-  // 첫 메시지 전이면 메인 에이전트를 아직 바꿀 수 있다 — 상태줄 칩과 /agent 가 같은 판단을 쓴다.
-  const agentSwitchable = useAgentSwitchable(workspace)
+  // 에이전트가 둘 이상이면 /agent 로 메인 에이전트를 바꿀 수 있다 — 상태줄 칩과 같은 판단을 쓴다.
+  const agentSwitch = useAgentSwitch(workspace)
 
   // 슬래시 명령 자동완성: 명령 목록(워크스페이스당 1회 조회)과 메뉴 선택 인덱스.
   const [commands, setCommands] = useState<SlashCommandInfo[] | null>(null)
@@ -473,7 +475,9 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
     }
 
     // /model·/effort·/fast·/agent 는 백엔드 왕복 없이 로컬 선택 카드로 처리한다(첨부가 있으면 일반 전송).
-    const picker = images.length ? null : matchPicker(trimmed, supportsFastMode, agentSwitchable)
+    const picker = images.length
+      ? null
+      : matchPicker(trimmed, supportsFastMode, agentSwitch.offered)
     if (picker) {
       openPicker(picker)
       setText('')
@@ -1299,8 +1303,9 @@ function SideAnswerCard({
  *
  * `allowFast` 는 이 워크스페이스의 백엔드가 fast mode 를 지원하는지다 — 지원하지 않으면(Codex)
  * 가로채지 않고 일반 텍스트로 흘려보낸다. 아무 일도 안 하는 카드를 띄우는 것보다 낫다.
- * `allowAgent` 도 같은 이유다 — 대화가 시작된 뒤에는 에이전트를 바꿀 수 없으므로
- * ([[canSwitchAgentBackend]]) 그때의 "/agent" 는 에이전트에게 보내는 평범한 메시지로 둔다.
+ * `allowAgent` 도 같은 이유다 — 쓸 수 있는 에이전트가 하나뿐이면 고를 것이 없으므로 그때의
+ * "/agent" 는 에이전트에게 보내는 평범한 메시지로 둔다. 턴이 도는 중인지는 여기서 보지 않는다:
+ * /model 과 마찬가지로 카드는 열리고, 잠긴 이유를 카드가 설명한다.
  */
 export function matchPicker(
   text: string,
@@ -2072,19 +2077,67 @@ function Empty({ children }: { children: React.ReactNode }): React.JSX.Element {
 }
 
 /**
- * 지금 이 워크스페이스의 메인 에이전트를 바꿀 수 있는가(상태줄 칩 · /agent 공용 판단).
- *
- * 규칙 자체는 shared 의 [[canSwitchAgentBackend]] 가 갖고 있고, 여기서는 렌더러 쪽 재료만 모은다 —
- * 고를 대상이 둘 이상인지, 그리고 이 워크스페이스의 대화 기록을 실제로 읽었는지.
+ * 인수인계 비용을 사람이 읽는 한 구절로. 어림값이므로([[shared/handoff]]) 정확한 척하지 않고
+ * 자릿수만 보여 준다 — 사용자가 이 숫자로 하는 판단은 "지금 넘길 만한가" 하나다.
+ * 아직 기록을 못 읽어 크기를 모르면(0) 숫자를 지어내지 않고 비용이 든다는 사실만 말한다.
+ */
+function handoffCostLabel(tokens: number): string {
+  if (tokens <= 0) return 'a full turn of input'
+  return `${formatHandoffTokens(tokens)} tokens of input in one turn`
+}
+
+/** 메인 에이전트 교체에 대한 이 화면의 판단(상태줄 칩 · /agent 카드 공용). */
+interface AgentSwitchState {
+  /** 고를 대상이 둘 이상이라 교체라는 선택지 자체가 존재하는가(칩·/agent 노출 여부). */
+  offered: boolean
+  /** 지금 이 순간 실제로 바꿀 수 있는가(턴이 도는 중·아카이브면 false). */
+  switchable: boolean
+  /** 바꾸면 지난 대화를 새 에이전트에게 넘기는 턴이 도는가 — 그렇다면 비용을 먼저 알린다. */
+  needsHandoff: boolean
+}
+
+/**
+ * 규칙 자체는 shared 의 [[canSwitchAgentBackend]]·[[agentSwitchNeedsHandoff]] 가 갖고 있고,
+ * 여기서는 렌더러 쪽 재료만 모은다 — 고를 대상이 둘 이상인지, 그리고 이 워크스페이스의 대화
+ * 기록을 실제로 읽었는지.
  *
  * 기록을 아직 못 읽은 상태는 "대화가 없다" 가 아니라 "모른다" 다. 그 구분을 안 하면 기록을
- * 불러오는 짧은 순간 동안 대화가 쌓인 워크스페이스에도 교체 UI 가 깜빡인다.
+ * 불러오는 짧은 순간에 누른 교체가 경고 없이 턴을 돌린다 — 그래서 모르는 동안에는 경고 쪽으로
+ * 기울여 둔다(main 이 기록 파일로 다시 판정하므로, 넘겨짚어 확인을 건너뛰면 거절당하기도 한다).
+ *
+ * 대화 **개수**만 구독하는 것이 중요하다. 항목 배열을 구독하면 답변이 스트리밍되는 동안 토큰마다
+ * 입력창 전체가 다시 그려진다 — 여기서 필요한 건 "대화가 있는가" 뿐이다.
  */
-function useAgentSwitchable(workspace: Workspace): boolean {
+function useAgentSwitch(workspace: Workspace): AgentSwitchState {
   const available = useAvailableBackends()
   const loaded = useStore((s) => s.loadedTranscripts[workspace.id] ?? false)
   const messageCount = useStore((s) => s.transcripts[workspace.id]?.length ?? 0)
-  return available.length > 1 && loaded && canSwitchAgentBackend(workspace, messageCount)
+  const offered = available.length > 1
+  return {
+    offered,
+    switchable: offered && canSwitchAgentBackend(workspace),
+    needsHandoff: !loaded || agentSwitchNeedsHandoff(workspace, messageCount)
+  }
+}
+
+/**
+ * 인수인계로 넘어갈 대략적인 토큰 수. main 이 실제로 보낼 프롬프트를 같은 함수로 만들어 재 본다 —
+ * 경고에 적힌 양과 실제로 보내는 양이 갈리면 경고가 아니라 소음이다.
+ *
+ * `enabled` 가 false 면 재지 않는다(0). 프롬프트 조립은 대화 길이에 비례하는 일이라, 필요하지도
+ * 않은 화면에서 매 렌더 돌릴 것이 아니다 — /agent 카드가 열려 있고 실제로 바꿀 수 있을 때만 쓴다.
+ */
+function useHandoffEstimate(workspace: Workspace, enabled: boolean): number {
+  const items = useStore((s) => (enabled ? s.transcripts[workspace.id] : undefined)) ?? EMPTY
+  const backends = useAvailableBackends()
+  const fromLabel =
+    backends.find((b) => b.id === workspace.agentBackend)?.label ??
+    AGENT_BACKEND_LABELS[workspace.agentBackend]
+  return useMemo(() => {
+    if (!enabled) return 0
+    const prompt = buildHandoffPrompt({ items, fromLabel })
+    return prompt ? estimateHandoffTokens(prompt) : 0
+  }, [enabled, items, fromLabel])
 }
 
 /**
@@ -2115,9 +2168,10 @@ function StatusLine({
   const defaults = useAgentSettings(workspace.agentBackend)
   // fast mode 는 Claude Code 전용이라, 지원하지 않는 백엔드에서는 상태줄에서도 감춘다.
   const supportsFastMode = backend?.capabilities.fastMode ?? false
-  // 에이전트 칩은 **바꿀 수 있는 동안에만** 띄운다. 어떤 에이전트가 도는지는 헤더의 브랜드 마크가
-  // 늘 말해 주므로, 여기서까지 반복하면 아무 데도 이어지지 않는 라벨이 하나 더 늘 뿐이다.
-  const agentSwitchable = useAgentSwitchable(workspace)
+  // 에이전트 칩은 **고를 것이 있을 때만** 띄운다. 어떤 에이전트가 도는지는 헤더의 브랜드 마크가
+  // 늘 말해 주므로, 하나뿐인 사용자에게 여기서까지 반복하면 아무 데도 이어지지 않는 라벨이 하나
+  // 더 늘 뿐이다. 반대로 둘 이상이면 모델·effort 칩과 같은 성질이 된다 — 언제든 눌러 바꾸는 값.
+  const agentSwitch = useAgentSwitch(workspace)
   const agentLabel = backend?.label ?? AGENT_BACKEND_LABELS[workspace.agentBackend]
 
   // worktree 절대 경로의 마지막 구간(디렉토리명). 비정상 경로면 전체 경로로 폴백한다.
@@ -2151,11 +2205,11 @@ function StatusLine({
         <Folder size={11} className="shrink-0 text-neutral-600" />
         <span className="truncate">{dirName}</span>
       </span>
-      {agentSwitchable && (
+      {agentSwitch.offered && (
         <button
           onClick={() => onPick('agent')}
           className="flex items-center gap-1 min-w-0 shrink hover:text-neutral-300 transition-colors"
-          title={`Agent: ${agentLabel} — click or type /agent to change (only before the first message)`}
+          title={`Agent: ${agentLabel} — click or type /agent to switch`}
         >
           <AgentBackendMark backend={workspace.agentBackend} size={11} />
           <span className="truncate">{agentLabel}</span>
@@ -2222,8 +2276,9 @@ type PickerKind = 'model' | 'effort' | 'fast' | 'agent'
  * 모델/effort 는 query 시작 시점에 고정되므로 변경 시 세션이 재시작된다 — 그래서 턴 진행 중에는
  * 적용을 막고 안내만 보여 준다(헤더 드롭다운 시절의 동작과 동일).
  *
- * /agent 만 성질이 다르다. 로컬에서 끝나지 않고 main 이 다시 판정하며(대화가 시작됐으면 거절),
- * 잠기는 조건도 "턴이 도는 중" 이 아니라 "첫 메시지가 이미 나갔는가" 다.
+ * /agent 만 성질이 다르다. 로컬에서 끝나지 않고 main 이 다시 판정하며, 이미 대화가 오간
+ * 워크스페이스에서는 적용 전에 확인을 받는다 — 새 에이전트는 지금까지의 맥락을 하나도 못 보고
+ * 처음부터 다시 파악해야 해서, 그 한 번이 세션 사용량을 크게 먹는다.
  */
 function PickerCard({
   kind,
@@ -2240,10 +2295,17 @@ function PickerCard({
   const models = useModels(workspace.agentBackend)
   const defaults = useAgentSettings(workspace.agentBackend)
   const pushToast = useStore((s) => s.pushToast)
+  const confirm = useStore((s) => s.confirm)
+  const resetContextUsage = useStore((s) => s.resetContextUsage)
   // 에이전트 교체는 이 카드가 유일한 경로가 아니다(main 이 같은 규칙으로 다시 판정한다).
-  // 여기서는 카드가 떠 있는 동안 조건이 무너지는 경우(다른 창에서 첫 메시지가 나갔다든지)를 본다.
+  // 여기서는 카드가 떠 있는 동안 조건이 무너지는 경우(다른 창에서 턴이 시작됐다든지)를 본다.
   const availableAgents = useAvailableBackends()
-  const agentSwitchable = useAgentSwitchable(workspace)
+  const agentSwitch = useAgentSwitch(workspace)
+  // 크기는 이 카드가 실제로 교체를 제안하는 동안에만 잰다(잠겨 있으면 고를 수도 없다).
+  const handoffTokens = useHandoffEstimate(
+    workspace,
+    kind === 'agent' && agentSwitch.switchable && agentSwitch.needsHandoff
+  )
 
   const options = useMemo<PickerOption[]>(() => {
     if (kind === 'agent') {
@@ -2311,20 +2373,46 @@ function PickerCard({
   const [cursor, setCursor] = useState(currentIdx)
   const activeRef = useRef<HTMLButtonElement | null>(null)
 
-  // 에이전트 교체는 조건이 살아 있을 때만 — 나머지 항목은 턴 진행 중에만 잠긴다.
-  const locked = kind === 'agent' ? !agentSwitchable : running
+  // 에이전트 교체는 지금 바꿀 수 있을 때만 — 나머지 항목은 턴 진행 중에만 잠긴다.
+  const locked = kind === 'agent' ? !agentSwitch.switchable : running
+
+  /**
+   * 에이전트 교체 1건. 지난 대화를 넘겨야 하는 자리에서는 먼저 확인을 받는다 — 그 인수인계는
+   * 사용자가 시키지 않은 턴이 한 번 도는 일이고, 대화가 길수록 비싸다. 값이 조용히 바뀌는 다른
+   * 카드들과 무게가 다르므로 크기까지 함께 보여 주고 묻는다.
+   * 최종 판정은 main 이 하므로 거절 사유(CLI 미설치·턴 진행 중)는 토스트로 그대로 보여 준다.
+   */
+  const switchAgent = async (value: AgentBackendId): Promise<void> => {
+    const label = availableAgents.find((b) => b.id === value)?.label ?? AGENT_BACKEND_LABELS[value]
+    if (agentSwitch.needsHandoff) {
+      const ok = await confirm({
+        title: `Switch this workspace to ${label}?`,
+        body:
+          `Agents can’t share a session, so the conversation so far rides along with your next ` +
+          `message to ${label} — ${handoffCostLabel(handoffTokens)}, billed to your usage. ` +
+          `Until you send that message it knows nothing about this workspace.`,
+        confirmLabel: 'Switch and hand over',
+        danger: true
+      })
+      if (!ok) return
+    }
+    const res = await window.api.workspace.setAgentBackend(workspace.id, value, {
+      handoff: agentSwitch.needsHandoff
+    })
+    if (res?.error) {
+      pushToast('error', res.error)
+      return
+    }
+    // 새 세션이라 컨텍스트도 처음부터다 — 옛 에이전트의 사용량을 남겨 두면 인수인계 턴이 값을
+    // 다시 보내 줄 때까지 게이지가 엉뚱한 양을 가리킨다.
+    resetContextUsage(workspace.id)
+  }
 
   const apply = (value: string): void => {
     if (locked) return // 잠긴 동안에는 안내만 보여 준다.
     if (value !== current) {
-      if (kind === 'agent') {
-        // 교체는 main 이 최종 판정한다 — 거절 사유(대화가 이미 시작됨·CLI 미설치)는 토스트로 알린다.
-        void window.api.workspace
-          .setAgentBackend(workspace.id, value as AgentBackendId)
-          .then((res) => {
-            if (res?.error) pushToast('error', res.error)
-          })
-      } else if (kind === 'model') void window.api.workspace.setModel(workspace.id, value || null)
+      if (kind === 'agent') void switchAgent(value as AgentBackendId)
+      else if (kind === 'model') void window.api.workspace.setModel(workspace.id, value || null)
       else if (kind === 'effort')
         void window.api.workspace.setEffort(workspace.id, (value || null) as EffortSetting | null)
       else void window.api.workspace.setFastMode(workspace.id, value ? value === 'on' : null)
@@ -2365,7 +2453,7 @@ function PickerCard({
           : '/fast'
   const description =
     kind === 'agent'
-      ? 'Main agent for this workspace — fixed once you send the first message'
+      ? 'Main agent for this workspace'
       : kind === 'model'
         ? 'Model for this workspace'
         : kind === 'effort'
@@ -2447,14 +2535,24 @@ function PickerCard({
         </div>
       )}
       {kind === 'agent' && !locked && (
-        <div className="px-3 py-1.5 text-xs text-neutral-600 border-t border-[var(--border)]">
-          Switching resets the model, reasoning effort, and fast mode to this agent&apos;s defaults.
+        // 대화가 오간 뒤의 교체는 값 하나 바꾸는 일이 아니라 턴이 한 번 도는 일이다. 고르고 나면
+        // 확인 대화상자가 한 번 더 묻지만, 고르기 **전에** 알아야 할 이야기라 카드에서도 말한다.
+        <div className="px-3 py-1.5 text-xs space-y-1 border-t border-[var(--border)]">
+          {agentSwitch.needsHandoff && (
+            <p className="text-[var(--warning-400)]/90">
+              This conversation rides along with your next message to the new agent —{' '}
+              {handoffCostLabel(handoffTokens)}, billed to your usage.
+            </p>
+          )}
+          <p className="text-neutral-600">
+            Switching resets the model, reasoning effort, and fast mode to this agent’s defaults.
+          </p>
         </div>
       )}
       <div className="px-3 py-1.5 text-xs text-neutral-600 border-t border-[var(--border)]">
         {locked
           ? kind === 'agent'
-            ? 'The agent is fixed once the conversation starts — /clear, or create a new workspace.'
+            ? 'Stop the current turn to switch agents.'
             : 'Stop the current turn to change it.'
           : '↑↓ navigate · ↵ select · esc close'}
       </div>
