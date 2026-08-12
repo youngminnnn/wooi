@@ -123,8 +123,8 @@ git log --oneline $(git describe --tags --abbrev=0)..main
    `npm install` 로 `package-lock.json` 을 따라오게 한다.
 3. **`release: vX.Y.Z` 로 커밋**한다. 본문에는 이전 태그 이후의 사용자 눈에 보이는
    변경을 나열한다(나중에 메인테이너가 읽는 요약이 된다).
-4. **`main` 에 머지**한다.
-5. **머지 커밋에 태그를 달아 push** 한다.
+4. **`main` 에 병합**한다.
+5. **병합 커밋에 태그를 달아 push** 한다.
    ```bash
    git checkout main && git pull
    git tag "v$(node -p "require('./package.json').version")"

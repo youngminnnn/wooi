@@ -8,7 +8,7 @@
     </title>
     <meta
       name="description"
-      content="Wooi vs Conductor, Vibe Kanban, Claude Squad, Crystal, Emdash and Orca. Every one of them runs coding agents in parallel isolated git worktrees — they differ on stacked dependent work, rebasing children when a parent merges, and PR review on the diff. Sourced from each project's own docs."
+      content="Wooi vs Conductor, Claude Squad, Emdash and Orca. Every one of them runs coding agents in parallel isolated git worktrees — they differ on stacked dependent work, rebasing children when a parent merges, and PR review on the diff. Sourced from each project's own docs."
     />
 
     <link rel="canonical" href="https://youngminnnn.github.io/wooi/alternatives.html" />
@@ -314,19 +314,6 @@
       thead th.own {
         color: var(--blue);
       }
-      /*
-        더 이상 유지되지 않는 프로젝트는 열 머리에서 바로 밝힌다. 표 맨 아래 "Project status"
-        행까지 읽어야 알 수 있으면, 그 위 행들은 현행 제품끼리의 비교로 오인된다.
-      */
-      thead th .col-status {
-        display: block;
-        margin-top: 4px;
-        font-family: var(--mono);
-        font-size: 10.5px;
-        font-weight: 400;
-        letter-spacing: 0;
-        color: #e0b464;
-      }
       tbody th {
         text-align: left;
         font-weight: 500;
@@ -494,16 +481,6 @@
         color: var(--text-dim);
         font-size: 14.5px;
       }
-      .tool-card .status {
-        display: inline-block;
-        margin-top: 12px;
-        font-size: 12.5px;
-        color: #e0b464;
-        border: 1px solid rgba(224, 180, 100, 0.3);
-        background: rgba(224, 180, 100, 0.08);
-        border-radius: 8px;
-        padding: 3px 9px;
-      }
       @media (max-width: 760px) {
         .tool-grid {
           grid-template-columns: 1fr;
@@ -629,16 +606,16 @@
       </h1>
       <p class="lede">
         <span class="en"
-          >Conductor, Vibe Kanban, Claude Squad, Crystal, Emdash, Orca and Wooi all do the same
-          first thing: give every agent its own isolated git worktree so N tasks can run at once.
-          That part is settled. This page compares what they do after that — and everything in the
-          table below comes from each project's own documentation.</span
+          >Conductor, Claude Squad, Emdash, Orca and Wooi all do the same first thing: give every
+          agent its own isolated git worktree so N tasks can run at once. That part is settled. This
+          page compares what they do after that — and everything in the table below comes from each
+          project's own documentation.</span
         >
         <span class="ko"
-          >Conductor, Vibe Kanban, Claude Squad, Crystal, Emdash, Orca, Wooi 는 첫 단계가 전부
-          같습니다. 에이전트마다 격리된 git worktree 를 주고 N 개 작업을 한꺼번에 돌립니다.
-          거기까지는 이미 정리된 얘기입니다. 이 페이지는 그 다음을 비교합니다. 아래 표의 내용은 전부
-          각 프로젝트의 공식 문서에서 확인한 것입니다.</span
+          >Conductor, Claude Squad, Emdash, Orca, Wooi 는 모두 에이전트마다 격리된 git worktree 를
+          두고 여러 작업을 동시에 돌립니다. 이제 이 기능은 기본에 가깝습니다. 이 페이지는 그 다음에
+          무엇을 할 수 있는지 비교합니다. 아래 내용은 각 프로젝트의 공식 문서에서
+          확인했습니다.</span
         >
       </p>
 
@@ -696,7 +673,7 @@
           >
           <span class="ko"
             ><b class="hl">스태킹.</b> 새 작업을 <code>main</code> 이 아니라 다른 작업의 브랜치에서
-            딸 수 있는가? 이게 없으면 B 는 A 가 머지될 때까지 기다리거나, <code>main</code> 에서
+            딸 수 있는가? 이게 없으면 B 는 A 가 병합될 때까지 기다리거나, <code>main</code> 에서
             시작해 A 의 변경을 다시 만들어 넣어야 자기 diff 가 말이 됩니다.</span
           >
         </p>
@@ -709,8 +686,8 @@
             time.</span
           >
           <span class="ko"
-            ><b class="hl">머지된 다음.</b> 스택을 쌓는 건 쉬운 쪽입니다. 어려운 쪽은 부모가 머지될
-            때입니다. 자식들은 이제 타깃 브랜치에 없는 커밋 위에 얹혀 있고, 자식 PR 은 전부 머지된
+            ><b class="hl">병합된 다음.</b> 스택을 쌓는 건 쉬운 쪽입니다. 어려운 쪽은 부모가 병합될
+            때입니다. 자식들은 이제 타깃 브랜치에 없는 커밋 위에 얹혀 있고, 자식 PR 은 전부 병합된
             base 를 가리키고 있습니다. 누군가는 자식을 rebase 하고 PR base 를 다시 잡아야 합니다.
             도구가 하든지, 아니면 매번 사람이 순서대로 손으로 하든지.</span
           >
@@ -765,27 +742,14 @@
                 <th scope="col"><span class="en">Capability</span><span class="ko">기능</span></th>
                 <th scope="col" class="own">Wooi</th>
                 <th scope="col">Conductor</th>
-                <th scope="col">
-                  Vibe Kanban
-                  <span class="col-status"
-                    ><span class="en">sunsetting</span><span class="ko">종료 예정</span></span
-                  >
-                </th>
                 <th scope="col">Claude Squad</th>
-                <th scope="col">
-                  Crystal
-                  <span class="col-status"
-                    ><span class="en">v0.3.x · deprecated</span
-                    ><span class="ko">v0.3.x · 지원 종료</span></span
-                  >
-                </th>
                 <th scope="col">Emdash</th>
                 <th scope="col">Orca</th>
               </tr>
             </thead>
             <tbody>
               <tr class="divider">
-                <th scope="row" colspan="8">
+                <th scope="row" colspan="6">
                   <span class="en">The settled part</span><span class="ko">이미 정리된 부분</span>
                 </th>
               </tr>
@@ -796,9 +760,9 @@
                 </th>
                 <td class="own"><span class="yes">Yes</span></td>
                 <td><span class="yes">Yes</span></td>
+
                 <td><span class="yes">Yes</span></td>
-                <td><span class="yes">Yes</span></td>
-                <td><span class="yes">Yes</span></td>
+
                 <td><span class="yes">Yes</span></td>
                 <td><span class="yes">Yes</span></td>
               </tr>
@@ -809,9 +773,9 @@
                 </th>
                 <td class="own"><span class="yes">Yes</span></td>
                 <td><span class="yes">Yes</span></td>
+
                 <td><span class="yes">Yes</span></td>
-                <td><span class="yes">Yes</span></td>
-                <td><span class="yes">Yes</span></td>
+
                 <td><span class="yes">Yes</span></td>
                 <td><span class="yes">Yes</span></td>
               </tr>
@@ -822,17 +786,13 @@
                 </th>
                 <td class="own"><span class="yes">Yes</span></td>
                 <td><span class="yes">Yes</span></td>
-                <td><span class="yes">Yes</span></td>
+
                 <td>
                   <span class="no"
                     ><span class="en">not documented</span><span class="ko">문서 없음</span></span
                   ><span class="note-mark">1</span>
                 </td>
-                <td>
-                  <span class="no"
-                    ><span class="en">not documented</span><span class="ko">문서 없음</span></span
-                  >
-                </td>
+
                 <td><span class="yes">Yes</span></td>
                 <td><span class="yes">Yes</span></td>
               </tr>
@@ -843,17 +803,13 @@
                 </th>
                 <td class="own"><span class="yes">Yes</span></td>
                 <td><span class="yes">Yes</span></td>
-                <td><span class="yes">Yes</span></td>
+
                 <td>
                   <span class="no"
                     ><span class="en">not documented</span><span class="ko">문서 없음</span></span
                   >
                 </td>
-                <td>
-                  <span class="no"
-                    ><span class="en">not documented</span><span class="ko">문서 없음</span></span
-                  >
-                </td>
+
                 <td>
                   <span class="no"
                     ><span class="en">not documented</span><span class="ko">문서 없음</span></span
@@ -863,7 +819,7 @@
               </tr>
 
               <tr class="divider">
-                <th scope="row" colspan="8">
+                <th scope="row" colspan="6">
                   <span class="en">Where the tools diverge</span
                   ><span class="ko">도구가 갈리는 부분</span>
                 </th>
@@ -881,21 +837,13 @@
                     ><span class="en">not documented</span><span class="ko">문서 없음</span></span
                   >
                 </td>
+
                 <td>
                   <span class="no"
                     ><span class="en">not documented</span><span class="ko">문서 없음</span></span
                   >
                 </td>
-                <td>
-                  <span class="no"
-                    ><span class="en">not documented</span><span class="ko">문서 없음</span></span
-                  >
-                </td>
-                <td>
-                  <span class="no"
-                    ><span class="en">not documented</span><span class="ko">문서 없음</span></span
-                  >
-                </td>
+
                 <td>
                   <span class="no"
                     ><span class="en">not documented</span><span class="ko">문서 없음</span></span
@@ -906,7 +854,7 @@
               <tr>
                 <th scope="row">
                   <span class="en">Parent merges → children rebased</span>
-                  <span class="ko">부모 머지 → 자식 자동 rebase</span>
+                  <span class="ko">부모 병합 → 자식 자동 rebase</span>
                   <span class="hint en">Automatically, for the whole chain</span>
                   <span class="hint ko">체인 전체에 대해 자동으로</span>
                 </th>
@@ -916,21 +864,13 @@
                     ><span class="en">not documented</span><span class="ko">문서 없음</span></span
                   >
                 </td>
+
                 <td>
                   <span class="no"
                     ><span class="en">not documented</span><span class="ko">문서 없음</span></span
                   >
                 </td>
-                <td>
-                  <span class="no"
-                    ><span class="en">not documented</span><span class="ko">문서 없음</span></span
-                  >
-                </td>
-                <td>
-                  <span class="no"
-                    ><span class="en">not documented</span><span class="ko">문서 없음</span></span
-                  >
-                </td>
+
                 <td>
                   <span class="no"
                     ><span class="en">not documented</span><span class="ko">문서 없음</span></span
@@ -945,7 +885,7 @@
               <tr>
                 <th scope="row">
                   <span class="en">Parent merges → child PR bases retargeted</span>
-                  <span class="ko">부모 머지 → 자식 PR base 재타게팅</span>
+                  <span class="ko">부모 병합 → 자식 PR base 재타게팅</span>
                   <span class="hint en">Child PRs repointed at the grandparent branch</span>
                   <span class="hint ko">자식 PR 을 조부모 브랜치로 다시 겨냥</span>
                 </th>
@@ -955,21 +895,13 @@
                     ><span class="en">not documented</span><span class="ko">문서 없음</span></span
                   >
                 </td>
+
                 <td>
                   <span class="no"
                     ><span class="en">not documented</span><span class="ko">문서 없음</span></span
                   >
                 </td>
-                <td>
-                  <span class="no"
-                    ><span class="en">not documented</span><span class="ko">문서 없음</span></span
-                  >
-                </td>
-                <td>
-                  <span class="no"
-                    ><span class="en">not documented</span><span class="ko">문서 없음</span></span
-                  >
-                </td>
+
                 <td>
                   <span class="no"
                     ><span class="en">not documented</span><span class="ko">문서 없음</span></span
@@ -994,21 +926,13 @@
                     ><span class="en">not documented</span><span class="ko">문서 없음</span></span
                   >
                 </td>
+
                 <td>
                   <span class="no"
                     ><span class="en">not documented</span><span class="ko">문서 없음</span></span
                   >
                 </td>
-                <td>
-                  <span class="no"
-                    ><span class="en">not documented</span><span class="ko">문서 없음</span></span
-                  >
-                </td>
-                <td>
-                  <span class="no"
-                    ><span class="en">not documented</span><span class="ko">문서 없음</span></span
-                  >
-                </td>
+
                 <td>
                   <span class="no"
                     ><span class="en">not documented</span><span class="ko">문서 없음</span></span
@@ -1035,17 +959,13 @@
                     ><span class="en">not documented</span><span class="ko">문서 없음</span></span
                   >
                 </td>
-                <td><span class="unk">unverified</span><span class="note-mark">3</span></td>
+
                 <td>
                   <span class="no"
                     ><span class="en">not documented</span><span class="ko">문서 없음</span></span
                   >
                 </td>
-                <td>
-                  <span class="no"
-                    ><span class="en">not documented</span><span class="ko">문서 없음</span></span
-                  >
-                </td>
+
                 <td>
                   <span class="no"
                     ><span class="en">not documented</span><span class="ko">문서 없음</span></span
@@ -1054,12 +974,12 @@
                 <td>
                   <span class="part"
                     ><span class="en">partial</span><span class="ko">일부</span></span
-                  ><span class="note-mark">6</span>
+                  ><span class="note-mark">3</span>
                 </td>
               </tr>
 
               <tr class="divider">
-                <th scope="row" colspan="8">
+                <th scope="row" colspan="6">
                   <span class="en">Shape of the thing</span><span class="ko">도구의 형태</span>
                 </th>
               </tr>
@@ -1067,32 +987,14 @@
                 <th scope="row"><span class="en">Platform</span><span class="ko">플랫폼</span></th>
                 <td class="own">macOS</td>
                 <td>macOS</td>
-                <td><span class="en">Local web UI</span><span class="ko">로컬 웹 UI</span></td>
+
                 <td><span class="en">Terminal</span><span class="ko">터미널</span></td>
-                <td>macOS</td>
+
                 <td>macOS · Windows · Linux</td>
                 <td>
                   <span class="en">macOS · Windows · Linux · mobile</span
                   ><span class="ko">macOS · Windows · Linux · 모바일</span>
                 </td>
-              </tr>
-              <tr>
-                <th scope="row">
-                  <span class="en">Project status</span><span class="ko">프로젝트 상태</span>
-                </th>
-                <td class="own"><span class="en">Active</span><span class="ko">활발</span></td>
-                <td><span class="en">Active</span><span class="ko">활발</span></td>
-                <td>
-                  <span class="en">Sunsetting</span><span class="ko">종료 예정</span
-                  ><span class="note-mark">4</span>
-                </td>
-                <td><span class="en">Active</span><span class="ko">활발</span></td>
-                <td>
-                  <span class="en">Succeeded</span><span class="ko">후속 프로젝트로</span
-                  ><span class="note-mark">5</span>
-                </td>
-                <td><span class="en">Active</span><span class="ko">활발</span></td>
-                <td><span class="en">Active</span><span class="ko">활발</span></td>
               </tr>
             </tbody>
           </table>
@@ -1153,44 +1055,8 @@
               a PR in review" 라는 선택지가 있고, CLI 에 부모/자식 worktree 계보가 있습니다 (<code
                 >--parent-worktree</code
               >
-              / <code>--no-parent</code>). 다만 부모가 머지된 뒤의 자동 rebase 나 PR 재타게팅은
+              / <code>--no-parent</code>). 다만 부모가 병합된 뒤의 자동 rebase 나 PR 재타게팅은
               문서에 없습니다.</span
-            >
-          </li>
-          <li>
-            <span class="en"
-              >Vibe Kanban's README routes review to GitHub ("open PRs with AI-generated
-              descriptions, review on GitHub, and merge") while its site advertises reviewing your
-              team's PRs and launching a worktree from any PR. Whether comments post back as GitHub
-              review comments could not be confirmed.</span
-            >
-            <span class="ko"
-              >Vibe Kanban 의 README 는 리뷰를 GitHub 로 넘깁니다("open PRs with AI-generated
-              descriptions, review on GitHub, and merge"). 반면 웹사이트는 팀의 PR 리뷰와 PR 에서
-              worktree 를 띄우는 기능을 내세웁니다. 코멘트가 GitHub 리뷰 코멘트로 올라가는지는
-              확인하지 못했습니다.</span
-            >
-          </li>
-          <li>
-            <span class="en"
-              >Announced by the project: "Vibe Kanban is sunsetting. The project will continue as
-              open source and community maintained."</span
-            >
-            <span class="ko"
-              >프로젝트 공지 그대로입니다. "Vibe Kanban is sunsetting. The project will continue as
-              open source and community maintained."</span
-            >
-          </li>
-          <li>
-            <span class="en"
-              >Crystal was deprecated in February 2026 and continues as Nimbalyst. Crystal's rows
-              here reflect its last documented release (v0.3.x), which had built-in rebase and
-              squash-onto-main but no stacking.</span
-            >
-            <span class="ko"
-              >Crystal 은 2026년 2월에 지원이 종료됐고 Nimbalyst 로 이어집니다. 표의 Crystal 행은
-              문서가 남아 있는 마지막 릴리스(v0.3.x) 기준입니다. rebase 와 squash-to-main 은 내장돼
-              있었지만 스태킹은 없었습니다.</span
             >
           </li>
           <li>
@@ -1260,36 +1126,6 @@
 
           <div class="tool-card">
             <h3>
-              <a href="https://github.com/BloopAI/vibe-kanban" target="_blank" rel="noopener"
-                >Vibe Kanban</a
-              >
-            </h3>
-            <div class="plat">
-              <span class="en">Local web UI · npx</span><span class="ko">로컬 웹 UI · npx</span>
-            </div>
-            <p>
-              <span class="en"
-                >The one that treats planning as the bottleneck. A kanban board sits over the
-                agents, issues break into sub-issues, and statuses move on their own when an agent
-                picks work up. It creates worktrees and setup scripts for you, opens PRs with
-                generated descriptions, and takes inline diff comments straight back to the
-                agent.</span
-              >
-              <span class="ko"
-                >병목을 계획 쪽으로 보는 도구입니다. 에이전트 위에 칸반 보드가 얹히고, 이슈는 하위
-                이슈로 쪼개지며, 에이전트가 일을 집어 들면 상태가 알아서 움직입니다. worktree 와
-                셋업 스크립트를 대신 만들어 주고, 설명이 자동으로 붙은 PR 을 열고, diff 인라인
-                코멘트를 에이전트에게 곧장 돌려줍니다.</span
-              >
-            </p>
-            <span class="status">
-              <span class="en">Sunsetting — continues community-maintained</span>
-              <span class="ko">종료 예정 — 커뮤니티 유지보수로 계속</span>
-            </span>
-          </div>
-
-          <div class="tool-card">
-            <h3>
               <a href="https://github.com/smtg-ai/claude-squad" target="_blank" rel="noopener"
                 >Claude Squad</a
               >
@@ -1312,31 +1148,6 @@
                 어렵습니다.</span
               >
             </p>
-          </div>
-
-          <div class="tool-card">
-            <h3>
-              <a href="https://github.com/stravu/crystal" target="_blank" rel="noopener">Crystal</a>
-            </h3>
-            <div class="plat">macOS · Electron</div>
-            <p>
-              <span class="en"
-                >An early and influential take: run, inspect and test many Claude Code and Codex
-                sessions side by side in worktrees, compare the approaches, then squash the winner
-                and rebase it onto main from inside the app. Much of what the rest of this table
-                takes for granted was normal here first.</span
-              >
-              <span class="ko"
-                >초기에 나와서 영향을 크게 남긴 접근입니다. 여러 Claude Code · Codex 세션을 worktree
-                안에서 나란히 돌리고 살펴보고 테스트한 뒤, 마음에 드는 쪽을 앱 안에서 squash 해 main
-                으로 rebase 합니다. 이 표의 나머지가 당연하게 여기는 것 중 상당수가 여기서 먼저
-                당연해졌습니다.</span
-              >
-            </p>
-            <span class="status">
-              <span class="en">Deprecated Feb 2026 — continues as Nimbalyst</span>
-              <span class="ko">2026년 2월 지원 종료 — Nimbalyst 로 이어짐</span>
-            </span>
           </div>
 
           <div class="tool-card">
@@ -1382,7 +1193,7 @@
               >
               <span class="ko"
                 >이 중에서 다루는 범위가 가장 넓습니다. 프롬프트 하나를 다섯 worktree 의 다섯
-                에이전트에 뿌려 놓고 이긴 쪽을 머지하고, diff 아무 줄에나 코멘트를 달아 돌려보내고,
+                에이전트에 뿌려 놓고 이긴 쪽을 병합하고, diff 아무 줄에나 코멘트를 달아 돌려보내고,
                 worktree 를 SSH 로 원격에서 돌리고, 전체를 CLI 로 조종하고, iOS · Android 로 들고
                 다닙니다. 여기서 문서에 스태킹을 직접 언급하는 유일한 다른 도구이기도 합니다 — 아직
                 리뷰 중인 PR 위에 얹으려고 다른 로컬 브랜치에서 worktree 를 시작할 수
@@ -1413,7 +1224,7 @@
               <span class="ko"
                 >출발점은 다른 도구들과 같습니다. 작업마다 worktree 하나, 브랜치 하나, 에이전트
                 하나가 병렬로 돕니다. Wooi 가 더하는 건 그 다음 이야기입니다. 워크스페이스를 다른
-                워크스페이스의 브랜치 위에 스택으로 얹고, 부모 PR 이 머지되면 Wooi 가 각 자식 PR 의
+                워크스페이스의 브랜치 위에 스택으로 얹고, 부모 PR 이 병합되면 Wooi 가 각 자식 PR 의
                 base 를 조부모 브랜치로 다시 잡고 자식들을 그 위로 rebase 합니다. 나머지 체인이
                 조용히 썩는 대신 멀쩡하게 남습니다. <code>git checkout -b</code> 와
                 <code>gh pr create</code> 로 직접 쌓은 스택도 PR 의 base 브랜치를 읽어 복원합니다.
@@ -1461,7 +1272,7 @@
                   >You already open stacked PRs and want the merge cascade handled for you.</span
                 >
                 <span class="ko"
-                  >이미 스택 PR 을 열고 있고, 머지 캐스케이드를 도구가 처리해 주길 원합니다.</span
+                  >이미 스택 PR 을 열고 있고, 병합 캐스케이드를 도구가 처리해 주길 원합니다.</span
                 >
               </li>
               <li>

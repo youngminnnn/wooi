@@ -184,19 +184,19 @@ PullRequestStackEntry   { id, position, pullRequest, stack }
 "이 워크스페이스가 스택에서 빠졌다"를 `link` 로 표현할 수 없다 — 그건
 `gh stack unstack <n>`(스택 전체를 없앤다) 뒤 재-link 가 필요하다.
 
-### 1.5 머지 동작
+### 1.5 병합 동작
 
-- `gh stack merge` 는 선택한 머지 집합에 대해 **전부 아니면 전무**다. 하나라도 머지할 수
-  없으면 아무것도 머지되지 않는다. `gh pr merge` 로는 스택을 머지할 수 없다.
+- `gh stack merge` 는 선택한 병합 집합에 대해 **전부 아니면 전무**다. 하나라도 병합할 수
+  없으면 아무것도 병합되지 않는다. `gh pr merge` 로는 스택을 병합할 수 없다.
   **[문서로 확인됨]**
-- 아래 레이어를 머지하면 위 PR 들은 열린 채로 남고 "자동으로 rebase 되고 retarget 된다".
+- 아래 레이어를 병합하면 위 PR 들은 열린 채로 남고 "자동으로 rebase 되고 retarget 된다".
   **[미확인 — 체인지로그 주장, 재현하지 않음]**
 - base 브랜치에 merge queue 가 걸려 있으면 method 플래그를 무시하고 큐에 들어가며, 여러 그룹으로
   나뉘어 착지할 수 있다. 체인지로그 시점에 merge queue 지원은 아직 롤아웃 중이었다.
   **[문서로 확인됨]**
 
 이 중 auto-retarget 쪽은 **새로운 게 아니고** Wooi 가 이미 처리한다. `cascade.ts` 헤더에
-머지 시점에 base 브랜치가 지워지면 GitHub 이 자식을 자동 retarget 한다는 것이 적혀 있고,
+병합 시점에 base 브랜치가 지워지면 GitHub 이 자식을 자동 retarget 한다는 것이 적혀 있고,
 `cascadeRetarget` 은 그 경우를 `'skipped' / already based on <newBase>` 로 이미 기록한다.
 그 로직은 그대로 살아남는다.
 
@@ -208,12 +208,12 @@ auto-**rebase** 쪽이 새롭고 위험한 부분이다. §2 를 보라.
 
 ### 2.1 force-push lease 충돌
 
-Wooi 의 캐스케이드는 부모가 머지된 뒤 자식을 로컬에서 rebase 하고
+Wooi 의 캐스케이드는 부모가 병합된 뒤 자식을 로컬에서 rebase 하고
 `git push --force-with-lease origin <branch>` 로 push 한다(`src/main/git.ts` 의
 `restackOnto`). lease 가 안전장치다 — Wooi 가 마지막으로 fetch 한 뒤 원격이 움직였으면 push 가
 거부된다.
 
-GitHub 이 머지 시점에 스택 자식 브랜치를 서버에서 rebase 한다면, 그 브랜치의 원격 ref 는
+GitHub 이 병합 시점에 스택 자식 브랜치를 서버에서 rebase 한다면, 그 브랜치의 원격 ref 는
 **Wooi 가 개입하지 않은 채 GitHub 이** 다시 쓴 것이다. 그러면 Wooi 의 다음 캐스케이드는 둘 중
 하나를 하는데 둘 다 나쁘다.
 
@@ -223,13 +223,13 @@ GitHub 이 머지 시점에 스택 자식 브랜치를 서버에서 rebase 한�
    rebase 된다. `rerere` 가 꺼져 있으면 같은 충돌을 두 번 풀어야 하고, 커밋이 두 번 다시
    쓰이면서 옛 sha 에 걸린 리뷰 코멘트가 무효가 된다.
 
-순수한 경합도 있다. Wooi 의 캐스케이드는 머지를 *감지*(PR 상태 폴링)해서 도는데, GitHub 의
-rebase 는 머지 그 자체가 방아쇠다. Wooi 는 반드시 늦게 도착하고, GitHub 이 이미 고쳤을 수도
+순수한 경합도 있다. Wooi 의 캐스케이드는 병합을 *감지*(PR 상태 폴링)해서 도는데, GitHub 의
+rebase 는 병합 그 자체가 방아쇠다. Wooi 는 반드시 늦게 도착하고, GitHub 이 이미 고쳤을 수도
 있는 상태에 대고 동작한다.
 
 **GitHub 이 실제로 원격 브랜치 ref 를 다시 쓰는지, 아니면 PR 만 retarget 하고 diff 를 다시
 계산하는지는 [미확인] 이다.** 체인지로그는 "automatically rebase and retarget" 이라 하고,
-엔지니어링 글은 머지 시점 동작을 아예 다루지 않으며, 확장 소스에도 답이 없다. 이 질문 하나가
+엔지니어링 글은 병합 시점 동작을 아예 다루지 않으며, 확장 소스에도 답이 없다. 이 질문 하나가
 Wooi 가 어디까지 갈 수 있는지를 결정하며, §7 은 이것을 구현 순서의 첫 항목으로 둔다.
 
 ### 2.2 로컬 worktree 는 GitHub 이 볼 수 없다
@@ -265,10 +265,10 @@ Wooi 에는 "GitHub 이 네 밑에서 이 브랜치를 rebase 했다"는 별도 
 
 | Wooi 가 하는 일 | `gh stack` 이 하는 일 | 충돌 |
 |---|---|---|
-| `retargetPr` 로 자식 → 조부모 | `link` 가 base 교정, 머지 시 서버가 auto-retarget | 무해. Wooi 는 base 가 이미 맞으면 `'skipped'` 로 기록한다. |
+| `retargetPr` 로 자식 → 조부모 | `link` 가 base 교정, 병합 시 서버가 auto-retarget | 무해. Wooi 는 base 가 이미 맞으면 `'skipped'` 로 기록한다. |
 | `restackOnto` + `--force-with-lease` | `sync` 가 rebase 후 `--atomic` force-push | **정면 충돌.** 둘을 같이 돌리면 안 된다. Wooi 는 `sync` 를 부르지 않는다. |
 | Wooi 스토어의 워크스페이스별 스택 상태 | worktree 별 `.git/gh-stack` | **정면 충돌.** 로컬 추적을 만들지 말고 `link` 를 쓴다. |
-| `mergePr` 로 PR 하나 머지 | `merge` 는 집합 전체에 대해 atomic | 의미가 다르다. 사용자에게 별개 동작으로 남긴다. |
+| `mergePr` 로 PR 하나 병합 | `merge` 는 집합 전체에 대해 atomic | 의미가 다르다. 사용자에게 별개 동작으로 남긴다. |
 
 ## 3. 제안
 
@@ -328,7 +328,7 @@ non-force 라서 반복 호출이 안전하고 사실상 멱등이다. Wooi 의 
 기록한다 — §2.2 의 "GitHub 이 밑에서 rebase 했다" 상태다. 작고 덧붙이는 변경이며, §2.1 의
 충돌을 조용한 것에서 보이는 것으로 바꾼다.
 
-**머지(그대로).** Wooi 는 계속 `mergePr` 로 한 번에 PR 하나씩 머지한다. `gh stack merge` 의
+**병합(그대로).** Wooi 는 계속 `mergePr` 로 한 번에 PR 하나씩 병합한다. `gh stack merge` 의
 전부-아니면-전무 의미는 별개의 제품 결정이고 — 레이어마다 각자 에이전트 세션이 있는데 다섯
 레이어를 한 번에 착지시키는 게 Wooi 사용자가 원하는 것인지 자명하지 않다 — 연동의 곁다리로
 조용히 도입할 것이 아니다. 따로 다시 판단한다.
@@ -425,7 +425,7 @@ Wooi 의 내장 MCP 도구(`create_stacked_workspace`, `check_stacked_work`)는 
 범위를 제안대로 유지하는 **한에서만** 폭발 반경이 작다.
 
 - 발행은 덧붙이기다. GitHub 이 preview 를 거두면 스택 객체가 사라지고 Wooi 의 체인은 계속
-  동작한다. 잃는 것은 웹 UI 스택 맵뿐이다. Wooi 의 캐스케이드·흡수·머지 경로 중 어느 것도 여기
+  동작한다. 잃는 것은 웹 UI 스택 맵뿐이다. Wooi 의 캐스케이드·흡수·병합 경로 중 어느 것도 여기
   의존하지 않는다.
 - 읽기는 `null`/`[]` 로 저하되는데, 폴백은 이미 그것을 "GitHub 스택 없음, `buildStackFromPrs`
   사용"으로 취급한다.
@@ -444,7 +444,7 @@ preview 로 롤아웃"이라 하고 플랜이나 조직 제한을 언급하지 �
 
 ## 7. 남은 질문
 
-1. **서버 측 스택 머지가 그 위 브랜치들의 원격 ref 를 다시 쓰는가?** §2.1 의 충돌이 전적으로
+1. **서버 측 스택 병합이 그 위 브랜치들의 원격 ref 를 다시 쓰는가?** §2.1 의 충돌이 전적으로
    여기 달렸다. 코드를 쓰기 전에 답해야 한다.
 2. 다시 쓴다면, 기존 리뷰 코멘트가 다시 걸리도록 PR head sha 도 갱신하는가, 아니면 코멘트가
    미아가 되는가?
@@ -458,7 +458,7 @@ preview 로 롤아웃"이라 하고 플랜이나 조직 제한을 언급하지 �
 
 ## 8. 구현 순서
 
-1. **질문 1 에 답한다.** 버리는 리포 하나, `gh stack link` 로 만든 3-PR 스택, 맨 아래를 머지한
+1. **질문 1 에 답한다.** 버리는 리포 하나, `gh stack link` 로 만든 3-PR 스택, 맨 아래를 병합한
    뒤 위 브랜치들을 `git ls-remote` 로 관찰. 반나절. 이게 정리되기 전에는 아무것도 시작하지
    않는다.
 2. **읽기 전용, 확장 없이.** `getRepoStacks` / `getStackForPr` 를 담은 `ghStack.ts` 와 2단계
