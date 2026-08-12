@@ -101,12 +101,16 @@ export default function ChangesPanel({
 
   return (
     <div className="h-full flex flex-col min-h-0">
-      <PanelToolbar label={`vs ${baseBranch}`} onRefresh={refresh} spinning={loading} />
+      <PanelToolbar
+        label={`vs ${diff?.baseBranch ?? baseBranch}`}
+        onRefresh={refresh}
+        spinning={loading}
+      />
       <div className="flex-1 overflow-y-auto px-3 py-3">
         <DiffView
           diff={diff}
           loading={loading}
-          baseBranch={baseBranch}
+          baseBranch={diff?.baseBranch ?? baseBranch}
           // 분리한 패널 창에는 큰 뷰어가 없다(FileBrowser 의 openViewer 주석 참고).
           onOpenFile={isPaneWindow ? undefined : (path) => openFileViewer(workspaceId, path)}
           commenting={commenting}

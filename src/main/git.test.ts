@@ -8,7 +8,8 @@ import {
   parseGithubOwner,
   ghMergeBase,
   syncGhMergeBase,
-  summarizeBranch
+  summarizeBranch,
+  getDiff
 } from './git'
 
 describe('sanitizeBranch', () => {
@@ -132,6 +133,51 @@ describe('gh-merge-base (gh 의 기본 PR base)', () => {
     await syncGhMergeBase(wt, 'child', 'parent')
     git(wt, ['branch', '-m', 'feat/child'])
     await expect(ghMergeBase(wt, 'feat/child')).resolves.toBe('parent')
+  })
+})
+
+describe('getDiff (Changes 패널)', () => {
+  let base: string
+  let repo: string
+
+  const git = (cwd: string, args: string[]): string =>
+    execFileSync('git', args, { cwd, encoding: 'utf-8' }).trim()
+
+  beforeEach(() => {
+    base = mkdtempSync(join(tmpdir(), 'wooi-diff-'))
+    repo = join(base, 'repo')
+    mkdirSync(repo)
+    git(repo, ['init', '-q', '-b', 'main'])
+    git(repo, ['config', 'user.email', 'test@example.com'])
+    git(repo, ['config', 'user.name', 'test'])
+    writeFileSync(join(repo, 'README.md'), 'initial\n')
+    git(repo, ['add', '-A'])
+    git(repo, ['commit', '-qm', 'init'])
+  })
+
+  afterEach(() => {
+    rmSync(base, { recursive: true, force: true })
+  })
+
+  it('로컬 base보다 origin base를 우선한다', async () => {
+    // 로컬 main은 init에 둔 채 origin/main만 한 커밋 전진시킨다.
+    git(repo, ['update-ref', 'refs/remotes/origin/main', 'HEAD'])
+    git(repo, ['checkout', '-qb', 'remote-main'])
+    writeFileSync(join(repo, 'remote.txt'), 'already on origin\n')
+    git(repo, ['add', '-A'])
+    git(repo, ['commit', '-qm', 'remote change'])
+    git(repo, ['update-ref', 'refs/remotes/origin/main', 'HEAD'])
+
+    // workspace가 최신 origin에서 분기했다면 remote.txt는 자기 변경으로 보이면 안 된다.
+    git(repo, ['checkout', '-qb', 'feat/work'])
+    writeFileSync(join(repo, 'mine.txt'), 'workspace change\n')
+    git(repo, ['add', '-A'])
+    git(repo, ['commit', '-qm', 'workspace change'])
+
+    const diff = await getDiff(repo, 'main')
+
+    expect(diff.baseBranch).toBe('origin/main')
+    expect(diff.files.map((file) => file.path)).toEqual(['mine.txt'])
   })
 })
 
