@@ -48,6 +48,7 @@ import { OPEN_REPO_SETTINGS_EVENT, openRepoSettings } from '../lib/repoSettings'
 import {
   AGENT_BACKEND_LABELS,
   DEFAULT_PEER_INBOUND,
+  activeRateLimitPause,
   orderVisibleWorkspaces,
   workspaceDisplayName
 } from '@shared/types'
@@ -61,6 +62,7 @@ import type {
   AgentBackendId,
   PrState,
   PrStatus,
+  RateLimitPause,
   Repo,
   ReviewSession,
   ReviewStatus,
@@ -118,7 +120,9 @@ export default function Sidebar({
   // 실행 중인 세션이 하나라도 있으면 1초마다 갱신해 경과 시간을 흐르게 하고("오래 실행 중" 힌트도
   // 같은 틱으로 갱신), 없으면 틱을 멈춰 불필요한 재렌더를 막는다.
   const anyRunningOrRateLimited = app.workspaces.some(
-    (w) => !w.archived && (w.status === 'running' || Boolean(w.pendingRateLimitResume))
+    (w) =>
+      !w.archived &&
+      (w.status === 'running' || Boolean(w.pendingRateLimitResume) || Boolean(w.rateLimited))
   )
   const now = useNow(1000, anyRunningOrRateLimited)
 
@@ -547,6 +551,9 @@ function WorkspaceRow({
   const runningStart = runningSince ?? workspace.lastActiveAt
   const runningMs = workspace.status === 'running' ? Math.max(0, now - runningStart) : 0
   const stale = runningMs >= RUNNING_STALE_MS
+  // 사용량 제한으로 멈춘 상태. 자동 이어가기 예약(pendingRateLimitResume)이 있으면 그쪽이 더 많은
+  // 것을 말해 주므로 그 표시를 쓰고, 없을 때(설정 off·예약 종료) 이 표시가 이유를 대신 알린다.
+  const rateLimited = activeRateLimitPause(workspace.rateLimited, now)
   // 표시 이름: 사용자 override → PR 제목 → worktree 이름. override 가 없으면 PR 제목이 자동 반영된다.
   const displayName = workspaceDisplayName(workspace, pr?.title)
   // 에이전트 배지와 stack 생성 override 는 같은 사용 가능 목록을 쓴다.
@@ -753,6 +760,7 @@ function WorkspaceRow({
           stale={stale}
           runningMs={runningMs}
           pendingRateLimitResume={workspace.pendingRateLimitResume}
+          rateLimited={rateLimited}
           pr={pr}
         />
         <div className="relative flex-1 min-w-0">
@@ -831,7 +839,7 @@ function WorkspaceRow({
                 · {formatDuration(now - runningSince)}
               </span>
             )}
-            {workspace.pendingRateLimitResume && (
+            {workspace.pendingRateLimitResume ? (
               <span
                 className="text-[var(--warning-400)]/90 shrink-0 tabular-nums"
                 title={`Usage limit reached — scheduled to resume at ${new Date(
@@ -841,6 +849,24 @@ function WorkspaceRow({
                 · rate limit · resumes in{' '}
                 {formatCountdown(workspace.pendingRateLimitResume.retryAt - now)}
               </span>
+            ) : (
+              // 자동 이어가기가 꺼져 있어도 제한에 걸린 사실은 보여 준다 — 그러지 않으면 그냥
+              // idle 로 보여서, 사용자는 왜 멈췄는지 워크스페이스에 들어가 봐야만 알 수 있다.
+              rateLimited && (
+                <span
+                  className="text-[var(--warning-400)]/90 shrink-0 tabular-nums"
+                  title={
+                    rateLimited.resetsAt
+                      ? `Stopped by the usage limit — resets at ${new Date(rateLimited.resetsAt).toLocaleString()}`
+                      : 'Stopped by the usage limit'
+                  }
+                >
+                  · rate limit
+                  {rateLimited.resetsAt
+                    ? ` · resets in ${formatCountdown(rateLimited.resetsAt - now)}`
+                    : ''}
+                </span>
+              )
             )}
           </div>
           {/* 액션 클러스터는 absolute 오버레이로 띄운다. 호버 전용 컨트롤이 평상시 레이아웃 폭을
@@ -1288,6 +1314,7 @@ export function StatusDot({
   stale,
   runningMs,
   pendingRateLimitResume,
+  rateLimited,
   pr
 }: {
   status: Workspace['status']
@@ -1296,6 +1323,8 @@ export function StatusDot({
   stale: boolean
   runningMs: number
   pendingRateLimitResume?: Workspace['pendingRateLimitResume']
+  /** 제한에 걸린 상태(해제 시각이 지나지 않은 것). 호출부가 activeRateLimitPause 로 걸러 넘긴다. */
+  rateLimited?: RateLimitPause | null
   pr?: PrStatus | null
 }): React.JSX.Element {
   // 권한 대기는 가장 행동 가능한 상태라 다른 표시보다 우선한다.
@@ -1324,15 +1353,17 @@ export function StatusDot({
       </span>
     )
   }
-  // 자동 재개 예약은 단순 idle 이 아니라 provider 제한이 풀리기를 기다리는 중이다. PR 상태보다
-  // 우선해 표시하되, 위의 권한 대기·실행 중처럼 지금 일어나고 있는 상태에는 양보한다.
-  if (pendingRateLimitResume) {
-    const retryAt = new Date(pendingRateLimitResume.retryAt).toLocaleString()
+  // 사용량 제한으로 멈춘 상태는 단순 idle 도, 그냥 error 도 아니다 — 시간이 지나면 스스로 풀리는
+  // 대기다. PR 상태·에러보다 우선해 표시하되, 위의 권한 대기·실행 중처럼 지금 일어나고 있는
+  // 상태에는 양보한다. 자동 이어가기가 꺼져 있어도(예약 없이 표시만 있어도) 같은 아이콘을 쓴다.
+  if (pendingRateLimitResume || rateLimited) {
+    const title = pendingRateLimitResume
+      ? `Paused by usage limit — scheduled to resume at ${new Date(pendingRateLimitResume.retryAt).toLocaleString()}`
+      : rateLimited?.resetsAt
+        ? `Stopped by usage limit — resets at ${new Date(rateLimited.resetsAt).toLocaleString()}`
+        : 'Stopped by usage limit'
     return (
-      <span
-        title={`Paused by usage limit — scheduled to resume at ${retryAt}`}
-        className="shrink-0 grid place-items-center"
-      >
+      <span title={title} className="shrink-0 grid place-items-center">
         <Hourglass
           size={12}
           className="text-[var(--warning-400)]"

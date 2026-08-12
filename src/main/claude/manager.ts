@@ -109,7 +109,8 @@ export class SessionManager implements AgentBackend {
       refreshLimits: () => this.refreshRateLimits(true),
       sendContinuation: (workspaceId) => this.sendContinuation(workspaceId),
       emitItem: (workspaceId, item) =>
-        this.dispatch(IPC.evtChat, { workspaceId, event: { type: 'item', item } })
+        this.dispatch(IPC.evtChat, { workspaceId, event: { type: 'item', item } }),
+      broadcastState: () => this.dispatch(IPC.evtState, getStore().getState())
     })
     this.rateLimitResume.restore()
   }
@@ -216,7 +217,7 @@ export class SessionManager implements AgentBackend {
         this.onSessionId(msg.workspaceId, msg.sessionId)
         break
       case 'rateLimit':
-        void this.rateLimitResume.schedule(msg.workspaceId)
+        void this.rateLimitResume.noteRateLimit(msg.workspaceId, msg.resetAt)
         break
       case 'settleIdle':
         this.forceIdle(msg.workspaceId)
@@ -548,8 +549,13 @@ export class SessionManager implements AgentBackend {
     return {}
   }
 
+  /**
+   * 세션 프로세스만 정리한다. **사용량 제한 예약은 건드리지 않는다** — 예약은 앱 재시작도 견디는
+   * 영속 상태이고(restore), 세션은 다음 전송에서 resume 으로 되살아난다. 유휴 세션 정리나 /add-dir
+   * 처럼 프로세스만 갈아 끼우는 경로가 예약을 조용히 지우면, 사이드바에서 카운트다운이 사라지고
+   * 이어가기도 영영 오지 않는다. 예약을 접어야 하는 경로(/clear·중단·사용자 전송)는 직접 cancel 한다.
+   */
   dispose(workspaceId: string): void {
-    this.rateLimitResume.cancel(workspaceId)
     this.sendIfHost({ type: 'dispose', workspaceId })
     // 세션이 사라지면 그 세션이 기다리던 권한 요청은 응답받을 수 없으므로 거둔다.
     for (const [requestId, wsId] of this.pendingPermissions) {

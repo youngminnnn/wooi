@@ -86,8 +86,11 @@ export interface SessionDeps {
     req: Omit<PermissionRequest, 'requestId' | 'workspaceId'>
   ) => Promise<PermissionDecision>
   onSessionId: (id: string) => void
-  /** 계정 사용량 제한으로 턴이 중단됐다. 메인이 reset 이후 자동 재개를 예약한다. */
-  onRateLimit?: () => void
+  /**
+   * 계정 사용량 제한으로 턴이 중단됐다. 메인이 reset 이후 자동 재개를 예약한다.
+   * resetAt 은 제한 오류가 직접 알려 준 해제 시각(epoch ms)이다 — 모르면 넘기지 않는다.
+   */
+  onRateLimit?: (resetAt?: number) => void
   /**
    * 세션이 스스로 권한 모드를 바꿨음을 알린다(계획 승인 → acceptEdits/default).
    * 모드는 workspace 상태의 일부라 메인이 store 에 반영하고 UI 로 방송해야 한다.
@@ -182,6 +185,24 @@ const RESTARTABLE_AUTH_ERROR =
 /** fast-mode cooldown이 아닌 계정 전체 사용량 제한 문구만 좁게 식별한다. */
 export const RATE_LIMIT_ERROR =
   /(?:usage limit|rate limit|quota).*(?:reached|exceeded|reset|available)|(?:reached|exceeded).*(?:usage limit|rate limit|quota)|hit your limit/i
+
+/**
+ * CLI 는 사용량 제한을 알릴 때 해제 시각을 epoch 로 덧붙인다
+ * (예: `Claude AI usage limit reached|1754880000`).
+ */
+const RATE_LIMIT_RESET_EPOCH = /\|\s*(\d{10,13})\b/
+
+/** 제한 오류 문구가 알려 준 해제 시각(epoch ms). 없거나 말이 안 되는 값이면 null. */
+export function rateLimitResetAt(text: string | null, now: number): number | null {
+  if (!text) return null
+  const match = RATE_LIMIT_RESET_EPOCH.exec(text)
+  if (!match) return null
+  const digits = match[1]
+  const at = digits.length >= 13 ? Number(digits) : Number(digits) * 1000
+  // 스냅샷보다 이 값을 우선하므로, 미래이면서 상식적인 범위(30일)일 때만 믿는다.
+  if (!Number.isFinite(at) || at <= now || at > now + 30 * 24 * 60 * 60_000) return null
+  return at
+}
 
 /**
  * 콜드 resume preflight 의 getContextUsage 상한. 따뜻한 세션의 미터 갱신(5초)보다 넉넉히 둔다 —
@@ -1573,21 +1594,25 @@ export class ClaudeSession {
       return
     }
 
-    if (
-      this.deps.autoResumeAfterRateLimit &&
-      this.turnError &&
-      RATE_LIMIT_ERROR.test(this.turnError)
-    ) {
+    // 사용량 제한으로 끝난 턴은 **설정과 무관하게** 메인에 알린다 — 자동 이어가기가 꺼져 있어도
+    // 사이드바가 "제한 때문에 멈췄다" 를 보여 줘야 하기 때문이다. beginTurn 이 turnError 를
+    // 비우므로, 문구가 알려 준 해제 시각은 그 전에 뽑아 둔다.
+    const rateLimited = Boolean(this.turnError && RATE_LIMIT_ERROR.test(this.turnError))
+    const resetAt = rateLimited ? rateLimitResetAt(this.turnError, Date.now()) : null
+    if (rateLimited && this.deps.autoResumeAfterRateLimit) {
+      // 이어가기를 예약할 때는 실패 카드를 띄우지 않는다 — 사용자에게는 "잠시 멈췄다가 이어감"
+      // 한 흐름으로 보여야 한다.
       this.pendingFailureItems = []
       this.beginTurn()
       this.inFlight.shift()
       this.deps.onSessionId(msg.session_id)
       this.active = false
       this.busy = false
-      this.deps.onRateLimit?.()
+      this.deps.onRateLimit?.(resetAt ?? undefined)
       this.deps.settleIdle()
       return
     }
+    if (rateLimited) this.deps.onRateLimit?.(resetAt ?? undefined)
 
     // 보류해 둔 실패 보고가 있으면(재시도하지 않기로 확정) 이제 표시하고, 턴 상태를 닫는다.
     this.flushPendingFailure()

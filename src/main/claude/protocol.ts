@@ -187,7 +187,9 @@ export type HostEvent =
   | { type: 'event'; workspaceId: string; event: ChatEvent }
   | { type: 'persist'; workspaceId: string; item: ChatItem }
   | { type: 'sessionId'; workspaceId: string; sessionId: string }
-  | { type: 'rateLimit'; workspaceId: string }
+  // resetAt 은 제한 오류가 직접 알려 준 해제 시각(epoch ms). 사용량 스냅샷이 비어 있을 때
+  // "언제 다시 보낼지" 를 아는 유일한 근거라 함께 넘긴다.
+  | { type: 'rateLimit'; workspaceId: string; resetAt?: number }
   // 턴이 정상 result 없이 끝나(예: CLI 가 턴 도중 죽음) 'running' 에 갇혔을 때, 완료 알림 없이
   // workspace 를 idle 로 확정하도록 메인에 요청한다(메인의 forceIdle 로 연결).
   | { type: 'settleIdle'; workspaceId: string }
