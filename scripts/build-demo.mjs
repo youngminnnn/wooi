@@ -41,7 +41,16 @@ const H = 800
 const APP_H = 740 // 앱 화면 높이. 아래 60px 은 캡션 띠.
 const DUR = 19 // 루프 길이(초)
 
-/* ── 색 — src/renderer/src/index.css 의 다크 토큰. oklch 는 Tailwind v4 팔레트 hex 로 확정. ── */
+/* ── 색 — src/renderer/src/index.css 의 다크 토큰. oklch 는 Tailwind v4 팔레트 hex 로 확정.
+ *
+ * 다만 흐린 쪽 끝(n400~n600·보더)은 앱보다 한 단계씩 밝다. 앱은 13px 를 100% 로 보지만
+ * 이 데모는 1280 폭이 README(~890px)·랜딩(.demo-frame 940px)에서 **0.7 배로 축소**돼
+ * 재생된다 — 11px 메타 줄이 화면에서 8px 가 되므로, 앱에서 성립하던 대비가 여기서 무너진다.
+ * (bg-2 위 기준: n500 3.68:1 → 6.20, n600 2.23 → 4.24, border 1.38 → 1.65)
+ * 밝은 쪽(n100~n300)과 시맨틱 색은 앱 값 그대로다 — 위계는 유지하고 바닥만 올린다.
+ * 라이트 테마로 뒤집는 안은 검토했으나 택하지 않았다: 앱 라이트 토큰으로 계산해도 흐린
+ * 글자는 4.83:1 에 그치고, 축소 상태에서 패널 구조를 만드는 경계선은 오히려 나빠진다(1.28).
+ */
 const C = {
   // 배경 / 표면 / 경계선
   bg: '#14161a',
@@ -51,21 +60,21 @@ const C = {
   surface2: '#262a31',
   surface3: '#252932',
   surface4: '#2a313c',
-  border: '#2f333b',
-  border2: '#383d46',
-  border3: '#424854',
-  borderStrong: '#4e5768',
+  border: '#3a3f49',
+  border2: '#454b56',
+  border3: '#505764',
+  borderStrong: '#5c667a',
   codeBg: '#1a1d23',
   codeInlineBg: '#262a31',
   codeFg: '#c9d1d9',
   diffHunk: '#22d3ee',
-  // 중립(Tailwind v4 neutral)
+  // 중립(Tailwind v4 neutral — 400 이하는 위 이유로 한 단계 밝힌 값)
   n100: '#f5f5f5',
   n200: '#e5e5e5',
   n300: '#d4d4d4',
-  n400: '#a1a1a1',
-  n500: '#737373',
-  n600: '#525252',
+  n400: '#b5b5b5',
+  n500: '#9a9a9a',
+  n600: '#7d7d7d',
   // 시맨틱(index.css 의 oklch 와 같은 Tailwind v4 색)
   info200: '#bedbff',
   info300: '#8ec5ff',
@@ -949,7 +958,7 @@ WS(rect(CONTENT_X, HEADER_BOT - 1, W - CONTENT_X, 1, { fill: C.border }))
         rect(stackX, 56, stackW, 24, { r: 6, fill: C.surface, stroke: C.border }) +
         icon('layers', stackX + 8, 62, 12, C.accent400) +
         text(stackX + 26, bl(68, 11), 'Stack', { px: 11, fill: C.n300, weight: 500 }) +
-        text(stackX + 26 + TW.stack + 6, bl(68, 11), '3 · 3 PR', { px: 11, fill: '#d4d4d499' }),
+        text(stackX + 26 + TW.stack + 6, bl(68, 11), '3 · 3 PR', { px: 11, fill: '#d4d4d4b3' }),
       { opacity: fade(T_STACK3 + 0.05, T_STACK3 + 0.3) }
     )
   )
@@ -1931,7 +1940,7 @@ S(
         [
           { t: r.branch, w: r.bw, fill: C.n500 },
           { t: ' ', w: 4 },
-          { t: v.pr, w: v.pw, fill: '#737373cc' },
+          { t: v.pr, w: v.pw, fill: '#9a9a9acc' },
           ...(v.ah
             ? [
                 { t: ' ', w: 4 },
