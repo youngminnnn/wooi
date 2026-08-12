@@ -2,10 +2,10 @@ import type {
   AgentBackendId,
   EffortSetting,
   ReviewArtifact,
-  ReviewDiff,
+  ReviewLayerDiff,
   ReviewProgressItem
 } from '@shared/types'
-import { buildReviewPrompt, type ReviewPromptMeta } from './prompt'
+import { buildReviewPrompt, reviewOutputSchema, type ReviewPromptMeta } from './prompt'
 import { runClaudeReview } from './runClaude'
 import { runCodexReview } from './runCodex'
 
@@ -28,7 +28,8 @@ export interface ReviewRunDeps {
   effort: EffortSetting | null
   userPrompt: string
   meta: ReviewPromptMeta
-  diff: ReviewDiff
+  /** 레이어별 diff(아래→위). PR 하나짜리 리뷰는 원소가 하나다. */
+  diffs: ReviewLayerDiff[]
   /**
    * 이어받을 에이전트 세션 id. 주면 앞선 리뷰 맥락 위에서 대화가 이어진다.
    * Claude 는 `resume`, Codex 는 `codex exec resume` 의 thread id 다.
@@ -47,16 +48,30 @@ export interface ReviewRunResult {
   /** 후속 턴을 같은 맥락으로 resume 하기 위한 세션 id. */
   sessionId: string | null
   error: string | null
+  /** 예산에 못 들어가 프롬프트에서 이름만 나열된 파일 수(후속 턴은 프롬프트를 새로 짓지 않아 0). */
+  truncatedFiles: number
+}
+
+/** 백엔드가 돌려주는 것. 예산 보고는 프롬프트를 지은 이쪽이 붙인다. */
+export type BackendReviewResult = Omit<ReviewRunResult, 'truncatedFiles'>
+
+/** 이 실행에 쓸 출력 스키마. 레이어 수에 따라 필수 필드가 달라진다([[review/prompt]]). */
+export function schemaFor(deps: ReviewRunDeps): Record<string, unknown> {
+  return reviewOutputSchema(deps.meta.layers.length)
 }
 
 export async function runReview(deps: ReviewRunDeps): Promise<ReviewRunResult> {
-  const prompt =
-    deps.promptOverride ??
-    buildReviewPrompt({
-      userPrompt: deps.userPrompt,
-      meta: deps.meta,
-      diff: deps.diff
-    })
+  const built = deps.promptOverride
+    ? { text: deps.promptOverride, truncatedFiles: 0 }
+    : buildReviewPrompt({
+        userPrompt: deps.userPrompt,
+        meta: deps.meta,
+        diffs: deps.diffs
+      })
 
-  return deps.backend === 'codex' ? runCodexReview(deps, prompt) : runClaudeReview(deps, prompt)
+  const result =
+    deps.backend === 'codex'
+      ? await runCodexReview(deps, built.text)
+      : await runClaudeReview(deps, built.text)
+  return { ...result, truncatedFiles: built.truncatedFiles }
 }

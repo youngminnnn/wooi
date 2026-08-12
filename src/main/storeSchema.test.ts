@@ -113,6 +113,11 @@ describe('v12 → v13 (백엔드별 에이전트 설정 분리)', () => {
   })
 })
 
+/** v21 이후 PR 단위 상태는 layers 안에 있다. 옛 마이그레이션 테스트가 공유해 쓴다. */
+function layerOf(review: Record<string, unknown>): Record<string, unknown> {
+  return (review.layers as Record<string, unknown>[])[0]
+}
+
 describe('v14 → v15 (리뷰의 에이전트 · PR 작성자)', () => {
   /** v14 시점의 리뷰 레코드. 그 시절 리뷰는 전부 Claude 로 돌았고 작성자를 몰랐다. */
   function v14File(): Record<string, unknown> {
@@ -132,10 +137,11 @@ describe('v14 → v15 (리뷰의 에이전트 · PR 작성자)', () => {
   })
 
   // 작성자를 모를 때 자기 PR 로 단정하면 정상적인 승인까지 막힌다 — 모르면 막지 않는 쪽이다.
+  // (v21 에서 PR 단위 필드가 layers 로 접혔으므로 그 안을 본다.)
   it('작성자를 모르는 리뷰는 자기 PR 로 단정하지 않는다', () => {
-    const review = reviewsOf(migrate(v14File(), 14))[0]
-    expect(review.prAuthor).toBe('')
-    expect(review.viewerIsAuthor).toBe(false)
+    const layer = layerOf(reviewsOf(migrate(v14File(), 14))[0])
+    expect(layer.prAuthor).toBe('')
+    expect(layer.viewerIsAuthor).toBe(false)
   })
 
   it('리뷰가 없는 파일도 그대로 통과한다', () => {
@@ -169,7 +175,7 @@ describe('v15 → v16 (제출 기록 합치기)', () => {
     (out.reviews as Record<string, unknown>[])[0]
 
   it('옛 판정은 옮기지 않고 비운다', () => {
-    expect(reviewOf(migrate(v15File(), 15)).lastSubmission).toBeNull()
+    expect(layerOf(reviewOf(migrate(v15File(), 15))).lastSubmission).toBeNull()
   })
 
   it('합쳐진 옛 필드는 남기지 않는다', () => {
@@ -207,14 +213,14 @@ describe('v16 → v17 (제출 기록에서 본문 빼기)', () => {
       }),
       16
     )
-    expect(reviewOf(out).lastSubmission).toEqual({
+    expect(layerOf(reviewOf(out)).lastSubmission).toEqual({
       verdict: 'request-changes',
       at: 1700000000000
     })
   })
 
   it('제출한 적 없는 리뷰는 그대로 둔다', () => {
-    expect(reviewOf(migrate(v16File(null), 16)).lastSubmission).toBeNull()
+    expect(layerOf(reviewOf(migrate(v16File(null), 16))).lastSubmission).toBeNull()
   })
 
   it('리뷰가 없는 파일도 그대로 통과한다', () => {
@@ -414,6 +420,7 @@ describe('normalizeShape (구버전 빌드가 남긴 레코드 메우기)', () =
   it('repos·workspaces·fanoutGroups 자체가 없어도 빈 배열로 돌려준다', () => {
     expect(normalizeShape({ schemaVersion: CURRENT_SCHEMA_VERSION })).toEqual({
       schemaVersion: CURRENT_SCHEMA_VERSION,
+      reviews: [],
       repos: [],
       workspaces: [],
       fanoutGroups: []

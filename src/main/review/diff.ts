@@ -6,7 +6,8 @@ import type {
   ReviewDiff,
   ReviewFileDiff,
   ReviewFindingInput,
-  ReviewHunk
+  ReviewHunk,
+  ReviewLayerDiff
 } from '@shared/types'
 
 /**
@@ -210,25 +211,41 @@ function unquote(p: string): string {
  * 에이전트가 hunk 헤더를 보고 줄 번호를 직접 세게 두면 반드시 틀린다. 셀 필요 자체를 없애는
  * 것이 인라인 코멘트 오배치를 줄이는 가장 효과적인 수단이다.
  */
-export function renderNumberedDiff(diff: ReviewDiff): string {
+export function renderNumberedDiff(diff: ReviewDiff, prNumber?: number): string {
   const out: string[] = []
   for (const file of diff.files) {
-    out.push(`=== ${file.path} (${file.status})`)
-    if (file.binary) {
-      out.push('  (binary — 코멘트 불가)')
-      out.push('')
-      continue
-    }
-    if (file.oldPath) out.push(`  (renamed from ${file.oldPath})`)
-    for (const hunk of file.hunks) {
-      out.push(`  ${hunk.header}`)
-      for (const row of hunk.rows) {
-        out.push(`  ${label(row)} ${sign(row)}${row.text}`)
-      }
-    }
-    out.push('')
+    out.push(renderFileHeader(file, prNumber))
+    out.push(...renderFileBody(file))
   }
   return out.join('\n')
+}
+
+/**
+ * 파일 헤더. 스택 리뷰에서는 **경로 앞에 PR 번호를 박는다** — 에이전트가 앵커를 정할 때 보는
+ * 바로 그 줄에 번호가 있어야, 어느 레이어의 파일인지 따로 기억하지 않아도 된다.
+ */
+export function renderFileHeader(file: ReviewFileDiff, prNumber?: number): string {
+  const tag = prNumber === undefined ? '' : `[#${prNumber}] `
+  return `=== ${tag}${file.path} (${file.status})`
+}
+
+/** 헤더를 뺀 파일 본문(번호가 박힌 행들). 예산 배분이 파일 단위로 붙였다 뗐다 할 수 있어야 한다. */
+export function renderFileBody(file: ReviewFileDiff): string[] {
+  const out: string[] = []
+  if (file.binary) {
+    out.push('  (binary — 코멘트 불가)')
+    out.push('')
+    return out
+  }
+  if (file.oldPath) out.push(`  (renamed from ${file.oldPath})`)
+  for (const hunk of file.hunks) {
+    out.push(`  ${hunk.header}`)
+    for (const row of hunk.rows) {
+      out.push(`  ${label(row)} ${sign(row)}${row.text}`)
+    }
+  }
+  out.push('')
+  return out
 }
 
 function label(row: DiffRow): string {
@@ -256,7 +273,11 @@ export interface AnchorResult {
  * anchor=null 을 돌려준다. 호출부는 그 지적을 **버리지 않고** general 로 강등한다 — 위치가
  * 틀렸다고 리뷰 내용까지 사라지면 안 된다.
  */
-export function resolveAnchor(diff: ReviewDiff, input: ReviewFindingInput): AnchorResult {
+export function resolveAnchor(
+  diff: ReviewDiff,
+  input: ReviewFindingInput,
+  prNumber?: number
+): AnchorResult {
   if (!input.file || typeof input.line !== 'number' || !Number.isFinite(input.line)) {
     return { anchor: null, reason: null }
   }
@@ -286,6 +307,7 @@ export function resolveAnchor(diff: ReviewDiff, input: ReviewFindingInput): Anch
 
   return {
     anchor: {
+      ...(prNumber === undefined ? {} : { prNumber }),
       file: file.path,
       side,
       line,
@@ -293,6 +315,62 @@ export function resolveAnchor(diff: ReviewDiff, input: ReviewFindingInput): Anch
       snappedFrom: line === input.line ? null : input.line
     },
     reason: null
+  }
+}
+
+/**
+ * 스택 전체(레이어 N 개의 diff)에서 앵커를 확정한다.
+ *
+ * **레이어 사이로 흘러 내려가지 않는 것**이 이 함수의 핵심 규칙이다. 스택에서는 같은 경로가
+ * 여러 레이어에 있고 줄 번호도 겹치기 쉬운데, 한 레이어에서 못 찾았다고 다음 레이어를 뒤지면
+ * 422 가 아니라 **엉뚱한 PR 에 그럴듯하게 달린 코멘트**가 나온다. 422 는 실패로 보이지만
+ * 이쪽은 성공으로 보여서, 리뷰어도 작성자도 알아채지 못한다.
+ *
+ * 규칙:
+ * 1. 에이전트가 PR 번호를 줬고 그 레이어가 있으면 **그 레이어 안에서만** 푼다. 실패하면 강등.
+ * 2. 번호가 없으면 그 경로를 가진 레이어를 찾는다. 하나면 그것.
+ * 3. 여러 레이어가 그 경로를 가졌으면, 그중 **해당 줄이 실제로 존재하는** 레이어가 정확히
+ *    하나일 때만 채택한다. 아니면 강등한다 — 둘 중 하나를 찍는 것이 바로 위의 실패 모드다.
+ */
+export function resolveStackAnchor(
+  layers: ReviewLayerDiff[],
+  input: ReviewFindingInput
+): AnchorResult {
+  if (layers.length === 0) return { anchor: null, reason: 'diff 가 없음' }
+  // 레이어가 하나뿐이면 PR 번호는 물어볼 것도 없다(단일 PR 리뷰가 그대로 이 경로를 탄다).
+  if (layers.length === 1) return resolveAnchor(layers[0].diff, input, layers[0].prNumber)
+
+  if (typeof input.prNumber === 'number') {
+    const layer = layers.find((l) => l.prNumber === input.prNumber)
+    if (!layer) {
+      return { anchor: null, reason: `스택에 없는 PR: #${input.prNumber}` }
+    }
+    return resolveAnchor(layer.diff, input, layer.prNumber)
+  }
+
+  if (!input.file) return { anchor: null, reason: null }
+
+  // 번호를 안 줬다 — 경로로 좁힌다.
+  const candidates = layers.filter((l) => findFile(l.diff, input.file!) !== null)
+  if (candidates.length === 0) {
+    return { anchor: null, reason: `어느 레이어의 diff 에도 없는 파일: ${input.file}` }
+  }
+  if (candidates.length === 1) {
+    return resolveAnchor(candidates[0].diff, input, candidates[0].prNumber)
+  }
+
+  // 여러 레이어가 같은 파일을 건드렸다 — 그 줄이 실제로 있는 레이어로만 좁힌다.
+  const resolved = candidates
+    .map((l) => ({ layer: l, result: resolveAnchor(l.diff, input, l.prNumber) }))
+    .filter((r) => r.result.anchor !== null)
+  if (resolved.length === 1) return resolved[0].result
+  const where = candidates.map((l) => `#${l.prNumber}`).join(', ')
+  return {
+    anchor: null,
+    reason:
+      resolved.length === 0
+        ? `${input.file}:${input.line} 이(가) ${where} 어디에도 없음`
+        : `${input.file}:${input.line} 이(가) ${where} 여러 곳에 있어 PR 을 특정할 수 없음`
   }
 }
 

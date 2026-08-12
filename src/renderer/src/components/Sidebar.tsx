@@ -17,6 +17,7 @@ import {
   AlertTriangle,
   RefreshCw,
   LayoutDashboard,
+  Layers,
   MoreVertical,
   Users,
   Search,
@@ -72,7 +73,7 @@ import type {
   ReviewStatus,
   Workspace
 } from '@shared/types'
-import { STATUS_LABEL } from '../lib/review'
+import { reviewTitle, STATUS_LABEL } from '../lib/review'
 import { OPEN_NEW_WORKSPACE_MENU_EVENT } from '../lib/newWorkspaceMenu'
 
 /** running 상태가 이 시간을 넘기면 사이드바에 "오래 실행 중" 힌트(멈춤일 수 있음)를 표시한다. */
@@ -1030,7 +1031,10 @@ function ReviewRow({
   // 워크스페이스 행과 같은 규칙 — 에이전트가 하나뿐이면 정보가 아니라 잡음이다.
   const showAgent = useAvailableBackends().length > 1
 
-  const { id, prNumber, prTitle } = session
+  const { id } = session
+  // 스택 리뷰는 맨 위 PR 로 이름을 삼는다(가장 늦게 병합돼 오래 남는다).
+  const { number: prNumber, title: prTitle } = reviewTitle(session)
+  const layerCount = session.layers.length
 
   return (
     <div
@@ -1066,6 +1070,17 @@ function ReviewRow({
             </span>
           )}
           <span className="shrink-0 tabular-nums">#{prNumber}</span>
+          {/* 스택 리뷰인 것은 목록에서 바로 보여야 한다 — 열어 보고 나서야 아는 것과
+              "이건 4개짜리 스택" 을 알고 여는 것은 다르다. */}
+          {layerCount > 1 && (
+            <span
+              className="shrink-0 flex items-center gap-0.5 text-[var(--accent-300)]"
+              title={`Stack of ${layerCount}: ${session.layers.map((l) => `#${l.prNumber}`).join(' → ')}`}
+            >
+              <Layers size={9} />
+              {layerCount}
+            </span>
+          )}
           {repoName && <span className="truncate">{repoName}</span>}
         </div>
       </div>
@@ -1144,8 +1159,8 @@ function ArchivedReviewRow({ session }: { session: ReviewSession }): React.JSX.E
 
   return (
     <div className="group/arcrev flex items-center gap-2 pl-6 pr-1.5 py-1 rounded-md hover:bg-[var(--surface)]">
-      <span className="flex-1 truncate text-xs text-neutral-500" title={session.prTitle}>
-        #{session.prNumber} {session.prTitle}
+      <span className="flex-1 truncate text-xs text-neutral-500" title={reviewTitle(session).title}>
+        #{reviewTitle(session).number} {reviewTitle(session).title}
       </span>
       <button
         onClick={() => void unarchiveReview(session.id)}

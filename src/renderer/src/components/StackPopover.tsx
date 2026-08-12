@@ -1,9 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Layers, GitBranch, ExternalLink, GitPullRequestCreate, Check } from 'lucide-react'
+import { Layers, GitBranch, ExternalLink, GitPullRequestCreate, Check, ScanEye } from 'lucide-react'
 import { useStore } from '../store'
 import { GithubMark } from './BrandIcons'
 import { useGithubDisconnected } from '../lib/github'
-import { isBranchStack, orderByStack, workspaceDisplayName, workspaceStack } from '@shared/types'
+import {
+  DEFAULT_AGENT_BACKEND,
+  isBranchStack,
+  orderByStack,
+  workspaceDisplayName,
+  workspaceStack,
+  workspaceStackMembers
+} from '@shared/types'
 import type { PrState, PrStatus, Workspace } from '@shared/types'
 
 /**
@@ -19,29 +26,6 @@ const PR_DOT: Record<PrState, { dotClass: string; label: string }> = {
   open: { dotClass: 'bg-[var(--accent-400)]', label: 'Open' },
   merged: { dotClass: 'bg-[var(--merged-400)]', label: 'Merged' },
   closed: { dotClass: 'bg-neutral-500', label: 'Closed' }
-}
-
-/**
- * 같은 stack(모델 A: 부모-자식 워크스페이스)에서 이 워크스페이스가 속한 연결 요소를 뿌리부터 모은다.
- */
-function stackMembers(all: Workspace[], id: string): Workspace[] {
-  const byId = new Map(all.map((w) => [w.id, w]))
-  let root = byId.get(id)
-  if (!root) return []
-  const guard = new Set<string>()
-  while (root.parentWorkspaceId && byId.has(root.parentWorkspaceId) && !guard.has(root.id)) {
-    guard.add(root.id)
-    root = byId.get(root.parentWorkspaceId)!
-  }
-  const out: Workspace[] = []
-  const collect = (wid: string): void => {
-    const w = byId.get(wid)
-    if (!w) return
-    out.push(w)
-    for (const c of all) if (c.parentWorkspaceId === wid) collect(c.id)
-  }
-  collect(root.id)
-  return out
 }
 
 /** 정규화된 스택 행(모델 A·B 공통 렌더용). */
@@ -78,6 +62,10 @@ export default function StackPopover({ workspace }: { workspace: Workspace }): R
   const setPrStatus = useStore((s) => s.setPrStatus)
   const pushToast = useStore((s) => s.pushToast)
   const requireGithub = useStore((s) => s.requireGithub)
+  const startReview = useStore((s) => s.startReview)
+  const defaultBackend = useStore(
+    (s) => s.app?.settings.defaultAgentBackend ?? DEFAULT_AGENT_BACKEND
+  )
   const githubDisconnected = useGithubDisconnected()
 
   const branchMode = isBranchStack(workspace)
@@ -88,7 +76,7 @@ export default function StackPopover({ workspace }: { workspace: Workspace }): R
   const members = useMemo(() => {
     if (branchMode) return []
     const active = workspaces.filter((w) => w.repoId === workspace.repoId && !w.archived)
-    return stackMembers(active, workspace.id)
+    return workspaceStackMembers(active, workspace.id)
   }, [branchMode, workspaces, workspace.repoId, workspace.id])
 
   // 모델 B: 현재 체크아웃되지 않은 스택 브랜치의 PR 상태는 브랜치별로 따로 조회해 로컬 캐시한다.
@@ -228,11 +216,32 @@ export default function StackPopover({ workspace }: { workspace: Workspace }): R
   ])
 
   const count = branchMode ? entries.length : members.length
+
+  /**
+   * 리뷰가 볼 PR 들. **행 순서 그대로**(아래→위) 뽑는다 — 이 팝오버가 이미 두 스택 모델을
+   * 같은 순서로 정규화해 두었으므로, 화면이 보여 준 스택과 리뷰가 보는 스택이 어긋나지 않는다.
+   * 병합·닫힘은 리뷰할 것이 없으므로 뺀다.
+   */
+  const stackPrNumbers = rows
+    .filter((r) => r.pr && r.pr.state !== 'merged' && r.pr.state !== 'closed')
+    .map((r) => r.pr!.number)
+  const missingPrCount = count - stackPrNumbers.length
+
+  const reviewStack = async (): Promise<void> => {
+    if (stackPrNumbers.length < 2) return
+    await requireGithub('Reviewing a stack needs GitHub.', async () => {
+      await startReview({
+        repoId: workspace.repoId,
+        prNumbers: stackPrNumbers,
+        prompt: 'Review this stack.',
+        agentBackend: defaultBackend
+      })
+    })
+  }
+
   if (count < 2) return <></>
 
-  const openPrCount = rows.filter(
-    (r) => r.pr && r.pr.state !== 'merged' && r.pr.state !== 'closed'
-  ).length
+  const openPrCount = stackPrNumbers.length
 
   // GitHub 이 서버에 스택 객체를 들고 있으면 그 번호를 밝힌다. 이 스택의 순서가 Wooi 의 추측이
   // 아니라 GitHub 이 알려 준 것이라는 뜻이라, 사용자가 github.com 에서 같은 스택을 찾을 수 있다.
@@ -276,6 +285,33 @@ export default function StackPopover({ workspace }: { workspace: Workspace }): R
               </span>
             )}
           </div>
+
+          {/* 스택 전체를 한 번에 리뷰한다. 여기 두는 이유는 이 팝오버가 이미 **두 스택 모델을
+              같은 목록으로 정규화**해 두었기 때문이다 — 리뷰가 볼 PR 은 그 목록에서 그대로 나온다. */}
+          <button
+            onClick={() => {
+              setOpen(false)
+              void reviewStack()
+            }}
+            disabled={stackPrNumbers.length < 2}
+            title={
+              stackPrNumbers.length < 2
+                ? 'At least two layers of this stack need a pull request to review it as a stack.'
+                : `Review #${stackPrNumbers.join(', #')} as one stack — is the split correct?`
+            }
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-neutral-200 hover:bg-[var(--surface-2)] disabled:cursor-not-allowed disabled:text-neutral-600"
+          >
+            <ScanEye size={13} className="shrink-0 text-[var(--info-400)]" />
+            <span className="min-w-0 flex-1">
+              Review the whole stack
+              {missingPrCount > 0 && (
+                <span className="ml-1 text-neutral-500">
+                  ({stackPrNumbers.length} of {count} have a PR)
+                </span>
+              )}
+            </span>
+          </button>
+          <div className="my-1 border-t border-[var(--border)]" />
           <div className="max-h-96 overflow-y-auto">
             {rows.map((r) => {
               const dot = r.pr ? PR_DOT[r.pr.state] : null

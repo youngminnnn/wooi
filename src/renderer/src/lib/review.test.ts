@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import type { PostedComment, ReviewActivityItem, ReviewFinding, ReviewSession } from '@shared/types'
 import {
+  buildSubmitPlan,
   emptyView,
   isPosted,
   matchesPrQuery,
@@ -31,13 +32,24 @@ function session(postedComments: PostedComment[] = []): ReviewSession {
     agentBackend: 'claude',
     model: null,
     effort: null,
-    prNumber: 7,
-    prUrl: 'https://github.com/o/r/pull/7',
-    prTitle: 'Add thing',
-    prAuthor: 'someone',
-    viewerIsAuthor: false,
-    headSha: 'abc1234',
-    baseRefName: 'main',
+    layers: [
+      {
+        prNumber: 7,
+        prUrl: 'https://github.com/o/r/pull/7',
+        prTitle: 'Add thing',
+        prAuthor: 'someone',
+        viewerIsAuthor: false,
+        headSha: 'abc1234',
+        headRefName: 'feat/thing',
+        baseRefName: 'main',
+        merged: false,
+        lastSeenAt: null,
+        lastSeenHeadSha: 'abc1234',
+        summary: '',
+        lastSubmission: null
+      }
+    ],
+    truncatedFiles: 0,
     prompt: 'review',
     status: 'done',
     summary: '',
@@ -46,10 +58,7 @@ function session(postedComments: PostedComment[] = []): ReviewSession {
     updatedAt: 0,
     agentSessionId: null,
     postedComments,
-    lastSeenAt: null,
-    lastSeenHeadSha: 'abc1234',
-    unread: false,
-    lastSubmission: null
+    unread: false
   }
 }
 
@@ -262,21 +271,23 @@ describe('orderedAnchoredFindings', () => {
 
   /** 건너뛰는 순서가 눈이 훑는 순서와 달라지면, 어디까지 봤는지 알 수 없다. */
   it('파일 순 → 줄 순으로 세운다', () => {
-    const out = orderedAnchoredFindings(diff, [
-      at('b20', 'b.ts', 20),
-      at('a30', 'a.ts', 30),
-      at('a10', 'a.ts', 10)
-    ])
+    const out = orderedAnchoredFindings(
+      [{ prNumber: 7, diff }],
+      [at('b20', 'b.ts', 20), at('a30', 'a.ts', 30), at('a10', 'a.ts', 10)]
+    )
     expect(out.map((f) => f.id)).toEqual(['a10', 'a30', 'b20'])
   })
 
   it('전반 지적과 diff 에 없는 파일은 뺀다', () => {
-    const out = orderedAnchoredFindings(diff, [finding('general'), at('ghost', 'c.ts', 1)])
+    const out = orderedAnchoredFindings(
+      [{ prNumber: 7, diff }],
+      [finding('general'), at('ghost', 'c.ts', 1)]
+    )
     expect(out).toEqual([])
   })
 
   it('diff 를 아직 못 읽었으면 갈 곳이 없다', () => {
-    expect(orderedAnchoredFindings(null, [at('a10', 'a.ts', 10)])).toEqual([])
+    expect(orderedAnchoredFindings([], [at('a10', 'a.ts', 10)])).toEqual([])
   })
 })
 
@@ -301,5 +312,63 @@ describe('stepFinding', () => {
 
   it('갈 곳이 없으면 null', () => {
     expect(stepFinding([], null, 1)).toBeNull()
+  })
+})
+
+describe('buildSubmitPlan', () => {
+  function stackSession(over: Partial<ReviewSession> = {}): ReviewSession {
+    const base = session()
+    return {
+      ...base,
+      summary: 'The split is right, but layer 2 is doing two things.',
+      layers: [
+        { ...base.layers[0], prNumber: 12, prTitle: 'Types', summary: 'Types look right.' },
+        {
+          ...base.layers[0],
+          prNumber: 13,
+          prTitle: 'Engine',
+          summary: 'Two changes in one layer.'
+        },
+        { ...base.layers[0], prNumber: 14, prTitle: 'UI', summary: 'Fine.' }
+      ],
+      ...over
+    }
+  }
+
+  /** 같은 문단을 다섯 PR 에 올리는 것은 소음이다 — 전체 평가는 한 곳에만 실린다. */
+  it('스택 총평은 맨 위 레이어에만 싣고 나머지는 그곳을 가리킨다', () => {
+    const rows = buildSubmitPlan(stackSession(), 'comment')
+    expect(rows.map((r) => r.layer.prNumber)).toEqual([12, 13, 14])
+    expect(rows[2].body).toContain('The split is right')
+    expect(rows[0].body).toContain('see #14')
+    expect(rows[0].body).not.toContain('The split is right')
+  })
+
+  it('레이어마다 자기 총평이 본문에 들어간다', () => {
+    const rows = buildSubmitPlan(stackSession(), 'approve')
+    expect(rows[1].body).toContain('Two changes in one layer.')
+  })
+
+  /** 스택은 여럿이 함께 쌓기도 한다 — 자기 PR 차단은 레이어마다 따로 걸려야 한다. */
+  it('내가 쓴 레이어만 comment 로 떨어진다', () => {
+    const s = stackSession()
+    s.layers[1] = { ...s.layers[1], viewerIsAuthor: true }
+    const rows = buildSubmitPlan(s, 'approve')
+    expect(rows.map((r) => r.verdict)).toEqual(['approve', 'comment', 'approve'])
+    expect(rows[1].blocked).toBe(true)
+  })
+
+  it('병합된 레이어는 계획에서 빠진다', () => {
+    const s = stackSession()
+    s.layers[0] = { ...s.layers[0], merged: true }
+    expect(buildSubmitPlan(s, 'comment').map((r) => r.layer.prNumber)).toEqual([13, 14])
+  })
+
+  /** 단일 PR 리뷰는 "레이어가 하나인 스택" 이므로 같은 함수를 타고, 안내 문구는 붙지 않는다. */
+  it('레이어가 하나면 총평만 그대로 실린다', () => {
+    const s = session()
+    const rows = buildSubmitPlan({ ...s, summary: 'Looks good.' }, 'approve')
+    expect(rows).toHaveLength(1)
+    expect(rows[0].body).toBe('Looks good.')
   })
 })

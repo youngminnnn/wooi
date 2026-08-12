@@ -8,8 +8,7 @@ import { claudeEffort } from '../claude/protocol'
 import { log } from '../logger'
 import { wooiMcpSettings } from '../mcpSettings'
 import { coerceArtifact, describeArg, extractFencedJson, truncate } from './artifact'
-import { REVIEW_OUTPUT_SCHEMA } from './prompt'
-import type { ReviewRunDeps, ReviewRunResult } from './run'
+import { schemaFor, type BackendReviewResult, type ReviewRunDeps } from './run'
 
 const claudeExecutable = resolveClaudeExecutable()
 
@@ -32,7 +31,7 @@ const MAX_TURNS = 80
 export async function runClaudeReview(
   deps: ReviewRunDeps,
   prompt: string
-): Promise<ReviewRunResult> {
+): Promise<BackendReviewResult> {
   // 리뷰는 메인 프로세스에서 돈다 — 호스트와 달리 store 를 직접 읽어도 된다.
   const mcpServers = resolveUserMcpServers(deps.repoPath, wooiMcpSettings())
   // 'ultracode' 는 effort 레벨이 아니라 별도 모드다 — 리뷰에는 그 별도 경로가 없으므로 effort
@@ -48,7 +47,7 @@ export async function runClaudeReview(
       // 리뷰해줘" 같은 프롬프트를 쓸 수 있어야 하므로 필수다.
       settingSources: MCP_SETTING_SOURCES,
       // 결과 형식을 CLI 가 강제하고 위반 시 스스로 재시도한다.
-      outputFormat: { type: 'json_schema', schema: REVIEW_OUTPUT_SCHEMA },
+      outputFormat: { type: 'json_schema', schema: schemaFor(deps) },
       disallowedTools: [...WRITE_TOOLS],
       canUseTool: reviewPermission,
       abortController: deps.abort,

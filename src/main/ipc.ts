@@ -57,6 +57,7 @@ import {
   fetchOwnerAvatarDataUrl
 } from './github'
 import { ReviewManager } from './review/manager'
+import { resolveStackForPr } from './review/stackResolve'
 import type { ReviewVerdict, TranscriptSearchResult } from '@shared/types'
 import {
   cascadeRetarget,
@@ -1993,13 +1994,26 @@ export function registerIpc(ctx: IpcContext): void {
     return listOpenPrsForReview(repo.path).catch(() => [])
   })
 
+  // 스택 멤버십은 review/stackResolve 만 읽는다 — 여기서는 그 결과를 넘겨주기만 한다.
+  ipcMain.handle(IPC.reviewResolveStack, async (_e, repoId: string, prNumber: number) => {
+    const repo = repoFor(repoId)
+    if (!repo) return { prNumbers: [prNumber] }
+    // GitHub 스택을 먼저 묻는다 — 워크스페이스 흡수 경로와 같은 우선순위다. 스택이 없는
+    // 리포·PR 은 오류가 아니라 빈 값을 돌려주므로, 빈 값이 그대로 폴백 신호가 된다.
+    const [openPrs, ghStack] = await Promise.all([
+      listOpenPrs(repo.path, repo.id).catch(() => []),
+      getStackForPr(repo.path, prNumber).catch(() => null)
+    ])
+    return { prNumbers: resolveStackForPr(prNumber, openPrs, ghStack).prNumbers }
+  })
+
   ipcMain.handle(
     IPC.reviewStart,
     async (
       _e,
       args: {
         repoId: string
-        prNumber: number
+        prNumbers: number[]
         prompt: string
         agentBackend?: AgentBackendId
         model?: string | null
@@ -2015,7 +2029,7 @@ export function registerIpc(ctx: IpcContext): void {
       const defaults = agentSettingsFor(settings, agentBackend)
       return reviewManager.start({
         repo,
-        prNumber: args.prNumber,
+        prNumbers: args.prNumbers,
         prompt: args.prompt,
         agentBackend,
         // 워크스페이스처럼 개별 오버라이드가 없으므로 전역 설정을 따른다.
@@ -2043,8 +2057,10 @@ export function registerIpc(ctx: IpcContext): void {
 
   ipcMain.handle(IPC.reviewLoad, (_e, reviewId: string) => reviewManager.loadBundle(reviewId))
 
-  ipcMain.handle(IPC.reviewSetFileViewed, (_e, reviewId: string, path: string, viewed: boolean) =>
-    reviewManager.setFileViewed(reviewId, path, viewed)
+  ipcMain.handle(
+    IPC.reviewSetFileViewed,
+    (_e, reviewId: string, path: string, viewed: boolean, prNumber?: number) =>
+      reviewManager.setFileViewed(reviewId, path, viewed, prNumber)
   )
 
   ipcMain.handle(IPC.reviewArchive, async (_e, reviewId: string) => {
@@ -2057,8 +2073,11 @@ export function registerIpc(ctx: IpcContext): void {
 
   ipcMain.handle(
     IPC.reviewSubmit,
-    async (_e, reviewId: string, verdict: ReviewVerdict, body: string) =>
-      reviewManager.submitReview(reviewId, verdict, body)
+    async (
+      _e,
+      reviewId: string,
+      entries: Array<{ prNumber: number; verdict: ReviewVerdict; body: string }>
+    ) => reviewManager.submitReview(reviewId, entries)
   )
 
   ipcMain.handle(IPC.reviewPoll, async (_e, reviewId: string) => {

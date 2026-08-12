@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Check, Loader2, Search } from 'lucide-react'
+import { Check, Layers, Loader2, Search } from 'lucide-react'
 import type { AgentBackendId, EffortSetting, ReviewPrCandidate } from '@shared/types'
 import { DEFAULT_AGENT_BACKEND } from '@shared/types'
 import Modal, { ghostBtn, inputClass, labelClass, primaryBtn } from '../Modal'
@@ -116,9 +116,38 @@ export default function PrReviewStartModal({
   const prNumber = picked?.number ?? null
   const canStart = !!repoId && prNumber !== null && !busy
 
+  /**
+   * 고른 PR 이 속한 스택. 리뷰의 기본값을 정하므로 고르는 즉시 물어본다.
+   * `null` 은 아직 조회 중, 원소 1개는 스택이 아니라는 뜻이다.
+   */
+  const [stack, setStack] = useState<{ prNumber: number; prNumbers: number[] } | null>(null)
+  /**
+   * 스택 전체를 볼지. **기본값은 켬**이다 — 스택의 한 층만 따로 보는 것이 지금 잘못돼 있는
+   * 바로 그 지점이고, 5개짜리 스택의 가운데 PR 주소를 붙여 넣은 사람이 나머지 4개를 일부러
+   * 무시하기로 정했을 리는 없다. 무엇을 보게 되는지 아래에 그대로 적어 두고, 끄는 것은 한 번이다.
+   */
+  const [wholeStack, setWholeStack] = useState(true)
+
+  // 결과에 어느 PR 의 것인지 함께 담아 두므로, PR 을 바꿀 때 여기서 비울 필요가 없다 —
+  // 아래 `resolved` 가 지금 고른 PR 의 결과일 때만 유효로 본다(리포 목록과 같은 방식).
+  useEffect(() => {
+    if (prNumber === null || !repoId) return
+    let alive = true
+    void window.api.review.resolveStack(repoId, prNumber).then((res) => {
+      if (alive) setStack({ prNumber, prNumbers: res.prNumbers })
+    })
+    return () => {
+      alive = false
+    }
+  }, [repoId, prNumber])
+
+  const resolved = stack?.prNumber === prNumber ? stack.prNumbers : null
+  const isStack = (resolved?.length ?? 0) > 1
+
   const choose = (number: number, pr?: ReviewPrCandidate): void => {
     setPicked({ number, pr })
     setQuery('')
+    setWholeStack(true)
   }
 
   /**
@@ -152,7 +181,7 @@ export default function PrReviewStartModal({
     }
     await startReview({
       repoId,
-      prNumber,
+      prNumbers: isStack && wholeStack ? resolved! : [prNumber],
       prompt: message,
       agentBackend: effectiveBackend,
       // 빈 값 = Default → 키를 넘기지 않아 전역 기본값으로 해석된다.
@@ -292,6 +321,33 @@ export default function PrReviewStartModal({
             </>
           )}
         </div>
+
+        {/* 스택이면 여기서 정한다. 무엇을 리뷰하게 되는지 목록으로 보여 주고, 한 번에 끌 수 있다. */}
+        {isStack && (
+          <div className="rounded-lg border border-[var(--accent-400)]/30 bg-[var(--accent-400)]/5 px-3 py-2.5">
+            <label className="flex cursor-pointer items-start gap-2.5">
+              <input
+                type="checkbox"
+                className="mt-0.5 accent-[var(--accent-400)]"
+                checked={wholeStack}
+                onChange={(e) => setWholeStack(e.target.checked)}
+              />
+              <span className="min-w-0">
+                <span className="flex items-center gap-1.5 text-sm text-neutral-100">
+                  <Layers size={13} className="text-[var(--accent-400)]" />
+                  Review the whole stack ({resolved!.length} pull requests)
+                </span>
+                <span className="mt-0.5 block text-xs text-neutral-400">
+                  {resolved!.map((n) => `#${n}`).join(' → ')}
+                </span>
+                <span className="mt-1 block text-xs text-neutral-500">
+                  One review over every layer at once — is the split correct, is the order right,
+                  does a layer depend on the one above it? Uncheck to review #{prNumber} alone.
+                </span>
+              </span>
+            </label>
+          </div>
+        )}
 
         {available.length > 1 && (
           <div>
