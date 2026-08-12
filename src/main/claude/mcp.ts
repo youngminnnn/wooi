@@ -3,9 +3,16 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { McpServerConfig, SettingSource } from '@anthropic-ai/claude-agent-sdk'
 import { isValidMcpServerName } from '@shared/types'
-import type { InheritedMcpServer, McpInventory, WooiMcpServer } from '@shared/types'
-import { wooiMcpSettings } from '../mcpSettings'
+import type { InheritedMcpServer, McpInventory, McpSettings, WooiMcpServer } from '@shared/types'
 import { log } from '../logger'
+
+/**
+ * **이 모듈은 agent-host(유틸리티 프로세스)에서도 로드된다** — session.ts·control.ts 가 쓴다.
+ * 그러니 electron `app` 이나 store 에 매인 것을 import 하면 안 된다(logger.ts 의 같은 주석 참고).
+ * 한때 `wooiMcpSettings()` 를 직접 불렀다가 store → `import { app } from 'electron'` 이 딸려
+ * 들어와 호스트가 로그 한 줄 없이 죽었다(#280). Wooi 스코프 설정은 메인이 읽어 인자로 넘긴다.
+ * scripts/check-host-imports.mjs 가 이 규칙을 지킨다.
+ */
 
 /**
  * SDK 가 파일시스템 설정(settings.json · CLAUDE.md · 프로젝트 .mcp.json)을 `claude` CLI 와
@@ -70,10 +77,15 @@ function toSdkConfig(server: WooiMcpServer): McpServerConfig {
  *     때문에 조용히 다른 서버로 바뀌는 편보다, 앱 쪽이 물러서고 UI 에서 "가려짐" 을 알리는 편이
  *     예측 가능하다. 다만 그 승계 항목을 설정에서 꺼 두면(disabledInherited) 이름이 비므로,
  *     같은 이름의 Wooi 서버가 그 자리를 대신한다 — 그게 "덮어쓰기" 의 명시적 경로다.
+ *
+ * mcp 인자는 Wooi 스코프 설정이다. 호스트에는 store 가 없으므로 메인이 읽어 넘긴다
+ * (`wooiMcpSettings()` 또는 SessionConfig.mcpSettings).
  */
-export function resolveUserMcpServers(repoPath: string | null): Record<string, McpServerConfig> {
+export function resolveUserMcpServers(
+  repoPath: string | null,
+  mcp: McpSettings
+): Record<string, McpServerConfig> {
   const raw = readClaudeJson()
-  const mcp = wooiMcpSettings()
   const disabled = new Set(mcp.disabledInherited)
 
   const inherited = {

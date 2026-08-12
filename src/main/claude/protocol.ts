@@ -8,6 +8,7 @@ import type {
   EffortSetting,
   ImageAttachment,
   McpAction,
+  McpSettings,
   PermissionDecision,
   PermissionMode,
   PermissionRequest
@@ -81,6 +82,14 @@ export interface SessionConfig {
   /** fast mode(`/fast`) 사용 여부. true 면 settings 레이어로 fastMode 를 켜서 query 를 연다. */
   fastMode: boolean
   permissionMode: ClaudePermissionMode
+  /**
+   * 설정 화면에서 관리하는 Wooi 스코프 MCP 서버 목록과 "승계 항목 끄기" 선택.
+   *
+   * 호스트가 직접 읽지 않고 메인이 실어 보낸다 — 이 값의 출처는 store 이고, store 는 electron
+   * `app` 에 매여 있어 유틸리티 프로세스에서 import 하는 순간 로드 시점에 죽는다(#280).
+   * 호스트는 이걸 ~/.claude.json 승계 목록과 합쳐 쓴다([[claude/mcp]] resolveUserMcpServers).
+   */
+  mcpSettings: McpSettings
   autoCompact: boolean
   autoResumeAfterRateLimit?: boolean
   resumeSessionId: string | null
@@ -169,7 +178,7 @@ export type HostCommand =
   | {
       type: 'refreshUsage'
       reqId: string
-      fallback: { cwd: string; repoPath: string | null } | null
+      fallback: { cwd: string; repoPath: string | null; mcpSettings: McpSettings } | null
     }
   | { type: 'listCommands'; reqId: string; cwd: string }
   | {

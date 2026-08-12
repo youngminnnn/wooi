@@ -7,10 +7,12 @@ import { log } from './logger'
  * Wooi 스코프 MCP 설정을 읽는다. **메인 프로세스 전용** — store 를 거치므로 electron `app` 에
  * 매여 있다.
  *
- * codex-host 는 유틸리티 프로세스라 이 파일을 import 하면 안 된다. `import { app } from
- * 'electron'` 은 거기서 **로드 시점에 throw** 하고(logger.ts 의 같은 주석 참고), 호스트는 로그
- * 한 줄 없이 exit 1 로 죽는다 — 겉으로는 "Codex host crashed" 로만 보여 원인을 찾기 어렵다.
- * 그래서 codex 쪽에는 결과 테이블을 env 로 내려 준다(codexMcpServerEnv).
+ * agent-host·codex-host 는 유틸리티 프로세스라 이 파일을 import 하면 안 된다. `import { app }
+ * from 'electron'` 은 거기서 **로드 시점에 throw** 하고(logger.ts 의 같은 주석 참고), 호스트는
+ * 로그 한 줄 없이 exit 1 로 죽는다 — 겉으로는 "Agent host crashed" 로만 보여 원인을 찾기 어렵다.
+ * 실제로 그 회귀가 한 번 릴리즈에 실렸다(#262 → #280). 그래서 결과만 내려 준다: codex 쪽은
+ * env 로(codexMcpServerEnv), agent-host 쪽은 SessionConfig.mcpSettings 로. 규칙을 지키는 것은
+ * scripts/check-host-imports.mjs 다.
  *
  * 어느 쪽도 "설정을 못 읽었다" 는 이유로 세션 생성을 멈추면 안 되므로, 실패는 빈 목록으로
  * 떨어뜨리고 경고만 남긴다(스토어가 아직 없는 유닛 테스트 경로 포함).

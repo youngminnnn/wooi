@@ -66,6 +66,7 @@ function ensure(workspaceId: string, config: SessionConfig): ClaudeSession {
   const session = new ClaudeSession({
     cwd: config.cwd,
     repoPath: config.repoPath,
+    mcpSettings: config.mcpSettings,
     model: config.model,
     effort: config.effort,
     fastMode: config.fastMode,
@@ -193,7 +194,12 @@ async function handle(msg: HostCommand): Promise<void> {
         const live = sessions.get(msg.workspaceId)?.liveQuery
         const result = live
           ? await runCommandOn(msg.kind, live)
-          : await runCommandShortLived(msg.kind, msg.config.cwd, msg.config.repoPath)
+          : await runCommandShortLived(
+              msg.kind,
+              msg.config.cwd,
+              msg.config.repoPath,
+              msg.config.mcpSettings
+            )
         invalidateAfterReload(msg.kind, msg.config.cwd)
         return result
       })
@@ -232,7 +238,12 @@ async function handle(msg: HostCommand): Promise<void> {
         }
         // 라이브 세션이 없다. 사용자가 명시적으로 갱신을 눌렀을 때만(fallback 제공) 단명 쿼리를 띄운다.
         if (!msg.fallback) return null
-        const result = await runCommandShortLived('usage', msg.fallback.cwd, msg.fallback.repoPath)
+        const result = await runCommandShortLived(
+          'usage',
+          msg.fallback.cwd,
+          msg.fallback.repoPath,
+          msg.fallback.mcpSettings
+        )
         return result.kind === 'usage' ? result.usage : null
       })
       break

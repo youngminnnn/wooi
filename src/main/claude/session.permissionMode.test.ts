@@ -90,6 +90,7 @@ async function start(approvePlanWith?: string): Promise<Harness> {
   const session = new ClaudeSession({
     cwd: process.cwd(),
     repoPath: null,
+    mcpSettings: { servers: [], disabledInherited: [] },
     model: null,
     effort: null,
     fastMode: false,

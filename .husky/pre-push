@@ -4,6 +4,10 @@
 # (main 등 보호 브랜치와 dependabot/ 은 스크립트에서 예외 처리)
 node scripts/check-branch-name.mjs --pre-push || exit 1
 
+# 유틸리티 프로세스(agent-host·codex-host·toolShim)가 electron 에 닿으면 로드 시점에 죽는다.
+# 타입체크로는 절대 안 잡히고 앱을 띄워야만 드러나는데, 검사는 1초도 안 걸린다.
+node scripts/check-host-imports.mjs || exit 1
+
 # 파일 단위로 스코프하기 어려운 typecheck 를 push 직전에 한 번만 돌린다.
 # CI 의 typecheck 게이트를 사전 차단한다. (무거운 build, 느린 test 는 CI 에 위임)
 npm run typecheck
