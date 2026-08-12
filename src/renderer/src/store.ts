@@ -818,7 +818,11 @@ export const useStore = create<UIState>((set, get) => ({
       archivingWorkspaces: { ...s.archivingWorkspaces, [workspaceId]: true }
     }))
     try {
-      return await window.api.workspace.archive(workspaceId)
+      const result = await window.api.workspace.archive(workspaceId)
+      // archive script 가 도는 동안 사용자가 다른 워크스페이스로 이동할 수 있다. 완료 시점에도
+      // 아카이브한 워크스페이스를 보고 있을 때만 Overview 로 나가야 새 선택을 덮어쓰지 않는다.
+      if (get().selectedWorkspaceId === workspaceId) void get().selectWorkspace(null)
+      return result
     } finally {
       set((s) => {
         const next = { ...s.archivingWorkspaces }
@@ -876,7 +880,6 @@ export const useStore = create<UIState>((set, get) => ({
       return
     }
     set({ undoableArchive: { workspaceIds: archived, at: Date.now() } })
-    if (archived.includes(get().selectedWorkspaceId ?? '')) void get().selectWorkspace(null)
     get().pushToast(
       failed ? 'error' : 'success',
       `Archived ${plural(archived.length, 'merged workspace')}${
