@@ -27,12 +27,22 @@ import type {
   Workspace
 } from '@shared/types'
 import type { NotificationChannel, NotificationEvent } from '@shared/types'
-import { AGENT_BACKEND_IDS, cascadeProblems, workspaceDisplayName } from '@shared/types'
+import {
+  AGENT_BACKEND_IDS,
+  DEFAULT_AGENT_BACKEND,
+  cascadeProblems,
+  workspaceDisplayName
+} from '@shared/types'
 import { fileDiffHash, isFileViewed } from '@shared/reviewViewed'
 import { playNotification } from './lib/sound'
 import { carrySuggestShownFlag, readUiFlag, setUiFlag } from './lib/uiFlags'
 import { openRepoSettings } from './lib/repoSettings'
 import { bodyOf, emptyView, isPosted, type ReviewTab, type ReviewViewState } from './lib/review'
+import {
+  composeDiffCommentsMessage,
+  type DiffComment,
+  type DiffCommentAnchor
+} from './lib/diffComments'
 import { popWorkspaceHistory, pushWorkspaceHistory } from './lib/workspaceHistory'
 import { undoCreateVerdict, type UndoableCreate } from './lib/undoCreate'
 
@@ -76,6 +86,9 @@ function notifyEnabled(
   if (w?.muted) return false
   return !!s.app?.settings.notifications?.[event]?.[channel]
 }
+
+/** diff 라인 코멘트의 id 카운터. 창 수명 안에서만 유일하면 되므로 단조 증가로 충분하다. */
+let diffCommentSeq = 0
 
 /** 실행 중 대기 큐에 보관되는 후속 메시지(텍스트 + 선택적 이미지 첨부). */
 export interface QueuedMessage {
@@ -271,6 +284,13 @@ interface UIState {
    * 전송 전이므로 사용자가 취소/수정할 수 있다.
    */
   messageQueue: Record<string, QueuedMessage[]>
+  /**
+   * Changes 탭 diff 에 달아 둔, 아직 보내지 않은 라인 코멘트(workspace 별, 작성 순서).
+   *
+   * 초안과 같은 성격이라 workspace 를 오가도 살아남지만 디스크에는 남기지 않는다 — 보내는 순간
+   * 대화 기록이 진짜 저장소가 되고, 안 보낸 코멘트를 다음 실행까지 끌고 다닐 이유는 없다.
+   */
+  diffComments: Record<string, DiffComment[]>
   /** workspace 별 대화 스크롤 위치(복원용). */
   scrollPositions: Record<string, number>
   /** workspace 별 스크립트 패널 열림 상태. */
@@ -435,6 +455,14 @@ interface UIState {
   /** 대기 큐에서 index 번째 메시지를 취소(제거)한다. */
   removeQueued: (workspaceId: string, index: number) => void
   setDraft: (workspaceId: string, text: string) => void
+  /** diff 라인 코멘트를 하나 추가한다. 만들어진 id 를 돌려준다(방금 만든 카드를 지목하는 용도). */
+  addDiffComment: (workspaceId: string, anchor: DiffCommentAnchor, body: string) => string
+  /** 코멘트 본문을 고친다. 빈 본문은 무시한다(지우려면 removeDiffComment). */
+  editDiffComment: (workspaceId: string, id: string, body: string) => void
+  removeDiffComment: (workspaceId: string, id: string) => void
+  clearDiffComments: (workspaceId: string) => void
+  /** 모아 둔 코멘트를 한 통의 메시지로 에이전트에게 보내고 비운다. 보낼 게 없으면 아무것도 안 한다. */
+  sendDiffComments: (workspaceId: string) => void
   /** /clear — 해당 workspace 의 대화 기록·컨텍스트 사용량을 화면에서 비운다(맥락 초기화). */
   resetTranscript: (workspaceId: string) => void
   setScrollPosition: (workspaceId: string, top: number) => void
@@ -625,6 +653,7 @@ export const useStore = create<UIState>((set, get) => ({
   agentsCollapsed: {},
   drafts: {},
   messageQueue: {},
+  diffComments: {},
   scrollPositions: {},
   scriptPanelOpen: {},
   rightWidth: 460,
@@ -738,14 +767,19 @@ export const useStore = create<UIState>((set, get) => ({
         const stale = Object.keys(s.unread).filter((id) => s.unread[id] && !live.has(id))
         const staleRunning = Object.keys(s.runningSince).filter((id) => !live.has(id))
         const staleQueue = Object.keys(s.messageQueue).filter((id) => !live.has(id))
-        if (!stale.length && !staleRunning.length && !staleQueue.length) return { app: next }
+        const staleComments = Object.keys(s.diffComments).filter((id) => !live.has(id))
+        if (!stale.length && !staleRunning.length && !staleQueue.length && !staleComments.length) {
+          return { app: next }
+        }
         const unread = { ...s.unread }
         for (const id of stale) delete unread[id]
         const runningSince = { ...s.runningSince }
         for (const id of staleRunning) delete runningSince[id]
         const messageQueue = { ...s.messageQueue }
         for (const id of staleQueue) delete messageQueue[id]
-        return { app: next, unread, runningSince, messageQueue }
+        const diffComments = { ...s.diffComments }
+        for (const id of staleComments) delete diffComments[id]
+        return { app: next, unread, runningSince, messageQueue, diffComments }
       })
     })
 
@@ -1671,6 +1705,70 @@ export const useStore = create<UIState>((set, get) => ({
     }),
 
   setDraft: (workspaceId, text) => set((s) => ({ drafts: { ...s.drafts, [workspaceId]: text } })),
+
+  addDiffComment: (workspaceId, anchor, body) => {
+    const id = `dc:${++diffCommentSeq}`
+    set((s) => ({
+      diffComments: {
+        ...s.diffComments,
+        [workspaceId]: [...(s.diffComments[workspaceId] ?? []), { ...anchor, id, body }]
+      }
+    }))
+    return id
+  },
+
+  editDiffComment: (workspaceId, id, body) =>
+    set((s) => {
+      const cur = s.diffComments[workspaceId]
+      if (!cur || !body.trim()) return {}
+      return {
+        diffComments: {
+          ...s.diffComments,
+          [workspaceId]: cur.map((c) => (c.id === id ? { ...c, body } : c))
+        }
+      }
+    }),
+
+  removeDiffComment: (workspaceId, id) =>
+    set((s) => {
+      const cur = s.diffComments[workspaceId]
+      if (!cur) return {}
+      const next = cur.filter((c) => c.id !== id)
+      const diffComments = { ...s.diffComments }
+      if (next.length) diffComments[workspaceId] = next
+      else delete diffComments[workspaceId]
+      return { diffComments }
+    }),
+
+  clearDiffComments: (workspaceId) =>
+    set((s) => {
+      if (!s.diffComments[workspaceId]) return {}
+      const diffComments = { ...s.diffComments }
+      delete diffComments[workspaceId]
+      return { diffComments }
+    }),
+
+  /**
+   * 전송 분기는 Composer 의 그것과 같아야 한다 — steering 을 못 하는 백엔드에 실행 중 메시지를
+   * 그냥 밀어 넣으면 현재 턴과 뒤엉키므로, 그럴 때는 대기 큐에 넣어 턴이 끝나면 나가게 한다.
+   */
+  sendDiffComments: (workspaceId) => {
+    const s = get()
+    const comments = s.diffComments[workspaceId]
+    if (!comments?.length) return
+    const ws = s.app?.workspaces.find((w) => w.id === workspaceId)
+    const backend = s.backends.find((b) => b.id === (ws?.agentBackend ?? DEFAULT_AGENT_BACKEND))
+    const text = composeDiffCommentsMessage(comments)
+
+    // 비우는 것이 먼저다. 전송 실패로 코멘트가 되살아나는 것보다, 보낸 뒤 남은 카드가 다시
+    // 보내지는 쪽이 사용자에게 더 나쁘다(같은 지시가 두 번 나간다).
+    get().clearDiffComments(workspaceId)
+    if (ws?.status === 'running' && !backend?.capabilities.steering) {
+      get().enqueueMessage(workspaceId, text)
+    } else {
+      void window.api.chat.send(workspaceId, text)
+    }
+  },
 
   resetTranscript: (workspaceId) =>
     set((s) => {
