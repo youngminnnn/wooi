@@ -248,6 +248,13 @@ export interface WooiApi {
      * webContentsId 는 `<webview>.getWebContentsId()` — main 이 그 게스트가 정말 Preview 인지 확인한다.
      */
     capture(workspaceId: string, webContentsId: number): Promise<PreviewCaptureResult>
+    /**
+     * 요소 픽커를 켜고 사용자가 고를 때까지 기다린다. 고르면 결과는 onComposerAttach 로 오고,
+     * 여기서는 끝났다는 것(또는 실패 사유)만 돌려준다. 취소·타임아웃도 error 로 온다.
+     */
+    pickElement(workspaceId: string, webContentsId: number): Promise<PreviewCaptureResult>
+    /** 진행 중인 픽을 취소한다. 켜져 있지 않으면 아무 일도 하지 않는다. */
+    cancelPick(webContentsId: number): Promise<void>
     onOpen(cb: (e: PreviewOpenEvent) => void): () => void
   }
 

@@ -93,6 +93,9 @@ const api: WooiApi = {
     open: (workspaceId, url) => ipcRenderer.invoke(IPC.previewOpen, workspaceId, url),
     capture: (workspaceId, webContentsId) =>
       ipcRenderer.invoke(IPC.previewCapture, workspaceId, webContentsId),
+    pickElement: (workspaceId, webContentsId) =>
+      ipcRenderer.invoke(IPC.previewPickElement, workspaceId, webContentsId),
+    cancelPick: (webContentsId) => ipcRenderer.invoke(IPC.previewCancelPick, webContentsId),
     onOpen: (cb) => subscribe(IPC.evtPreviewOpen, cb)
   },
 

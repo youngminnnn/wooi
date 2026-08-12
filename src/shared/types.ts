@@ -1581,11 +1581,19 @@ export interface PreviewOpenEvent {
   url: string
 }
 
-/** 컴포저에 붙일 이미지(evtComposerAttach 페이로드). */
-export interface ComposerAttachEvent {
-  workspaceId: string
-  image: ImageAttachment
+/**
+ * 컴포저에 넣을 것 한 건. 스크린샷은 이미지만, 요소 픽커는 이미지(크롭)와 텍스트를 함께 싣는다.
+ * 둘을 한 건으로 묶는 것이 요점이다 — 픽커의 그림과 설명은 짝이라, 따로 흘려보내면 컴포저에서
+ * 순서가 갈리거나 한쪽만 도착한다.
+ */
+export interface ComposerAttachment {
+  image?: ImageAttachment
+  /** 초안 끝에 붙일 텍스트 블록(요소 픽커의 구조화 정보). */
+  text?: string
 }
+
+/** 컴포저에 넣을 것이 도착했다(evtComposerAttach 페이로드). */
+export type ComposerAttachEvent = ComposerAttachment & { workspaceId: string }
 
 /** Preview 캡처 결과. 성공하면 이미지는 evtComposerAttach 로 따로 흘러가고 여기엔 아무것도 없다. */
 export interface PreviewCaptureResult {
@@ -2336,6 +2344,13 @@ export const IPC = {
   previewOpen: 'preview:open',
   /** Preview 화면을 캡처해 컴포저 첨부로 흘려보낸다. 인자는 webview 게스트의 webContents id. */
   previewCapture: 'preview:capture',
+  /**
+   * 요소 픽커를 켠다. 사용자가 미리보는 페이지에서 요소를 고를 때까지 기다렸다가,
+   * 선택자·outerHTML·적용된 CSS·크롭 이미지를 컴포저로 흘려보낸다.
+   */
+  previewPickElement: 'preview:pickElement',
+  /** 진행 중인 요소 픽을 취소한다(Esc·패널 언마운트). */
+  previewCancelPick: 'preview:cancelPick',
   // Dock 미확인 배지
   appSetBadge: 'app:setBadge',
   // 앱 버전 / 자동 업데이트
