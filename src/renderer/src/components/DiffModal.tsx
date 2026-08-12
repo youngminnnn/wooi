@@ -30,8 +30,8 @@ export default function DiffModal({
   }, [workspaceId])
 
   return (
-    <Modal title={`Changes vs ${baseBranch}`} onClose={onClose} width={860}>
-      <DiffView diff={diff} loading={loading} baseBranch={baseBranch} />
+    <Modal title={`Changes vs ${diff?.baseBranch ?? baseBranch}`} onClose={onClose} width={860}>
+      <DiffView diff={diff} loading={loading} baseBranch={diff?.baseBranch ?? baseBranch} />
     </Modal>
   )
 }

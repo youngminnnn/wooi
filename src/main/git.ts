@@ -681,9 +681,12 @@ const UNTRACKED_MAX_BYTES = 512 * 1024
  * 신규(untracked) 파일은 별도로 합쳐 "추가됨" 으로 표시한다.
  */
 export async function getDiff(worktreePath: string, baseBranch: string): Promise<WorkspaceDiff> {
+  // 워크트리에서는 로컬 base 브랜치를 체크아웃하지 않으므로 그 ref가 오래된 채로 남기 쉽다.
+  // fetch 된 origin ref를 우선 써서 Changes가 실제 원격 base와 같은 기준을 보게 한다.
+  const baseRef = await resolveBaseStartPoint(worktreePath, baseBranch)
   // base 가 분기 이후 전진했어도 base 의 새 커밋이 역방향 변경으로 보이지 않도록,
   // base..HEAD 의 공통 조상(merge-base)을 기준으로 working tree 와 비교한다(PR diff 와 동일 의미).
-  const from = await git(worktreePath, ['merge-base', baseBranch, 'HEAD']).catch(() => baseBranch)
+  const from = await git(worktreePath, ['merge-base', baseRef, 'HEAD']).catch(() => baseRef)
 
   let raw = ''
   try {
@@ -707,7 +710,7 @@ export async function getDiff(worktreePath: string, baseBranch: string): Promise
   }
 
   files.sort((a, b) => a.path.localeCompare(b.path))
-  return { baseBranch, files }
+  return { baseBranch: baseRef, files }
 }
 
 /** 커밋 목록과 변경 파일 목록. 어느 쪽이든 잘렸으면 omitted 에 남는다. */
