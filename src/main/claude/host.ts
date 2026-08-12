@@ -79,9 +79,11 @@ function ensure(workspaceId: string, config: SessionConfig): ClaudeSession {
     // 유일한 근거다(모델이 인자로 지목할 수 없다는 뜻이기도 하다).
     wooiMcp: createWooiMcpServer(
       (tool, args) => callMain(workspaceId, tool, args),
-      config.delegateBackends
+      config.delegateBackends,
+      config.canSwitchToAgentTeam
     ),
     delegateBackends: config.delegateBackends,
+    canSwitchToAgentTeam: config.canSwitchToAgentTeam,
     // 위임 시점의 config 가 아니라 세션 생성 시점의 값을 쓴다 — 위임 도구는 세션과 함께 살고,
     // 모델·effort 를 바꾸면 어차피 매니저가 세션을 다시 연다.
     agentDefaults: (backend) => config.agentDefaults[backend] ?? { model: null, effort: null },

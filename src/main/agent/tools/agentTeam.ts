@@ -1,7 +1,6 @@
-import { AGENT_BACKEND_LABELS, experimentsOf } from '@shared/types'
+import { AGENT_BACKEND_LABELS } from '@shared/types'
 import { getStore } from '../../store'
-import { backendMeta } from '../backend'
-import { delegateBackendsFor } from '../multiAgent'
+import { agentTeamEligibility, delegateBackendsFor } from '../multiAgent'
 import { delegateToolName } from './catalog'
 import type { AgentToolHandler } from './registry'
 import { callerWorkspace } from './target'
@@ -25,20 +24,18 @@ export const switchToAgentTeam: AgentToolHandler = async (deps, workspaceId) => 
   const ws = callerWorkspace(workspaceId)
   const settings = getStore().getState().settings
 
-  // 거절 조건은 delegateBackendsFor 와 **같은 것**을 본다([[agent/multiAgent]]). 여기서 조건을
+  // 거절 조건은 delegateBackendsFor 와 **같은 판단**을 쓴다([[agent/multiAgent]]). 여기서 조건을
   // 새로 발명하면 "켰다고 하는데 도구는 안 생기는" 상태를 만들 수 있다 — 모드를 켠 뒤 위임
-  // 도구가 없는 것만큼 모델이 고치기 어려운 실패는 없다.
-  if (!experimentsOf(settings).multiAgent) {
-    throw new Error(
-      'Agent teams are turned off in this copy of Wooi (Settings → Experiments), so switching ' +
-        'would not give you any teammates. Ask the user to turn the experiment on first.'
-    )
-  }
-  if (!backendMeta(ws.agentBackend).capabilities.delegate) {
+  // 도구가 없는 것만큼 모델이 고치기 어려운 실패는 없다. 문장만 여기서 고른다.
+  const eligible = agentTeamEligibility(ws, settings)
+  if (!eligible.ok) {
     const label = AGENT_BACKEND_LABELS[ws.agentBackend] ?? ws.agentBackend
     throw new Error(
-      `${label} cannot lead an agent team in Wooi — there is no way to attach the teammate tools ` +
-        'to its session, so the mode would change nothing.'
+      eligible.reason === 'experiment'
+        ? 'Agent teams are turned off in this copy of Wooi (Settings → Experiments), so ' +
+            'switching would not give you any teammates. Ask the user to turn the experiment on first.'
+        : `${label} cannot lead an agent team in Wooi — there is no way to attach the teammate ` +
+            'tools to its session, so the mode would change nothing.'
     )
   }
 

@@ -46,6 +46,39 @@ export const WOOI_MCP_INSTRUCTIONS = [
   'use it instead of asking the user to relay something to work happening elsewhere.'
 ].join(' ')
 
+/**
+ * Solo 워크스페이스에만 붙는 한 문장.
+ *
+ * 지연 로딩된 도구의 **이름**은 프롬프트에 있지만 설명은 없다. 그래서 "codex 서브에이전트에게
+ * 시켜" 라는 요청을 받은 모델이 이름 목록을 훑어도 `switch_to_agent_team` 이 그 답이라는 것을
+ * 알 수 없다 — 그 이름에는 codex 도 subagent 도 없다. 실측(dev 트랜스크립트 349b8642)에서 모델은
+ * Wooi 도구를 아예 찾아보지 않고 `codex exec` 를 셸로 돌렸다.
+ *
+ * 그 공백을 메우는 다리다. 도구 정의를 통째로 상시 로딩하는 것(alwaysLoad, ≈250 토큰)보다 훨씬
+ * 싸면서, 필요한 연결 하나를 정확히 만들어 준다. 팀 워크스페이스에는 붙이지 않는다 — 거기서는
+ * 위임 도구가 이름부터 `codex_subagent` 라 다리가 필요 없다.
+ */
+const SOLO_INSTRUCTIONS =
+  'This workspace is Solo: you cannot run other agent products (Claude Code, Codex) as ' +
+  'subagents here, and running their CLIs from the shell is not a substitute — it bypasses ' +
+  'approval and hides the work from the user. If the user asks for one, call ' +
+  '`switch_to_agent_team` first.'
+
+/**
+ * 이 워크스페이스에 실을 서버 수준 안내. 팀으로 **바꿀 수 있는** Solo 일 때만 한 줄이 붙는다.
+ *
+ * 바꿀 수 없는 워크스페이스(실험 스위치 꺼짐·조율 못 하는 백엔드)에는 붙이지 않는다 — 부르면
+ * 반드시 실패하는 도구를 권하는 것은 안내가 아니라 함정이고, 모델은 그 실패를 자기 잘못으로
+ * 읽는다(createIndependentWorkspace 가 report_to_parent 안내를 뺀 것과 같은 이유).
+ */
+export function wooiMcpInstructions(
+  delegateBackends: AgentBackendId[] = [],
+  canSwitchToAgentTeam = false
+): string {
+  if (delegateBackends.length || !canSwitchToAgentTeam) return WOOI_MCP_INSTRUCTIONS
+  return `${WOOI_MCP_INSTRUCTIONS} ${SOLO_INSTRUCTIONS}`
+}
+
 export interface AgentToolSpec {
   /** 모델에게 보이는 이름. 사용자가 CLAUDE.md 규칙에 적게 되므로 **한번 정하면 바꾸기 어렵다**. */
   name: string

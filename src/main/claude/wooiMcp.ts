@@ -1,6 +1,6 @@
 import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk'
 import type { McpSdkServerConfigWithInstance } from '@anthropic-ai/claude-agent-sdk'
-import { agentToolsFor, WOOI_MCP_INSTRUCTIONS, WOOI_MCP_SERVER_NAME } from '../agent/tools/catalog'
+import { agentToolsFor, wooiMcpInstructions, WOOI_MCP_SERVER_NAME } from '../agent/tools/catalog'
 import type { AgentBackendId } from '@shared/types'
 
 /**
@@ -16,12 +16,14 @@ import type { AgentBackendId } from '@shared/types'
 export function createWooiMcpServer(
   callTool: (tool: string, args: unknown) => Promise<unknown>,
   /** 이 워크스페이스가 띄울 수 있는 서브에이전트 종류. 비어 있으면 위임 도구가 없다. */
-  delegateBackends: AgentBackendId[] = []
+  delegateBackends: AgentBackendId[] = [],
+  /** Solo 일 때, 팀으로 바꿀 수 있는가. 안내 한 줄을 붙일지 가른다([[agent/tools/catalog]]). */
+  canSwitchToAgentTeam = false
 ): McpSdkServerConfigWithInstance {
   return createSdkMcpServer({
     name: WOOI_MCP_SERVER_NAME,
     version: '1.0.0',
-    instructions: WOOI_MCP_INSTRUCTIONS,
+    instructions: wooiMcpInstructions(delegateBackends, canSwitchToAgentTeam),
     tools: agentToolsFor(delegateBackends).map((spec) =>
       tool(
         spec.name,
