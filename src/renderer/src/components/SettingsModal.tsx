@@ -192,6 +192,15 @@ export default function SettingsModal({
   const [saveState, setSaveState] = useState<SaveState>('idle')
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent): void => {
+      // 위에 confirm 대화상자가 떠 있으면 그 대화상자만 닫고 설정은 유지한다.
+      if (event.key === 'Escape' && !useStore.getState().confirmState) onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+
   const setPage = (next: Page): void => {
     setPageState(next)
     localStorage.setItem(PAGE_KEY, next)
