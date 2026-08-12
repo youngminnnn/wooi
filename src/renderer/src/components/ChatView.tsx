@@ -101,9 +101,9 @@ const PR_STYLE: Record<PrState, { Icon: LucideIcon; iconClass: string; badgeClas
   },
   open: {
     Icon: GitPullRequest,
-    iconClass: 'text-[var(--accent-400)]',
+    iconClass: 'text-[var(--open-400)]',
     badgeClass:
-      'border-[var(--accent-500)]/30 bg-[var(--accent-500)]/10 text-[var(--accent-200)] hover:border-[var(--accent-500)]/60'
+      'border-[var(--open-500)]/30 bg-[var(--open-500)]/10 text-[var(--open-200)] hover:border-[var(--open-500)]/60'
   },
   merged: {
     Icon: GitMerge,
