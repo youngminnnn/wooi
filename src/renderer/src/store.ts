@@ -27,6 +27,7 @@ import type {
   ReviewVerdict,
   ScriptStatus,
   StackCascadeResult,
+  StackOpProgress,
   UpdateStatus,
   Workspace
 } from '@shared/types'
@@ -264,6 +265,7 @@ interface UIState {
   composerAttachments: Record<string, ComposerAttachment[]>
   gitStatus: Record<string, GitStatus | null>
   prStatus: Record<string, PrStatus | null>
+  stackProgress: Record<string, StackOpProgress | null>
   /** workspace 별 PR 상태 조회 진행 여부(브랜치 전환·새로고침 중 헤더에 로딩 표시). */
   prRefreshing: Record<string, boolean>
   permissions: PermissionRequest[]
@@ -644,6 +646,30 @@ interface UIState {
   toggleFileViewed: (reviewId: string, path: string, prNumber?: number) => Promise<void>
 }
 
+export const stackBusy = (state: UIState, workspaceId: string): boolean =>
+  !!state.stackProgress[workspaceId] && !state.stackProgress[workspaceId]!.finished
+
+/**
+ * 버튼을 누른 **즉시** 세우는 낙관적 진행 표시. main 의 첫 이벤트가 도착하기까지의 IPC 왕복
+ * 동안 컨트롤이 죽은 것처럼 보이지 않게 하는 것이 목적이다 — 체감 속도의 절반이 여기서 온다.
+ * 돌려준 객체는 그대로 소유권 표식으로도 쓴다(dropIfUntouched 참고).
+ */
+function optimisticStackProgress(
+  workspaceId: string,
+  kind: StackOpProgress['kind'],
+  total: number | null
+): StackOpProgress {
+  return {
+    workspaceId,
+    kind,
+    total,
+    done: [],
+    current: null,
+    finished: false,
+    startedAt: Date.now()
+  }
+}
+
 let initialized = false
 
 // 창 포커스 상태(완료를 미확인으로 잡을지 판단용). DOM 의 document.hasFocus() 는 Dock 클릭·앱
@@ -654,6 +680,13 @@ let windowFocused = true
 // 사이드바 배지(변경 파일 수·ahead/behind·충돌)가 최신으로 보이도록 백그라운드에서 폴링한다.
 let statusPollTimer: ReturnType<typeof setInterval> | null = null
 const STATUS_POLL_INTERVAL_MS = 15_000
+
+// PR 조회는 git 보다 비싸므로 느린 주기로 따로 돈다. listOpenPrs 는 리포별 10초 캐시와 in-flight
+// 합류를 쓰므로 한 틱에 리포당 gh pr list 한 번이고, getPrMeta 는 실제 sync 후보가 있을 때만
+// 불린다. detectStackSync 도 이미 계획이 있으면 즉시 끝나므로 활성 워크스페이스 수만큼 중복된
+// 네트워크 비용이 그대로 늘어나지는 않는다.
+let prPollTimer: ReturnType<typeof setInterval> | null = null
+const PR_POLL_INTERVAL_MS = 45_000
 
 // gh 가 미연결로 보이는 동안에만 도는 인증 상태 폴링. 예전 하드 게이트가 3초마다 돌던 폴링을
 // 대체한다 — 게이트가 사라졌다고 폴링까지 없애면, `gh auth status` 가 일시적으로 실패했을 때
@@ -723,6 +756,7 @@ export const useStore = create<UIState>((set, get) => ({
   composerAttachments: {},
   gitStatus: {},
   prStatus: {},
+  stackProgress: {},
   prRefreshing: {},
   permissions: [],
   authStatus: null,
@@ -800,6 +834,15 @@ export const useStore = create<UIState>((set, get) => ({
       }, STATUS_POLL_INTERVAL_MS)
     }
 
+    if (!prPollTimer) {
+      prPollTimer = setInterval(() => {
+        if (!windowFocused) return
+        for (const workspace of get().app?.workspaces ?? []) {
+          if (!workspace.archived) void get().refreshPr(workspace.id)
+        }
+      }, PR_POLL_INTERVAL_MS)
+    }
+
     // gh 미연결로 보이는 동안에만 인증 상태를 다시 확인한다. 앱 밖(터미널)에서 로그인한 경우와
     // `gh auth status` 가 일시적으로 실패했다가 회복된 경우를 모두 스스로 따라잡는다.
     if (!authPollTimer) {
@@ -870,6 +913,22 @@ export const useStore = create<UIState>((set, get) => ({
         for (const id of staleComments) delete diffComments[id]
         return { app: next, unread, runningSince, messageQueue, diffComments }
       })
+    })
+
+    window.api.onStackProgress((progress) => {
+      set((s) => ({
+        stackProgress: { ...s.stackProgress, [progress.workspaceId]: progress }
+      }))
+      if (!progress.finished) return
+      setTimeout(() => {
+        set((s) => {
+          // 같은 workspace 에서 이미 다음 작업이 시작됐으면 이전 작업의 타이머가 지우지 않는다.
+          if (s.stackProgress[progress.workspaceId]?.startedAt !== progress.startedAt) return s
+          return {
+            stackProgress: { ...s.stackProgress, [progress.workspaceId]: null }
+          }
+        })
+      }, 4000)
     })
 
     // OS 알림 클릭 등으로 main 이 요청한 workspace 선택.
@@ -1628,14 +1687,31 @@ export const useStore = create<UIState>((set, get) => ({
   },
 
   restackWorkspace: async (workspaceId) => {
+    const workspace = get().app?.workspaces.find((w) => w.id === workspaceId)
+    const optimistic = optimisticStackProgress(
+      workspaceId,
+      'restack',
+      workspace?.stack?.length ?? null
+    )
+    set((s) => ({ stackProgress: { ...s.stackProgress, [workspaceId]: optimistic } }))
     const res = await window.api.workspace.restack(workspaceId)
+    // main 이 진행 이벤트를 한 번도 보내지 않은 경우 — 핸들러가 "워크스페이스 없음"·"에이전트
+    // 실행 중" 처럼 스트림을 열기 전에 반환한 것이다. 우리가 세운 표시를 우리가 걷지 않으면
+    // 끝났다는 신호가 영영 오지 않아 버튼이 스피너에 갇힌다. 객체 동일성으로 가려낸다 —
+    // main 이 보낸 값은 IPC 를 건너온 새 객체라 절대 같지 않다.
+    set((s) =>
+      s.stackProgress[workspaceId] === optimistic
+        ? { stackProgress: { ...s.stackProgress, [workspaceId]: null } }
+        : {}
+    )
+    const base = res.baseBranch || workspace?.baseBranch || 'base'
     if (res.status === 'restacked') {
       get().pushToast(
         'success',
-        res.pushed ? 'Restacked onto base and pushed.' : 'Restacked onto base.'
+        res.pushed ? `Rebased onto ${base} and pushed.` : `Rebased onto ${base}.`
       )
     } else if (res.status === 'up-to-date') {
-      get().pushToast('info', 'Already up to date with base.')
+      get().pushToast('info', `Already up to date with ${base}.`)
     } else if (res.status === 'conflict') {
       get().pushToast(
         'error',
@@ -1651,10 +1727,24 @@ export const useStore = create<UIState>((set, get) => ({
   },
 
   applyStackSync: async (workspaceId) => {
+    const workspace = get().app?.workspaces.find((w) => w.id === workspaceId)
+    const optimistic = optimisticStackProgress(
+      workspaceId,
+      'sync',
+      workspace?.stackSync?.affected.length ?? null
+    )
+    set((s) => ({ stackProgress: { ...s.stackProgress, [workspaceId]: optimistic } }))
     const res = await window.api.stack.syncApply(workspaceId).catch((err) => ({
       error: err instanceof Error ? err.message : String(err),
       cascade: undefined
     }))
+    // restackWorkspace 와 같은 이유의 정리 — 계획이 이미 사라졌거나 워크스페이스를 못 찾아
+    // main 이 스트림을 열기 전에 반환했으면 낙관적 표시가 그대로 남는다.
+    set((s) =>
+      s.stackProgress[workspaceId] === optimistic
+        ? { stackProgress: { ...s.stackProgress, [workspaceId]: null } }
+        : {}
+    )
     if (res.error) get().pushToast('error', `Stack sync failed: ${res.error}`)
     else if (res.cascade) get().reportCascade(res.cascade, 'Stack synced.')
     void get().refreshGit(workspaceId)

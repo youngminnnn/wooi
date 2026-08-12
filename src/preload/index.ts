@@ -290,6 +290,7 @@ const api: WooiApi = {
   onScriptExit: (cb) => subscribe(IPC.evtScriptExit, cb),
   onComposerAttach: (cb) => subscribe(IPC.evtComposerAttach, cb),
   onState: (cb) => subscribe(IPC.evtState, cb),
+  onStackProgress: (cb) => subscribe(IPC.evtStackProgress, cb),
   onReview: (cb) => subscribe(IPC.evtReview, cb),
   onSelectWorkspace: (cb) => subscribe(IPC.evtSelectWorkspace, cb),
   onOpenRepoSettings: (cb) => subscribe(IPC.evtOpenRepoSettings, cb),

@@ -19,6 +19,19 @@ import {
 } from './git'
 
 /**
+ * 캐스케이드가 단계를 하나 만들 때마다 밖으로 흘려보내는 통로. 캐스케이드는 브랜치를 하나씩
+ * 순차로 처리하느라 수십 초가 걸리는데, 예전에는 그동안 UI 가 스피너 하나로 멈춰 있었다.
+ * 결과만 모아 돌려주는 반환값과 따로 두는 이유가 그것이다 — 진행은 끝나기 전에 보여야 뜻이 있다.
+ * 선택적 인자라 이 싱크를 넘기지 않는 호출부의 동작은 이전과 완전히 같다.
+ */
+export interface StackProgressSink {
+  /** 이 브랜치의 단계를 시작한다(결과가 나오기 전에 "지금 여기"를 알리는 용도). */
+  start(branch: string, kind: StackCascadeStep['kind']): void
+  /** 단계 하나가 끝났다. 반환될 steps 에 담기는 값과 **같은 객체**를 흘린다. */
+  step(step: StackCascadeStep): void
+}
+
+/**
  * 부모 PR 병합 후 자식 PR 들을 조부모로 옮기는 캐스케이드.
  *
  * 이 모듈의 존재 이유는 두 가지다.
@@ -212,18 +225,24 @@ export async function cascadeRetarget(opts: {
   mergedBranch: string
   newBase: string
   entries: StackedBranch[]
+  progress?: StackProgressSink
 }): Promise<StackCascadeStep[]> {
   const { worktreePath, mergedBranch, newBase, entries } = opts
   const steps: StackCascadeStep[] = []
+  const push = (step: StackCascadeStep): void => {
+    steps.push(step)
+    opts.progress?.step(step)
+  }
 
   for (const e of entries) {
     // 병합된 브랜치를 직속 base 로 삼던 PR 만 옮긴다. 그 위는 base 가 그대로다.
     if (e.baseBranch !== mergedBranch) continue
+    opts.progress?.start(e.branch, 'retarget')
 
     const selector = e.prNumber ?? e.branch
     const meta = await getPrMeta(worktreePath, selector).catch(() => null)
     if (!meta) {
-      steps.push({
+      push({
         branch: e.branch,
         prNumber: e.prNumber,
         kind: 'retarget',
@@ -234,7 +253,7 @@ export async function cascadeRetarget(opts: {
     }
 
     if (meta.state === 'MERGED') {
-      steps.push({
+      push({
         branch: e.branch,
         prNumber: meta.number,
         kind: 'retarget',
@@ -246,7 +265,7 @@ export async function cascadeRetarget(opts: {
 
     if (meta.state === 'CLOSED') {
       // base 브랜치 삭제로 GitHub 이 닫아 버린 경우 — 복구 경로로 되살린다.
-      steps.push(
+      push(
         await recoverClosedPr(
           worktreePath,
           selector,
@@ -268,7 +287,7 @@ export async function cascadeRetarget(opts: {
 
     // 열려 있는데 base 가 이미 목표값이면 GitHub 이 병합 시점에 자동 retarget 한 것이다.
     if (meta.baseRefName === newBase) {
-      steps.push({
+      push({
         branch: e.branch,
         prNumber: meta.number,
         kind: 'retarget',
@@ -281,7 +300,7 @@ export async function cascadeRetarget(opts: {
     const res = await retargetPr(worktreePath, newBase, String(selector)).catch((err) => ({
       error: err instanceof Error ? err.message : String(err)
     }))
-    steps.push({
+    push({
       branch: e.branch,
       prNumber: meta.number,
       kind: 'retarget',
@@ -306,19 +325,25 @@ export async function cascadeRestackBranchStack(opts: {
   entries: StackedBranch[]
   /** oldTip 계산용 스택 전체. */
   allEntries: StackedBranch[]
+  progress?: StackProgressSink
 }): Promise<StackCascadeStep[]> {
   const { worktreePath, mergedBranch, newBase, entries, allEntries } = opts
   if (!entries.length) return []
 
   const clean = await isWorktreeClean(worktreePath).catch(() => false)
   if (!clean) {
-    return entries.map((e) => ({
-      branch: e.branch,
-      prNumber: e.prNumber,
-      kind: 'restack' as const,
-      status: 'skipped' as const,
-      message: 'uncommitted changes in the worktree — rebase skipped, restack manually'
-    }))
+    return entries.map((e) => {
+      opts.progress?.start(e.branch, 'restack')
+      const step: StackCascadeStep = {
+        branch: e.branch,
+        prNumber: e.prNumber,
+        kind: 'restack',
+        status: 'skipped',
+        message: 'uncommitted changes in the worktree — rebase skipped, restack manually'
+      }
+      opts.progress?.step(step)
+      return step
+    })
   }
 
   const original = await currentBranch(worktreePath).catch(() => '')
@@ -331,14 +356,19 @@ export async function cascadeRestackBranchStack(opts: {
   }
 
   const steps: StackCascadeStep[] = []
+  const push = (step: StackCascadeStep): void => {
+    steps.push(step)
+    opts.progress?.step(step)
+  }
   let halted: string | null = null
   // halted 와 따로 두는 이유: 충돌·에러는 워킹트리를 rebase 진행 상태로 남겨 원래 브랜치로
   // 되돌릴 수 없지만, 갈라짐은 아무것도 건드리지 않고 멈춘 것이라 되돌려 놓는 편이 낫다.
   let leftMidRebase = false
 
   for (const e of entries) {
+    opts.progress?.start(e.branch, 'restack')
     if (halted) {
-      steps.push({
+      push({
         branch: e.branch,
         prNumber: e.prNumber,
         kind: 'restack',
@@ -352,7 +382,7 @@ export async function cascadeRestackBranchStack(opts: {
     // 그 브랜치로 옮겨 놓지도 않는다. 위 브랜치들은 이 브랜치 tip 을 기준으로 쌓이므로,
     // 하나가 갈라졌으면 그 위도 전부 판단 근거를 잃는다 → 멈춘다.
     if ((await detectRemoteDivergence(worktreePath, e.branch)) === 'diverged') {
-      steps.push(divergedStep(e.branch, e.prNumber))
+      push(divergedStep(e.branch, e.prNumber))
       halted = `${e.branch} diverged from its remote`
       continue
     }
@@ -364,7 +394,7 @@ export async function cascadeRestackBranchStack(opts: {
 
     const co = await checkoutBranch(worktreePath, e.branch)
     if (co.error) {
-      steps.push({
+      push({
         branch: e.branch,
         prNumber: e.prNumber,
         kind: 'restack',
@@ -381,7 +411,7 @@ export async function cascadeRestackBranchStack(opts: {
       baseBranch: base,
       message: err instanceof Error ? err.message : String(err)
     }))
-    steps.push(stepFromRestack(e.branch, e.prNumber, r))
+    push(stepFromRestack(e.branch, e.prNumber, r))
 
     // 충돌은 워킹트리를 rebase 진행 상태로 남긴다 — 이후 브랜치는 체크아웃조차 불가하므로 멈춘다.
     if (r.status === 'conflict') {

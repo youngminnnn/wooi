@@ -551,6 +551,9 @@ function WorkspaceRow({
   const compacting = useStore((s) => s.compacting[workspace.id] ?? false)
   const runningSince = useStore((s) => s.runningSince[workspace.id])
   const restack = useStore((s) => s.restackWorkspace)
+  const restackBusy = useStore(
+    (s) => !!s.stackProgress[workspace.id] && !s.stackProgress[workspace.id]!.finished
+  )
   const confirm = useStore((s) => s.confirm)
   const reportArchiveScriptFailure = useStore((s) => s.reportArchiveScriptFailure)
   const requestDelete = useStore((s) => s.requestDeleteWorkspace)
@@ -660,23 +663,27 @@ function WorkspaceRow({
       onSelect: () => stack(backend.id),
       separatorBefore: index === 0
     })),
-    ...(workspace.parentWorkspaceId
-      ? [
-          {
-            key: 'restack',
-            label: githubDisconnected
-              ? `Restack onto ${workspace.baseBranch} — Connect GitHub`
-              : git && git.behind > 0
-                ? `Restack onto ${workspace.baseBranch} (${git.behind} behind)`
-                : `Restack onto ${workspace.baseBranch}`,
-            icon: githubDisconnected ? <GithubMark size={12} /> : <RefreshCw size={13} />,
-            onSelect: () =>
-              void requireGithub('Restacking updates the branch and its pull request.', () =>
-                restack(workspace.id)
-              )
-          }
-        ]
-      : []),
+    {
+      key: 'restack',
+      label: restackBusy
+        ? 'Rebasing…'
+        : githubDisconnected
+          ? `Rebase onto ${workspace.baseBranch} — Connect GitHub`
+          : git && git.behind > 0
+            ? `Rebase onto ${workspace.baseBranch} (${git.behind} behind)`
+            : `Rebase onto ${workspace.baseBranch}`,
+      icon: githubDisconnected ? (
+        <GithubMark size={12} />
+      ) : (
+        <RefreshCw size={13} className={restackBusy ? 'animate-spin' : ''} />
+      ),
+      onSelect: () => {
+        if (restackBusy) return
+        void requireGithub('Restacking updates the branch and its pull request.', () =>
+          restack(workspace.id)
+        )
+      }
+    },
     // 멀티 에이전트 모드 토글(실험 기능). 대부분의 워크스페이스는 모달 없이 자동 생성되므로,
     // 만든 뒤에 켜는 이 경로가 사실상 주된 진입점이다. 다음 세션부터 적용된다.
     ...multiAgentAction(workspace, multiAgent),
@@ -930,20 +937,21 @@ function WorkspaceRow({
               (뒤처지지 않았으면 급하지 않으므로 ⋯ 메뉴 안에만 둔다.) */}
             {workspace.parentWorkspaceId && git && git.behind > 0 && (
               <button
+                disabled={restackBusy}
                 onClick={(e) => {
                   e.stopPropagation()
                   void requireGithub('Restacking updates the branch and its pull request.', () =>
                     restack(workspace.id)
                   )
                 }}
-                className="h-5 w-5 grid place-items-center rounded shrink-0 hover:bg-[var(--surface-2)] text-[var(--warning-400)] hover:text-[var(--warning-300)]"
+                className="h-5 w-5 grid place-items-center rounded shrink-0 hover:bg-[var(--surface-2)] text-[var(--warning-400)] hover:text-[var(--warning-300)] disabled:opacity-60"
                 title={
                   githubDisconnected
                     ? `Connect GitHub to restack onto ${workspace.baseBranch} (${git.behind} behind)`
                     : `Restack onto ${workspace.baseBranch} (${git.behind} behind) — rebase & force-push`
                 }
               >
-                <RefreshCw size={12} />
+                <RefreshCw size={12} className={restackBusy ? 'animate-spin' : ''} />
               </button>
             )}
             <button
