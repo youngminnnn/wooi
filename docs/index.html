@@ -833,7 +833,7 @@
         >
         <span class="ko"
           >병렬로 돌리는 건 어렵지 않습니다. 어려운 건
-          <span class="grad">머지까지</span>입니다.</span
+          <span class="grad">병합까지</span>입니다.</span
         >
       </h1>
 
@@ -909,7 +909,7 @@
             <span class="ko"
               >격리된 worktree 에서 에이전트를 돌리는 건 여러 오케스트레이터가 이미 지원합니다.
               하지만 worktree 는 파일 충돌은 막아도 의존성은 못 풉니다. 안 풀린 쪽은 그 다음입니다.
-              병렬로 쓰였지만 순서대로 머지돼야 하는 브랜치들, 그리고 에이전트가 코드를 쓰는
+              병렬로 쓰였지만 순서대로 병합돼야 하는 브랜치들, 그리고 에이전트가 코드를 쓰는
               속도만큼 쌓이는 리뷰 대기열. Wooi 가 힘을 싣는 자리가 여기입니다.</span
             >
           </p>
@@ -1003,7 +1003,7 @@
               >
               <span class="ko"
                 >텔레메트리와 자체 서버가 없어 설정·대화 기록은 로컬에 남습니다. 업데이트는 작업이
-                끝날 때까지 기다립니다. 필요한 무시 파일은 새 worktree로 전달되고, 세션은 재시작
+                끝날 때까지 기다립니다. 필요한 ignore 파일은 새 worktree로 전달되고, 세션은 재시작
                 뒤에도 이어집니다.</span
               >
             </p>
@@ -1071,7 +1071,7 @@
           </div>
           <div class="concept-step">
             <div class="num">03</div>
-            <h3><span class="en">Land the work</span><span class="ko">머지까지</span></h3>
+            <h3><span class="en">Land the work</span><span class="ko">병합까지</span></h3>
             <p>
               <span class="en"
                 >Open a GitHub PR in one click. If the task builds on another, stack it and Wooi
@@ -1111,7 +1111,7 @@
           <h2>
             <span class="en"
               >Everything you need to run agents in parallel — and land what they write</span
-            ><span class="ko">에이전트를 병렬로 돌리고, 그 결과를 머지하기까지</span>
+            ><span class="ko">에이전트를 병렬로 돌리고, 그 결과를 병합하기까지</span>
           </h2>
         </div>
 
@@ -1138,23 +1138,6 @@
                   >모든 작업이 독립적이지는 않습니다 — 2번 작업이 1번 위에서 이어져야 할 때가 있죠.
                   Wooi 는 그 체인을 <code>git</code> 과 <code>gh</code> 만으로 직접 관리합니다. 별도
                   스택 도구가 필요 없습니다.</span
-                >
-              </li>
-              <li>
-                <strong
-                  ><span class="en">Stack a workspace</span
-                  ><span class="ko">워크스페이스 쌓기</span></strong
-                >
-                —
-                <span class="en"
-                  >pick <strong>Stack a new workspace</strong> from a workspace's menu; the new one
-                  branches off that workspace's branch and its PR targets that branch instead of the
-                  default branch.</span
-                >
-                <span class="ko"
-                  >워크스페이스 메뉴에서 <strong>Stack a new workspace</strong> 를 고르면 그
-                  브랜치에서 분기한 워크스페이스가 생기고, PR 도 기본 브랜치가 아닌 그 부모 브랜치를
-                  대상으로 열립니다.</span
                 >
               </li>
               <li>
@@ -1540,37 +1523,6 @@
               </li>
               <li>
                 <strong
-                  ><span class="en">Start a review</span><span class="ko">리뷰 시작</span></strong
-                >
-                —
-                <span class="en"
-                  >hit <strong>Review PR</strong> on the Overview board, pick a repo and one of its
-                  open PRs (or type a number), and say what you want looked at. A review gets its
-                  own row in the sidebar and runs alongside your workspaces.</span
-                >
-                <span class="ko"
-                  >Overview 보드의 <strong>Review PR</strong> 을 누르고 리포와 열린 PR 을 고른
-                  뒤(번호 직접 입력도 됩니다) 무엇을 봐 주면 좋을지 적습니다. 리뷰는 사이드바에 자기
-                  행을 갖고 워크스페이스 옆에서 나란히 돕니다.</span
-                >
-              </li>
-              <li>
-                <strong
-                  ><span class="en">Claude or Codex</span
-                  ><span class="ko">Claude 또는 Codex</span></strong
-                >
-                —
-                <span class="en"
-                  >pick the agent when you start; the review stays on it, and follow-up turns resume
-                  the same session.</span
-                >
-                <span class="ko"
-                  >시작할 때 에이전트를 고르면 리뷰는 끝까지 그 에이전트로 돌고, 후속 질문도 같은
-                  세션을 이어받습니다.</span
-                >
-              </li>
-              <li>
-                <strong
                   ><span class="en">Its own worktree</span
                   ><span class="ko">전용 worktree</span></strong
                 >
@@ -1613,17 +1565,6 @@
                   >comment · approve · request changes 를 제출합니다. 안 올린 지적은 판정과 함께
                   올릴 수 있고 — 코멘트가 먼저 올라가며, 하나라도 실패하면 판정은 보류됩니다. 내 PR
                   에서는 approve/request changes 를 숨깁니다(GitHub 이 거부하므로).</span
-                >
-              </li>
-              <li>
-                <strong><span class="en">Persistent</span><span class="ko">영속</span></strong> —
-                <span class="en"
-                  >reviews survive restarts and can be archived, restored, or deleted; deleting
-                  cleans up the review worktree too.</span
-                >
-                <span class="ko"
-                  >앱을 껐다 켜도 남고 아카이브·복원·삭제할 수 있습니다. 삭제하면 리뷰 worktree 도
-                  함께 정리됩니다.</span
                 >
               </li>
             </ul>
@@ -1748,36 +1689,6 @@
             <ul>
               <li>
                 <strong
-                  ><span class="en">No default prompt</span
-                  ><span class="ko">기본 프롬프트 없음</span></strong
-                >
-                —
-                <span class="en"
-                  >the input box starts empty; the session begins only when you send your first
-                  message.</span
-                >
-                <span class="ko"
-                  >입력창은 빈 상태로 시작하고, 첫 메시지를 보낼 때 비로소 세션이 시작됩니다.</span
-                >
-              </li>
-              <li>
-                <strong
-                  ><span class="en">Automatic creation</span
-                  ><span class="ko">자동 생성</span></strong
-                >
-                —
-                <span class="en"
-                  >workspaces get an auto-generated name (like <code>witty-otter</code>) and branch
-                  off the default branch. Turn on manual setup to choose the name and base branch
-                  yourself.</span
-                >
-                <span class="ko"
-                  >자동 생성된 이름(<code>witty-otter</code> 등)을 받고 기본 브랜치에서 분기됩니다.
-                  직접 입력을 켜면 이름·베이스 브랜치를 직접 고를 수 있습니다.</span
-                >
-              </li>
-              <li>
-                <strong
                   ><span class="en">Choose Claude Code or Codex</span
                   ><span class="ko">Claude Code 또는 Codex 선택</span></strong
                 >
@@ -1835,7 +1746,7 @@
                   <strong>Link</strong> shares one original.</span
                 >
                 <span class="ko"
-                  >새 worktree 에는 git 이 추적하는 파일만 들어오므로, 필요한 무시 파일
+                  >새 worktree 에는 git 이 추적하는 파일만 들어오므로, 필요한 ignore 파일
                   (<code>.env</code>, <code>CLAUDE.local.md</code> 등)을 리포마다 적어 둡니다.
                   <strong>Copy</strong> 는 워크스페이스마다 자기 사본을, <strong>Link</strong> 는
                   원본 하나를 공유합니다.</span
@@ -1886,36 +1797,6 @@
               </li>
               <li>
                 <strong
-                  ><span class="en">OS notifications & Dock badge</span
-                  ><span class="ko">OS 알림 · Dock 배지</span></strong
-                >
-                —
-                <span class="en"
-                  >when the window is inactive, completions / errors / permission requests appear as
-                  notifications and a Dock badge count.</span
-                >
-                <span class="ko"
-                  >창이 비활성이면 완료·에러·권한 요청을 OS 알림으로 띄우고 Dock 배지에
-                  집계합니다.</span
-                >
-              </li>
-              <li>
-                <strong
-                  ><span class="en">Jump to what needs you</span
-                  ><span class="ko">확인 필요한 곳으로 이동</span></strong
-                >
-                —
-                <span class="en"
-                  >"Needs input" / "Next unread" buttons jump straight to the session that needs
-                  you.</span
-                >
-                <span class="ko"
-                  >"Needs input / Next unread" 버튼으로 사용자 확인이 필요한 세션으로 바로
-                  이동합니다.</span
-                >
-              </li>
-              <li>
-                <strong
                   ><span class="en">Overview board</span
                   ><span class="ko">Overview 보드</span></strong
                 >
@@ -1929,23 +1810,6 @@
                   Stop all 로 일괄 중단합니다.</span
                 >
               </li>
-              <li>
-                <strong
-                  ><span class="en">Updates that wait for you</span
-                  ><span class="ko">기다려 주는 업데이트</span></strong
-                >
-                —
-                <span class="en"
-                  >restarting mid-turn would cut an agent off, so a ready update can be installed
-                  now or held with <strong>Restart when work finishes</strong> — Wooi waits until
-                  every workspace is idle, then restarts on its own.</span
-                >
-                <span class="ko"
-                  >턴이 도는 중에 재시작하면 에이전트가 끊깁니다. 그래서 준비된 업데이트를 지금
-                  설치하거나 <strong>Restart when work finishes</strong> 로 미룰 수 있습니다. 모든
-                  워크스페이스가 잠잠해지면 알아서 재시작합니다.</span
-                >
-              </li>
             </ul>
           </div>
 
@@ -1956,14 +1820,6 @@
               <h3><span class="en">Work area</span><span class="ko">작업 영역</span></h3>
             </div>
             <ul>
-              <li>
-                <strong><span class="en">All files</span><span class="ko">All files</span></strong>
-                —
-                <span class="en"
-                  >a file tree of the worktree with a read-only, syntax-highlighted viewer.</span
-                >
-                <span class="ko">worktree 파일 트리와 읽기 전용·구문 강조 뷰어.</span>
-              </li>
               <li>
                 <strong><span class="en">Changes</span><span class="ko">Changes</span></strong> —
                 <span class="en"
@@ -1976,11 +1832,6 @@
                   untracked 를 모두 포함하고, <strong>Create PR</strong> 버튼이 PR 작성 화면을
                   엽니다.</span
                 >
-              </li>
-              <li>
-                <strong><span class="en">Check</span><span class="ko">Check</span></strong> —
-                <span class="en">CI check results for the PR on the current branch.</span>
-                <span class="ko">현재 브랜치 PR 의 CI 체크 결과.</span>
               </li>
               <li>
                 <strong><span class="en">Preview</span><span class="ko">Preview</span></strong> —
@@ -2016,45 +1867,6 @@
               <h3><span class="en">Composing messages</span><span class="ko">메시지 작성</span></h3>
             </div>
             <ul>
-              <li>
-                <strong
-                  ><span class="en">Slash-command autocomplete</span
-                  ><span class="ko">슬래시 명령 자동완성</span></strong
-                >
-                —
-                <span class="en"
-                  >type <code>/</code> to see the commands available for the workspace's selected
-                  agent.</span
-                >
-                <span class="ko"
-                  ><code>/</code> 를 치면 워크스페이스에서 선택한 에이전트가 지원하는 명령 목록이
-                  뜹니다.</span
-                >
-              </li>
-              <li>
-                <strong
-                  ><span class="en">Inline shell commands</span
-                  ><span class="ko">인라인 셸 명령</span></strong
-                >
-                —
-                <span class="en"
-                  >start a message with <code>!</code> to run it as a shell command, with output
-                  shown right in the chat.</span
-                >
-                <span class="ko"
-                  >메시지를 <code>!</code> 로 시작하면 셸 명령으로 실행되고 결과가 채팅에 바로
-                  표시됩니다.</span
-                >
-              </li>
-              <li>
-                <strong
-                  ><span class="en">Image attachments</span
-                  ><span class="ko">이미지 첨부</span></strong
-                >
-                —
-                <span class="en">paste or drop images into the input box to send them along.</span>
-                <span class="ko">입력창에 이미지를 붙여넣거나 끌어다 놓으면 함께 전송됩니다.</span>
-              </li>
               <li>
                 <strong
                   ><span class="en">Status line & auto-compact</span
@@ -2180,7 +1992,7 @@
                   >약관·개인정보처리방침에 동의한 뒤 Claude Code 또는 Codex를 연결합니다. 둘 중
                   하나만 있으면 되며, Codex는 ChatGPT 또는 OpenAI API 키로 연결할 수 있습니다.
                   GitHub 은 이 단계에서 건너뛸 수 있습니다 — 바로 작업을 시작하면, PR
-                  생성·머지·스택·Check 를 처음 쓰는 순간 Wooi 가 연결을 요청하고 연결 후 원래 하려던
+                  생성·병합·스택·Check 를 처음 쓰는 순간 Wooi 가 연결을 요청하고 연결 후 원래 하려던
                   동작을 이어서 실행합니다.</span
                 >
               </p>

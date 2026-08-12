@@ -168,9 +168,6 @@ Ordered by what sets Wooi apart, not by what you click first.
 Not every task is independent — sometimes step 2 has to build on step 1. Wooi manages
 those chains itself with plain `git` and `gh` — no extra stacking CLI needed.
 
-- **Stack a workspace** — pick **Stack a new workspace** from a workspace's menu. The new
-  workspace branches off that workspace's branch, and its PR targets that branch instead
-  of the repo's default branch.
 - **Or let the agent stack it** — `create_stacked_workspace` opens the next workspace on
   top of the current branch when the work just finished is a complete, reviewable unit.
   See [Agent orchestration](#agent-orchestration-built-in-mcp) below.
@@ -274,10 +271,6 @@ runs alongside your workspaces instead of taking one over.
   your way. The mark is stored against a fingerprint of that file's contents, so when a
   new commit changes the file it goes back to unviewed on its own — and files that didn't
   change stay checked.
-- **Start a review** — **Review PR** on the Overview board. Pick a repo, choose one of its
-  open PRs (or type a number / URL), and say what you want looked at.
-- **Claude or Codex** — pick the agent when you start. A review stays on the agent it was
-  started with, and follow-up turns resume that same session.
 - **Its own worktree** — the PR head is checked out under
   `~/wooi/reviews/<repo>/pr-<number>-<id>`, a worktree dedicated to that review, so the
   agent can read code outside the changed hunks and grep the rest of the tree without
@@ -290,8 +283,6 @@ runs alongside your workspaces instead of taking one over.
   rather than going out unsupported. Approve / request changes are hidden on your own PR
   (GitHub rejects those), and repeating the same verdict on a PR that hasn't moved is
   blocked.
-- **Persistent** — reviews survive restarts and can be archived, restored, or deleted;
-  deleting cleans up the review worktree too.
 
 ### Agent backends
 
@@ -330,12 +321,6 @@ See [agent backends](docs/agent-backends.md) for the full capability matrix.
 
 ### Workspaces
 
-- **No default prompt** — the input box starts empty; the session begins only when you
-  send your first message.
-- **Automatic creation** — workspaces get an auto-generated name (like
-  `witty-otter`) and branch off the repo's default branch. Turn on **manual setup** in
-  Settings to choose the name and base branch yourself. Rename a workspace by
-  double-clicking its name in the header.
 - **Choose Claude Code or Codex** when creating a workspace — and change your mind with
   `/agent` later as well. If work has already started, the next agent receives a bounded
   handoff of the conversation; stacked workspaces initially inherit their parent's agent.
@@ -351,10 +336,6 @@ See [agent backends](docs/agent-backends.md) for the full capability matrix.
   diffs side by side, then adopt one winner and archive the alternatives.
 - The sidebar distinguishes **running** (spinner), **awaiting permission** (yellow
   shield), and **unread responses** (blue dot).
-- When the window is inactive, completions / errors / permission requests appear as OS
-  notifications and a Dock badge count.
-- The **"Needs input" / "Next unread"** buttons above the input box jump straight to the
-  session that needs you.
 - An **Overview board** (shown when no workspace is selected) lists every active session
   with status filters (All / Running / Needs input / Unread / Idle) and a **Stop all**
   action; click any card to jump in.
@@ -363,13 +344,10 @@ See [agent backends](docs/agent-backends.md) for the full capability matrix.
 
 A tabbed panel on top plus an interactive terminal below (resizable split):
 
-- **All files** — a file tree of the worktree with a read-only, syntax-highlighted
-  viewer.
 - **Changes** — a per-file diff against the base branch (same meaning as a PR diff),
   covering commits + staged + unstaged + untracked files. The header summary
   (`N changed · ↑ahead · ↓behind`) opens this as a modal. When there's no PR and the
   branch is ahead, a **Create PR** button opens GitHub's PR page in your browser.
-- **Check** — CI check results for the PR on the current branch.
 - **Preview** — open the workspace's dev server inside Wooi, capture the page or pick a
   specific element into the composer, and send collected console and network failures to
   the agent. The preview runs in a separate, permission-denied session.
@@ -378,26 +356,17 @@ A tabbed panel on top plus an interactive terminal below (resizable split):
 
 ### Composing messages
 
-- **Slash-command autocomplete** — type `/` to see the commands available for the
-  workspace's selected agent.
 - **File mentions** — type `@` to fuzzy-search the worktree and pull a file into your
   message, so the agent gets its contents without hunting for it first. The menu shows
   each file's size and warns when a file is big enough that the agent may truncate or
   skip it. Directory mentions (`@src/`) attach a listing. In the **All files** viewer,
   **Mention** adds the open file — select lines first and it narrows to just that range
   (`@src/app.ts#L40-80`).
-- **Inline shell commands** — start a message with `!` to run it as a shell command in
-  the worktree, with the output shown right in the chat.
-- **Drag & drop** — drop files anywhere on the window: images become attachments, everything
-  else becomes an `@` mention. Files inside the worktree are shortened to a relative path.
-- **Image attachments** — paste or drop images to send them along.
 - **Status line** — branch · directory · model · effort · context usage are always
   shown above the input box; long conversations **auto-compact** (toggleable), or run
   `/compact` manually.
 - **Draft preservation & message queueing** — an in-progress message survives workspace
   switches, and you can queue follow-up messages while a turn is running.
-- **Shortcuts** — ↑/↓ to recall previous messages, ⌘1–9 and ⌘↑ ⌘↓ to switch workspaces, ⌘[ to go
-  back to the one you were just in.
 
 ### Convenience
 
@@ -408,8 +377,6 @@ A tabbed panel on top plus an interactive terminal below (resizable split):
 - **Updates that wait for you** — when a new version is ready you can install it now, or
   pick **Restart when work finishes** and Wooi holds the restart until every workspace is
   idle, then counts down before restarting.
-- **Open in editor / Reveal in Finder** — header buttons open the worktree in VS Code
-  (`code`, falling back to Finder) or reveal it in Finder.
 
 > Note: the diff viewer is read-only — no staging, commit, or revert from within Wooi.
 

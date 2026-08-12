@@ -696,7 +696,7 @@
           >
           <span class="ko"
             ><b class="hl">스태킹.</b> 새 작업을 <code>main</code> 이 아니라 다른 작업의 브랜치에서
-            딸 수 있는가? 이게 없으면 B 는 A 가 머지될 때까지 기다리거나, <code>main</code> 에서
+            딸 수 있는가? 이게 없으면 B 는 A 가 병합될 때까지 기다리거나, <code>main</code> 에서
             시작해 A 의 변경을 다시 만들어 넣어야 자기 diff 가 말이 됩니다.</span
           >
         </p>
@@ -709,8 +709,8 @@
             time.</span
           >
           <span class="ko"
-            ><b class="hl">머지된 다음.</b> 스택을 쌓는 건 쉬운 쪽입니다. 어려운 쪽은 부모가 머지될
-            때입니다. 자식들은 이제 타깃 브랜치에 없는 커밋 위에 얹혀 있고, 자식 PR 은 전부 머지된
+            ><b class="hl">병합된 다음.</b> 스택을 쌓는 건 쉬운 쪽입니다. 어려운 쪽은 부모가 병합될
+            때입니다. 자식들은 이제 타깃 브랜치에 없는 커밋 위에 얹혀 있고, 자식 PR 은 전부 병합된
             base 를 가리키고 있습니다. 누군가는 자식을 rebase 하고 PR base 를 다시 잡아야 합니다.
             도구가 하든지, 아니면 매번 사람이 순서대로 손으로 하든지.</span
           >
@@ -906,7 +906,7 @@
               <tr>
                 <th scope="row">
                   <span class="en">Parent merges → children rebased</span>
-                  <span class="ko">부모 머지 → 자식 자동 rebase</span>
+                  <span class="ko">부모 병합 → 자식 자동 rebase</span>
                   <span class="hint en">Automatically, for the whole chain</span>
                   <span class="hint ko">체인 전체에 대해 자동으로</span>
                 </th>
@@ -945,7 +945,7 @@
               <tr>
                 <th scope="row">
                   <span class="en">Parent merges → child PR bases retargeted</span>
-                  <span class="ko">부모 머지 → 자식 PR base 재타게팅</span>
+                  <span class="ko">부모 병합 → 자식 PR base 재타게팅</span>
                   <span class="hint en">Child PRs repointed at the grandparent branch</span>
                   <span class="hint ko">자식 PR 을 조부모 브랜치로 다시 겨냥</span>
                 </th>
@@ -1153,7 +1153,7 @@
               a PR in review" 라는 선택지가 있고, CLI 에 부모/자식 worktree 계보가 있습니다 (<code
                 >--parent-worktree</code
               >
-              / <code>--no-parent</code>). 다만 부모가 머지된 뒤의 자동 rebase 나 PR 재타게팅은
+              / <code>--no-parent</code>). 다만 부모가 병합된 뒤의 자동 rebase 나 PR 재타게팅은
               문서에 없습니다.</span
             >
           </li>
@@ -1382,7 +1382,7 @@
               >
               <span class="ko"
                 >이 중에서 다루는 범위가 가장 넓습니다. 프롬프트 하나를 다섯 worktree 의 다섯
-                에이전트에 뿌려 놓고 이긴 쪽을 머지하고, diff 아무 줄에나 코멘트를 달아 돌려보내고,
+                에이전트에 뿌려 놓고 이긴 쪽을 병합하고, diff 아무 줄에나 코멘트를 달아 돌려보내고,
                 worktree 를 SSH 로 원격에서 돌리고, 전체를 CLI 로 조종하고, iOS · Android 로 들고
                 다닙니다. 여기서 문서에 스태킹을 직접 언급하는 유일한 다른 도구이기도 합니다 — 아직
                 리뷰 중인 PR 위에 얹으려고 다른 로컬 브랜치에서 worktree 를 시작할 수
@@ -1413,7 +1413,7 @@
               <span class="ko"
                 >출발점은 다른 도구들과 같습니다. 작업마다 worktree 하나, 브랜치 하나, 에이전트
                 하나가 병렬로 돕니다. Wooi 가 더하는 건 그 다음 이야기입니다. 워크스페이스를 다른
-                워크스페이스의 브랜치 위에 스택으로 얹고, 부모 PR 이 머지되면 Wooi 가 각 자식 PR 의
+                워크스페이스의 브랜치 위에 스택으로 얹고, 부모 PR 이 병합되면 Wooi 가 각 자식 PR 의
                 base 를 조부모 브랜치로 다시 잡고 자식들을 그 위로 rebase 합니다. 나머지 체인이
                 조용히 썩는 대신 멀쩡하게 남습니다. <code>git checkout -b</code> 와
                 <code>gh pr create</code> 로 직접 쌓은 스택도 PR 의 base 브랜치를 읽어 복원합니다.
@@ -1461,7 +1461,7 @@
                   >You already open stacked PRs and want the merge cascade handled for you.</span
                 >
                 <span class="ko"
-                  >이미 스택 PR 을 열고 있고, 머지 캐스케이드를 도구가 처리해 주길 원합니다.</span
+                  >이미 스택 PR 을 열고 있고, 병합 캐스케이드를 도구가 처리해 주길 원합니다.</span
                 >
               </li>
               <li>
