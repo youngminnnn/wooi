@@ -8,11 +8,17 @@ import { useRef } from 'react'
 export default function Splitter({
   axis,
   onStart,
-  onDelta
+  onDelta,
+  onReset,
+  label
 }: {
   axis: 'x' | 'y'
   onStart: () => void
   onDelta: (dx: number, dy: number) => void
+  /** 더블클릭 또는 Home 키로 기본 크기를 복원한다. */
+  onReset?: () => void
+  /** 키보드 사용자를 위한 분할바 이름. */
+  label?: string
 }): React.JSX.Element {
   const dragging = useRef(false)
 
@@ -52,8 +58,32 @@ export default function Splitter({
       ? 'absolute inset-y-0 -left-1 -right-1 cursor-col-resize'
       : 'absolute inset-x-0 -top-1 -bottom-1 cursor-row-resize'
 
+  const onKeyDown = (e: React.KeyboardEvent): void => {
+    if (e.key === 'Home' && onReset) {
+      e.preventDefault()
+      onReset()
+      return
+    }
+    const direction = e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 1
+    if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) return
+    e.preventDefault()
+    onStart()
+    const step = e.shiftKey ? 40 : 10
+    onDelta(axis === 'x' ? direction * step : 0, axis === 'y' ? direction * step : 0)
+  }
+
   return (
-    <div className={`relative ${cls}`} onMouseDown={onMouseDown}>
+    <div
+      role="separator"
+      aria-label={label}
+      aria-orientation={axis === 'x' ? 'vertical' : 'horizontal'}
+      tabIndex={label ? 0 : -1}
+      title={onReset ? 'Drag to resize · Double-click to reset' : undefined}
+      className={`relative ${cls} focus:outline-none focus:bg-[var(--border-strong)]`}
+      onMouseDown={onMouseDown}
+      onDoubleClick={onReset}
+      onKeyDown={onKeyDown}
+    >
       <div className={hit} />
     </div>
   )
