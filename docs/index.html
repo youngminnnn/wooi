@@ -839,12 +839,15 @@
 
       <p class="subtitle">
         <span class="en"
-          >Wooi stacks dependent work, keeps the chain valid through merges, and puts reviews on the
-          diff instead of in a transcript.</span
+          >Running agents side by side is the horizontal axis. Wooi adds the vertical one: dependent
+          work branches off the work it depends on, and the whole chain stays valid as parents
+          merge. Agents build those chains themselves through Wooi's built-in tools, and every
+          review lands on the diff instead of in a transcript.</span
         >
         <span class="ko"
-          >Wooi는 의존 작업을 스택으로 쌓고, 머지 뒤에도 체인을 유효하게 유지합니다. 리뷰는 채팅
-          로그 대신 diff 위에 남습니다.</span
+          >에이전트를 나란히 돌리는 건 가로축입니다. Wooi 는 세로축을 더합니다. 이어지는 작업은
+          자기가 딛고 선 작업에서 분기하고, 부모가 병합돼도 체인 전체가 유효하게 남습니다. 그 체인은
+          에이전트가 내장 도구로 직접 쌓고, 리뷰는 채팅 로그가 아니라 diff 위에 붙습니다.</span
         >
       </p>
 
@@ -921,23 +924,12 @@
             </h3>
             <p>
               <span class="en"
-                >The whole app knows what a chain is, not just the branch you're standing on. Work
-                that builds on other work branches off it instead of off the default branch.
-                <strong>Restack</strong> rebases onto the latest parent; when a parent merges, a
-                <strong>merge cascade</strong> retargets each child PR to the grandparent and
-                rebases the children onto it; a PR that drifts onto the wrong base gets flagged
-                instead of silently accepted. Wooi reads GitHub's stack object when available, falls
-                back to the PR base chain, and reviews every layer together before carrying the
-                stack through restack and merge.</span
+                >Build dependent work as a PR stack. Wooi imports stacks from GitHub, reviews every
+                layer together, and keeps the chain valid through restacks and merges.</span
               >
               <span class="ko"
-                >지금 서 있는 브랜치뿐 아니라 앱 전체가 "체인"을 압니다. 앞선 작업 위에서 이어지는
-                작업은 기본 브랜치가 아니라 그 작업의 브랜치에서 분기합니다.
-                <strong>Restack</strong> 은 최신 부모 위로 rebase 합니다. 부모가 병합되면
-                <strong>병합 캐스케이드</strong>가 자식 PR 의 base 를 조부모로 옮기고 자식들을 그
-                위로 rebase 합니다. base가 어긋난 PR은 조용히 넘어가지 않고 알려 줍니다. GitHub 스택
-                객체가 있으면 먼저 읽습니다. 없으면 PR의 base 체인으로 복원합니다. 모든 레이어를
-                함께 리뷰한 뒤 restack과 병합까지 이어 갑니다.</span
+                >의존 작업을 PR 스택으로 쌓습니다. GitHub 스택을 가져와 모든 레이어를 함께 리뷰하고,
+                restack과 병합 뒤에도 체인을 유효하게 유지합니다.</span
               >
             </p>
           </div>
@@ -949,22 +941,14 @@
             </h3>
             <p>
               <span class="en"
-                >Every session gets a built-in MCP server. <code>check_related_work</code> shows
-                which files the other workspaces are touching <em>before</em> an agent starts,
-                <code>create_workspace</code> / <code>create_stacked_workspace</code> split a task
-                into a chain of reviewable PRs, and <code>report_to_parent</code> /
-                <code>notify_child</code> carry results along that chain. An agent can also ask to
-                form a team or message another workspace under the receiver's policy. Files, diffs,
-                and transcripts do not cross that boundary.</span
+                >Built-in tools let agents split work, build stacks, form teams, and message other
+                workspaces. Permission and receive policies keep files, diffs, and transcripts
+                inside their workspace.</span
               >
               <span class="ko"
-                >모든 세션에 내장 MCP 서버가 붙습니다. <code>check_related_work</code> 로 다른
-                워크스페이스가 건드리는 파일을 <em>시작하기 전에</em> 확인합니다.
-                <code>create_workspace</code>·<code>create_stacked_workspace</code> 로 작업을 리뷰
-                가능한 PR 체인으로 쪼개고, <code>report_to_parent</code>·<code>notify_child</code>
-                로 결과를 체인을 따라 주고받습니다. 필요하면 에이전트 팀으로 바꾸거나 다른
-                워크스페이스에 메시지를 보낼 수도 있습니다. 수신 여부는 받는 쪽의 정책이 정하며
-                파일·diff·대화 기록은 경계를 넘지 않습니다.</span
+                >내장 도구로 작업을 나누고 스택을 쌓으며, 팀을 꾸리거나 다른 워크스페이스에 메시지를
+                보냅니다. 권한·수신 정책이 파일과 diff, 대화 기록이 워크스페이스 밖으로 나가지 않게
+                막습니다.</span
               >
             </p>
           </div>
@@ -976,22 +960,14 @@
             </h3>
             <p>
               <span class="en"
-                >Every agent can review a PR now; what's missing is somewhere to work the result. A
-                Wooi review is its own entity with its own worktree. Findings are anchored to diff
-                lines with a severity badge — edit, discard, post one or post the batch. Files carry
-                a <strong>viewed</strong> mark that auto-clears when a new commit changes them,
-                replies are polled so you can follow up, and verdicts are guarded. Stacked reviews
-                read every layer in one session; workspace diff comments carry an exact code
+                >Each review has its own worktree, with findings anchored to diff lines. Stack
+                reviews read every layer together, while workspace comments send the exact code
                 location back to the agent.</span
               >
               <span class="ko"
-                >PR 리뷰는 이제 어떤 에이전트든 합니다. 없는 건 그 결과를 다룰 자리입니다. Wooi 의
-                리뷰는 전용 worktree 를 가진 독립 엔티티입니다. 지적은 심각도 배지와 함께 diff 줄에
-                앵커됩니다. 고치고 버리고 낱개로든 한꺼번에든 게시합니다. 파일의
-                <strong>봤음</strong> 표시는 새 커밋이 그 파일을 바꾸면 저절로 풀립니다. 답글은
-                주기적으로 가져와 이어서 물어볼 수 있고, 판정에는 가드가 있습니다. 스택 리뷰는 모든
-                레이어를 한 세션에서 읽으며, 워크스페이스 diff 코멘트는 정확한 코드 위치를
-                에이전트에게 돌려보냅니다.</span
+                >리뷰마다 전용 worktree가 있고 지적은 diff 줄에 붙습니다. 스택 리뷰는 모든 레이어를
+                함께 읽으며, 워크스페이스 코멘트는 정확한 코드 위치를 에이전트에게
+                돌려보냅니다.</span
               >
             </p>
           </div>
@@ -1003,19 +979,13 @@
             </h3>
             <p>
               <span class="en"
-                >Claude Code and OpenAI Codex, each supported down to its own controls rather than
-                reduced to a lowest common denominator: <code>/rewind</code> and
-                <code>/btw</code> where the backend has them, per-backend permission modes,
-                reasoning effort and fast mode, account rate limits normalized into one readable
-                status line, your own MCP servers inherited from your CLI config, and
-                mid-conversation switching with the existing context handed to the new agent.</span
+                >Wooi exposes each backend's own models, permissions, effort, fast mode, rate
+                limits, and MCP servers. Switch between Claude Code and Codex mid-conversation with
+                the existing context carried over.</span
               >
               <span class="ko"
-                >Claude Code 와 OpenAI Codex 를 최소 공통분모로 합치지 않고 각자의 조작 방식까지
-                따라갑니다. 백엔드가 지원할 때의 <code>/rewind</code>·<code>/btw</code>, 백엔드별
-                권한 모드, reasoning effort 와 fast mode, 상태줄 하나로 정규화한 계정 레이트리밋,
-                사용자가 CLI에 설정해 둔 MCP 서버 승계, 기존 맥락을 넘기는 대화 중 에이전트 교체까지
-                지원합니다.</span
+                >각 백엔드의 모델·권한·effort·fast mode·레이트리밋·MCP 서버를 그대로 살립니다. 대화
+                도중 Claude Code와 Codex를 바꿔도 기존 맥락이 이어집니다.</span
               >
             </p>
           </div>
@@ -1027,16 +997,14 @@
             </h3>
             <p>
               <span class="en"
-                >No telemetry and no servers of its own — settings and transcripts stay on your
-                machine. Updates can wait for <strong>"restart when work finishes"</strong> instead
-                of killing a running turn. Ignored-but-needed files like <code>.env</code> are
-                carried into every new worktree, and sessions resume across restarts.</span
+                >No telemetry or servers of its own: settings and transcripts stay local. Updates
+                wait for active work, ignored files carry into new worktrees, and sessions survive
+                restarts.</span
               >
               <span class="ko"
-                >텔레메트리도, 자체 서버도 없습니다. 설정과 대화 기록은 내 컴퓨터에만 남습니다.
-                업데이트는 돌아가는 턴을 끊지 않고 <strong>"작업이 다 끝나면 재시작"</strong> 을
-                기다릴 수 있습니다. <code>.env</code> 처럼 git 이 추적하지 않지만 꼭 필요한 파일은
-                새 worktree 마다 전달됩니다. 세션은 앱을 껐다 켜도 복원됩니다.</span
+                >텔레메트리와 자체 서버가 없어 설정·대화 기록은 로컬에 남습니다. 업데이트는 작업이
+                끝날 때까지 기다립니다. 필요한 무시 파일은 새 worktree로 전달되고, 세션은 재시작
+                뒤에도 이어집니다.</span
               >
             </p>
           </div>
