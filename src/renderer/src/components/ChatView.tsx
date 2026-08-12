@@ -75,6 +75,18 @@ const PR_STYLE: Record<PrState, { Icon: LucideIcon; iconClass: string; badgeClas
     badgeClass:
       'border-[var(--attention-500)]/30 bg-[var(--attention-500)]/10 text-[var(--attention-200)] hover:border-[var(--attention-500)]/60'
   },
+  ci_pending: {
+    Icon: Clock,
+    iconClass: 'text-[var(--warning-400)]',
+    badgeClass:
+      'border-[var(--warning-500)]/30 bg-[var(--warning-500)]/10 text-[var(--warning-200)] hover:border-[var(--warning-500)]/60'
+  },
+  ci_failed: {
+    Icon: MessageSquareWarning,
+    iconClass: 'text-[var(--danger-400)]',
+    badgeClass:
+      'border-[var(--danger-500)]/30 bg-[var(--danger-500)]/10 text-[var(--danger-200)] hover:border-[var(--danger-500)]/60'
+  },
   approved: {
     Icon: CircleCheck,
     iconClass: 'text-[var(--success-400)]',
