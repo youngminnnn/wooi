@@ -40,7 +40,21 @@ jobs:
           node-version: '24'
           cache: 'npm'
 
-      - run: npm ci
+      # Electron 바이너리는 GitHub Releases 에서 별도로 내려받는다. 일시적인 CDN/네트워크 오류가
+      # 나면 npm 패키지 설치 전체가 실패하므로 깨끗한 설치를 몇 번 재시도한다. postinstall 이
+      # 다운로드 실패를 정확히 반환해야 테스트에서 뒤늦게 연쇄 실패하지 않는다.
+      - name: Install dependencies
+        run: |
+          for attempt in 1 2 3; do
+            if npm ci; then
+              exit 0
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              exit 1
+            fi
+            echo "npm ci failed (attempt $attempt/3); retrying in 5 seconds..."
+            sleep 5
+          done
 
       - name: Typecheck
         run: npm run typecheck

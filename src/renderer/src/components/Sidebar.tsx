@@ -596,7 +596,6 @@ function WorkspaceRow({
     if (!ok) return
     const { archiveScriptFailure } = await archiveWorkspace(workspace.id)
     reportArchiveScriptFailure(archiveScriptFailure)
-    if (active) void select(null)
   }
 
   // 팀 여부 — 행 마크와 그 툴팁이 쓴다.

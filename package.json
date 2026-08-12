@@ -29,7 +29,7 @@
     "demo": "node scripts/build-demo.mjs",
     "metrics": "node scripts/adoption-snapshot.mjs",
     "dist": "electron-vite build && electron-builder --mac --publish never",
-    "postinstall": "node node_modules/electron/install.js; chmod +x node_modules/node-pty/prebuilds/*/spawn-helper 2>/dev/null || true",
+    "postinstall": "node node_modules/electron/install.js && (chmod +x node_modules/node-pty/prebuilds/*/spawn-helper 2>/dev/null || true)",
     "prepare": "husky"
   },
   "lint-staged": {

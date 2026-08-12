@@ -211,7 +211,6 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
     if (!ok) return
     const { archiveScriptFailure } = await runArchiveWorkspace(workspace.id)
     reportArchiveScriptFailure(archiveScriptFailure)
-    void selectWorkspace(null)
   }
 
   // 우상단 '아카이브(⇧⌘⌫)' 단축키는 확인 다이얼로그와 displayName 이 필요하므로
