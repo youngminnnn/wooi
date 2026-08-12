@@ -72,6 +72,7 @@ import {
 } from '@shared/types'
 import { resolveToolPermission } from './agent/tools/permission'
 import { appendMemory } from './claude/memory'
+import { claudeConfigPath, mcpInventory } from './claude/mcp'
 import {
   archiveWorkspace,
   carryIntoNewWorktree,
@@ -90,6 +91,7 @@ import type {
   AppState,
   AppSettings,
   CarryFailure,
+  CodexMcpServer,
   CarryItem,
   CodexLoginMethod,
   CommandPanelKind,
@@ -1993,6 +1995,48 @@ export function registerIpc(ctx: IpcContext): void {
     if (patch.autoResumeAfterRateLimit === false) ctx.sessions.cancelAllRateLimitResumes()
     broadcastState()
   })
+
+  // ── MCP 서버 설정 ───────────────────────────────────────────────────────
+
+  // 승계 목록(~/.claude.json)은 앱 상태가 아니라 남의 파일이라 방송에 실을 수 없다 — 설정 화면이
+  // 열릴 때마다 읽는다. project 항목은 등록된 리포 경로로 걸러야 우리가 실제로 주입하는 것만 남는다.
+  ipcMain.handle(IPC.mcpInventory, () => mcpInventory(store.getState().repos.map((r) => r.path)))
+
+  // 승계 항목의 편집 경로는 "그 파일을 여세요" 하나뿐이다(우리는 쓰지 않는다).
+  ipcMain.handle(IPC.mcpOpenConfig, async () => {
+    const path = claudeConfigPath()
+    // 파일이 없으면 열 것도 없으므로 담긴 디렉터리를 연다 — 사용자가 거기서 새로 만들 수 있다.
+    await shell.openPath(existsSync(path) ? path : join(path, '..'))
+  })
+
+  // Codex 는 자기 설정 파일(~/.codex/config.toml)을 스스로 읽으므로 목록도 app-server 에
+  // 물어본다(TOML 파서를 들이지 않는 이유이기도 하다). 설치되지 않았으면 빈 목록으로 끊는다.
+  ipcMain.handle(
+    IPC.mcpCodexList,
+    async (): Promise<{ servers?: CodexMcpServer[]; error?: string }> => {
+      try {
+        return { servers: await ctx.sessions.configuredMcpServers('codex') }
+      } catch (err) {
+        return { error: err instanceof Error ? err.message : String(err) }
+      }
+    }
+  )
+
+  // 이 토글만은 사용자 파일에 직접 쓴다 — codex 에는 "우리 쪽에서 빼기" 에 해당하는 경로가 없다.
+  ipcMain.handle(
+    IPC.mcpCodexSetEnabled,
+    async (
+      _e,
+      serverName: string,
+      enabled: boolean
+    ): Promise<{ servers?: CodexMcpServer[]; error?: string }> => {
+      try {
+        return { servers: await ctx.sessions.setMcpServerEnabled('codex', serverName, enabled) }
+      } catch (err) {
+        return { error: err instanceof Error ? err.message : String(err) }
+      }
+    }
+  )
 
   // ── 외부 연동 인증 ──────────────────────────────────────────────────────
 

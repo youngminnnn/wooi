@@ -9,6 +9,7 @@ import type {
   EffortOptionInfo,
   EffortSetting,
   ImageAttachment,
+  CodexMcpServer,
   McpAction,
   McpServerInfo,
   ModelOption,
@@ -71,6 +72,15 @@ export interface AgentBackend {
   runCommand(workspaceId: string, kind: CommandPanelKind): Promise<CommandResult>
   /** /mcp 패널의 서버별 동작(capabilities.mcp). */
   mcpAction(workspaceId: string, serverName: string, action: McpAction): Promise<McpServerInfo[]>
+  /**
+   * 설정 화면용 — 이 백엔드가 **자기 설정 파일에** 들고 있는 MCP 서버 목록.
+   *
+   * 워크스페이스와 무관한 설치 단위 조회다. 그런 파일이 따로 없는 백엔드에는 이 메서드가 없다
+   * (Claude 는 ~/.claude.json 을 Wooi 가 직접 읽어 주입하므로 main/claude/mcp.ts 가 답한다).
+   */
+  listConfiguredMcpServers?(): Promise<CodexMcpServer[]>
+  /** 그 목록의 서버 하나를 켜고 끈다. 백엔드의 설정 파일에 기록된다. */
+  setMcpServerEnabled?(serverName: string, enabled: boolean): Promise<CodexMcpServer[]>
   /** /rewind — 체크포인트로 파일 되돌리기(capabilities.rewind). */
   rewindAction(workspaceId: string, userMessageId: string): Promise<RewindActionResult>
   /** reasoning effort / ultracode 오버라이드(capabilities.effort). */

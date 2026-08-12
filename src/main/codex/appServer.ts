@@ -2,6 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { WOOI_MCP_SERVER_NAME } from '../agent/tools/catalog'
 import { log } from '../logger'
+import { CODEX_MCP_SERVERS_ENV, type CodexStdioServer } from '@shared/types'
 import { RpcClient, type ServerRequestHandler } from './jsonrpc'
 import { RPC, type InitializeResult } from './wire'
 import { withWooiCodexConfig } from './config'
@@ -95,6 +96,44 @@ function toml(value: string): string {
   return JSON.stringify(value)
 }
 
+/**
+ * Wooi 스코프 MCP 서버 테이블. **메인이 계산해 env 로 내려 준 것**을 그대로 읽는다.
+ *
+ * 이 파일은 codex-host(유틸리티 프로세스)에서 돈다. 거기서는 `import { app } from 'electron'`
+ * 이 로드 시점에 throw 하므로(logger.ts 의 같은 주석) 설정 store 로 이어지는 import 를 하나라도
+ * 들이면 호스트가 로그 한 줄 없이 죽는다 — 겉으로는 "Codex host crashed" 로만 보인다.
+ * 그래서 shim 경로(WOOI_TOOL_SHIM)와 같은 방식으로 값만 받는다.
+ *
+ * 이름이 Wooi 내장 도구 서버와 겹치면 건너뛴다. 그 이름을 뺏기면 앱 조작 통로가 통째로
+ * 남의 서버로 바뀐다(Claude 쪽 session.ts 와 같은 판단).
+ */
+export function wooiMcpServerTable(): Record<string, CodexStdioServer> {
+  const raw = process.env[CODEX_MCP_SERVERS_ENV]
+  if (!raw) return {}
+  try {
+    const parsed = JSON.parse(raw) as Record<string, CodexStdioServer>
+    delete parsed[WOOI_MCP_SERVER_NAME]
+    return parsed
+  } catch (err) {
+    log.warn(`codex: could not read ${CODEX_MCP_SERVERS_ENV} — no Wooi MCP servers injected`, err)
+    return {}
+  }
+}
+
+/** 같은 테이블을 app-server spawn 용 `-c` 인자로 편다(사용자의 config.toml 은 건드리지 않는다). */
+function wooiMcpConfigArgs(): string[] {
+  return Object.entries(wooiMcpServerTable()).flatMap(([name, server]) => [
+    '-c',
+    `mcp_servers.${name}.command=${toml(server.command)}`,
+    '-c',
+    `mcp_servers.${name}.args=[${server.args.map(toml).join(', ')}]`,
+    ...Object.entries(server.env).flatMap(([key, value]) => [
+      '-c',
+      `mcp_servers.${name}.env.${key}=${toml(value)}`
+    ])
+  ])
+}
+
 export interface AppServerOptions {
   /** codex 실행 파일 절대 경로. */
   executable: string
@@ -124,9 +163,11 @@ export class AppServer {
   }
 
   private async start(): Promise<void> {
+    // Wooi 스코프 서버는 프로세스가 뜰 때 한 번 고정된다 — 설정을 바꾸면 앱을 다시 켜야
+    // 반영된다(app-server 는 모든 워크스페이스가 공유하는 단일 프로세스라 재기동이 곧 전면 중단).
     const child = spawn(
       this.opts.executable,
-      withWooiCodexConfig(['app-server', ...wooiToolArgs()]),
+      withWooiCodexConfig(['app-server', ...wooiToolArgs(), ...wooiMcpConfigArgs()]),
       {
         stdio: ['pipe', 'pipe', 'pipe'],
         // 사용자 셸에서 하이드레이트된 PATH·자격증명 환경을 그대로 물려준다.

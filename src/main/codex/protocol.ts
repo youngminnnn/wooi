@@ -76,6 +76,9 @@ export type CodexCommand =
   /** /context·/usage·/permissions 카드용 데이터 조회. */
   | { type: 'runCommand'; reqId: string; workspaceId: string; kind: CommandPanelKind }
   | { type: 'mcpAction'; reqId: string; serverName: string; action: McpAction }
+  // 설정 화면용 — 워크스페이스와 무관한 계정/설치 단위 조회라 workspaceId 를 싣지 않는다.
+  | { type: 'mcpConfigList'; reqId: string }
+  | { type: 'mcpSetEnabled'; reqId: string; serverName: string; enabled: boolean }
   /** /compact — 대화 압축을 시작한다(진행 상황은 일반 턴 알림으로 흐른다). */
   | { type: 'compact'; workspaceId: string; config: CodexConfig }
   | { type: 'review'; workspaceId: string; config: CodexConfig }

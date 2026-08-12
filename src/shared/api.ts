@@ -13,6 +13,7 @@ import type {
   ClaudeLoginEvent,
   CodexLoginEvent,
   CodexLoginMethod,
+  CodexMcpServer,
   CommandPanelKind,
   CommandResult,
   CreateWorkspaceArgs,
@@ -26,6 +27,7 @@ import type {
   GithubLoginEvent,
   ImageAttachment,
   McpAction,
+  McpInventory,
   McpServerInfo,
   ModelOption,
   MemoryScope,
@@ -493,6 +495,27 @@ export interface WooiApi {
 
   settings: {
     update(patch: Partial<AppSettings>): Promise<void>
+  }
+
+  /**
+   * MCP 서버 설정 화면용. Wooi 스코프 목록 자체는 AppSettings.mcp 에 있어 `settings.update` 로
+   * 고치고, 여기서는 우리가 소유하지 않는 ~/.claude.json 쪽만 다룬다.
+   */
+  mcp: {
+    /** ~/.claude.json 에서 승계되는 서버 목록(표시 전용). */
+    inventory(): Promise<McpInventory>
+    /** ~/.claude.json 을 기본 편집기로 연다(없으면 담긴 폴더를 연다). */
+    openConfig(): Promise<void>
+    /**
+     * `~/.codex/config.toml` 에 설정된 MCP 서버 목록. Codex 가 설치돼 있지 않으면 빈 목록이다.
+     * 호출하면 codex app-server 가 뜨므로, 렌더러는 Codex 로그인 상태일 때만 부른다.
+     */
+    codexServers(): Promise<{ servers?: CodexMcpServer[]; error?: string }>
+    /** 그 서버의 `enabled` 를 사용자 파일에 쓰고 갱신된 목록을 돌려준다. */
+    setCodexServerEnabled(
+      name: string,
+      enabled: boolean
+    ): Promise<{ servers?: CodexMcpServer[]; error?: string }>
   }
 
   auth: {

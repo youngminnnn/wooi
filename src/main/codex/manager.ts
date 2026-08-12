@@ -8,6 +8,7 @@ import {
   type UtilityProcess
 } from 'electron'
 import { getStore } from '../store'
+import { codexMcpServerEnv } from '../mcpSettings'
 import { getTranscripts } from '../transcripts'
 import { log } from '../logger'
 import { IPC, agentSettingsFor, normalizePermissionMode, workspaceDisplayName } from '@shared/types'
@@ -28,6 +29,7 @@ import type {
   CommandResult,
   EffortSetting,
   ImageAttachment,
+  CodexMcpServer,
   McpAction,
   McpServerInfo,
   ModelOption,
@@ -121,7 +123,10 @@ export class CodexSessionManager implements AgentBackend {
       env: {
         ...process.env,
         WOOI_USER_DATA: app.getPath('userData'),
-        WOOI_LOG_NAME: 'codex-host.log'
+        WOOI_LOG_NAME: 'codex-host.log',
+        // 호스트는 설정 store 를 읽을 수 없다(electron `app` 이 없다) — 메인이 계산해 넘긴다.
+        // 값이 fork 시점에 굳으므로 MCP 설정 변경은 앱 재시작 후 Codex 에 반영된다.
+        ...codexMcpServerEnv()
       }
     })
 
@@ -551,6 +556,21 @@ export class CodexSessionManager implements AgentBackend {
       reqId,
       serverName,
       action
+    }))
+  }
+
+  /** 설정 화면용 — `~/.codex/config.toml` 에 설정된 MCP 서버 목록(워크스페이스와 무관). */
+  listConfiguredMcpServers(): Promise<CodexMcpServer[]> {
+    return this.request<CodexMcpServer[]>((reqId) => ({ type: 'mcpConfigList', reqId }))
+  }
+
+  /** 그 서버의 `enabled` 를 사용자 파일에 쓰고, 갱신된 목록을 돌려준다. */
+  setMcpServerEnabled(serverName: string, enabled: boolean): Promise<CodexMcpServer[]> {
+    return this.request<CodexMcpServer[]>((reqId) => ({
+      type: 'mcpSetEnabled',
+      reqId,
+      serverName,
+      enabled
     }))
   }
 

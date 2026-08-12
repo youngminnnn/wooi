@@ -10,6 +10,7 @@ import {
   Info,
   Laptop,
   Link2,
+  Plug,
   RefreshCw,
   RotateCcw,
   Search,
@@ -22,6 +23,8 @@ import { hasNewVersion, scheduledRestartText, updateStatusText } from '../lib/up
 import { useNow } from '../lib/useNow'
 import { inputClass } from './Modal'
 import IntegrationsPanel from './IntegrationsPanel'
+import McpServersPage from './McpServersPage'
+import { PageFrame, SettingGroup, SettingRow, Switch } from './SettingsPrimitives'
 import { permissionModesFor } from '../lib/permission'
 import { effortOptionsFor } from '../lib/effort'
 import { useAvailableBackends, useBackend, useModels } from '../lib/backends'
@@ -48,7 +51,8 @@ import type {
   ThemePreference
 } from '@shared/types'
 
-type Page = 'general' | 'agents' | 'notifications' | 'integrations' | 'repositories' | 'about'
+type Page =
+  'general' | 'agents' | 'notifications' | 'integrations' | 'mcp' | 'repositories' | 'about'
 type SaveState = 'idle' | 'saving' | 'saved' | 'error'
 type NotificationPreset = 'recommended' | 'quiet' | 'everything' | 'custom'
 
@@ -84,6 +88,12 @@ const PAGES: { id: Page; label: string; icon: typeof Settings2; keywords: string
     label: 'Integrations',
     icon: Link2,
     keywords: 'login account github claude codex connect'
+  },
+  {
+    id: 'mcp',
+    label: 'MCP servers',
+    icon: Plug,
+    keywords: 'mcp model context protocol server tool stdio http sse claude.json'
   },
   {
     id: 'repositories',
@@ -269,6 +279,7 @@ export default function SettingsModal({
                 <IntegrationsPanel />
               </PageFrame>
             )}
+            {page === 'mcp' && <McpServersPage settings={settings} save={save} />}
             {page === 'repositories' && <RepositoriesPage repos={repos} onClose={onClose} />}
             {page === 'about' && <AboutPage onStartTour={onStartTour} />}
           </main>
@@ -288,88 +299,6 @@ function SaveIndicator({ state }: { state: SaveState }): React.JSX.Element | nul
       {state === 'saved' && <Check size={11} className="text-[var(--success-400)]" />}
       {state === 'saving' ? 'Saving…' : state === 'saved' ? 'Saved' : 'Could not save'}
     </span>
-  )
-}
-
-function PageFrame({
-  title,
-  description,
-  children
-}: {
-  title: string
-  description: string
-  children: React.ReactNode
-}): React.JSX.Element {
-  return (
-    <div className="mx-auto max-w-2xl">
-      <h2 className="text-xl font-semibold text-neutral-100">{title}</h2>
-      <p className="mt-1 mb-6 text-sm text-neutral-500">{description}</p>
-      <div className="space-y-6">{children}</div>
-    </div>
-  )
-}
-
-function SettingGroup({
-  title,
-  children
-}: {
-  title: string
-  children: React.ReactNode
-}): React.JSX.Element {
-  return (
-    <section className="overflow-hidden rounded-xl border border-[var(--border)]">
-      <h3 className="border-b border-[var(--border)] bg-[var(--bg-2)]/45 px-4 py-2.5 text-xs font-semibold uppercase tracking-wider text-neutral-500">
-        {title}
-      </h3>
-      <div className="divide-y divide-[var(--border)]">{children}</div>
-    </section>
-  )
-}
-
-function SettingRow({
-  title,
-  description,
-  children
-}: {
-  title: string
-  description?: string
-  children: React.ReactNode
-}): React.JSX.Element {
-  return (
-    <div className="flex items-center justify-between gap-6 px-4 py-3.5">
-      <div className="min-w-0">
-        <div className="text-sm font-medium text-neutral-200">{title}</div>
-        {description && (
-          <p className="mt-0.5 text-xs leading-relaxed text-neutral-600">{description}</p>
-        )}
-      </div>
-      <div className="shrink-0">{children}</div>
-    </div>
-  )
-}
-
-function Switch({
-  checked,
-  onChange,
-  label
-}: {
-  checked: boolean
-  onChange: (checked: boolean) => void
-  label: string
-}): React.JSX.Element {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      aria-label={label}
-      onClick={() => onChange(!checked)}
-      className={`relative h-5 w-9 rounded-full transition-colors ${checked ? 'bg-[var(--info-600)]' : 'bg-[var(--border-2)]'}`}
-    >
-      <span
-        className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${checked ? 'translate-x-4' : 'translate-x-0'}`}
-      />
-    </button>
   )
 }
 
