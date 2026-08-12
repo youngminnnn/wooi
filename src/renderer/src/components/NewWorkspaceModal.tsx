@@ -3,7 +3,6 @@ import { Copy, GitBranch } from 'lucide-react'
 import {
   FANOUT_MAX_SLOTS,
   FANOUT_MIN_SLOTS,
-  experimentsOf,
   fanoutSlotName,
   workspaceDisplayName
 } from '@shared/types'
@@ -60,16 +59,10 @@ export default function NewWorkspaceModal({
       ? agentBackend
       : available[0].id
 
-  // 멀티 에이전트는 **모드**다 — 어떤 종류를 쓸지 여기서 고르지 않는다. 켜 두면 대화에서
-  // "Codex 한테 시켜줘" 라고 말하는 것으로 종류가 정해진다. 시작값은 전역 기본 설정을 따른다.
-  const [multiAgent, setMultiAgent] = useState(() => app.settings.defaultMultiAgent === true)
-  // 에이전트가 둘 이상 있고, 고른 메인이 조율하는 쪽이 될 수 있을 때만 모드를 제안한다.
-  const showModePicker =
-    experimentsOf(app.settings).multiAgent &&
-    available.length > 1 &&
-    Boolean(available.find((b) => b.id === effectiveBackend)?.capabilities.delegate)
-  // 메인을 조율 불가 백엔드로 바꾸면 모드도 함께 꺼진 것으로 읽는다(체크는 남겨 두고 되돌아오면 살아난다).
-  const effectiveMultiAgent = multiAgent && showModePicker
+  // Solo/팀은 여기서 묻지 않는다. 팀은 워크스페이스의 **종류**가 아니라 언제든 켤 수 있는
+  // 능력이고, 무엇을 위임할 만한지는 만드는 순간이 아니라 대화 중에 드러난다 — 가장 모르는
+  // 때에 고르게 하는 셈이라 그 선택지를 뺐다. 새 워크스페이스는 언제나 Solo 로 시작하고,
+  // 전환은 헤더 배지·사이드바 메뉴·switch_to_agent_team 이 맡는다.
 
   // ── fan-out ────────────────────────────────────────────────────────────
   // 스택 자식은 부모 브랜치 위에 쌓이는 수직 관계라 후보를 여럿 둘 자리가 없다. 그래서 스택
@@ -93,15 +86,11 @@ export default function NewWorkspaceModal({
     void useStore.getState().createWorkspace(
       repoId,
       {
-        // 자동 설정에서는 이름을 비워 main 의 고유 이름 생성기를 그대로 사용한다. 이 모달은
-        // 멀티 에이전트 모드 선택 때문에 열릴 수도 있으므로, 모달 표시 자체가 수동 네이밍을
-        // 뜻하지는 않는다.
+        // 자동 설정에서는 이름을 비워 main 의 고유 이름 생성기를 그대로 사용한다.
         ...(manualSetup ? { name: trimmed } : {}),
         parentWorkspaceId,
-        agentBackend: effectiveBackend,
-        // 모드를 물어봤다면 **끈 것도 명시해서** 보낸다. 생략하면 main 이 전역 기본값으로
-        // 폴백하므로, 기본이 멀티일 때 사용자가 고른 "Single agent" 가 조용히 뒤집힌다.
-        ...(showModePicker ? { multiAgent: effectiveMultiAgent } : {})
+        agentBackend: effectiveBackend
+        // multiAgent 는 넘기지 않는다 — main 이 Solo 로 만든다.
       },
       manualSetup ? trimmed : undefined
     )
@@ -111,8 +100,7 @@ export default function NewWorkspaceModal({
   const createFanout = (): void => {
     if (!prompt.trim()) return
     const slots: FanoutSlot[] = Array.from({ length: slotCount }, (_, i) => ({
-      agentBackend: backendForSlot(i),
-      ...(showModePicker ? { multiAgent: effectiveMultiAgent } : {})
+      agentBackend: backendForSlot(i)
     }))
     void useStore
       .getState()
@@ -276,47 +264,10 @@ export default function NewWorkspaceModal({
           </div>
         )}
 
-        {showModePicker && (
-          <div>
-            <label className={labelClass}>Work mode</label>
-            <div className="flex gap-1.5">
-              {[
-                { on: false, label: 'Solo', hint: 'One agent does the work.' },
-                {
-                  on: true,
-                  label: 'Agent team',
-                  hint: 'The lead agent can delegate tasks.'
-                }
-              ].map((option) => (
-                <button
-                  key={option.label}
-                  type="button"
-                  onClick={() => setMultiAgent(option.on)}
-                  className={
-                    'flex-1 text-left text-sm px-3 py-2 rounded-lg border transition-colors ' +
-                    (effectiveMultiAgent === option.on
-                      ? 'border-[var(--info-500)] bg-[var(--info-600)]/15 text-neutral-100'
-                      : 'border-[var(--border)] text-neutral-300 hover:bg-[var(--surface-2)]')
-                  }
-                >
-                  <div className="font-medium">{option.label}</div>
-                  <div className="mt-0.5 text-xs text-neutral-500">{option.hint}</div>
-                </button>
-              ))}
-            </div>
-            {effectiveMultiAgent && (
-              <p className="mt-1.5 text-xs text-neutral-600">
-                Teammates are selected from your available agents. You can also ask directly in
-                chat, for example: &ldquo;have Codex review this&rdquo;.
-              </p>
-            )}
-          </div>
-        )}
-
         {/* fan-out 은 후보마다 에이전트를 따로 고르므로 단일 피커를 겹쳐 보여 주지 않는다. */}
         {showPicker && !fanout && (
           <div>
-            <label className={labelClass}>{effectiveMultiAgent ? 'Lead agent' : 'Agent'}</label>
+            <label className={labelClass}>Agent</label>
             <div className="flex gap-1.5">
               {available.map((b) => (
                 <button
@@ -339,9 +290,7 @@ export default function NewWorkspaceModal({
               ))}
             </div>
             <p className="mt-1.5 text-xs text-neutral-600">
-              {effectiveMultiAgent
-                ? 'The agent you talk to. It stays fixed for the life of the workspace.'
-                : 'A workspace stays on the agent it was created with.'}
+              A workspace stays on the agent it was created with.
             </p>
           </div>
         )}

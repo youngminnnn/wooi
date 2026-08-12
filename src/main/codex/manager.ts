@@ -13,7 +13,7 @@ import { getTranscripts } from '../transcripts'
 import { log } from '../logger'
 import { IPC, agentSettingsFor, normalizePermissionMode, workspaceDisplayName } from '@shared/types'
 import { CODEX_META, type AgentBackend } from '../agent/backend'
-import { agentTeamEligibility, delegateBackendsFor } from '../agent/multiAgent'
+import { canLeadAgentTeam, delegateBackendsFor } from '../agent/multiAgent'
 import { delegateThreadInstructions, soloThreadInstructions } from '../subagent/catalog'
 import { abortAllSubAgents, abortSubAgents } from '../agent/tools/subagent'
 import { durationLabel } from './rateLimits'
@@ -260,7 +260,7 @@ export class CodexSessionManager implements AgentBackend {
    */
   private delegateBackendsOf(workspaceId: string): AgentBackendId[] {
     const ws = this.getWorkspace(workspaceId)
-    return ws ? delegateBackendsFor(ws, getStore().getState().settings) : []
+    return ws ? delegateBackendsFor(ws) : []
   }
 
   private configFor(ws: Workspace): CodexConfig {
@@ -268,7 +268,7 @@ export class CodexSessionManager implements AgentBackend {
     const defaults = agentSettingsFor(settings, CODEX_META.id)
     // 위임이 닫혀 있으면 소켓을 띄우지도 않는다 — 단일 에이전트 사용자에게 유닉스 소켓이 하나
     // 생길 이유가 없다(socketPath() 가 첫 호출에서 리슨을 시작한다).
-    const backends = delegateBackendsFor(ws, settings)
+    const backends = delegateBackendsFor(ws)
     return {
       cwd: ws.worktreePath,
       model: ws.model ?? defaults.model,
@@ -283,7 +283,7 @@ export class CodexSessionManager implements AgentBackend {
       // 모델의 목록에 안 뜬다 — [[subagent/catalog]] 의 실측). 팀으로 바꿀 수 있을 때만 안내한다.
       delegateInstructions: backends.length
         ? delegateThreadInstructions(backends)
-        : agentTeamEligibility(ws, settings).ok
+        : canLeadAgentTeam(ws)
           ? soloThreadInstructions()
           : null
     }

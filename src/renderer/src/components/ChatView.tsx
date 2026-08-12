@@ -318,8 +318,8 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
                 className="shrink-0 flex items-center gap-1 rounded px-1.5 py-0.5 bg-[var(--surface-2)] text-neutral-400 hover:text-neutral-200 hover:bg-[var(--surface-3)]"
                 title={
                   multiAgent.active
-                    ? `Agent team led by ${agentLabel}. Click to switch to Solo; applies from the next message.`
-                    : 'Solo workspace. Click to let the lead agent delegate tasks; applies from the next message.'
+                    ? `Agent team led by ${agentLabel}. Click to turn delegation off; applies from the next message.`
+                    : `Solo workspace. Click to let ${agentLabel} delegate to other agents; applies from the next message.`
                 }
               >
                 <Users size={10} className={multiAgent.active ? 'multi-agent-mark' : ''} />

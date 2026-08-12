@@ -1,5 +1,4 @@
-import { experimentsOf, type AgentBackendId, type Workspace } from '@shared/types'
-import { useStore } from '../store'
+import { type AgentBackendId, type Workspace } from '@shared/types'
 import { useAvailableBackends } from './backends'
 
 /**
@@ -12,8 +11,8 @@ import { useAvailableBackends } from './backends'
  */
 export interface MultiAgentState {
   /**
-   * 이 워크스페이스에서 모드를 **쓸 수 있는가**. 실험 스위치가 켜져 있고, 에이전트가 둘 이상
-   * 있고, 메인 백엔드가 조율하는 쪽이 될 수 있을 때만 참이다. 켜고 끄는 UI 를 노출할지 가른다.
+   * 이 워크스페이스에서 모드를 **쓸 수 있는가**. 에이전트가 둘 이상 있고, 메인 백엔드가 조율하는
+   * 쪽이 될 수 있을 때만 참이다. 켜고 끄는 UI 를 노출할지 가른다.
    */
   canUse: boolean
   /** 지금 **실제로** 켜져 있는가. 배지·표시는 이 값만 본다. */
@@ -28,14 +27,13 @@ export interface MultiAgentState {
 }
 
 export function useMultiAgent(workspace: Workspace): MultiAgentState {
-  const experiment = useStore((s) => experimentsOf(s.app?.settings).multiAgent)
   const available = useAvailableBackends()
   // 위임 도구를 꽂을 경로가 있는 백엔드에서만(capabilities.delegate). 없으면 모드를 켜 봤자
   // 아무 일도 일어나지 않으므로 제안조차 하지 않는다.
   const canCoordinate = Boolean(
     available.find((b) => b.id === workspace.agentBackend)?.capabilities.delegate
   )
-  const canUse = experiment && canCoordinate && available.length > 1
+  const canUse = canCoordinate && available.length > 1
   const active = canUse && workspace.multiAgent === true
   return {
     canUse,

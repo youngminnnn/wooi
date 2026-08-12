@@ -480,7 +480,7 @@ export interface AgentCapabilities {
   /** /add-dir — worktree 밖 디렉토리를 작업 루트로 더 열어 줄 수 있는지. */
   addDirectory: boolean
   /**
-   * 이 백엔드가 **메인일 때** 다른 종류의 에이전트에게 작업을 위임할 수 있는지(실험 기능).
+   * 이 백엔드가 **메인일 때** 다른 종류의 에이전트에게 작업을 위임할 수 있는지.
    *
    * 위임 도구는 MCP 로 주입하는데, 그 배관이 백엔드마다 다르다 — Claude 는 SDK 의 in-process
    * 서버를 그대로 꽂을 수 있지만, Codex 는 app-server 스레드에 MCP 설정을 주입하는 별도 경로가
@@ -882,39 +882,6 @@ export function agentSettingsFor(settings: AppSettings, id: AgentBackendId): Age
   return settings.agents?.[id] ?? DEFAULT_AGENT_SETTINGS
 }
 
-/**
- * 실험 기능 스위치를 꺼낸다. 항목이 통째로 없거나 일부만 저장된 설정(기능이 나중에 추가됨)에서도
- * 빠진 스위치는 꺼진 것으로 읽는다 — 실험 기능이 사고로 켜지는 일은 없어야 한다.
- */
-export function experimentsOf(settings: AppSettings | null | undefined): ExperimentSettings {
-  return { ...DEFAULT_EXPERIMENTS, ...(settings?.experiments ?? {}) }
-}
-
-/**
- * 아직 정식 기능이 아닌 것들의 스위치. 기본값은 전부 꺼짐이고, 켠 사용자에게만 UI 가 열린다.
- *
- * 정식 승격 시에는 이 항목을 지우고 해당 기능을 상시 노출로 바꾼다 — 그때 저장된 값은 기본값
- * 병합으로 조용히 사라지므로 마이그레이션이 필요 없다.
- */
-export interface ExperimentSettings {
-  /**
-   * 멀티 에이전트 위임(메인과 다른 종류의 에이전트에게 작업을 넘김).
-   * 켜면 워크스페이스 생성 시 위임할 백엔드를 고를 수 있다.
-   */
-  multiAgent: boolean
-}
-
-/**
- * 실험 기능의 기본 상태.
- *
- * multiAgent 를 켜 두는 것은 "안정적이다" 라는 뜻이 아니라 **보이게 두겠다**는 뜻이다 — 에이전트를
- * 둘 이상 쓰는 사용자만 선택지를 보게 되고(피커·메뉴 모두 available >= 2 로 가드), 워크스페이스
- * 단위로 다시 켜야 실제로 열린다. 즉 기본 동작은 그대로 단일 에이전트다.
- */
-export const DEFAULT_EXPERIMENTS: ExperimentSettings = {
-  multiAgent: true
-}
-
 // ── MCP 서버 (Wooi 스코프) ────────────────────────────────────────────────
 //
 // 사용자가 `claude` CLI 로 등록한 서버는 ~/.claude.json 에 있고, Wooi 는 그 파일을 **읽기만**
@@ -1032,19 +999,11 @@ export interface AppSettings {
    * 의미가 있으며, 하나뿐이면 그 하나로 자동 해석된다.
    */
   defaultAgentBackend: AgentBackendId
-  /**
-   * 새 워크스페이스를 멀티 에이전트 모드로 만들지(실험 기능).
-   *
-   * `defaultAgentBackend` 와 **직교한다** — 멀티 에이전트 워크스페이스도 대화 상대인 메인
-   * 에이전트가 하나 필요하고, 그건 여전히 위 값이다. 설정 UI 는 둘을 "Multi-agent · Claude Code"
-   * 처럼 한 선택지로 합쳐 보여 주지만, 저장은 나눠서 한다.
-   */
-  defaultMultiAgent?: boolean
-  /**
-   * 실험 기능 스위치. 저장된 설정에 없으면(구버전에서 올라옴) 기본값 병합으로 채워진다.
-   * 읽을 때는 항상 `experimentsOf(settings)` 를 거쳐 누락에 대비한다.
-   */
-  experiments?: ExperimentSettings
+  //
+  // 팀으로 시작할지의 전역 기본값은 **두지 않는다**. 팀은 워크스페이스의 종류가 아니라 언제든
+  // 켤 수 있는 능력이고, 무엇을 위임할 만한지는 만들기 전이 아니라 대화 중에 드러난다 — 미리
+  // 고르게 하는 자리를 만들면 사용자가 가장 모르는 때에 고르게 하는 셈이다. 새 워크스페이스는
+  // 언제나 Solo 로 시작하고, 켜는 것은 헤더 배지·사이드바 메뉴·`switch_to_agent_team` 이 맡는다.
   /** 백엔드별 전역 기본값(모델·effort·권한 모드). */
   agents: Record<AgentBackendId, AgentSettings>
   /**
@@ -2918,8 +2877,8 @@ export interface CreateWorkspaceArgs {
    */
   agentBackend?: AgentBackendId
   /**
-   * 멀티 에이전트 워크스페이스로 만들지. 생략하면 평범한 단일 에이전트 워크스페이스다.
-   * 실험 기능이 꺼져 있으면 저장은 되지만 세션에 반영되지 않는다(delegateBackendsFor 가 접는다).
+   * 팀 워크스페이스로 만들지. 생략하면 Solo 다 — 새 워크스페이스의 기본은 언제나 Solo 이고,
+   * 이것을 켜서 넘기는 경로는 fan-out 슬롯뿐이다(사람이 후보별로 골라 둔 값).
    */
   multiAgent?: boolean
 }

@@ -1,11 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { AlertTriangle } from 'lucide-react'
-import {
-  CURRENT_TERMS_VERSION,
-  experimentsOf,
-  hasAnyAgent,
-  orderVisibleWorkspaces
-} from '@shared/types'
+import { CURRENT_TERMS_VERSION, hasAnyAgent, orderVisibleWorkspaces } from '@shared/types'
 import type { AgentBackendId } from '@shared/types'
 import { DEFAULT_SIDEBAR_WIDTH, useStore } from './store'
 import { nextPermissionMode } from './lib/permission'
@@ -13,7 +8,6 @@ import { OPEN_REPO_SETTINGS_EVENT, openRepoSettings } from './lib/repoSettings'
 import { OPEN_FILE_QUICK_OPEN_EVENT, openFileQuickOpen } from './lib/fileViewer'
 import { openNewWorkspaceMenu } from './lib/newWorkspaceMenu'
 import { applyTheme } from './lib/theme'
-import { useAvailableBackends } from './lib/backends'
 import { finishSwitchHint } from './lib/uiFlags'
 import TitleBar from './components/TitleBar'
 import { UpdateBanner } from './components/UpdateBanner'
@@ -49,7 +43,6 @@ export default function App(): React.JSX.Element {
   const ready = useStore((s) => s.ready)
   const init = useStore((s) => s.init)
   const app = useStore((s) => s.app)
-  const availableBackends = useAvailableBackends()
   const selectedId = useStore((s) => s.selectedWorkspaceId)
   const authStatus = useStore((s) => s.authStatus)
   const rightWidth = useStore((s) => s.rightWidth)
@@ -518,21 +511,15 @@ export default function App(): React.JSX.Element {
   const needsOnboarding = !app.settings.onboarded
   const needsDefaults = !app.settings.pickedDefaults
 
-  // 새 workspace 만들기: 수동 설정이거나 팀 모드를 쓸 수 있으면 생성 모달을 연다. 팀 모드가
-  // 숨은 사후 설정이 되지 않게 모든 적격 사용자가 생성 시점에 Solo/Agent team 을 보게 한다.
+  // 새 workspace 만들기: 수동 설정일 때만 생성 모달을 연다. Solo/팀은 여기서 묻지 않는다 —
+  // 새 워크스페이스는 언제나 Solo 로 시작하고, 무엇을 위임할 만한지는 만드는 순간이 아니라
+  // 대화 중에 드러난다. 켜는 길은 그때 헤더 배지·사이드바 메뉴·switch_to_agent_team 으로 열려 있다.
   // 자동 생성은 사이드바에 스피너 행을 바로 띄우고 worktree 준비는 백그라운드로 진행한다.
   //
   // agentBackend 는 사이드바의 에이전트 선택에서 온다(에이전트가 둘 이상일 때만). 생략하면
   // main 이 전역 기본 백엔드를 쓴다 — ⌘N 은 그래서 묻지 않고 바로 만든다.
   const handleNewWorkspace = (repoId: string, agentBackend?: AgentBackendId): void => {
-    const selectedBackend = agentBackend ?? app.settings.defaultAgentBackend
-    const teamChoiceAvailable =
-      experimentsOf(app.settings).multiAgent &&
-      availableBackends.length > 1 &&
-      Boolean(
-        availableBackends.find((backend) => backend.id === selectedBackend)?.capabilities.delegate
-      )
-    if (app.settings.manualWorkspaceSetup || teamChoiceAvailable) {
+    if (app.settings.manualWorkspaceSetup) {
       setNewWs({ repoId, parentWorkspaceId: null, agentBackend })
       return
     }

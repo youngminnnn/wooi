@@ -302,9 +302,8 @@ the same conversation, which means the tools are available from the following tu
 tool result says so; an agent that calls it should end its turn and delegate afterwards.
 
 Calling it in a workspace that is already a team changes nothing and does not reopen the
-session. The call fails when multi-agent mode is turned off in Settings → Experiments, or
-when the workspace's main agent cannot coordinate a team, because in both cases the switch
-would produce a team with no usable teammates.
+session. The call fails when the workspace's main agent cannot coordinate a team, because
+the switch would produce a team with no usable teammates.
 
 ## Optional subagent tools
 
