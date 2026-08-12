@@ -407,23 +407,32 @@ export class ClaudeSession {
     return this.q
   }
 
-  /** 사용자 메시지를 보낸다. 첫 메시지면 query 를 시작한다. */
-  send(text: string, images?: ImageAttachment[]): void {
+  /**
+   * 사용자 메시지를 보낸다. 첫 메시지면 query 를 시작한다.
+   *
+   * `silent` 는 사용자가 쓴 말이 아니라 Wooi 가 대신 넣는 맥락일 때 쓴다([[claude/protocol]]).
+   * 모델에게는 똑같이 가지만 기록에는 남기지 않는다 — 인수인계 프롬프트는 지난 대화를 통째로
+   * 다시 적은 것이라, 남기면 같은 대화가 화면에 두 번 쌓인다.
+   */
+  send(text: string, images?: ImageAttachment[], opts?: { silent?: boolean }): void {
     const imgs = images ?? []
-    const item: ChatItem = {
-      // 큐에 쌓인 N개를 한 번에 보내면 같은 ms 안에서 여러 번 호출된다 — 시간 기반 id 는
-      // 충돌해서 upsert(last-wins) 로 합쳐지고 마지막 메시지만 화면에 남는다. uuid 로 보장한다.
-      id: `user:${randomUUID()}`,
-      type: 'user',
-      text,
-      ts: Date.now(),
-      // base64 본문은 트랜스크립트에 남기지 않고(무겁다) 이름/형식만 칩으로 표시.
-      ...(imgs.length
-        ? { attachments: imgs.map((i) => ({ name: i.name, mediaType: i.mediaType })) }
-        : {})
+    const silent = opts?.silent ?? false
+    if (!silent) {
+      const item: ChatItem = {
+        // 큐에 쌓인 N개를 한 번에 보내면 같은 ms 안에서 여러 번 호출된다 — 시간 기반 id 는
+        // 충돌해서 upsert(last-wins) 로 합쳐지고 마지막 메시지만 화면에 남는다. uuid 로 보장한다.
+        id: `user:${randomUUID()}`,
+        type: 'user',
+        text,
+        ts: Date.now(),
+        // base64 본문은 트랜스크립트에 남기지 않고(무겁다) 이름/형식만 칩으로 표시.
+        ...(imgs.length
+          ? { attachments: imgs.map((i) => ({ name: i.name, mediaType: i.mediaType })) }
+          : {})
+      }
+      this.deps.persist(item)
+      this.deps.emit({ type: 'item', item })
     }
-    this.deps.persist(item)
-    this.deps.emit({ type: 'item', item })
     // 새 사용자 시도다 — 턴 상태와 자동 재시도 예산, 중단 표시를 리셋한다.
     this.beginTurn()
     this.autoRetried = false
@@ -432,7 +441,9 @@ export class ClaudeSession {
 
     // /rewind 체크포인트 라벨용으로 이 메시지의 첫 줄을 큐에 둔다 — SDK 가 이 사용자 메시지를
     // echo 하며 부여하는 uuid 와 handleUser 에서 짝지어 체크포인트로 확정한다.
-    this.pendingUserTexts.push(firstLine(text || (imgs.length ? `${imgs.length} image(s)` : '')))
+    // silent 메시지는 되감을 지점이 아니므로 라벨을 넣지 않는다(그 echo 는 라벨 없이 지나간다).
+    if (!silent)
+      this.pendingUserTexts.push(firstLine(text || (imgs.length ? `${imgs.length} image(s)` : '')))
 
     // 이미지가 있으면 멀티모달 content 배열로(텍스트 블록 + base64 이미지 블록), 없으면 문자열.
     const content = imgs.length

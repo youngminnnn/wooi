@@ -137,14 +137,15 @@ export interface WooiApi {
      * 없으면 이유를 담은 error 로 돌아온다. 성공하면 모델·effort·fast mode 오버라이드는 새 백엔드
      * 기준으로 초기화된다(백엔드마다 값 자체가 다르다).
      *
-     * 대화가 이미 시작된 워크스페이스라면 에이전트 쪽 맥락을 버리게 되므로
-     * ([[agentSwitchDiscardsContext]]) `discardContext: true` 로 확인 사실을 함께 보내야 한다.
-     * 없이 부르면 main 이 거절한다 — 화면이 낡아 경고 없이 눌린 교체를 그대로 실행하지 않기 위해서다.
+     * 대화가 이미 시작된 워크스페이스라면 지금까지의 대화를 새 에이전트에게 넘기는 턴이 한 번
+     * 돈다([[agentSwitchNeedsHandoff]]). 사용량이 드는 일이므로 `handoff: true` 로 확인 사실을
+     * 함께 보내야 하고, 없이 부르면 main 이 거절한다 — 화면이 낡아 경고 없이 눌린 교체가 그대로
+     * 청구되지 않게 한다.
      */
     setAgentBackend(
       workspaceId: string,
       agentBackend: AgentBackendId,
-      opts?: { discardContext?: boolean }
+      opts?: { handoff?: boolean }
     ): Promise<{ error?: string }>
     /** 워크스페이스별 알림 음소거를 설정한다. */
     setMuted(workspaceId: string, muted: boolean): Promise<void>

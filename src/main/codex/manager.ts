@@ -275,7 +275,12 @@ export class CodexSessionManager implements AgentBackend {
     this.send({ type: 'prewarm' })
   }
 
-  sendMessage(workspaceId: string, text: string, images?: ImageAttachment[]): void {
+  sendMessage(
+    workspaceId: string,
+    text: string,
+    images?: ImageAttachment[],
+    opts?: { silent?: boolean }
+  ): void {
     this.rateLimitResume.cancel(workspaceId)
     const ws = this.getWorkspace(workspaceId)
     if (!ws) return
@@ -300,7 +305,14 @@ export class CodexSessionManager implements AgentBackend {
       return
     }
 
-    this.send({ type: 'send', workspaceId, config: this.configFor(ws), text, images })
+    this.send({
+      type: 'send',
+      workspaceId,
+      config: this.configFor(ws),
+      text,
+      images,
+      silent: opts?.silent
+    })
   }
 
   private sendContinuation(workspaceId: string): void {

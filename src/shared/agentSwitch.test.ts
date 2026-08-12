@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { agentSwitchDiscardsContext, canSwitchAgentBackend } from './types'
+import { agentSwitchNeedsHandoff, canSwitchAgentBackend } from './types'
 import type { Workspace } from './types'
 
 const ws = (
@@ -16,7 +16,7 @@ describe('canSwitchAgentBackend', () => {
     expect(canSwitchAgentBackend(ws())).toBe(true)
   })
 
-  it('대화가 오간 뒤에도 바꿀 수 있다 — 대신 맥락을 버린다는 경고를 받는다', () => {
+  it('대화가 오간 뒤에도 바꿀 수 있다 — 대신 인수인계 비용을 경고받는다', () => {
     expect(canSwitchAgentBackend(ws({ sessionId: 'sess-1' }))).toBe(true)
   })
 
@@ -26,20 +26,20 @@ describe('canSwitchAgentBackend', () => {
   })
 })
 
-describe('agentSwitchDiscardsContext', () => {
-  it('아무것도 보내지 않았으면 버릴 맥락이 없다 — 경고 없이 바꾼다', () => {
-    expect(agentSwitchDiscardsContext(ws(), 0)).toBe(false)
+describe('agentSwitchNeedsHandoff', () => {
+  it('아무것도 보내지 않았으면 넘길 맥락이 없다 — 경고도 비용도 없이 바꾼다', () => {
+    expect(agentSwitchNeedsHandoff(ws(), 0)).toBe(false)
   })
 
-  it('대화가 한 줄이라도 있으면 새 에이전트는 그것을 못 본다', () => {
-    expect(agentSwitchDiscardsContext(ws(), 1)).toBe(true)
+  it('대화가 한 줄이라도 있으면 넘겨야 한다 — 새 에이전트는 세션을 물려받지 못한다', () => {
+    expect(agentSwitchNeedsHandoff(ws(), 1)).toBe(true)
   })
 
   it('세션이 열린 적 있으면(sessionId) 트랜스크립트가 비어 보여도 경고한다', () => {
-    expect(agentSwitchDiscardsContext(ws({ sessionId: 'sess-1' }), 0)).toBe(true)
+    expect(agentSwitchNeedsHandoff(ws({ sessionId: 'sess-1' }), 0)).toBe(true)
   })
 
   it('/clear 로 비운 워크스페이스는 다시 맨 처음과 같다(세션·기록이 모두 없다)', () => {
-    expect(agentSwitchDiscardsContext(ws({ sessionId: null }), 0)).toBe(false)
+    expect(agentSwitchNeedsHandoff(ws({ sessionId: null }), 0)).toBe(false)
   })
 })

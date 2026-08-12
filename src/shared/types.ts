@@ -680,9 +680,9 @@ export interface Workspace {
  *
  * 대화 도중이라도 바꿀 수 있다 — 에이전트가 잘못 걸린 걸 알아채는 시점은 대개 몇 턴 돌려 본
  * 뒤이고, 그때 "새 워크스페이스를 만들어 처음부터"만 남겨 두면 브랜치·워크트리·작업 중인 변경까지
- * 다 옮겨야 한다. 다만 공짜가 아니다: 지금까지의 맥락(sessionId)은 다른 CLI 의 것이라 이어지지
- * 않으므로 새 에이전트는 빈 맥락에서 시작한다([[agentSwitchDiscardsContext]] 가 그 구간을 가려
- * 경고를 띄운다).
+ * 다 옮겨야 한다. 맥락은 지난 대화를 새 세션에 다시 말해 주는 것으로 잇는다
+ * ([[shared/handoff]]) — 다만 그 한 번이 통째로 입력 토큰이라, [[agentSwitchNeedsHandoff]] 가
+ * 그 구간을 가려 사용량 경고를 띄운다.
  *
  * 막는 경우는 둘뿐이다. 턴이 도는 중에 바꾸면 지금 답하고 있는 세션을 발밑에서 치우게 되고,
  * 아카이브된 워크스페이스는 애초에 대화 대상이 아니다.
@@ -695,19 +695,19 @@ export function canSwitchAgentBackend(workspace: Pick<Workspace, 'archived' | 's
 }
 
 /**
- * 지금 에이전트를 바꾸면 대화 맥락을 버리게 되는가(= 경고 없이 진행하면 안 되는가).
+ * 지금 에이전트를 바꾸면 맥락을 넘겨야 하는가(= 사용량이 드는 구간인가).
  *
- * 버리는 것은 화면의 대화가 아니라 **에이전트 쪽 맥락**이다. 트랜스크립트는 그대로 남지만 새
- * 에이전트는 그중 한 줄도 보지 못하므로, 하던 일을 이어받으려면 코드부터 다시 읽어야 한다 —
- * 그 재파악이 세션 사용량을 크게 먹는다. 그래서 이 구간에서는 사용자에게 먼저 물어보고
- * ([[Composer]] 의 확인 대화상자), main 도 확인받지 않은 요청은 거절한다([[ipc]]).
+ * 백엔드끼리 세션을 물려줄 방법은 없으므로(Claude 의 sessionId 로 Codex 를 resume 할 수 없다)
+ * 맥락은 지난 대화를 새 세션에 통째로 다시 말해 주는 것으로만 넘어간다([[shared/handoff]]).
+ * 그 한 번이 그대로 입력 토큰이라 대화가 길수록 비싸다 — 그래서 이 구간에서는 사용자에게 먼저
+ * 물어보고([[Composer]] 의 확인 대화상자), main 도 확인받지 않은 요청은 거절한다([[ipc]]).
  *
  * `messageCount` 는 이 워크스페이스의 트랜스크립트 항목 수다(main 은 기록 파일, 렌더러는 불러온
  * 기록에서 읽는다). sessionId 만으로는 부족하다 — 유휴 세션이 정리된 워크스페이스에도 sessionId
  * 는 resume 용으로 남아 있고([[agent/orchestrator]]), 반대로 /clear 로 비운 워크스페이스는
  * sessionId 가 없어도 대화가 있었던 곳이라 트랜스크립트로 함께 판정해야 한다.
  */
-export function agentSwitchDiscardsContext(
+export function agentSwitchNeedsHandoff(
   workspace: Pick<Workspace, 'sessionId'>,
   messageCount: number
 ): boolean {

@@ -93,7 +93,12 @@ export class CodexThread {
 
   // ── 턴 ──────────────────────────────────────────────────────────────
 
-  async send(text: string, images?: ImageAttachment[]): Promise<void> {
+  /**
+   * `silent` 는 사용자가 쓴 말이 아니라 Wooi 가 대신 넣는 맥락일 때 쓴다([[codex/protocol]]).
+   * 기록에만 남기지 않을 뿐 서버로는 그대로 가므로, echo 를 삼키는 등록은 그대로 해 둔다 —
+   * 안 하면 mapper 가 그 echo 를 처음 보는 사용자 메시지로 알고 화면에 되살린다.
+   */
+  async send(text: string, images?: ImageAttachment[], opts?: { silent?: boolean }): Promise<void> {
     if (this.disposed) return
     const attachments = (images ?? []).map((image) => ({
       name: image.name,
@@ -112,8 +117,10 @@ export class CodexThread {
       text,
       attachments.map((attachment) => attachment.name)
     )
-    this.deps.persist(item)
-    this.deps.emit({ type: 'item', item })
+    if (!opts?.silent) {
+      this.deps.persist(item)
+      this.deps.emit({ type: 'item', item })
+    }
     try {
       const rpc = await this.deps.rpc()
       const threadId = await this.ensureThread(rpc)

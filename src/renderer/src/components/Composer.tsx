@@ -48,9 +48,10 @@ import {
   INTERACTIVE_COMMANDS,
   MENTION_DROP_HINT_BYTES,
   MENTION_TRUNCATE_HINT_BYTES,
-  agentSwitchDiscardsContext,
+  agentSwitchNeedsHandoff,
   canSwitchAgentBackend
 } from '@shared/types'
+import { buildHandoffPrompt, estimateHandoffTokens, formatHandoffTokens } from '@shared/handoff'
 import { useNow } from '../lib/useNow'
 import {
   agoLabel,
@@ -2075,24 +2076,37 @@ function Empty({ children }: { children: React.ReactNode }): React.JSX.Element {
   return <span className="text-neutral-500">{children}</span>
 }
 
+/**
+ * 인수인계 비용을 사람이 읽는 한 구절로. 어림값이므로([[shared/handoff]]) 정확한 척하지 않고
+ * 자릿수만 보여 준다 — 사용자가 이 숫자로 하는 판단은 "지금 넘길 만한가" 하나다.
+ * 아직 기록을 못 읽어 크기를 모르면(0) 숫자를 지어내지 않고 비용이 든다는 사실만 말한다.
+ */
+function handoffCostLabel(tokens: number): string {
+  if (tokens <= 0) return 'a full turn of input'
+  return `${formatHandoffTokens(tokens)} tokens of input in one turn`
+}
+
 /** 메인 에이전트 교체에 대한 이 화면의 판단(상태줄 칩 · /agent 카드 공용). */
 interface AgentSwitchState {
   /** 고를 대상이 둘 이상이라 교체라는 선택지 자체가 존재하는가(칩·/agent 노출 여부). */
   offered: boolean
   /** 지금 이 순간 실제로 바꿀 수 있는가(턴이 도는 중·아카이브면 false). */
   switchable: boolean
-  /** 바꾸면 에이전트 쪽 맥락을 버리게 되는가 — 그렇다면 먼저 경고하고 확인받는다. */
-  discardsContext: boolean
+  /** 바꾸면 지난 대화를 새 에이전트에게 넘기는 턴이 도는가 — 그렇다면 비용을 먼저 알린다. */
+  needsHandoff: boolean
 }
 
 /**
- * 규칙 자체는 shared 의 [[canSwitchAgentBackend]]·[[agentSwitchDiscardsContext]] 가 갖고 있고,
+ * 규칙 자체는 shared 의 [[canSwitchAgentBackend]]·[[agentSwitchNeedsHandoff]] 가 갖고 있고,
  * 여기서는 렌더러 쪽 재료만 모은다 — 고를 대상이 둘 이상인지, 그리고 이 워크스페이스의 대화
  * 기록을 실제로 읽었는지.
  *
  * 기록을 아직 못 읽은 상태는 "대화가 없다" 가 아니라 "모른다" 다. 그 구분을 안 하면 기록을
- * 불러오는 짧은 순간에 누른 교체가 경고 없이 맥락을 지운다 — 그래서 모르는 동안에는 경고 쪽으로
+ * 불러오는 짧은 순간에 누른 교체가 경고 없이 턴을 돌린다 — 그래서 모르는 동안에는 경고 쪽으로
  * 기울여 둔다(main 이 기록 파일로 다시 판정하므로, 넘겨짚어 확인을 건너뛰면 거절당하기도 한다).
+ *
+ * 대화 **개수**만 구독하는 것이 중요하다. 항목 배열을 구독하면 답변이 스트리밍되는 동안 토큰마다
+ * 입력창 전체가 다시 그려진다 — 여기서 필요한 건 "대화가 있는가" 뿐이다.
  */
 function useAgentSwitch(workspace: Workspace): AgentSwitchState {
   const available = useAvailableBackends()
@@ -2102,8 +2116,29 @@ function useAgentSwitch(workspace: Workspace): AgentSwitchState {
   return {
     offered,
     switchable: offered && canSwitchAgentBackend(workspace),
-    discardsContext: !loaded || agentSwitchDiscardsContext(workspace, messageCount)
+    needsHandoff: !loaded || agentSwitchNeedsHandoff(workspace, messageCount)
   }
+}
+
+/**
+ * 인수인계로 넘어갈 대략적인 토큰 수. main 이 실제로 보낼 프롬프트를 같은 함수로 만들어 재 본다 —
+ * 경고에 적힌 양과 실제로 보내는 양이 갈리면 경고가 아니라 소음이다.
+ *
+ * `enabled` 가 false 면 재지 않는다(0). 프롬프트 조립은 대화 길이에 비례하는 일이라, 필요하지도
+ * 않은 화면에서 매 렌더 돌릴 것이 아니다 — /agent 카드가 열려 있고 실제로 바꿀 수 있을 때만 쓴다.
+ */
+function useHandoffEstimate(workspace: Workspace, enabled: boolean): number {
+  const items = useStore((s) => (enabled ? s.transcripts[workspace.id] : undefined)) ?? EMPTY
+  const backends = useAvailableBackends()
+  const fromLabel =
+    backends.find((b) => b.id === workspace.agentBackend)?.label ??
+    AGENT_BACKEND_LABELS[workspace.agentBackend]
+  return useMemo(() => {
+    if (!enabled) return 0
+    // toLabel 은 크기에 영향을 주지 않는다(고정 문구 한 줄) — 고르기 전이라 대상도 아직 없다.
+    const prompt = buildHandoffPrompt({ items, fromLabel, toLabel: '' })
+    return prompt ? estimateHandoffTokens(prompt) : 0
+  }, [enabled, items, fromLabel])
 }
 
 /**
@@ -2267,6 +2302,11 @@ function PickerCard({
   // 여기서는 카드가 떠 있는 동안 조건이 무너지는 경우(다른 창에서 턴이 시작됐다든지)를 본다.
   const availableAgents = useAvailableBackends()
   const agentSwitch = useAgentSwitch(workspace)
+  // 크기는 이 카드가 실제로 교체를 제안하는 동안에만 잰다(잠겨 있으면 고를 수도 없다).
+  const handoffTokens = useHandoffEstimate(
+    workspace,
+    kind === 'agent' && agentSwitch.switchable && agentSwitch.needsHandoff
+  )
 
   const options = useMemo<PickerOption[]>(() => {
     if (kind === 'agent') {
@@ -2338,33 +2378,34 @@ function PickerCard({
   const locked = kind === 'agent' ? !agentSwitch.switchable : running
 
   /**
-   * 에이전트 교체 1건. 맥락을 버리게 되는 자리에서는 먼저 확인을 받는다 — 되돌릴 수 없는 데다
-   * (다시 바꿔도 옛 세션은 살아나지 않는다) 값이 조용히 바뀌는 다른 카드들과 무게가 다르다.
+   * 에이전트 교체 1건. 지난 대화를 넘겨야 하는 자리에서는 먼저 확인을 받는다 — 그 인수인계는
+   * 사용자가 시키지 않은 턴이 한 번 도는 일이고, 대화가 길수록 비싸다. 값이 조용히 바뀌는 다른
+   * 카드들과 무게가 다르므로 크기까지 함께 보여 주고 묻는다.
    * 최종 판정은 main 이 하므로 거절 사유(CLI 미설치·턴 진행 중)는 토스트로 그대로 보여 준다.
    */
   const switchAgent = async (value: AgentBackendId): Promise<void> => {
     const label = availableAgents.find((b) => b.id === value)?.label ?? AGENT_BACKEND_LABELS[value]
-    if (agentSwitch.discardsContext) {
+    if (agentSwitch.needsHandoff) {
       const ok = await confirm({
         title: `Switch this workspace to ${label}?`,
         body:
-          `The conversation stays on screen, but ${label} starts with an empty context — it can't ` +
-          `see any of it. Picking the work back up means re-reading the code and redoing what was ` +
-          `already done, which can use up a large share of your session limit.`,
-        confirmLabel: 'Switch anyway',
+          `Agents can’t share a session, so Wooi replays the conversation so far to ${label} — ` +
+          `${handoffCostLabel(handoffTokens)}, billed to your usage. It reads that, sums up where ` +
+          `the work stands, and you carry on from there.`,
+        confirmLabel: 'Switch and hand over',
         danger: true
       })
       if (!ok) return
     }
     const res = await window.api.workspace.setAgentBackend(workspace.id, value, {
-      discardContext: agentSwitch.discardsContext
+      handoff: agentSwitch.needsHandoff
     })
     if (res?.error) {
       pushToast('error', res.error)
       return
     }
-    // 새 세션은 빈 맥락에서 시작한다 — 상태줄 게이지에 옛 에이전트의 사용량을 남겨 두면 다음 턴이
-    // 값을 다시 보내 줄 때까지 없는 컨텍스트가 차 있는 것처럼 보인다.
+    // 새 세션이라 컨텍스트도 처음부터다 — 옛 에이전트의 사용량을 남겨 두면 인수인계 턴이 값을
+    // 다시 보내 줄 때까지 게이지가 엉뚱한 양을 가리킨다.
     resetContextUsage(workspace.id)
   }
 
@@ -2495,13 +2536,13 @@ function PickerCard({
         </div>
       )}
       {kind === 'agent' && !locked && (
-        // 대화가 오간 뒤의 교체는 값 하나 바꾸는 일이 아니라 맥락을 버리는 일이다. 고르고 나면
+        // 대화가 오간 뒤의 교체는 값 하나 바꾸는 일이 아니라 턴이 한 번 도는 일이다. 고르고 나면
         // 확인 대화상자가 한 번 더 묻지만, 고르기 **전에** 알아야 할 이야기라 카드에서도 말한다.
         <div className="px-3 py-1.5 text-xs space-y-1 border-t border-[var(--border)]">
-          {agentSwitch.discardsContext && (
+          {agentSwitch.needsHandoff && (
             <p className="text-[var(--warning-400)]/90">
-              Switching now drops this conversation’s context — the new agent starts fresh and has
-              to re-read everything, which can use a lot of session usage.
+              Switching replays this conversation to the new agent —{' '}
+              {handoffCostLabel(handoffTokens)}, billed to your usage.
             </p>
           )}
           <p className="text-neutral-600">

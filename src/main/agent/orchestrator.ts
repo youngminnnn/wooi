@@ -214,9 +214,14 @@ export class AgentOrchestrator {
     if (hasCodexWorkspace) this.get('codex').prewarm?.()
   }
 
-  sendMessage(workspaceId: string, text: string, images?: ImageAttachment[]): void {
+  sendMessage(
+    workspaceId: string,
+    text: string,
+    images?: ImageAttachment[],
+    opts?: { silent?: boolean }
+  ): void {
     this.touch(workspaceId)
-    this.backendFor(workspaceId).sendMessage(workspaceId, text, images)
+    this.backendFor(workspaceId).sendMessage(workspaceId, text, images, opts)
     this.trimIdleSessions()
   }
 
