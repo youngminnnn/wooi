@@ -507,6 +507,19 @@ export interface AgentBackendMeta {
   permissionModes: PermissionModeInfo[]
   /** 워크스페이스·전역 설정이 값을 지정하지 않았을 때의 권한 모드. */
   defaultPermissionMode: PermissionMode
+  /**
+   * "알아서 진행해라" 에 해당하는 모드. 없으면 null.
+   *
+   * **식별자가 백엔드마다 다르기 때문에** 필요하다 — Claude 는 `auto`(분류기가 승인/거절을
+   * 대신한다)이지만 Codex 의 같은 자리는 `default`(라벨은 "Auto")다. 그리고 Claude 의
+   * `default` 는 정반대로 "매번 묻는" 모드다. 그래서 `permissionMode === 'auto'` 같은 문자열
+   * 비교로 판단하면 Codex 에서는 늘 빗나가고, `'default'` 로 판단하면 Claude 에서 가장
+   * 보수적인 모드를 자동 모드로 오해한다.
+   *
+   * `fullAccess` 와는 다르다 — 그쪽은 승인이 아예 없는 반면, 이 모드는 샌드박스나 분류기가
+   * 남아 있다. 승인 카드를 생략할지 결정하는 쪽에서 둘을 따로 물어야 하는 이유다.
+   */
+  autonomousPermissionMode: PermissionMode | null
   /** reasoning effort 선택지(모델별로 좁혀질 수 있다 — ModelOption.efforts 참고). */
   efforts: EffortOptionInfo[]
   capabilities: AgentCapabilities

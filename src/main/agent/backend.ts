@@ -247,6 +247,10 @@ export const CLAUDE_META: AgentBackendMeta = {
   // 기본값(AgentSettings.permissionMode)을 직접 정해 뒀다면 그 값이 이긴다 — CLI 의 롤아웃도
   // "본인이 정한 기본값은 유지" 다. 이미 만들어진 워크스페이스는 자기 저장값을 그대로 쓴다.
   defaultPermissionMode: 'auto',
+  // 위와 **같은 값이지만 뜻이 다르다** — 이쪽은 "기본으로 무엇을 고를까" 가 아니라 "어느 모드가
+  // 자동인가" 다. 지금 겹치는 것은 기본값이 auto 로 옮겨 온 결과일 뿐이고, 기본값이 다시 바뀌어도
+  // 자동인 모드는 여전히 'auto' 다. Claude 의 'default' 는 정반대로 "매번 묻는" 모드다.
+  autonomousPermissionMode: 'auto',
   efforts: CLAUDE_EFFORTS,
   capabilities: {
     sideQuestion: true,
@@ -340,6 +344,9 @@ export const CODEX_META: AgentBackendMeta = {
   defaultModel: null,
   permissionModes: CODEX_PERMISSION_MODES,
   defaultPermissionMode: 'default',
+  // Codex 는 'default' 가 곧 "Auto" 다(워크스페이스 안에서는 알아서 하고, 밖으로 나갈 때만
+  // 묻는다). 식별자만 Claude 와 같을 뿐 의미는 Claude 의 'auto' 쪽에 대응한다.
+  autonomousPermissionMode: 'default',
   efforts: CODEX_EFFORTS,
   capabilities: {
     sideQuestion: false,

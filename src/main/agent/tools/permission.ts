@@ -10,6 +10,7 @@ import {
   type Workspace
 } from '@shared/types'
 import { getStore } from '../../store'
+import { backendMeta } from '../backend'
 import { isReadOnlyToolName } from './catalog'
 import { resolvePrBase } from './pullRequest'
 import { scriptCommandFor } from './script'
@@ -56,15 +57,38 @@ export function cancelToolPermissions(): void {
 }
 
 /**
+ * 자동 모드에서 카드를 생략하는 도구들.
+ *
+ * 자동 모드("알아서 진행해라")라고 해서 Wooi 도구를 전부 통과시키지는 않는다. 대부분은
+ * 워크트리 **밖으로** 나가거나 되돌리기 어렵기 때문이다 — 워크스페이스를 만들고, worktree 를
+ * 지우고, PR 을 열고, 리포의 스크립트를 돌린다. 자동 모드가 약속한 것은 "이 작업 공간 안에서
+ * 알아서 하라" 이지 "앱과 원격을 마음대로 하라" 가 아니다.
+ *
+ * `switch_to_agent_team` 만 다르다. 이 워크스페이스의 능력 하나를 켜는 것이 전부이고, 되돌리는
+ * 데 배지 클릭 한 번이면 되며, 무엇보다 **사용자가 방금 말로 요청한 일**이다("Codex 한테 리뷰
+ * 시켜줘"). 자동 모드에서까지 여기서 멈춰 세우면, 사용자가 시킨 일을 하려고 카드를 띄우는
+ * 셈이 된다. 팀이 된 뒤 서브에이전트가 실제로 하는 일들은 askSubAgentPermission 이 따로 묻는다.
+ */
+const AUTO_MODE_SKIPS_CARD = new Set(['switch_to_agent_team'])
+
+/** 이 워크스페이스가 "알아서 진행" 모드인가. 식별자가 백엔드마다 달라 메타에 물어본다. */
+function isAutonomous(workspace: Workspace): boolean {
+  const mode = backendMeta(workspace.agentBackend).autonomousPermissionMode
+  return mode !== null && workspace.permissionMode === mode
+}
+
+/**
  * 이 호출을 사용자에게 물어야 하는가.
  *
  * - 읽기 전용 도구는 묻지 않는다(Claude 쪽 정책과 같다 — 상태를 바꾸지 않으니 승인이 결정할
  *   것이 없고, 매번 카드가 뜨면 정작 물어야 할 것이 묻힌다).
  * - `fullAccess` 는 사용자가 "승인 없이 돌려라" 를 고른 모드다. 그 기대를 여기서만 뒤집지 않는다.
+ * - 자동 모드는 도구를 가려서 통과시킨다(AUTO_MODE_SKIPS_CARD).
  */
 function needsApproval(workspace: Workspace, tool: string): boolean {
   if (isReadOnlyToolName(tool)) return false
   if (workspace.permissionMode === 'fullAccess') return false
+  if (AUTO_MODE_SKIPS_CARD.has(tool) && isAutonomous(workspace)) return false
   return true
 }
 

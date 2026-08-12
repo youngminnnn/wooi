@@ -139,6 +139,50 @@ describe('ensureToolApproved', () => {
     expect(cards).toHaveLength(0)
   })
 
+  /**
+   * 자동 모드의 식별자는 백엔드마다 다르다 — Claude 는 'auto', Codex 는 'default'(라벨 "Auto").
+   * 그런데 Claude 의 'default' 는 정반대로 "매번 묻는" 모드다. 문자열 하나로 판단하면 반드시
+   * 한쪽이 틀리므로, 백엔드 메타(autonomousPermissionMode)를 거치는지 양쪽으로 확인한다.
+   */
+  it('자동 모드에서는 팀 전환을 묻지 않는다 — 사용자가 방금 말로 시킨 일이다', async () => {
+    for (const ws of [
+      workspace({ agentBackend: 'claude', permissionMode: 'auto' }),
+      workspace({ agentBackend: 'codex', permissionMode: 'default' })
+    ]) {
+      cards.length = 0
+      await expect(
+        ensureToolApproved(ws, 'switch_to_agent_team', { reason: 'Codex should review this.' })
+      ).resolves.toBeUndefined()
+      expect(cards).toHaveLength(0)
+    }
+  })
+
+  it('Claude 의 default 는 자동 모드가 아니므로 팀 전환도 묻는다', async () => {
+    // 두 백엔드가 'default' 식별자를 공유하는 데서 오는 함정이다. 여기가 통과되면 "매번 묻는"
+    // 모드를 고른 사용자가 카드 없이 팀 전환을 당한다.
+    const pending = ensureToolApproved(
+      workspace({ agentBackend: 'claude', permissionMode: 'default' }),
+      'switch_to_agent_team',
+      { reason: 'Codex should review this.' }
+    )
+    expect(cards).toHaveLength(1)
+    resolveToolPermission(cards[0].requestId, { behavior: 'allow' })
+    await expect(pending).resolves.toBeUndefined()
+  })
+
+  it('자동 모드라도 워크트리 밖으로 나가는 도구는 묻는다', async () => {
+    // 자동 모드가 약속한 것은 "이 작업 공간 안에서 알아서 하라" 다. 브랜치·워크트리를 만들고
+    // 리포의 셋업 스크립트를 돌리는 일까지 조용히 통과시키면 그 약속을 넘어선다.
+    const pending = ensureToolApproved(
+      workspace({ agentBackend: 'claude', permissionMode: 'auto' }),
+      'create_stacked_workspace',
+      {}
+    )
+    expect(cards).toHaveLength(1)
+    resolveToolPermission(cards[0].requestId, { behavior: 'allow' })
+    await expect(pending).resolves.toBeUndefined()
+  })
+
   it('readOnly·plan 모드에서도 상태를 바꾸는 도구는 반드시 묻는다', async () => {
     for (const mode of ['readOnly', 'plan'] as const) {
       cards.length = 0
