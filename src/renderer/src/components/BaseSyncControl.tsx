@@ -51,13 +51,7 @@ export default function BaseSyncControl({
   }, [menuOpen])
 
   const busy = !!progress && !progress.finished
-  if (
-    git.behind <= 0 &&
-    !prNeedsBaseUpdate &&
-    !workspace.stackSync &&
-    !busy &&
-    !showFinished
-  )
+  if (git.behind <= 0 && !prNeedsBaseUpdate && !workspace.stackSync && !busy && !showFinished)
     return null
 
   const doneBranches = new Set(progress?.done.map((step) => step.branch) ?? []).size
