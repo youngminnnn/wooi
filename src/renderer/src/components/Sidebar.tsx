@@ -1366,7 +1366,7 @@ const PR_DOT: Record<PrState, { dotClass: string; label: string }> = {
   ci_failed: { dotClass: 'bg-[var(--danger-400)]', label: 'CI failed' },
   approved: { dotClass: 'bg-[var(--success-400)]', label: 'Ready to merge' },
   conflict: { dotClass: 'bg-[var(--danger-400)]', label: 'Conflict' },
-  open: { dotClass: 'bg-[var(--accent-400)]', label: 'Open' },
+  open: { dotClass: 'bg-[var(--open-400)]', label: 'Open' },
   merged: { dotClass: 'bg-[var(--merged-400)]', label: 'Merged' },
   closed: { dotClass: 'bg-neutral-500', label: 'Closed' }
 }
