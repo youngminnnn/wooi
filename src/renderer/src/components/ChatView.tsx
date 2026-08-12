@@ -159,6 +159,7 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
   const nextPendingPermissionId = useStore((s) => s.nextPendingPermissionId)
   const selectWorkspace = useStore((s) => s.selectWorkspace)
   const reportArchiveScriptFailure = useStore((s) => s.reportArchiveScriptFailure)
+  const runArchiveWorkspace = useStore((s) => s.archiveWorkspace)
   const approveAllPermissions = useStore((s) => s.approveAllPermissions)
   const unreadCount = Object.entries(unread).filter(([id, on]) => on && id !== workspace.id).length
   const pendingElsewhere = permissions.filter((p) => p.workspaceId !== workspace.id)
@@ -196,7 +197,7 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
       danger: true
     })
     if (!ok) return
-    const { archiveScriptFailure } = await window.api.workspace.archive(workspace.id)
+    const { archiveScriptFailure } = await runArchiveWorkspace(workspace.id)
     reportArchiveScriptFailure(archiveScriptFailure)
     void selectWorkspace(null)
   }

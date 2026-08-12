@@ -22,6 +22,7 @@ export default function ArchiveSuggestBanner({
   const dismissArchiveSuggest = useStore((s) => s.dismissArchiveSuggest)
   const selectWorkspace = useStore((s) => s.selectWorkspace)
   const reportArchiveScriptFailure = useStore((s) => s.reportArchiveScriptFailure)
+  const archiveWorkspace = useStore((s) => s.archiveWorkspace)
   const changedFiles = useStore((s) => s.gitStatus[workspace.id]?.changedFiles ?? 0)
   const [busy, setBusy] = useState(false)
 
@@ -33,7 +34,7 @@ export default function ArchiveSuggestBanner({
   const archive = async (): Promise<void> => {
     setBusy(true)
     try {
-      const { archiveScriptFailure } = await window.api.workspace.archive(workspace.id)
+      const { archiveScriptFailure } = await archiveWorkspace(workspace.id)
       reportArchiveScriptFailure(archiveScriptFailure)
       void selectWorkspace(null)
     } finally {
