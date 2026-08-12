@@ -31,7 +31,7 @@ const DEFAULT_MODEL = CLAUDE_DEFAULT_MODEL
  * 디스크 영속 형식의 현재 스키마 버전. 영속 데이터 모양이 바뀔 때마다 1 올리고,
  * MIGRATIONS 에 직전 버전 → 새 버전 변환 함수를 추가한다.
  */
-export const CURRENT_SCHEMA_VERSION = 20
+export const CURRENT_SCHEMA_VERSION = 21
 
 /**
  * v12 이하의 settings 모양. 그 시절엔 에이전트가 Claude 하나뿐이라 모델·effort·fast mode·
@@ -114,6 +114,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
 export const EMPTY_STATE: AppState = {
   repos: [],
   workspaces: [],
+  fanoutGroups: [],
   reviews: [],
   settings: DEFAULT_SETTINGS
 }
@@ -401,7 +402,12 @@ export const MIGRATIONS: Array<(raw: Record<string, unknown>) => Record<string, 
       }
     )
     return { ...raw, repos, workspaces }
-  }
+  },
+
+  // v20 → v21: fan-out 그룹(같은 프롬프트로 동시에 만든 후보 묶음) 도입. 기존 워크스페이스는
+  // 어떤 묶음에도 속하지 않는다 — 과거에 나란히 만든 것을 지금 와서 한 그룹으로 추측하면
+  // 사용자가 만든 적 없는 "채택" 대상이 생기고, 채택은 형제를 아카이브하는 동작이다.
+  (raw) => ({ ...raw, fanoutGroups: [] })
 ]
 
 /**
@@ -447,7 +453,10 @@ export function normalizeShape(raw: Record<string, unknown>): Record<string, unk
   const workspaces = ((raw.workspaces as Array<Record<string, unknown>>) ?? []).map((workspace) =>
     isRecord(workspace.ports) ? workspace : { ...workspace, ports: {} }
   )
-  return { ...raw, repos, workspaces }
+  // fan-out 그룹도 같은 이유로 여기서 메운다. v21 이전 빌드가 최신 버전 파일에 이어서 쓰면
+  // 이 배열이 통째로 사라지는데, 사이드바·비교 화면은 그것을 그냥 순회한다.
+  const fanoutGroups = Array.isArray(raw.fanoutGroups) ? raw.fanoutGroups : []
+  return { ...raw, repos, workspaces, fanoutGroups }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

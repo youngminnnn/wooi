@@ -87,6 +87,13 @@ import {
   reorderById,
   workspaceStack
 } from '@shared/types'
+import {
+  adoptFanoutWinner,
+  createFanout,
+  forgetFanoutGroup,
+  pruneFanoutGroups,
+  type CreateFanoutDeps
+} from './fanout'
 import { resolveToolPermission } from './agent/tools/permission'
 import { appendMemory } from './claude/memory'
 import { claudeConfigPath, mcpInventory } from './claude/mcp'
@@ -104,6 +111,7 @@ import {
   type CreateWorkspaceDeps
 } from './workspaces'
 import type {
+  AdoptFanoutResult,
   AgentBackendId,
   AppState,
   AppSettings,
@@ -111,6 +119,8 @@ import type {
   CodexMcpServer,
   CarryItem,
   ChatItem,
+  CreateFanoutArgs,
+  CreateFanoutResult,
   CodexLoginMethod,
   CommandPanelKind,
   CommandResult,
@@ -185,6 +195,11 @@ export function registerIpc(ctx: IpcContext): void {
 
   /** 워크스페이스 생성이 메인에서 필요로 하는 것들([[workspaces]] createWorkspace). */
   const workspaceDeps: CreateWorkspaceDeps = { scripts: ctx.scripts, broadcastState }
+  /** fan-out 은 생성에 더해 만든 후보에게 첫 프롬프트까지 보낸다([[fanout]]). */
+  const fanoutDeps: CreateFanoutDeps = {
+    ...workspaceDeps,
+    sendMessage: (workspaceId, text) => ctx.sessions.sendMessage(workspaceId, text)
+  }
   /** 아카이브는 워크스페이스에 매달린 것들까지 끊어야 해 더 넓다([[workspaces]] archiveWorkspace). */
   const archiveDeps: ArchiveWorkspaceDeps = {
     sessions: ctx.sessions,
@@ -627,6 +642,8 @@ export function registerIpc(ctx: IpcContext): void {
       store.update((st) => {
         st.workspaces = st.workspaces.filter((w) => w.id !== workspaceId)
       })
+      // 지워진 후보가 fan-out 그룹에 남아 있으면 비교 화면이 없는 워크스페이스 칸을 그린다.
+      pruneFanoutGroups([workspaceId])
       broadcastState()
       return archiveScriptFailure ? { archiveScriptFailure } : {}
     }
@@ -656,11 +673,32 @@ export function registerIpc(ctx: IpcContext): void {
         store.update((st) => {
           st.workspaces = st.workspaces.filter((w) => !ids.has(w.id))
         })
+        pruneFanoutGroups(targets.map((w) => w.id))
         broadcastState()
       }
       return { count: targets.length }
     }
   )
+
+  // ── fan-out (같은 프롬프트를 후보 여럿에게) ─────────────────────────────
+
+  ipcMain.handle(
+    IPC.fanoutCreate,
+    async (_e, args: CreateFanoutArgs): Promise<CreateFanoutResult> =>
+      createFanout(fanoutDeps, args)
+  )
+
+  // 형제 아카이브는 되돌릴 수 있지만(브랜치·PR·대화는 남는다) 미커밋 변경은 사라진다.
+  // 그래서 확인은 렌더러가 무엇을 잃는지 세어 먼저 받고, 여기서는 다시 묻지 않는다.
+  ipcMain.handle(
+    IPC.fanoutAdopt,
+    async (_e, groupId: string, workspaceId: string): Promise<AdoptFanoutResult> =>
+      adoptFanoutWinner(archiveDeps, groupId, workspaceId)
+  )
+
+  ipcMain.handle(IPC.fanoutForget, (_e, groupId: string) => {
+    forgetFanoutGroup(broadcastState, groupId)
+  })
 
   ipcMain.handle(
     IPC.workspaceSetPermissionMode,

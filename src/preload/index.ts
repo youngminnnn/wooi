@@ -65,6 +65,12 @@ const api: WooiApi = {
     addDir: (workspaceId, dir) => ipcRenderer.invoke(IPC.workspaceAddDir, workspaceId, dir)
   },
 
+  fanout: {
+    create: (args) => ipcRenderer.invoke(IPC.fanoutCreate, args),
+    adopt: (groupId, workspaceId) => ipcRenderer.invoke(IPC.fanoutAdopt, groupId, workspaceId),
+    forget: (groupId) => ipcRenderer.invoke(IPC.fanoutForget, groupId)
+  },
+
   chat: {
     send: (workspaceId, text, images) =>
       ipcRenderer.invoke(IPC.chatSend, workspaceId, text, images),

@@ -1,4 +1,5 @@
 import type {
+  AdoptFanoutResult,
   AgentBackendId,
   AgentBackendMeta,
   AppNotice,
@@ -8,6 +9,8 @@ import type {
   ArchiveScriptFailure,
   AuthStatus,
   CarryFailure,
+  CreateFanoutArgs,
+  CreateFanoutResult,
   ChatItem,
   ChatEnvelope,
   ClaudeLoginEvent,
@@ -194,6 +197,25 @@ export interface WooiApi {
     ): Promise<{ path?: string; error?: string }>
     /** /add-dir — worktree 밖 디렉토리를 작업 루트로 더한다(다음 메시지부터 적용). */
     addDir(workspaceId: string, dir: string): Promise<{ error?: string }>
+  }
+
+  /**
+   * fan-out — 같은 프롬프트로 후보 워크스페이스 여럿을 동시에 굴리고, 하나를 채택한다.
+   * 워크스페이스 생성 자체는 workspace.create 와 같은 경로를 쓴다(main 의 createWorkspace).
+   */
+  fanout: {
+    /**
+     * 후보들을 만들고 한 그룹으로 묶은 뒤, 같은 프롬프트를 전부에게 보낸다.
+     * 일부 후보가 실패해도 나머지는 만들어지고, 실패 사유는 failures 로 돌아온다.
+     */
+    create(args: CreateFanoutArgs): Promise<CreateFanoutResult>
+    /**
+     * 승자를 채택하고 나머지 형제를 아카이브한다. **확인은 호출 측이 먼저 받는다** —
+     * 형제의 미커밋 변경은 아카이브와 함께 사라진다.
+     */
+    adopt(groupId: string, workspaceId: string): Promise<AdoptFanoutResult>
+    /** 그룹 기록만 지운다(워크스페이스는 그대로 남는다). */
+    forget(groupId: string): Promise<void>
   }
 
   chat: {

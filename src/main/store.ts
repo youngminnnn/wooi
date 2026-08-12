@@ -11,7 +11,14 @@ import {
   normalizeShape,
   type PersistedState
 } from './storeSchema'
-import type { AppSettings, AppState, Repo, ReviewSession, Workspace } from '@shared/types'
+import type {
+  AppSettings,
+  AppState,
+  FanoutGroup,
+  Repo,
+  ReviewSession,
+  Workspace
+} from '@shared/types'
 
 /**
  * 쓰기를 모으는 창. 상태 변화 하나하나가 아니라 이 간격마다 한 번만 디스크에 내려간다.
@@ -126,6 +133,7 @@ class Store {
         schemaVersion: Math.max(version, CURRENT_SCHEMA_VERSION),
         repos: (migrated.repos as Repo[]) ?? [],
         workspaces,
+        fanoutGroups: (migrated.fanoutGroups as FanoutGroup[]) ?? [],
         reviews,
         settings: {
           ...DEFAULT_SETTINGS,
@@ -199,6 +207,9 @@ class Store {
     return structuredClone({
       repos: this.state.repos,
       workspaces: this.state.workspaces,
+      // 마이그레이션 이전 파일에서 올라오면 undefined 일 수 있다 — 읽는 쪽이 전부 옵셔널
+      // 체이닝을 하게 두는 대신 여기서 한 번 빈 배열로 고정한다.
+      fanoutGroups: this.state.fanoutGroups ?? [],
       reviews: this.state.reviews,
       settings: this.state.settings,
       rateLimits: this.state.rateLimits,

@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type {
+  AdoptFanoutResult,
   AgentBackendId,
   AgentBackendMeta,
   AppNotice,
@@ -10,7 +11,9 @@ import type {
   ChatEnvelope,
   ChatItem,
   ComposerAttachment,
+  CreateFanoutResult,
   EffortSetting,
+  FanoutSlot,
   GitStatus,
   ImageAttachment,
   ModelOption,
@@ -32,6 +35,7 @@ import {
   AGENT_BACKEND_IDS,
   DEFAULT_AGENT_BACKEND,
   cascadeProblems,
+  fanoutSlotName,
   workspaceDisplayName
 } from '@shared/types'
 import { fileDiffHash, isFileViewed } from '@shared/reviewViewed'
@@ -353,6 +357,11 @@ interface UIState {
    */
   activeReviewId: string | null
   /**
+   * 열려 있는 fan-out 비교 화면의 그룹 id. 리뷰와 같은 자리(대화창 위)를 쓰므로 둘은 서로를
+   * 밀어낸다 — 워크스페이스를 고르면 둘 다 닫힌다.
+   */
+  activeFanoutGroupId: string | null
+  /**
    * reviewId → 화면 상태(사이드카에서 읽어온 diff·지적·활동 + 선택/편집).
    * 리뷰의 **메타데이터는 여기 없다** — `app.reviews` 가 권위이고 상태 방송으로 갱신된다.
    */
@@ -382,6 +391,34 @@ interface UIState {
     },
     displayName?: string
   ) => Promise<string | undefined>
+  /**
+   * 같은 프롬프트로 후보 워크스페이스 여럿을 한 번에 만들고, 만들어지면 비교 화면을 연다.
+   * 생성 중에는 createWorkspace 와 같은 자리표시 행을 후보 수만큼 띄운다.
+   */
+  createFanout: (
+    repoId: string,
+    args: { name?: string; prompt: string; slots: FanoutSlot[] }
+  ) => Promise<void>
+  /** fan-out 비교 화면을 연다(리뷰 화면과 자리를 다투므로 그쪽은 닫는다). */
+  openFanoutCompare: (groupId: string) => void
+  /** 비교 화면을 닫고 원래 보던 워크스페이스로 돌아간다. */
+  closeFanoutCompare: () => void
+  /**
+   * 승자를 채택한다(확인 후). 나머지 형제는 아카이브되고 — 되살릴 수 있지만 미커밋 변경은
+   * 사라지므로 — 무엇을 잃는지 먼저 센다.
+   */
+  requestAdoptFanoutWinner: (groupId: string, workspaceId: string) => Promise<void>
+  /**
+   * 지금 채택 중인 후보 id(없으면 null).
+   *
+   * 채택은 형제를 **하나씩** 아카이브하고, 형제마다 PR 제목을 `gh` 로 스냅샷한 뒤 worktree 를
+   * 지운다 — 후보가 셋이면 몇 초가 걸린다. 그동안 화면이 아무 반응도 하지 않으면 사용자는
+   * 버튼이 안 눌린 줄 알고 다시 누르는데, 그러면 이미 사라지는 중인 워크스페이스를 상대로
+   * 두 번째 아카이브가 돌아간다. 그래서 진행 중임을 화면에 남기고 그 사이 입력을 막는다.
+   */
+  adoptingFanoutWorkspaceId: string | null
+  /** 그룹 기록만 지운다(워크스페이스는 그대로). */
+  forgetFanoutGroup: (groupId: string) => Promise<void>
   /**
    * 워크스페이스를 영구 삭제한다(확인 후). 아카이브와 달리 worktree·브랜치·대화 기록이 모두
    * 사라지며 되돌릴 수 없다 — 무엇을 잃는지(미커밋 변경·미푸시 커밋·쌓인 스택)를 먼저 알린다.
@@ -691,6 +728,8 @@ export const useStore = create<UIState>((set, get) => ({
   },
   pending: [],
   activeReviewId: null,
+  activeFanoutGroupId: null,
+  adoptingFanoutWorkspaceId: null,
   reviewViews: {},
 
   init: async () => {
@@ -1264,6 +1303,130 @@ export const useStore = create<UIState>((set, get) => ({
     return undefined
   },
 
+  createFanout: async (repoId, args) => {
+    // 후보 수만큼 자리표시 행을 띄운다. worktree 를 순차로 만들기 때문에 첫 후보가 나타난 뒤에도
+    // 한동안 나머지가 비어 있는데, 자리표시가 없으면 그 사이 "일부만 만들어졌다"로 보인다.
+    const placeholders = args.slots.map((_, i) => ({
+      id: `pending:${++pendingSeq}`,
+      repoId,
+      // 이름을 비워 두면 뿌리 이름은 main 이 정한다 — 여기서 지어내면 자리표시와 실제 행의
+      // 이름이 어긋난다. 그때는 빈 문자열로 두어 행이 "Creating…" 만 보이게 한다.
+      name: args.name?.trim() ? fanoutSlotName(args.name.trim(), i) : '',
+      parentWorkspaceId: null
+    }))
+    set((s) => ({ pending: [...s.pending, ...placeholders] }))
+
+    let res: CreateFanoutResult
+    try {
+      res = await window.api.fanout.create({ repoId, ...args })
+    } catch (err) {
+      res = { error: err instanceof Error ? err.message : String(err) }
+    }
+
+    const ids = new Set(placeholders.map((p) => p.id))
+    set((s) => ({ pending: s.pending.filter((p) => !ids.has(p.id)) }))
+
+    if (res.error) {
+      get().pushToast('error', res.error)
+      return
+    }
+    // 일부만 실패한 경우에도 나머지는 살아 있다. 조용히 넘기면 사용자는 자기가 고른 수보다
+    // 적은 후보를 보면서 이유를 알 수 없다.
+    if (res.failures?.length) {
+      get().pushToast(
+        'error',
+        `${res.failures.length} of ${args.slots.length} candidates could not be created:\n${res.failures.join('\n')}`
+      )
+    }
+    get().reportCarryFailures(res.carryFailures)
+    if (res.workspaceIds?.length)
+      get().suggestCarry(repoId, res.workspaceIds[0], res.carrySuggestions)
+    if (res.groupId) get().openFanoutCompare(res.groupId)
+  },
+
+  openFanoutCompare: (groupId) => {
+    set({ activeFanoutGroupId: groupId, activeReviewId: null })
+    // 비교 화면의 후보 카드는 git 요약(N changed · ↑ahead)을 그대로 읽어 쓴다. 진입 시 한 번
+    // 새로 고쳐 두지 않으면, 아직 한 번도 연 적 없는 후보의 칸이 비어 있다.
+    const group = get().app?.fanoutGroups.find((g) => g.id === groupId)
+    for (const id of group?.workspaceIds ?? []) void get().refreshGit(id)
+  },
+
+  closeFanoutCompare: () => set({ activeFanoutGroupId: null }),
+
+  requestAdoptFanoutWinner: async (groupId, workspaceId) => {
+    const s = get()
+    // 이미 채택이 돌고 있으면 무시한다. 화면도 버튼을 잠그지만, 그 사이 도착한 단축키·이벤트가
+    // 두 번째 채택을 시작하면 사라지는 중인 워크스페이스를 상대로 아카이브가 겹친다.
+    if (s.adoptingFanoutWorkspaceId) return
+    const group = s.app?.fanoutGroups.find((g) => g.id === groupId)
+    const winner = s.app?.workspaces.find((w) => w.id === workspaceId)
+    if (!group || !winner) return
+
+    /** 진행 표시를 켜고 채택을 돌린다. 실패해도 표시는 반드시 꺼야 한다 — 켜진 채로 남으면
+     *  다시 시도할 방법이 없다. */
+    const adopt = async (): Promise<AdoptFanoutResult> => {
+      set({ adoptingFanoutWorkspaceId: workspaceId })
+      try {
+        return await window.api.fanout.adopt(groupId, workspaceId)
+      } catch (err) {
+        return { error: err instanceof Error ? err.message : String(err) }
+      } finally {
+        set({ adoptingFanoutWorkspaceId: null })
+      }
+    }
+
+    const siblings = group.workspaceIds
+      .filter((id) => id !== workspaceId)
+      .map((id) => s.app?.workspaces.find((w) => w.id === id))
+      .filter((w): w is Workspace => !!w && !w.archived)
+    if (siblings.length === 0) {
+      // 정리할 형제가 없으면 묻지 않는다 — 그룹에 "이걸 골랐다" 를 기록할 뿐이라 즉시 끝난다.
+      const res = await adopt()
+      if (res.error) get().pushToast('error', res.error)
+      else get().closeFanoutCompare()
+      return
+    }
+
+    // 무엇을 잃는지 센다. 아카이브는 브랜치·PR·대화를 남기지만 **미커밋 변경은 남기지 않는다** —
+    // 그 사실을 말하지 않으면 "되돌릴 수 있다"는 안내가 절반만 참이 된다.
+    const uncommitted = siblings.reduce((n, w) => n + (s.gitStatus[w.id]?.changedFiles ?? 0), 0)
+    const running = siblings.filter((w) => w.status === 'running').length
+    const names = siblings.map((w) => workspaceDisplayName(w, s.prStatus[w.id]?.title))
+
+    const ok = await s.confirm({
+      title: `Keep “${workspaceDisplayName(winner, s.prStatus[workspaceId]?.title)}” and archive the rest?`,
+      body: [
+        `Archives ${joinList(names)}.`,
+        'Their worktrees are removed, but the branches, pull requests and conversations are kept — you can unarchive any of them from the sidebar.',
+        uncommitted ? `You lose ${plural(uncommitted, 'uncommitted file')} across them.` : '',
+        running ? `${plural(running, 'candidate')} still working — their turns are stopped.` : ''
+      ]
+        .filter(Boolean)
+        .join(' '),
+      confirmLabel: 'Adopt and archive'
+    })
+    if (!ok) return
+
+    const res = await adopt()
+    if (res.error) {
+      get().pushToast('error', res.error)
+      return
+    }
+    for (const failure of res.archiveScriptFailures ?? []) get().reportArchiveScriptFailure(failure)
+    get().closeFanoutCompare()
+    void get().selectWorkspace(workspaceId)
+    get().pushToast(
+      'success',
+      `Adopted “${workspaceDisplayName(winner)}” — archived ${plural(res.archived?.length ?? 0, 'sibling')}.`
+    )
+  },
+
+  forgetFanoutGroup: async (groupId) => {
+    await window.api.fanout.forget(groupId)
+    if (get().activeFanoutGroupId === groupId) get().closeFanoutCompare()
+  },
+
   requestDeleteWorkspace: async (workspaceId) => {
     const s = get()
     const ws = s.app?.workspaces.find((w) => w.id === workspaceId)
@@ -1524,11 +1687,14 @@ export const useStore = create<UIState>((set, get) => ({
         id,
         opts?.fromHistory
       )
+      // fan-out 비교 화면도 리뷰와 같은 자리를 쓴다 — 워크스페이스를 고르는 것은 "그 화면에서
+      // 나온다" 는 뜻이다(그룹 자체는 남아 사이드바에서 다시 열 수 있다).
+      const closed = { activeReviewId: null, activeFanoutGroupId: null }
       if (!id || !s.unread[id])
-        return { selectedWorkspaceId: id, activeReviewId: null, fileViewer, workspaceHistory }
+        return { selectedWorkspaceId: id, ...closed, fileViewer, workspaceHistory }
       const unread = { ...s.unread }
       delete unread[id]
-      return { selectedWorkspaceId: id, unread, activeReviewId: null, fileViewer, workspaceHistory }
+      return { selectedWorkspaceId: id, unread, ...closed, fileViewer, workspaceHistory }
     })
 
     // 별도 창으로 떼어 둔 패널은 메인 창의 선택을 따라간다 — 보조 모니터의 작업 패널이 다른

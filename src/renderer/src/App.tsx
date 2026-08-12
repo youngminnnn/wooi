@@ -20,6 +20,7 @@ import { UpdateBanner } from './components/UpdateBanner'
 import { NoticeBanner } from './components/NoticeBanner'
 import Sidebar from './components/Sidebar'
 import PrReviewScreen from './components/review/PrReviewScreen'
+import FanoutCompareScreen from './components/fanout/FanoutCompareScreen'
 import { useFeatureNudge } from './lib/featureNudge'
 import PrReviewStartModal from './components/review/PrReviewStartModal'
 import ChatView from './components/ChatView'
@@ -77,6 +78,8 @@ export default function App(): React.JSX.Element {
     repoId: string
     parentWorkspaceId: string | null
     agentBackend?: AgentBackendId
+    /** 같은 프롬프트를 후보 여럿에게 뿌리는 모드로 연다. */
+    fanout?: boolean
   } | null>(null)
   const [configRepoId, setConfigRepoId] = useState<string | null>(null)
   // ⌘K 퀵 스위처. ⌘1–9 로 닿지 않는(10번째 이후) 워크스페이스로 이동하는 기본 경로다.
@@ -90,6 +93,7 @@ export default function App(): React.JSX.Element {
   // ⇧⌘O 파일 퀵 오픈. 큰 파일 뷰어의 "주소창" 역할을 겸한다.
   const [quickOpenFile, setQuickOpenFile] = useState(false)
   const activeReviewId = useStore((s) => s.activeReviewId)
+  const activeFanoutGroupId = useStore((s) => s.activeFanoutGroupId)
   const fileViewer = useStore((s) => s.fileViewer)
 
   // 업데이트로 새로 생긴 기능을 한 번만 알려 준다(신규 설치 사용자에게는 뜨지 않는다).
@@ -139,7 +143,8 @@ export default function App(): React.JSX.Element {
     quickOpenFile
 
   // 큰 파일 뷰어가 실제로 화면에 떠 있는지 — 리뷰 화면에 들어가 있으면 가려지므로 아니다.
-  const fileViewerVisible = !activeReviewId && !!fileViewer && fileViewer.workspaceId === selectedId
+  const fileViewerVisible =
+    !activeReviewId && !activeFanoutGroupId && !!fileViewer && fileViewer.workspaceId === selectedId
 
   // 모달 상태는 여기(App)에만 있으므로, 대화 화면의 전역 키 핸들러(Composer 의 Esc 등)가
   // 볼 수 있도록 store 로 내보낸다 — 모달이 떠 있을 때 뒤쪽 단축키가 같이 발동하면 안 된다.
@@ -329,6 +334,11 @@ export default function App(): React.JSX.Element {
         if (id) void st.selectWorkspace(id)
         return
       }
+
+      // fan-out 비교 화면이 떠 있으면 헤더 도구의 대상이 화면에 없다 — 뒤에 가려진 워크스페이스를
+      // 에디터에서 열거나 아카이브하면, 사용자는 자기가 무엇을 건드렸는지 알 수 없다.
+      // 워크스페이스 전환(⌘1–9·⌘K·⌘↑↓)은 아래에서 계속 받는다 — 그게 이 화면에서 나가는 길이다.
+      if (st.activeFanoutGroupId && (e.shiftKey || e.altKey || e.ctrlKey)) return
 
       // 우상단 헤더 도구 단축키 — 현재 선택된 workspace 를 대상으로 한다.
       // ⇧⌘ 조합이라 macOS 기본 단축키(⌘S/E/F, ⌘⌫ 등)나 앱 기존 단축키와 충돌하지 않는다.
@@ -526,6 +536,12 @@ export default function App(): React.JSX.Element {
     void useStore.getState().createWorkspace(repoId, { agentBackend })
   }
 
+  // fan-out: 같은 프롬프트를 후보 여럿에게 동시에 던진다. 프롬프트를 반드시 받아야 하므로
+  // manualWorkspaceSetup 과 무관하게 늘 모달을 연다 — 물어볼 것이 있는 생성 경로다.
+  const handleFanout = (repoId: string, agentBackend?: AgentBackendId): void => {
+    setNewWs({ repoId, parentWorkspaceId: null, agentBackend, fanout: true })
+  }
+
   // stacked PR: 특정 워크스페이스 위에 새 워크스페이스를 쌓는다(base = 부모 브랜치).
   const handleStackWorkspace = (
     repoId: string,
@@ -564,6 +580,7 @@ export default function App(): React.JSX.Element {
         <Sidebar
           onNewWorkspace={handleNewWorkspace}
           onNewFromIssue={setIssueRepoId}
+          onFanout={handleFanout}
           onStackWorkspace={handleStackWorkspace}
           onOpenQuickSwitch={() => setQuickSwitchOpen(true)}
         />
@@ -572,7 +589,9 @@ export default function App(): React.JSX.Element {
           ref={contentRef}
           className="relative flex-1 min-w-0 border-l border-[var(--border)] flex"
         >
-          {activeReviewId ? (
+          {activeFanoutGroupId ? (
+            <FanoutCompareScreen key={activeFanoutGroupId} groupId={activeFanoutGroupId} />
+          ) : activeReviewId ? (
             <PrReviewScreen key={activeReviewId} reviewId={activeReviewId} />
           ) : selected ? (
             <>
@@ -647,6 +666,7 @@ export default function App(): React.JSX.Element {
           repoId={newWs.repoId}
           parentWorkspaceId={newWs.parentWorkspaceId}
           initialAgentBackend={newWs.agentBackend}
+          fanout={newWs.fanout}
           onClose={() => setNewWs(null)}
         />
       )}
