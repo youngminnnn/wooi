@@ -12,19 +12,19 @@
     "늘어난 사실을 알 방법이 없다. 갱신은 '차이를 읽고 납득했다'는 선언이니 diff 를 보고 커밋한다."
   ],
   "generatedBy": "codex app-server generate-json-schema --out <dir>",
-  "codexVersion": "codex-cli 0.146.0",
-  "capturedOn": "2026-08-12",
+  "codexVersion": "codex-cli 0.147.0",
+  "capturedOn": "2026-08-13",
   "files": [
     {
       "path": "codex_app_server_protocol.schemas.json",
-      "sha256": "048a75c51358e0ea8de994f7d5265ce685476fe5badaf52daa67f0af6e0f1061",
+      "sha256": "941db8101b16a35374f3fdd83d6c5b092ef3ed1be21de0fd3aad8d4689a0314a",
       "definitions": 82,
       "note": "v1 표면. Wooi 가 여기서 쓰는 건 initialize 핸드셰이크뿐이고, 나머지 대화는 v2 로 한다."
     },
     {
       "path": "codex_app_server_protocol.v2.schemas.json",
-      "sha256": "b767c1161c2c56341f3d0e313b4f93810b4b53bdaabeff95c06e1242cfc4df03",
-      "definitions": 537,
+      "sha256": "e077be743be4d7b58eea540e00af9da6e930017a24d2ead6eb4c48161d3870c9",
+      "definitions": 557,
       "note": "v2 표면. thread/*, turn/*, item/* 등 Wooi 가 실제로 주고받는 것이 전부 여기 있다."
     }
   ]
