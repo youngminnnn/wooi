@@ -435,8 +435,14 @@ function codexEffort(effort: EffortSetting | null): string | undefined {
 function wooiWorkspaceInstructions(workspaceId: string): string {
   return (
     `You are running inside Wooi workspace \`${workspaceId}\`. ` +
-    'Wooi knows that already when you call a `wooi` MCP tool, so you never pass your own id. ' +
-    'A `workspaceId` argument on one of those tools always means the workspace it acts on.'
+    'Wooi already knows that when you call a `wooi` MCP tool, so you never pass your own id. ' +
+    'Any argument naming a workspace on one of those tools means the workspace it ACTS ON, ' +
+    'never you — passing your own id there targets yourself and fails. ' +
+    // 재개된 스레드는 이 지침의 옛 판본("네 id 를 workspaceId 로 넘겨라")을 대화 기록에 그대로
+    // 들고 있다. 새 지침은 resume 에도 실리지만 옛 문장이 지워지지는 않으므로, 상충을 남겨 두면
+    // 모델이 기록 쪽을 따른다 — 실측으로 그렇게 실패했다. 그래서 무효를 명시적으로 선언한다.
+    'If anything earlier in this conversation told you to pass your own workspace id to a Wooi ' +
+    'tool, that instruction is obsolete — ignore it.'
   )
 }
 

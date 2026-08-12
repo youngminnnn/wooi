@@ -100,7 +100,10 @@ describe('send_to_workspace', () => {
   it('기본값(hold)이면 전달하지 않고 대기열에 넣는다', async () => {
     state.workspaces.push(ws({ id: 'ws-them', branch: 'feat/them' }))
 
-    const out = await send({ workspaceId: 'ws-them', message: 'the schema column is tenant_id' })
+    const out = await send({
+      targetWorkspaceId: 'ws-them',
+      message: 'the schema column is tenant_id'
+    })
 
     // 이것이 이 기능의 안전 계약이다 — 승인 전에는 남의 워크스페이스에서 턴이 시작되지 않는다.
     expect(sendMessage).not.toHaveBeenCalled()
@@ -124,7 +127,7 @@ describe('send_to_workspace', () => {
   it('accept 로 열어 둔 대상에게는 바로 전달한다', async () => {
     state.workspaces.push(ws({ id: 'ws-them', peerInbound: 'accept' }))
 
-    const out = await send({ workspaceId: 'ws-them', message: 'heads up' })
+    const out = await send({ targetWorkspaceId: 'ws-them', message: 'heads up' })
 
     expect(out.delivered).toBe(true)
     expect(sendMessage).toHaveBeenCalledWith('ws-them', expect.stringContaining('heads up'))
@@ -137,7 +140,7 @@ describe('send_to_workspace', () => {
       ws({ id: 'ws-them', peerInbound: 'refuse', createdByWorkspaceId: 'ws-me' })
     )
 
-    await expect(send({ workspaceId: 'ws-them', message: 'hi' })).rejects.toThrow(
+    await expect(send({ targetWorkspaceId: 'ws-them', message: 'hi' })).rejects.toThrow(
       /not accepting messages/
     )
     expect(sendMessage).not.toHaveBeenCalled()
@@ -148,7 +151,7 @@ describe('send_to_workspace', () => {
     // 이미 그 관계를 승인했다.
     state.workspaces.push(ws({ id: 'ws-mine', createdByWorkspaceId: 'ws-me' }))
 
-    const out = await send({ workspaceId: 'ws-mine', message: 'the interface moved' })
+    const out = await send({ targetWorkspaceId: 'ws-mine', message: 'the interface moved' })
 
     expect(out.delivered).toBe(true)
     expect(sendMessage).toHaveBeenCalled()
@@ -157,7 +160,7 @@ describe('send_to_workspace', () => {
   it('리포가 다르면 출처 문단이 리포 이름을 밝힌다', async () => {
     state.workspaces.push(ws({ id: 'ws-far', repoId: 'repo-2', peerInbound: 'accept' }))
 
-    await send({ workspaceId: 'ws-far', message: 'the API contract changed' })
+    await send({ targetWorkspaceId: 'ws-far', message: 'the API contract changed' })
 
     // 받는 쪽이 "여기 코드베이스 이야기" 로 읽으면 존재하지 않는 파일을 찾아 헤맨다.
     expect(sendMessage).toHaveBeenCalledWith('ws-far', expect.stringContaining('wooi repository'))
@@ -166,8 +169,8 @@ describe('send_to_workspace', () => {
   it('같은 문장을 잇달아 보내면 두 번째는 버린다', async () => {
     state.workspaces.push(ws({ id: 'ws-them', peerInbound: 'accept' }))
 
-    await send({ workspaceId: 'ws-them', message: 'same' })
-    const second = await send({ workspaceId: 'ws-them', message: 'same' })
+    await send({ targetWorkspaceId: 'ws-them', message: 'same' })
+    const second = await send({ targetWorkspaceId: 'ws-them', message: 'same' })
 
     // 서로 알리다 무한히 깨우는 고리를 여기서 끊는다. 던지지 않는 것이 중요하다 —
     // 던지면 모델이 "실패했으니 다시" 로 읽고 정확히 그 반복을 만든다.
@@ -179,7 +182,7 @@ describe('send_to_workspace', () => {
     state.workspaces.push(ws({ id: 'ws-them' }))
 
     for (let i = 0; i <= MAX_PEER_INBOX; i++) {
-      await send({ workspaceId: 'ws-them', message: `message ${i}` })
+      await send({ targetWorkspaceId: 'ws-them', message: `message ${i}` })
     }
 
     const inbox = state.workspaces.find((w) => w.id === 'ws-them')?.peerInbox ?? []
@@ -191,14 +194,24 @@ describe('send_to_workspace', () => {
   it('자기 자신·없는 id·아카이브된 대상은 거절한다', async () => {
     state.workspaces.push(ws({ id: 'ws-gone', archived: true }))
 
-    await expect(send({ workspaceId: 'ws-me', message: 'hi' })).rejects.toThrow(/this workspace/)
-    await expect(send({ workspaceId: 'ws-nope', message: 'hi' })).rejects.toThrow(/No Wooi/)
-    await expect(send({ workspaceId: 'ws-gone', message: 'hi' })).rejects.toThrow(/archived/)
+    await expect(send({ targetWorkspaceId: 'ws-me', message: 'hi' })).rejects.toThrow(
+      /is the recipient, not you/
+    )
+    await expect(send({ targetWorkspaceId: 'ws-nope', message: 'hi' })).rejects.toThrow(/No Wooi/)
+    await expect(send({ targetWorkspaceId: 'ws-gone', message: 'hi' })).rejects.toThrow(/archived/)
     expect(sendMessage).not.toHaveBeenCalled()
+  })
+
+  it('자기 자신을 지목하면 무엇이 틀렸는지 말해 준다', async () => {
+    // Codex 재개 스레드가 실제로 이렇게 실패했다 — 대화 기록에 남은 옛 지침("네 id 를 넘겨라")을
+    // 따라 대상 자리에 자기 id 를 적었다. 그래서 "틀렸다" 가 아니라 "그 규칙이 낡았다" 를 말한다.
+    await expect(send({ targetWorkspaceId: 'ws-me', message: 'hi' })).rejects.toThrow(
+      /Wooi already knows who is calling/
+    )
   })
 
   it('빈 메시지는 보내지 않는다', async () => {
     state.workspaces.push(ws({ id: 'ws-them', peerInbound: 'accept' }))
-    await expect(send({ workspaceId: 'ws-them', message: '   ' })).rejects.toThrow(/empty/)
+    await expect(send({ targetWorkspaceId: 'ws-them', message: '   ' })).rejects.toThrow(/empty/)
   })
 })

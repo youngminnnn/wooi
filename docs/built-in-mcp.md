@@ -178,7 +178,7 @@ Sends a plain-text message to another open workspace.
 
 | Input | Type | Required | Description |
 | --- | --- | --- | --- |
-| `workspaceId` | string | Yes | Target id from `list_workspace_peers`. |
+| `targetWorkspaceId` | string | Yes | Recipient id from `list_workspace_peers`. Never your own — Wooi already knows who is calling. |
 | `message` | string | Yes | Self-contained text: what changed and what the other workspace should do differently. |
 
 Wooi wraps the message with its origin before delivering it, so the receiving agent reads

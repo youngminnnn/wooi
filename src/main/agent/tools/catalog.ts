@@ -328,9 +328,16 @@ export const AGENT_TOOLS: AgentToolSpec[] = [
       'Handing over a whole new piece of work is `create_workspace`, not this.'
     ].join(' '),
     inputSchema: {
-      workspaceId: z
+      // 이름이 `workspaceId` 가 아닌 것이 의도적이다. Codex 스레드는 한때 "wooi 도구에는 네
+      // 워크스페이스 id 를 `workspaceId` 로 넘겨라" 라는 지침을 받았고, 그 문장이 대화 기록에
+      // 남아 재개된 스레드가 대상 자리에 자기 id 를 적었다(실측). 지침은 무효를 선언해 고쳤지만,
+      // 이름이 겹치지 않으면 애초에 그 규칙이 걸릴 자리가 없다.
+      targetWorkspaceId: z
         .string()
-        .describe('Which workspace to message — an id from `list_workspace_peers`.'),
+        .describe(
+          'Which workspace to message — an id from `list_workspace_peers`. This is the ' +
+            'recipient, never yourself; Wooi already knows who is calling.'
+        ),
       message: z
         .string()
         .describe(

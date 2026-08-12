@@ -221,10 +221,20 @@ export const sendToWorkspace: AgentToolHandler = async (deps, workspaceId, args)
     throw new Error('The message is empty — say what the other workspace needs to know.')
   }
 
-  const targetId = typeof args.workspaceId === 'string' ? args.workspaceId.trim() : ''
-  if (!targetId) throw new Error('No workspace id was given — say which workspace you mean.')
+  const targetId = typeof args.targetWorkspaceId === 'string' ? args.targetWorkspaceId.trim() : ''
+  if (!targetId) {
+    throw new Error(
+      'No recipient was given — set `targetWorkspaceId` to an id from `list_workspace_peers`.'
+    )
+  }
+  // 자기를 지목하는 것은 오타가 아니라 거의 언제나 "호출자 id 를 적어야 한다" 는 낡은 규칙을
+  // 따른 결과다(Codex 재개 스레드). 그래서 틀렸다고만 하지 않고 무엇이 틀렸는지 말해 준다.
   if (targetId === workspaceId) {
-    throw new Error('That is this workspace. Pick another one from `list_workspace_peers`.')
+    throw new Error(
+      'That is this workspace — `targetWorkspaceId` is the recipient, not you. Wooi already ' +
+        'knows who is calling, so never pass your own id. Pick a different workspace from ' +
+        '`list_workspace_peers`.'
+    )
   }
 
   const target = getStore()

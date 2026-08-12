@@ -165,7 +165,7 @@ Stacked 조율은 한 축으로만 흐릅니다. 부모가 자식을 깨우고, 
 
 | 입력 | 타입 | 필수 | 설명 |
 | --- | --- | --- | --- |
-| `workspaceId` | string | 예 | `list_workspace_peers` 에서 얻은 대상 ID. |
+| `targetWorkspaceId` | string | 예 | `list_workspace_peers` 에서 얻은 수신자 ID. 자기 자신은 넣지 않습니다 — 호출자는 Wooi 가 이미 압니다. |
 | `message` | string | 예 | 무엇이 바뀌었고 상대가 무엇을 달리해야 하는지 독립적으로 이해할 수 있게 쓴 텍스트. |
 
 Wooi 는 전달 전에 출처 문단을 씌웁니다. 받는 에이전트가 사용자의 새 지시가 아니라 다른
