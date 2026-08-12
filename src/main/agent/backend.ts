@@ -97,8 +97,13 @@ export interface AgentBackend {
   setEffort(workspaceId: string, effort: EffortSetting | null): void
   /** fast mode(`/fast`) 오버라이드(capabilities.fastMode). null 이면 전역 설정을 따른다. */
   setFastMode(workspaceId: string, fastMode: boolean | null): void
-  /** 입력창 자동완성용 슬래시 명령 목록(capabilities.slashCommands). */
-  listCommands(cwd: string): Promise<SlashCommandInfo[]>
+  /**
+   * 입력창 자동완성용 슬래시 명령 목록(capabilities.slashCommands).
+   *
+   * cwd 만으로 부족해 workspaceId 도 받는다 — team 모드 워크스페이스에는 위임 서브에이전트
+   * 커맨드(`/wooi:claude` …)가 더 실리는데, 그 판단은 워크스페이스를 봐야 한다.
+   */
+  listCommands(workspaceId: string, cwd: string): Promise<SlashCommandInfo[]>
   /**
    * /add-dir — worktree 밖 디렉토리를 작업 루트로 더한다(capabilities.addDirectory).
    * 세션 시작 시점에 고정되는 값이라 구현은 기존 세션을 정리하고 다음 메시지에서 다시 연다.

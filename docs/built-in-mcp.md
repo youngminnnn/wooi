@@ -349,6 +349,11 @@ with your own commands: `/wooi:pr`, `/wooi:children`, and so on. The catalog is
 | `/wooi:logs <name> [lines]` | `read_script_output` | direct |
 | `/wooi:archive <workspace id>` | `archive_workspace` | direct |
 
+In a team-mode workspace, one more command per agent backend appears — `/wooi:claude` and
+`/wooi:codex` — matching the `claude_subagent` and `codex_subagent` tools. They take
+`<what it should do>` and hand it to the agent, which writes the full brief. They are absent
+outside team mode, because the underlying tools are.
+
 **Direct** commands run the tool in the main process and show the result in a card. They cost no
 turn and no tokens, and they do not show an approval card — you named the tool yourself, so there
 is nothing to confirm. Only the commands in the table above can run this way, and their arguments
@@ -364,6 +369,10 @@ Wooi generates a Claude Code plugin from the catalog at startup and writes it un
 (`src/main/agent/plugin.ts`). The plugin is passed to sessions with `skipMcpDiscovery`, since Wooi
 already provides the `wooi` MCP server in-process. Claude Code then supplies both the autocomplete
 entries and the prompt expansion, so nothing about the command list is hardcoded.
+
+Two variants are generated — with and without the delegate commands — and a session is given the
+one that matches its mode. They cannot be merged into one plugin: a plugin's name is also its
+command prefix, so both must be named `wooi`, and a session can load only one of them.
 
 Codex reads the same plugin format, but its slash-command handling lives in its TUI rather than in
 the app-server protocol that Wooi drives, and there is no RPC to list or expand commands. So for

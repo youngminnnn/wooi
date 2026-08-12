@@ -22,10 +22,11 @@ import {
   expandWooiCommand,
   matchWooiCommand,
   wooiCommandName,
-  WOOI_COMMANDS
+  wooiCommandsFor
 } from '@shared/wooiCommands'
 import type { CodexCommand, CodexConfig, CodexEvent } from './protocol'
 import type {
+  AgentBackendId,
   AgentAuthStatus,
   AgentRateLimits,
   CodexLoginMethod,
@@ -253,6 +254,15 @@ export class CodexSessionManager implements AgentBackend {
   }
 
   /** store 에서 스레드 생성/재개에 필요한 설정을 계산한다. */
+  /**
+   * 이 워크스페이스가 위임할 수 있는 백엔드. 세션 설정(configFor)과 자동완성·확장이 같은 판단을
+   * 써야 하므로 한 곳에 둔다 — 어긋나면 입력창에 뜨는 명령이 세션에는 없게 된다.
+   */
+  private delegateBackendsOf(workspaceId: string): AgentBackendId[] {
+    const ws = this.getWorkspace(workspaceId)
+    return ws ? delegateBackendsFor(ws, getStore().getState().settings) : []
+  }
+
   private configFor(ws: Workspace): CodexConfig {
     const settings = getStore().getState().settings
     const defaults = agentSettingsFor(settings, CODEX_META.id)
@@ -321,7 +331,9 @@ export class CodexSessionManager implements AgentBackend {
     // app-server 에 확장 RPC 가 없어(슬래시 처리가 TUI 크레이트에만 있다) 그냥 모델에게 가는
     // 텍스트가 된다 — `/compact`·`/review` 를 전용 RPC 로 돌리는 것과 같은 이유로 여기서 푼다.
     // 즉시 실행 명령(mode: 'direct')은 렌더러가 이미 가로챘으므로 여기까지 오지 않는다.
-    const wooi = !images?.length ? matchWooiCommand(text) : null
+    const wooi = !images?.length
+      ? matchWooiCommand(text, this.delegateBackendsOf(workspaceId))
+      : null
     if (wooi) {
       this.send({
         type: 'send',
@@ -617,7 +629,8 @@ export class CodexSessionManager implements AgentBackend {
     return Promise.reject(new Error('Codex does not support rewind.'))
   }
 
-  listCommands(): Promise<SlashCommandInfo[]> {
+  listCommands(workspaceId: string): Promise<SlashCommandInfo[]> {
+    const backends = this.delegateBackendsOf(workspaceId)
     return Promise.resolve([
       { name: 'model', description: 'Choose the model' },
       { name: 'effort', description: 'Choose reasoning effort' },
@@ -636,7 +649,7 @@ export class CodexSessionManager implements AgentBackend {
       // Claude 는 같은 목록을 플러그인으로 받아 CLI 가 알아서 실어 주지만(agent/plugin.ts),
       // Codex 는 app-server 로 몰기 때문에 여기서 손으로 실어야 한다. 슬래시 확장이 Codex 의
       // TUI 크레이트에만 있고 app-server RPC 에는 없어서, 확장도 sendMessage 가 직접 한다.
-      ...WOOI_COMMANDS.map((c) => ({
+      ...wooiCommandsFor(backends).map((c) => ({
         name: wooiCommandName(c),
         description: c.description,
         ...(c.argumentHint ? { argumentHint: c.argumentHint } : {})

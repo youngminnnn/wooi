@@ -1,7 +1,8 @@
 import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { log } from '../logger'
-import { WOOI_COMMANDS, WOOI_COMMAND_NAMESPACE, type WooiCommandSpec } from '@shared/wooiCommands'
+import { wooiCommandsFor, WOOI_COMMAND_NAMESPACE, type WooiCommandSpec } from '@shared/wooiCommands'
+import { AGENT_BACKEND_IDS, type AgentBackendId } from '@shared/types'
 
 /**
  * `/wooi:*` 슬래시 명령을 Claude Code 에 넘기는 **로컬 플러그인**을 디스크에 만든다.
@@ -32,9 +33,11 @@ import { WOOI_COMMANDS, WOOI_COMMAND_NAMESPACE, type WooiCommandSpec } from '@sh
  * 옵션에 전달) 양쪽에서 필요한데 host 에는 `app` 이 없다. 메인이 부팅 첫 구문에서 세팅하고
  * host fork 가 물려받는 WOOI_USER_DATA 를 읽는다 — logger.ts 와 같은 방식이다.
  */
-export function wooiPluginDir(): string | null {
+export function wooiPluginDir(team = false): string | null {
   const userData = process.env.WOOI_USER_DATA?.trim()
-  return userData ? join(userData, 'claude-plugin') : null
+  // 변형을 디렉토리로 가르는 이유: 플러그인 이름이 곧 커맨드 접두사라 둘 다 `wooi` 여야 하고,
+  // 같은 이름 둘을 한 세션에 물릴 수는 없다. 세션마다 **하나만** 고른다(session.ts).
+  return userData ? join(userData, team ? 'claude-plugin-team' : 'claude-plugin') : null
 }
 
 /**
@@ -43,14 +46,28 @@ export function wooiPluginDir(): string | null {
  * 없는 경로를 넘기면 CLI 가 세션 자체를 열지 못한다. 생성이 실패했을 때 명령 몇 개를 잃는 것이
  * 워크스페이스를 통째로 잃는 것보다 낫다.
  */
-export function resolveWooiPlugin(): string | null {
-  const dir = wooiPluginDir()
+export function resolveWooiPlugin(team = false): string | null {
+  const dir = wooiPluginDir(team)
   if (!dir) return null
   return existsSync(join(dir, '.claude-plugin', 'plugin.json')) ? dir : null
 }
 
+/**
+ * 두 변형을 모두 만든다. 부팅 때 한 번 부른다([[index]]).
+ *
+ * team 변형에는 등록된 모든 백엔드의 위임 커맨드가 들어간다 — team 모드는 백엔드 화이트리스트가
+ * 아니라 모드라, 켜져 있으면 종류 전부를 쓸 수 있기 때문이다(multiAgent.ts delegateBackendsFor).
+ */
+export function writeWooiPlugins(): void {
+  const base = wooiPluginDir(false)
+  const team = wooiPluginDir(true)
+  if (base) writeWooiPlugin(base)
+  if (team) writeWooiPlugin(team, AGENT_BACKEND_IDS)
+}
+
 /** 생성한 플러그인 디렉토리 경로. 세션 옵션에 그대로 넘긴다. */
-export function writeWooiPlugin(dir: string): string {
+export function writeWooiPlugin(dir: string, delegateBackends: AgentBackendId[] = []): string {
+  const commands = wooiCommandsFor(delegateBackends)
   const commandsDir = join(dir, 'commands')
   const manifestDir = join(dir, '.claude-plugin')
   mkdirSync(commandsDir, { recursive: true })
@@ -70,8 +87,8 @@ export function writeWooiPlugin(dir: string): string {
     'utf8'
   )
 
-  const owned = new Set(WOOI_COMMANDS.map((c) => `${c.name}.md`))
-  for (const spec of WOOI_COMMANDS) {
+  const owned = new Set(commands.map((c) => `${c.name}.md`))
+  for (const spec of commands) {
     writeFileSync(join(commandsDir, `${spec.name}.md`), commandFile(spec), 'utf8')
   }
 
@@ -83,9 +100,7 @@ export function writeWooiPlugin(dir: string): string {
     }
   }
 
-  log.info(
-    `plugin: wrote ${WOOI_COMMANDS.length} /${WOOI_COMMAND_NAMESPACE}:* command(s) to ${dir}`
-  )
+  log.info(`plugin: wrote ${commands.length} /${WOOI_COMMAND_NAMESPACE}:* command(s) to ${dir}`)
   return dir
 }
 

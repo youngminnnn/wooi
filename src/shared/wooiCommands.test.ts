@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { AGENT_TOOLS } from '../main/agent/tools/catalog'
+import { agentToolsFor, AGENT_TOOLS } from '../main/agent/tools/catalog'
+import { AGENT_BACKEND_IDS } from './types'
 import {
   expandWooiCommand,
   matchWooiCommand,
   parseWooiCommandArgs,
   wooiCommandName,
+  wooiCommandsFor,
   WOOI_COMMANDS
 } from './wooiCommands'
 
@@ -14,12 +16,41 @@ describe('catalog', () => {
     expect(WOOI_COMMANDS.map((c) => c.tool).sort()).toEqual(AGENT_TOOLS.map((t) => t.name).sort())
   })
 
+  it('covers the delegate tools too, and only in team mode', () => {
+    // team 모드에서만 존재하는 도구다. 커맨드도 그때만 생겨야 한다 — 쓸 수 없는 명령이
+    // 자동완성에 뜨면 사용자는 왜 안 되는지 알 길이 없다.
+    expect(
+      wooiCommandsFor()
+        .map((c) => c.tool)
+        .sort()
+    ).toEqual(WOOI_COMMANDS.map((c) => c.tool).sort())
+    expect(
+      wooiCommandsFor(AGENT_BACKEND_IDS)
+        .map((c) => c.tool)
+        .sort()
+    ).toEqual(
+      agentToolsFor(AGENT_BACKEND_IDS)
+        .map((t) => t.name)
+        .sort()
+    )
+  })
+
+  it('delegates through the agent, never directly', () => {
+    // 서브에이전트는 빈 맥락으로 시작하므로 브리프를 모델이 써야 한다. direct 로 새면
+    // 사용자가 친 한 줄만 받은 맥락 없는 서브에이전트가 된다.
+    for (const spec of wooiCommandsFor(AGENT_BACKEND_IDS).filter(
+      (c) => !WOOI_COMMANDS.includes(c)
+    )) {
+      expect(spec.mode, spec.name).toBe('agent')
+    }
+  })
+
   it('has unique command names', () => {
     expect(new Set(WOOI_COMMANDS.map((c) => c.name)).size).toBe(WOOI_COMMANDS.length)
   })
 
   it('leaves a $ARGUMENTS slot in every prompt that takes arguments', () => {
-    for (const spec of WOOI_COMMANDS.filter((c) => c.argumentHint)) {
+    for (const spec of wooiCommandsFor(AGENT_BACKEND_IDS).filter((c) => c.argumentHint)) {
       expect(spec.prompt, spec.name).toContain('$ARGUMENTS')
     }
   })
@@ -32,6 +63,16 @@ describe('matchWooiCommand', () => {
       spec: { name: 'run' },
       rest: 'dev server'
     })
+  })
+
+  it('matches delegate commands only when they are available', () => {
+    expect(matchWooiCommand('/wooi:claude review auth')).toBeNull()
+    expect(matchWooiCommand('/wooi:claude review auth', AGENT_BACKEND_IDS)).toMatchObject({
+      spec: { name: 'claude', tool: 'claude_subagent' },
+      rest: 'review auth'
+    })
+    expect(matchWooiCommand('/wooi:codex', ['codex'])).toMatchObject({ spec: { name: 'codex' } })
+    expect(matchWooiCommand('/wooi:claude', ['codex'])).toBeNull()
   })
 
   it('ignores anything that is not one of ours', () => {

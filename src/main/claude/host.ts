@@ -249,7 +249,7 @@ async function handle(msg: HostCommand): Promise<void> {
       break
 
     case 'listCommands':
-      await respond(msg.reqId, () => listSlashCommands(msg.cwd))
+      await respond(msg.reqId, () => listSlashCommands(msg.cwd, msg.team))
       break
 
     case 'sideQuestion':

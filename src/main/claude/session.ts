@@ -685,7 +685,8 @@ export class ClaudeSession {
       // effort 옵션으로 그대로 넘기고, null 이면 아무것도 넘기지 않아 모델 기본 동작을 따른다.
       const ultracode = this.deps.effort === 'ultracode'
       const sdkEffort = claudeEffort(this.deps.effort)
-      const wooiPlugin = resolveWooiPlugin()
+      // team 모드 세션에만 위임 커맨드가 든 변형을 물린다 — 쓸 수 없는 명령은 보이지 않아야 한다.
+      const wooiPlugin = resolveWooiPlugin(!!this.deps.delegateBackends?.length)
       this.q = query({
         prompt: this.promptStream(this.input),
         options: {

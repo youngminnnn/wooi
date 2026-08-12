@@ -2,7 +2,8 @@ import { mkdtempSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { WOOI_COMMANDS } from '@shared/wooiCommands'
+import { wooiCommandsFor, WOOI_COMMANDS } from '@shared/wooiCommands'
+import { AGENT_BACKEND_IDS } from '@shared/types'
 import { resolveWooiPlugin, wooiPluginDir, writeWooiPlugin } from './plugin'
 
 function scratch(): string {
@@ -40,6 +41,26 @@ describe('writeWooiPlugin', () => {
     expect(readFileSync(join(dir, 'commands', 'children.md'), 'utf8')).not.toContain(
       'argument-hint'
     )
+  })
+
+  it('writes the delegate commands only into the team variant', () => {
+    const solo = readdirSync(join(writeWooiPlugin(scratch()), 'commands'))
+    const team = readdirSync(join(writeWooiPlugin(scratch(), AGENT_BACKEND_IDS), 'commands'))
+    expect(solo).not.toContain('claude.md')
+    expect(team).toEqual(
+      wooiCommandsFor(AGENT_BACKEND_IDS)
+        .map((c) => `${c.name}.md`)
+        .sort()
+    )
+  })
+
+  it('drops the delegate commands when a variant is rewritten without them', () => {
+    // team 모드를 껐다 켜는 일이 실제로 생긴다. 한 디렉토리를 두 모양으로 다시 쓰는 경우는
+    // 없지만, 남는 파일이 자동완성에 계속 뜨는 실패를 정리 로직이 막는지 여기서 고정한다.
+    const root = scratch()
+    writeWooiPlugin(root, AGENT_BACKEND_IDS)
+    writeWooiPlugin(root)
+    expect(readdirSync(join(root, 'commands'))).not.toContain('claude.md')
   })
 
   it('removes command files it no longer owns', () => {

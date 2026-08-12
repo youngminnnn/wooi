@@ -10,6 +10,8 @@
  * agent/tools/catalog 와 달리 zod 를 쓰지 않으므로 렌더러 번들에 얹혀도 문자열 몇 개다.
  */
 
+import { AGENT_BACKEND_LABELS, type AgentBackendId } from './types'
+
 /**
  * 커맨드 앞에 붙는 이름공간. `/wooi:pr` 처럼 보인다.
  *
@@ -248,10 +250,58 @@ export const WOOI_COMMANDS: WooiCommandSpec[] = [
 ]
 
 /**
+ * 위임 서브에이전트 커맨드. 백엔드마다 하나씩, **team 모드 워크스페이스에만** 있다.
+ *
+ * 목록이 상수가 아니라 함수인 이유는 [[agent/tools/catalog]] 의 delegateToolSpecs 와 같다 —
+ * 쓸 수 없는 도구를 보여 주면 안 되고, 위임 도구는 team 모드에서만 존재한다. 그래서 이 커맨드도
+ * 그때만 자동완성에 실리고, 플러그인도 그때만 위임 커맨드가 든 변형이 붙는다([[agent/plugin]]).
+ *
+ * `agent` 모드인 것은 선택이 아니다. 서브에이전트는 빈 맥락으로 시작해 이 대화를 볼 수 없으므로
+ * 브리프에 필요한 사실을 전부 다시 적어야 하고, 그건 대화를 읽은 모델만 할 수 있다 — 사용자가
+ * 친 한 줄을 그대로 프롬프트로 넘기면 맥락 없는 서브에이전트가 된다. 결과가 갈 곳이 있어야
+ * 한다는 점도 같다: 도구 결과는 부른 에이전트에게 돌아가 다음 판단에 쓰인다.
+ */
+export function delegateWooiCommands(backends: AgentBackendId[]): WooiCommandSpec[] {
+  return backends.map((backend) => {
+    const label = AGENT_BACKEND_LABELS[backend] ?? backend
+    return {
+      // 도구 이름이 `claude_subagent` 인 것과 같은 이유로 백엔드 이름을 그대로 쓴다 — 어느
+      // 제품으로 띄우는지가 이름만으로 읽혀야 한다.
+      name: backend,
+      tool: `${backend}_subagent`,
+      mode: 'agent' as const,
+      description: `Run a ${label} subagent in this workspace`,
+      argumentHint: '<what it should do>',
+      prompt: [
+        `Start a ${label} subagent by calling the \`mcp__wooi__${backend}_subagent\` tool.`,
+        `It really runs on ${label} — do not substitute your own built-in subagent mechanism,`,
+        'which cannot run that product.',
+        '',
+        'Write the `prompt` as a complete brief. The subagent starts from an empty context, cannot',
+        'see this conversation, and cannot ask you anything mid-run, so restate every fact it',
+        'needs: the files and symbols involved as `path:line`, the commands to run, the constraints,',
+        'and exactly what to return. Give `description` a 3-6 word label shown while it runs.',
+        '',
+        'Call the tool once per subagent. If the request implies several, say how many you started',
+        'and what each one is doing.',
+        '',
+        'What it should do: $ARGUMENTS'
+      ].join('\n')
+    }
+  })
+}
+
+/** 이 워크스페이스가 지금 쓸 수 있는 커맨드 전부. `agentToolsFor` 와 같은 모양이다. */
+export function wooiCommandsFor(delegateBackends: AgentBackendId[] = []): WooiCommandSpec[] {
+  return [...WOOI_COMMANDS, ...delegateWooiCommands(delegateBackends)]
+}
+
+/**
  * `direct` 커맨드의 나머지 텍스트를 도구 인자로 바꾼다.
  *
  * 파서를 스펙 안에 함수로 넣지 않고 여기 한 곳에 모은 이유: 스펙은 플러그인 파일 생성에도
- * 쓰이는 순수 데이터라 직렬화 가능한 채로 두는 편이 낫고, 파싱 규칙 12개가 한눈에 보인다.
+ * 쓰이는 순수 데이터라 직렬화 가능한 채로 두는 편이 낫고, 파싱 규칙이 한눈에 보인다.
+ * 위임 커맨드는 전부 `agent` 모드라 여기 오지 않는다.
  *
  * 인자가 틀렸을 때 던지지 않고 `error` 를 돌려주는 이유: 이건 사용자의 오타지 프로그래밍
  * 오류가 아니다. 사용법 한 줄을 보여 주고 입력창에 남겨 두면 이어서 고쳐 칠 수 있다.
@@ -314,13 +364,23 @@ export function parseWooiCommandArgs(name: string, raw: string): WooiCommandArgs
   }
 }
 
-/** `/wooi:pr 급하게` → `{ spec, rest: '급하게' }`. Wooi 커맨드가 아니면 null. */
-export function matchWooiCommand(text: string): { spec: WooiCommandSpec; rest: string } | null {
+/**
+ * `/wooi:pr 급하게` → `{ spec, rest: '급하게' }`. Wooi 커맨드가 아니면 null.
+ *
+ * `delegateBackends` 를 넘기지 않으면 위임 커맨드(`/wooi:claude` …)는 **매치되지 않는다**.
+ * 기본값이 빈 배열인 것이 맞다: 이 함수를 부르는 두 곳의 필요가 다르다. 렌더러는 즉시 실행
+ * 커맨드만 가로채면 되고 위임 커맨드는 전부 `agent` 모드라 평범한 메시지로 흘려보내야 한다.
+ * 확장이 필요한 Codex 매니저만 자기가 계산한 목록을 넘긴다.
+ */
+export function matchWooiCommand(
+  text: string,
+  delegateBackends: AgentBackendId[] = []
+): { spec: WooiCommandSpec; rest: string } | null {
   const m = new RegExp(`^/${WOOI_COMMAND_NAMESPACE}:([\\w-]+)(?:\\s+([\\s\\S]*))?$`).exec(
     text.trim()
   )
   if (!m) return null
-  const spec = WOOI_COMMANDS.find((c) => c.name === m[1])
+  const spec = wooiCommandsFor(delegateBackends).find((c) => c.name === m[1])
   return spec ? { spec, rest: (m[2] ?? '').trim() } : null
 }
 

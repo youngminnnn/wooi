@@ -5,7 +5,7 @@ import { IPC } from '@shared/types'
 import { applyDevPaths, isDevIsolated, wooiHome } from './paths'
 import { AgentOrchestrator } from './agent/orchestrator'
 import { initAgentTools } from './agent/tools'
-import { wooiPluginDir, writeWooiPlugin } from './agent/plugin'
+import { writeWooiPlugins } from './agent/plugin'
 import { cancelToolPermissions, initToolPermission } from './agent/tools/permission'
 import { startToolSocket, stopToolSocket } from './agent/tools/socket'
 import { setCodexStatusProvider } from './auth'
@@ -146,8 +146,7 @@ initAgentTools({
 // 매번 다시 쓴다 — 카탈로그가 SSOT 이므로 앱을 업데이트하면 명령도 함께 바뀌어야 한다.
 // 실패해도 앱은 정상 동작한다 — 그 명령들만 없다(resolveWooiPlugin 이 존재 여부로 거른다).
 try {
-  const dir = wooiPluginDir()
-  if (dir) writeWooiPlugin(dir)
+  writeWooiPlugins()
 } catch (err) {
   log.warn('plugin: failed to write /wooi:* slash commands; they will not be available', err)
 }
