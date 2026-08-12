@@ -39,6 +39,7 @@ import {
 } from '@shared/types'
 import type {
   AgentBackendId,
+  AgentBackendMeta,
   AgentSettings,
   AppSettings,
   EffortSetting,
@@ -63,6 +64,36 @@ const THEME_OPTIONS: { value: ThemePreference; label: string }[] = [
   { value: 'dark', label: 'Dark' },
   { value: 'light', label: 'Light' }
 ]
+
+function PermissionModeHelp({
+  backend
+}: {
+  backend: AgentBackendMeta | undefined
+}): React.JSX.Element {
+  return (
+    <details className="group relative">
+      <summary
+        className="grid h-7 w-7 cursor-pointer list-none place-items-center rounded-full border border-[var(--border)] text-xs font-medium text-neutral-500 transition-colors hover:border-[var(--border-2)] hover:bg-[var(--surface-2)] hover:text-neutral-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--info-500)] [&::-webkit-details-marker]:hidden"
+        aria-label="About permission modes"
+      >
+        ?
+      </summary>
+      <div className="absolute right-0 z-20 mt-2 w-80 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-3 shadow-xl">
+        <div className="mb-2 text-xs font-medium text-neutral-300">Permission modes</div>
+        <div className="space-y-2.5">
+          {permissionModesFor(backend).map((item) => (
+            <div key={item.id}>
+              <div className="text-xs font-medium text-neutral-300">{item.label}</div>
+              <div className="mt-0.5 text-xs leading-relaxed text-neutral-500">
+                {item.description}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </details>
+  )
+}
 const PAGES: { id: Page; label: string; icon: typeof Settings2; keywords: string }[] = [
   {
     id: 'general',
@@ -445,20 +476,23 @@ function AgentsPage({
           title="Permission mode"
           description="Controls how much the agent can do without asking. You can cycle it with ⇧⇥ during a session."
         >
-          <select
-            className={inputClass + ' w-56 text-sm'}
-            value={mode ?? ''}
-            disabled={!backend}
-            onChange={(event) =>
-              patchAgent({ permissionMode: event.target.value as PermissionMode })
-            }
-          >
-            {permissionModesFor(backend).map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.label} — {item.description}
-              </option>
-            ))}
-          </select>
+          <div className="flex items-center gap-2">
+            <select
+              className={inputClass + ' w-56 text-sm'}
+              value={mode ?? ''}
+              disabled={!backend}
+              onChange={(event) =>
+                patchAgent({ permissionMode: event.target.value as PermissionMode })
+              }
+            >
+              {permissionModesFor(backend).map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.label}
+                </option>
+              ))}
+            </select>
+            <PermissionModeHelp backend={backend} />
+          </div>
         </SettingRow>
         <SettingRow title="Model" description="Workspace override available">
           <select
