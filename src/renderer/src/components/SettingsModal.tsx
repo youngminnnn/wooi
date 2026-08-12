@@ -24,6 +24,7 @@ import { hasNewVersion, scheduledRestartText, updateStatusText } from '../lib/up
 import { useNow } from '../lib/useNow'
 import { inputClass } from './Modal'
 import IntegrationsPanel from './IntegrationsPanel'
+import RemoteAccessPanel from './RemoteAccessPanel'
 import McpServersPage from './McpServersPage'
 import PluginsPage from './PluginsPage'
 import { PageFrame, SettingGroup, SettingRow, Switch } from './SettingsPrimitives'
@@ -331,6 +332,13 @@ export default function SettingsModal({
                 description="Connect the tools Wooi uses to run agents and work with pull requests."
               >
                 <IntegrationsPanel />
+                {/* 원격 접근도 "외부와 연결"이라는 점에서 같은 성격이라 이 페이지에 둔다. */}
+                <div className="mt-8 border-t border-[var(--border)] pt-6">
+                  <h4 className="mb-3 text-xs font-semibold uppercase tracking-wider text-neutral-500">
+                    Remote access
+                  </h4>
+                  <RemoteAccessPanel />
+                </div>
               </PageFrame>
             )}
             {page === 'mcp' && <McpServersPage settings={settings} save={save} />}

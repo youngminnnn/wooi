@@ -1,3 +1,4 @@
+import type { RemoteStatus } from './remote'
 import type {
   AdoptFanoutResult,
   AgentBackendId,
@@ -606,6 +607,23 @@ export interface WooiApi {
   }
 
   /**
+   * 모바일 컴패니언의 원격 접근 관리. 전부 설정 패널 전용이며,
+   * 어느 것도 폰에서 호출할 수 없다(allowlist.test.ts 가 잠근다).
+   */
+  remote: {
+    getStatus(): Promise<RemoteStatus>
+    /** 마스터 스위치. 끄면 소켓·타이머가 전부 정리된다. */
+    setEnabled(enabled: boolean): Promise<RemoteStatus>
+    pairStart(): Promise<RemoteStatus>
+    /** 사용자가 SAS 6자리를 확인했다. 여기서 처음으로 세션키가 만들어진다. */
+    pairConfirm(): Promise<RemoteStatus>
+    pairCancel(): Promise<RemoteStatus>
+    revokeDevice(deviceId: string): Promise<RemoteStatus>
+    /** 되돌릴 수 없다 — 모든 폰이 재페어링해야 한다. */
+    clearData(): Promise<RemoteStatus>
+  }
+
+  /**
    * MCP 서버 설정 화면용. Wooi 스코프 목록 자체는 AppSettings.mcp 에 있어 `settings.update` 로
    * 고치고, 여기서는 우리가 소유하지 않는 ~/.claude.json 쪽만 다룬다.
    */
@@ -692,6 +710,8 @@ export interface WooiApi {
   onState(cb: (state: AppState) => void): () => void
   /** restack·stack sync 의 브랜치별 진행 스트림. */
   onStackProgress(cb: (progress: StackOpProgress) => void): () => void
+  /** 원격 접근 상태 변화(연결·페어링 진행·기기 목록). */
+  onRemote(cb: (status: RemoteStatus) => void): () => void
   /** PR 리뷰 진행 상황·결과 스트림. */
   onReview(cb: (e: ReviewEnvelope) => void): () => void
   /** OS 알림 클릭 시 main 이 보내는 workspace 선택 요청. */

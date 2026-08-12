@@ -18,6 +18,7 @@ import { initHealthLogging } from './health'
 import { TerminalManager } from './terminal'
 import { applyNavigationGuards, loadRenderer, rendererWebPreferences } from './windows'
 import { registerIpc } from './ipc'
+import { disposeRemote, getRemoteBridge, initRemote } from './remote'
 import { log } from './logger'
 import { hydrateEnvFromLoginShell } from './env'
 import { initUpdater } from './updater'
@@ -220,11 +221,21 @@ app.whenReady().then(() => {
   // Preview 게스트의 울타리는 창보다 먼저 세운다 — will-attach-webview 를 놓치면 그 webview 는
   // 우리가 강제하려던 설정 없이 붙는다([[preview]]).
   initPreview(dispatch)
-  registerIpc({ sessions, scripts, terminals, panes, getWindow: () => mainWindow })
+  // 원격 브리지는 IPC 등록보다 **먼저** 만들어야 한다 — 핸들러가 getRemoteBridge() 를 부른다.
+  // 만드는 것 자체는 아무 자원도 잡지 않는다(설정을 읽을 뿐이다). 실제 연결은 아래에서
+  // 사용자가 켜 둔 경우에만 일어난다.
+  initRemote((status) => dispatch(IPC.evtRemote, status))
+  registerIpc({ sessions, scripts, terminals, panes, dispatch, getWindow: () => mainWindow })
   createWindow()
   sessions.prewarm()
   initUpdater(dispatch)
   initNotice(dispatch)
+  // 지난 실행에서 켜 두었다면 복원한다. 실패해도 앱 기동을 막지 않는다 — 상태는 설정 패널에 뜬다.
+  if (getStore().getState().settings.remoteEnabled) {
+    void getRemoteBridge()
+      .setEnabled(true)
+      .catch((err) => log.error('원격 자동 연결 실패', err))
+  }
   initHealthLogging(() => sessions.liveSessionCount())
   if (isDevIsolated()) {
     log.info(`dev 격리: userData=${app.getPath('userData')} worktreeRoot=${wooiHome()}`)
@@ -243,6 +254,7 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => {
+  void disposeRemote()
   sessions.disposeAll()
   scripts.disposeAll()
   terminals.disposeAll()

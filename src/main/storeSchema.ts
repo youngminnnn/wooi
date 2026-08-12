@@ -103,7 +103,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   // 이 필드가 없던 버전(v1.0.3 이하)에서 올라오면 다음 실행에 한 번 질문을 받는다.
   pickedDefaults: false,
   // 미동의(null) 로 시작 — 기존 사용자도 load 의 기본값 병합으로 null 이 되어 (재)동의를 요구한다.
-  acceptedTermsVersion: null
+  acceptedTermsVersion: null,
+  // 원격 접근은 옵트인이다. 꺼져 있으면 릴레이에 아무것도 보내지 않는다.
+  remoteEnabled: false
 }
 
 export const EMPTY_STATE: AppState = {

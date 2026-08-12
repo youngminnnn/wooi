@@ -30,7 +30,10 @@
     "metrics": "node scripts/adoption-snapshot.mjs",
     "dist": "electron-vite build && electron-builder --mac --publish never",
     "postinstall": "node node_modules/electron/install.js && (chmod +x node_modules/node-pty/prebuilds/*/spawn-helper 2>/dev/null || true)",
-    "prepare": "husky"
+    "prepare": "husky",
+    "remote:probe": "node --import ./scripts/ts-resolve.mjs scripts/remote-probe.ts",
+    "remote:keystore-probe": "electron scripts/keystore-probe.mjs",
+    "typecheck:mobile": "npm --prefix apps/mobile exec tsc -- --noEmit"
   },
   "lint-staged": {
     "*.{ts,tsx,js,jsx,mjs,cjs}": [
@@ -86,6 +89,7 @@
     "@eslint/js": "^10.0.1",
     "@tailwindcss/vite": "^4.3.3",
     "@types/node": "^26.2.0",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
     "@vitejs/plugin-react": "^5.2.0",
@@ -108,12 +112,17 @@
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.233",
+    "@noble/ciphers": "^2.2.0",
+    "@noble/curves": "^2.2.0",
+    "@noble/hashes": "^2.2.0",
+    "@supabase/supabase-js": "^2.112.0",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
     "electron-updater": "^6.8.9",
     "highlight.js": "^11.11.1",
     "lucide-react": "^1.31.0",
     "node-pty": "^1.1.0",
+    "qrcode": "^1.5.4",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-markdown": "^10.1.0",

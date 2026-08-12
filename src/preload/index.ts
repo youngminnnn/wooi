@@ -250,6 +250,16 @@ const api: WooiApi = {
 
   openExternal: (url) => ipcRenderer.invoke(IPC.openExternal, url),
 
+  remote: {
+    getStatus: () => ipcRenderer.invoke(IPC.remoteGetStatus),
+    setEnabled: (enabled) => ipcRenderer.invoke(IPC.remoteSetEnabled, enabled),
+    pairStart: () => ipcRenderer.invoke(IPC.remotePairStart),
+    pairConfirm: () => ipcRenderer.invoke(IPC.remotePairConfirm),
+    pairCancel: () => ipcRenderer.invoke(IPC.remotePairCancel),
+    revokeDevice: (deviceId) => ipcRenderer.invoke(IPC.remoteRevokeDevice, deviceId),
+    clearData: () => ipcRenderer.invoke(IPC.remoteClearData)
+  },
+
   settings: {
     update: (patch) => ipcRenderer.invoke(IPC.settingsUpdate, patch)
   },
@@ -303,6 +313,7 @@ const api: WooiApi = {
   onComposerAttach: (cb) => subscribe(IPC.evtComposerAttach, cb),
   onState: (cb) => subscribe(IPC.evtState, cb),
   onStackProgress: (cb) => subscribe(IPC.evtStackProgress, cb),
+  onRemote: (cb) => subscribe(IPC.evtRemote, cb),
   onReview: (cb) => subscribe(IPC.evtReview, cb),
   onSelectWorkspace: (cb) => subscribe(IPC.evtSelectWorkspace, cb),
   onOpenRepoSettings: (cb) => subscribe(IPC.evtOpenRepoSettings, cb),

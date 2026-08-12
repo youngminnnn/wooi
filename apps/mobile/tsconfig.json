@@ -1,0 +1,13 @@
+{
+  "extends": "expo/tsconfig.base",
+  "compilerOptions": {
+    "strict": true,
+    "paths": {
+      "@shared/*": ["../../src/shared/*"]
+    }
+  },
+  // 공유 폴더는 **소스만** 본다. 그쪽 vitest 파일은 node 타입을 요구하는데
+  // 모바일 프로젝트가 그걸 알 이유가 없다(Metro 도 번들에 넣지 않는다).
+  "include": ["**/*.ts", "**/*.tsx", "../../src/shared/**/*.ts"],
+  "exclude": ["../../src/shared/**/*.test.ts", "node_modules", ".expo"]
+}

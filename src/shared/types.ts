@@ -1163,6 +1163,14 @@ export interface AppSettings {
    */
   acceptedTermsVersion: number | null
   /**
+   * 모바일 컴패니언의 원격 접근을 허용한다. **기본 꺼짐** — 옵트인이며, 꺼져 있으면
+   * 릴레이 소켓도 타이머도 만들어지지 않아 네트워크 비용이 0이다.
+   *
+   * 이 필드가 없던 버전에서 올라온 사용자도 기본값 병합으로 false 가 되므로
+   * schemaVersion 을 올리지 않는다(showRunningAgents·pickedDefaults 와 같은 이유).
+   */
+  remoteEnabled: boolean
+  /**
    * 별도 창으로 분리한 패널(work/scripts)의 마지막 위치·크기.
    *
    * 설정 화면에서 고르는 값이 아니라 창을 닫을 때 기록되는 자리 기억이다 — 듀얼 모니터에서
@@ -2946,7 +2954,27 @@ export const IPC = {
   /** 자동 업데이트 상태 변화(확인 중/최신/발견/다운로드 진행/준비됨/오류). */
   evtUpdate: 'evt:update',
   /** 원격 공지 목록이 갱신됨(main 이 주기적으로 가져온 결과). */
-  evtNotice: 'evt:notice'
+  evtNotice: 'evt:notice',
+  /** 원격 접근 상태 변화(연결/페어링 진행/기기 목록). 설정 패널만 구독한다. */
+  evtRemote: 'evt:remote',
+
+  // 원격 접근(모바일 컴패니언) 관리 — **전부 데스크톱 전용이다.**
+  // 이름이 `remote:` 로 시작하지만 원격에서 호출할 수 있어서는 절대 안 된다
+  // (폰이 스스로 페어링을 시작하거나 다른 기기를 revoke 할 수 있게 된다).
+  // allowlist.test.ts 의 영구 거부 목록이 이걸 잠근다.
+  /** 연결 상태·페어링 진행 상태·페어링된 기기 목록을 한 번에 읽는다. */
+  remoteGetStatus: 'remote:getStatus',
+  /** 원격 접근 마스터 스위치. 끄면 소켓과 타이머가 전부 정리된다. */
+  remoteSetEnabled: 'remote:setEnabled',
+  /** QR 을 띄우고 폰의 claim 을 기다리기 시작한다. */
+  remotePairStart: 'remote:pairStart',
+  /** 사용자가 SAS 6자리를 확인했다 — 여기서 처음으로 세션키가 만들어진다. */
+  remotePairConfirm: 'remote:pairConfirm',
+  remotePairCancel: 'remote:pairCancel',
+  /** 기기 하나의 접근을 끊는다(릴레이의 revoked_at + 로컬 키 삭제). */
+  remoteRevokeDevice: 'remote:revokeDevice',
+  /** 모든 원격 데이터를 지운다 — 키스토어와 릴레이 양쪽. */
+  remoteClearData: 'remote:clearData'
 } as const
 
 // ── IPC 페이로드 타입 ────────────────────────────────────────────────────
