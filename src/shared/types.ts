@@ -659,6 +659,8 @@ export interface Workspace {
   sessionId: string | null
   /** 계정 사용량 제한이 풀린 뒤 같은 대화를 자동으로 이어가기 위한 영속 예약. */
   pendingRateLimitResume?: PendingRateLimitResume | null
+  /** 마지막 턴이 사용량 제한으로 멈췄다는 표시(자동 이어가기 설정과 무관하게 기록·표시한다). */
+  rateLimited?: RateLimitPause | null
   permissionMode: PermissionMode
   status: WorkspaceStatus
   /** 이 workspace 전용 모델 오버라이드. null 이면 전역 설정(AppSettings.model) 을 따른다. */
@@ -2256,6 +2258,38 @@ export interface PendingRateLimitResume {
   detectedAt: number
   retryAt: number
   attempt: number
+}
+
+/**
+ * 이 워크스페이스의 마지막 턴이 계정 사용량 제한으로 멈췄다는 표시.
+ *
+ * 자동 이어가기(autoResumeAfterRateLimit)와 **무관하게** 기록한다 — 설정이 꺼져 있어도 사용자는
+ * "왜 멈췄고 언제 풀리는지" 를 사이드바에서 알아야 하기 때문이다. 설정이 켜져 있으면
+ * pendingRateLimitResume 이 함께 있고, 그쪽이 재개 시각까지 말해 준다.
+ */
+export interface RateLimitPause {
+  backend: AgentBackendId
+  detectedAt: number
+  /** 아는 해제 시각(epoch ms). 오류도 사용량 스냅샷도 알려 주지 않았으면 null. */
+  resetsAt: number | null
+}
+
+/**
+ * 해제 시각을 끝내 알아내지 못한 표시를 언제까지 보여 줄지.
+ *
+ * 표시는 다음 전송 때 지워지므로, 이 상한은 "안 쓰는 워크스페이스에 rate limit 딱지가 며칠씩
+ * 붙어 있는" 것만 막는다. 5시간 창은 물론이고 대부분의 제한이 이 안에 풀린다.
+ */
+const UNKNOWN_RESET_TTL_MS = 12 * 60 * 60_000
+
+/** 지금도 유효한 제한 표시인지 — 해제 시각이 지났거나 너무 오래됐으면 더는 보여 주지 않는다. */
+export function activeRateLimitPause(
+  pause: RateLimitPause | null | undefined,
+  now: number
+): RateLimitPause | null {
+  if (!pause) return null
+  if (pause.resetsAt != null) return pause.resetsAt > now ? pause : null
+  return now - pause.detectedAt < UNKNOWN_RESET_TTL_MS ? pause : null
 }
 
 export interface CreateWorkspaceArgs {

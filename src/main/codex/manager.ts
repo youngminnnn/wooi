@@ -102,7 +102,8 @@ export class CodexSessionManager implements AgentBackend {
       refreshLimits: () => this.refreshRateLimits(true),
       sendContinuation: (workspaceId) => this.sendContinuation(workspaceId),
       emitItem: (workspaceId, item) =>
-        this.dispatch(IPC.evtChat, { workspaceId, event: { type: 'item', item } })
+        this.dispatch(IPC.evtChat, { workspaceId, event: { type: 'item', item } }),
+      broadcastState: () => this.dispatch(IPC.evtState, getStore().getState())
     })
     this.rateLimitResume.restore()
   }
@@ -192,7 +193,7 @@ export class CodexSessionManager implements AgentBackend {
         this.onSessionId(msg.workspaceId, msg.sessionId)
         break
       case 'rateLimit':
-        void this.rateLimitResume.schedule(msg.workspaceId)
+        void this.rateLimitResume.noteRateLimit(msg.workspaceId)
         break
       case 'settleIdle':
         this.forceIdle(msg.workspaceId)
@@ -419,8 +420,11 @@ export class CodexSessionManager implements AgentBackend {
     this.forceIdle(workspaceId)
   }
 
+  /**
+   * 스레드만 정리한다. 사용량 제한 예약은 유지한다 — 예약은 영속 상태라 프로세스 정리로 사라지면
+   * 안 된다(Claude manager 의 dispose 주석 참고). 예약을 접는 건 /clear·중단·사용자 전송의 몫이다.
+   */
   dispose(workspaceId: string): void {
-    this.rateLimitResume.cancel(workspaceId)
     this.sendIfHost({ type: 'dispose', workspaceId })
     // 위임 서브런은 메인에서 돌므로 dispose 로 끊기지 않는다. 여기서 안 끊으면 워크스페이스를
     // 닫아도 자식 프로세스가 남아 worktree 를 계속 건드린다.

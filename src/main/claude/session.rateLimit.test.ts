@@ -60,6 +60,29 @@ beforeAll(() => {
   process.env.WOOI_USER_DATA = mkdtempSync(join(tmpdir(), 'wooi-session-limit-'))
 })
 
+describe('rateLimitResetAt', () => {
+  const NOW = Date.parse('2026-08-10T00:00:00Z')
+
+  it('CLI 가 덧붙인 epoch 를 해제 시각으로 읽는다', async () => {
+    const { rateLimitResetAt } = await import('./session')
+    const at = NOW + 2 * 60 * 60_000
+    expect(rateLimitResetAt(`Claude AI usage limit reached|${Math.floor(at / 1000)}`, NOW)).toBe(at)
+    expect(rateLimitResetAt(`usage limit reached|${at}`, NOW)).toBe(at)
+  })
+
+  it('과거·먼 미래·형식이 다른 값은 믿지 않는다', async () => {
+    const { rateLimitResetAt } = await import('./session')
+    expect(rateLimitResetAt('Claude AI usage limit reached|1600000000', NOW)).toBeNull()
+    expect(
+      rateLimitResetAt(`usage limit reached|${Math.floor(NOW / 1000) + 60 * 24 * 3600}`, NOW)
+    ).toBeNull()
+    expect(
+      rateLimitResetAt("You've hit your session limit · resets 1:30am (Asia/Seoul)", NOW)
+    ).toBeNull()
+    expect(rateLimitResetAt(null, NOW)).toBeNull()
+  })
+})
+
 describe('ClaudeSession session limit handling', () => {
   it('알려진 session limit 오류를 새 프로세스에서 재시도하지 않는다', async () => {
     const { ClaudeSession } = await import('./session')

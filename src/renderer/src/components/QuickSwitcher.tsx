@@ -2,8 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { GitBranch, LayoutDashboard, Search, Settings2 } from 'lucide-react'
 import { useStore } from '../store'
 import { openRepoSettings } from '../lib/repoSettings'
+import { useNow } from '../lib/useNow'
 import { StatusDot } from './Sidebar'
-import { orderVisibleWorkspaces, workspaceDisplayName } from '@shared/types'
+import { activeRateLimitPause, orderVisibleWorkspaces, workspaceDisplayName } from '@shared/types'
 import type { Workspace } from '@shared/types'
 
 /**
@@ -55,6 +56,9 @@ export default function QuickSwitcher({ onClose }: { onClose: () => void }): Rea
 
   const [query, setQuery] = useState('')
   const listRef = useRef<HTMLDivElement>(null)
+  // 제한 표시가 아직 유효한지 판단하는 기준 시각. 퀵 스위처는 잠깐 떠 있다 사라지므로 흐를 필요는
+  // 없지만, 렌더 중에 Date.now() 를 부르지 않으려면 훅으로 받아야 한다.
+  const now = useNow(60_000)
 
   const entries = useMemo<Entry[]>(() => {
     const ordered = orderVisibleWorkspaces(app.repos, app.workspaces)
@@ -225,6 +229,7 @@ export default function QuickSwitcher({ onClose }: { onClose: () => void }): Rea
                     stale={false}
                     runningMs={0}
                     pendingRateLimitResume={ws.pendingRateLimitResume}
+                    rateLimited={activeRateLimitPause(ws.rateLimited, now)}
                     pr={prStatus[ws.id]}
                   />
                 ) : entry.kind === 'repoSettings' ? (
