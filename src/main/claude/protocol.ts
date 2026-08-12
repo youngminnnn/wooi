@@ -116,11 +116,10 @@ export type HostCommand =
       text: string
       images?: ImageAttachment[]
       /**
-       * 이 메시지를 대화 기록에 남기지 않는다(에이전트에게는 그대로 간다).
-       * 사용자가 쓴 말이 아니라 Wooi 가 대신 넣는 맥락일 때 쓴다 — [[shared/handoff]] 의
-       * 인수인계 프롬프트가 그렇다. 화면에는 main 이 대신 한 줄짜리 안내를 남긴다.
+       * 모델에게 보낼 때 `text` 앞에 붙일 맥락. 기록에는 남지 않는다 — 사용자가 쓴 말이 아니라
+       * Wooi 가 대신 넣는 것이기 때문이다([[shared/handoff]] 의 인수인계 프롬프트).
        */
-      silent?: boolean
+      prefix?: string
     }
   | { type: 'interrupt'; workspaceId: string }
   | { type: 'setPermissionMode'; workspaceId: string; mode: ClaudePermissionMode }

@@ -2135,8 +2135,7 @@ function useHandoffEstimate(workspace: Workspace, enabled: boolean): number {
     AGENT_BACKEND_LABELS[workspace.agentBackend]
   return useMemo(() => {
     if (!enabled) return 0
-    // toLabel 은 크기에 영향을 주지 않는다(고정 문구 한 줄) — 고르기 전이라 대상도 아직 없다.
-    const prompt = buildHandoffPrompt({ items, fromLabel, toLabel: '' })
+    const prompt = buildHandoffPrompt({ items, fromLabel })
     return prompt ? estimateHandoffTokens(prompt) : 0
   }, [enabled, items, fromLabel])
 }
@@ -2389,9 +2388,9 @@ function PickerCard({
       const ok = await confirm({
         title: `Switch this workspace to ${label}?`,
         body:
-          `Agents can’t share a session, so Wooi replays the conversation so far to ${label} — ` +
-          `${handoffCostLabel(handoffTokens)}, billed to your usage. It reads that, sums up where ` +
-          `the work stands, and you carry on from there.`,
+          `Agents can’t share a session, so the conversation so far rides along with your next ` +
+          `message to ${label} — ${handoffCostLabel(handoffTokens)}, billed to your usage. ` +
+          `Until you send that message it knows nothing about this workspace.`,
         confirmLabel: 'Switch and hand over',
         danger: true
       })
@@ -2541,7 +2540,7 @@ function PickerCard({
         <div className="px-3 py-1.5 text-xs space-y-1 border-t border-[var(--border)]">
           {agentSwitch.needsHandoff && (
             <p className="text-[var(--warning-400)]/90">
-              Switching replays this conversation to the new agent —{' '}
+              This conversation rides along with your next message to the new agent —{' '}
               {handoffCostLabel(handoffTokens)}, billed to your usage.
             </p>
           )}

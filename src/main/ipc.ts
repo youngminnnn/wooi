@@ -644,10 +644,9 @@ export function registerIpc(ctx: IpcContext): void {
       }
       const fromLabel = backends.find((b) => b.id === ws.agentBackend)?.label ?? ws.agentBackend
 
-      // 인수인계 프롬프트는 **바꾸기 전에** 만든다 — 넘길 내용은 옛 에이전트와 나눈 대화다.
-      const handoffPrompt = needsHandoff
-        ? buildHandoffPrompt({ items, fromLabel, toLabel: target.label })
-        : null
+      // 넘길 대화가 실제로 있는지는 지금 만들어 봐야 안다(기록이 result·thinking 뿐일 수 있다).
+      // 크기는 안내에만 쓰고, 실제로 보낼 프롬프트는 보낼 때 다시 만든다([[agent/orchestrator]]).
+      const handoffPrompt = needsHandoff ? buildHandoffPrompt({ items, fromLabel }) : null
 
       // 살아 있는 세션은 **바꾸기 전에** 정리한다 — agentBackend 를 바꾸고 나면 라우팅이 새
       // 백엔드로 가서 옛 세션(과 그 CLI 프로세스)에 손이 닿지 않는다.
@@ -662,6 +661,10 @@ export function registerIpc(ctx: IpcContext): void {
         // 남의 세션 id 로 resume 을 시도해 실패한다(claude/manager 의 resumeSessionId,
         // codex/manager 의 resumeThreadId). 비우면 새 세션이 열리고, 맥락은 아래 인수인계가 잇는다.
         w.sessionId = null
+        // 인수인계는 여기서 보내지 않고 **다음 메시지에 얹어** 나간다. 여기서 한 턴을 돌리면
+        // 사용자가 시작하지도 않은 그 턴에 곧바로 입력한 명령이 끼어들어(Codex 의 steering)
+        // 엉뚱한 답이 돌아온다 — 실제로 겪은 증상이다([[shared/handoff]]).
+        w.pendingHandoffFrom = handoffPrompt ? fromLabel : null
         // 모델·effort·fast mode 는 백엔드마다 값 자체가 다르다(Claude 의 모델 ID 를 Codex 에 줄 수
         // 없다). 그대로 들고 가면 조용히 무시되거나 거부되므로 새 백엔드의 기본값으로 되돌린다.
         w.model = null
@@ -677,19 +680,17 @@ export function registerIpc(ctx: IpcContext): void {
       })
       broadcastState()
 
-      // 인수인계. 프롬프트 자체는 지난 대화를 통째로 다시 적은 것이라 기록에 남기지 않고
-      // (남기면 같은 대화가 화면에 두 번 쌓인다) 대신 무슨 일이 있었는지 한 줄로 남긴다.
-      // 새 에이전트의 요약 답변은 평범한 턴이므로 그대로 화면에 뜬다.
+      // 무슨 일이 일어날지 기록에 남긴다. 넘기는 시점이 "지금" 이 아니라 "다음 메시지" 라서,
+      // 이 줄이 없으면 확인까지 눌러 놓고 아무 일도 안 일어난 것처럼 보인다.
       if (handoffPrompt) {
         const item: ChatItem = {
           id: `system:agent-switch:${Date.now()}`,
           type: 'system',
-          text: `Switched to ${target.label} and replayed the conversation above to it (${formatHandoffTokens(estimateHandoffTokens(handoffPrompt))} tokens of input). Its summary of where the work stands follows.`,
+          text: `Switched to ${target.label}. The conversation above goes with your next message (${formatHandoffTokens(estimateHandoffTokens(handoffPrompt))} tokens of input) — it can’t see any of it until then.`,
           ts: Date.now()
         }
         getTranscripts().upsert(workspaceId, item)
         dispatch(IPC.evtChat, { workspaceId, event: { type: 'item', item } })
-        ctx.sessions.sendMessage(workspaceId, handoffPrompt, undefined, { silent: true })
       }
 
       return {}
@@ -806,6 +807,11 @@ export function registerIpc(ctx: IpcContext): void {
   ipcMain.handle(IPC.chatClear, (_e, workspaceId: string) => {
     ctx.sessions.clearSession(workspaceId)
     getTranscripts().remove(workspaceId)
+    // 넘기기로 예약해 둔 대화가 방금 사라졌다 — 예약도 함께 지운다.
+    store.update((st) => {
+      const w = st.workspaces.find((x) => x.id === workspaceId)
+      if (w) w.pendingHandoffFrom = null
+    })
     broadcastState()
   })
 

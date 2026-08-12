@@ -667,6 +667,15 @@ export interface Workspace {
   fastModeState: FastModeState | null
   /** fast mode 가 꺼져 있는 이유(CLI 보고). 이유를 특정할 수 없거나 켜져 있으면 null. */
   fastModeReason: FastModeDisabledReason | null
+  /**
+   * 에이전트를 바꾸면서 아직 넘기지 못한 인수인계 예약 — 값은 **넘겨주는 쪽** 에이전트의 표시
+   * 이름이다([[shared/handoff]]). 다음 사용자 메시지 앞에 지난 대화가 붙어 나가고 그때 지워진다
+   * ([[agent/orchestrator]] 의 takeHandoffPrefix).
+   *
+   * 프롬프트 자체를 담지 않는 것이 요점이다. 그 텍스트는 수만 자라 설정 파일이 그만큼 커지는데,
+   * 넘길 내용은 어차피 트랜스크립트에 그대로 있어 보낼 때 다시 만들면 된다.
+   */
+  pendingHandoffFrom?: string | null
   /** 아카이브되면 사이드바 기본 목록에서 숨기고 worktree 를 제거한다(브랜치·기록은 유지). */
   archived: boolean
   /** 이 워크스페이스의 모든 알림(OS 알림·소리·Dock 배지)을 음소거한다. 레거시는 undefined=false. */

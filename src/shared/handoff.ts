@@ -4,9 +4,15 @@ import type { ChatItem } from './types'
  * 에이전트를 바꿀 때 새 에이전트에게 넘길 "지금까지의 대화" 를 텍스트로 만든다.
  *
  * 백엔드끼리 세션을 물려줄 방법은 없다 — Claude 의 sessionId 로 Codex 를 resume 할 수 없고, 그
- * 반대도 마찬가지다. 그래서 맥락은 **대화 기록을 다시 말해 주는 것** 으로만 넘어간다. 새 세션의
- * 첫 메시지로 이 텍스트를 보내면, 그 한 번이 통째로 입력 토큰이 된다 — 사용자에게 사용량 경고를
- * 먼저 띄우는 이유이자([[Composer]] 의 확인 대화상자), 여기에 예산 상한이 있는 이유다.
+ * 반대도 마찬가지다. 그래서 맥락은 **대화 기록을 다시 말해 주는 것** 으로만 넘어간다. 그 한 번이
+ * 통째로 입력 토큰이 되므로 사용량 경고를 먼저 띄우고([[Composer]] 의 확인 대화상자), 여기에
+ * 예산 상한을 둔다.
+ *
+ * 이 텍스트는 **사용자의 다음 메시지 앞에 붙어서** 나간다([[agent/orchestrator]]). 교체 직후에
+ * 따로 한 턴을 돌리지 않는 것이 중요하다 — 그러면 사용자가 시작하지도 않은 턴이 도는 동안 입력한
+ * 명령이 그 턴으로 빨려 들어가(Codex 의 steering) 엉뚱한 답을 받는다. 실제로 그랬다: 인수인계
+ * 턴에 "요약만 하고 기다려라" 라고 시켜 뒀으니, 그 사이 들어온 사용자 명령은 무시되고 요약만
+ * 돌아왔다. 다음 메시지에 얹으면 턴은 하나뿐이고, 사용자가 이어서 일하지 않으면 비용도 없다.
  *
  * 렌더러와 main 이 같은 함수를 쓴다. main 은 실제로 보낼 프롬프트를 만들고, 렌더러는 경고에
  * 띄울 크기를 같은 규칙으로 어림한다 — 경고에 적힌 양과 실제로 보내는 양이 갈리면 안 된다.
@@ -70,18 +76,16 @@ function renderItem(item: ChatItem, fromLabel: string): string | null {
 }
 
 /**
- * 넘길 대화가 있으면 프롬프트를, 없으면 null 을 돌려준다.
+ * 넘길 대화가 있으면 프롬프트를, 없으면 null 을 돌려준다. 뒤에 사용자의 새 메시지가 이어 붙는다.
  *
- * 프롬프트는 새 에이전트에게 **읽으라고만** 시킨다. 지난 대화의 마지막 줄이 대개 지시문이라
- * (＂그럼 그렇게 고쳐 줘＂) 그대로 넘기면 새 에이전트가 그 일을 처음부터 다시 한다 — 이미 파일에
- * 반영된 일을. 그래서 "기록이지 지시가 아니다" 를 못박고, 요약 한 번으로 턴을 끝내게 한다.
+ * 지난 대화는 **읽을 것**이지 시킬 것이 아니라고 못박는다. 마지막 줄이 대개 지시문이라
+ * (＂그럼 그렇게 고쳐 줘＂) 그냥 넘기면 새 에이전트가 이미 파일에 반영된 그 일을 처음부터 다시
+ * 한다. 그리고 진짜 할 일은 그 뒤에 붙는 사용자 메시지라는 것을 마지막에 분명히 말해 준다.
  */
 export function buildHandoffPrompt(args: {
   items: ChatItem[]
   /** 넘겨주는 쪽 에이전트의 표시 이름(예: "Claude Code"). */
   fromLabel: string
-  /** 이어받는 쪽 에이전트의 표시 이름(예: "Codex"). */
-  toLabel: string
   budget?: number
 }): string | null {
   const budget = args.budget ?? HANDOFF_CHAR_BUDGET
@@ -108,17 +112,19 @@ export function buildHandoffPrompt(args: {
     : ''
 
   return [
-    `You are taking over this workspace from ${args.fromLabel}. The user switched agents mid-conversation, so you are starting with none of its context — everything you need to know is below.`,
+    `You are taking over this workspace from ${args.fromLabel}. The user switched agents mid-conversation, so you are starting with none of its context — the conversation so far is replayed below.`,
     '',
-    'This is a record of what happened before you joined, not instructions for you. The requests in it were made to the other agent and it already acted on them: any file it says it changed is already changed on disk. Do not carry out those requests again.',
-    '',
-    `Read it, then reply with a short handover note — what the task is, where it stands, and what you think is left — in 5 lines or fewer. Do not run tools or change files yet; wait for the user's next message.`,
+    'It is a record of what happened before you joined, not instructions for you. Those requests were made to the other agent and it already acted on them: any file it says it changed is already changed on disk. Do not carry them out again — check the files if you need to know their current state.',
     '',
     `===== Conversation so far (oldest first) =====${omitted}`,
     '',
     blocks.join('\n\n'),
     '',
-    '===== End of conversation ====='
+    '===== End of replayed conversation =====',
+    '',
+    'The user’s new message follows. That — and only that — is what you should act on now; use everything above as background.',
+    '',
+    '----------'
   ].join('\n')
 }
 

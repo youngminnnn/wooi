@@ -6,7 +6,7 @@ const user = (text: string, id = text): ChatItem => ({ id, type: 'user', text, t
 const agent = (text: string, id = text): ChatItem => ({ id, type: 'assistant', text, ts: 1 })
 
 const build = (items: ChatItem[], budget?: number): string | null =>
-  buildHandoffPrompt({ items, fromLabel: 'Claude Code', toLabel: 'Codex', budget })
+  buildHandoffPrompt({ items, fromLabel: 'Claude Code', budget })
 
 describe('buildHandoffPrompt', () => {
   it('넘길 대화가 없으면 null — 보낼 것도, 물릴 사용량도 없다', () => {
@@ -37,7 +37,15 @@ describe('buildHandoffPrompt', () => {
   it('지난 요청을 다시 수행하지 말라고 못박는다 — 마지막 줄은 대개 지시문이다', () => {
     const prompt = build([user('delete every test file')])!
     expect(prompt).toContain('not instructions for you')
-    expect(prompt).toContain('Do not carry out those requests again')
+    expect(prompt).toContain('Do not carry them out again')
+  })
+
+  it('진짜 할 일은 뒤에 붙는 사용자 메시지라고 마지막에 말해 준다', () => {
+    // 이 프롬프트는 단독으로 나가지 않고 사용자의 다음 메시지 앞에 붙는다. 그 경계를 말해 주지
+    // 않으면 새 에이전트가 지난 대화의 마지막 지시를 자기 할 일로 착각한다.
+    const prompt = build([user('add a login button')])!
+    expect(prompt.trimEnd().endsWith('----------')).toBe(true)
+    expect(prompt).toContain('The user’s new message follows')
   })
 
   it('생각·도구 결과는 넘기지 않는다(속말이거나, 예산 대비 얻는 게 적다)', () => {

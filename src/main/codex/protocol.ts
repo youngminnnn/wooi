@@ -66,8 +66,8 @@ export type CodexCommand =
       config: CodexConfig
       text: string
       images?: ImageAttachment[]
-      /** 대화 기록에 남기지 않고 보낸다([[claude/protocol]] 의 같은 필드와 같은 뜻). */
-      silent?: boolean
+      /** 모델에게만 보낼 앞맥락([[claude/protocol]] 의 같은 필드와 같은 뜻). */
+      prefix?: string
     }
   | { type: 'interrupt'; workspaceId: string }
   | { type: 'setPermissionMode'; workspaceId: string; mode: PermissionMode }

@@ -94,12 +94,14 @@ export class CodexThread {
   // ── 턴 ──────────────────────────────────────────────────────────────
 
   /**
-   * `silent` 는 사용자가 쓴 말이 아니라 Wooi 가 대신 넣는 맥락일 때 쓴다([[codex/protocol]]).
-   * 기록에만 남기지 않을 뿐 서버로는 그대로 가므로, echo 를 삼키는 등록은 그대로 해 둔다 —
-   * 안 하면 mapper 가 그 echo 를 처음 보는 사용자 메시지로 알고 화면에 되살린다.
+   * `prefix` 는 사용자가 쓴 말이 아니라 Wooi 가 앞에 붙여 주는 맥락이다([[codex/protocol]]).
+   * 기록에는 사용자의 말만 남지만 서버로는 합쳐서 가므로, echo 를 삼키는 등록은 **합친 쪽**으로
+   * 해야 한다 — 서버가 되돌려 주는 것이 그것이라, 어긋나면 mapper 가 그 echo 를 처음 보는
+   * 사용자 메시지로 알고 인수인계 프롬프트 전문을 화면에 되살린다.
    */
-  async send(text: string, images?: ImageAttachment[], opts?: { silent?: boolean }): Promise<void> {
+  async send(text: string, images?: ImageAttachment[], opts?: { prefix?: string }): Promise<void> {
     if (this.disposed) return
+    const prompt = opts?.prefix ? `${opts.prefix}\n\n${text}` : text
     const attachments = (images ?? []).map((image) => ({
       name: image.name,
       mediaType: image.mediaType
@@ -114,17 +116,15 @@ export class CodexThread {
     // CLI 탐지·app-server 초기화보다 먼저 반응한다. 이후 userMessage 알림은 mapper 가 소비한다.
     rememberOptimisticUser(
       this.state,
-      text,
+      prompt,
       attachments.map((attachment) => attachment.name)
     )
-    if (!opts?.silent) {
-      this.deps.persist(item)
-      this.deps.emit({ type: 'item', item })
-    }
+    this.deps.persist(item)
+    this.deps.emit({ type: 'item', item })
     try {
       const rpc = await this.deps.rpc()
       const threadId = await this.ensureThread(rpc)
-      const input = buildInput(text, images)
+      const input = buildInput(prompt, images)
       const policy = turnPolicyFor(this.config.permissionMode, this.config.cwd)
 
       // 턴이 도는 중이면 새 턴을 만들지 않고 밀어 넣는다(Codex 네이티브 steering).

@@ -361,7 +361,7 @@ async function handle(msg: CodexCommand): Promise<void> {
       break
 
     case 'send':
-      await ensure(msg.workspaceId, msg.config).send(msg.text, msg.images, { silent: msg.silent })
+      await ensure(msg.workspaceId, msg.config).send(msg.text, msg.images, { prefix: msg.prefix })
       break
 
     case 'interrupt':
