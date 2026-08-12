@@ -23,6 +23,27 @@ import { WOOI_MCP_SERVER_NAME, delegateToolName } from '../agent/tools/catalog'
  *
  * Claude 쪽은 SDK 가 도구 정의를 프롬프트에 직접 싣기 때문에 이 문제가 없다.
  */
+/**
+ * Solo 워크스페이스의 Codex 스레드에 실을 문장.
+ *
+ * 위 주석의 실측이 여기서 더 아프다. Codex 에게 MCP 도구는 **이름조차 보이지 않으므로**,
+ * Solo 워크스페이스의 Codex 는 `switch_to_agent_team` 이 존재한다는 사실 자체를 알 길이 없다.
+ * Claude 는 이름 목록이라도 보지만(그것만으로는 부족하다는 것이 dev 트랜스크립트 349b8642 의
+ * 교훈이다) Codex 는 그마저 없다.
+ *
+ * 팀으로 바꿀 수 있는 워크스페이스에만 싣는다 — 부르면 반드시 실패하는 도구를 권하지 않는다.
+ */
+export function soloThreadInstructions(): string {
+  return [
+    'This is a Solo Wooi workspace: you cannot run other coding agent products (Claude Code,',
+    'Codex) as subagents here, and running their CLIs from the shell is not a substitute — that',
+    'bypasses approval and hides the work from the user.',
+    `If the user asks for one, call the \`${WOOI_MCP_SERVER_NAME}\` MCP server's`,
+    '`switch_to_agent_team` tool first; the user approves the switch and the subagent tools',
+    'arrive from the next message.'
+  ].join('\n')
+}
+
 export function delegateThreadInstructions(backends: AgentBackendId[]): string {
   const lines = backends.map(
     (backend) =>

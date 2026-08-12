@@ -742,14 +742,19 @@ export function registerIpc(ctx: IpcContext): void {
   })
 
   /**
-   * 멀티 에이전트 모드 전환(실험 기능). 세션 옵션에 실리는 값이라 **다음 세션부터** 적용된다 —
-   * 여기서 세션을 끊지 않는 이유는, 도는 중인 턴을 설정 변경만으로 죽이는 편이 더 놀랍기 때문이다.
+   * 멀티 에이전트 모드 전환(실험 기능).
+   *
+   * 위임 도구는 세션을 **열 때** 그 세션에 박히므로(claude/host.ts 의 ensure) 값만 바꾸면 도는
+   * 세션에는 영영 반영되지 않는다. 그렇다고 여기서 끊으면 도는 중인 턴이 설정 변경만으로 죽는다
+   * — 그래서 다음 전송 직전에 다시 열도록 예약한다([[agent/orchestrator]]). 배지가 약속하는
+   * "다음 메시지부터" 가 그대로 참이 되고, 대화 맥락은 resume 으로 이어진다.
    */
   ipcMain.handle(IPC.workspaceSetMultiAgent, (_e, workspaceId: string, multiAgent: boolean) => {
     store.update((st) => {
       const w = st.workspaces.find((x) => x.id === workspaceId)
       if (w) w.multiAgent = multiAgent
     })
+    ctx.sessions.restartBeforeNextMessage(workspaceId)
     broadcastState()
   })
 

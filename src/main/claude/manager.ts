@@ -21,7 +21,7 @@ import {
   workspaceDisplayName
 } from '@shared/types'
 import { CLAUDE_META, CLAUDE_MODELS, type AgentBackend } from '../agent/backend'
-import { agentDefaultsFor, delegateBackendsFor } from '../agent/multiAgent'
+import { agentDefaultsFor, agentTeamEligibility, delegateBackendsFor } from '../agent/multiAgent'
 import { claudeMode, type HostCommand, type HostEvent, type SessionConfig } from './protocol'
 import { runAgentTool } from '../agent/tools'
 import { RATE_LIMIT_CONTINUATION, RateLimitResumeCoordinator } from '../rateLimitResume'
@@ -326,6 +326,7 @@ export class SessionManager implements AgentBackend {
       resumeSessionId: ws.sessionId,
       additionalDirs: ws.additionalDirs ?? [],
       delegateBackends: delegateBackendsFor(ws, settings),
+      canSwitchToAgentTeam: agentTeamEligibility(ws, settings).ok,
       agentDefaults: agentDefaultsFor(settings)
     }
   }

@@ -17,6 +17,7 @@ import { CLAUDE_CODE_SYSTEM_PROMPT } from './systemPrompt'
 import { log } from '../logger'
 import { MCP_SETTING_SOURCES, resolveUserMcpServers } from './mcp'
 import { isReadOnlyWooiTool, WOOI_MCP_SERVER_NAME } from '../agent/tools/catalog'
+import { delegateShellAttempt, delegateShellGuidance } from '../agent/delegateShell'
 import { fastModeReasonText, planApprovalMode, PLAN_OPTIONS } from '@shared/types'
 import { asClaudeMode, claudeEffort, claudeMode, type ClaudePermissionMode } from './protocol'
 import type {
@@ -72,6 +73,11 @@ export interface SessionDeps {
    * 기존 단일 에이전트 세션은 이 경로를 전혀 타지 않으므로 **없는 것이 기본**이다.
    */
   delegateBackends?: AgentBackendId[]
+  /**
+   * Solo 인 이 워크스페이스를 팀으로 바꿀 수 있는가. 셸로 다른 에이전트 제품을 돌리려는 시도를
+   * 가로챌 때 무엇을 권할지 가른다([[agent/delegateShell]]). 없으면 못 바꾸는 것으로 읽는다.
+   */
+  canSwitchToAgentTeam?: boolean
   /**
    * 위임받을 백엔드의 모델·effort 기본값. 메인이 설정에서 계산해 내려 준다.
    * delegateBackends 가 비어 있으면 쓰이지 않으므로 함께 생략할 수 있다.
@@ -1080,6 +1086,31 @@ export class ClaudeSession {
         behavior: 'deny',
         message:
           'The user wants to keep planning. Do not make any edits yet — refine the plan and ask again.'
+      }
+    }
+
+    // 셸로 다른 에이전트 제품을 돌리려는 시도는 승인 이전에 되돌린다.
+    //
+    // 승인 카드로 넘기지 않는 이유: 카드는 "이 명령을 실행할까?" 만 묻는다. 사용자가 원한 것은
+    // 대개 "codex 에게 시켜라" 이지 "셸에서 codex 를 돌려라" 가 아니고, 그 차이는 카드에 보이지
+    // 않는다. 게다가 fullAccess·auto 에서는 카드 자체가 없어 조용히 지나간다 — 실측에서 모델은
+    // 정확히 그 경로로 샜다([[agent/delegateShell]]).
+    //
+    // 이것은 능력을 뺏는 것이 아니라 **같은 일을 Wooi 안에서 하게** 돌려세우는 것이다. 안내
+    // 문장이 부를 도구를 지목하므로 모델은 같은 턴에 이어서 진행할 수 있고, 대안이 없는
+    // 워크스페이스에서는 사용자에게 넘기라고 말한다.
+    if (toolName === 'Bash' && typeof input.command === 'string') {
+      const attempt = delegateShellAttempt(input.command)
+      if (attempt) {
+        const backends = this.deps.delegateBackends ?? []
+        return {
+          behavior: 'deny',
+          message: delegateShellGuidance(
+            attempt,
+            backends.includes(attempt),
+            this.deps.canSwitchToAgentTeam === true
+          )
+        }
       }
     }
 

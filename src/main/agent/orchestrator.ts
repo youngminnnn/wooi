@@ -81,6 +81,13 @@ export class AgentOrchestrator {
    * "전송한 적 있고 아직 dispose 되지 않은" 것이 곧 살아 있는 세션이다.
    */
   private lastUsedAt = new Map<string, number>()
+  /**
+   * 다음 전송 전에 세션을 다시 열어야 하는 워크스페이스들([[restartBeforeNextMessage]]).
+   *
+   * 백엔드별 매니저가 아니라 여기 두는 이유: 세션을 열 때 고정되는 것을 바꾸는 일(멀티 에이전트
+   * 전환)은 백엔드 공통이고, Claude·Codex 가 각자 예약을 들고 있으면 한쪽만 고쳐진 채로 갈린다.
+   */
+  private pendingRestart = new Set<string>()
 
   constructor(
     private dispatch: Dispatch,
@@ -215,7 +222,23 @@ export class AgentOrchestrator {
     if (hasCodexWorkspace) this.get('codex').prewarm?.()
   }
 
+  /**
+   * 다음 전송에서 세션을 새로 열게 한다. 대화는 그대로다 — 다음 전송이 저장된 sessionId 로
+   * resume 하므로(모델·effort 를 바꿀 때와 같은 길), 사용자에게는 그 한 번의 응답이 조금 느린
+   * 것으로만 나타난다.
+   *
+   * **지금 끊지 않는** 것이 요점이다. 이 예약을 부르는 쪽은 도구 실행부이고, 그 도구는 지금
+   * 도는 턴 안에서 불린다 — 여기서 dispose 하면 도구 결과가 돌아갈 세션이 사라져 턴이 통째로
+   * 죽는다. 그래서 "턴이 끝나면" 이 아니라 "다음 전송 직전" 에 건다: 턴의 끝을 관찰할 필요가
+   * 없고(백엔드마다 다르다), 사용자가 다음 말을 걸기 전까지는 아무 일도 일어나지 않는다.
+   */
+  restartBeforeNextMessage(workspaceId: string): void {
+    this.pendingRestart.add(workspaceId)
+  }
+
   sendMessage(workspaceId: string, text: string, images?: ImageAttachment[]): void {
+    // 세션이 없으면 dispose 는 no-op 이고, 어차피 이 전송이 새로 연다.
+    if (this.pendingRestart.has(workspaceId)) this.dispose(workspaceId)
     this.touch(workspaceId)
     this.backendFor(workspaceId).sendMessage(workspaceId, text, images)
     this.trimIdleSessions()
@@ -253,16 +276,21 @@ export class AgentOrchestrator {
 
   dispose(workspaceId: string): void {
     this.lastUsedAt.delete(workspaceId)
+    // 어떤 이유로 끊겼든 다음 전송은 어차피 새 세션이다 — 예약이 남아 있으면 그다음 전송에서
+    // 이미 새것인 세션을 한 번 더 끊는다.
+    this.pendingRestart.delete(workspaceId)
     this.backendFor(workspaceId).dispose(workspaceId)
   }
 
   disposeAll(): void {
     this.lastUsedAt.clear()
+    this.pendingRestart.clear()
     for (const backend of this.backends.values()) backend.disposeAll()
   }
 
   abortAll(): void {
     this.lastUsedAt.clear()
+    this.pendingRestart.clear()
     for (const backend of this.backends.values()) backend.abortAll()
   }
 
@@ -270,6 +298,7 @@ export class AgentOrchestrator {
   recycleAll(): void {
     // 프로세스가 갈리므로 살아 있던 세션도 함께 사라진다 — 다음 전송이 다시 만든다.
     this.lastUsedAt.clear()
+    this.pendingRestart.clear()
     for (const backend of this.backends.values()) backend.recycleAll()
   }
 

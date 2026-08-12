@@ -100,6 +100,14 @@ export interface SessionConfig {
    */
   delegateBackends: AgentBackendId[]
   /**
+   * Solo 인 이 워크스페이스를 **팀으로 바꿀 수 있는가**. 이미 팀이면 의미가 없다(위 목록이 찬다).
+   *
+   * 호스트가 셸로 다른 에이전트 제품을 돌리려는 시도를 가로챌 때, 대안으로 전환을 권할지
+   * 판단하는 근거다([[agent/delegateShell]]). 실험 스위치·capability 는 메인의 store 에만 있으므로
+   * 결론만 실어 보낸다 — 호스트가 판단하려 들면 store 를 끌어와야 한다.
+   */
+  canSwitchToAgentTeam: boolean
+  /**
    * 위임받을 백엔드의 모델·effort 기본값. 호스트에는 store 가 없으므로 메인이 계산해 실어 보낸다.
    * 백엔드가 늘어도 항목만 늘면 되도록 Record 로 넘긴다.
    */

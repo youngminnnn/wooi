@@ -13,8 +13,8 @@ import { getTranscripts } from '../transcripts'
 import { log } from '../logger'
 import { IPC, agentSettingsFor, normalizePermissionMode, workspaceDisplayName } from '@shared/types'
 import { CODEX_META, type AgentBackend } from '../agent/backend'
-import { delegateBackendsFor } from '../agent/multiAgent'
-import { delegateThreadInstructions } from '../subagent/catalog'
+import { agentTeamEligibility, delegateBackendsFor } from '../agent/multiAgent'
+import { delegateThreadInstructions, soloThreadInstructions } from '../subagent/catalog'
 import { abortAllSubAgents, abortSubAgents } from '../agent/tools/subagent'
 import { durationLabel } from './rateLimits'
 import { RATE_LIMIT_CONTINUATION, RateLimitResumeCoordinator } from '../rateLimitResume'
@@ -263,7 +263,13 @@ export class CodexSessionManager implements AgentBackend {
       permissionMode: normalizePermissionMode(CODEX_META, ws.permissionMode),
       resumeThreadId: ws.sessionId,
       delegateBackends: backends,
-      delegateInstructions: backends.length ? delegateThreadInstructions(backends) : null
+      // Solo 라고 아무 말도 하지 않으면 Codex 는 전환 도구의 **이름조차** 보지 못한다(MCP 도구가
+      // 모델의 목록에 안 뜬다 — [[subagent/catalog]] 의 실측). 팀으로 바꿀 수 있을 때만 안내한다.
+      delegateInstructions: backends.length
+        ? delegateThreadInstructions(backends)
+        : agentTeamEligibility(ws, settings).ok
+          ? soloThreadInstructions()
+          : null
     }
   }
 

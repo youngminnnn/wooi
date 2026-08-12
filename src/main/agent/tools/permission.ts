@@ -161,7 +161,8 @@ const TOOL_LABELS: Record<string, string> = {
   run_script: 'Run a repository script',
   stop_script: 'Stop a repository script',
   create_workspace: 'Create a workspace',
-  archive_workspace: 'Archive a workspace'
+  archive_workspace: 'Archive a workspace',
+  switch_to_agent_team: 'Switch to an agent team'
 }
 
 /** 카드가 지목된 대상을 이름으로 부를 수 있게 한다. 못 찾으면 핸들러가 어차피 거절한다. */
@@ -208,6 +209,17 @@ function titleFor(tool: string, args: unknown, workspace: Workspace): string {
     const script = target ? repoOf(target)?.archiveScript.trim() : ''
     const runs = script ? ` and runs the repository's archive script (\`${script}\`)` : ''
     return `The agent wants to archive ${which} — this removes its worktree${runs}. Its branch and conversation are kept.`
+  }
+  if (tool === 'switch_to_agent_team') {
+    // 사용자가 판단할 거리는 "왜 팀이 필요한가" 다 — 승인하면 이 워크스페이스는 다른 에이전트
+    // 제품까지 띄울 수 있게 되고, 한 번의 작업이 아니라 워크스페이스가 그렇게 남는다.
+    const reason =
+      typeof a.reason === 'string' && a.reason.trim() ? ` It says: ${a.reason.trim()}` : ''
+    return (
+      'The agent wants to turn this Solo workspace into an agent team — it could then run ' +
+      `subagents on other agent products, and ${workspaceDisplayName(workspace)} stays a team ` +
+      `until you switch it back.${reason}`
+    )
   }
   if (tool === 'report_to_parent') {
     return 'The agent wants to report this workspace’s result back to the workspace it was stacked on.'
