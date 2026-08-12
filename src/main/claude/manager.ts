@@ -21,7 +21,7 @@ import {
   peerSessionName,
   workspaceDisplayName
 } from '@shared/types'
-import { CLAUDE_META, CLAUDE_MODELS, type AgentBackend } from '../agent/backend'
+import { CLAUDE_META, CLAUDE_MODELS, type AgentBackend, type TurnEndHook } from '../agent/backend'
 import { agentDefaultsFor, canLeadAgentTeam, delegateBackendsFor } from '../agent/multiAgent'
 import { claudeMode, type HostCommand, type HostEvent, type SessionConfig } from './protocol'
 import { runAgentTool } from '../agent/tools'
@@ -104,7 +104,8 @@ export class SessionManager implements AgentBackend {
 
   constructor(
     private dispatch: Dispatch,
-    private getWindow: () => BrowserWindow | null
+    private getWindow: () => BrowserWindow | null,
+    private onTurnEnd?: TurnEndHook
   ) {
     this.rateLimitResume = new RateLimitResumeCoordinator({
       backend: CLAUDE_META.id,
@@ -360,7 +361,7 @@ export class SessionManager implements AgentBackend {
     workspaceId: string,
     text: string,
     images?: ImageAttachment[],
-    opts?: { prefix?: string }
+    opts?: { prefix?: string; silent?: boolean }
   ): void {
     this.rateLimitResume.cancel(workspaceId)
     const ws = this.getWorkspace(workspaceId)
@@ -371,7 +372,8 @@ export class SessionManager implements AgentBackend {
       config: this.configFor(ws),
       text,
       images,
-      prefix: opts?.prefix
+      prefix: opts?.prefix,
+      silent: opts?.silent
     })
   }
 
@@ -813,6 +815,10 @@ export class SessionManager implements AgentBackend {
   private emit(workspaceId: string, event: ChatEvent): void {
     // 상태·모델 변화는 store 에도 반영해 재시작/새 창에서도 사이드바가 일치하도록 한다.
     if (event.type === 'status') {
+      // 턴이 끝났다 — 소유자가 이어서 한 턴을 더 보냈다면 이 종료는 없던 일로 한다([[agent/backend]]
+      // TurnEndHook). 여기서 빠져나가는 것이 요점이다: 아래로 내려가면 idle 이 방송돼 대화가 잠깐
+      // 쉬는 것처럼 보이고, 그 틈에 사용자가 친 말이 사용자가 시작하지 않은 턴에 섞여 들어간다.
+      if (event.status !== 'running' && this.onTurnEnd?.(workspaceId, event.status)) return
       getStore().update((st) => {
         const w = st.workspaces.find((x) => x.id === workspaceId)
         if (w) {

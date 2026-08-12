@@ -100,28 +100,38 @@ export class CodexThread {
    * 해야 한다 — 서버가 되돌려 주는 것이 그것이라, 어긋나면 mapper 가 그 echo 를 처음 보는
    * 사용자 메시지로 알고 인수인계 프롬프트 전문을 화면에 되살린다.
    */
-  async send(text: string, images?: ImageAttachment[], opts?: { prefix?: string }): Promise<void> {
+  async send(
+    text: string,
+    images?: ImageAttachment[],
+    opts?: { prefix?: string; silent?: boolean }
+  ): Promise<void> {
     if (this.disposed) return
     const prompt = opts?.prefix ? `${opts.prefix}\n\n${text}` : text
     const attachments = (images ?? []).map((image) => ({
       name: image.name,
       mediaType: image.mediaType
     }))
-    const item: ChatItem = {
-      id: `user:${randomUUID()}`,
-      type: 'user',
-      text,
-      ts: Date.now(),
-      ...(attachments.length ? { attachments } : {})
-    }
     // CLI 탐지·app-server 초기화보다 먼저 반응한다. 이후 userMessage 알림은 mapper 가 소비한다.
+    //
+    // silent 전송에서도 **반드시** 등록한다([[agent/backend]] sendMessage). 기록만 건너뛰면 될 것
+    // 같지만, 이걸 빼면 서버가 되돌려 주는 echo 를 mapper 가 처음 보는 사용자 메시지로 알고
+    // 화면에 되살린다 — 숨기려던 문장이 그대로 뜬다.
     rememberOptimisticUser(
       this.state,
       prompt,
       attachments.map((attachment) => attachment.name)
     )
-    this.deps.persist(item)
-    this.deps.emit({ type: 'item', item })
+    if (!opts?.silent) {
+      const item: ChatItem = {
+        id: `user:${randomUUID()}`,
+        type: 'user',
+        text,
+        ts: Date.now(),
+        ...(attachments.length ? { attachments } : {})
+      }
+      this.deps.persist(item)
+      this.deps.emit({ type: 'item', item })
+    }
     try {
       const rpc = await this.deps.rpc()
       const threadId = await this.ensureThread(rpc)

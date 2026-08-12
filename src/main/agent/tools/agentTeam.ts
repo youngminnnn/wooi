@@ -53,9 +53,14 @@ export const switchToAgentTeam: AgentToolHandler = async (deps, workspaceId) => 
   })
 
   // 위임 도구는 세션을 **열 때** 그 세션에 박힌다(claude/host.ts 의 ensure, codex/thread.ts 의
-  // openThread). 그래서 플래그만 바꾸면 지금 도는 세션에는 영원히 도구가 없다. 다음 전송에서
-  // 세션을 다시 열도록 예약해 둔다 — 지금 끊으면 이 호출을 낸 턴이 결과도 못 받고 죽는다.
-  deps.sessions.restartBeforeNextMessage(workspaceId)
+  // openThread). 그래서 플래그만 바꾸면 지금 도는 세션에는 영원히 도구가 없다. 지금 끊으면 이
+  // 호출을 낸 턴이 결과도 못 받고 죽으므로, 이 턴이 **끝나는 즉시** 다시 열고 이어 가게 한다.
+  //
+  // 사용자의 다음 메시지를 기다리지 않는 이유가 이 도구의 전부다. 여기까지 온 이유는 사용자가
+  // 방금 "Codex 한테 리뷰 시켜줘" 라고 말했기 때문인데, 거기서 멈추고 "이제 다시 말해 주세요" 로
+  // 끝내면 사용자가 시킨 일은 시작도 못 한 채 턴 하나가 지나간다. 이어지는 턴은 사용자가
+  // 시작시키지 않았을 뿐, 사용자가 시작시킨 작업이다([[agent/orchestrator]] resumeAfterTurn).
+  deps.sessions.resumeAfterTurn(workspaceId, RESUME_PROMPT)
   // 헤더 배지가 바로 'Agent team' 으로 바뀌어, 사용자가 승인한 것이 실제로 일어났음을 본다.
   deps.broadcastState()
 
@@ -65,10 +70,32 @@ export const switchToAgentTeam: AgentToolHandler = async (deps, workspaceId) => 
     teammateTools,
     // 이 문장이 이 도구 결과의 핵심이다. 도구가 생기는 시점을 정확히 적어 두지 않으면 모델은
     // 곧바로 위임을 시도하고, 없는 도구를 부르며 자기가 뭘 잘못했는지 찾는 데 턴을 쓴다.
+    // "기다려라" 라고 적지 않는 것도 그만큼 중요하다 — 그렇게 적으면 다음 턴이 저절로 시작되는데
+    // 모델은 사용자 대답을 요청해 둔 상태라, 자기가 물어본 것에 자기가 답하는 꼴이 된다.
     next:
-      'The teammate tools are not in this session yet — Wooi reopens the session on the next ' +
-      'message to load them, and this conversation carries over. Finish this turn now: tell the ' +
-      'user the workspace is an agent team, say what you plan to delegate to whom, and ask them ' +
-      'to reply so you can start. Delegate from that turn on.'
+      'The teammate tools are not in this session yet — Wooi reopens the session the moment this ' +
+      'turn ends and then continues on its own, with this conversation carried over. So end this ' +
+      'turn now in a line or two: say the workspace is an agent team and what you are about to ' +
+      'delegate to whom. Do not ask the user to reply — the next turn starts by itself, and that ' +
+      'is where you delegate.'
   }
 }
+
+/**
+ * 팀이 된 뒤 이어지는 턴에 Wooi 가 넣는 말.
+ *
+ * **화면에는 한 글자도 남지 않는다**([[agent/orchestrator]] resumeAfterTurn 이 silent 로 보낸다).
+ * 사용자가 치지도 않은 문장이 자기 말풍선으로 대화에 쌓이면 안 되기 때문이다 — 사용자가 보는 것은
+ * 자기 요청에 이어 에이전트가 계속 일하는 모습뿐이어야 한다.
+ *
+ * 문장이 하는 일은 두 가지다. 하나는 이 턴을 **누가** 시작했는지 밝히는 것 — 밝히지 않으면 모델은
+ * 사용자가 다시 말을 건 줄 알고 "무엇을 도와드릴까요" 로 답한다. 다른 하나는 이미 한 일을 다시
+ * 하지 말라는 것 — 방금 끝난 턴에서 계획을 말해 뒀으므로 그 계획을 실행할 차례다.
+ */
+const RESUME_PROMPT =
+  'Wooi reopened this session so the teammate tools are loaded; they are available to you now. ' +
+  'Wooi started this turn, not the user — it continues the request the user made just before ' +
+  'your last turn, which is why you switched this workspace to an agent team. This message is ' +
+  'not shown to the user, so do not refer to it. Carry out the delegation you just described. ' +
+  'Do not plan it again, do not repeat work that is already done, and do not ask the user to ' +
+  'confirm — they already asked for this.'

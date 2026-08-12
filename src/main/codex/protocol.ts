@@ -68,6 +68,8 @@ export type CodexCommand =
       images?: ImageAttachment[]
       /** 모델에게만 보낼 앞맥락([[claude/protocol]] 의 같은 필드와 같은 뜻). */
       prefix?: string
+      /** 이 전송을 기록에서 지운다([[claude/protocol]] 의 같은 필드와 같은 뜻). */
+      silent?: boolean
     }
   | { type: 'interrupt'; workspaceId: string }
   | { type: 'setPermissionMode'; workspaceId: string; mode: PermissionMode }

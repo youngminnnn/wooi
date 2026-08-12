@@ -57,6 +57,17 @@ export interface AgentToolDeps {
      * 안에서 불린다 — 여기서 dispose 하면 자기 호출의 결과가 돌아갈 세션을 자기가 죽인다.
      */
     restartBeforeNextMessage: (workspaceId: string) => void
+    /**
+     * 같은 재시작을 예약하되, 사용자의 다음 메시지를 기다리지 않고 **턴이 끝나는 즉시** 이어서
+     * 한 턴을 더 보낸다([[agent/orchestrator]] resumeAfterTurn).
+     *
+     * 사용자가 방금 말로 시킨 일이 그 재시작을 기다리고 있을 때 쓴다. 그때 "다시 말을 걸어
+     * 달라" 고 답하면, 사용자 입장에서는 시킨 일이 아직 시작도 안 한 채로 턴만 하나 지나간다.
+     *
+     * `prompt` 는 모델에게만 가고 화면·트랜스크립트에는 남지 않는다 — 사용자가 치지도 않은
+     * 문장이 자기 말풍선으로 쌓이면 안 되기 때문이다([[agent/backend]] sendMessage 의 silent).
+     */
+    resumeAfterTurn: (workspaceId: string, prompt: string) => void
   }
   terminals: { disposeWorkspace: (workspaceId: string) => void }
 }

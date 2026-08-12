@@ -297,9 +297,11 @@ takes away a capability nobody asked to lose. The user can switch back from the
 conversation header.
 
 Subagent tools are bound to a session when that session opens, so they do not appear in
-the turn that made the call. Wooi reopens the session before the next message and resumes
-the same conversation, which means the tools are available from the following turn. The
-tool result says so; an agent that calls it should end its turn and delegate afterwards.
+the turn that made the call. Wooi reopens the session the moment that turn ends, resumes
+the same conversation and continues it on its own, so the tools are available from the
+turn right after. The user does not have to send anything for that to happen: they asked
+for the work in the message that led here, and the continuation is that work. The tool
+result says so; an agent that calls it should end its turn and delegate in the next one.
 
 Calling it in a workspace that is already a team changes nothing and does not reopen the
 session. The call fails when the workspace's main agent cannot coordinate a team, because

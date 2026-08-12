@@ -132,7 +132,10 @@ async function respond(reqId: string, fn: () => Promise<unknown> | unknown): Pro
 async function handle(msg: HostCommand): Promise<void> {
   switch (msg.type) {
     case 'send':
-      ensure(msg.workspaceId, msg.config).send(msg.text, msg.images, { prefix: msg.prefix })
+      ensure(msg.workspaceId, msg.config).send(msg.text, msg.images, {
+        prefix: msg.prefix,
+        silent: msg.silent
+      })
       break
 
     case 'interrupt':

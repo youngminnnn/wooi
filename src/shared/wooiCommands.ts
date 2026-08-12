@@ -196,9 +196,10 @@ export const WOOI_COMMANDS: WooiCommandSpec[] = [
     prompt: [
       'Turn this workspace into an agent team by calling the `mcp__wooi__switch_to_agent_team` tool.',
       '',
-      'The teammate tools arrive on your **next** turn, not this one — Wooi reopens the session to',
-      'load them. So finish the turn right after calling it: say what you will delegate and to',
-      'which agent, and ask the user to reply so the next turn can do it.',
+      'The teammate tools arrive on your **next** turn, not this one — Wooi reopens the session the',
+      'moment this turn ends and then continues on its own. So finish the turn right after calling',
+      'it: say what you will delegate and to which agent. Do not ask the user to reply; the next',
+      'turn starts by itself and that is where you delegate.',
       '',
       'Write `reason` as one sentence the user will read on the approval card. If they did not say',
       'what to delegate, base it on what this conversation is about.',

@@ -144,6 +144,11 @@ export type HostCommand =
        * Wooi 가 대신 넣는 것이기 때문이다([[shared/handoff]] 의 인수인계 프롬프트).
        */
       prefix?: string
+      /**
+       * 이 전송을 기록에서 지운다(트랜스크립트·화면 모두). 사용자의 말이 아예 없는 전송에 쓴다
+       * ([[agent/backend]] sendMessage) — prefix 와 달리 남길 사용자의 말 자체가 없다.
+       */
+      silent?: boolean
     }
   | { type: 'interrupt'; workspaceId: string }
   | { type: 'setPermissionMode'; workspaceId: string; mode: ClaudePermissionMode }
