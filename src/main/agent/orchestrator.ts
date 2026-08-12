@@ -76,6 +76,20 @@ export function pickEvictableSessions(args: {
     .map(([id]) => id)
 }
 
+/**
+ * Wooi 가 사용자를 대신해 보내는 이어가기 프롬프트.
+ *
+ * 둘로 나뉘는 이유는 **화면에 남는 양**이다. `prefix` 는 모델에게만 가고 기록에는 남지 않으므로
+ * ([[agent/backend]] sendMessage) 긴 지시문은 전부 이쪽에 넣는다. `text` 는 사용자 말풍선으로
+ * 남으니 한 줄이어야 한다 — 사용자가 치지도 않은 문단이 자기 말로 쌓이면 대화가 지저분해진다.
+ */
+export interface ResumePrompt {
+  /** 기록에 남는 한 줄. 사용자가 아니라 Wooi 가 넣었다는 것이 읽혀야 한다. */
+  text: string
+  /** 모델에게만 가는 본문. */
+  prefix: string
+}
+
 export class AgentOrchestrator {
   private backends = new Map<AgentBackendId, AgentBackend>()
   /**
@@ -90,6 +104,14 @@ export class AgentOrchestrator {
    * 전환)은 백엔드 공통이고, Claude·Codex 가 각자 예약을 들고 있으면 한쪽만 고쳐진 채로 갈린다.
    */
   private pendingRestart = new Set<string>()
+  /**
+   * 지금 도는 턴이 **끝나는 즉시** 세션을 다시 열고 이어 보낼 프롬프트([[resumeAfterTurn]]).
+   *
+   * pendingRestart 와 짝이지만 다른 것을 정한다. 저쪽은 "언제 다시 여는가"(다음 전송 직전)이고,
+   * 이쪽은 "그 전송을 누가 하는가"(사용자가 아니라 Wooi)다. 그래서 이 자리에 값이 있으면
+   * pendingRestart 에도 반드시 들어 있다.
+   */
+  private pendingResume = new Map<string, ResumePrompt>()
 
   constructor(
     private dispatch: Dispatch,
@@ -138,7 +160,12 @@ export class AgentOrchestrator {
   private get(id: AgentBackendId): AgentBackend {
     let backend = this.backends.get(id)
     if (!backend) {
-      backend = createBackend(id, { dispatch: this.dispatch, getWindow: this.getWindow })
+      backend = createBackend(id, {
+        dispatch: this.dispatch,
+        getWindow: this.getWindow,
+        // 턴의 끝은 백엔드만 알지만, 그때 무엇을 할지는 백엔드 공통이다([[handleTurnEnd]]).
+        onTurnEnd: (workspaceId, status) => this.handleTurnEnd(workspaceId, status)
+      })
       this.backends.set(id, backend)
     }
     return backend
@@ -231,14 +258,91 @@ export class AgentOrchestrator {
    *
    * **지금 끊지 않는** 것이 요점이다. 이 예약을 부르는 쪽은 도구 실행부이고, 그 도구는 지금
    * 도는 턴 안에서 불린다 — 여기서 dispose 하면 도구 결과가 돌아갈 세션이 사라져 턴이 통째로
-   * 죽는다. 그래서 "턴이 끝나면" 이 아니라 "다음 전송 직전" 에 건다: 턴의 끝을 관찰할 필요가
-   * 없고(백엔드마다 다르다), 사용자가 다음 말을 걸기 전까지는 아무 일도 일어나지 않는다.
+   * 죽는다. 그래서 지금이 아니라 나중에 건다.
+   *
+   * 사용자가 손으로 켠 것(헤더 배지)처럼 **아무도 기다리고 있지 않은** 변경에 쓴다. 사용자가
+   * 방금 말로 시킨 일이 이 재시작을 기다리고 있다면 [[resumeAfterTurn]] 이다 — 그때는 다음 말을
+   * 걸어 달라고 하는 것 자체가 마찰이다.
    */
   restartBeforeNextMessage(workspaceId: string): void {
     this.pendingRestart.add(workspaceId)
+    // 예약해 둔 자동 이어가기가 있었다면 접는다. 이쪽을 부른 쪽은 "사용자의 다음 메시지에 반영
+    // 하라" 고 말한 것이라 "지금 이어 가라" 와 정면으로 어긋난다 — 실제로 겹치는 경우가 그렇다:
+    // 모델이 팀으로 바꾼 턴이 끝나기 전에 사용자가 헤더 배지로 다시 Solo 로 돌리면(ipc 의
+    // workspaceSetMultiAgent), 이어 갈 턴은 "팀원 도구가 실렸다" 는 거짓말로 시작하게 된다.
+    this.cancelResume(workspaceId)
+  }
+
+  /**
+   * 지금 도는 턴이 끝나는 즉시 세션을 다시 열고, 이어서 한 턴을 더 보낸다.
+   *
+   * [[restartBeforeNextMessage]] 와 예약하는 것은 같고 **시점만 다르다**. 저쪽은 사용자가 다음
+   * 말을 걸 때까지 기다리므로, 사용자가 방금 말로 시킨 일("Codex 한테 리뷰 시켜줘")이 도구 하나
+   * 켜는 데서 멈추고 "이제 다시 말해 주세요" 로 끝난다. 이쪽은 그 요청의 연장선에서 턴이 이어진다.
+   *
+   * 사용자가 시작하지 않은 턴을 도는 것은 한 번 되돌린 적이 있는 설계다([[shared/handoff]]).
+   * 거기서는 사용자가 **아무것도 요청하지 않은** 상태에서 요약 턴이 돌았고, 그 사이 입력한 명령이
+   * 그 턴에 빨려 들어가 무시됐다. 여기는 사용자가 방금 작업을 시켰고 그 결과를 기다리는 중이라
+   * 이어지는 턴이 곧 사용자가 원한 그 작업이다. 그래도 같은 함정을 피하는 방어는 따로 있다 —
+   * [[handleTurnEnd]] 가 턴 사이에 틈을 만들지 않는다.
+   */
+  resumeAfterTurn(workspaceId: string, prompt: ResumePrompt): void {
+    this.pendingRestart.add(workspaceId)
+    this.pendingResume.set(workspaceId, prompt)
+  }
+
+  /**
+   * 백엔드가 턴 종료를 알려 온다([[agent/backend]] TurnEndHook). 이어 보낼 것이 있으면 여기서
+   * 보내고 true 를 돌려준다 — 그러면 백엔드는 이 턴을 끝난 것으로 방송하지 않는다.
+   *
+   * **방송하지 않는 것이 이 설계의 전부다.** 방송하면 턴과 턴 사이에 렌더러가 "쉬고 있다" 고 보는
+   * 틈이 생기고, 그 틈에 사용자가 친 말은 곧 시작될 자동 턴에 섞여 들어간다 — Codex 는 steering
+   * 으로 즉시([[agent/backend]] CODEX_META 의 capabilities.steering), Claude 는 대기 큐가 풀려서
+   * (렌더러 store 의 messageQueue). 정확히 그 실패를 한 번 겪고 설계를 되돌린 적이 있다
+   * ([[shared/handoff]]). 틈이 없으면 입력창은 계속 '진행 중' 규칙으로 동작하므로 렌더러는 고칠
+   * 것이 없다 — 사용자에게는 턴 하나가 이어서 도는 것으로만 보인다.
+   */
+  private handleTurnEnd(workspaceId: string, status: 'idle' | 'error'): boolean {
+    const resume = this.pendingResume.get(workspaceId)
+    if (!resume) return false
+    // 어느 쪽으로 끝났든 예약은 여기서 소진된다. 남겨 두면 한참 뒤 다른 턴이 끝날 때 뜬금없이
+    // 되살아난다.
+    this.pendingResume.delete(workspaceId)
+    // 오류로 끝난 자리에서 자동으로 한 턴을 더 태우지 않는다 — 같은 실패를 반복하기 쉽고,
+    // 무엇보다 사용자가 멈춘 것을 화면에서 봐야 한다. 재시작 예약은 남으므로 다음 메시지가 연다.
+    if (status !== 'idle') return false
+
+    // 여기서는 끊어도 된다 — 턴이 이미 끝나 결과를 기다리는 도구 호출이 없다. 이게 예약을 "다음
+    // 전송 직전" 이 아니라 지금 풀 수 있는 이유다(restartBeforeNextMessage 주석 참고).
+    this.dispose(workspaceId)
+    this.touch(workspaceId)
+    try {
+      this.backendFor(workspaceId).sendMessage(workspaceId, resume.text, undefined, {
+        prefix: resume.prefix
+      })
+    } catch (err) {
+      log.error(`orchestrator: 턴 종료 뒤 자동 이어가기 실패 (${workspaceId})`, err)
+      // 못 보냈으면 턴은 그냥 끝난 것이다. false 를 돌려 백엔드가 idle 을 방송하게 둔다 —
+      // 여기서 true 를 돌리면 사이드바가 영영 '진행 중' 에 갇힌다.
+      return false
+    }
+    return true
+  }
+
+  /**
+   * 사용자가 직접 개입했다 — 예약된 자동 이어가기를 접는다.
+   *
+   * 자동 턴의 명분은 "사용자가 방금 시킨 일을 이어서 한다" 하나뿐이다. 그 사이 사용자가 직접
+   * 보내거나·중단하거나·대화를 비웠다면 그 명분이 사라진다. 재시작 예약(pendingRestart)은 건드리지
+   * 않는다 — 세션이 낡았다는 사실은 개입과 무관하게 그대로다.
+   */
+  private cancelResume(workspaceId: string): void {
+    this.pendingResume.delete(workspaceId)
   }
 
   sendMessage(workspaceId: string, text: string, images?: ImageAttachment[]): void {
+    // 사용자가 먼저 말을 걸었다 — 이 전송이 세션을 다시 열므로 자동 이어가기는 할 일이 없다.
+    this.cancelResume(workspaceId)
     // 세션이 없으면 dispose 는 no-op 이고, 어차피 이 전송이 새로 연다.
     if (this.pendingRestart.has(workspaceId)) this.dispose(workspaceId)
     this.touch(workspaceId)
@@ -282,6 +386,8 @@ export class AgentOrchestrator {
   }
 
   interrupt(workspaceId: string): Promise<void> {
+    // 중단은 "그만" 이다. 그 턴이 끝나자마자 Wooi 가 다음 턴을 시작하면 중단이 중단이 아니게 된다.
+    this.cancelResume(workspaceId)
     return this.backendFor(workspaceId).interrupt(workspaceId)
   }
 
@@ -302,6 +408,8 @@ export class AgentOrchestrator {
   }
 
   clearSession(workspaceId: string): void {
+    // 맥락을 비운 대화에 옛 턴의 이어가기를 밀어 넣지 않는다 — 이어갈 대화가 이미 없다.
+    this.cancelResume(workspaceId)
     this.backendFor(workspaceId).clearSession(workspaceId)
   }
 
@@ -316,18 +424,23 @@ export class AgentOrchestrator {
     // 어떤 이유로 끊겼든 다음 전송은 어차피 새 세션이다 — 예약이 남아 있으면 그다음 전송에서
     // 이미 새것인 세션을 한 번 더 끊는다.
     this.pendingRestart.delete(workspaceId)
+    // 세션이 사라졌으면 이어갈 턴도 사라진 것이다. (자동 이어가기 자신이 부르는 dispose 는
+    // 이미 예약을 꺼내 간 뒤라 여기서 지울 것이 없다 — [[handleTurnEnd]])
+    this.cancelResume(workspaceId)
     this.backendFor(workspaceId).dispose(workspaceId)
   }
 
   disposeAll(): void {
     this.lastUsedAt.clear()
     this.pendingRestart.clear()
+    this.pendingResume.clear()
     for (const backend of this.backends.values()) backend.disposeAll()
   }
 
   abortAll(): void {
     this.lastUsedAt.clear()
     this.pendingRestart.clear()
+    this.pendingResume.clear()
     for (const backend of this.backends.values()) backend.abortAll()
   }
 
@@ -336,6 +449,7 @@ export class AgentOrchestrator {
     // 프로세스가 갈리므로 살아 있던 세션도 함께 사라진다 — 다음 전송이 다시 만든다.
     this.lastUsedAt.clear()
     this.pendingRestart.clear()
+    this.pendingResume.clear()
     for (const backend of this.backends.values()) backend.recycleAll()
   }
 

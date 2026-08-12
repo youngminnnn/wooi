@@ -76,7 +76,8 @@ export function delegateShellGuidance(
       `${why} This workspace is Solo, so \`${tool}\` does not exist here yet. Call ` +
       '`switch_to_agent_team` — the user approves that switch, and `' +
       tool +
-      '` is available from the next message. Do not work around this with the shell.'
+      '` is available from your next turn, which Wooi starts on its own as soon as this one ' +
+      'ends. Do not work around this with the shell.'
     )
   }
   // 바꿀 수도 없는 워크스페이스에서 대안 없이 막으면 그냥 능력을 뺏는 것이다. 사실만 말하고

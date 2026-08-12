@@ -32,6 +32,20 @@ import type {
  * 메서드(사이드 질문·인터랙티브 명령·MCP·rewind 등)는 백엔드 고유 풍부함을 노출하며, 지원하지
  * 않는 백엔드에서는 오케스트레이터가 capabilities 로 가드해 호출을 막거나 명확한 에러로 끊는다.
  */
+/**
+ * 턴이 끝났다고 소유자(오케스트레이터)에게 알리는 훅. 백엔드마다 턴의 끝을 아는 자리가 다르므로
+ * (Claude·Codex 가 각자 status 이벤트를 만든다) 그 자리에서 공통 훅 하나를 부르게 한다.
+ *
+ * **true 를 돌려주면 그 워크스페이스의 다음 턴을 소유자가 이미 이어 보냈다**는 뜻이다. 그러면
+ * 백엔드는 이 턴을 끝난 것으로 처리하면 안 된다 — 상태를 idle 로 적지도, 방송하지도, 완료 알림을
+ * 띄우지도 않는다. 대화는 끊긴 적이 없기 때문이다. 왜 끊긴 것으로 보이면 안 되는지는
+ * [[agent/orchestrator]] 의 handleTurnEnd 에 적어 뒀다.
+ *
+ * 오류로 끝났을 때도 알린다 — 소유자가 들고 있던 예약을 접어야 하기 때문이다. 다만 그때는 언제나
+ * false 다(실패한 자리에서 자동으로 한 턴을 더 태우지 않는다).
+ */
+export type TurnEndHook = (workspaceId: string, status: 'idle' | 'error') => boolean
+
 export interface AgentBackend {
   /** 이 백엔드의 식별·표시·기능 메타데이터. */
   readonly meta: AgentBackendMeta
