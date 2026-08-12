@@ -188,6 +188,25 @@ export const WOOI_COMMANDS: WooiCommandSpec[] = [
       'Call `mcp__wooi__list_workspace_peers` and summarize what each open workspace is working on.'
   },
   {
+    name: 'team',
+    tool: 'switch_to_agent_team',
+    mode: 'agent',
+    description: 'Turn this workspace into an agent team',
+    argumentHint: '[what you want to delegate]',
+    prompt: [
+      'Turn this workspace into an agent team by calling the `mcp__wooi__switch_to_agent_team` tool.',
+      '',
+      'The teammate tools arrive on your **next** turn, not this one — Wooi reopens the session to',
+      'load them. So finish the turn right after calling it: say what you will delegate and to',
+      'which agent, and ask the user to reply so the next turn can do it.',
+      '',
+      'Write `reason` as one sentence the user will read on the approval card. If they did not say',
+      'what to delegate, base it on what this conversation is about.',
+      '',
+      'What they want to delegate (may be empty): $ARGUMENTS'
+    ].join('\n')
+  },
+  {
     name: 'children',
     tool: 'check_stacked_work',
     mode: 'direct',

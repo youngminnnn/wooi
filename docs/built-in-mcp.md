@@ -340,6 +340,7 @@ with your own commands: `/wooi:pr`, `/wooi:children`, and so on. The catalog is
 | `/wooi:report [what to report]` | `report_to_parent` | agent |
 | `/wooi:notify <what changed>` | `notify_child` | agent |
 | `/wooi:send <what changed>` | `send_to_workspace` | agent |
+| `/wooi:team [what to delegate]` | `switch_to_agent_team` | agent |
 | `/wooi:peers` | `list_workspace_peers` | direct |
 | `/wooi:children` | `check_stacked_work` | direct |
 | `/wooi:related [paths…]` | `check_related_work` | direct |

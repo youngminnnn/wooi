@@ -152,7 +152,8 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
   const agentSwitch = useAgentSwitch(workspace)
 
   // 슬래시 명령 자동완성: 명령 목록(워크스페이스당 1회 조회)과 메뉴 선택 인덱스.
-  const [commands, setCommands] = useState<SlashCommandInfo[] | null>(null)
+  // 받아 둔 목록 + 그것이 무엇에 대한 목록인지(commandsKey). 아래 fresh 참고.
+  const [commands, setCommands] = useState<{ key: string; list: SlashCommandInfo[] } | null>(null)
   const [loadingCommands, setLoadingCommands] = useState(false)
   const [menuIdx, setMenuIdx] = useState(0)
 
@@ -304,21 +305,39 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
   // "!" 로 시작하면 Claude Code CLI 의 bash 모드처럼 — 메시지가 아니라 터미널 명령으로 다룬다.
   const bashMode = text.startsWith('!')
 
+  /**
+   * 받아 둔 목록이 **무엇에 대한** 목록인지. 이 값이 달라지면 캐시는 낡은 것이다.
+   *
+   * 목록은 한 번 받으면 계속 쓰는데(아래 effect 의 가드), 이 두 값은 목록 자체를 바꾼다 —
+   * 에이전트 팀으로 바꾸면 `/wooi:claude` 같은 위임 명령이 생기고([[shared/wooiCommands]]),
+   * 메인 에이전트를 바꾸면 백엔드가 답하는 명령이 통째로 달라진다. 실측으로, 팀으로 바꾼 뒤에도
+   * `/wooi:c` 에 위임 명령이 뜨지 않았다.
+   *
+   * effect 로 캐시를 비우지 않고 키를 함께 들고 있는 이유: 비우는 방식은 한 프레임 동안 낡은
+   * 목록이 그대로 보이고, setState-in-effect 로 렌더가 한 번 더 돈다. 키가 어긋나면 캐시가
+   * 없는 것으로 치는 편이 파생값에 가깝다.
+   *
+   * 워크스페이스 전환은 여기서 다루지 않는다 — ChatView 가 `key={workspace.id}` 로 이 컴포넌트를
+   * 통째로 다시 만들어 상태가 저절로 비워진다([[App]]).
+   */
+  const commandsKey = `${workspace.agentBackend}:${workspace.multiAgent ? 'team' : 'solo'}`
+  const fresh = commands?.key === commandsKey ? commands.list : null
+
   // 슬래시 모드 진입 시 명령 목록을 lazy 하게 조회한다.
   useEffect(() => {
-    if (slashQuery === null || commands !== null || loadingCommands) return
+    if (slashQuery === null || fresh !== null || loadingCommands) return
     setLoadingCommands(true)
     void window.api.commands.list(workspace.id).then((list) => {
-      setCommands(list)
+      setCommands({ key: commandsKey, list })
       setLoadingCommands(false)
     })
-  }, [slashQuery, commands, loadingCommands, workspace.id])
+  }, [slashQuery, fresh, loadingCommands, workspace.id, commandsKey])
 
   // 접두사 우선, 없으면 부분일치로 필터링. 접두사 매치를 위로 올린다.
   const matches = useMemo(() => {
-    if (slashQuery === null || !commands) return []
+    if (slashQuery === null || !fresh) return []
     const q = slashQuery.toLowerCase()
-    const scored = commands
+    const scored = fresh
       .map((c) => {
         // 이름 우선, 없으면 별칭(/cost·/stats 등)으로도 매칭한다.
         const names = [c.name, ...(c.aliases ?? [])].map((n) => n.toLowerCase())
@@ -332,7 +351,7 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
       .filter((x) => x.rank < 2)
       .sort((a, b) => a.rank - b.rank || a.c.name.localeCompare(b.c.name))
     return scored.map((x) => x.c)
-  }, [slashQuery, commands])
+  }, [slashQuery, fresh])
 
   const menuOpen = slashQuery !== null && (loadingCommands || matches.length > 0)
 
