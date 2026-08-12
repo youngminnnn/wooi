@@ -9,7 +9,10 @@ export default defineConfig({
   main: {
     // Keep the Claude Agent SDK (and other deps) external so the SDK can resolve
     // its bundled native CLI binary relative to node_modules at runtime.
-    plugins: [externalizeDepsPlugin()],
+    // toolShim 은 Electron 밖에서 순수 Node 프로세스로 실행된다. 패키징된 앱의 app.asar 안에
+    // 있는 node_modules 는 그 프로세스가 읽을 수 없으므로, shim 이 런타임에 쓰는 zod 는
+    // main 산출물에 포함해야 한다([[codex/toolShim]]).
+    plugins: [externalizeDepsPlugin({ exclude: ['zod'] })],
     resolve: {
       alias: { '@shared': shared }
     },
