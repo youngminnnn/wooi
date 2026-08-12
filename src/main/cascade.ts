@@ -7,7 +7,16 @@ import {
   restoreRemoteRef,
   deleteRemoteRef
 } from './github'
-import { checkoutBranch, currentBranch, isWorktreeClean, restackOnto, revParse } from './git'
+import {
+  checkoutBranch,
+  currentBranch,
+  hasCommit,
+  isAncestor,
+  isWorktreeClean,
+  remoteTipSha,
+  restackOnto,
+  revParse
+} from './git'
 
 /**
  * 부모 PR 병합 후 자식 PR 들을 조부모로 옮기는 캐스케이드.
@@ -27,7 +36,99 @@ import { checkoutBranch, currentBranch, isWorktreeClean, restackOnto, revParse }
  *    닫힌 PR 은 base 변경이 거부되고(`Cannot change the base branch of a closed pull request`),
  *    base 브랜치가 없으면 reopen 도 거부된다(`Could not open the pull request`) — 교착이다.
  *    유일한 탈출로는 base 브랜치를 되살린 뒤 reopen → retarget 하는 것이다. recoverClosedPr 가 그 경로다.
+ *
+ * ── GitHub 스택의 서버측 rebase (실측 확인) ─────────────────────────────────
+ * GitHub 이 stacked pull request 의 아래층을 병합하면, 위 브랜치들의 **원격 ref 를 서버에서
+ * 다시 쓴다**(체인 전체를 캐스케이딩 rebase). 로컬 worktree 는 rebase 이전 커밋을 든 채 깨끗하게
+ * 남으므로 "할 일 없음"처럼 보이는데, 그대로 rebase 하면 GitHub 의 결과를 덮어써 위 레이어가
+ * 자기만의 diff 를 잃는다. detectRemoteDivergence 가 그 자리를 지킨다 — 자세한 근거는 그 위
+ * 주석에 있다. **force-with-lease 는 이 경우를 막지 못한다.**
  */
+
+// ── 리모트 갈라짐 가드 ──────────────────────────────────────────────────────
+//
+// **`--force-with-lease` 는 여기서 아무것도 막아 주지 않는다.** 이 검사가 명시적이어야 하는
+// 이유가 그것이다. 아래 실측(2026-08-12, stacked-pr-playground #46–48 / 스택 #49)을 근거로 한다.
+//
+// 1) GitHub 은 스택 아래층이 병합되면 **위 브랜치들의 원격 ref 를 서버에서 실제로 다시 쓴다**
+//    (체인 전체를 캐스케이딩 rebase 한다). 로컬 worktree 는 rebase **이전** 커밋을 든 채,
+//    미커밋 변경이 없으니 **깨끗하다** — 지금 코드에는 "할 일 없음"으로 읽힌다.
+// 2) 그 상태로 restackOnto 를 부르면 lease 는 무력하다. restackOnto 가 push 직전에 스스로
+//    `fetchRemote()` 를 부르므로(git.ts) lease 기준값이 GitHub 이 방금 쓴 ref 로 갱신되고,
+//    force-push 가 **성공한다**. 캐스케이드는 oldBase 를 넘기니 needsRebase 도 항상 true 다.
+// 3) 피해는 "충돌을 두 번 푼다" 정도가 아니다. 옛 커밋을 재생해 GitHub 의 rebase 를 덮어쓰므로
+//    **위 레이어가 자기만의 diff 를 잃는다** — 아래층 변경까지 자기 PR 에 다시 끌어안는다
+//    (실측: PR 이 파일 1개에서 2개로 늘었다). 스택이 스택인 이유가 그대로 무너진다.
+//
+// 그래서 lease 를 믿지 않고 push 이전 단계에서 직접 물어본다. 판정되면 rebase 하지 않는다.
+// 자동 화해도 하지 않는다 — 대개는 GitHub 쪽이 옳지만(그쪽이 이미 제대로 rebase 했다),
+// 일반적으로는 협업자의 force-push 일 수도 있어 어느 쪽을 버릴지는 사람이 정할 문제다.
+//
+// (리뷰 코멘트 유실은 위험이 아니다 — GitHub 자신의 rebase 와 외부 force-push 양쪽에서
+// 재앵커링되는 것을 확인했다. 문제는 오로지 diff 가 뒤섞이는 것이다.)
+
+/**
+ * 리모트 브랜치와 로컬 tip 의 관계.
+ * - in-sync: 같다.
+ * - local-ahead: 리모트가 로컬 tip 의 조상이다(= 아직 push 하지 않은 커밋만 있다. 정상).
+ * - diverged: 조상도 아니고 같지도 않다 — 내가 하지 않은 push 가 리모트에 있다.
+ * - unknown: 리모트에 브랜치가 없거나(아직 push 전) 조회하지 못했다. 판정하지 않는다.
+ */
+export type RemoteState = 'in-sync' | 'local-ahead' | 'diverged' | 'unknown'
+
+/**
+ * "내가 push 하지 않았는데 리모트가 움직였는가"를 판정한다.
+ *
+ * "내가 push 했는지"를 따로 기록해 둘 필요는 없다. Wooi 의 push 는 rebase 직후의
+ * force-with-lease 뿐이라, 그게 성공했다면 리모트는 로컬 tip 과 **같다**. 즉 같지도 않고
+ * 조상도 아니라는 사실 자체가 "내가 만든 상태가 아니다"의 충분한 증거다.
+ */
+export async function detectRemoteDivergence(
+  worktreePath: string,
+  branch: string
+): Promise<RemoteState> {
+  // `ls-remote` 로 리모트에 **직접** 묻는다. `origin/<branch>` 는 마지막 fetch 시점의 사진이라
+  // "내가 모르는 사이에 움직였나"에 답할 수 없고, 하필 restackOnto 가 push 직전에 fetch 하므로
+  // 추적 ref 를 믿으면 정확히 놓쳐야 할 순간에 놓친다.
+  const remote = await remoteTipSha(worktreePath, branch).catch(() => null)
+  // 리모트에 브랜치가 없거나(아직 push 전) 물어보지 못했다. 막을 근거가 없고, 막을 필요도 없다
+  // — 전자는 restackOnto 가 push 자체를 건너뛰고, 후자(네트워크 불통)는 push 도 실패한다.
+  if (!remote) return 'unknown'
+  const local = await revParse(worktreePath, branch).catch(() => null)
+  if (!local) return 'unknown'
+  if (remote === local) return 'in-sync'
+  // 리모트 sha 를 우리가 아예 모르면 fetch 한 적 없는 히스토리다 → 조상 판정 자체가 불가능하고,
+  // 그 사실이 곧 갈라짐이다(merge-base 를 그냥 부르면 unknown revision 으로 실패한다).
+  if (!(await hasCommit(worktreePath, remote).catch(() => false))) return 'diverged'
+  return (await isAncestor(worktreePath, remote, local).catch(() => false))
+    ? 'local-ahead'
+    : 'diverged'
+}
+
+/**
+ * 갈라짐을 사용자에게 설명하는 문구. 캐스케이드(자동)와 수동 restack 이 같은 말을 하도록 한 곳에
+ * 둔다 — 같은 원인·같은 대처인데 경로에 따라 다르게 설명하면 사용자가 다른 문제로 읽는다.
+ */
+export function divergedMessage(branch: string): string {
+  return (
+    'the remote branch was rewritten by something other than Wooi — GitHub rebases the branches ' +
+    'above a stacked pull request when a lower one merges. Rebasing here would replay your older ' +
+    'commits over that and fold the merged layer back into this branch, so the rebase was skipped. ' +
+    `Inspect it with 'git fetch origin ${branch}' and take the remote version ` +
+    `('git reset --hard origin/${branch}') if GitHub is ahead.`
+  )
+}
+
+/** 갈라짐을 캐스케이드 단계 결과로 옮긴다(모델 A·B 가 같은 문구를 쓴다). */
+export function divergedStep(branch: string, prNumber: number | null): StackCascadeStep {
+  return {
+    branch,
+    prNumber,
+    kind: 'restack',
+    status: 'diverged',
+    message: divergedMessage(branch)
+  }
+}
 
 /** RestackResult 를 캐스케이드 단계 결과로 옮긴다. */
 export function stepFromRestack(
@@ -231,6 +332,9 @@ export async function cascadeRestackBranchStack(opts: {
 
   const steps: StackCascadeStep[] = []
   let halted: string | null = null
+  // halted 와 따로 두는 이유: 충돌·에러는 워킹트리를 rebase 진행 상태로 남겨 원래 브랜치로
+  // 되돌릴 수 없지만, 갈라짐은 아무것도 건드리지 않고 멈춘 것이라 되돌려 놓는 편이 낫다.
+  let leftMidRebase = false
 
   for (const e of entries) {
     if (halted) {
@@ -241,6 +345,15 @@ export async function cascadeRestackBranchStack(opts: {
         status: 'skipped',
         message: `skipped after ${halted}`
       })
+      continue
+    }
+
+    // 체크아웃보다 먼저 본다 — 갈라진 브랜치는 아예 건드리지 않는 것이 요점이라, 워킹트리를
+    // 그 브랜치로 옮겨 놓지도 않는다. 위 브랜치들은 이 브랜치 tip 을 기준으로 쌓이므로,
+    // 하나가 갈라졌으면 그 위도 전부 판단 근거를 잃는다 → 멈춘다.
+    if ((await detectRemoteDivergence(worktreePath, e.branch)) === 'diverged') {
+      steps.push(divergedStep(e.branch, e.prNumber))
+      halted = `${e.branch} diverged from its remote`
       continue
     }
 
@@ -259,6 +372,7 @@ export async function cascadeRestackBranchStack(opts: {
         message: co.error
       })
       halted = `checkout of ${e.branch} failed`
+      leftMidRebase = true
       continue
     }
 
@@ -270,12 +384,17 @@ export async function cascadeRestackBranchStack(opts: {
     steps.push(stepFromRestack(e.branch, e.prNumber, r))
 
     // 충돌은 워킹트리를 rebase 진행 상태로 남긴다 — 이후 브랜치는 체크아웃조차 불가하므로 멈춘다.
-    if (r.status === 'conflict') halted = `rebase conflict on ${e.branch}`
-    else if (r.status === 'error' || r.status === 'dirty') halted = `rebase of ${e.branch} failed`
+    if (r.status === 'conflict') {
+      halted = `rebase conflict on ${e.branch}`
+      leftMidRebase = true
+    } else if (r.status === 'error' || r.status === 'dirty') {
+      halted = `rebase of ${e.branch} failed`
+      leftMidRebase = true
+    }
   }
 
   // 원래 브랜치로 되돌린다(병합돼 스택에서 빠질 브랜치였다면 그대로 둔다 — 호출부가 HEAD 를 보고 맞춘다).
-  if (!halted && original && original !== mergedBranch) {
+  if (!leftMidRebase && original && original !== mergedBranch) {
     await checkoutBranch(worktreePath, original).catch(() => ({}))
   }
 

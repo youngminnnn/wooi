@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest'
-import { buildStackFromPrs, detectArchiveSuggestion, detectBaseMismatch } from './stack'
+import {
+  buildStackFromGhStack,
+  buildStackFromPrs,
+  detectArchiveSuggestion,
+  detectBaseMismatch
+} from './stack'
+import type { GhStackEdge } from './stack'
 
 type Pr = { number: number; head: string; base: string }
 
@@ -56,6 +62,93 @@ describe('buildStackFromPrs', () => {
     expect(order).toContain('feat-2b')
     expect(order.indexOf('feat-1')).toBeLessThan(order.indexOf('feat-2a'))
     expect(order.indexOf('feat-1')).toBeLessThan(order.indexOf('feat-2b'))
+  })
+})
+
+describe('buildStackFromGhStack', () => {
+  const edge = (
+    position: number,
+    headRef: string,
+    baseRef: string,
+    over: Partial<GhStackEdge> = {}
+  ): GhStackEdge => ({ position, prNumber: position, headRef, baseRef, state: 'OPEN', ...over })
+
+  const stack = (
+    entries: GhStackEdge[],
+    baseRef = 'main'
+  ): { baseRef: string; entries: GhStackEdge[] } => ({
+    baseRef,
+    entries
+  })
+
+  it('orders the chain by position, not by the order GitHub listed the entries', () => {
+    const out = buildStackFromGhStack(
+      'b',
+      stack([edge(3, 'c', 'b'), edge(1, 'a', 'main'), edge(2, 'b', 'a')]),
+      none
+    )
+    expect(out?.map((e) => e.branch)).toEqual(['a', 'b', 'c'])
+    expect(out?.map((e) => e.baseBranch)).toEqual(['main', 'a', 'b'])
+    expect(out?.map((e) => e.prNumber)).toEqual([1, 2, 3])
+  })
+
+  it('트러스트 순서: 위쪽 엔트리는 PR 의 낡은 base 대신 position 을 따른다', () => {
+    // 리타겟이 아직 밀려 c 의 base 가 옛 브랜치를 가리키는 상황 — 그래도 체인은 살아남아야 한다.
+    const out = buildStackFromGhStack(
+      'c',
+      stack([edge(1, 'a', 'main'), edge(2, 'b', 'a'), edge(3, 'c', 'stale-branch')]),
+      none
+    )
+    expect(out?.map((e) => e.baseBranch)).toEqual(['main', 'a', 'b'])
+  })
+
+  it('맨 아래 엔트리는 PR 이 신고한 base 를 그대로 쓴다(아래가 병합돼 조부모로 옮겨졌을 수 있다)', () => {
+    const out = buildStackFromGhStack(
+      'b',
+      stack([edge(2, 'b', 'release'), edge(3, 'c', 'b')], 'main'),
+      none
+    )
+    expect(out?.[0]).toMatchObject({ branch: 'b', baseBranch: 'release' })
+  })
+
+  it('drops merged and closed entries — the fallback only ever sees open PRs either', () => {
+    const out = buildStackFromGhStack(
+      'b',
+      stack([
+        edge(1, 'a', 'main', { state: 'MERGED' }),
+        edge(2, 'b', 'main'),
+        edge(3, 'c', 'b'),
+        edge(4, 'd', 'c', { state: 'CLOSED' })
+      ]),
+      none
+    )
+    expect(out?.map((e) => e.branch)).toEqual(['b', 'c'])
+  })
+
+  it('returns null when the anchor is not in the stack', () => {
+    expect(
+      buildStackFromGhStack('x', stack([edge(1, 'a', 'main'), edge(2, 'b', 'a')]), none)
+    ).toBeNull()
+  })
+
+  it('returns null when fewer than two entries are still open', () => {
+    const out = buildStackFromGhStack(
+      'b',
+      stack([edge(1, 'a', 'main', { state: 'MERGED' }), edge(2, 'b', 'main')]),
+      none
+    )
+    expect(out).toBeNull()
+  })
+
+  it('refuses a stack that spans other workspaces — that is a model A chain', () => {
+    // 계층마다 worktree 를 따로 둔 스택을 모델 B 로 흡수하면 남의 브랜치를 이 worktree 의
+    // 스택으로 기록하게 된다. null 을 돌려 폴백이 경계를 제대로 처리하게 넘긴다.
+    const out = buildStackFromGhStack(
+      'b',
+      stack([edge(1, 'a', 'main'), edge(2, 'b', 'a')]),
+      new Set(['a'])
+    )
+    expect(out).toBeNull()
   })
 })
 

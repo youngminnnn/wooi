@@ -27,7 +27,14 @@ import {
 } from './git'
 import { applyCarryExcludes, carryIntoWorktree, detectCarryItems, validateCarryPath } from './carry'
 import { getWorkspacePrStatus, invalidateWorkspacePr } from './prCache'
-import { buildStackFromPrs, detectArchiveSuggestion, detectBaseMismatch } from './stack'
+import {
+  buildStackFromGhStack,
+  buildStackFromPrs,
+  detectArchiveSuggestion,
+  detectBaseMismatch
+} from './stack'
+import { getRepoStacks, getStackForPr } from './ghStack'
+import type { GhStackInfo } from './ghStack'
 import { findFreePort, waitForPortFree } from './net'
 import {
   getPrStatus,
@@ -49,7 +56,14 @@ import {
 } from './github'
 import { ReviewManager } from './review/manager'
 import type { ReviewVerdict, TranscriptSearchResult } from '@shared/types'
-import { cascadeRetarget, cascadeRestackBranchStack, stepFromRestack } from './cascade'
+import {
+  cascadeRetarget,
+  cascadeRestackBranchStack,
+  detectRemoteDivergence,
+  divergedMessage,
+  divergedStep,
+  stepFromRestack
+} from './cascade'
 import {
   getAuthStatus,
   claudeLoginStart,
@@ -1015,6 +1029,16 @@ export function registerIpc(ctx: IpcContext): void {
     }
     let anyChanged = false
     for (const entry of stack) {
+      // 캐스케이드와 같은 가드. 여기도 상위 브랜치에는 oldBase 를 넘겨 무조건 rebase 하고,
+      // restackOnto 가 push 직전에 fetch 해 lease 를 되살리므로 force-push 가 그대로 통한다
+      // — 즉 이 버튼도 GitHub 의 서버측 rebase 를 덮어쓸 수 있다(cascade.ts 의 실측 기록 참고).
+      if ((await detectRemoteDivergence(worktreePath, entry.branch)) === 'diverged') {
+        return {
+          status: 'error',
+          baseBranch: entry.baseBranch,
+          message: `${entry.branch}: ${divergedMessage(entry.branch)}`
+        }
+      }
       const co = await checkoutBranch(worktreePath, entry.branch)
       if (co.error) return { status: 'error', baseBranch: entry.baseBranch, message: co.error }
       // base 가 다른 스택 멤버면(=상위 브랜치) 그 base 의 이전 tip 을 oldBase 로 넘겨 정확히 재배치한다.
@@ -1046,6 +1070,12 @@ export function registerIpc(ctx: IpcContext): void {
     }
     if (ws.stack && ws.stack.length > 1) {
       return restackWholeStack(ws.worktreePath, ws.stack, ws.branch)
+    }
+    // 단일 브랜치도 안전하지 않다. oldBase 를 넘기지 않아 "뒤처졌을 때만" rebase 하지만, base 가
+    // 앞서간 상황이 바로 아래층이 병합된 직후 — GitHub 이 이 브랜치를 이미 서버에서 rebase 해 둔
+    // 그 순간이다. 그대로 두면 옛 커밋을 재생해 그 결과를 덮어쓴다.
+    if ((await detectRemoteDivergence(ws.worktreePath, ws.branch)) === 'diverged') {
+      return { status: 'error', baseBranch: ws.baseBranch, message: divergedMessage(ws.branch) }
     }
     return restackOnto(ws.worktreePath, ws.baseBranch).catch((err) => ({
       status: 'error' as const,
@@ -1120,6 +1150,17 @@ export function registerIpc(ctx: IpcContext): void {
   }
 
   /**
+   * 계획에 담을 갈라짐 표시. 캐스케이드가 실행 직전에 다시 판정하므로 이 값은 표시 전용이다 —
+   * 승인 버튼을 누르기 **전에** 무엇이 안 될지 보여 주는 것이 목적이다.
+   *
+   * 계획이 만들어지는 순간에만 도는 것도 요점이다(이미 계획이 있으면 detectStackSync 가 곧바로
+   * 반환한다). 그래서 `ls-remote` 는 대상 브랜치당 한 번이고, 상시 폴링 비용에 얹히지 않는다.
+   */
+  const divergedFromRemote = async (worktreePath: string, branch: string): Promise<boolean> =>
+    (await detectRemoteDivergence(worktreePath, branch).catch(() => 'unknown' as const)) ===
+    'diverged'
+
+  /**
    * "이미 병합된 부모"를 찾아 캐스케이드 계획을 만든다.
    *
    * 병합은 wooi·`gh pr merge`·GitHub 웹 어디서든 일어날 수 있는 교체 가능한 행위라, 감지를 여기
@@ -1162,7 +1203,8 @@ export function registerIpc(ctx: IpcContext): void {
             branch: a.branch,
             prNumber: am?.number ?? a.prNumber,
             // base 브랜치가 삭제되면 GitHub 이 자식 PR 을 닫아 버린다 — 복구 단계가 필요하다.
-            prClosed: am?.state === 'CLOSED'
+            prClosed: am?.state === 'CLOSED',
+            remoteDiverged: await divergedFromRemote(ws.worktreePath, a.branch)
           })
         }
         if (!affected.length) continue
@@ -1190,7 +1232,8 @@ export function registerIpc(ctx: IpcContext): void {
           affected.push({
             branch: c.branch,
             prNumber: cm?.number ?? c.prNumber,
-            prClosed: cm?.state === 'CLOSED'
+            prClosed: cm?.state === 'CLOSED',
+            remoteDiverged: await divergedFromRemote(c.worktreePath, c.branch)
           })
         }
         return {
@@ -1203,6 +1246,29 @@ export function registerIpc(ctx: IpcContext): void {
     }
 
     return null
+  }
+
+  /**
+   * 이 워크스페이스의 브랜치가 **GitHub 스택**에 속하는지 보고, 속하면 그 스택 객체를 읽어 온다.
+   *
+   * 리포 단위로 캐시되는 목록으로 먼저 거르는 것이 요점이다 — 스택이 하나도 없는 리포(오늘의
+   * 대부분이 그렇다. base 로 연결된 PR 을 여는 것만으로는 스택 객체가 생기지 않는다)에서는
+   * 여기서 끝나고, 워크스페이스마다 GraphQL 을 띄우지 않는다.
+   */
+  const readGhStack = async (
+    ws: Workspace,
+    branches: string[]
+  ): Promise<{ info: GhStackInfo; position: number | null } | null> => {
+    const stacks = await getRepoStacks(ws.worktreePath, ws.repoId).catch(() => [])
+    if (!stacks.length) return null
+    const mine = (n: number, head: string): boolean =>
+      branches.includes(head) || (ws.prNumber != null && ws.prNumber === n)
+    const hit = stacks.flatMap((s) => s.pullRequests).find((p) => mine(p.number, p.headRef))
+    if (!hit) return null
+    const info = await getStackForPr(ws.worktreePath, hit.number).catch(() => null)
+    if (!info) return null
+    const here = info.entries.find((e) => mine(e.prNumber, e.headRef))
+    return { info, position: here?.position ?? null }
   }
 
   /**
@@ -1225,10 +1291,26 @@ export function registerIpc(ctx: IpcContext): void {
       for (const e of workspaceStack(other)) exclude.add(e.branch)
     }
     // HEAD → 원래 브랜치 순으로 anchor 를 시도해 스택을 복원한다.
+    const anchors = [head, ws.branch].filter(Boolean)
     let detected: StackedBranch[] | null = null
-    for (const anchor of [head, ws.branch].filter(Boolean)) {
-      detected = buildStackFromPrs(anchor, prs, exclude)
-      if (detected) break
+
+    // GitHub 이 스택 객체를 들고 있으면 그 순서가 이긴다 — 위치가 명시적이라 리타겟이 밀려
+    // base 체인이 잠시 끊겨도 살아남는다. 없으면(= 오늘 Wooi 가 연 PR 들은 전부 여기 해당)
+    // 아래의 base 링크 복원이 그대로 돈다. 기능 감지가 없는 것은 의도된 것이다: 스택이 없는
+    // 리포·PR 은 오류가 아니라 빈 값을 돌려주므로 빈 값이 곧 폴백 신호다.
+    const gh = await readGhStack(ws, anchors).catch(() => null)
+    if (gh) {
+      for (const anchor of anchors) {
+        detected = buildStackFromGhStack(anchor, gh.info, exclude)
+        if (detected) break
+      }
+    }
+
+    if (!detected) {
+      for (const anchor of anchors) {
+        detected = buildStackFromPrs(anchor, prs, exclude)
+        if (detected) break
+      }
     }
     const headPr = prs.find((p) => p.head === head)
     // 외부에서 부모 PR 이 병합됐는지 감지한다(감지만 — 실행은 사용자 승인 후).
@@ -1291,6 +1373,18 @@ export function registerIpc(ctx: IpcContext): void {
         w.archiveSuggest = suggestion
         changed = true
       }
+      // GitHub 스택 메타데이터. 모델 B 로 흡수됐는지와 무관하게 기록한다 — 계층마다 worktree 를
+      // 따로 둔 모델 A 스택에서는 흡수가 (일부러) 일어나지 않지만, 스택 번호·위치는 그때도
+      // 보여 줄 값이다. 스택에서 빠지면 지운다: 남겨 두면 없어진 스택을 계속 가리킨다.
+      const ghNumber = gh?.info.number ?? null
+      const ghPosition = gh?.position ?? null
+      if ((w.ghStackNumber ?? null) !== ghNumber || (w.ghStackPosition ?? null) !== ghPosition) {
+        w.ghStackNumber = ghNumber
+        w.ghStackPosition = ghPosition
+        changed = true
+      }
+      if (gh) w.ghStackSyncedAt = Date.now()
+      else if (w.ghStackSyncedAt != null) w.ghStackSyncedAt = null
       // 대기 중인 계획이 있는 동안에는 기록된 스택을 그대로 보존한다. detected 는 "열린 PR" 로만
       // 만들어져 병합된 엔트리가 이미 빠져 있으므로, 지금 덮어쓰면 캐스케이드가 대상 브랜치를 잃는다.
       if (!plan && detected) {
@@ -1439,6 +1533,15 @@ export function registerIpc(ctx: IpcContext): void {
       // base 가 조부모로 내려갔으므로 gh 기본 base 도 함께 옮긴다(조부모가 리포 기본
       // 브랜치면 설정이 지워져 gh 기본값으로 되돌아간다).
       await syncPrBase(child, grandparentBranch)
+      // 리모트가 우리 모르게 움직였으면 rebase 하지 않는다(모델 B 와 같은 판정·같은 이유).
+      // 위의 retarget 은 PR 쪽만 건드리므로 이미 끝났고, 여기서 멈추는 것은 히스토리 리라이트뿐이다.
+      const remote = await detectRemoteDivergence(child.worktreePath, child.branch).catch(
+        () => 'unknown' as const
+      )
+      if (remote === 'diverged') {
+        steps.push(divergedStep(child.branch, child.prNumber))
+        continue
+      }
       const r = await restackOnto(child.worktreePath, grandparentBranch, mergedBranch).catch(
         (err): RestackResult => ({
           status: 'error',

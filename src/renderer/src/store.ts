@@ -1471,6 +1471,10 @@ export const useStore = create<UIState>((set, get) => ({
         const n = p.conflictedFiles?.length ?? 0
         return `• ${who}: rebase conflict in ${n} file(s) — resolve in the worktree`
       }
+      // diverged 는 실패가 아니라 "일부러 하지 않았다" — 실패로 읽히면 사용자가 엉뚱한 곳을 뒤진다.
+      if (p.status === 'diverged') {
+        return `• ${who}: the remote branch was rewritten (GitHub rebases stacked PRs server-side) — rebase skipped so it is not overwritten; compare against origin`
+      }
       return `• ${who}: ${p.kind} failed — ${p.message ?? 'unknown error'}`
     })
     get().pushToast('error', `Stack cascade needs attention:\n${lines.join('\n')}`)
