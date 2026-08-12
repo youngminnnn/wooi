@@ -1661,31 +1661,52 @@ export interface PermissionOption {
  * 계획(plan) 승인 프롬프트의 선택지. ExitPlanMode 승인은 단순 allow/deny 가 아니라
  * "승인 후 어떤 권한 모드로 코딩을 시작할지" 를 함께 고르는 것이라, id 를 세션(main)과
  * 프롬프트(렌더러)가 공유해야 한다 — 터미널 Claude Code 의 세 선택지와 같은 의미다.
+ *
+ * 1번 자리는 CLI 와 같은 규칙으로 갈린다: auto mode 를 쓸 수 있으면 "Yes, and use auto mode",
+ * 없으면 "Yes, auto-accept edits". 가용 여부는 부르는 쪽이 판단해 넘긴다
+ * (main 은 모델을 보고 `supportsAutoMode` 로 정한다).
  */
-export const PLAN_OPTIONS: PermissionOption[] = [
-  {
-    id: 'plan-auto-accept',
-    label: 'Yes, and auto-accept edits',
-    behavior: 'allow',
-    description: 'Switches to Accept edits — file edits apply without asking'
-  },
-  {
-    id: 'plan-manual',
-    label: 'Yes, and manually approve edits',
-    behavior: 'allow',
-    description: 'Switches to Default — every edit still asks first'
-  },
-  {
-    id: 'plan-keep',
-    label: 'No, keep planning',
-    behavior: 'deny',
-    description: 'Stays in Plan mode so you can keep refining the plan'
-  }
-]
+export function planOptions(autoAvailable: boolean): PermissionOption[] {
+  return [
+    autoAvailable
+      ? {
+          id: 'plan-auto',
+          label: 'Yes, and use auto mode',
+          behavior: 'allow',
+          description: 'Switches to Auto mode — a classifier approves actions as they come'
+        }
+      : {
+          id: 'plan-auto-accept',
+          label: 'Yes, auto-accept edits',
+          behavior: 'allow',
+          description: 'Switches to Accept edits — file edits apply without asking'
+        },
+    {
+      id: 'plan-manual',
+      label: 'Yes, and manually approve edits',
+      behavior: 'allow',
+      description: 'Switches to Default — every edit still asks first'
+    },
+    {
+      id: 'plan-keep',
+      label: 'No, keep planning',
+      behavior: 'deny',
+      description: 'Stays in Plan mode so you can keep refining the plan'
+    }
+  ]
+}
 
-/** 계획 승인 시 전환할 권한 모드. 알 수 없는 선택지는 안전한 쪽(매번 확인)으로 떨어진다. */
+/**
+ * 계획 승인 시 전환할 권한 모드.
+ *
+ * **id 가 모드를 결정한다** — 승인 시점에 auto 가용성을 다시 들고 다니지 않아도 되도록,
+ * 프롬프트를 그릴 때 이미 갈라 둔 id 를 그대로 읽는다. 알 수 없는 선택지는 안전한 쪽
+ * (매번 확인)으로 떨어진다.
+ */
 export function planApprovalMode(optionId: string | undefined): PermissionMode {
-  return optionId === 'plan-auto-accept' ? 'acceptEdits' : 'default'
+  if (optionId === 'plan-auto') return 'auto'
+  if (optionId === 'plan-auto-accept') return 'acceptEdits'
+  return 'default'
 }
 
 export type PermissionDecision =

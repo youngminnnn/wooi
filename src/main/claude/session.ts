@@ -19,7 +19,8 @@ import { MCP_SETTING_SOURCES, resolveUserMcpServers } from './mcp'
 import { isReadOnlyWooiTool, WOOI_MCP_SERVER_NAME } from '../agent/tools/catalog'
 import { delegateShellAttempt, delegateShellGuidance } from '../agent/delegateShell'
 import { resolveWooiPlugin } from '../agent/plugin'
-import { fastModeReasonText, planApprovalMode, PLAN_OPTIONS, unknownItemId } from '@shared/types'
+import { fastModeReasonText, planApprovalMode, planOptions, unknownItemId } from '@shared/types'
+import { supportsAutoMode } from '../agent/backend'
 import { asClaudeMode, claudeEffort, claudeMode, type ClaudePermissionMode } from './protocol'
 import type {
   AgentBackendId,
@@ -1099,7 +1100,7 @@ export class ClaudeSession {
         decisionReason: options.decisionReason,
         kind: 'plan',
         input: clampInput(input) as Record<string, unknown>,
-        options: PLAN_OPTIONS
+        options: planOptions(supportsAutoMode(this.deps.model))
       })
 
       if (decision.behavior === 'allow') {
