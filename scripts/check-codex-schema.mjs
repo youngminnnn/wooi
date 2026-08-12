@@ -151,7 +151,12 @@ try {
         definitions: Object.keys(parsed.definitions ?? {}).length
       }
     })
-    const capturedOn = new Date().toISOString().slice(0, 10)
+    const capturedOn = new Intl.DateTimeFormat('en-CA', {
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    }).format(new Date())
     writeFileSync(
       MANIFEST,
       JSON.stringify({ ...snapshot, codexVersion: installedVersion, capturedOn, files }, null, 2) +
