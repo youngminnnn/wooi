@@ -1,0 +1,98 @@
+name: codex-schema-drift
+
+# codex app-server 프로토콜이 우리가 확인한 판본에서 움직였는지 매달 확인하고, 움직였으면 이슈로 남긴다.
+#
+# app-server 프로토콜에는 버전 헤더도 호환 계층도 없다. OpenAI 가 알림에 필드를 하나 더 실어도
+# 우리 저장소에는 아무 일도 일어나지 않으니 CI 도 안 돌고, 아무도 모른 채로 남는다.
+# 사용자가 그 기능을 실제로 써서 unknown 카드가 뜨기 전까지는 — 그때는 이미 늦다.
+#
+# 그래서 comparison-freshness.yml 과 똑같은 구조를 쓴다: 신호를 밖에서 가져와 이슈 하나로 모은다.
+# 다른 점은 상대가 남의 README 가 아니라 codex 가 직접 뱉는 기계 판독 스키마라는 것뿐이다.
+# scripts/check-codex-schema.mjs 가 설치된 codex 로 스키마를 다시 뽑아
+# docs/codex-protocol/ 의 스냅샷과 대조하고, 어느 타입이 추가·삭제·변경됐는지까지 적어 준다.
+#
+# 인증은 필요 없다 — generate-json-schema 는 바이너리에 컴파일된 타입을 덤프할 뿐이라
+# 로그인하지 않은 환경에서도 돈다(로그인 없는 CODEX_HOME 으로 직접 확인했다).
+# 그래서 이 잡을 스케줄에 걸 수 있다. 만약 언젠가 인증이 필요해지면 스크립트가 "판정 불가"로
+# 끊고 잡은 초록불로 끝난다 — 조용히 거짓 안심을 주므로, 그때는 이 워크플로를
+# workflow_dispatch 전용으로 낮추는 게 맞다.
+
+on:
+  schedule:
+    # 매달 8일 04:00 UTC (KST 13:00). comparison-freshness(1일)와 날짜를 띄워 이슈가 겹치지 않게 한다.
+    - cron: '0 4 8 * *'
+  workflow_dispatch:
+
+concurrency:
+  group: codex-schema-drift
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+
+    permissions:
+      # 추적용 이슈 하나를 열고 갱신하기 위한 권한. 저장소 내용은 건드리지 않는다.
+      issues: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '20'
+
+      # 최신 codex 를 받는다. 사용자들이 각자 업데이트해서 쓰는 물건이라, "최신이 무엇을
+      # 말하는가"가 곧 우리가 곧 마주칠 현실이다. 설치가 실패해도 잡을 죽이지 않는다 —
+      # 그 경우 스크립트가 "판정 불가"로 끊는다.
+      - name: Install Codex CLI
+        continue-on-error: true
+        run: npm i -g @openai/codex
+
+      # npm ci 없이 돈다 — 스크립트는 표준 라이브러리만 쓴다.
+      - name: Check protocol schema
+        id: check
+        run: |
+          # 스크립트는 "움직였다"를 종료 코드 1로 알린다 — 잡을 빨간불로 만들지 않고
+          # 이슈로 넘겨야 하므로, 실패를 값으로 받는다.
+          node scripts/check-codex-schema.mjs --markdown > report.md && status=0 || status=1
+          if [ "$status" -eq 0 ]; then
+            echo 'drifted=no' >> "$GITHUB_OUTPUT"
+          else
+            echo 'drifted=yes' >> "$GITHUB_OUTPUT"
+          fi
+          cat report.md
+
+      # 이슈는 항상 하나만 유지한다. 이미 열려 있으면 본문만 갈아 끼워서, 몇 달 방치돼도
+      # 같은 이슈가 최신 상태를 들고 있게 한다.
+      - name: Open or update tracking issue
+        if: steps.check.outputs.drifted == 'yes'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TITLE: 'codex: app-server 프로토콜 스키마 재확인 필요'
+        run: |
+          # 라벨이 없으면 아래 issue list 가 에러를 낸다. 먼저 만들어 둔다(이미 있으면 무시).
+          gh label create codex-schema-drift \
+            --description 'codex app-server 프로토콜 스키마 드리프트' --color ededed 2>/dev/null || true
+          existing=$(gh issue list --state open --label codex-schema-drift \
+            --json number --jq '.[0].number')
+          if [ -n "$existing" ]; then
+            gh issue edit "$existing" --body-file report.md
+            echo "기존 이슈 #$existing 을 갱신했습니다."
+          else
+            gh issue create --title "$TITLE" --body-file report.md \
+              --label codex-schema-drift
+          fi
+
+      # 스냅샷을 갱신하고 나면 다음 실행에서 깨끗해진다. 그때 이슈를 닫는다.
+      - name: Close tracking issue when clean
+        if: steps.check.outputs.drifted == 'no'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          existing=$(gh issue list --state open --label codex-schema-drift \
+            --json number --jq '.[0].number' 2>/dev/null)
+          if [ -n "$existing" ]; then
+            gh issue close "$existing" --comment "프로토콜 스키마가 스냅샷과 다시 일치합니다 — 자동으로 닫습니다."
+          fi

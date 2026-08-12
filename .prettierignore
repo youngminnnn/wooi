@@ -6,3 +6,6 @@ build
 coverage
 *.md
 package-lock.json
+
+# codex 가 생성한 프로토콜 스냅샷. 우리 손을 타지 않아야 대조에 의미가 있으므로 뱉은 그대로 둔다.
+docs/codex-protocol/*.schemas.json
