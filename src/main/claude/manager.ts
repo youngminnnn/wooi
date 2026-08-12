@@ -361,7 +361,7 @@ export class SessionManager implements AgentBackend {
     workspaceId: string,
     text: string,
     images?: ImageAttachment[],
-    opts?: { prefix?: string }
+    opts?: { prefix?: string; silent?: boolean }
   ): void {
     this.rateLimitResume.cancel(workspaceId)
     const ws = this.getWorkspace(workspaceId)
@@ -372,7 +372,8 @@ export class SessionManager implements AgentBackend {
       config: this.configFor(ws),
       text,
       images,
-      prefix: opts?.prefix
+      prefix: opts?.prefix,
+      silent: opts?.silent
     })
   }
 

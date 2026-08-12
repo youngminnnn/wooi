@@ -84,20 +84,18 @@ export const switchToAgentTeam: AgentToolHandler = async (deps, workspaceId) => 
 /**
  * 팀이 된 뒤 이어지는 턴에 Wooi 가 넣는 말.
  *
- * `text` 는 사용자 말풍선으로 기록에 남으므로 한 줄이다 — 사용자가 치지도 않은 문단이 자기 말로
- * 쌓이면 대화가 지저분해진다. 지시문은 기록에 남지 않는 `prefix` 로 보낸다([[agent/orchestrator]]
- * ResumePrompt).
+ * **화면에는 한 글자도 남지 않는다**([[agent/orchestrator]] resumeAfterTurn 이 silent 로 보낸다).
+ * 사용자가 치지도 않은 문장이 자기 말풍선으로 대화에 쌓이면 안 되기 때문이다 — 사용자가 보는 것은
+ * 자기 요청에 이어 에이전트가 계속 일하는 모습뿐이어야 한다.
  *
  * 문장이 하는 일은 두 가지다. 하나는 이 턴을 **누가** 시작했는지 밝히는 것 — 밝히지 않으면 모델은
  * 사용자가 다시 말을 건 줄 알고 "무엇을 도와드릴까요" 로 답한다. 다른 하나는 이미 한 일을 다시
  * 하지 말라는 것 — 방금 끝난 턴에서 계획을 말해 뒀으므로 그 계획을 실행할 차례다.
  */
-const RESUME_PROMPT = {
-  text: 'Continue — the agent team is ready.',
-  prefix:
-    'Wooi reopened this session so the teammate tools are loaded; they are available to you now. ' +
-    'Wooi started this turn, not the user — it continues the request the user made just before ' +
-    'your last turn, which is why you switched this workspace to an agent team. Carry out the ' +
-    'delegation you just described. Do not plan it again, do not repeat work that is already ' +
-    'done, and do not ask the user to confirm — they already asked for this.'
-}
+const RESUME_PROMPT =
+  'Wooi reopened this session so the teammate tools are loaded; they are available to you now. ' +
+  'Wooi started this turn, not the user — it continues the request the user made just before ' +
+  'your last turn, which is why you switched this workspace to an agent team. This message is ' +
+  'not shown to the user, so do not refer to it. Carry out the delegation you just described. ' +
+  'Do not plan it again, do not repeat work that is already done, and do not ask the user to ' +
+  'confirm — they already asked for this.'

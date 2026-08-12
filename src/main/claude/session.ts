@@ -384,8 +384,11 @@ export class ClaudeSession {
    * /rewind 용 체크포인트(되돌릴 수 있는 사용자 메시지 지점). 보낸 메시지의 첫 줄을
    * pendingUserTexts 에 모았다가, SDK 가 그 메시지를 echo 하며 부여한 uuid 와 짝지어 쌓는다.
    * 파일 체크포인팅(enableFileCheckpointing)이 켜진 살아 있는 세션에서만 의미가 있다.
+   *
+   * `null` 은 화면에 남지 않는 전송(silent)의 자리표다 — 체크포인트는 만들지 않되 echo 와의 짝은
+   * 한 칸도 밀리지 않게 한다(handleUser 참고).
    */
-  private pendingUserTexts: string[] = []
+  private pendingUserTexts: (string | null)[] = []
   private checkpoints: RewindPoint[] = []
 
   constructor(private deps: SessionDeps) {
@@ -455,24 +458,34 @@ export class ClaudeSession {
    * `prefix` 는 사용자가 쓴 말이 아니라 Wooi 가 앞에 붙여 주는 맥락이다([[claude/protocol]]).
    * 모델에게는 함께 가지만 기록에는 사용자의 말만 남는다 — 인수인계 프롬프트는 지난 대화를
    * 통째로 다시 적은 것이라, 남기면 같은 대화가 화면에 두 번 쌓인다.
+   *
+   * `silent` 는 한 걸음 더 간다: 남길 사용자의 말이 **아예 없는** 전송이라 기록도 화면도 건드리지
+   * 않는다([[agent/backend]] sendMessage). /rewind 체크포인트도 만들지 않는다 — 되돌릴 지점으로
+   * 고를 사용자 메시지가 화면에 없기 때문이다(자동 /compact 주입이 걸러지는 것과 같은 길).
    */
-  send(text: string, images?: ImageAttachment[], opts?: { prefix?: string }): void {
+  send(
+    text: string,
+    images?: ImageAttachment[],
+    opts?: { prefix?: string; silent?: boolean }
+  ): void {
     const imgs = images ?? []
     const prompt = opts?.prefix ? `${opts.prefix}\n\n${text}` : text
-    const item: ChatItem = {
-      // 큐에 쌓인 N개를 한 번에 보내면 같은 ms 안에서 여러 번 호출된다 — 시간 기반 id 는
-      // 충돌해서 upsert(last-wins) 로 합쳐지고 마지막 메시지만 화면에 남는다. uuid 로 보장한다.
-      id: `user:${randomUUID()}`,
-      type: 'user',
-      text,
-      ts: Date.now(),
-      // base64 본문은 트랜스크립트에 남기지 않고(무겁다) 이름/형식만 칩으로 표시.
-      ...(imgs.length
-        ? { attachments: imgs.map((i) => ({ name: i.name, mediaType: i.mediaType })) }
-        : {})
+    if (!opts?.silent) {
+      const item: ChatItem = {
+        // 큐에 쌓인 N개를 한 번에 보내면 같은 ms 안에서 여러 번 호출된다 — 시간 기반 id 는
+        // 충돌해서 upsert(last-wins) 로 합쳐지고 마지막 메시지만 화면에 남는다. uuid 로 보장한다.
+        id: `user:${randomUUID()}`,
+        type: 'user',
+        text,
+        ts: Date.now(),
+        // base64 본문은 트랜스크립트에 남기지 않고(무겁다) 이름/형식만 칩으로 표시.
+        ...(imgs.length
+          ? { attachments: imgs.map((i) => ({ name: i.name, mediaType: i.mediaType })) }
+          : {})
+      }
+      this.deps.persist(item)
+      this.deps.emit({ type: 'item', item })
     }
-    this.deps.persist(item)
-    this.deps.emit({ type: 'item', item })
     // 새 사용자 시도다 — 턴 상태와 자동 재시도 예산, 중단 표시를 리셋한다.
     this.beginTurn()
     this.autoRetried = false
@@ -480,8 +493,11 @@ export class ClaudeSession {
     this.markActive()
 
     // /rewind 체크포인트 라벨용으로 이 메시지의 첫 줄을 큐에 둔다 — SDK 가 이 사용자 메시지를
-    // echo 하며 부여하는 uuid 와 handleUser 에서 짝지어 체크포인트로 확정한다.
-    this.pendingUserTexts.push(firstLine(text || (imgs.length ? `${imgs.length} image(s)` : '')))
+    // echo 하며 부여하는 uuid 와 handleUser 에서 짝지어 체크포인트로 확정한다. silent 전송은
+    // 체크포인트를 만들지 않지만 echo 는 오므로, 빈 자리(null)를 넣어 짝을 맞춘다.
+    this.pendingUserTexts.push(
+      opts?.silent ? null : firstLine(text || (imgs.length ? `${imgs.length} image(s)` : ''))
+    )
 
     // 이미지가 있으면 멀티모달 content 배열로(텍스트 블록 + base64 이미지 블록), 없으면 문자열.
     const content = imgs.length
@@ -1614,10 +1630,15 @@ export class ClaudeSession {
     const isToolResult =
       Array.isArray(content) && content.some((b) => (b as Block).type === 'tool_result')
     if (uuid && !isToolResult && this.pendingUserTexts.length > 0) {
-      const text = this.pendingUserTexts.shift() ?? ''
-      this.checkpoints.push({ userMessageId: uuid, text, ts: Date.now() })
-      // 메모리 상한 — 아주 긴 세션에서도 목록이 무한정 커지지 않게 한다(최근 100개 유지).
-      if (this.checkpoints.length > 100) this.checkpoints.shift()
+      const text = this.pendingUserTexts.shift()
+      // null 은 silent 전송의 자리표다 — 화면에 없는 메시지로 되돌아갈 수는 없으니 체크포인트를
+      // 만들지 않는다. 그래도 **자리는 차지해야** 한다: 빼 버리면 그 echo 가 뒤따라오는 진짜
+      // 사용자 메시지의 라벨을 가져가, 라벨과 되돌아갈 지점이 한 칸씩 어긋난다.
+      if (text != null) {
+        this.checkpoints.push({ userMessageId: uuid, text, ts: Date.now() })
+        // 메모리 상한 — 아주 긴 세션에서도 목록이 무한정 커지지 않게 한다(최근 100개 유지).
+        if (this.checkpoints.length > 100) this.checkpoints.shift()
+      }
     }
 
     // 다른 Claude Code 세션이 보낸 메시지(네이티브 cross-session messaging). CLI 는 이것을

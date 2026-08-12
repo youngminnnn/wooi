@@ -54,15 +54,19 @@ export interface AgentBackend {
 
   // ── 핵심 (모든 백엔드 필수) ──────────────────────────────────────────────
   /**
-   * `opts.prefix` 는 모델에게 보낼 때 `text` 앞에 붙는 맥락이다(기록에는 남지 않는다). 사용자가
-   * 쓴 말이 아니라 Wooi 가 대신 넣는 것일 때 쓴다 — 에이전트 교체 시의 인수인계
-   * ([[shared/handoff]])가 그렇다.
+   * Wooi 가 사용자를 대신해 넣는 말은 두 종류이고, 화면에 남는 양이 다르다.
+   *
+   * - `opts.prefix` — `text` 앞에 붙어 모델에게만 간다. **사용자의 말이 따로 있고** 그 앞에 맥락만
+   *   얹을 때 쓴다(에이전트 교체 시의 인수인계, [[shared/handoff]]). 기록에는 사용자의 말만 남는다.
+   * - `opts.silent` — 이 전송 자체를 기록에서 지운다. 사용자의 말이 **아예 없을** 때 쓴다(팀으로
+   *   바꾼 뒤의 자동 이어가기, [[agent/orchestrator]] resumeAfterTurn). 사용자가 치지도 않은 문장이
+   *   자기 말풍선으로 대화에 쌓이면 안 되기 때문이다. 모델에게는 평소처럼 간다.
    */
   sendMessage(
     workspaceId: string,
     text: string,
     images?: ImageAttachment[],
-    opts?: { prefix?: string }
+    opts?: { prefix?: string; silent?: boolean }
   ): void
   interrupt(workspaceId: string): Promise<void>
   setPermissionMode(workspaceId: string, mode: PermissionMode): Promise<void>

@@ -1,6 +1,5 @@
 import { describe, expect, it, beforeEach, vi } from 'vitest'
 import type { Workspace } from '@shared/types'
-import type { ResumePrompt } from './orchestrator'
 
 /**
  * "세션을 다시 연다" 는 예약의 규칙 — **언제** 열고, 그 뒤를 **누가** 잇는가.
@@ -38,12 +37,12 @@ vi.mock('./registry', () => ({
 }))
 
 const workspace: Partial<Workspace> = { id: 'ws-1', agentBackend: 'claude', status: 'idle' }
-const prompt: ResumePrompt = { text: 'Continue.', prefix: 'The teammate tools are loaded.' }
+const prompt = 'The teammate tools are loaded — carry on.'
 
 interface Agents {
   sendMessage: (id: string, text: string) => void
   restartBeforeNextMessage: (id: string) => void
-  resumeAfterTurn: (id: string, prompt: ResumePrompt) => void
+  resumeAfterTurn: (id: string, prompt: string) => void
   interrupt: (id: string) => Promise<void>
   clearSession: (id: string) => void
   dispose: (id: string) => void
@@ -149,9 +148,8 @@ describe('resumeAfterTurn', () => {
 
     expect(endTurn()).toBe(true)
     expect(backend.dispose).toHaveBeenCalledWith('ws-1')
-    expect(backend.sendMessage).toHaveBeenCalledWith('ws-1', 'Continue.', undefined, {
-      prefix: prompt.prefix
-    })
+    // silent — 화면에는 한 글자도 남지 않아야 한다([[agent/backend]] sendMessage).
+    expect(backend.sendMessage).toHaveBeenCalledWith('ws-1', prompt, undefined, { silent: true })
     // 여기서도 끊는 것이 전송보다 앞서야 한다 — 뒤면 도구가 없는 옛 세션이 그 턴을 받는다.
     expect(backend.dispose.mock.invocationCallOrder[0]).toBeLessThan(
       backend.sendMessage.mock.invocationCallOrder[0]

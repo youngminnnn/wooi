@@ -73,16 +73,14 @@ describe('switch_to_agent_team', () => {
     expect(restartBeforeNextMessage).not.toHaveBeenCalled()
   })
 
-  // 기록에 남는 것은 한 줄이고, 지시문은 기록에 남지 않는 prefix 로 간다. 반대로 넣으면
-  // 사용자가 치지도 않은 문단이 사용자 말풍선으로 대화에 쌓인다.
-  it('이어 갈 때 화면에 남기는 것은 한 줄뿐이다', async () => {
+  it('이어 갈 때 모델에게 그 턴을 누가 시작했는지 밝힌다', async () => {
     await switch_()
 
     const [, prompt] = resumeAfterTurn.mock.calls[0]
-    expect(prompt.text).not.toMatch(/\n/)
-    expect(prompt.text.length).toBeLessThan(80)
-    // 그 턴을 누가 시작했는지 모델이 알아야 한다 — 모르면 사용자가 다시 말을 건 줄 알고 답한다.
-    expect(prompt.prefix).toMatch(/Wooi started this turn, not the user/)
+    // 밝히지 않으면 모델은 사용자가 다시 말을 건 줄 알고 "무엇을 도와드릴까요" 로 답한다.
+    expect(prompt).toMatch(/Wooi started this turn, not the user/)
+    // 화면에 남지 않는 말이라는 것도 알려 준다 — 모르면 "말씀하신 대로" 하고 없는 말을 가리킨다.
+    expect(prompt).toMatch(/not shown to the user/)
   })
 
   it('지금 도는 세션은 끊지 않는다 — 이 호출의 결과가 돌아갈 세션이다', async () => {

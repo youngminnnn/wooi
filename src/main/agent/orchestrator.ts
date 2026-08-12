@@ -76,20 +76,6 @@ export function pickEvictableSessions(args: {
     .map(([id]) => id)
 }
 
-/**
- * Wooi 가 사용자를 대신해 보내는 이어가기 프롬프트.
- *
- * 둘로 나뉘는 이유는 **화면에 남는 양**이다. `prefix` 는 모델에게만 가고 기록에는 남지 않으므로
- * ([[agent/backend]] sendMessage) 긴 지시문은 전부 이쪽에 넣는다. `text` 는 사용자 말풍선으로
- * 남으니 한 줄이어야 한다 — 사용자가 치지도 않은 문단이 자기 말로 쌓이면 대화가 지저분해진다.
- */
-export interface ResumePrompt {
-  /** 기록에 남는 한 줄. 사용자가 아니라 Wooi 가 넣었다는 것이 읽혀야 한다. */
-  text: string
-  /** 모델에게만 가는 본문. */
-  prefix: string
-}
-
 export class AgentOrchestrator {
   private backends = new Map<AgentBackendId, AgentBackend>()
   /**
@@ -111,7 +97,7 @@ export class AgentOrchestrator {
    * 이쪽은 "그 전송을 누가 하는가"(사용자가 아니라 Wooi)다. 그래서 이 자리에 값이 있으면
    * pendingRestart 에도 반드시 들어 있다.
    */
-  private pendingResume = new Map<string, ResumePrompt>()
+  private pendingResume = new Map<string, string>()
 
   constructor(
     private dispatch: Dispatch,
@@ -286,7 +272,7 @@ export class AgentOrchestrator {
    * 이어지는 턴이 곧 사용자가 원한 그 작업이다. 그래도 같은 함정을 피하는 방어는 따로 있다 —
    * [[handleTurnEnd]] 가 턴 사이에 틈을 만들지 않는다.
    */
-  resumeAfterTurn(workspaceId: string, prompt: ResumePrompt): void {
+  resumeAfterTurn(workspaceId: string, prompt: string): void {
     this.pendingRestart.add(workspaceId)
     this.pendingResume.set(workspaceId, prompt)
   }
@@ -317,9 +303,9 @@ export class AgentOrchestrator {
     this.dispose(workspaceId)
     this.touch(workspaceId)
     try {
-      this.backendFor(workspaceId).sendMessage(workspaceId, resume.text, undefined, {
-        prefix: resume.prefix
-      })
+      // silent — 사용자가 치지도 않은 문장이 자기 말풍선으로 대화에 쌓이면 안 된다. 모델에게만
+      // 가고 기록에는 아무것도 남지 않는다([[agent/backend]] sendMessage).
+      this.backendFor(workspaceId).sendMessage(workspaceId, resume, undefined, { silent: true })
     } catch (err) {
       log.error(`orchestrator: 턴 종료 뒤 자동 이어가기 실패 (${workspaceId})`, err)
       // 못 보냈으면 턴은 그냥 끝난 것이다. false 를 돌려 백엔드가 idle 을 방송하게 둔다 —

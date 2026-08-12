@@ -1,7 +1,6 @@
 import { log } from '../../logger'
 import type { ChatEvent, ChatItem } from '@shared/types'
 import type { ScriptRunner } from '../../scripts'
-import type { ResumePrompt } from '../orchestrator'
 
 /**
  * 에이전트가 Wooi 자체를 조작하는 도구들의 **실행부**.
@@ -64,8 +63,11 @@ export interface AgentToolDeps {
      *
      * 사용자가 방금 말로 시킨 일이 그 재시작을 기다리고 있을 때 쓴다. 그때 "다시 말을 걸어
      * 달라" 고 답하면, 사용자 입장에서는 시킨 일이 아직 시작도 안 한 채로 턴만 하나 지나간다.
+     *
+     * `prompt` 는 모델에게만 가고 화면·트랜스크립트에는 남지 않는다 — 사용자가 치지도 않은
+     * 문장이 자기 말풍선으로 쌓이면 안 되기 때문이다([[agent/backend]] sendMessage 의 silent).
      */
-    resumeAfterTurn: (workspaceId: string, prompt: ResumePrompt) => void
+    resumeAfterTurn: (workspaceId: string, prompt: string) => void
   }
   terminals: { disposeWorkspace: (workspaceId: string) => void }
 }
