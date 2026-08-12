@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { z } from 'zod'
 import type { AgentToolDeps } from './registry'
 import type { Repo, Workspace } from '@shared/types'
+import { AGENT_TOOLS } from './catalog'
 
 /**
  * 독립 워크스페이스 생성과 아카이브에서 지켜야 할 것들.
@@ -95,6 +97,15 @@ async function archive_(
 }
 
 describe('create_workspace', () => {
+  it('MCP 스키마에서 새 워크스페이스의 agent를 선택할 수 있다', () => {
+    const spec = AGENT_TOOLS.find((tool) => tool.name === 'create_workspace')
+    expect(spec).toBeDefined()
+
+    const schema = z.object(spec!.inputSchema)
+    expect(schema.safeParse({ agentBackend: 'codex' }).success).toBe(true)
+    expect(schema.safeParse({ agentBackend: 'unknown' }).success).toBe(false)
+  })
+
   it('부모를 넘기지 않는다 — 이것이 스택과 갈리는 지점 전부다', async () => {
     await create_({ name: 'feat/other' })
 
@@ -104,6 +115,18 @@ describe('create_workspace', () => {
       name: 'feat/other'
     })
     expect(create.mock.calls[0][1]).not.toHaveProperty('parentWorkspaceId')
+  })
+
+  it('선택한 agent를 새 워크스페이스에 넘긴다', async () => {
+    await create_({ agentBackend: 'codex' })
+
+    expect(create).toHaveBeenCalledWith(deps, expect.objectContaining({ agentBackend: 'codex' }))
+  })
+
+  it('agent를 생략하면 Wooi 기본값을 쓰도록 넘기지 않는다', async () => {
+    await create_()
+
+    expect(create.mock.calls[0][1]).not.toHaveProperty('agentBackend')
   })
 
   // 부모가 없어도 "내가 만들었다" 는 남아야 한다. 이게 없으면 자기가 만든 워크스페이스를

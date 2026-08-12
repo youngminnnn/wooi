@@ -421,6 +421,13 @@ export const AGENT_TOOLS: AgentToolSpec[] = [
           'Branch name for the new workspace, following the repository’s branch naming convention ' +
             '(e.g. "feat/inline-login"). Omit to let Wooi generate one.'
         ),
+      agentBackend: z
+        .enum(AGENT_BACKEND_IDS as [AgentBackendId, ...AgentBackendId[]])
+        .optional()
+        .describe(
+          'Agent that will run the new workspace. Omit to use Wooi’s default agent. Available ' +
+            `agents: ${AGENT_BACKEND_IDS.map((id) => `${id} (${AGENT_BACKEND_LABELS[id]})`).join(', ')}.`
+        ),
       task: z
         .string()
         .optional()
