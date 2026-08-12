@@ -107,8 +107,10 @@ export default function Sidebar({
   const app = useStore((s) => s.app)!
   const pending = useStore((s) => s.pending)
   const pushToast = useStore((s) => s.pushToast)
+  const archiveMergedWorkspaces = useStore((s) => s.archiveMergedWorkspaces)
   const selectedId = useStore((s) => s.selectedWorkspaceId)
   const select = useStore((s) => s.selectWorkspace)
+  const prStatus = useStore((s) => s.prStatus)
 
   const onOverview = selectedId === null
 
@@ -335,6 +337,7 @@ export default function Sidebar({
           const archived = all.filter((w) => w.archived)
           const repoPending = pending.filter((p) => p.repoId === repo.id)
           const runningCount = active.filter((w) => w.status === 'running').length
+          const mergedCount = active.filter((w) => prStatus[w.id]?.state === 'merged').length
           return (
             <div
               key={repo.id}
@@ -364,6 +367,19 @@ export default function Sidebar({
                     <Loader2 size={10} className="animate-spin" />
                     {runningCount}
                   </span>
+                )}
+                {mergedCount > 0 && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      void archiveMergedWorkspaces(repo.id)
+                    }}
+                    className="h-5 w-5 grid place-items-center rounded text-[var(--merged-400)] hover:bg-[var(--merged-500)]/15 hover:text-[var(--merged-200)]"
+                    title={`Archive ${mergedCount} workspace${mergedCount === 1 ? '' : 's'} with merged pull requests`}
+                    aria-label={`Archive ${mergedCount} merged workspaces`}
+                  >
+                    <Archive size={13} />
+                  </button>
                 )}
                 {/* 예전엔 13px·neutral-500 이라 바로 옆 + 버튼(14px·neutral-400)보다도 흐려서,
                     유일한 진입점인데도 눈에 걸리지 않았다. 크기·대비를 + 와 맞춘다.

@@ -57,7 +57,7 @@ import {
   type DiffCommentAnchor
 } from './lib/diffComments'
 import { popWorkspaceHistory, pushWorkspaceHistory } from './lib/workspaceHistory'
-import { undoCreateVerdict, type UndoableCreate } from './lib/undoCreate'
+import { UNDO_CREATE_WINDOW_MS, undoCreateVerdict, type UndoableCreate } from './lib/undoCreate'
 
 export const scriptKey = (workspaceId: string, scriptId: string): string =>
   `${workspaceId}:${scriptId}`
@@ -379,6 +379,14 @@ interface UIState {
   archiveWorkspace: (
     workspaceId: string
   ) => Promise<{ archiveScriptFailure?: ArchiveScriptFailure }>
+  /** 마지막 일괄 아카이브. 바로 뒤의 ⌘Z 또는 토스트 Undo 로만 한 번 복원한다. */
+  undoableArchive: { workspaceIds: string[]; at: number } | null
+  /** 한 리포에서 PR 이 병합된 활성 워크스페이스를 재확인 후 일괄 아카이브한다. */
+  archiveMergedWorkspaces: (repoId: string) => Promise<void>
+  /** 마지막 일괄 아카이브에서 실제로 성공한 워크스페이스를 모두 복원한다. */
+  undoArchiveWorkspaces: () => Promise<void>
+  /** 가장 최근 생성/일괄 아카이브 중 하나를 ⌘Z 로 되돌린다. */
+  undoLastWorkspaceAction: () => Promise<void>
 
   /**
    * 열려 있는 PR 리뷰. null 이 아니면 전체 화면 리뷰 모드다(사이드바·대화창을 대체).
@@ -798,6 +806,7 @@ export const useStore = create<UIState>((set, get) => ({
   },
   pending: [],
   archivingWorkspaces: {},
+  undoableArchive: null,
   activeReviewId: null,
   activeFanoutGroupId: null,
   adoptingFanoutWorkspaceId: null,
@@ -816,6 +825,109 @@ export const useStore = create<UIState>((set, get) => ({
         delete next[workspaceId]
         return { archivingWorkspaces: next }
       })
+    }
+  },
+
+  archiveMergedWorkspaces: async (repoId) => {
+    const candidates = get().app?.workspaces.filter((w) => w.repoId === repoId && !w.archived) ?? []
+    if (!candidates.length) return
+
+    // 버튼을 누른 시점의 GitHub 상태를 다시 읽는다. 오래된 폴링 결과만 믿고 열린 PR 을
+    // 치우는 것은 이 기능의 위험도에 맞지 않는다.
+    await Promise.allSettled(candidates.map((w) => get().refreshPr(w.id)))
+    const s = get()
+    const merged = candidates.filter((w) => s.prStatus[w.id]?.state === 'merged')
+    if (!merged.length) {
+      s.pushToast('info', 'No workspaces with merged pull requests to archive.')
+      return
+    }
+    const names = merged.map((w) => workspaceDisplayName(w, s.prStatus[w.id]?.title))
+    const running = merged.filter((w) => w.status === 'running').length
+    const changed = merged.reduce((n, w) => n + (s.gitStatus[w.id]?.changedFiles ?? 0), 0)
+    const ok = await s.confirm({
+      title: `Archive ${plural(merged.length, 'workspace')} with merged pull requests?`,
+      body: [
+        `Archives ${joinList(names)}.`,
+        'Their worktrees are removed, but branches, pull requests and conversations are kept.',
+        changed ? `You lose ${plural(changed, 'uncommitted file')} across them.` : '',
+        running ? `${plural(running, 'workspace')} still working — their turns are stopped.` : '',
+        'You can undo this immediately with ⌘Z.'
+      ]
+        .filter(Boolean)
+        .join(' '),
+      confirmLabel: `Archive ${merged.length}`,
+      danger: true
+    })
+    if (!ok) return
+
+    const archived: string[] = []
+    let failed = 0
+    for (const w of merged) {
+      try {
+        const res = await get().archiveWorkspace(w.id)
+        get().reportArchiveScriptFailure(res.archiveScriptFailure)
+        archived.push(w.id)
+      } catch {
+        failed++
+      }
+    }
+    if (!archived.length) {
+      get().pushToast('error', 'Could not archive the merged workspaces.')
+      return
+    }
+    set({ undoableArchive: { workspaceIds: archived, at: Date.now() } })
+    if (archived.includes(get().selectedWorkspaceId ?? '')) void get().selectWorkspace(null)
+    get().pushToast(
+      failed ? 'error' : 'success',
+      `Archived ${plural(archived.length, 'merged workspace')}${
+        failed ? `; ${failed} failed` : ''
+      }. Press ⌘Z to undo.`,
+      [{ label: 'Undo', run: () => void get().undoArchiveWorkspaces() }]
+    )
+  },
+
+  undoArchiveWorkspaces: async () => {
+    const undoable = get().undoableArchive
+    if (!undoable || Date.now() - undoable.at > UNDO_CREATE_WINDOW_MS) {
+      if (undoable) set({ undoableArchive: null })
+      get().pushToast('info', 'Nothing to undo.')
+      return
+    }
+    // 먼저 소비해 중복 ⌘Z/더블클릭이 같은 worktree 를 동시에 만들지 못하게 한다.
+    set({ undoableArchive: null })
+    let restored = 0
+    const errors: string[] = []
+    for (const id of undoable.workspaceIds) {
+      const res: Awaited<ReturnType<typeof window.api.workspace.unarchive>> =
+        await window.api.workspace
+          .unarchive(id)
+          .catch((err) => ({ error: err instanceof Error ? err.message : String(err) }))
+      if (res.error) errors.push(res.error)
+      else {
+        restored++
+        get().reportCarryFailures(res.carryFailures)
+      }
+    }
+    if (errors.length) {
+      get().pushToast(
+        'error',
+        `Restored ${restored}; ${errors.length} failed.\n${errors.join('\n')}`
+      )
+    } else {
+      get().pushToast('success', `Restored ${plural(restored, 'workspace')}.`)
+    }
+  },
+
+  undoLastWorkspaceAction: async () => {
+    const s = get()
+    const archiveAt =
+      s.undoableArchive && Date.now() - s.undoableArchive.at <= UNDO_CREATE_WINDOW_MS
+        ? s.undoableArchive.at
+        : -1
+    if (archiveAt > (s.undoableCreate?.at ?? -1)) {
+      await s.undoArchiveWorkspaces()
+    } else {
+      await s.undoCreateWorkspace()
     }
   },
 

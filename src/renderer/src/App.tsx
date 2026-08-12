@@ -221,13 +221,13 @@ export default function App(): React.JSX.Element {
 
       if (!e.metaKey) return
 
-      // ⌘Z: 방금 만든 워크스페이스를 되돌린다(⌘N 을 잘못 눌렀을 때의 탈출구).
+      // ⌘Z: 가장 최근 워크스페이스 생성 또는 병합 PR 일괄 아카이브를 되돌린다.
       // 글을 쓰는 중이라면 텍스트 실행취소가 우선이므로 그냥 양보한다 — preventDefault 를
       // 하지 않아야 기본 Edit ▸ Undo 가 그대로 동작한다.
       if (e.code === 'KeyZ' && !e.shiftKey && !e.ctrlKey && !e.altKey) {
         if (typing()) return
         e.preventDefault()
-        void st.undoCreateWorkspace()
+        void st.undoLastWorkspaceAction()
         return
       }
 
