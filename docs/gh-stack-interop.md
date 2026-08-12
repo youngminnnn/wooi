@@ -12,9 +12,21 @@ first-class stacks on github.com, and read stack membership back from the GitHub
 control to `gh stack sync`. `cascade.ts` stays the engine. The reasoning is in
 [Recommendation](#recommendation).
 
+**Fix one thing first.** §2.1 documents a defect that exists *today*, independent of adoption:
+when a chain is a GitHub stack, GitHub cascade-rebases it server-side on merge, and Wooi's
+cascade then force-pushes over that rebase — costing the layer above its isolated diff. Wooi
+reaches this by adopting an externally created stack, which `buildStackFromPrs` already does.
+The divergence guard is therefore step 1 of §8, ahead of any interop work.
+
 Claims below are marked **[verified]** when this document's author reproduced them against
-`gh stack` v0.1.0 / the live GitHub API on 2026-08-11, and **[unverified]** when they come
-from documentation alone or could not be exercised without creating real pull requests.
+`gh stack` v0.1.0 / the live GitHub API on 2026-08-11–12, and **[unverified]** when they come
+from documentation alone.
+
+The merge-time behavior in §2.1 was exercised for real on 2026-08-12 against a scratch repo
+(`youngminnnn/stacked-pr-playground`): a three-layer stack was created with `gh stack link`,
+the bottom PR squash-merged, and the resulting refs, PR bases, review-comment anchors, and
+Wooi's own force-push path observed directly. Those branches and PRs (#46–48, stack #49) are
+left in place so the result can be re-inspected.
 
 ## 1. Findings
 
@@ -184,6 +196,10 @@ From the bundled command reference: **[verified as documentation; not exercised]
   corrected.
 - Stack membership is **additive only** — `link` never removes a PR from a stack.
 - `link` writes no local state, so local navigation commands do not work on the result.
+- Without `--open`, the PRs it creates are **drafts**, and `gh stack merge` refuses a draft
+  (`pull request #46 is a draft; mark it ready for review before merging`). If Wooi ever calls
+  `link` on branches with no PR yet, it must decide draft-vs-ready deliberately rather than
+  inheriting this default. **[verified]**
 
 Three of these matter a lot to Wooi. The non-force push means `link` cannot clobber a branch
 Wooi is managing. The base correction means `link` overlaps with `retargetPr`. And
@@ -217,27 +233,64 @@ Wooi's cascade, after a parent merges, rebases each child locally and pushes wit
 `git push --force-with-lease origin <branch>` (`restackOnto` in `src/main/git.ts`). The lease
 is the safety mechanism: the push is rejected if the remote moved since Wooi last fetched.
 
-If GitHub server-side rebases a stacked child branch on merge, then the remote ref for that
-branch is rewritten **by GitHub, without Wooi's involvement**. Wooi's next cascade then does
-one of two things, both bad:
+**GitHub does rewrite the remote refs.** This was reproduced end to end on a scratch repo
+(`youngminnnn/stacked-pr-playground`, stack #49 / PRs #46–48, three layers `q1/1-a` →
+`q1/2-b` → `q1/3-c`). Squash-merging the bottom PR moved `main` to `d5208b1` and rewrote both
+branches above it: **[verified]**
 
-1. **The lease fails and the push is rejected.** Wooi surfaces a failed cascade step for a
-   stack that GitHub already fixed. Noisy, but safe — the user sees a scary error about work
-   that is actually fine.
-2. **Wooi rebases first, then pushes successfully, and GitHub rebases too.** The branch gets
-   rebased twice onto the same base. With `rerere` disabled this can mean the user resolves
-   the same conflict twice; the commits are rewritten twice, invalidating any review comment
-   anchored to the old shas.
+| ref | before merge | after merge |
+|---|---|---|
+| `main` | `f71c618` | `d5208b1` |
+| `q1/1-a` (merged) | `2e7b5a0` | `2e7b5a0` |
+| `q1/2-b` | `504d24f` | **`8ed4598`** |
+| `q1/3-c` | `b5bbdd8` | **`09b733b`** |
+
+The squash commit is an ancestor of both rewritten branches, and `q1/2-b`'s PR was retargeted
+`q1/1-a` → `main`. GitHub performs a correct cascading rebase of the whole chain, server-side,
+with no local involvement. **[verified]**
+
+That settles the question — and the answer is the bad one. Worse, the dangerous case is not an
+edge case but the **default path**, because of how `restackOnto` is written
+(`src/main/git.ts:533`):
+
+1. `restackOnto` calls `fetchRemote()` itself before pushing (`git.ts:547`). So by the time it
+   pushes, `origin/<branch>` has been refreshed to GitHub's rewritten sha and **the lease is
+   valid again**. The lease cannot protect against this.
+2. In the cascade path `oldBase` is always passed (`ipc.ts:1372`), and
+   `needsRebase = oldBase ? true : behind > 0` (`git.ts:556`) is therefore **unconditionally
+   true**. Wooi rebases regardless of the branch already containing the new base.
+3. The local worktree still holds the pre-rebase commits, so Wooi replays them onto
+   `origin/main` and produces a **different sha for semantically identical content**.
+
+Reproduced exactly: with local `q1/2-b` at the old `504d24f`, a fetch, then
+`git rebase --onto origin/main q1/1-a`, then `git push --force-with-lease` →
+`+ 8ed4598...58c8440 q1/2-b -> q1/2-b (forced update)`. **The push succeeds and clobbers
+GitHub's rebase.** **[verified]**
+
+(For completeness: the lease *does* reject the push when the tracking ref is stale —
+`! [rejected] q1/2-b -> q1/2-b (stale info)` **[verified]**. But `restackOnto` always fetches
+first, so Wooi never lands in that branch of the behavior.)
+
+**The concrete harm is the layer above losing its isolated diff.** After GitHub's rebase alone,
+PR #48 showed exactly one file (`q1-c.txt`) — the point of stacking. After Wooi's force-push
+rewrote its base out from under it, #48 showed two (`q1-b.txt`, `q1-c.txt`), because its head
+still descends from the now-orphaned `8ed4598`. **[verified]** A reviewer of the top layer
+starts seeing the layers below it.
+
+Two risks turned out **not** to apply. Review comments are re-anchored rather than orphaned —
+GitHub updated `commit_id` to the new sha while preserving `original_commit_id`, and did so
+across both its own rebase and Wooi's external force-push. **[verified]** And the stack object
+itself survives the clobber intact (still three entries, correct positions). **[verified]**
 
 There is also a plain race: Wooi's cascade is triggered by *detecting* a merge (polling PR
 state), while GitHub's rebase is triggered by the merge itself. Wooi is guaranteed to arrive
-second, acting on a state GitHub may have already corrected.
+second, acting on a state GitHub has already corrected.
 
-**Whether GitHub actually rewrites the remote branch ref, versus only retargeting the PR and
-recomputing the diff, is [unverified].** The changelog says "automatically rebase and
-retarget"; the engineering post does not describe merge-time behavior at all; nothing in the
-extension source settles it. This single question is the gate on how far Wooi can go, and
-§7 makes it the first item of the implementation sequence.
+**This is a present-day risk, not a consequence of adopting anything.** Wooi does not need to
+publish stacks to hit it. `buildStackFromPrs` already adopts a chain of open PRs, so a user who
+creates a stack with `gh stack` and opens it in Wooi gets a chain that Wooi will cascade over
+and damage on the next parent merge. That makes the divergence guard (§3.3) a **prerequisite**,
+not an enhancement — see §8.
 
 ### 2.2 The local worktree is the thing GitHub cannot see
 
@@ -454,48 +507,70 @@ The blast radius is small **if and only if** the scope stays as proposed.
 The risk would be large if Wooi adopted `gh stack sync` as its cascade, or stored GitHub's
 stack as the source of truth. Neither is proposed.
 
-Gating is not fully known. The changelog says "rolling out in public preview to all
-repositories over the coming days" with no plan or org restriction mentioned **[verified as
-documentation]**, and the read endpoint answers on an ordinary personal repo **[verified]**.
-But the extension carries an explicit "not enabled for this repository" error and a dedicated
-exit code for it, so per-repo gating clearly exists in some form. **[verified]** Treat exit 9
-as the ground truth and do not assume availability.
+Gating is not fully known, but it is narrower than feared. The changelog says "rolling out in
+public preview to all repositories over the coming days" with no plan or org restriction
+mentioned **[verified as documentation]**, and a full stack was created, linked, and merged on
+an ordinary **private personal repo** with no exit 9 at any point **[verified]**. So the
+feature is not gated on visibility or on organization ownership. The extension still carries an
+explicit "not enabled for this repository" error and a dedicated exit code, so per-repo gating
+exists in some form. **[verified]** Treat exit 9 as the ground truth and do not assume
+availability.
+
+One incidental note for anyone parsing identifiers: stack numbers and PR numbers share a
+counter space. The probe stack was **#49** in a repo whose most recent PR was **#48**.
+**[verified]** The extension's docs rely on this ("stack and PR numbers never overlap"), so a
+bare number is ambiguous only across kinds, never within one.
 
 ## 7. Open questions
 
-1. **Does a server-side stack merge rewrite the remote refs of the branches above it?** The
-   §2.1 collision depends entirely on this. Must be answered before any code is written.
-2. If it does rewrite them, does it also update the PR head sha such that existing review
-   comments are re-anchored, or are they orphaned?
-3. What exactly does exit 9 key off — repo, org, plan, or rollout cohort?
-4. Does `gh stack link` on branches whose PRs already have correct chained bases produce any
+1. ~~Does a server-side stack merge rewrite the remote refs of the branches above it?~~
+   **Answered: yes.** Reproduced in §2.1 — GitHub cascade-rebases the whole chain server-side.
+   Wooi's cascade then clobbers it, and the layer above loses its isolated diff.
+2. ~~Are review comments re-anchored, or orphaned?~~ **Answered: re-anchored.** `commit_id` is
+   updated to the new sha and `original_commit_id` preserved, across both GitHub's own rebase
+   and an external force-push. Comment loss is not one of the risks.
+3. What exactly does exit 9 key off — repo, org, plan, or rollout cohort? Partially narrowed:
+   a **private personal repo** had stacks enabled with no exit 9, so it is not gated on
+   visibility or on being an organization. **[verified]**
+4. What should Wooi actually *do* when it detects the divergence from §2.1? Recording a step
+   and telling the user is the safe floor, but the better answer may be to fast-forward the
+   local branch to GitHub's rewritten ref and skip the rebase entirely — GitHub has already
+   done the work correctly. That needs its own design pass: the worktree may be dirty, may
+   have the branch checked out, and may have an agent mid-session on it.
+5. Does `gh stack link` on branches whose PRs already have correct chained bases produce any
    PR mutation (a base "correction" that is a no-op) that would show in the PR timeline as
    noise?
-5. Does `link` work when the PRs were opened by a different account than the one running it?
+6. Does `link` work when the PRs were opened by a different account than the one running it?
    Wooi opens PRs as the connected user, so probably moot, but unconfirmed.
-6. Is there a documented, versioned REST or GraphQL mutation for stack creation, so Wooi could
+7. Is there a documented, versioned REST or GraphQL mutation for stack creation, so Wooi could
    drop the extension dependency entirely for publishing? Today only the extension's
    undocumented `POST /repos/{o}/{r}/stacks` is known.
 
 ## 8. Implementation sequence
 
-1. **Answer question 1.** A throwaway repo, a three-PR stack created with `gh stack link`,
-   merge the bottom one, and watch `git ls-remote` on the branches above. Half a day. Nothing
-   else starts until this is settled.
-2. **Read-side only, no extension.** `ghStack.ts` with `getRepoStacks` / `getStackForPr`, and
-   the tier-2 detection. Surface the stack number and GitHub's ordering in `StackPopover`.
-   Ships value (adoption gets more reliable) with zero write risk and no new dependency.
-3. **The divergence guard** from §3.3 — a new `StackCascadeStep` status for "remote moved
-   underneath you", surfaced in `StackSyncBanner`. Valuable on its own merits, independent of
-   the rest.
+Question 1 is now answered (§2.1), which reorders this list. The divergence guard was
+originally third and "valuable on its own merits"; it is now **first and load-bearing**,
+because Wooi damages GitHub-stacked chains today without adopting anything.
+
+1. **The divergence guard.** Before rebasing a child, compare its remote ref to the local tip;
+   if the remote moved in a way Wooi did not cause, record a new `StackCascadeStep` status
+   instead of rebasing, and surface it in `StackSyncBanner`. This is the fix for the §2.1
+   clobber. Note it cannot rely on the lease — `restackOnto` fetches before pushing, so the
+   lease is always valid by then (§2.1). The check has to be explicit.
+2. **Read-side, no extension.** `ghStack.ts` with `getRepoStacks` / `getStackForPr`, and the
+   tier-2 detection. Surface the stack number and GitHub's ordering in `StackPopover`. Zero
+   write risk, no new dependency. Also gives step 1 a cheap, precise trigger: if the PR is in
+   a GitHub stack, expect GitHub to have rebased.
+3. **Decide question 4** — whether to fast-forward onto GitHub's rebase rather than just
+   reporting it. Design pass, then implement.
 4. **Extension detection and the permitted-subcommand allowlist**, with exit-9 persistence.
 5. **Publishing behind the per-repo opt-in**, default off. `linkStack` on PR create/retarget,
    `unstackStack` on opt-out.
 6. **Revisit `gh stack merge`** as a separate product decision once the preview stabilizes.
 
-Steps 2 and 3 are worth doing regardless of what happens to the preview. Steps 4 and 5 should
-wait for the preview to leave preview, unless question 1 resolves cleanly and there is a
-specific user asking for the web-UI stack map.
+Steps 1 and 2 are worth doing regardless of what happens to the preview — step 1 especially,
+since it fixes a live defect. Steps 4 and 5 should wait for the preview to leave preview,
+unless there is a specific user asking for the web-UI stack map.
 
 ## 9. Effect on the comparison table
 
