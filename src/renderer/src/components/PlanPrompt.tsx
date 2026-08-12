@@ -3,7 +3,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { ClipboardCheck } from 'lucide-react'
 import { useStore } from '../store'
-import { PLAN_OPTIONS } from '@shared/types'
+import { planOptions } from '@shared/types'
 import type { PermissionOption, PermissionRequest } from '@shared/types'
 
 /**
@@ -19,7 +19,8 @@ import type { PermissionOption, PermissionRequest } from '@shared/types'
 export default function PlanPrompt({ request }: { request: PermissionRequest }): React.JSX.Element {
   const dismiss = useStore((s) => s.dismissPermission)
   const options = useMemo<PermissionOption[]>(
-    () => (request.options?.length ? request.options : PLAN_OPTIONS),
+    // 폴백은 실제로 쓰이지 않는다 — 세션이 항상 options 를 실어 보낸다(claude/session.ts).
+    () => (request.options?.length ? request.options : planOptions(true)),
     [request.options]
   )
   const plan = typeof request.input.plan === 'string' ? request.input.plan : ''

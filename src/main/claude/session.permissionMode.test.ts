@@ -80,18 +80,21 @@ const modeStatus = (permissionMode: string): Record<string, unknown> => ({
 interface Harness {
   session: { send(text: string): void; dispose(): void }
   modes: string[]
+  /** 승인 프롬프트에 실려 나간 선택지 id 들(마지막 요청 기준). */
+  offered: string[]
 }
 
-async function start(approvePlanWith?: string): Promise<Harness> {
+async function start(approvePlanWith?: string, model: string | null = null): Promise<Harness> {
   const { ClaudeSession } = await import('./session')
   const modes: string[] = []
+  const offered: string[] = []
   const items: ChatItem[] = []
   const events: ChatEvent[] = []
   const session = new ClaudeSession({
     cwd: process.cwd(),
     repoPath: null,
     mcpSettings: { servers: [], disabledInherited: [] },
-    model: null,
+    model,
     effort: null,
     fastMode: false,
     permissionMode: 'default',
@@ -102,17 +105,20 @@ async function start(approvePlanWith?: string): Promise<Harness> {
     wooiMcp,
     emit: (e) => events.push(e),
     persist: (i) => items.push(i),
-    requestPermission: async () =>
-      approvePlanWith
+    requestPermission: async (req) => {
+      offered.length = 0
+      for (const o of req.options ?? []) offered.push(o.id)
+      return approvePlanWith
         ? { behavior: 'allow' as const, optionId: approvePlanWith }
-        : { behavior: 'deny' as const },
+        : { behavior: 'deny' as const }
+    },
     onSessionId: () => {},
     onPermissionMode: (m) => modes.push(m),
     settleIdle: () => {}
   })
   session.send('hello')
   await settle()
-  return { session, modes }
+  return { session, modes, offered }
 }
 
 describe('ClaudeSession 권한 모드 동기화', () => {
@@ -150,18 +156,37 @@ describe('ClaudeSession 권한 모드 동기화', () => {
   })
 
   it('계획 승인 직후 CLI 의 되돌림은 사용자가 고른 모드를 덮지 않는다', async () => {
-    const h = await start('plan-auto-accept')
+    const h = await start('plan-auto')
 
-    // 사용자가 승인 프롬프트에서 "auto-accept edits" 를 골랐다.
+    // 사용자가 승인 프롬프트에서 "use auto mode" 를 골랐다.
     await canUseTool('ExitPlanMode', { plan: 'do the thing' }, {})
-    expect(h.modes).toEqual(['acceptEdits'])
+    expect(h.modes).toEqual(['auto'])
 
     // CLI 는 ExitPlanMode 를 처리하며 자기 기본값으로 되돌아간다고 보고한다 — 사용자의 선택이
     // 아니라 중간 상태이므로 UI 를 흔들면 안 된다.
     fake.push(modeStatus('default'))
     await settle()
-    expect(h.modes).toEqual(['acceptEdits'])
+    expect(h.modes).toEqual(['auto'])
 
+    h.session.dispose()
+  })
+
+  it('auto 를 쓸 수 있는 모델이면 계획 승인 1번이 auto mode 다', async () => {
+    const h = await start('plan-auto', 'claude-opus-5[1m]')
+    await canUseTool('ExitPlanMode', { plan: 'do the thing' }, {})
+
+    expect(h.offered).toEqual(['plan-auto', 'plan-manual', 'plan-keep'])
+    expect(h.modes).toEqual(['auto'])
+    h.session.dispose()
+  })
+
+  it('auto 를 못 쓰는 모델이면 1번 자리가 auto-accept edits 로 바뀐다', async () => {
+    // CLI 도 auto 가 없을 때만 이 자리를 "Yes, auto-accept edits" 로 바꾼다.
+    const h = await start('plan-auto-accept', 'claude-haiku-4-5')
+    await canUseTool('ExitPlanMode', { plan: 'do the thing' }, {})
+
+    expect(h.offered).toEqual(['plan-auto-accept', 'plan-manual', 'plan-keep'])
+    expect(h.modes).toEqual(['acceptEdits'])
     h.session.dispose()
   })
 })

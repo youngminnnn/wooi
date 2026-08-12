@@ -172,6 +172,25 @@ export const CLAUDE_MODELS: ModelOption[] = [
 ]
 
 /**
+ * auto mode 를 지원하지 **않는** 모델. Anthropic 문서가 명시한 목록이다
+ * (Haiku 계열 · Sonnet 4.5 · Opus 4.5 · claude-3 계열). CLAUDE_MODELS 중에서는
+ * `claude-haiku-4-5` 하나만 걸리지만, 저장된 값이나 마이그레이션으로 옛 ID 가 흘러들 수 있다.
+ */
+const NO_AUTO_MODE = [/haiku/i, /sonnet-4-5/i, /opus-4-5/i, /^claude-3/i]
+
+/**
+ * 이 모델로 auto mode 를 쓸 수 있는가. 계획 승인 프롬프트의 1번 선택지를 가른다.
+ *
+ * 허용 목록이 아니라 **거부 목록**인 이유: 앞으로 나올 모델은 auto 를 지원할 것이므로, 모르는
+ * 값을 "지원" 으로 두는 쪽이 실패 방향이 낫다. 잘못 짚어도 CLI 가 모드를 되돌리고
+ * `syncPermissionMode` 가 UI 를 되맞춘다. null 은 CLI 기본 모델(Opus 계열)이라 지원으로 본다.
+ */
+export function supportsAutoMode(model: string | null | undefined): boolean {
+  if (!model) return true
+  return !NO_AUTO_MODE.some((p) => p.test(model))
+}
+
+/**
  * Claude Code 의 권한 모드. CLI 가 Shift+Tab 으로 순환하는 순서·명칭·푸터 문구를 그대로 쓴다
  * (default → accept edits → plan → auto).
  */
@@ -224,7 +243,10 @@ export const CLAUDE_META: AgentBackendMeta = {
   label: 'Claude Code',
   defaultModel: CLAUDE_DEFAULT_MODEL,
   permissionModes: CLAUDE_PERMISSION_MODES,
-  defaultPermissionMode: 'default',
+  // 2026-08-14 부터 Claude Code CLI 도 Pro/Max/Team 신규 세션을 auto 로 연다. 사용자가 백엔드
+  // 기본값(AgentSettings.permissionMode)을 직접 정해 뒀다면 그 값이 이긴다 — CLI 의 롤아웃도
+  // "본인이 정한 기본값은 유지" 다. 이미 만들어진 워크스페이스는 자기 저장값을 그대로 쓴다.
+  defaultPermissionMode: 'auto',
   efforts: CLAUDE_EFFORTS,
   capabilities: {
     sideQuestion: true,
