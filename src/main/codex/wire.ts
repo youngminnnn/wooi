@@ -332,7 +332,12 @@ export interface InitializeResult {
 }
 
 export interface ThreadResult {
-  thread?: { id?: ThreadId; status?: string; path?: string | null }
+  thread?: {
+    id?: ThreadId
+    /** 버전에 따라 문자열 또는 `{ type, activeFlags }` 판별 객체로 온다. */
+    status?: string | { type?: string }
+    path?: string | null
+  }
 }
 
 export interface ModelListResult {
@@ -395,6 +400,7 @@ export const RPC = {
 /** 서버가 보내오는 알림 메서드. */
 export const NOTIFY = {
   threadStarted: 'thread/started',
+  threadStatusChanged: 'thread/status/changed',
   turnStarted: 'turn/started',
   // 실패한 턴도 turn/completed 로 온다(status:'failed'). `turn/failed` 알림은 존재하지 않는다.
   turnCompleted: 'turn/completed',

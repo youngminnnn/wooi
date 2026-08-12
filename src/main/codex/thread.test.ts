@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { CodexThread } from './thread'
+import { CodexThread, threadStatusType } from './thread'
 import { NOTIFY, RPC } from './wire'
 import type { ChatEvent, ChatItem } from '@shared/types'
 import type { RpcClient } from './jsonrpc'
@@ -124,6 +124,15 @@ describe('컨텍스트 사용량 추적', () => {
 })
 
 describe('턴 추적', () => {
+  it.each([
+    ['active', 'active'],
+    [{ type: 'active', activeFlags: [] }, 'active'],
+    [{ type: 'idle' }, 'idle'],
+    [undefined, null]
+  ])('스레드 상태 %j 를 %j 로 정규화한다', (input, expected) => {
+    expect(threadStatusType(input)).toBe(expected)
+  })
+
   it('turn/started 의 id 를 기억하고 완료 시 놓는다', () => {
     const { thread, events } = makeThread()
     thread.handleNotification(NOTIFY.turnStarted, { turn: { id: 't1', status: 'inProgress' } })
@@ -131,6 +140,24 @@ describe('턴 추적', () => {
 
     thread.handleNotification(NOTIFY.turnCompleted, { turn: { id: 't1', status: 'completed' } })
     expect(events.at(-1)).toEqual({ type: 'status', status: 'idle' })
+  })
+
+  it('재개된 기존 턴의 active 상태로 running 을 복구한다', () => {
+    const { thread, events } = makeThread()
+    thread.handleNotification(NOTIFY.threadStatusChanged, {
+      threadId: 'thr_1',
+      status: { type: 'active', activeFlags: [] }
+    })
+    expect(events).toContainEqual({ type: 'status', status: 'running' })
+  })
+
+  it('thread idle 은 turn/completed 와 중복되므로 상태 이벤트를 내지 않는다', () => {
+    const { thread, events } = makeThread()
+    thread.handleNotification(NOTIFY.threadStatusChanged, {
+      threadId: 'thr_1',
+      status: { type: 'idle' }
+    })
+    expect(events).toEqual([])
   })
 })
 
