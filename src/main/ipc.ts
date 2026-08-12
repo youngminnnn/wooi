@@ -138,6 +138,7 @@ import type {
 } from '@shared/types'
 import type { AgentOrchestrator } from './agent/orchestrator'
 import type { PaneWindows } from './paneWindows'
+import { capturePreview } from './preview'
 import type { ScriptRunner } from './scripts'
 import type { TerminalManager } from './terminal'
 
@@ -993,6 +994,42 @@ export function registerIpc(ctx: IpcContext): void {
 
   ipcMain.handle(IPC.scriptGetOutput, (_e, workspaceId: string, scriptId: string) => {
     return ctx.scripts.getOutput(workspaceId, scriptId)
+  })
+
+  // ── Preview 패널 ───────────────────────────────────────────────────────
+
+  /** Preview 가 마지막으로 본 주소를 워크스페이스에 적어 둔다. 값이 그대로면 방송하지 않는다. */
+  const rememberPreviewUrl = (workspaceId: string, url: string): boolean => {
+    const current = store.getState().workspaces.find((w) => w.id === workspaceId)
+    if (!current || current.previewUrl === url) return false
+    store.update((s) => {
+      const ws = s.workspaces.find((w) => w.id === workspaceId)
+      if (ws) ws.previewUrl = url
+    })
+    broadcastState()
+    return true
+  }
+
+  ipcMain.handle(IPC.previewSetUrl, (_e, workspaceId: string, url: string) => {
+    rememberPreviewUrl(workspaceId, url)
+  })
+
+  // "Open in Preview" — 주소를 기억하고 모든 창에 방송한다. 스크립트 패널과 Preview 탭이 서로
+  // 다른 창에 떠 있을 수 있어(둘 다 분리 가능) renderer 끼리 직접 이야기할 방법이 없다.
+  ipcMain.handle(IPC.previewOpen, (_e, workspaceId: string, url: string) => {
+    rememberPreviewUrl(workspaceId, url)
+    dispatch(IPC.evtPreviewOpen, { workspaceId, url })
+  })
+
+  // 캡처는 main 이 한다(renderer 에는 webContents 가 없다). 찍은 이미지는 호출자에게 돌려주지
+  // 않고 방송한다 — 컴포저는 메인 창에만 있고, 캡처를 누른 창은 분리된 work 창일 수 있다.
+  ipcMain.handle(IPC.previewCapture, async (_e, workspaceId: string, webContentsId: number) => {
+    const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
+    if (!ws) return { error: 'That workspace is gone.' }
+    const { image, error } = await capturePreview(ws.previewUrl ?? '', webContentsId)
+    if (error || !image) return { error: error ?? 'Could not capture the preview.' }
+    dispatch(IPC.evtComposerAttach, { workspaceId, image })
+    return {}
   })
 
   // ── 분리한 패널 창 ─────────────────────────────────────────────────────

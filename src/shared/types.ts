@@ -657,6 +657,14 @@ export interface Workspace {
   /** run script id 별로 예약한 포트. */
   ports: Record<string, number>
   /**
+   * Preview 탭이 마지막으로 보고 있던 주소(영속). 없거나 null 이면 아직 아무것도 열지 않았다.
+   *
+   * 워크스페이스에 매다는 이유는 수명이 같아서다 — dev 서버 주소는 이 worktree 의 성질이고,
+   * 워크스페이스를 지우면 함께 사라져야 한다(설정에 모아 두면 죽은 항목이 쌓인다).
+   * 옵셔널이라 저장된 워크스페이스는 마이그레이션 없이 그대로 읽힌다.
+   */
+  previewUrl?: string | null
+  /**
    * setup 스크립트의 마지막 실행 결과(영속). setup 은 생성 직후 자동 실행되는 일회성 초기화라,
    * 이미 성공한 걸 다시 돌리면 재설치·재시드처럼 무의미하거나 파괴적일 수 있다. 그래서 결과를
    * 디스크에 남겨, 앱을 재시작해도 성공한 setup 은 재실행 버튼을 노출하지 않는다(실패했을 때만 Retry).
@@ -1552,6 +1560,38 @@ export interface ScriptExitEvent {
 
 export type ScriptRunState = 'idle' | 'running' | 'exited'
 
+// ── Preview 패널(워크트리의 dev 서버를 앱 안에서 보는 탭) ────────────────
+
+/**
+ * Preview `<webview>` 가 쓰는 Electron 세션 파티션.
+ *
+ * 앱의 기본 세션과 **반드시** 갈라 둔다. 이유가 둘이다:
+ *  1. 격리 — 미리보는 페이지가 앱이 들고 있는 쿠키·스토리지·자격증명에 닿지 못한다.
+ *  2. CSP — 메인은 프로덕션에서 defaultSession 의 모든 응답에 `default-src 'self'` 를 씌운다
+ *     ([[main/index]] applyContentSecurityPolicy). 같은 세션을 쓰면 그 헤더가 미리보는
+ *     dev 서버 페이지에도 붙어 자기 스크립트조차 못 불러온다. 파티션이 다르면 아예 걸리지 않는다.
+ *
+ * `persist:` 접두사로 디스크에 남긴다 — 로그인해 둔 dev 앱을 앱 재시작마다 다시 로그인하지 않도록.
+ */
+export const PREVIEW_PARTITION = 'persist:wooi-preview'
+
+/** Preview 를 특정 주소로 열라는 신호(evtPreviewOpen 페이로드). */
+export interface PreviewOpenEvent {
+  workspaceId: string
+  url: string
+}
+
+/** 컴포저에 붙일 이미지(evtComposerAttach 페이로드). */
+export interface ComposerAttachEvent {
+  workspaceId: string
+  image: ImageAttachment
+}
+
+/** Preview 캡처 결과. 성공하면 이미지는 evtComposerAttach 로 따로 흘러가고 여기엔 아무것도 없다. */
+export interface PreviewCaptureResult {
+  error?: string
+}
+
 // ── 분리 가능한 패널(별도 창) ────────────────────────────────────────────
 
 /**
@@ -2289,6 +2329,13 @@ export const IPC = {
   paneSetWorkspace: 'pane:setWorkspace',
   /** 분리한 창에서 리포 설정을 요청한다(메인 창을 앞으로 가져와 모달을 연다). */
   paneOpenRepoSettings: 'pane:openRepoSettings',
+  // Preview 패널 (워크트리의 dev 서버를 앱 안에서 보는 탭)
+  /** Preview 가 마지막으로 본 주소를 워크스페이스에 영속한다(주소창 입력·내비게이션 후). */
+  previewSetUrl: 'preview:setUrl',
+  /** 이 워크스페이스의 Preview 를 특정 주소로 연다(스크립트 패널의 "Open in Preview"). */
+  previewOpen: 'preview:open',
+  /** Preview 화면을 캡처해 컴포저 첨부로 흘려보낸다. 인자는 webview 게스트의 webContents id. */
+  previewCapture: 'preview:capture',
   // Dock 미확인 배지
   appSetBadge: 'app:setBadge',
   // 앱 버전 / 자동 업데이트
@@ -2348,6 +2395,16 @@ export const IPC = {
   evtPaneWorkspace: 'evt:paneWorkspace',
   /** 분리한 창이 요청한 리포 설정 열기 — 메인 창이 받아 모달을 띄운다. */
   evtOpenRepoSettings: 'evt:openRepoSettings',
+  /**
+   * Preview 를 특정 주소로 열라는 신호. 스크립트 패널과 Preview 탭이 서로 **다른 창**에 있을 수
+   * 있어(둘 다 분리 가능) renderer 안에서 직접 부를 수 없다 — main 을 거쳐 모든 창에 방송한다.
+   */
+  evtPreviewOpen: 'evt:previewOpen',
+  /**
+   * 컴포저에 붙일 이미지(Preview 스크린샷). 캡처는 어느 창에서든 일어날 수 있지만 컴포저는
+   * 메인 창에만 있으므로, main 이 받아 방송하고 컴포저가 있는 창만 집어 간다.
+   */
+  evtComposerAttach: 'evt:composerAttach',
   /** 자동 업데이트 상태 변화(확인 중/최신/발견/다운로드 진행/준비됨/오류). */
   evtUpdate: 'evt:update',
   /** 원격 공지 목록이 갱신됨(main 이 주기적으로 가져온 결과). */

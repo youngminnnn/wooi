@@ -16,6 +16,7 @@ import type {
   CodexMcpServer,
   CommandPanelKind,
   CommandResult,
+  ComposerAttachEvent,
   CreateWorkspaceArgs,
   CreateWorkspaceResult,
   DirEntry,
@@ -39,6 +40,8 @@ import type {
   PermissionRequest,
   PrChecks,
   PrEditable,
+  PreviewCaptureResult,
+  PreviewOpenEvent,
   PrMergeMethod,
   PrStatus,
   Repo,
@@ -226,6 +229,26 @@ export interface WooiApi {
     getStatus(workspaceId: string): Promise<ScriptStatus[]>
     /** 지금까지의 누적 출력(꼬리 버퍼). 나중에 뜬 창이 이전 로그를 채우는 데 쓴다. */
     getOutput(workspaceId: string, scriptId: string): Promise<string>
+  }
+
+  /**
+   * Preview 탭(워크트리의 dev 서버를 앱 안에서 보는 화면). 범용 브라우저가 아니라
+   * "이 워크스페이스가 띄운 로컬 서버를 보는 창" 이라 API 도 그만큼만 있다.
+   */
+  preview: {
+    /** 마지막으로 본 주소를 워크스페이스에 영속한다(다음에 열면 여기서 시작한다). */
+    setUrl(workspaceId: string, url: string): Promise<void>
+    /**
+     * Preview 를 이 주소로 연다. 주소를 영속하고 모든 창에 방송하므로, 스크립트 패널이
+     * 분리된 창에 있어도 메인 창(또는 분리된 work 창)의 Preview 탭이 받아 움직인다.
+     */
+    open(workspaceId: string, url: string): Promise<void>
+    /**
+     * Preview 화면을 캡처해 컴포저 첨부로 보낸다. 성공하면 이미지는 onComposerAttach 로 온다.
+     * webContentsId 는 `<webview>.getWebContentsId()` — main 이 그 게스트가 정말 Preview 인지 확인한다.
+     */
+    capture(workspaceId: string, webContentsId: number): Promise<PreviewCaptureResult>
+    onOpen(cb: (e: PreviewOpenEvent) => void): () => void
   }
 
   git: {
@@ -568,6 +591,8 @@ export interface WooiApi {
   onPermissionCancel(cb: (requestId: string) => void): () => void
   onScriptOutput(cb: (e: ScriptOutputEvent) => void): () => void
   onScriptExit(cb: (e: ScriptExitEvent) => void): () => void
+  /** 컴포저에 붙일 이미지가 도착했다(Preview 스크린샷). 컴포저가 있는 창만 반응한다. */
+  onComposerAttach(cb: (e: ComposerAttachEvent) => void): () => void
   onState(cb: (state: AppState) => void): () => void
   /** PR 리뷰 진행 상황·결과 스트림. */
   onReview(cb: (e: ReviewEnvelope) => void): () => void

@@ -217,6 +217,28 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
     })
   }
 
+  /**
+   * Preview 스크린샷 받기. 캡처는 다른 창(분리한 work 창)에서 일어날 수 있어 store 를 우편함처럼
+   * 쓴다 — 도착한 이미지를 여기서 꺼내 붙여넣기와 같은 대기 첨부로 올린다.
+   *
+   * 위의 "워크스페이스 전환 시 비우기" 이펙트보다 **뒤에** 있어야 한다. 앞에 두면 워크스페이스를
+   * 옮기는 순간 방금 꺼낸 첨부가 그 초기화에 함께 지워진다(이펙트는 선언 순서대로 실행된다).
+   */
+  const pendingAttachments = useStore((s) => s.composerAttachments[workspace.id])
+  const takeAttachments = useStore((s) => s.takeComposerAttachments)
+  useEffect(() => {
+    if (!pendingAttachments?.length) return
+    const taken = takeAttachments(workspace.id)
+    setImages((prev) => [
+      ...prev,
+      ...taken.map((img) => ({
+        ...img,
+        id: `img:${imgSeq.current++}`,
+        previewUrl: `data:${img.mediaType};base64,${img.dataBase64}`
+      }))
+    ])
+  }, [pendingAttachments, takeAttachments, workspace.id])
+
   /** 클립보드의 이미지를 첨부로 받는다. 이미지가 하나라도 있으면 기본 텍스트 붙여넣기를 막는다. */
   const onPaste = (e: React.ClipboardEvent<HTMLTextAreaElement>): void => {
     const files = Array.from(e.clipboardData.items)

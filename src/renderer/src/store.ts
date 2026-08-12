@@ -49,6 +49,9 @@ import { undoCreateVerdict, type UndoableCreate } from './lib/undoCreate'
 export const scriptKey = (workspaceId: string, scriptId: string): string =>
   `${workspaceId}:${scriptId}`
 
+/** 대기 중인 첨부가 없을 때 돌려주는 고정 배열(매번 새 배열을 만들면 구독자가 헛되이 다시 그린다). */
+const EMPTY_ATTACHMENTS: ImageAttachment[] = []
+
 /**
  * 일괄 승인(⇧⌘A)이 대신 눌러 줘도 되는 요청인지.
  *
@@ -227,6 +230,14 @@ interface UIState {
   loadedTranscripts: Record<string, boolean>
   scriptOutput: Record<string, string>
   scriptStatus: Record<string, ScriptStatus[]>
+  /**
+   * 컴포저가 아직 집어 가지 않은 첨부 이미지(Preview 스크린샷), 워크스페이스별.
+   *
+   * 컴포저를 거치지 않고 여기 모으는 이유는 캡처 버튼과 컴포저가 **다른 창**에 있을 수 있어서다
+   * (Preview 는 분리한 work 창에서도 돈다). 지금 보고 있지 않은 워크스페이스로 찍었더라도
+   * 그 워크스페이스로 돌아가면 컴포저가 그때 집어 간다.
+   */
+  composerAttachments: Record<string, ImageAttachment[]>
   gitStatus: Record<string, GitStatus | null>
   prStatus: Record<string, PrStatus | null>
   /** workspace 별 PR 상태 조회 진행 여부(브랜치 전환·새로고침 중 헤더에 로딩 표시). */
@@ -424,6 +435,8 @@ interface UIState {
    * 출력은 이벤트로만 흘러오므로, 나중에 뜬 창은 이게 없으면 돌고 있는 dev 서버의 로그를 못 본다.
    */
   seedScriptOutput: (workspaceId: string, scriptId: string) => Promise<void>
+  /** 대기 중인 첨부를 컴포저로 넘긴다(꺼내면 목록에서 사라진다 — 두 번 붙지 않게). */
+  takeComposerAttachments: (workspaceId: string) => ImageAttachment[]
   refreshAuth: () => Promise<void>
   /** 에이전트 백엔드 메타 + 백엔드별 모델 목록을 다시 읽는다(가용성은 실행 중에도 바뀐다). */
   refreshAgents: () => Promise<void>
@@ -640,6 +653,7 @@ export const useStore = create<UIState>((set, get) => ({
   loadedTranscripts: {},
   scriptOutput: {},
   scriptStatus: {},
+  composerAttachments: {},
   gitStatus: {},
   prStatus: {},
   prRefreshing: {},
@@ -1089,6 +1103,17 @@ export const useStore = create<UIState>((set, get) => ({
       const key = scriptKey(workspaceId, scriptId)
       const out = get().scriptOutput
       set({ scriptOutput: { ...out, [key]: (out[key] ?? '') + chunk } })
+    })
+
+    // Preview 스크린샷. 방송은 모든 창이 받지만 컴포저는 메인 창에만 있으므로 여기서만 모은다
+    // (분리한 창에서 모으면 아무도 집어 가지 않는 이미지가 그 창의 메모리에 쌓인다).
+    window.api.onComposerAttach(({ workspaceId, image }) => {
+      set((s) => ({
+        composerAttachments: {
+          ...s.composerAttachments,
+          [workspaceId]: [...(s.composerAttachments[workspaceId] ?? []), image]
+        }
+      }))
     })
 
     window.api.onScriptExit(({ workspaceId, scriptId, code }) => {
@@ -1592,6 +1617,17 @@ export const useStore = create<UIState>((set, get) => ({
     // 조회하는 사이 라이브 출력이 도착했다면 그쪽이 이어지는 흐름이다 — 앞부분을 덮어써
     // 중복시키지 않는다.
     set((s) => (s.scriptOutput[key] ? {} : { scriptOutput: { ...s.scriptOutput, [key]: out } }))
+  },
+
+  takeComposerAttachments: (workspaceId) => {
+    const pending = get().composerAttachments[workspaceId]
+    if (!pending?.length) return EMPTY_ATTACHMENTS
+    set((s) => {
+      const next = { ...s.composerAttachments }
+      delete next[workspaceId]
+      return { composerAttachments: next }
+    })
+    return pending
   },
 
   refreshAuth: async () => {
