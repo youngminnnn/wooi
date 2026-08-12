@@ -17,11 +17,28 @@ export default function Modal({
 }): React.JSX.Element {
   const titleId = useId()
   const panelRef = useRef<HTMLDivElement>(null)
+  const openerRef = useRef<HTMLElement | null>(null)
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       // 위에 confirm 대화상자가 떠 있으면 Escape 는 그쪽이 처리한다(하위 모달까지 닫히지 않게).
       if (e.key === 'Escape' && !useStore.getState().confirmState) onClose()
+      if (e.key !== 'Tab' || useStore.getState().confirmState) return
+      const focusable = Array.from(
+        panelRef.current?.querySelectorAll<HTMLElement>(
+          'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])'
+        ) ?? []
+      )
+      if (focusable.length === 0) return
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault()
+        last.focus()
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault()
+        first.focus()
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -30,10 +47,12 @@ export default function Modal({
   // 열릴 때 '한 번만' 첫 포커스 가능한 요소로 포커스를 옮긴다. onClose 가 매 렌더 새 클로저여도
   // 재실행되지 않도록 마운트 전용 이펙트로 분리한다(리렌더마다 포커스를 뺏는 문제 방지).
   useEffect(() => {
+    openerRef.current = document.activeElement as HTMLElement | null
     const first = panelRef.current?.querySelector<HTMLElement>(
       'input, select, textarea, button, [tabindex]:not([tabindex="-1"])'
     )
     first?.focus()
+    return () => openerRef.current?.focus()
   }, [])
 
   return (
