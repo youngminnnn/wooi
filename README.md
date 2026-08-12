@@ -20,40 +20,47 @@ Wooi's built-in tools, and every review lands on the diff instead of in a transc
 
 > **Agent support** — Since v1.4.0, Wooi supports both **Claude Code** (via the
 > Claude Agent SDK) and **OpenAI Codex** (via the Codex CLI). Choose an agent when
-> creating a workspace; the choice is still open until you send the first message, and
-> the workspace keeps that agent from then on.
+> creating a workspace, then switch between them later with `/agent`. When a conversation
+> is already under way, Wooi carries its context into the next message to the new agent.
 
 ## Why Wooi
 
-- 🧱 **Stacked PRs are a first-class citizen** — the whole app knows what a chain is, not
+- 🧱 **The whole stacked-PR lifecycle** — the whole app knows what a chain is, not
   just the branch you're standing on. Work that builds on other work branches off it
   instead of off the default branch. **Restack** rebases onto the latest parent and
   pushes with `--force-with-lease`; when a parent merges, a **merge cascade** retargets
   each child PR to the grandparent and rebases the children onto it; a PR that drifts
   onto the wrong base gets **flagged instead of silently accepted**. And if an agent
-  builds a chain by hand with `git checkout -b` and `gh pr create`, Wooi **reconstructs
-  the stack from the PRs' base links** and shows it the same way.
+  builds a chain outside Wooi, the app reads GitHub's stack object first and falls back
+  to reconstructing it from the PRs' base links. It can then **review every layer as one
+  stack**, restack it, and keep the remainder valid as layers merge.
 - 🤖 **Agents orchestrate the app, not just the repo** — every session gets a built-in
   MCP server. `check_related_work` shows which files the other workspaces are touching
   *before* an agent starts, `create_workspace` / `create_stacked_workspace` let it split
   a task into a chain of reviewable PRs, and `report_to_parent` / `notify_child` carry
-  results and updates along that chain. It's fenced in: an agent can only target
-  workspaces it created itself, and sibling *paths* are shared — never diffs. One prompt
-  can end up as a three-PR stack you never arranged. See the
+  results and updates along that chain. An agent can also ask to turn a solo workspace
+  into an **agent team**, or send a text message to another workspace under that
+  workspace's receive policy. Files, diffs, and transcripts never cross that boundary.
+  One prompt can end up as a three-PR stack you never arranged. See the
   [built-in MCP reference](docs/built-in-mcp.md).
-- 🔍 **Review is a workspace, not a paragraph** — every agent can review a PR now; what's
+- 🔍 **The diff and the stack are the review surface** — every agent can review a PR now; what's
   missing is somewhere to work the result. A Wooi review is its own entity with its own
   worktree, so the agent reads past the changed hunks without touching your checkout.
   Findings are **anchored to diff lines** with a severity badge, editable, discardable,
   and postable one at a time or as a batch. Files carry a **viewed** mark that
   auto-clears when a new commit changes that file, replies to your comments are polled so
   you can ask a follow-up, and verdicts are guarded — approve is hidden on your own PR,
-  and a verdict is held back if the findings it rests on failed to post.
+  and a verdict is held back if the findings it rests on failed to post. A stacked review
+  reads all layers in one session to find ordering, boundary, and cross-layer dependency
+  problems; in an ordinary workspace, you can comment on a diff line and send that exact
+  location back to the agent.
 - 🎛️ **Two agent backends, integrated deeply** — Claude Code and OpenAI Codex, each
   supported down to the details rather than reduced to a lowest common denominator:
   `/rewind` and `/btw` where the backend has them, per-backend permission modes,
   reasoning effort and fast mode, account rate limits normalized into one readable
-  status line, and your own MCP servers inherited from your CLI config. See
+  status line, and your own MCP servers inherited from your CLI config. You can switch
+  the main agent during a conversation, with Wooi carrying the existing context into the
+  next message. See
   [agent backends](docs/agent-backends.md).
 - 🔒 **Quiet where it counts** — **no telemetry** and no servers of its own; transcripts
   stay local. Updates can wait for **"restart when work finishes"** instead of killing a
@@ -181,6 +188,13 @@ those chains itself with plain `git` and `gh` — no extra stacking CLI needed.
 - **Detected, not just declared** — if an agent builds a chain on its own with
   `git checkout -b` and `gh pr create`, Wooi reconstructs the stack from the PRs' base
   links and shows it the same way.
+- **GitHub stacks come in too** — Wooi reads GitHub's server-side stack object when it is
+  available, preserving its explicit layer order, and falls back to the PR base chain.
+  If the remote branch has moved away from the local expectation, synchronization stops
+  instead of overwriting it.
+- **Review the stack as a stack** — one review session reads every layer together and
+  looks for ordering, boundary, granularity, churn, and cross-layer dependency problems
+  that separate PR reviews cannot see. Findings stay attached to the layer they concern.
 - **The default base is the parent, for everyone** — stacking a workspace records the
   parent as that branch's `gh-merge-base`, so a bare `gh pr create` — yours or an
   agent's — targets the parent branch instead of the repo's default branch. If a PR
@@ -206,6 +220,13 @@ stack them in dependency order, and pass results along the chain.
   one was stacked on (it doesn't interrupt the parent), `check_stacked_work` lists the
   children with their branch, PR, and latest report, and `notify_child` sends an update
   that starts a turn in a child — queued behind its current turn if it's busy.
+- **Talk across workspaces** — `list_workspace_peers` and `send_to_workspace` carry a
+  short text message to another open workspace, even outside the current repo. The
+  receiver decides whether to accept, hold for approval, or refuse it. Files, diffs, and
+  transcripts do not travel with the message.
+- **Grow into a team when the work calls for it** — an agent can request a switch from a
+  solo workspace to an agent team. Once approved, Wooi carries the conversation over and
+  automatically continues the task after the switch.
 - **Plus the everyday ones** — `open_pull_request` (Wooi picks the base: the parent
   branch when stacked, the default branch otherwise), `list_issues`, `archive_workspace`,
   and `run_script` / `stop_script` / `read_script_output` for the repo scripts you
@@ -215,6 +236,8 @@ stack them in dependency order, and pass results along the chain.
   can't archive its caller, and `notify_child` is limited to a direct stacked child.
   Read-only tools run without a prompt; state-changing ones follow the workspace's
   permission mode and show an approval card.
+- **Explicit when useful** — built-in tools are also available as `/wooi:*` slash
+  commands, so you can deliberately invoke the same orchestration path from the composer.
 
 Every tool, input, and constraint is documented in the
 [built-in MCP reference](docs/built-in-mcp.md).
@@ -236,6 +259,13 @@ runs alongside your workspaces instead of taking one over.
   rendered as a card right there in the diff, with a severity badge and a markdown body.
   If an agent cites a line that isn't part of the diff, the card says so and shows where it
   got moved to, so you catch a misplaced comment before it goes out instead of after.
+- **Review a stack as one unit** — select a stacked PR and one session reads all of its
+  layers together. It separates stack-level findings from layer findings, anchors each
+  inline comment to the correct PR, and submits verdicts per layer without losing track
+  of partial success.
+- **Send your own diff feedback back to the agent** — in a regular workspace, comment on
+  a changed line and reply with that file and line attached. The agent gets the code
+  location instead of a detached description of it.
 - **Curate before you post** — **Edit** reworks the wording inline, **Discard** drops the
   ones you don't want, **Comment** posts that finding on its own. Or tick the ones you want
   and post the batch; each goes out as its own review comment, and posted cards go quiet
@@ -272,6 +302,10 @@ only ever shows controls that actually work there.
 
 - **Backend-specific controls** — models, reasoning-effort levels, permission modes,
   slash commands, and account details all come from the selected backend.
+- **Switch agents without throwing the conversation away** — use `/agent` even after
+  work has started. Claude and Codex cannot resume each other's native session IDs, so
+  Wooi builds a bounded handoff from the conversation and sends it with your next message
+  to the new agent, showing the estimated handoff cost first.
 - **Permission modes, cycled with Shift+Tab** — Claude Code offers default, accept edits,
   plan, and auto; Codex offers read only, auto, full access, and plan. The current mode
   is shown below the input box. Permission prompts offer **"Always allow"**
@@ -287,6 +321,8 @@ only ever shows controls that actually work there.
 - **Rate limits, normalized** — account usage from either backend is shown in one status
   line, pinned to the window that actually paces you (Claude's 5-hour session window,
   Codex's weekly window) so the number doesn't swap out from under you.
+- **Wait for the limit, then continue** — when a backend reports a known reset time, Wooi
+  shows it and avoids retrying turns that cannot succeed before the limit clears.
 - **Your MCP servers come along** — servers configured in your own Claude/Codex CLI setup
   are resolved and injected into the session alongside Wooi's own `wooi` server.
 
@@ -301,8 +337,8 @@ See [agent backends](docs/agent-backends.md) for the full capability matrix.
   Settings to choose the name and base branch yourself. Rename a workspace by
   double-clicking its name in the header.
 - **Choose Claude Code or Codex** when creating a workspace — and change your mind with
-  `/agent` any time before the first message. After that the workspace keeps that agent,
-  and stacked workspaces inherit their parent's.
+  `/agent` later as well. If work has already started, the next agent receives a bounded
+  handoff of the conversation; stacked workspaces initially inherit their parent's agent.
 - **Per-workspace model & reasoning effort** — set from the status line above the input
   box, or by typing `/model` and `/effort`. When unset they follow the global settings;
   changing them resumes the same conversation.
@@ -311,6 +347,8 @@ See [agent backends](docs/agent-backends.md) for the full capability matrix.
 
 ### Parallel-session visibility
 
+- **Fan out one prompt** to several independent workspaces, compare their responses and
+  diffs side by side, then adopt one winner and archive the alternatives.
 - The sidebar distinguishes **running** (spinner), **awaiting permission** (yellow
   shield), and **unread responses** (blue dot).
 - When the window is inactive, completions / errors / permission requests appear as OS
@@ -332,8 +370,11 @@ A tabbed panel on top plus an interactive terminal below (resizable split):
   (`N changed · ↑ahead · ↓behind`) opens this as a modal. When there's no PR and the
   branch is ahead, a **Create PR** button opens GitHub's PR page in your browser.
 - **Check** — CI check results for the PR on the current branch.
-- **Terminal** — a per-workspace login-shell terminal that survives workspace switches,
-  so running commands and shell state are preserved when you return.
+- **Preview** — open the workspace's dev server inside Wooi, capture the page or pick a
+  specific element into the composer, and send collected console and network failures to
+  the agent. The preview runs in a separate, permission-denied session.
+- **Terminal** — per-workspace login-shell terminals with multiple tabs. They survive
+  workspace switches, so running commands and shell state are preserved when you return.
 
 ### Composing messages
 
