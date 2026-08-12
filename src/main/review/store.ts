@@ -17,7 +17,12 @@ const CACHE_LIMIT = 8
  * diff 는 여러 개일 이유가 없으므로 고정 id 를 써서 덮어쓴다.
  */
 type ReviewRecord =
-  | { id: string; rec: 'diff'; diff: ReviewDiff }
+  /**
+   * 레이어 1건의 diff. **PR 마다 레코드가 하나**라 어느 레이어를 다시 받아도 그 레이어만
+   * 덮어쓴다(스택에서는 아래가 바뀌면 위쪽만 다시 받는다).
+   * `prNumber` 가 없는 레코드는 옛 단일 PR 리뷰가 남긴 것이다.
+   */
+  | { id: string; rec: 'diff'; diff: ReviewDiff; prNumber?: number }
   | { id: string; rec: 'finding'; finding: ReviewFinding }
   /**
    * 버린 지적의 묘비. **지적과 같은 id 를 쓴다** — last-wins 규칙이 그대로 삭제로 동작하고,
@@ -33,8 +38,13 @@ type ReviewRecord =
   /** 표시를 끈 묘비. 지적의 묘비와 같은 결로 **표시와 같은 id 를 쓴다**. */
   | { id: string; rec: 'file-unviewed'; path: string }
 
-/** diff 레코드의 고정 id — 새 diff 를 append 하면 이전 것을 덮어쓴다. */
+/** 옛 단일 PR 리뷰가 쓰던 diff 레코드 id. 지금도 읽어야 한다. */
 const DIFF_ID = '__diff__'
+
+/** 레이어별 diff 레코드의 id — 같은 PR 의 diff 를 다시 쓰면 그것만 덮어쓴다. */
+function diffId(prNumber: number): string {
+  return `${DIFF_ID}:${prNumber}`
+}
 
 /** 파일별 viewed 레코드의 id. 같은 파일을 다시 토글하면 이 id 로 덮어써진다. */
 function viewedId(path: string): string {
@@ -42,11 +52,33 @@ function viewedId(path: string): string {
 }
 
 function emptyBundle(): ReviewBundle {
-  return { diff: null, findings: [], activity: [], viewed: {} }
+  return { diffs: [], findings: [], activity: [], viewed: {} }
 }
 
 function serialize(rec: ReviewRecord): string {
   return JSON.stringify(rec) + '\n'
+}
+
+/**
+ * 레이어의 diff 를 번들에 넣거나 갈아 끼운다. 순서는 **처음 들어온 순서**(= 아래→위로 받는
+ * 순서)를 지킨다 — 화면이 레이어를 그 순서로 그린다.
+ *
+ * PR 번호가 없는 레코드는 옛 단일 PR 리뷰가 남긴 것이라 번호를 붙일 수 없다. 그때는 0 으로
+ * 자리를 잡아 두고, 세션의 유일한 레이어로 읽힌다([[types]] layerFor).
+ */
+function upsertDiff(bundle: ReviewBundle, prNumber: number | undefined, diff: ReviewDiff): void {
+  const n = prNumber ?? 0
+  const idx = bundle.diffs.findIndex((d) => d.prNumber === n)
+  if (idx >= 0) {
+    bundle.diffs[idx] = { prNumber: n, diff }
+    return
+  }
+  // 번호가 붙은 diff 가 처음 들어왔는데 번호 없는 자리(0)가 남아 있으면 그것을 대체한다.
+  // 옛 리뷰를 다시 돌리면 같은 PR 의 diff 가 옛 레코드와 새 레코드로 둘 다 남는데, 그대로 두면
+  // 화면에 같은 파일이 두 벌 그려진다. 옛 리뷰는 레이어가 하나뿐이라 이 대체는 언제나 옳다.
+  const legacy = n > 0 ? bundle.diffs.findIndex((d) => d.prNumber === 0) : -1
+  if (legacy >= 0) bundle.diffs[legacy] = { prNumber: n, diff }
+  else bundle.diffs.push({ prNumber: n, diff })
 }
 
 /**
@@ -74,7 +106,7 @@ function toBundle(records: ReviewRecord[]): ReviewBundle {
   for (const rec of records) {
     // 종류를 하나씩 확인한다 — "나머지는 활동" 으로 두면 묘비 같은 새 레코드가 활동
     // 타임라인에 undefined 로 섞여 들어간다.
-    if (rec.rec === 'diff') bundle.diff = rec.diff
+    if (rec.rec === 'diff') upsertDiff(bundle, rec.prNumber, rec.diff)
     else if (rec.rec === 'finding') bundle.findings.push(rec.finding)
     else if (rec.rec === 'activity') bundle.activity.push(rec.item)
     else if (rec.rec === 'file-viewed') bundle.viewed[rec.path] = rec.hash
@@ -108,9 +140,9 @@ class ReviewBundleStore {
     return bundle
   }
 
-  setDiff(reviewId: string, diff: ReviewDiff): void {
-    this.append(reviewId, { id: DIFF_ID, rec: 'diff', diff }, (b) => {
-      b.diff = diff
+  setDiff(reviewId: string, prNumber: number, diff: ReviewDiff): void {
+    this.append(reviewId, { id: diffId(prNumber), rec: 'diff', diff, prNumber }, (b) => {
+      upsertDiff(b, prNumber, diff)
     })
   }
 
@@ -134,13 +166,13 @@ class ReviewBundleStore {
    * 파일의 "봤음" 표시를 켜거나(hash) 끈다(null).
    * 같은 id 로 덮어쓰므로 토글이 그대로 last-wins 로 풀린다.
    */
-  setFileViewed(reviewId: string, path: string, hash: string | null): void {
+  setFileViewed(reviewId: string, key: string, hash: string | null): void {
     const rec: ReviewRecord = hash
-      ? { id: viewedId(path), rec: 'file-viewed', path, hash }
-      : { id: viewedId(path), rec: 'file-unviewed', path }
+      ? { id: viewedId(key), rec: 'file-viewed', path: key, hash }
+      : { id: viewedId(key), rec: 'file-unviewed', path: key }
     this.append(reviewId, rec, (b) => {
-      if (hash) b.viewed[path] = hash
-      else delete b.viewed[path]
+      if (hash) b.viewed[key] = hash
+      else delete b.viewed[key]
     })
   }
 
@@ -198,4 +230,4 @@ export function getReviewBundles(): ReviewBundleStore {
 }
 
 // 테스트용 — Electron 없이 파싱 규칙만 검증할 수 있게 노출한다.
-export const __test = { parseJsonl, toBundle, serialize, DIFF_ID, viewedId }
+export const __test = { parseJsonl, toBundle, serialize, DIFF_ID, diffId, viewedId }

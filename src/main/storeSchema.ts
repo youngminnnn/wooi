@@ -31,7 +31,7 @@ const DEFAULT_MODEL = CLAUDE_DEFAULT_MODEL
  * 디스크 영속 형식의 현재 스키마 버전. 영속 데이터 모양이 바뀔 때마다 1 올리고,
  * MIGRATIONS 에 직전 버전 → 새 버전 변환 함수를 추가한다.
  */
-export const CURRENT_SCHEMA_VERSION = 21
+export const CURRENT_SCHEMA_VERSION = 22
 
 /**
  * v12 이하의 settings 모양. 그 시절엔 에이전트가 Claude 하나뿐이라 모델·effort·fast mode·
@@ -319,7 +319,8 @@ export const MIGRATIONS: Array<(raw: Record<string, unknown>) => Record<string, 
   // 돌았으므로 그대로 claude 로 채운다. 작성자는 알 길이 없어 비워 두는데, 그래도 위험하지 않다 —
   // 승인 차단은 모르면 막지 않는 쪽(=지금까지와 동일)으로 떨어지고, 제출 직전에 한 번 더 확인한다.
   (raw) => {
-    const reviews = ((raw.reviews as Partial<ReviewSession>[]) ?? []).map((r) => ({
+    // 이 시점의 리뷰는 PR 하나짜리 평면 레코드였다(v21 에서 layers 로 접힌다).
+    const reviews = ((raw.reviews as Array<Record<string, unknown>>) ?? []).map((r) => ({
       ...r,
       agentBackend: r.agentBackend ?? DEFAULT_AGENT_BACKEND,
       prAuthor: r.prAuthor ?? '',
@@ -407,8 +408,71 @@ export const MIGRATIONS: Array<(raw: Record<string, unknown>) => Record<string, 
   // v20 → v21: fan-out 그룹(같은 프롬프트로 동시에 만든 후보 묶음) 도입. 기존 워크스페이스는
   // 어떤 묶음에도 속하지 않는다 — 과거에 나란히 만든 것을 지금 와서 한 그룹으로 추측하면
   // 사용자가 만든 적 없는 "채택" 대상이 생기고, 채택은 형제를 아카이브하는 동작이다.
-  (raw) => ({ ...raw, fanoutGroups: [] })
+  (raw) => ({ ...raw, fanoutGroups: [] }),
+
+  // v21 → v22: 리뷰가 PR 하나가 아니라 **레이어 목록**을 본다(스택 리뷰).
+  // PR 단위였던 필드(번호·제목·head sha·워터마크·판정)를 원소가 하나인 layers 로 접는다 —
+  // 옛 리뷰는 그 자체로 "레이어가 하나인 스택" 이므로 정보를 잃지 않는다.
+  (raw) => {
+    const reviews = ((raw.reviews as Array<Record<string, unknown>>) ?? []).map((r) =>
+      foldReviewIntoLayer(r)
+    )
+    return { ...raw, reviews }
+  }
 ]
+
+/**
+ * PR 단위 필드를 원소 하나짜리 `layers` 로 접는다. 이미 `layers` 가 있으면 그대로 둔다.
+ *
+ * 마이그레이션과 normalizeShape 이 함께 쓴다 — 구버전 빌드가 최신 버전 파일에 이어서 쓰면
+ * 버전은 최신인데 레코드는 옛 모양이라 마이그레이션이 돌지 않는다(#267 과 같은 구멍).
+ * `layers` 가 비면 화면이 통째로 빈 리뷰를 그리므로 여기서 반드시 메워야 한다.
+ */
+function foldReviewIntoLayer(r: Record<string, unknown>): Record<string, unknown> {
+  if (Array.isArray(r.layers) && r.layers.length > 0) {
+    return typeof r.truncatedFiles === 'number' ? r : { ...r, truncatedFiles: 0 }
+  }
+  const {
+    prNumber,
+    prUrl,
+    prTitle,
+    prAuthor,
+    viewerIsAuthor,
+    headSha,
+    baseRefName,
+    lastSeenAt,
+    lastSeenHeadSha,
+    lastSubmission,
+    ...rest
+  } = r
+  // 번호조차 없는 레코드는 접을 것이 없다 — 빈 레이어 목록으로 두면 화면이 "레코드 없음" 으로
+  // 그리므로, 오히려 알아볼 수 있는 상태다.
+  if (typeof prNumber !== 'number') return { ...rest, layers: [], truncatedFiles: 0 }
+  return {
+    ...rest,
+    truncatedFiles: typeof r.truncatedFiles === 'number' ? r.truncatedFiles : 0,
+    layers: [
+      {
+        prNumber,
+        prUrl: typeof prUrl === 'string' ? prUrl : '',
+        prTitle: typeof prTitle === 'string' ? prTitle : '',
+        prAuthor: typeof prAuthor === 'string' ? prAuthor : '',
+        viewerIsAuthor: viewerIsAuthor === true,
+        headSha: typeof headSha === 'string' ? headSha : '',
+        // 옛 레코드는 head 브랜치 이름을 남기지 않았다. 프롬프트의 표시용일 뿐이라 비워 둔다.
+        headRefName: '',
+        baseRefName: typeof baseRefName === 'string' ? baseRefName : '',
+        merged: false,
+        lastSeenAt: typeof lastSeenAt === 'string' ? lastSeenAt : null,
+        lastSeenHeadSha: typeof lastSeenHeadSha === 'string' ? lastSeenHeadSha : '',
+        // 옛 레코드의 총평은 세션에 있고 그것이 곧 이 유일한 레이어의 총평이다. 복사하지 않고
+        // 비워 둔다 — 두 곳에 같은 문장이 있으면 제출 모달이 그것을 두 번 싣는다.
+        summary: '',
+        lastSubmission: (lastSubmission as Record<string, unknown> | null) ?? null
+      }
+    ]
+  }
+}
 
 /**
  * 디스크에 기록되는 형식 — 런타임 AppState 에 schemaVersion 을 더한 것.
@@ -456,7 +520,10 @@ export function normalizeShape(raw: Record<string, unknown>): Record<string, unk
   // fan-out 그룹도 같은 이유로 여기서 메운다. v21 이전 빌드가 최신 버전 파일에 이어서 쓰면
   // 이 배열이 통째로 사라지는데, 사이드바·비교 화면은 그것을 그냥 순회한다.
   const fanoutGroups = Array.isArray(raw.fanoutGroups) ? raw.fanoutGroups : []
-  return { ...raw, repos, workspaces, fanoutGroups }
+  const reviews = ((raw.reviews as Array<Record<string, unknown>>) ?? []).map((review) =>
+    foldReviewIntoLayer(review)
+  )
+  return { ...raw, repos, workspaces, fanoutGroups, reviews }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

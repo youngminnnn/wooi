@@ -1,4 +1,9 @@
-import type { ReviewArtifact, ReviewFindingInput, ReviewSeverity } from '@shared/types'
+import type {
+  ReviewArtifact,
+  ReviewFindingInput,
+  ReviewLayerSummary,
+  ReviewSeverity
+} from '@shared/types'
 
 /**
  * 에이전트가 뱉은 리뷰 결과를 우리 타입으로 좁힌다.
@@ -22,14 +27,38 @@ export function coerceArtifact(value: unknown): ReviewArtifact | null {
   const v = value as Record<string, unknown>
   const general = coerceFindings(v.general)
   const inline = coerceFindings(v.inline)
+  const stack = coerceFindings(v.stack)
   const hasReply = typeof v.reply === 'string' && v.reply.trim().length > 0
-  if (general === null && inline === null && typeof v.summary !== 'string' && !hasReply) return null
+  if (
+    general === null &&
+    inline === null &&
+    stack === null &&
+    typeof v.summary !== 'string' &&
+    !hasReply
+  ) {
+    return null
+  }
   return {
     summary: typeof v.summary === 'string' ? v.summary : '',
     reply: hasReply ? (v.reply as string) : '',
     general: general ?? [],
-    inline: inline ?? []
+    inline: inline ?? [],
+    stack: stack ?? [],
+    layers: coerceLayerSummaries(v.layers)
   }
+}
+
+function coerceLayerSummaries(value: unknown): ReviewLayerSummary[] {
+  if (!Array.isArray(value)) return []
+  const out: ReviewLayerSummary[] = []
+  for (const raw of value) {
+    if (!raw || typeof raw !== 'object') continue
+    const l = raw as Record<string, unknown>
+    const summary = typeof l.summary === 'string' ? l.summary.trim() : ''
+    if (!Number.isInteger(l.prNumber) || !summary) continue
+    out.push({ prNumber: l.prNumber as number, summary })
+  }
+  return out
 }
 
 function coerceFindings(value: unknown): ReviewFindingInput[] | null {
@@ -49,7 +78,15 @@ function coerceFindings(value: unknown): ReviewFindingInput[] | null {
       ...(typeof f.file === 'string' ? { file: f.file } : {}),
       ...(Number.isInteger(f.line) ? { line: f.line as number } : {}),
       ...(Number.isInteger(f.startLine) ? { startLine: f.startLine as number } : {}),
-      ...(f.side === 'LEFT' || f.side === 'RIGHT' ? { side: f.side } : {})
+      ...(f.side === 'LEFT' || f.side === 'RIGHT' ? { side: f.side } : {}),
+      ...(Number.isInteger(f.prNumber) ? { prNumber: f.prNumber as number } : {}),
+      ...(Array.isArray(f.prNumbers) && f.prNumbers.some(Number.isInteger)
+        ? {
+            stackPrNumbers: (f.prNumbers as unknown[]).filter((n): n is number =>
+              Number.isInteger(n)
+            )
+          }
+        : {})
     })
   }
   return out

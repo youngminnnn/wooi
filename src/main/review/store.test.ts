@@ -3,7 +3,7 @@ import type { ReviewActivityItem, ReviewDiff, ReviewFileDiff, ReviewFinding } fr
 import { fileDiffHash, isFileViewed, viewedFilePaths } from '@shared/reviewViewed'
 import { __test } from './store'
 
-const { parseJsonl, toBundle, serialize, DIFF_ID, viewedId } = __test
+const { parseJsonl, toBundle, serialize, DIFF_ID, diffId, viewedId } = __test
 
 const DIFF: ReviewDiff = { files: [] }
 
@@ -45,7 +45,7 @@ describe('사이드카 JSONL', () => {
       { id: 'a1', rec: 'activity', item: turn('a1', 'hello') }
     )
     const b = toBundle(parseJsonl(text))
-    expect(b.diff).toEqual(DIFF)
+    expect(b.diffs.map((d) => d.diff)).toEqual([DIFF])
     expect(b.findings.map((f) => f.id)).toEqual(['f1'])
     expect(b.activity.map((a) => a.id)).toEqual(['a1'])
   })
@@ -84,7 +84,8 @@ describe('사이드카 JSONL', () => {
         jsonl({ id: DIFF_ID, rec: 'diff', diff: DIFF }, { id: DIFF_ID, rec: 'diff', diff: next })
       )
     )
-    expect(b.diff?.files).toHaveLength(1)
+    expect(b.diffs).toHaveLength(1)
+    expect(b.diffs[0].diff.files).toHaveLength(1)
   })
 
   /** 크래시 도중 반쪽만 쓰인 줄이 남을 수 있다 — 그 한 줄 때문에 기록 전체를 잃으면 안 된다. */
@@ -99,7 +100,7 @@ describe('사이드카 JSONL', () => {
 
   it('빈 내용은 빈 번들', () => {
     const b = toBundle(parseJsonl(''))
-    expect(b).toEqual({ diff: null, findings: [], activity: [], viewed: {} })
+    expect(b).toEqual({ diffs: [], findings: [], activity: [], viewed: {} })
   })
 
   it('id 없는 줄은 무시한다', () => {
@@ -161,7 +162,7 @@ describe('파일 봤음 표시', () => {
 
     const changed = fileDiff('a.ts', 'a changed')
     expect(isFileViewed(b.viewed, changed)).toBe(false)
-    expect(viewedFilePaths(b.viewed, [changed])).toEqual(new Set())
+    expect(viewedFilePaths(b.viewed, [{ files: [changed] }])).toEqual(new Set())
   })
 
   it('경로가 같아도 다른 파일의 표시는 서로 건드리지 않는다', () => {
@@ -171,7 +172,9 @@ describe('파일 봤음 표시', () => {
       { id: viewedId('b.ts'), rec: 'file-viewed', path: 'b.ts', hash: fileDiffHash(B) },
       { id: viewedId('a.ts'), rec: 'file-unviewed', path: 'a.ts' }
     )
-    expect(viewedFilePaths(toBundle(parseJsonl(text)).viewed, [A, B])).toEqual(new Set(['b.ts']))
+    expect(viewedFilePaths(toBundle(parseJsonl(text)).viewed, [{ files: [A, B] }])).toEqual(
+      new Set(['b.ts'])
+    )
   })
 
   /** toBundle 주석이 경고하는 함정 — 종류를 안 가리면 새 레코드가 활동 타임라인에 샌다. */
@@ -212,5 +215,53 @@ describe('파일 봤음 표시', () => {
       additions
     })
     expect(fileDiffHash(bin(1))).not.toBe(fileDiffHash(bin(2)))
+  })
+})
+
+describe('레이어별 diff', () => {
+  const A = { ...DIFF, files: [{ ...DIFF.files[0], path: 'a.ts' }] }
+  const B = { ...DIFF, files: [{ ...DIFF.files[0], path: 'b.ts' }] }
+
+  it('레이어마다 자기 레코드를 갖고 순서를 지킨다', () => {
+    const b = toBundle(
+      parseJsonl(
+        jsonl(
+          { id: diffId(12), rec: 'diff', diff: A, prNumber: 12 },
+          { id: diffId(13), rec: 'diff', diff: B, prNumber: 13 }
+        )
+      )
+    )
+    expect(b.diffs.map((d) => d.prNumber)).toEqual([12, 13])
+  })
+
+  it('같은 레이어를 다시 받으면 그 레이어만 덮어쓴다', () => {
+    const b = toBundle(
+      parseJsonl(
+        jsonl(
+          { id: diffId(12), rec: 'diff', diff: A, prNumber: 12 },
+          { id: diffId(13), rec: 'diff', diff: A, prNumber: 13 },
+          { id: diffId(13), rec: 'diff', diff: B, prNumber: 13 }
+        )
+      )
+    )
+    expect(b.diffs).toHaveLength(2)
+    expect(b.diffs[1].diff.files[0].path).toBe('b.ts')
+  })
+
+  /**
+   * 옛 리뷰를 다시 돌리면 번호 없는 레코드와 번호 있는 레코드가 함께 남는다. 둘을 별개로 두면
+   * 같은 파일이 화면에 두 벌 그려진다 — 옛 리뷰는 레이어가 하나뿐이므로 대체가 맞다.
+   */
+  it('번호 없는 옛 레코드는 번호 붙은 레코드가 대체한다', () => {
+    const b = toBundle(
+      parseJsonl(
+        jsonl(
+          { id: DIFF_ID, rec: 'diff', diff: A },
+          { id: diffId(12), rec: 'diff', diff: B, prNumber: 12 }
+        )
+      )
+    )
+    expect(b.diffs).toHaveLength(1)
+    expect(b.diffs[0]).toEqual({ prNumber: 12, diff: B })
   })
 })

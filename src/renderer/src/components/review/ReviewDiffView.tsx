@@ -1,8 +1,25 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronDown, ChevronRight, FileMinus2, FilePen, FilePlus2, FileCode } from 'lucide-react'
-import type { DiffRow, ReviewFileDiff, ReviewFinding, ReviewSession } from '@shared/types'
+import {
+  ChevronDown,
+  ChevronRight,
+  FileMinus2,
+  FilePen,
+  FilePlus2,
+  FileCode,
+  Layers
+} from 'lucide-react'
+import type {
+  DiffRow,
+  ReviewFileDiff,
+  ReviewFinding,
+  ReviewLayerDiff,
+  ReviewSession
+} from '@shared/types'
+import { isStackReview } from '@shared/types'
+import { viewedKey } from '@shared/reviewViewed'
 import {
   countByFile,
+  fileKey,
   findingsForRow,
   indexFindingsByRow,
   type ReviewViewState
@@ -20,22 +37,23 @@ import ReviewViewedToggle from './ReviewViewedToggle'
 export default function ReviewDiffView({
   session,
   view,
-  files,
+  diffs,
   focusedId,
   onFocusFinding,
-  viewedPaths,
+  viewedKeys,
   onToggleViewed
 }: {
   session: ReviewSession
   view: ReviewViewState
-  files: ReviewFileDiff[]
+  /** 레이어별 diff(아래→위). PR 하나짜리 리뷰는 원소가 하나다. */
+  diffs: ReviewLayerDiff[]
   /** 지금 지목한 지적. 그 카드로 스크롤하고 테두리를 준다. */
   focusedId?: string | null
   /** 카드를 직접 눌렀을 때. 다음/이전 이동이 그 자리에서 이어지게 한다. */
   onFocusFinding?: (id: string) => void
-  /** 지금 diff 기준으로 "봤음" 인 경로들. 해시 계산을 화면당 한 번만 하려고 위에서 받는다. */
-  viewedPaths: Set<string>
-  onToggleViewed: (path: string) => void
+  /** 지금 diff 기준으로 "봤음" 인 파일 키들. 해시 계산을 화면당 한 번만 하려고 위에서 받는다. */
+  viewedKeys: Set<string>
+  onToggleViewed: (path: string, prNumber: number) => void
 }): React.JSX.Element {
   const index = useMemo(() => indexFindingsByRow(view.findings), [view.findings])
   const counts = useMemo(() => countByFile(view.findings), [view.findings])
@@ -46,16 +64,21 @@ export default function ReviewDiffView({
    * 화면은 그대로여서 이동이 먹히지 않은 것처럼 보인다).
    */
   const [openFiles, setOpenFiles] = useState<Record<string, boolean>>({})
-  const focusedFile = focusedId
-    ? view.findings.find((f) => f.id === focusedId)?.anchor?.file
+  const focusedAnchor = focusedId
+    ? view.findings.find((f) => f.id === focusedId)?.anchor
     : undefined
+  const stacked = isStackReview(session)
 
-  const isOpen = (file: ReviewFileDiff): boolean => {
-    const chosen = openFiles[file.path]
+  const isOpen = (file: ReviewFileDiff, prNumber: number): boolean => {
+    const key = fileKey(prNumber, file.path)
+    const chosen = openFiles[key]
     if (chosen !== undefined) return chosen
     // 손대지 않은 파일이라면, 지목된 코멘트가 그 안에 있을 때 펼쳐 준다. 직접 접은 파일은
     // 접힌 채로 둔다 — 사용자가 방금 내린 결정을 이동이 뒤집으면 안 된다.
-    return file.path === focusedFile || defaultOpen(file, counts[file.path] ?? 0)
+    const isFocusedFile =
+      focusedAnchor?.file === file.path &&
+      (focusedAnchor.prNumber === undefined || focusedAnchor.prNumber === prNumber)
+    return isFocusedFile || defaultOpen(file, counts[key] ?? 0)
   }
 
   // 카드가 화면에 놓인 뒤에 옮겨간다. 같은 코멘트를 두 번 끌고 가지 않도록 마지막 것을 기억한다.
@@ -77,23 +100,51 @@ export default function ReviewDiffView({
 
   return (
     <div className="space-y-3 p-3">
-      {files.map((file) => (
-        <FileBlock
-          key={file.path}
-          file={file}
-          session={session}
-          view={view}
-          index={index}
-          findingCount={counts[file.path] ?? 0}
-          focusedId={focusedId ?? null}
-          onFocusFinding={focusFromClick}
-          viewed={viewedPaths.has(file.path)}
-          onToggleViewed={() => onToggleViewed(file.path)}
-          open={isOpen(file)}
-          onToggle={() =>
-            setOpenFiles((prev) => ({ ...prev, [file.path]: !(prev[file.path] ?? isOpen(file)) }))
-          }
-        />
+      {diffs.map((layer, i) => (
+        <div key={layer.prNumber} className="space-y-3">
+          {/* 레이어 머리글. 스택 리뷰에서 지금 보고 있는 것이 몇 층인지가 diff 를 읽는 내내
+              보여야 한다 — 같은 파일이 여러 층에 나오기 때문이다. */}
+          {stacked && (
+            <div className="flex items-center gap-2 rounded-lg border border-[var(--accent-400)]/25 bg-[var(--accent-400)]/5 px-3 py-1.5">
+              <Layers size={13} className="shrink-0 text-[var(--accent-400)]" />
+              <span className="shrink-0 font-mono text-xs text-[var(--accent-300)]">
+                #{layer.prNumber}
+              </span>
+              <span className="min-w-0 flex-1 truncate text-xs text-neutral-300">
+                {session.layers.find((l) => l.prNumber === layer.prNumber)?.prTitle ?? ''}
+              </span>
+              <span className="shrink-0 text-[11px] text-neutral-500">
+                Layer {i + 1} of {diffs.length}
+              </span>
+            </div>
+          )}
+          {layer.diff.files.map((file) => {
+            const key = fileKey(layer.prNumber, file.path)
+            return (
+              <FileBlock
+                key={key}
+                file={file}
+                fileId={key}
+                prNumber={stacked ? layer.prNumber : undefined}
+                session={session}
+                view={view}
+                index={index}
+                findingCount={counts[key] ?? 0}
+                focusedId={focusedId ?? null}
+                onFocusFinding={focusFromClick}
+                viewed={viewedKeys.has(viewedKey(file.path, layer.prNumber))}
+                onToggleViewed={() => onToggleViewed(file.path, layer.prNumber)}
+                open={isOpen(file, layer.prNumber)}
+                onToggle={() =>
+                  setOpenFiles((prev) => ({
+                    ...prev,
+                    [key]: !(prev[key] ?? isOpen(file, layer.prNumber))
+                  }))
+                }
+              />
+            )
+          })}
+        </div>
       ))}
     </div>
   )
@@ -106,6 +157,8 @@ function defaultOpen(file: ReviewFileDiff, findingCount: number): boolean {
 
 function FileBlock({
   file,
+  fileId,
+  prNumber,
   session,
   view,
   index,
@@ -118,6 +171,10 @@ function FileBlock({
   onToggle
 }: {
   file: ReviewFileDiff
+  /** 파일 블록의 DOM id. 좌측 목록의 "이 파일로 이동" 이 이 값을 찾는다. */
+  fileId: string
+  /** 이 파일이 속한 레이어. 단일 PR 리뷰면 undefined(앵커에도 번호가 없다). */
+  prNumber?: number
   session: ReviewSession
   view: ReviewViewState
   index: Map<string, ReviewFinding[]>
@@ -130,10 +187,7 @@ function FileBlock({
   onToggle: () => void
 }): React.JSX.Element {
   return (
-    <div
-      className="rounded-lg border border-[var(--border)] overflow-hidden"
-      id={`file-${file.path}`}
-    >
+    <div className="rounded-lg border border-[var(--border)] overflow-hidden" id={`file-${fileId}`}>
       {/* 접기(헤더 전체)와 "봤음" 체크는 다른 행동이라 버튼을 나눈다 — 버튼 안에 버튼을 둘 수도 없다. */}
       <div className="w-full flex items-center gap-2 px-3 py-2 bg-[var(--bg-3)] hover:bg-[var(--surface)]">
         <button
@@ -180,7 +234,7 @@ function FileBlock({
                   row={row}
                   session={session}
                   view={view}
-                  findings={findingsForRow(index, file.path, row)}
+                  findings={findingsForRow(index, prNumber, file.path, row)}
                   focusedId={focusedId}
                   onFocusFinding={onFocusFinding}
                 />

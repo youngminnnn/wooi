@@ -340,12 +340,18 @@ export interface WooiApi {
     /** 시작 모달의 열린 PR 드롭다운. */
     listOpenPrs(repoId: string): Promise<ReviewPrCandidate[]>
     /**
+     * 이 PR 이 속한 스택(아래→위). 스택이 아니면 그 PR 하나만 담아 돌려준다.
+     * 시작 모달이 "스택 전체를 리뷰" 선택지를 띄울지 정하는 근거다.
+     */
+    resolveStack(repoId: string, prNumber: number): Promise<{ prNumbers: number[] }>
+    /**
      * 리뷰를 시작한다. PR 조회까지만 기다렸다가 reviewId 를 돌려주고, 워크트리 준비·에이전트
      * 실행·결과는 onReview 스트림으로 흘린다.
      */
     start(args: {
       repoId: string
-      prNumber: number
+      /** 리뷰할 PR 들, 아래(base 쪽)부터. 원소가 하나면 지금까지의 단일 PR 리뷰다. */
+      prNumbers: number[]
       prompt: string
       /** 생략하면 전역 기본 에이전트로 돈다. */
       agentBackend?: AgentBackendId
@@ -379,17 +385,25 @@ export interface WooiApi {
     setFileViewed(
       reviewId: string,
       path: string,
-      viewed: boolean
-    ): Promise<{ hash?: string; error?: string }>
+      viewed: boolean,
+      /** 어느 레이어의 파일인지. 스택에서는 같은 경로가 여러 레이어에 있어 구분해야 한다. */
+      prNumber?: number
+    ): Promise<{ key?: string; hash?: string; error?: string }>
     /** 워크트리만 지우고 결과·ref 는 남긴다(되살리기 가능). */
     archive(reviewId: string): Promise<void>
     /** 아카이브된 리뷰의 워크트리를 다시 만든다. */
     unarchive(reviewId: string): Promise<{ error?: string }>
     /**
-     * PR 리뷰를 제출한다. 개별 코멘트와 별개의 행위로, PR 전체에 대한 판정을 남긴다.
+     * 판정을 제출한다. 개별 코멘트와 별개의 행위로, PR 전체에 대한 판정을 남긴다.
      * request-changes·comment 는 본문이 필수다.
+     *
+     * GitHub 에는 스택을 한 번에 승인하는 API 가 없으므로 **레이어마다 한 건씩** 낸다.
+     * 성공한 레이어는 그 자리에서 기록되므로, 일부가 실패해도 나머지를 다시 낼 필요는 없다.
      */
-    submit(reviewId: string, verdict: ReviewVerdict, body: string): Promise<{ error?: string }>
+    submit(
+      reviewId: string,
+      entries: Array<{ prNumber: number; verdict: ReviewVerdict; body: string }>
+    ): Promise<{ submitted: number; errors: Array<{ prNumber: number; error: string }> }>
     /** 답글·새 커밋을 한 번 확인한다. 새 활동은 onReview 로 흘러온다. */
     poll(reviewId: string): Promise<void>
     /** 사용자가 리뷰를 확인했다 — 미확인 표시를 끈다. */

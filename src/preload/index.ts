@@ -143,6 +143,8 @@ const api: WooiApi = {
 
   review: {
     listOpenPrs: (repoId) => ipcRenderer.invoke(IPC.reviewListOpenPrs, repoId),
+    resolveStack: (repoId, prNumber) =>
+      ipcRenderer.invoke(IPC.reviewResolveStack, repoId, prNumber),
     start: (args) => ipcRenderer.invoke(IPC.reviewStart, args),
     cancel: (reviewId) => ipcRenderer.invoke(IPC.reviewCancel, reviewId),
     post: (reviewId, findingId, body) =>
@@ -150,12 +152,11 @@ const api: WooiApi = {
     dismiss: (reviewId, findingId) => ipcRenderer.invoke(IPC.reviewDismiss, reviewId, findingId),
     close: (reviewId) => ipcRenderer.invoke(IPC.reviewClose, reviewId),
     load: (reviewId) => ipcRenderer.invoke(IPC.reviewLoad, reviewId),
-    setFileViewed: (reviewId, path, viewed) =>
-      ipcRenderer.invoke(IPC.reviewSetFileViewed, reviewId, path, viewed),
+    setFileViewed: (reviewId, path, viewed, prNumber) =>
+      ipcRenderer.invoke(IPC.reviewSetFileViewed, reviewId, path, viewed, prNumber),
     archive: (reviewId) => ipcRenderer.invoke(IPC.reviewArchive, reviewId),
     unarchive: (reviewId) => ipcRenderer.invoke(IPC.reviewUnarchive, reviewId),
-    submit: (reviewId, verdict, body) =>
-      ipcRenderer.invoke(IPC.reviewSubmit, reviewId, verdict, body),
+    submit: (reviewId, entries) => ipcRenderer.invoke(IPC.reviewSubmit, reviewId, entries),
     poll: (reviewId) => ipcRenderer.invoke(IPC.reviewPoll, reviewId),
     markSeen: (reviewId) => ipcRenderer.invoke(IPC.reviewMarkSeen, reviewId),
     reply: (reviewId, commentId, body) =>

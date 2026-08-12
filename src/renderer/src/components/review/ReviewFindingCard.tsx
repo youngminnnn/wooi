@@ -5,6 +5,7 @@ import {
   CornerDownRight,
   ExternalLink,
   History,
+  Layers,
   Loader2,
   MoveVertical,
   Pencil,
@@ -36,7 +37,8 @@ export default function ReviewFindingCard({
   finding,
   compact = false,
   focused = false,
-  onFocus
+  onFocus,
+  layerLabel
 }: {
   /** 영속 레코드 — 게시 여부의 권위. */
   session: ReviewSession
@@ -49,6 +51,8 @@ export default function ReviewFindingCard({
   focused?: boolean
   /** 이 카드를 건드렸을 때 — 다음/이전 이동이 여기서부터 이어지게 한다. */
   onFocus?: () => void
+  /** 이 지적이 올라갈 PR 번호. 스택 리뷰에서만 준다 — 어디로 가는지 게시 전에 보여야 한다. */
+  layerLabel?: number
 }): React.JSX.Element {
   const toggleFinding = useStore((s) => s.toggleFinding)
   const editFinding = useStore((s) => s.editFinding)
@@ -101,6 +105,26 @@ export default function ReviewFindingCard({
               {severity.label}
             </span>
             <span className="text-sm font-medium text-neutral-100">{finding.title}</span>
+            {/* 스택 지적은 여러 층에 대한 말이고, 게시는 그중 가장 아래로 간다. 어느 층들인지
+                보이지 않으면 카드만 봐서는 무엇에 대한 지적인지 알 수 없다. */}
+            {(finding.stackPrNumbers?.length ?? 0) > 0 ? (
+              <span
+                className="flex items-center gap-1 rounded bg-[var(--accent-400)]/15 px-1.5 py-0.5 text-[10px] font-medium text-[var(--accent-300)]"
+                title={`About ${finding.stackPrNumbers!.map((n) => `#${n}`).join(', ')} — posted on #${finding.prNumber ?? finding.stackPrNumbers![0]}`}
+              >
+                <Layers size={10} />
+                {finding.stackPrNumbers!.map((n) => `#${n}`).join(' → ')}
+              </span>
+            ) : (
+              layerLabel !== undefined && (
+                <span
+                  className="rounded bg-[var(--surface-2)] px-1.5 py-0.5 font-mono text-[10px] text-neutral-400"
+                  title={`Posted on #${layerLabel}`}
+                >
+                  #{layerLabel}
+                </span>
+              )
+            )}
             {/* 상대가 그 줄을 이미 고쳐 코멘트가 밀려났다 — GitHub 이 Outdated 로 접어 두는 상태.
                 여기서 알리지 않으면 사용자는 아직 살아 있는 지적으로 착각한다. */}
             {comment?.outdated && (

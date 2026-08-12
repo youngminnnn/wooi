@@ -244,8 +244,18 @@ export function reviewWorktreePathFor(
   return join(wooiHome(), 'reviews', basename(repoPath), `pr-${prNumber}-${shortId(reviewId)}`)
 }
 
-/** 이 리뷰가 붙잡아 둘 로컬 ref 이름. refs/heads 밖이라 브랜치 목록을 어지럽히지 않는다. */
-export function reviewRefFor(reviewId: string): string {
+/**
+ * 이 리뷰의 레이어 하나가 붙잡아 둘 로컬 ref 이름. refs/heads 밖이라 브랜치 목록을 어지럽히지 않는다.
+ *
+ * 리뷰 하나가 PR 을 여러 개 볼 수 있으므로(스택 리뷰) 리뷰 id 아래에 PR 번호로 갈라 둔다.
+ * 덕분에 정리는 `refs/wooi/review/<id>/` 네임스페이스를 통째로 지우는 것으로 끝난다.
+ */
+export function reviewRefFor(reviewId: string, prNumber: number): string {
+  return `${reviewRefNamespace(reviewId)}/pr-${prNumber}`
+}
+
+/** 이 리뷰가 만든 모든 ref 의 접두사. */
+export function reviewRefNamespace(reviewId: string): string {
   return `refs/wooi/review/${reviewId}`
 }
 
@@ -255,24 +265,22 @@ function shortId(reviewId: string): string {
 }
 
 /**
- * PR head 를 이 리뷰 전용 로컬 ref 로 가져온다.
+ * 리뷰가 보는 PR 들의 head 를 이 리뷰 전용 로컬 ref 로 **한 번의 fetch 로** 가져온다.
  *
  * GitHub 은 **fork 에서 온 PR 도** base 저장소의 `refs/pull/<n>/head` 로 공개한다. 덕분에
  * fork 리모트를 추가하지 않고도 origin 하나로 모든 PR 을 받을 수 있다.
+ *
+ * 스택이면 refspec 을 여러 개 넘긴다 — PR 마다 fetch 를 돌리면 5레이어 스택의 준비 시간이
+ * 그대로 5배가 된다.
  */
-export async function fetchPrHead(
+export async function fetchPrHeads(
   repoPath: string,
-  prNumber: number,
+  prNumbers: number[],
   reviewId: string
 ): Promise<boolean> {
-  const ref = reviewRefFor(reviewId)
-  const r = await gitTry(repoPath, [
-    'fetch',
-    '--no-tags',
-    '--force',
-    'origin',
-    `+refs/pull/${prNumber}/head:${ref}`
-  ])
+  if (prNumbers.length === 0) return false
+  const refspecs = prNumbers.map((n) => `+refs/pull/${n}/head:${reviewRefFor(reviewId, n)}`)
+  const r = await gitTry(repoPath, ['fetch', '--no-tags', '--force', 'origin', ...refspecs])
   return r.ok
 }
 
@@ -295,6 +303,24 @@ export async function resetDetachedWorktree(worktreePath: string, ref: string): 
 /** 리뷰용 임시 ref 를 지운다. 이걸 지워야 해당 커밋이 GC 대상이 된다. */
 export async function deleteRef(repoPath: string, ref: string): Promise<void> {
   await gitTry(repoPath, ['update-ref', '-d', ref])
+}
+
+/**
+ * 이 리뷰가 만든 ref 를 전부 지운다.
+ *
+ * 레이어 목록을 인자로 받지 않고 **실제로 존재하는 ref 를 조회해** 지운다 — 레이어가 도중에
+ * 바뀌었거나(스택이 자랐거나) 준비 중에 실패했을 때 남은 ref 를 놓치지 않기 위함이다.
+ * 남으면 그 커밋이 영영 GC 되지 않는다.
+ */
+export async function deleteReviewRefs(repoPath: string, reviewId: string): Promise<void> {
+  const ns = reviewRefNamespace(reviewId)
+  const listed = await git(repoPath, ['for-each-ref', '--format=%(refname)', ns]).catch(() => '')
+  const refs = listed
+    .split('\n')
+    .map((r) => r.trim())
+    .filter(Boolean)
+  // 옛 리뷰는 네임스페이스 자체가 ref 였다(refs/wooi/review/<id>). 그것도 함께 지운다.
+  for (const ref of refs.length > 0 ? refs : [ns]) await deleteRef(repoPath, ref)
 }
 
 /** 사이드바 배지용 경량 상태 (브랜치, base 대비 ahead/behind, 변경 파일 수). */

@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import type { ReviewProgressItem } from '@shared/types'
 import { createCodexReader, strictSchema } from './runCodex'
 import { coerceArtifact } from './artifact'
-import { REVIEW_OUTPUT_SCHEMA } from './prompt'
+import { reviewOutputSchema } from './prompt'
 
 /**
  * `codex exec --json` 의 JSONL 을 읽는 부분만 떼어 검증한다.
@@ -180,7 +180,8 @@ describe('strictSchema', () => {
     for (const value of Object.values(node as Node)) eachObject(value, visit)
   }
 
-  const strict = strictSchema(REVIEW_OUTPUT_SCHEMA) as Node
+  const SINGLE_PR_SCHEMA = reviewOutputSchema(1)
+  const strict = strictSchema(SINGLE_PR_SCHEMA) as Node
   const props = strict.properties as Node
   const inlineItem = (props.inline as Node).items as Node
 
@@ -205,7 +206,7 @@ describe('strictSchema', () => {
   })
 
   it('원본 스키마는 건드리지 않는다 — Claude 쪽은 이 제약이 없다', () => {
-    expect(REVIEW_OUTPUT_SCHEMA.required).not.toContain('reply')
+    expect(SINGLE_PR_SCHEMA.required).not.toContain('reply')
   })
 
   it('codex 가 null 로 채워 보낸 선택 필드는 없는 값으로 읽힌다', () => {

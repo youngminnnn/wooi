@@ -263,6 +263,36 @@ export function isBranchStack(ws: Pick<Workspace, 'stack'>): boolean {
 }
 
 /**
+ * 모델 A(부모-자식 워크스페이스) 스택에서 이 워크스페이스가 속한 연결 요소를 뿌리부터 모은다.
+ * 뿌리까지 올라간 뒤 DFS 로 내려오므로 형제 가지도 함께 들어온다(스택 팝오버가 보는 것과 같은 집합).
+ *
+ * 스택 팝오버와 스택 리뷰가 **같은 함수**를 봐야 한다 — 화면이 보여 준 스택과 리뷰가 읽는 스택이
+ * 다르면, 사용자가 고른 것과 리뷰가 도는 것이 어긋난다.
+ */
+export function workspaceStackMembers<T extends { id: string; parentWorkspaceId: string | null }>(
+  all: T[],
+  id: string
+): T[] {
+  const byId = new Map(all.map((w) => [w.id, w]))
+  let root = byId.get(id)
+  if (!root) return []
+  const guard = new Set<string>()
+  while (root.parentWorkspaceId && byId.has(root.parentWorkspaceId) && !guard.has(root.id)) {
+    guard.add(root.id)
+    root = byId.get(root.parentWorkspaceId)!
+  }
+  const out: T[] = []
+  const collect = (wid: string): void => {
+    const w = byId.get(wid)
+    if (!w) return
+    out.push(w)
+    for (const c of all) if (c.parentWorkspaceId === wid) collect(c.id)
+  }
+  collect(root.id)
+  return out
+}
+
+/**
  * 이 워크스페이스의 PR 을 병합했을 때 캐스케이드가 rebase 후 force-push 하게 될 브랜치들.
  *
  * 병합 확인 창에서 이 목록을 먼저 보여 주기 위한 것이다 — 캐스케이드는 자식 브랜치의 리모트
@@ -1966,6 +1996,17 @@ export interface ReviewDiff {
   files: ReviewFileDiff[]
 }
 
+/**
+ * 한 레이어(= PR 1건)의 diff. 스택 리뷰는 이 묶음을 여러 개 들고 다닌다.
+ *
+ * `ReviewDiff` 자체는 손대지 않는다 — PR 하나를 줄 단위로 파싱하는 코드는 정확하고 테스트도
+ * 그쪽에 있다. 여러 PR 을 다루는 것은 그 위를 감싸는 그릇의 일이지 파서의 일이 아니다.
+ */
+export interface ReviewLayerDiff {
+  prNumber: number
+  diff: ReviewDiff
+}
+
 export type ReviewSeverity = 'blocker' | 'major' | 'minor' | 'nit' | 'question' | 'praise'
 
 /** 에이전트가 submit_review 도구로 제출한 지적 1건(앵커 검증 전 원본). */
@@ -1980,18 +2021,46 @@ export interface ReviewFindingInput {
   /** 여러 줄에 걸친 지적의 시작 줄. */
   startLine?: number
   side?: DiffSide
+  /**
+   * 이 지적이 어느 PR 의 diff 를 가리키는지. 스택 리뷰에서 **인라인 지적에는 필수**다 —
+   * 같은 경로·같은 줄 번호가 여러 레이어에 존재할 수 있어, 없으면 엉뚱한 PR 에 코멘트가 달린다.
+   * 레이어가 하나뿐인 리뷰에서는 생략해도 그 하나로 해석된다.
+   */
+  prNumber?: number
+  /**
+   * 스택 자체에 대한 지적이 관련짓는 PR 들(레이어 경계·순서·중복). 비어 있지 않으면 어느 한
+   * 줄에도 속하지 않는 지적이라는 뜻이다.
+   */
+  stackPrNumbers?: number[]
+}
+
+/** 레이어 1건에 대한 총평. 판정을 낼 때 그 PR 의 본문으로 쓴다. */
+export interface ReviewLayerSummary {
+  prNumber: number
+  summary: string
 }
 
 export interface ReviewArtifact {
+  /** 스택 전체(레이어가 하나면 그 PR)에 대한 총평. */
   summary: string
   /** 후속 턴의 대화형 답변. 최초 리뷰에서는 비어 있다. */
   reply: string
   general: ReviewFindingInput[]
   inline: ReviewFindingInput[]
+  /** 스택 자체에 대한 지적. 레이어가 하나인 리뷰에서는 비어 있다. */
+  stack: ReviewFindingInput[]
+  /** 레이어별 총평. 판정을 PR 마다 따로 내야 하므로 본문도 PR 마다 따로 필요하다. */
+  layers: ReviewLayerSummary[]
 }
 
 /** diff 의 실제 행에 확정 고정된 위치. 이 값이 있어야 인라인 코멘트를 걸 수 있다. */
 export interface ReviewAnchor {
+  /**
+   * 이 줄을 담고 있는 diff 의 PR. 코멘트는 반드시 이 PR 로 간다 — 다른 PR 에 걸면 422 이거나,
+   * 더 나쁘게는 같은 경로·줄이 우연히 존재해 **엉뚱한 PR 에 조용히 달린다**.
+   * 옛 레코드(단일 PR 리뷰)에는 없다. 그때는 세션의 유일한 레이어를 뜻한다.
+   */
+  prNumber?: number
   file: string
   side: DiffSide
   line: number
@@ -2007,6 +2076,16 @@ export interface ReviewFinding {
   title: string
   body: string
   anchor: ReviewAnchor | null
+  /**
+   * 이 지적이 게시될 PR. 인라인이면 `anchor.prNumber` 와 같고, 전반 지적이면 타임라인 코멘트가
+   * 올라갈 PR 이다. 옛 레코드에는 없다 — 그때는 세션의 유일한 레이어.
+   */
+  prNumber?: number
+  /**
+   * 스택 자체에 대한 지적이 관련짓는 PR 들(아래→위). 비어 있지 않으면 화면에서 따로 묶어
+   * 보여주고, 게시는 그중 **가장 아래 레이어**로 간다(먼저 바뀌어야 하는 쪽).
+   */
+  stackPrNumbers?: number[]
 }
 
 export type ReviewStatus = 'preparing' | 'running' | 'done' | 'error' | 'cancelled'
@@ -2044,6 +2123,11 @@ export interface PostedComment {
   commentId: number
   htmlUrl: string
   kind: ReviewCommentKind
+  /**
+   * 이 코멘트가 달린 PR. 답글 폴링과 outdated 판정이 PR 마다 따로 돌므로, 어느 응답과 대조해야
+   * 하는지 알려면 필요하다. 옛 레코드에는 없다 — 그때는 세션의 유일한 레이어.
+   */
+  prNumber?: number
   /** ISO 8601. 이 이후에 달린 남의 코멘트만 새 활동으로 본다. */
   createdAt: string
   /**
@@ -2078,21 +2162,14 @@ export interface ReviewSession {
    */
   model: string | null
   effort: EffortSetting | null
-  prNumber: number
-  prUrl: string
-  prTitle: string
-  /** PR 작성자의 GitHub 로그인. 자기 PR 인지 판단하는 근거다. */
-  prAuthor: string
   /**
-   * 내가 쓴 PR 인가. GitHub 은 자기 PR 을 승인하거나 변경 요청할 수 없게 막으므로, 이 값이
-   * true 면 판정 선택지에서 그 둘을 아예 뺀다(눌러 보고 GraphQL 에러를 받는 대신).
-   *
-   * 시작 시점에 한 번 계산해 둔다. 작성자도 내 계정도 리뷰 도중에 바뀌지 않는다.
+   * 이 리뷰가 보는 레이어들(아래→위). **PR 하나짜리 리뷰는 원소가 하나인 스택이다** —
+   * `workspaceStack()` 이 스택이 아닌 워크스페이스에 단일 엔트리를 합성해 주는 것과 같은 규칙이라,
+   * 매니저·프롬프트·앵커링·화면이 분기 없이 한 경로로 돈다.
    */
-  viewerIsAuthor: boolean
-  /** 인라인 코멘트의 commit_id 로 쓰인다. */
-  headSha: string
-  baseRefName: string
+  layers: ReviewLayer[]
+  /** 컨텍스트 예산에 못 들어가 프롬프트에서 이름만 나열된 파일 수. 0 이 아니면 화면이 알린다. */
+  truncatedFiles: number
   /** 리뷰를 시작할 때 사용자가 쓴 최초 프롬프트. */
   prompt: string
   status: ReviewStatus
@@ -2108,14 +2185,71 @@ export interface ReviewSession {
   /** 후속 턴을 같은 맥락으로 이어 붙이기 위한 SDK 세션 id. */
   agentSessionId: string | null
   postedComments: PostedComment[]
+  /** 아직 확인하지 않은 새 활동(답글·커밋)이 있는지 — 사이드바 점. */
+  unread: boolean
+}
+
+/**
+ * 스택 리뷰가 보는 레이어 1건 = PR 1건.
+ *
+ * 세션이 하나여도 **GitHub 을 향한 상태는 PR 마다 따로**다 — 인라인 코멘트의 commit_id,
+ * 자기 PR 차단, 판정 제출, 답글 워터마크가 모두 PR 단위이기 때문이다. 그것들이 여기 모여 있다.
+ */
+export interface ReviewLayer {
+  prNumber: number
+  prUrl: string
+  prTitle: string
+  /** PR 작성자의 GitHub 로그인. 자기 PR 인지 판단하는 근거다. */
+  prAuthor: string
+  /**
+   * 내가 쓴 PR 인가. GitHub 은 자기 PR 을 승인하거나 변경 요청할 수 없게 막으므로, 이 값이
+   * true 면 판정 선택지에서 그 둘을 아예 뺀다(눌러 보고 GraphQL 에러를 받는 대신).
+   *
+   * **레이어마다 따로** 판정한다 — 둘이 함께 쌓은 스택이면 내 것과 남의 것이 섞여 있다.
+   */
+  viewerIsAuthor: boolean
+  /** 인라인 코멘트의 commit_id 로 쓰인다. */
+  headSha: string
+  headRefName: string
+  baseRefName: string
+  /**
+   * 이 레이어의 PR 이 병합됐는가. 병합돼도 레코드에서 빼지 않는다 — 거기 단 코멘트와 지적은
+   * 그대로 기록이다. 대신 폴링·재조회 대상에서만 빠진다.
+   */
+  merged: boolean
   /** 답글 폴링 워터마크(ISO). 이보다 뒤에 생긴 남의 코멘트만 새 활동으로 본다. */
   lastSeenAt: string | null
   /** 마지막으로 확인한 PR head sha. 달라지면 새 커밋이 올라온 것이다. */
   lastSeenHeadSha: string
-  /** 아직 확인하지 않은 새 활동(답글·커밋)이 있는지 — 사이드바 점. */
-  unread: boolean
-  /** 마지막으로 제출한 리뷰. 화면의 판정 칩이 이 값을 본다. */
+  /**
+   * 이 레이어 하나에 대한 총평. 판정을 PR 마다 따로 내야 하므로 본문도 PR 마다 필요하다.
+   * 세션의 `summary`(스택 전체)와 같은 규칙으로, 제출하면 비운다.
+   */
+  summary: string
+  /** 이 PR 에 마지막으로 제출한 판정. 제출은 PR 마다 따로 나가므로 기록도 따로 남는다. */
   lastSubmission: ReviewSubmission | null
+}
+
+/** 스택의 맨 위 레이어. 리뷰의 이름·워크트리 기준이 된다(맨 위가 가장 늦게 병합돼 오래 남는다). */
+export function stackHead(session: Pick<ReviewSession, 'layers'>): ReviewLayer | undefined {
+  return session.layers[session.layers.length - 1]
+}
+
+/**
+ * PR 번호로 레이어를 찾는다. 번호를 모르면(옛 레코드의 앵커·코멘트) **맨 위**로 떨어진다 —
+ * 옛 레코드는 레이어가 하나뿐이라 그것이 곧 유일한 레이어다.
+ */
+export function layerFor(
+  session: Pick<ReviewSession, 'layers'>,
+  prNumber: number | undefined
+): ReviewLayer | undefined {
+  if (prNumber === undefined) return stackHead(session)
+  return session.layers.find((l) => l.prNumber === prNumber)
+}
+
+/** 리뷰가 스택인가(레이어 2개 이상). `isBranchStack` 과 같은 결의 질문이다. */
+export function isStackReview(session: Pick<ReviewSession, 'layers'>): boolean {
+  return session.layers.length > 1
 }
 
 /**
@@ -2166,14 +2300,22 @@ export type ReviewActivityItem =
       /** 인라인 답글일 때의 위치. line 은 diff 에서 밀려나면 null 일 수 있다. */
       path?: string
       line?: number | null
+      /** 어느 레이어에서 온 답글인지. 없으면 세션의 유일한 레이어(옛 레코드). */
+      prNumber?: number
       ts: number
     }
-  | { id: string; kind: 'commits'; headSha: string; ts: number }
+  | { id: string; kind: 'commits'; headSha: string; prNumber?: number; ts: number }
+  /**
+   * 아래 레이어에 새 커밋이 올라가 위쪽이 통째로 rebase 됐지만 **내용은 그대로**인 경우.
+   * 레이어마다 "새 커밋" 을 하나씩 띄우면 진짜 바뀐 것이 그 소음에 묻힌다.
+   */
+  | { id: string; kind: 'restack'; prNumbers: number[]; causedBy: number; ts: number }
   | { id: string; kind: 'error'; text: string; ts: number }
 
 /** 리뷰 화면을 열 때 사이드카에서 한 번에 읽어오는 덩치 큰 부분. */
 export interface ReviewBundle {
-  diff: ReviewDiff | null
+  /** 레이어별 diff(아래→위). PR 하나짜리 리뷰는 원소가 하나다. */
+  diffs: ReviewLayerDiff[]
   findings: ReviewFinding[]
   activity: ReviewActivityItem[]
   /**
@@ -2185,7 +2327,7 @@ export interface ReviewBundle {
 
 export type ReviewEvent =
   | { type: 'status'; status: ReviewStatus }
-  | { type: 'diff'; diff: ReviewDiff }
+  | { type: 'diff'; diffs: ReviewLayerDiff[] }
   | { type: 'progress'; item: ReviewProgressItem }
   | { type: 'findings'; findings: ReviewFinding[] }
   | { type: 'activity'; item: ReviewActivityItem }
@@ -2345,6 +2487,8 @@ export const IPC = {
 
   /** 리뷰 시작 모달의 열린 PR 목록(제목·작성자 포함). */
   reviewListOpenPrs: 'review:listOpenPrs',
+  /** PR 번호에서 그 PR 이 속한 스택을 복원한다(시작 모달의 "스택 전체" 선택지). */
+  reviewResolveStack: 'review:resolveStack',
   /** PR 리뷰를 시작한다. 즉시 reviewId 를 돌려주고 나머지는 evtReview 로 흘린다. */
   reviewStart: 'review:start',
   /** 실행 중인 리뷰를 중단한다. */

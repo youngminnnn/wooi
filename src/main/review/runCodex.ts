@@ -7,8 +7,7 @@ import { codexEffort, execCodex } from '../codex/exec'
 import { detectCodex } from '../codex/executable'
 import { log } from '../logger'
 import { coerceArtifact, describeArg, extractFencedJson, truncate } from './artifact'
-import { REVIEW_OUTPUT_SCHEMA } from './prompt'
-import type { ReviewRunDeps, ReviewRunResult } from './run'
+import { schemaFor, type BackendReviewResult, type ReviewRunDeps } from './run'
 
 /**
  * Codex 로 리뷰를 돌린다.
@@ -25,7 +24,7 @@ const SANDBOX = 'read-only'
 export async function runCodexReview(
   deps: ReviewRunDeps,
   prompt: string
-): Promise<ReviewRunResult> {
+): Promise<BackendReviewResult> {
   const install = await detectCodex()
   if (!install.usable || !install.path) {
     return {
@@ -43,7 +42,7 @@ export async function runCodexReview(
   const lastMessagePath = join(dir, 'last-message.txt')
 
   try {
-    await writeFile(schemaPath, JSON.stringify(strictSchema(REVIEW_OUTPUT_SCHEMA)), 'utf8')
+    await writeFile(schemaPath, JSON.stringify(strictSchema(schemaFor(deps))), 'utf8')
 
     // resume 는 -s/-C 를 받지 않는다(하위 명령이라 옵션 집합이 다르다) — 샌드박스는 -c 로 주고
     // 작업 디렉터리는 자식 프로세스의 cwd 로 정한다.

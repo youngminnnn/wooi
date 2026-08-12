@@ -38,11 +38,18 @@ import {
   fanoutSlotName,
   workspaceDisplayName
 } from '@shared/types'
-import { fileDiffHash, isFileViewed } from '@shared/reviewViewed'
+import { fileDiffHash, isFileViewed, viewedKey } from '@shared/reviewViewed'
 import { playNotification } from './lib/sound'
 import { carrySuggestShownFlag, readUiFlag, setUiFlag } from './lib/uiFlags'
 import { openRepoSettings } from './lib/repoSettings'
-import { bodyOf, emptyView, isPosted, type ReviewTab, type ReviewViewState } from './lib/review'
+import {
+  bodyOf,
+  emptyView,
+  isPosted,
+  reviewTitle,
+  type ReviewTab,
+  type ReviewViewState
+} from './lib/review'
 import {
   composeDiffCommentsMessage,
   type DiffComment,
@@ -570,7 +577,8 @@ interface UIState {
   /** 리뷰를 시작하고 전체 화면 모드로 진입한다. 실패하면 토스트만 띄우고 진입하지 않는다. */
   startReview: (args: {
     repoId: string
-    prNumber: number
+    /** 리뷰할 PR 들, 아래(base 쪽)부터. 원소가 하나면 지금까지의 단일 PR 리뷰다. */
+    prNumbers: number[]
     prompt: string
     agentBackend: AgentBackendId
     /** 생략하면 그 에이전트의 전역 기본값으로 돈다(모달의 "Default"). */
@@ -601,8 +609,14 @@ interface UIState {
   dismissFinding: (reviewId: string, findingId: string) => Promise<void>
   /** 선택된(또는 지정된) 지적을 순서대로 개별 코멘트로 게시한다. */
   postFindings: (reviewId: string, findingIds: string[]) => Promise<{ ok: number; failed: number }>
-  /** PR 전체 판정을 제출한다. 성공하면 true. */
-  submitReview: (reviewId: string, verdict: ReviewVerdict, body: string) => Promise<boolean>
+  /**
+   * 판정을 제출한다. 스택이면 레이어마다 한 건씩 나가므로 계획을 통째로 넘긴다.
+   * 전부 성공했을 때만 true(일부만 성공하면 화면을 열어 둔 채 나머지를 다시 낼 수 있게 한다).
+   */
+  submitReview: (
+    reviewId: string,
+    entries: Array<{ prNumber: number; verdict: ReviewVerdict; body: string }>
+  ) => Promise<boolean>
   /** 활성 리뷰들의 답글·새 커밋을 한 번 확인한다. */
   pollReviews: () => Promise<void>
   /** 인라인 스레드에 답장한다. 성공하면 true. */
@@ -611,8 +625,8 @@ interface UIState {
   followUpReview: (reviewId: string, text: string) => Promise<void>
   /** 오른쪽 패널의 탭을 바꾼다(리뷰별로 기억된다). */
   setReviewTab: (reviewId: string, tab: ReviewTab) => void
-  /** 파일 1건의 "봤음" 표시를 뒤집는다. */
-  toggleFileViewed: (reviewId: string, path: string) => Promise<void>
+  /** 파일 1건의 "봤음" 표시를 뒤집는다. 스택에서는 같은 경로가 여러 레이어에 있어 PR 도 받는다. */
+  toggleFileViewed: (reviewId: string, path: string, prNumber?: number) => Promise<void>
 }
 
 let initialized = false
@@ -1115,7 +1129,7 @@ export const useStore = create<UIState>((set, get) => ({
           case 'status':
             return {}
           case 'diff':
-            return { diff: event.diff }
+            return { diffs: event.diffs }
           case 'progress':
             // 진행 로그는 화면 표시용이라 무한정 쌓아둘 이유가 없다.
             return { progress: [...v.progress, event.item].slice(-200) }
@@ -2127,14 +2141,14 @@ export const useStore = create<UIState>((set, get) => ({
 
   // ── PR 리뷰 모드 ─────────────────────────────────────────────────────────
 
-  startReview: async ({ repoId, prNumber, prompt, agentBackend, model, effort }) => {
+  startReview: async ({ repoId, prNumbers, prompt, agentBackend, model, effort }) => {
     // PR 조회도 코멘트 게시도 gh 를 쓰므로 다른 PR 기능과 같은 지연 게이트를 태운다.
     await get().requireGithub('Reviewing a pull request needs GitHub.', async () => {
       // model·effort 는 **키를 아예 빼야** main 이 전역 기본값으로 해석한다(null 은 "에이전트가
       // 알아서" 라는 다른 뜻이다).
       const res = await window.api.review.start({
         repoId,
-        prNumber,
+        prNumbers,
         prompt,
         agentBackend,
         ...(model !== undefined ? { model } : {}),
@@ -2162,7 +2176,7 @@ export const useStore = create<UIState>((set, get) => ({
     const bundle = await window.api.review.load(reviewId)
     patchReview(set, get, reviewId, (v) => ({
       loaded: true,
-      diff: bundle.diff ?? v.diff,
+      diffs: bundle.diffs.length > 0 ? bundle.diffs : v.diffs,
       findings: bundle.findings,
       activity: bundle.activity,
       viewed: bundle.viewed ?? {}
@@ -2198,7 +2212,7 @@ export const useStore = create<UIState>((set, get) => ({
     const session = get().app?.reviews.find((r) => r.id === reviewId)
     if (!session || session.archived) return
     const ok = await get().confirm({
-      title: `Archive review of #${session.prNumber}?`,
+      title: `Archive review of ${reviewTitle(session).number ? `#${reviewTitle(session).number}` : 'this pull request'}?`,
       body: 'Its worktree is removed, but the findings and conversation are kept. You can unarchive it later.',
       confirmLabel: 'Archive',
       danger: true
@@ -2301,20 +2315,22 @@ export const useStore = create<UIState>((set, get) => ({
     return { ok, failed }
   },
 
-  submitReview: async (reviewId, verdict, body) => {
-    const res = await window.api.review.submit(reviewId, verdict, body)
-    if (res.error) {
-      get().pushToast('error', res.error)
-      return false
+  submitReview: async (reviewId, entries) => {
+    const res = await window.api.review.submit(reviewId, entries)
+    // 레이어마다 따로 나가므로 **일부만 성공할 수 있다**. 성공한 것은 이미 기록됐으니
+    // 실패한 쪽만 말해 주고, 화면은 열어 둔 채로 둔다(다시 내면 나머지만 나간다).
+    for (const e of res.errors) {
+      get().pushToast('error', e.prNumber ? `#${e.prNumber}: ${e.error}` : e.error)
     }
-    const label =
-      verdict === 'approve'
-        ? 'Approved'
-        : verdict === 'request-changes'
-          ? 'Requested changes'
-          : 'Commented'
-    get().pushToast('success', `${label} on the pull request.`)
-    return true
+    if (res.submitted > 0) {
+      get().pushToast(
+        'success',
+        res.submitted === 1
+          ? 'Submitted the review.'
+          : `Submitted ${res.submitted} reviews across the stack.`
+      )
+    }
+    return res.errors.length === 0
   },
 
   pollReviews: async () => {
@@ -2323,7 +2339,8 @@ export const useStore = create<UIState>((set, get) => ({
     for (const r of reviews) {
       // 추적할 게 없으면 건너뛴다. 코멘트를 안 달았어도 리뷰를 제출했다면 **새 커밋** 은
       // 계속 봐야 한다 — 내 지적에 대한 응답이 커밋으로 오기 때문이다.
-      if (r.archived || (r.postedComments.length === 0 && !r.lastSubmission)) continue
+      if (r.archived) continue
+      if (r.postedComments.length === 0 && !r.layers.some((l) => l.lastSubmission)) continue
       await window.api.review.poll(r.id)
     }
   },
@@ -2348,22 +2365,25 @@ export const useStore = create<UIState>((set, get) => ({
     if (tab === 'activity') void window.api.review.markSeen(reviewId)
   },
 
-  toggleFileViewed: async (reviewId, path) => {
+  toggleFileViewed: async (reviewId, path, prNumber) => {
     const view = get().reviewViews[reviewId]
-    const file = view?.diff?.files.find((f) => f.path === path)
+    const layer =
+      prNumber === undefined ? view?.diffs[0] : view?.diffs.find((d) => d.prNumber === prNumber)
+    const file = layer?.diff.files.find((f) => f.path === path)
     if (!view || !file) return
-    const on = !isFileViewed(view.viewed, file)
+    const on = !isFileViewed(view.viewed, file, layer?.prNumber)
+    const key = viewedKey(path, layer?.prNumber)
 
     // 체크박스는 누른 즉시 뒤집혀야 한다 — 먼저 화면을 바꾸고, 실패하면 되돌린다.
-    const wasHash = view.viewed[path] ?? null
+    const wasHash = view.viewed[key] ?? null
     patchReview(set, get, reviewId, (v) => ({
-      viewed: withViewed(v.viewed, path, on ? fileDiffHash(file) : null)
+      viewed: withViewed(v.viewed, key, on ? fileDiffHash(file) : null)
     }))
 
-    const res = await window.api.review.setFileViewed(reviewId, path, on)
+    const res = await window.api.review.setFileViewed(reviewId, path, on, layer?.prNumber)
     if (res.error) {
       get().pushToast('error', res.error)
-      patchReview(set, get, reviewId, (v) => ({ viewed: withViewed(v.viewed, path, wasHash) }))
+      patchReview(set, get, reviewId, (v) => ({ viewed: withViewed(v.viewed, key, wasHash) }))
       return
     }
     // main 이 자기 diff 로 계산한 지문이 권위다 — 새 커밋이 방금 들어와 이쪽 diff 가 한 박자
@@ -2371,7 +2391,7 @@ export const useStore = create<UIState>((set, get) => ({
     const hash = res.hash
     if (hash) {
       patchReview(set, get, reviewId, (v) =>
-        v.viewed[path] === undefined ? {} : { viewed: withViewed(v.viewed, path, hash) }
+        v.viewed[key] === undefined ? {} : { viewed: withViewed(v.viewed, key, hash) }
       )
     }
   }

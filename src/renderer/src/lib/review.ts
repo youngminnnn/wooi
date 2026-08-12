@@ -3,14 +3,17 @@ import type {
   DiffSide,
   PostedComment,
   ReviewActivityItem,
-  ReviewDiff,
   ReviewFinding,
+  ReviewLayer,
+  ReviewLayerDiff,
   ReviewPrCandidate,
   ReviewProgressItem,
   ReviewSession,
   ReviewSeverity,
-  ReviewStatus
+  ReviewStatus,
+  ReviewVerdict
 } from '@shared/types'
+import { stackHead } from '@shared/types'
 
 /** 오른쪽 패널에서 보고 있던 탭. */
 export type ReviewTab = 'findings' | 'activity'
@@ -25,7 +28,8 @@ export type ReviewTab = 'findings' | 'activity'
 export interface ReviewViewState {
   /** 사이드카를 한 번이라도 읽었는지. false 면 로딩 표시. */
   loaded: boolean
-  diff: ReviewDiff | null
+  /** 레이어별 diff(아래→위). PR 하나짜리 리뷰는 원소가 하나다. */
+  diffs: ReviewLayerDiff[]
   findings: ReviewFinding[]
   activity: ReviewActivityItem[]
   /** 실행 중 에이전트 활동. 영속하지 않는다(끝나면 의미가 없다). */
@@ -56,7 +60,7 @@ export interface ReviewViewState {
 export function emptyView(): ReviewViewState {
   return {
     loaded: false,
-    diff: null,
+    diffs: [],
     findings: [],
     activity: [],
     progress: [],
@@ -151,12 +155,15 @@ export function selectionSummary(session: ReviewSession, view: ReviewViewState):
  *
  * 문맥 행은 RIGHT/LEFT 양쪽 번호를 모두 갖는다. LEFT 로 앵커된 지적도 같은 행 아래에 보여야
  * 하므로 두 키 모두로 조회한다.
+ *
+ * 키에 **PR 번호가 들어간다** — 스택에서는 같은 경로·같은 줄이 여러 레이어에 있고, 그 둘은
+ * 서로 다른 코드다. 번호를 빼면 아래 레이어의 지적이 위 레이어의 같은 줄 아래에도 그려진다.
  */
 export function indexFindingsByRow(findings: ReviewFinding[]): Map<string, ReviewFinding[]> {
   const map = new Map<string, ReviewFinding[]>()
   for (const f of findings) {
     if (!f.anchor) continue
-    const key = rowKey(f.anchor.file, f.anchor.side, f.anchor.line)
+    const key = rowKey(f.anchor.prNumber, f.anchor.file, f.anchor.side, f.anchor.line)
     const list = map.get(key)
     if (list) list.push(f)
     else map.set(key, [f])
@@ -164,40 +171,116 @@ export function indexFindingsByRow(findings: ReviewFinding[]): Map<string, Revie
   return map
 }
 
-export function rowKey(file: string, side: DiffSide, line: number): string {
-  return `${file} ${side} ${line}`
+export function rowKey(
+  prNumber: number | undefined,
+  file: string,
+  side: DiffSide,
+  line: number
+): string {
+  return `${prNumber ?? ''} ${file} ${side} ${line}`
 }
 
 /** 이 행에 걸린 지적들(문맥 행이면 양쪽 면 모두 확인). */
 export function findingsForRow(
   index: Map<string, ReviewFinding[]>,
+  prNumber: number | undefined,
   file: string,
   row: DiffRow
 ): ReviewFinding[] {
   const out: ReviewFinding[] = []
-  if (row.newLine !== null) out.push(...(index.get(rowKey(file, 'RIGHT', row.newLine)) ?? []))
-  if (row.oldLine !== null) out.push(...(index.get(rowKey(file, 'LEFT', row.oldLine)) ?? []))
+  if (row.newLine !== null) {
+    out.push(...(index.get(rowKey(prNumber, file, 'RIGHT', row.newLine)) ?? []))
+  }
+  if (row.oldLine !== null) {
+    out.push(...(index.get(rowKey(prNumber, file, 'LEFT', row.oldLine)) ?? []))
+  }
   return out
 }
 
 /**
- * diff 에 걸린 지적을 **화면에 보이는 순서**(파일 순 → 줄 순)로 세운다.
+ * diff 에 걸린 지적을 **화면에 보이는 순서**(레이어 순 → 파일 순 → 줄 순)로 세운다.
  *
  * 다음/이전 코멘트로 건너뛰는 순서는 눈이 훑는 순서와 같아야 한다 — 도착한 순서(findings 배열)
  * 대로 뛰면 위아래로 튀어 다녀 어디까지 봤는지 알 수 없다. diff 에 없는 파일의 지적은
  * 화면에 자리가 없으므로 목록에서 뺀다.
  */
 export function orderedAnchoredFindings(
-  diff: ReviewDiff | null,
+  diffs: ReviewLayerDiff[],
   findings: ReviewFinding[]
 ): ReviewFinding[] {
-  const fileRank = new Map<string, number>()
-  diff?.files.forEach((f, i) => fileRank.set(f.path, i))
+  const rank = new Map<string, number>()
+  let n = 0
+  for (const layer of diffs) {
+    for (const f of layer.diff.files) rank.set(`${layer.prNumber} ${f.path}`, n++)
+  }
+  const rankOf = (f: ReviewFinding): number | undefined =>
+    rank.get(`${f.anchor!.prNumber ?? diffs[0]?.prNumber ?? ''} ${f.anchor!.file}`) ??
+    // 옛 레코드의 앵커에는 PR 번호가 없다. 레이어가 하나라면 그 레이어의 파일이 맞다.
+    (diffs.length === 1 ? rank.get(`${diffs[0].prNumber} ${f.anchor!.file}`) : undefined)
   return findings
-    .filter((f) => f.anchor && fileRank.has(f.anchor.file))
+    .filter((f) => f.anchor && rankOf(f) !== undefined)
     .sort((a, b) => {
-      const byFile = fileRank.get(a.anchor!.file)! - fileRank.get(b.anchor!.file)!
+      const byFile = rankOf(a)! - rankOf(b)!
       return byFile !== 0 ? byFile : a.anchor!.line - b.anchor!.line
+    })
+}
+
+/** 스택 지적(어느 줄에도 속하지 않고 레이어 사이의 관계에 대한 것). 화면이 따로 묶어 보여준다. */
+export function isStackFinding(finding: ReviewFinding): boolean {
+  return !finding.anchor && (finding.stackPrNumbers?.length ?? 0) > 0
+}
+
+/** 리뷰의 이름. 스택이면 맨 위 PR 을 쓰고 몇 층인지 덧붙인다. */
+export function reviewTitle(session: ReviewSession): { number: number; title: string } {
+  const head = stackHead(session)
+  return { number: head?.prNumber ?? 0, title: head?.prTitle ?? 'Pull request' }
+}
+
+/** 지적이 걸린 레이어. 못 찾으면 맨 위(옛 레코드는 레이어가 하나뿐이다). */
+export function layerOfFinding(
+  session: ReviewSession,
+  finding: ReviewFinding
+): ReviewLayer | undefined {
+  const n = finding.anchor?.prNumber ?? finding.prNumber
+  if (n === undefined) return stackHead(session)
+  return session.layers.find((l) => l.prNumber === n) ?? stackHead(session)
+}
+
+/** 제출 모달의 한 줄 — PR 하나에 낼 판정과 본문. */
+export interface SubmitPlanRow {
+  layer: ReviewLayer
+  verdict: ReviewVerdict
+  body: string
+  /** 자기 PR 이라 승인·변경 요청을 낼 수 없다. */
+  blocked: boolean
+}
+
+/**
+ * 하나의 스택 결정을 레이어별 제출 계획으로 편다.
+ *
+ * - 자기 PR 인 레이어는 `comment` 로 떨어진다(GitHub 이 거부한다). 스택은 여럿이 함께 쌓기도
+ *   하므로 이 판정은 레이어마다 다르다.
+ * - **스택 총평은 맨 위 레이어에만** 실린다. 같은 문단을 다섯 PR 에 올리는 것은 소음이다.
+ *   나머지 레이어는 자기 총평을 쓰고, 어디에 전체 평가가 있는지만 가리킨다.
+ * - 이미 병합된 레이어는 계획에서 빠진다.
+ */
+export function buildSubmitPlan(session: ReviewSession, verdict: ReviewVerdict): SubmitPlanRow[] {
+  const head = stackHead(session)
+  const stacked = session.layers.length > 1
+  return session.layers
+    .filter((l) => !l.merged)
+    .map((layer) => {
+      const isHead = layer.prNumber === head?.prNumber
+      const parts: string[] = []
+      if (isHead && session.summary.trim()) parts.push(session.summary.trim())
+      else if (stacked && head) parts.push(`Reviewed as part of the stack — see #${head.prNumber}.`)
+      if (layer.summary.trim()) parts.push(layer.summary.trim())
+      return {
+        layer,
+        verdict: layer.viewerIsAuthor && verdict !== 'comment' ? 'comment' : verdict,
+        body: parts.join('\n\n'),
+        blocked: layer.viewerIsAuthor
+      }
     })
 }
 
@@ -217,14 +300,20 @@ export function stepFinding(
   return ordered[(at + delta + ordered.length) % ordered.length].id
 }
 
-/** 파일별 인라인 지적 수 — 파일 목록 배지용. */
+/** 파일별 인라인 지적 수 — 파일 목록 배지용. 레이어를 구분해야 하므로 키에 PR 번호가 들어간다. */
 export function countByFile(findings: ReviewFinding[]): Record<string, number> {
   const out: Record<string, number> = {}
   for (const f of findings) {
     if (!f.anchor) continue
-    out[f.anchor.file] = (out[f.anchor.file] ?? 0) + 1
+    const key = fileKey(f.anchor.prNumber, f.anchor.file)
+    out[key] = (out[key] ?? 0) + 1
   }
   return out
+}
+
+/** 파일을 레이어까지 포함해 가리키는 키. 배지 수·펼침 상태·스크롤 앵커가 모두 이걸 쓴다. */
+export function fileKey(prNumber: number | undefined, path: string): string {
+  return `${prNumber ?? ''} ${path}`
 }
 
 interface SeverityStyle {

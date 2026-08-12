@@ -1,5 +1,12 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { CornerDownRight, ExternalLink, GitCommitHorizontal, Loader2, Send } from 'lucide-react'
+import {
+  CornerDownRight,
+  ExternalLink,
+  GitCommitHorizontal,
+  Layers,
+  Loader2,
+  Send
+} from 'lucide-react'
 import type { ReviewActivityItem, ReviewSession } from '@shared/types'
 import { useStore } from '../../store'
 import { toolParts, type ReviewViewState } from '../../lib/review'
@@ -186,8 +193,23 @@ function ActivityRow({
       <div className="flex items-center justify-center gap-1.5 py-1 text-xs text-[var(--warning-300)]">
         <GitCommitHorizontal size={12} className="shrink-0" />
         <span>
-          New commits pushed — the diff below may be out of date.{' '}
+          New commits pushed{item.prNumber ? ` to #${item.prNumber}` : ''} — the diff below may be
+          out of date.{' '}
           <span className="font-mono text-neutral-500">{item.headSha.slice(0, 7)}</span>
+        </span>
+      </div>
+    )
+  }
+
+  // 아래 레이어가 움직여 위쪽이 rebase 됐지만 내용은 그대로인 경우. 레이어마다 "새 커밋" 을
+  // 띄우면 진짜 바뀐 것이 그 소음에 묻히므로, 한 줄로 묶어 **차분한 색**으로 알린다.
+  if (item.kind === 'restack') {
+    return (
+      <div className="flex items-center justify-center gap-1.5 py-1 text-xs text-neutral-500">
+        <Layers size={12} className="shrink-0" />
+        <span>
+          {item.prNumbers.map((n) => `#${n}`).join(', ')} restacked onto the new #{item.causedBy} —
+          their diffs are unchanged.
         </span>
       </div>
     )

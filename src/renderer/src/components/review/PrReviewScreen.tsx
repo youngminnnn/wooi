@@ -5,6 +5,7 @@ import {
   ChevronUp,
   ExternalLink,
   FileCheck,
+  Layers,
   Loader2,
   MessageSquarePlus,
   Square,
@@ -12,11 +13,14 @@ import {
   X
 } from 'lucide-react'
 import type { ReviewVerdict } from '@shared/types'
-import { viewedFilePaths } from '@shared/reviewViewed'
+import { isStackReview, stackHead } from '@shared/types'
+import { viewedFilePaths, viewedKey } from '@shared/reviewViewed'
 import { useStore } from '../../store'
 import {
   countByFile,
+  fileKey,
   orderedAnchoredFindings,
+  reviewTitle,
   selectionSummary,
   stepFinding,
   STATUS_LABEL
@@ -53,15 +57,27 @@ export default function PrReviewScreen({ reviewId }: { reviewId: string }): Reac
   const tab = view?.tab ?? 'findings'
 
   const counts = useMemo(() => countByFile(view?.findings ?? []), [view?.findings])
-  const files = useMemo(() => view?.diff?.files ?? [], [view?.diff])
+  const diffs = useMemo(() => view?.diffs ?? [], [view?.diffs])
+  /** 좌측 파일 목록의 행 — 스택이면 레이어 머리글이 섞여 들어온다. */
+  const fileRows = useMemo(
+    () =>
+      diffs.flatMap((layer) =>
+        layer.diff.files.map((f) => ({ prNumber: layer.prNumber, file: f }))
+      ),
+    [diffs]
+  )
   // 파일마다 diff 를 해시하므로 한 번만 계산해 목록·헤더가 나눠 쓴다.
-  const viewedPaths = useMemo(
-    () => viewedFilePaths(view?.viewed ?? {}, files),
-    [view?.viewed, files]
+  const viewedKeys = useMemo(
+    () =>
+      viewedFilePaths(
+        view?.viewed ?? {},
+        diffs.map((d) => ({ prNumber: d.prNumber, files: d.diff.files }))
+      ),
+    [view?.viewed, diffs]
   )
   const ordered = useMemo(
-    () => orderedAnchoredFindings(view?.diff ?? null, view?.findings ?? []),
-    [view?.diff, view?.findings]
+    () => orderedAnchoredFindings(diffs, view?.findings ?? []),
+    [diffs, view?.findings]
   )
   const focusedIndex = focusedId ? ordered.findIndex((f) => f.id === focusedId) : -1
 
@@ -122,14 +138,29 @@ export default function PrReviewScreen({ reviewId }: { reviewId: string }): Reac
   const running = session.status === 'preparing' || session.status === 'running'
   const inlineCount = view.findings.filter((f) => f.anchor).length
   const { selectableCount, pendingIds, allSelected, someSelected } = selectionSummary(session, view)
+  const head = stackHead(session)
+  const title = reviewTitle(session)
+  const stacked = isStackReview(session)
+  // 판정 칩은 스택에서 레이어마다 다를 수 있다 — 하나로 뭉뚱그리지 않고 맨 위의 것을 보여주되,
+  // 몇 개나 냈는지 함께 적는다.
+  const submissions = session.layers.filter((l) => l.lastSubmission)
 
   return (
     <div className="flex flex-1 flex-col min-w-0 bg-[var(--bg)]">
       <header className="flex h-11 shrink-0 items-center gap-2 border-b border-[var(--border)] px-3">
-        <span className="shrink-0 font-mono text-sm text-neutral-500">#{session.prNumber}</span>
-        <span className="min-w-0 flex-1 truncate text-sm text-neutral-100" title={session.prTitle}>
-          {session.prTitle}
+        <span className="shrink-0 font-mono text-sm text-neutral-500">#{title.number}</span>
+        <span className="min-w-0 flex-1 truncate text-sm text-neutral-100" title={title.title}>
+          {title.title}
         </span>
+        {stacked && (
+          <span
+            className="flex shrink-0 items-center gap-1 rounded-md border border-[var(--accent-400)]/30 bg-[var(--accent-400)]/10 px-2 py-0.5 text-xs text-[var(--accent-300)]"
+            title={`Reviewed as one stack: ${session.layers.map((l) => `#${l.prNumber}`).join(' → ')}`}
+          >
+            <Layers size={11} />
+            Stack of {session.layers.length}
+          </span>
+        )}
 
         <span className="flex shrink-0 items-center gap-1.5 text-xs text-neutral-400">
           {running && <Loader2 size={12} className="animate-spin text-[var(--info-400)]" />}
@@ -137,7 +168,16 @@ export default function PrReviewScreen({ reviewId }: { reviewId: string }): Reac
         </span>
 
         {/* 마지막으로 낸 판정. 다시 내려면 제출 화면에서 새 본문을 쓰면 된다. */}
-        {session.lastSubmission && <VerdictChip verdict={session.lastSubmission.verdict} />}
+        {head?.lastSubmission && (
+          <VerdictChip
+            verdict={head.lastSubmission.verdict}
+            note={
+              stacked && submissions.length < session.layers.length
+                ? `${submissions.length}/${session.layers.length}`
+                : undefined
+            }
+          />
+        )}
 
         {/* 코멘트 사이 이동. 긴 diff 에서는 지적이 화면 밖에 흩어져 있어, 스크롤로 찾는 것이
             리뷰에서 가장 많이 하는 헛일이다. */}
@@ -179,7 +219,7 @@ export default function PrReviewScreen({ reviewId }: { reviewId: string }): Reac
           </button>
         )}
         <button
-          onClick={() => void window.api.openExternal(session.prUrl)}
+          onClick={() => void window.api.openExternal(head?.prUrl ?? '')}
           title="Open this pull request in your browser"
           className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-neutral-400 hover:bg-[var(--surface-2)] hover:text-neutral-100 active:scale-90"
         >
@@ -216,70 +256,97 @@ export default function PrReviewScreen({ reviewId }: { reviewId: string }): Reac
         <nav className="w-48 shrink-0 overflow-y-auto border-r border-[var(--border)] p-2">
           <h2 className="flex items-center gap-1 px-1 pb-1.5 text-xs font-medium text-neutral-500">
             <span>Files</span>
-            {files.length > 0 && (
+            {fileRows.length > 0 && (
               <span
                 className="ml-auto shrink-0 tabular-nums"
-                title={`${viewedPaths.size} of ${files.length} files marked as viewed`}
+                title={`${viewedKeys.size} of ${fileRows.length} files marked as viewed`}
               >
-                {viewedPaths.size}/{files.length} viewed
+                {viewedKeys.size}/{fileRows.length} viewed
               </span>
             )}
           </h2>
-          {files.map((f) => {
-            const isViewed = viewedPaths.has(f.path)
-            return (
-              // 체크와 "그 파일로 이동" 은 다른 행동이라 버튼을 나눈다(버튼 안에 버튼을 넣을 수도 없다).
-              <div
-                key={f.path}
-                className={
-                  'flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-xs hover:bg-[var(--surface-2)] ' +
-                  // 본 파일은 눌러 둔다 — 목록을 훑을 때 남은 것이 먼저 눈에 들어와야 한다.
-                  (isViewed ? 'text-neutral-600' : 'text-neutral-400')
-                }
-              >
-                <ReviewViewedToggle
-                  viewed={isViewed}
-                  path={f.path}
-                  onToggle={() => void toggleFileViewed(reviewId, f.path)}
-                />
-                <button
-                  onClick={() =>
-                    document
-                      .getElementById(`file-${f.path}`)
-                      ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-                  }
-                  className={
-                    'min-w-0 flex-1 truncate text-left font-mono hover:text-neutral-100 ' +
-                    (isViewed ? 'line-through decoration-neutral-700' : '')
-                  }
-                  title={f.path}
-                >
-                  {f.path}
-                </button>
-                {(counts[f.path] ?? 0) > 0 && (
-                  <span className="shrink-0 rounded-full bg-[var(--info-500)]/20 px-1.5 text-[10px] text-[var(--info-300)]">
-                    {counts[f.path]}
+          {diffs.map((layer) => (
+            <div key={layer.prNumber}>
+              {/* 스택에서는 파일 목록도 레이어로 나눠 놓아야 한다 — 같은 경로가 여러 번 나오는데
+                  구분이 없으면 어느 층의 파일인지 알 수 없다. */}
+              {stacked && (
+                <div className="mt-2 flex items-center gap-1 px-1.5 pb-0.5 text-[11px] text-[var(--accent-300)]">
+                  <Layers size={10} className="shrink-0" />
+                  <span className="truncate" title={layerTitle(session, layer.prNumber)}>
+                    #{layer.prNumber}
                   </span>
-                )}
-              </div>
-            )
-          })}
+                </div>
+              )}
+              {layer.diff.files.map((f) => {
+                const key = viewedKey(f.path, layer.prNumber)
+                const isViewed = viewedKeys.has(key)
+                const count = counts[fileKey(layer.prNumber, f.path)] ?? 0
+                return (
+                  // 체크와 "그 파일로 이동" 은 다른 행동이라 버튼을 나눈다(버튼 안에 버튼을 넣을 수도 없다).
+                  <div
+                    key={key}
+                    className={
+                      'flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-xs hover:bg-[var(--surface-2)] ' +
+                      // 본 파일은 눌러 둔다 — 목록을 훑을 때 남은 것이 먼저 눈에 들어와야 한다.
+                      (isViewed ? 'text-neutral-600' : 'text-neutral-400')
+                    }
+                  >
+                    <ReviewViewedToggle
+                      viewed={isViewed}
+                      path={f.path}
+                      onToggle={() => void toggleFileViewed(reviewId, f.path, layer.prNumber)}
+                    />
+                    <button
+                      onClick={() =>
+                        document
+                          .getElementById(`file-${fileKey(layer.prNumber, f.path)}`)
+                          ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                      }
+                      className={
+                        'min-w-0 flex-1 truncate text-left font-mono hover:text-neutral-100 ' +
+                        (isViewed ? 'line-through decoration-neutral-700' : '')
+                      }
+                      title={f.path}
+                    >
+                      {f.path}
+                    </button>
+                    {count > 0 && (
+                      <span className="shrink-0 rounded-full bg-[var(--info-500)]/20 px-1.5 text-[10px] text-[var(--info-300)]">
+                        {count}
+                      </span>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          ))}
         </nav>
 
         {/* 중앙: 실행 중에는 진행 상황, 끝나면 diff + 인라인 카드 */}
         <main className="min-w-0 flex-1 overflow-y-auto">
           {running && view.findings.length === 0 ? (
             <ReviewProgressPane status={session.status} view={view} />
-          ) : view.diff ? (
-            <ReviewDiffView
-              session={session}
-              view={view}
-              files={view.diff.files}
-              focusedId={focusedId}
-              onFocusFinding={setFocusedId}
-              viewedPaths={viewedPaths}
-              onToggleViewed={(path) => void toggleFileViewed(reviewId, path)}
-            />
+          ) : diffs.length > 0 ? (
+            <>
+              {/* 예산에 못 들어간 파일이 있으면 반드시 알린다 — 에이전트가 워크트리에서 직접
+                  읽었을 수는 있어도, "전부 봤다" 고 믿게 두면 안 된다. */}
+              {session.truncatedFiles > 0 && (
+                <p className="mx-3 mt-3 rounded-md border border-[var(--warning-500)]/30 bg-[var(--warning-500)]/10 px-3 py-2 text-xs text-[var(--warning-200)]">
+                  {session.truncatedFiles} file{session.truncatedFiles === 1 ? ' was' : 's were'}{' '}
+                  too large to include in the prompt — the agent was told to read{' '}
+                  {session.truncatedFiles === 1 ? 'it' : 'them'} from the worktree instead.
+                </p>
+              )}
+              <ReviewDiffView
+                session={session}
+                view={view}
+                diffs={diffs}
+                focusedId={focusedId}
+                onFocusFinding={setFocusedId}
+                viewedKeys={viewedKeys}
+                onToggleViewed={(path, prNumber) => void toggleFileViewed(reviewId, path, prNumber)}
+              />
+            </>
           ) : (
             <p className="p-8 text-center text-sm text-neutral-500">
               Couldn&rsquo;t load the diff.
@@ -369,9 +436,11 @@ export default function PrReviewScreen({ reviewId }: { reviewId: string }): Reac
         <button
           onClick={() => setSubmitOpen(true)}
           title={
-            session.viewerIsAuthor
+            session.layers.every((l) => l.viewerIsAuthor)
               ? 'Comment on the pull request as a whole'
-              : 'Approve, request changes, or comment on the pull request as a whole'
+              : stacked
+                ? 'Approve, request changes, or comment — submitted to every layer of the stack'
+                : 'Approve, request changes, or comment on the pull request as a whole'
           }
           className="flex items-center gap-1.5 rounded-lg bg-[var(--info-600)] px-3.5 py-1.5 text-sm font-medium text-white shadow-sm hover:bg-[var(--info-500)]"
         >
@@ -383,6 +452,16 @@ export default function PrReviewScreen({ reviewId }: { reviewId: string }): Reac
       {submitOpen && <ReviewSubmitModal session={session} onClose={() => setSubmitOpen(false)} />}
     </div>
   )
+}
+
+/** 레이어 머리글의 툴팁 — 번호만으로는 어느 층인지 떠올리기 어렵다. */
+function layerTitle(
+  session: { layers: Array<{ prNumber: number; prTitle: string }> },
+  n: number
+): string {
+  const at = session.layers.findIndex((l) => l.prNumber === n)
+  const layer = session.layers[at]
+  return layer ? `Layer ${at + 1} of ${session.layers.length} — ${layer.prTitle}` : `#${n}`
 }
 
 /** 글을 쓰는 중인가. 수식키 없는 단축키(n/p)가 입력을 가로채지 않도록. */
@@ -406,14 +485,26 @@ const VERDICT_CHIP: Record<ReviewVerdict, { label: string; className: string }> 
   }
 }
 
-function VerdictChip({ verdict }: { verdict: ReviewVerdict }): React.JSX.Element {
+function VerdictChip({
+  verdict,
+  note
+}: {
+  verdict: ReviewVerdict
+  /** 스택에서 일부 레이어만 제출됐을 때 "2/4" 처럼 적는다 — 다 냈다고 착각하면 안 된다. */
+  note?: string
+}): React.JSX.Element {
   const { label, className } = VERDICT_CHIP[verdict]
   return (
     <span
       className={`shrink-0 rounded-md border px-2 py-1 text-xs font-medium ${className}`}
-      title="The last review you submitted from here"
+      title={
+        note
+          ? `The last verdict you submitted — only ${note} layers of this stack have one`
+          : 'The last review you submitted from here'
+      }
     >
       {label}
+      {note && <span className="ml-1 opacity-70 tabular-nums">{note}</span>}
     </span>
   )
 }
