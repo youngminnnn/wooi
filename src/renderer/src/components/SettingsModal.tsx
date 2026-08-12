@@ -508,6 +508,18 @@ function AgentsPage({
             />
           </SettingRow>
         )}
+        {editing === 'claude' && (
+          <SettingRow
+            title="Auto-compact long conversations"
+            description="Summarizes Claude Code context near its limit so sessions can continue."
+          >
+            <Switch
+              label="Auto-compact long conversations"
+              checked={settings.autoCompact}
+              onChange={(value) => save({ autoCompact: value })}
+            />
+          </SettingRow>
+        )}
       </SettingGroup>
 
       <SettingGroup title="Conversations">
@@ -519,16 +531,6 @@ function AgentsPage({
             label="Continue after rate limits"
             checked={settings.autoResumeAfterRateLimit}
             onChange={(value) => save({ autoResumeAfterRateLimit: value })}
-          />
-        </SettingRow>
-        <SettingRow
-          title="Auto-compact long conversations"
-          description="A global Wooi setting. Summarizes context near its limit so sessions can continue."
-        >
-          <Switch
-            label="Auto-compact long conversations"
-            checked={settings.autoCompact}
-            onChange={(value) => save({ autoCompact: value })}
           />
         </SettingRow>
       </SettingGroup>
