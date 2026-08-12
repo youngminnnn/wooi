@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type {
+  AdoptFanoutResult,
   AgentBackendId,
   AgentBackendMeta,
   AppNotice,
@@ -407,6 +408,15 @@ interface UIState {
    * 사라지므로 — 무엇을 잃는지 먼저 센다.
    */
   requestAdoptFanoutWinner: (groupId: string, workspaceId: string) => Promise<void>
+  /**
+   * 지금 채택 중인 후보 id(없으면 null).
+   *
+   * 채택은 형제를 **하나씩** 아카이브하고, 형제마다 PR 제목을 `gh` 로 스냅샷한 뒤 worktree 를
+   * 지운다 — 후보가 셋이면 몇 초가 걸린다. 그동안 화면이 아무 반응도 하지 않으면 사용자는
+   * 버튼이 안 눌린 줄 알고 다시 누르는데, 그러면 이미 사라지는 중인 워크스페이스를 상대로
+   * 두 번째 아카이브가 돌아간다. 그래서 진행 중임을 화면에 남기고 그 사이 입력을 막는다.
+   */
+  adoptingFanoutWorkspaceId: string | null
   /** 그룹 기록만 지운다(워크스페이스는 그대로). */
   forgetFanoutGroup: (groupId: string) => Promise<void>
   /**
@@ -719,6 +729,7 @@ export const useStore = create<UIState>((set, get) => ({
   pending: [],
   activeReviewId: null,
   activeFanoutGroupId: null,
+  adoptingFanoutWorkspaceId: null,
   reviewViews: {},
 
   init: async () => {
@@ -1345,16 +1356,35 @@ export const useStore = create<UIState>((set, get) => ({
 
   requestAdoptFanoutWinner: async (groupId, workspaceId) => {
     const s = get()
+    // 이미 채택이 돌고 있으면 무시한다. 화면도 버튼을 잠그지만, 그 사이 도착한 단축키·이벤트가
+    // 두 번째 채택을 시작하면 사라지는 중인 워크스페이스를 상대로 아카이브가 겹친다.
+    if (s.adoptingFanoutWorkspaceId) return
     const group = s.app?.fanoutGroups.find((g) => g.id === groupId)
     const winner = s.app?.workspaces.find((w) => w.id === workspaceId)
     if (!group || !winner) return
+
+    /** 진행 표시를 켜고 채택을 돌린다. 실패해도 표시는 반드시 꺼야 한다 — 켜진 채로 남으면
+     *  다시 시도할 방법이 없다. */
+    const adopt = async (): Promise<AdoptFanoutResult> => {
+      set({ adoptingFanoutWorkspaceId: workspaceId })
+      try {
+        return await window.api.fanout.adopt(groupId, workspaceId)
+      } catch (err) {
+        return { error: err instanceof Error ? err.message : String(err) }
+      } finally {
+        set({ adoptingFanoutWorkspaceId: null })
+      }
+    }
 
     const siblings = group.workspaceIds
       .filter((id) => id !== workspaceId)
       .map((id) => s.app?.workspaces.find((w) => w.id === id))
       .filter((w): w is Workspace => !!w && !w.archived)
     if (siblings.length === 0) {
-      await window.api.fanout.adopt(groupId, workspaceId)
+      // 정리할 형제가 없으면 묻지 않는다 — 그룹에 "이걸 골랐다" 를 기록할 뿐이라 즉시 끝난다.
+      const res = await adopt()
+      if (res.error) get().pushToast('error', res.error)
+      else get().closeFanoutCompare()
       return
     }
 
@@ -1378,7 +1408,7 @@ export const useStore = create<UIState>((set, get) => ({
     })
     if (!ok) return
 
-    const res = await window.api.fanout.adopt(groupId, workspaceId)
+    const res = await adopt()
     if (res.error) {
       get().pushToast('error', res.error)
       return

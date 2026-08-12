@@ -130,7 +130,12 @@ function Header({
 }): React.JSX.Element {
   const forget = useStore((s) => s.forgetFanoutGroup)
   const confirm = useStore((s) => s.confirm)
+  const adopting = useStore((s) => s.adoptingFanoutWorkspaceId)
   const adopted = candidates.find((w) => w.id === group.adoptedWorkspaceId)
+  // 형제는 하나씩 아카이브되고 그때마다 상태가 방송된다 — 아직 살아 있는 형제를 세면 "몇 개
+  // 남았는가" 가 공짜로 나온다. 도는 시간이 몇 초라, 도는 중이라는 사실만 알리는 것보다
+  // 줄어드는 숫자를 보여 주는 편이 기다릴 만한지 판단할 근거가 된다.
+  const remaining = adopting ? candidates.filter((w) => w.id !== adopting && !w.archived).length : 0
 
   return (
     <div className="shrink-0 border-b border-[var(--border)]">
@@ -140,11 +145,23 @@ function Header({
         <span className="text-xs text-neutral-500 shrink-0">
           {candidates.length} candidate{candidates.length === 1 ? '' : 's'}
         </span>
-        {adopted && (
-          <span className="flex items-center gap-1 shrink-0 text-xs text-[var(--success-400)]">
-            <Check size={11} />
-            Adopted {workspaceDisplayName(adopted)}
+        {adopting ? (
+          <span
+            role="status"
+            className="flex items-center gap-1.5 shrink-0 text-xs text-[var(--info-400)]"
+          >
+            <Loader2 size={11} className="animate-spin" />
+            {remaining > 0
+              ? `Archiving ${remaining} candidate${remaining === 1 ? '' : 's'}…`
+              : 'Finishing up…'}
           </span>
+        ) : (
+          adopted && (
+            <span className="flex items-center gap-1 shrink-0 text-xs text-[var(--success-400)]">
+              <Check size={11} />
+              Adopted {workspaceDisplayName(adopted)}
+            </span>
+          )
         )}
 
         <div className="flex-1" />
@@ -181,7 +198,9 @@ function Header({
               confirmLabel: 'Forget group'
             }).then((ok) => ok && void forget(group.id))
           }}
-          className="h-7 px-2 grid place-items-center rounded-md text-xs text-neutral-500 hover:bg-[var(--surface-2)] hover:text-neutral-200"
+          // 채택이 도는 중에 그룹을 지우면, 끝나고 나서 갱신할 그룹이 사라진 상태가 된다.
+          disabled={adopting !== null}
+          className="h-7 px-2 grid place-items-center rounded-md text-xs text-neutral-500 hover:bg-[var(--surface-2)] hover:text-neutral-200 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
           title="Remove the grouping (workspaces are kept)"
         >
           Forget
@@ -229,6 +248,8 @@ function CandidateColumn({
   const git = useStore((s) => s.gitStatus[workspace.id])
   const select = useStore((s) => s.selectWorkspace)
   const adopt = useStore((s) => s.requestAdoptFanoutWinner)
+  const adopting = useStore((s) => s.adoptingFanoutWorkspaceId)
+  const isAdopting = adopting === workspace.id
   const [diff, setDiff] = useState<WorkspaceDiff | null>(null)
   const [loading, setLoading] = useState(true)
   /** 파일 목록에서 고른 경로. null 이면 전부 본다. */
@@ -309,12 +330,34 @@ function CandidateColumn({
           ) : (
             <button
               onClick={() => void adopt(group.id, workspace.id)}
-              disabled={!canAdopt}
-              className="w-full flex items-center justify-center gap-1.5 text-xs px-2 py-1.5 rounded-md border border-[var(--border-2)] text-neutral-300 hover:bg-[var(--surface-2)] hover:text-neutral-100 disabled:opacity-40 disabled:cursor-not-allowed"
-              title="Keep this one and archive the other candidates"
+              // 채택이 도는 동안에는 **모든** 후보의 버튼을 잠근다. 누른 칸만 잠그면 그 사이
+              // 옆 칸을 눌러 두 번째 채택이 시작되고, 그 대상은 지금 사라지는 중인 형제다.
+              disabled={!canAdopt || adopting !== null}
+              className={
+                'w-full flex items-center justify-center gap-1.5 text-xs px-2 py-1.5 rounded-md border transition-colors disabled:cursor-not-allowed ' +
+                // 도는 중인 칸은 흐려지면 안 된다 — 지금 무슨 일이 일어나는지 알려 주는
+                // 유일한 표시라서, 다른 잠긴 버튼과 같은 취급을 하면 스피너까지 같이 묻힌다.
+                (isAdopting
+                  ? 'border-[var(--info-500)] bg-[var(--info-600)]/15 text-neutral-100'
+                  : 'border-[var(--border-2)] text-neutral-300 hover:bg-[var(--surface-2)] hover:text-neutral-100 disabled:opacity-40 disabled:hover:bg-transparent')
+              }
+              title={
+                isAdopting
+                  ? 'Archiving the other candidates…'
+                  : 'Keep this one and archive the other candidates'
+              }
             >
-              <Trophy size={12} />
-              Adopt this one
+              {isAdopting ? (
+                <>
+                  <Loader2 size={12} className="animate-spin" />
+                  Adopting…
+                </>
+              ) : (
+                <>
+                  <Trophy size={12} />
+                  Adopt this one
+                </>
+              )}
             </button>
           )}
         </div>
