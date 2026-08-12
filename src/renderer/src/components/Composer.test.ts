@@ -24,9 +24,9 @@ describe('백엔드 전용 composer 명령', () => {
 })
 
 describe('선택 카드 슬래시 명령', () => {
-  it('에이전트를 바꿀 수 있을 때만 /agent 를 가로챈다', () => {
+  it('고를 에이전트가 둘 이상일 때만 /agent 를 가로챈다', () => {
     expect(matchPicker('/agent', true, true)).toBe('agent')
-    // 대화가 시작된 뒤의 "/agent" 는 카드가 아니라 에이전트에게 보내는 평범한 메시지다.
+    // 쓸 수 있는 에이전트가 하나뿐이면 "/agent" 는 카드가 아니라 에이전트에게 보내는 평범한 메시지다.
     expect(matchPicker('/agent', true, false)).toBeNull()
   })
 

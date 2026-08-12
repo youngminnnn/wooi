@@ -16,6 +16,7 @@ import type {
   CodexMcpServer,
   CommandPanelKind,
   CommandResult,
+  ComposerAttachEvent,
   CreateWorkspaceArgs,
   CreateWorkspaceResult,
   DirEntry,
@@ -39,6 +40,9 @@ import type {
   PermissionRequest,
   PrChecks,
   PrEditable,
+  PreviewCaptureResult,
+  PreviewIssueCountEvent,
+  PreviewOpenEvent,
   PrMergeMethod,
   PrStatus,
   Repo,
@@ -63,6 +67,7 @@ import type {
   UpdateStatus,
   WorkspaceDiff
 } from './types'
+import type { PreviewIssue } from './previewIssues'
 
 /**
  * preload 가 `window.api` 로 노출하는 표면. preload 구현과 renderer 소비가
@@ -146,12 +151,20 @@ export interface WooiApi {
     /** fast mode(`/fast`) 오버라이드. null 이면 전역 설정(settings.fastMode)을 따른다. */
     setFastMode(workspaceId: string, fastMode: boolean | null): Promise<void>
     /**
-     * 메인 에이전트를 바꾼다. 아직 아무것도 보내지 않은 워크스페이스에서만 통한다
-     * ([[canSwitchAgentBackend]]) — 대화가 시작됐거나 그 에이전트를 쓸 수 없으면 이유를 담은
-     * error 로 돌아온다. 성공하면 모델·effort·fast mode 오버라이드는 새 백엔드 기준으로
-     * 초기화된다(백엔드마다 값 자체가 다르다).
+     * 메인 에이전트를 바꾼다([[canSwitchAgentBackend]]) — 턴이 도는 중이거나 그 에이전트를 쓸 수
+     * 없으면 이유를 담은 error 로 돌아온다. 성공하면 모델·effort·fast mode 오버라이드는 새 백엔드
+     * 기준으로 초기화된다(백엔드마다 값 자체가 다르다).
+     *
+     * 대화가 이미 시작된 워크스페이스라면 지금까지의 대화를 새 에이전트에게 넘기는 턴이 한 번
+     * 돈다([[agentSwitchNeedsHandoff]]). 사용량이 드는 일이므로 `handoff: true` 로 확인 사실을
+     * 함께 보내야 하고, 없이 부르면 main 이 거절한다 — 화면이 낡아 경고 없이 눌린 교체가 그대로
+     * 청구되지 않게 한다.
      */
-    setAgentBackend(workspaceId: string, agentBackend: AgentBackendId): Promise<{ error?: string }>
+    setAgentBackend(
+      workspaceId: string,
+      agentBackend: AgentBackendId,
+      opts?: { handoff?: boolean }
+    ): Promise<{ error?: string }>
     /** 워크스페이스별 알림 음소거를 설정한다. */
     setMuted(workspaceId: string, muted: boolean): Promise<void>
     /**
@@ -218,6 +231,43 @@ export interface WooiApi {
     getStatus(workspaceId: string): Promise<ScriptStatus[]>
     /** 지금까지의 누적 출력(꼬리 버퍼). 나중에 뜬 창이 이전 로그를 채우는 데 쓴다. */
     getOutput(workspaceId: string, scriptId: string): Promise<string>
+  }
+
+  /**
+   * Preview 탭(워크트리의 dev 서버를 앱 안에서 보는 화면). 범용 브라우저가 아니라
+   * "이 워크스페이스가 띄운 로컬 서버를 보는 창" 이라 API 도 그만큼만 있다.
+   */
+  preview: {
+    /** 마지막으로 본 주소를 워크스페이스에 영속한다(다음에 열면 여기서 시작한다). */
+    setUrl(workspaceId: string, url: string): Promise<void>
+    /**
+     * Preview 를 이 주소로 연다. 주소를 영속하고 모든 창에 방송하므로, 스크립트 패널이
+     * 분리된 창에 있어도 메인 창(또는 분리된 work 창)의 Preview 탭이 받아 움직인다.
+     */
+    open(workspaceId: string, url: string): Promise<void>
+    /**
+     * Preview 화면을 캡처해 컴포저 첨부로 보낸다. 성공하면 이미지는 onComposerAttach 로 온다.
+     * webContentsId 는 `<webview>.getWebContentsId()` — main 이 그 게스트가 정말 Preview 인지 확인한다.
+     */
+    capture(workspaceId: string, webContentsId: number): Promise<PreviewCaptureResult>
+    /**
+     * 요소 픽커를 켜고 사용자가 고를 때까지 기다린다. 고르면 결과는 onComposerAttach 로 오고,
+     * 여기서는 끝났다는 것(또는 실패 사유)만 돌려준다. 취소·타임아웃도 error 로 온다.
+     */
+    pickElement(workspaceId: string, webContentsId: number): Promise<PreviewCaptureResult>
+    /** 진행 중인 픽을 취소한다. 켜져 있지 않으면 아무 일도 하지 않는다. */
+    cancelPick(webContentsId: number): Promise<void>
+    /** 이 게스트의 콘솔·네트워크 문제를 이 워크스페이스 것으로 모으기 시작한다. */
+    watchIssues(workspaceId: string, webContentsId: number): Promise<void>
+    /** 수집을 멈춘다(패널이 사라질 때). */
+    unwatchIssues(webContentsId: number): Promise<void>
+    /** 모아 둔 문제 목록. 개수만 방송되므로 패널을 열 때 이걸로 채운다. */
+    listIssues(workspaceId: string): Promise<PreviewIssue[]>
+    clearIssues(workspaceId: string): Promise<void>
+    /** 고른 문제들을 컴포저에 넣는다(결과는 onComposerAttach 로 온다). */
+    sendIssues(workspaceId: string, issueIds: string[]): Promise<PreviewCaptureResult>
+    onOpen(cb: (e: PreviewOpenEvent) => void): () => void
+    onIssues(cb: (e: PreviewIssueCountEvent) => void): () => void
   }
 
   git: {
@@ -560,6 +610,8 @@ export interface WooiApi {
   onPermissionCancel(cb: (requestId: string) => void): () => void
   onScriptOutput(cb: (e: ScriptOutputEvent) => void): () => void
   onScriptExit(cb: (e: ScriptExitEvent) => void): () => void
+  /** 컴포저에 붙일 이미지가 도착했다(Preview 스크린샷). 컴포저가 있는 창만 반응한다. */
+  onComposerAttach(cb: (e: ComposerAttachEvent) => void): () => void
   onState(cb: (state: AppState) => void): () => void
   /** PR 리뷰 진행 상황·결과 스트림. */
   onReview(cb: (e: ReviewEnvelope) => void): () => void

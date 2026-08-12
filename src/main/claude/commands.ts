@@ -32,8 +32,9 @@ const BUILTIN_COMMANDS: SlashCommandInfo[] = [
   { name: 'model', description: 'Choose the model for this workspace' },
   { name: 'effort', description: 'Choose the reasoning effort for this workspace' },
   { name: 'fast', description: 'Toggle fast mode for this workspace (same model, faster output)' },
-  // /agent 는 첫 메시지 전에만 통한다 — 그 뒤에는 Composer 가 가로채지 않고 평범한 메시지로 보낸다.
-  { name: 'agent', description: 'Switch this workspace’s agent (before the first message)' },
+  // /agent 는 쓸 수 있는 에이전트가 둘 이상일 때만 통한다 — 하나뿐이면 Composer 가 가로채지 않고
+  // 평범한 메시지로 보낸다.
+  { name: 'agent', description: 'Switch this workspace’s agent' },
   // 패스스루(메시지로 보내면 CLI 가 확장) — 자동완성에만 보강한다.
   {
     name: 'compact',

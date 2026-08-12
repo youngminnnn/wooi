@@ -445,9 +445,16 @@ export class ClaudeSession {
     return this.q
   }
 
-  /** 사용자 메시지를 보낸다. 첫 메시지면 query 를 시작한다. */
-  send(text: string, images?: ImageAttachment[]): void {
+  /**
+   * 사용자 메시지를 보낸다. 첫 메시지면 query 를 시작한다.
+   *
+   * `prefix` 는 사용자가 쓴 말이 아니라 Wooi 가 앞에 붙여 주는 맥락이다([[claude/protocol]]).
+   * 모델에게는 함께 가지만 기록에는 사용자의 말만 남는다 — 인수인계 프롬프트는 지난 대화를
+   * 통째로 다시 적은 것이라, 남기면 같은 대화가 화면에 두 번 쌓인다.
+   */
+  send(text: string, images?: ImageAttachment[], opts?: { prefix?: string }): void {
     const imgs = images ?? []
+    const prompt = opts?.prefix ? `${opts.prefix}\n\n${text}` : text
     const item: ChatItem = {
       // 큐에 쌓인 N개를 한 번에 보내면 같은 ms 안에서 여러 번 호출된다 — 시간 기반 id 는
       // 충돌해서 upsert(last-wins) 로 합쳐지고 마지막 메시지만 화면에 남는다. uuid 로 보장한다.
@@ -475,13 +482,13 @@ export class ClaudeSession {
     // 이미지가 있으면 멀티모달 content 배열로(텍스트 블록 + base64 이미지 블록), 없으면 문자열.
     const content = imgs.length
       ? [
-          ...(text ? [{ type: 'text' as const, text }] : []),
+          ...(prompt ? [{ type: 'text' as const, text: prompt }] : []),
           ...imgs.map((i) => ({
             type: 'image' as const,
             source: { type: 'base64' as const, media_type: i.mediaType, data: i.dataBase64 }
           }))
         ]
-      : text
+      : prompt
 
     this.enqueue({
       type: 'user',

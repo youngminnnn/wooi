@@ -182,10 +182,10 @@ export default function MessageList({
   }, [])
 
   if (items.length === 0) {
-    // 첫 메시지를 보내면 에이전트가 고정되므로([[canSwitchAgentBackend]]), 아직 바꿀 수 있다는
-    // 사실은 바로 이 화면에서만 의미가 있다. 고를 대상이 둘 이상일 때만 알린다.
-    const switchable =
-      availableAgents.length > 1 && !!workspace && canSwitchAgentBackend(workspace, 0)
+    // 에이전트는 나중에도 바꿀 수 있지만([[canSwitchAgentBackend]]) 공짜로 바꿀 수 있는 건 지금
+    // 뿐이다 — 넘길 대화가 없어 인수인계 턴이 돌지 않는다. 그 사실을 알려 주기 좋은 화면이 여기다.
+    // 고를 대상이 둘 이상일 때만 알린다.
+    const switchable = availableAgents.length > 1 && !!workspace && canSwitchAgentBackend(workspace)
     const agentLabel = workspace
       ? (availableAgents.find((b) => b.id === workspace.agentBackend)?.label ??
         AGENT_BACKEND_LABELS[workspace.agentBackend])
@@ -217,7 +217,8 @@ export default function MessageList({
                 <kbd className="rounded bg-[var(--surface-2)] px-1 py-0.5 text-xs text-neutral-300">
                   /agent
                 </kbd>{' '}
-                to switch while nothing has been sent.
+                to switch. Free right now — later, switching replays the conversation to the new
+                agent.
               </span>
             </p>
           )}

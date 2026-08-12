@@ -139,6 +139,11 @@ export type HostCommand =
       config: SessionConfig
       text: string
       images?: ImageAttachment[]
+      /**
+       * 모델에게 보낼 때 `text` 앞에 붙일 맥락. 기록에는 남지 않는다 — 사용자가 쓴 말이 아니라
+       * Wooi 가 대신 넣는 것이기 때문이다([[shared/handoff]] 의 인수인계 프롬프트).
+       */
+      prefix?: string
     }
   | { type: 'interrupt'; workspaceId: string }
   | { type: 'setPermissionMode'; workspaceId: string; mode: ClaudePermissionMode }

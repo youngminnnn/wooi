@@ -346,11 +346,23 @@ export class SessionManager implements AgentBackend {
 
   // ── 공개 API (IPC 핸들러가 호출) ──────────────────────────────────────────
 
-  sendMessage(workspaceId: string, text: string, images?: ImageAttachment[]): void {
+  sendMessage(
+    workspaceId: string,
+    text: string,
+    images?: ImageAttachment[],
+    opts?: { prefix?: string }
+  ): void {
     this.rateLimitResume.cancel(workspaceId)
     const ws = this.getWorkspace(workspaceId)
     if (!ws) return
-    this.send({ type: 'send', workspaceId, config: this.configFor(ws), text, images })
+    this.send({
+      type: 'send',
+      workspaceId,
+      config: this.configFor(ws),
+      text,
+      images,
+      prefix: opts?.prefix
+    })
   }
 
   private sendContinuation(workspaceId: string): void {

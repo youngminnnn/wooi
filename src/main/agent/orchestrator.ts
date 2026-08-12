@@ -1,5 +1,7 @@
 import type { BrowserWindow } from 'electron'
 import { getStore } from '../store'
+import { getTranscripts } from '../transcripts'
+import { buildHandoffPrompt } from '@shared/handoff'
 import {
   DEFAULT_AGENT_BACKEND,
   type AgentBackendId,
@@ -240,8 +242,43 @@ export class AgentOrchestrator {
     // 세션이 없으면 dispose 는 no-op 이고, 어차피 이 전송이 새로 연다.
     if (this.pendingRestart.has(workspaceId)) this.dispose(workspaceId)
     this.touch(workspaceId)
-    this.backendFor(workspaceId).sendMessage(workspaceId, text, images)
+    const prefix = this.takeHandoffPrefix(workspaceId, text)
+    this.backendFor(workspaceId).sendMessage(
+      workspaceId,
+      text,
+      images,
+      prefix ? { prefix } : undefined
+    )
     this.trimIdleSessions()
+  }
+
+  /**
+   * 에이전트를 바꾸면서 예약해 둔 인수인계가 있으면([[ipc]] 의 workspaceSetAgentBackend), 이번
+   * 메시지 앞에 붙일 프롬프트를 만들고 예약을 지운다.
+   *
+   * 교체 직후에 따로 한 턴을 돌리지 않고 **다음 메시지에 얹는** 이유는 [[shared/handoff]] 에
+   * 적어 뒀다 — 요약하면, 사용자가 시작하지 않은 턴이 도는 동안 입력한 명령이 그 턴으로 빨려
+   * 들어가 엉뚱한 답이 나왔기 때문이다.
+   *
+   * 슬래시 명령과 `!셸` 은 건드리지 않는다. 프롬프트가 아니라 명령이라 백엔드가 다른 경로로
+   * 가로채기도 하고(codex 의 /compact·/review·/fork), 지난 대화를 붙일 자리도 아니다 — 예약은
+   * 그대로 남아 다음 **메시지**에 얹힌다.
+   */
+  private takeHandoffPrefix(workspaceId: string, text: string): string | undefined {
+    const store = getStore()
+    const fromLabel = store
+      .getState()
+      .workspaces.find((w) => w.id === workspaceId)?.pendingHandoffFrom
+    if (!fromLabel) return undefined
+    const trimmed = text.trim()
+    if (trimmed.startsWith('/') || trimmed.startsWith('!')) return undefined
+
+    // 프롬프트를 만들지 못했더라도(그 사이 /clear 로 대화가 비었다) 예약은 지운다 — 넘길 것이 없다.
+    store.update((st) => {
+      const w = st.workspaces.find((x) => x.id === workspaceId)
+      if (w) w.pendingHandoffFrom = null
+    })
+    return buildHandoffPrompt({ items: getTranscripts().load(workspaceId), fromLabel }) ?? undefined
   }
 
   interrupt(workspaceId: string): Promise<void> {

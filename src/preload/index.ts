@@ -49,8 +49,8 @@ const api: WooiApi = {
       ipcRenderer.invoke(IPC.workspaceSetEffort, workspaceId, effort),
     setFastMode: (workspaceId, fastMode) =>
       ipcRenderer.invoke(IPC.workspaceSetFastMode, workspaceId, fastMode),
-    setAgentBackend: (workspaceId, agentBackend) =>
-      ipcRenderer.invoke(IPC.workspaceSetAgentBackend, workspaceId, agentBackend),
+    setAgentBackend: (workspaceId, agentBackend, opts) =>
+      ipcRenderer.invoke(IPC.workspaceSetAgentBackend, workspaceId, agentBackend, opts),
     setMuted: (workspaceId, muted) => ipcRenderer.invoke(IPC.workspaceSetMuted, workspaceId, muted),
     setMultiAgent: (workspaceId, multiAgent) =>
       ipcRenderer.invoke(IPC.workspaceSetMultiAgent, workspaceId, multiAgent),
@@ -86,6 +86,25 @@ const api: WooiApi = {
     stop: (workspaceId, kind) => ipcRenderer.invoke(IPC.scriptStop, workspaceId, kind),
     getStatus: (workspaceId) => ipcRenderer.invoke(IPC.scriptGetStatus, workspaceId),
     getOutput: (workspaceId, kind) => ipcRenderer.invoke(IPC.scriptGetOutput, workspaceId, kind)
+  },
+
+  preview: {
+    setUrl: (workspaceId, url) => ipcRenderer.invoke(IPC.previewSetUrl, workspaceId, url),
+    open: (workspaceId, url) => ipcRenderer.invoke(IPC.previewOpen, workspaceId, url),
+    capture: (workspaceId, webContentsId) =>
+      ipcRenderer.invoke(IPC.previewCapture, workspaceId, webContentsId),
+    pickElement: (workspaceId, webContentsId) =>
+      ipcRenderer.invoke(IPC.previewPickElement, workspaceId, webContentsId),
+    cancelPick: (webContentsId) => ipcRenderer.invoke(IPC.previewCancelPick, webContentsId),
+    watchIssues: (workspaceId, webContentsId) =>
+      ipcRenderer.invoke(IPC.previewWatchIssues, workspaceId, webContentsId),
+    unwatchIssues: (webContentsId) => ipcRenderer.invoke(IPC.previewUnwatchIssues, webContentsId),
+    listIssues: (workspaceId) => ipcRenderer.invoke(IPC.previewListIssues, workspaceId),
+    clearIssues: (workspaceId) => ipcRenderer.invoke(IPC.previewClearIssues, workspaceId),
+    sendIssues: (workspaceId, issueIds) =>
+      ipcRenderer.invoke(IPC.previewSendIssues, workspaceId, issueIds),
+    onOpen: (cb) => subscribe(IPC.evtPreviewOpen, cb),
+    onIssues: (cb) => subscribe(IPC.evtPreviewIssues, cb)
   },
 
   git: {
@@ -260,6 +279,7 @@ const api: WooiApi = {
   onPermissionCancel: (cb) => subscribe(IPC.evtPermissionCancel, cb),
   onScriptOutput: (cb) => subscribe(IPC.evtScriptOutput, cb),
   onScriptExit: (cb) => subscribe(IPC.evtScriptExit, cb),
+  onComposerAttach: (cb) => subscribe(IPC.evtComposerAttach, cb),
   onState: (cb) => subscribe(IPC.evtState, cb),
   onReview: (cb) => subscribe(IPC.evtReview, cb),
   onSelectWorkspace: (cb) => subscribe(IPC.evtSelectWorkspace, cb),

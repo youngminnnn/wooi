@@ -5,7 +5,9 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { getStore } from './store'
 import { getTranscripts } from './transcripts'
+import { buildHandoffPrompt, estimateHandoffTokens, formatHandoffTokens } from '@shared/handoff'
 import { listDir, readFileInRoot, searchFiles } from './fsbrowse'
+import { formatIssues } from '@shared/previewIssues'
 import { log } from './logger'
 import {
   abortMerge,
@@ -78,6 +80,7 @@ import {
   IPC,
   SETUP_SCRIPT_ID,
   agentSettingsFor,
+  agentSwitchNeedsHandoff,
   canSwitchAgentBackend,
   isBranchStack,
   normalizePermissionMode,
@@ -107,6 +110,7 @@ import type {
   CarryFailure,
   CodexMcpServer,
   CarryItem,
+  ChatItem,
   CodexLoginMethod,
   CommandPanelKind,
   CommandResult,
@@ -135,6 +139,13 @@ import type {
 } from '@shared/types'
 import type { AgentOrchestrator } from './agent/orchestrator'
 import type { PaneWindows } from './paneWindows'
+import {
+  cancelPreviewPick,
+  capturePreview,
+  pickPreviewElement,
+  previewIssues,
+  watchPreviewIssues
+} from './preview'
 import type { ScriptRunner } from './scripts'
 import type { TerminalManager } from './terminal'
 
@@ -678,36 +689,59 @@ export function registerIpc(ctx: IpcContext): void {
   })
 
   /**
-   * 메인 에이전트 교체. 생성 시 골랐어야 할 값을, **아직 아무것도 보내지 않은** 동안에만 고쳐 준다
-   * ([[canSwitchAgentBackend]]).
+   * 메인 에이전트 교체([[canSwitchAgentBackend]]). 대화 도중에도 되며, 그때는 지금까지의 대화를
+   * 새 에이전트에게 넘겨 준다([[agentSwitchNeedsHandoff]]) — 그 인수인계 한 번이 통째로 입력
+   * 토큰이라 사용량이 드는 일이므로, 렌더러가 사용자에게 확인받았다는 표시(`handoff`)를 함께
+   * 보내야 한다.
    *
    * 규칙은 렌더러와 같은 함수를 쓰지만 판정 재료는 여기서 다시 읽는다 — 렌더러의 화면이 낡았거나
-   * (교체 직전에 첫 메시지가 나갔거나) 다른 창에서 이미 대화가 시작됐을 수 있고, 그때 그대로
-   * 바꿔 주면 남의 대화 맥락을 다른 CLI 로 넘기게 된다.
+   * (경고를 띄우지 않던 사이에 첫 메시지가 나갔거나) 다른 창에서 이미 대화가 시작됐을 수 있고,
+   * 그때 그대로 바꿔 주면 사용자가 비용을 승낙한 적 없는 턴이 돈다.
    */
   ipcMain.handle(
     IPC.workspaceSetAgentBackend,
-    async (_e, workspaceId: string, agentBackend: AgentBackendId): Promise<{ error?: string }> => {
+    async (
+      _e,
+      workspaceId: string,
+      agentBackend: AgentBackendId,
+      opts?: { handoff?: boolean }
+    ): Promise<{ error?: string }> => {
       const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
       if (!ws) return { error: 'Workspace not found.' }
       if (ws.agentBackend === agentBackend) return {}
-      if (!canSwitchAgentBackend(ws, getTranscripts().load(workspaceId).length)) {
+      if (!canSwitchAgentBackend(ws)) {
+        return {
+          error: ws.archived
+            ? 'This workspace is archived.'
+            : 'Stop the current turn before switching agents.'
+        }
+      }
+
+      const items = getTranscripts().load(workspaceId)
+      const needsHandoff = agentSwitchNeedsHandoff(ws, items.length)
+      if (needsHandoff && !opts?.handoff) {
         return {
           error:
-            'The agent is fixed once the conversation starts. Clear the conversation (/clear) or create a new workspace.'
+            'This conversation has already started — switching agents replays it to the new agent. Confirm the switch to continue.'
         }
       }
 
       // 등록 여부·가용성(CLI 설치·버전)을 카탈로그에서 확인한다. 쓸 수 없는 에이전트로 갈아타면
-      // 워크스페이스가 첫 메시지에서야 실패하므로, 그 전에 이유를 그대로 돌려준다.
-      const target = (await ctx.sessions.listBackends()).find((b) => b.id === agentBackend)
+      // 워크스페이스가 다음 메시지에서야 실패하므로, 그 전에 이유를 그대로 돌려준다.
+      const backends = await ctx.sessions.listBackends()
+      const target = backends.find((b) => b.id === agentBackend)
       if (!target) return { error: 'Unknown agent.' }
       if (!target.available) {
         return { error: target.unavailableReason ?? `${target.label} is not available.` }
       }
+      const fromLabel = backends.find((b) => b.id === ws.agentBackend)?.label ?? ws.agentBackend
 
-      // 세션은 첫 전송에서야 생기므로 보통 아무것도 없지만, 남아 있다면 **바꾸기 전에** 정리한다 —
-      // agentBackend 를 바꾸고 나면 라우팅이 새 백엔드로 가서 옛 세션에 손이 닿지 않는다.
+      // 넘길 대화가 실제로 있는지는 지금 만들어 봐야 안다(기록이 result·thinking 뿐일 수 있다).
+      // 크기는 안내에만 쓰고, 실제로 보낼 프롬프트는 보낼 때 다시 만든다([[agent/orchestrator]]).
+      const handoffPrompt = needsHandoff ? buildHandoffPrompt({ items, fromLabel }) : null
+
+      // 살아 있는 세션은 **바꾸기 전에** 정리한다 — agentBackend 를 바꾸고 나면 라우팅이 새
+      // 백엔드로 가서 옛 세션(과 그 CLI 프로세스)에 손이 닿지 않는다.
       ctx.sessions.dispose(workspaceId)
 
       const settings = store.getState().settings
@@ -715,6 +749,14 @@ export function registerIpc(ctx: IpcContext): void {
         const w = st.workspaces.find((x) => x.id === workspaceId)
         if (!w) return
         w.agentBackend = agentBackend
+        // sessionId 는 옛 백엔드의 것이라 새 백엔드에서는 의미가 없다. 그대로 두면 다음 메시지가
+        // 남의 세션 id 로 resume 을 시도해 실패한다(claude/manager 의 resumeSessionId,
+        // codex/manager 의 resumeThreadId). 비우면 새 세션이 열리고, 맥락은 아래 인수인계가 잇는다.
+        w.sessionId = null
+        // 인수인계는 여기서 보내지 않고 **다음 메시지에 얹어** 나간다. 여기서 한 턴을 돌리면
+        // 사용자가 시작하지도 않은 그 턴에 곧바로 입력한 명령이 끼어들어(Codex 의 steering)
+        // 엉뚱한 답이 돌아온다 — 실제로 겪은 증상이다([[shared/handoff]]).
+        w.pendingHandoffFrom = handoffPrompt ? fromLabel : null
         // 모델·effort·fast mode 는 백엔드마다 값 자체가 다르다(Claude 의 모델 ID 를 Codex 에 줄 수
         // 없다). 그대로 들고 가면 조용히 무시되거나 거부되므로 새 백엔드의 기본값으로 되돌린다.
         w.model = null
@@ -729,6 +771,20 @@ export function registerIpc(ctx: IpcContext): void {
         )
       })
       broadcastState()
+
+      // 무슨 일이 일어날지 기록에 남긴다. 넘기는 시점이 "지금" 이 아니라 "다음 메시지" 라서,
+      // 이 줄이 없으면 확인까지 눌러 놓고 아무 일도 안 일어난 것처럼 보인다.
+      if (handoffPrompt) {
+        const item: ChatItem = {
+          id: `system:agent-switch:${Date.now()}`,
+          type: 'system',
+          text: `Switched to ${target.label}. The conversation above goes with your next message (${formatHandoffTokens(estimateHandoffTokens(handoffPrompt))} tokens of input) — it can’t see any of it until then.`,
+          ts: Date.now()
+        }
+        getTranscripts().upsert(workspaceId, item)
+        dispatch(IPC.evtChat, { workspaceId, event: { type: 'item', item } })
+      }
+
       return {}
     }
   )
@@ -848,6 +904,11 @@ export function registerIpc(ctx: IpcContext): void {
   ipcMain.handle(IPC.chatClear, (_e, workspaceId: string) => {
     ctx.sessions.clearSession(workspaceId)
     getTranscripts().remove(workspaceId)
+    // 넘기기로 예약해 둔 대화가 방금 사라졌다 — 예약도 함께 지운다.
+    store.update((st) => {
+      const w = st.workspaces.find((x) => x.id === workspaceId)
+      if (w) w.pendingHandoffFrom = null
+    })
     broadcastState()
   })
 
@@ -940,6 +1001,90 @@ export function registerIpc(ctx: IpcContext): void {
 
   ipcMain.handle(IPC.scriptGetOutput, (_e, workspaceId: string, scriptId: string) => {
     return ctx.scripts.getOutput(workspaceId, scriptId)
+  })
+
+  // ── Preview 패널 ───────────────────────────────────────────────────────
+
+  /** Preview 가 마지막으로 본 주소를 워크스페이스에 적어 둔다. 값이 그대로면 방송하지 않는다. */
+  const rememberPreviewUrl = (workspaceId: string, url: string): boolean => {
+    const current = store.getState().workspaces.find((w) => w.id === workspaceId)
+    if (!current || current.previewUrl === url) return false
+    store.update((s) => {
+      const ws = s.workspaces.find((w) => w.id === workspaceId)
+      if (ws) ws.previewUrl = url
+    })
+    broadcastState()
+    return true
+  }
+
+  ipcMain.handle(IPC.previewSetUrl, (_e, workspaceId: string, url: string) => {
+    rememberPreviewUrl(workspaceId, url)
+  })
+
+  // "Open in Preview" — 주소를 기억하고 모든 창에 방송한다. 스크립트 패널과 Preview 탭이 서로
+  // 다른 창에 떠 있을 수 있어(둘 다 분리 가능) renderer 끼리 직접 이야기할 방법이 없다.
+  ipcMain.handle(IPC.previewOpen, (_e, workspaceId: string, url: string) => {
+    rememberPreviewUrl(workspaceId, url)
+    dispatch(IPC.evtPreviewOpen, { workspaceId, url })
+  })
+
+  // 캡처는 main 이 한다(renderer 에는 webContents 가 없다). 찍은 이미지는 호출자에게 돌려주지
+  // 않고 방송한다 — 컴포저는 메인 창에만 있고, 캡처를 누른 창은 분리된 work 창일 수 있다.
+  ipcMain.handle(IPC.previewCapture, async (_e, workspaceId: string, webContentsId: number) => {
+    const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
+    if (!ws) return { error: 'That workspace is gone.' }
+    const { image, error } = await capturePreview(ws.previewUrl ?? '', webContentsId)
+    if (error || !image) return { error: error ?? 'Could not capture the preview.' }
+    dispatch(IPC.evtComposerAttach, { workspaceId, image })
+    return {}
+  })
+
+  // 요소 픽커. 사용자가 고를 때까지(또는 취소·타임아웃까지) 이 핸들러가 매달려 있는다 —
+  // 렌더러는 그동안 "고르는 중" 을 보여 주고, 결과는 캡처와 같은 우편함으로 흘러간다.
+  ipcMain.handle(IPC.previewPickElement, async (_e, workspaceId: string, webContentsId: number) => {
+    const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
+    if (!ws) return { error: 'That workspace is gone.' }
+    const { attachment, error } = await pickPreviewElement(ws.previewUrl ?? '', webContentsId)
+    if (error || !attachment) return { error: error ?? 'Could not read that element.' }
+    dispatch(IPC.evtComposerAttach, { workspaceId, ...attachment })
+    return {}
+  })
+
+  ipcMain.handle(IPC.previewCancelPick, (_e, webContentsId: number) => {
+    cancelPreviewPick(webContentsId)
+  })
+
+  // 콘솔·네트워크 문제 수집. 목록은 여기서 당겨 가고, 개수만 evtPreviewIssues 로 방송된다
+  // — 매 콘솔 줄을 IPC 로 밀면 폭주하는 dev 로그가 메인 힙을 밀어 올린다([[main/previewIssues]]).
+  ipcMain.handle(IPC.previewWatchIssues, (_e, workspaceId: string, webContentsId: number) => {
+    watchPreviewIssues(workspaceId, webContentsId)
+  })
+
+  ipcMain.handle(IPC.previewUnwatchIssues, (_e, webContentsId: number) => {
+    previewIssues().unwatch(webContentsId)
+  })
+
+  ipcMain.handle(IPC.previewListIssues, (_e, workspaceId: string) =>
+    previewIssues().list(workspaceId)
+  )
+
+  ipcMain.handle(IPC.previewClearIssues, (_e, workspaceId: string) => {
+    previewIssues().clear(workspaceId)
+  })
+
+  ipcMain.handle(IPC.previewSendIssues, (_e, workspaceId: string, issueIds: string[]) => {
+    const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
+    if (!ws) return { error: 'That workspace is gone.' }
+    const wanted = new Set(issueIds)
+    const picked = previewIssues()
+      .list(workspaceId)
+      .filter((i) => wanted.has(i.id))
+    if (!picked.length) return { error: 'Nothing to send.' }
+    dispatch(IPC.evtComposerAttach, {
+      workspaceId,
+      text: formatIssues(picked, ws.previewUrl ?? '')
+    })
+    return {}
   })
 
   // ── 분리한 패널 창 ─────────────────────────────────────────────────────

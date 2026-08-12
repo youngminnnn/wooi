@@ -657,6 +657,14 @@ export interface Workspace {
   /** run script id 별로 예약한 포트. */
   ports: Record<string, number>
   /**
+   * Preview 탭이 마지막으로 보고 있던 주소(영속). 없거나 null 이면 아직 아무것도 열지 않았다.
+   *
+   * 워크스페이스에 매다는 이유는 수명이 같아서다 — dev 서버 주소는 이 worktree 의 성질이고,
+   * 워크스페이스를 지우면 함께 사라져야 한다(설정에 모아 두면 죽은 항목이 쌓인다).
+   * 옵셔널이라 저장된 워크스페이스는 마이그레이션 없이 그대로 읽힌다.
+   */
+  previewUrl?: string | null
+  /**
    * setup 스크립트의 마지막 실행 결과(영속). setup 은 생성 직후 자동 실행되는 일회성 초기화라,
    * 이미 성공한 걸 다시 돌리면 재설치·재시드처럼 무의미하거나 파괴적일 수 있다. 그래서 결과를
    * 디스크에 남겨, 앱을 재시작해도 성공한 setup 은 재실행 버튼을 노출하지 않는다(실패했을 때만 Retry).
@@ -695,6 +703,15 @@ export interface Workspace {
   fastModeState: FastModeState | null
   /** fast mode 가 꺼져 있는 이유(CLI 보고). 이유를 특정할 수 없거나 켜져 있으면 null. */
   fastModeReason: FastModeDisabledReason | null
+  /**
+   * 에이전트를 바꾸면서 아직 넘기지 못한 인수인계 예약 — 값은 **넘겨주는 쪽** 에이전트의 표시
+   * 이름이다([[shared/handoff]]). 다음 사용자 메시지 앞에 지난 대화가 붙어 나가고 그때 지워진다
+   * ([[agent/orchestrator]] 의 takeHandoffPrefix).
+   *
+   * 프롬프트 자체를 담지 않는 것이 요점이다. 그 텍스트는 수만 자라 설정 파일이 그만큼 커지는데,
+   * 넘길 내용은 어차피 트랜스크립트에 그대로 있어 보낼 때 다시 만들면 된다.
+   */
+  pendingHandoffFrom?: string | null
   /** 아카이브되면 사이드바 기본 목록에서 숨기고 worktree 를 제거한다(브랜치·기록은 유지). */
   archived: boolean
   /** 이 워크스페이스의 모든 알림(OS 알림·소리·Dock 배지)을 음소거한다. 레거시는 undefined=false. */
@@ -714,32 +731,42 @@ export interface Workspace {
 }
 
 /**
- * 이 워크스페이스의 메인 에이전트를 아직 바꿀 수 있는가.
+ * 이 워크스페이스의 메인 에이전트를 지금 바꿀 수 있는가.
  *
- * 에이전트는 생성 시점에 정해져 세션 내내 고정된다. 대화가 시작된 뒤에 바꾸면 지금까지의
- * 맥락(sessionId)이 다른 CLI 의 것이라 이어지지 않고, 모델·effort·권한 모드도 백엔드마다 값이
- * 달라 조용히 어긋난다. 그래서 **아직 아무것도 보내지 않은** 동안에만 연다 — 그때는 버릴 맥락이
- * 없어서 교체가 "새로 만드는 것"과 같은 일이 된다. 기본 설정에서는 워크스페이스가 모달 없이
- * 만들어지므로, 에이전트가 잘못 걸린 걸 알아채는 시점이 대개 이 구간이다.
+ * 대화 도중이라도 바꿀 수 있다 — 에이전트가 잘못 걸린 걸 알아채는 시점은 대개 몇 턴 돌려 본
+ * 뒤이고, 그때 "새 워크스페이스를 만들어 처음부터"만 남겨 두면 브랜치·워크트리·작업 중인 변경까지
+ * 다 옮겨야 한다. 맥락은 지난 대화를 새 세션에 다시 말해 주는 것으로 잇는다
+ * ([[shared/handoff]]) — 다만 그 한 번이 통째로 입력 토큰이라, [[agentSwitchNeedsHandoff]] 가
+ * 그 구간을 가려 사용량 경고를 띄운다.
+ *
+ * 막는 경우는 둘뿐이다. 턴이 도는 중에 바꾸면 지금 답하고 있는 세션을 발밑에서 치우게 되고,
+ * 아카이브된 워크스페이스는 애초에 대화 대상이 아니다.
+ *
+ * 규칙을 여기(shared)에 두는 이유는 렌더러와 main 이 같은 답을 내야 하기 때문이다. 렌더러는 이
+ * 값으로 선택 UI 를 잠글지 정하고, main 은 같은 값으로 요청을 거절한다.
+ */
+export function canSwitchAgentBackend(workspace: Pick<Workspace, 'archived' | 'status'>): boolean {
+  return !workspace.archived && workspace.status !== 'running'
+}
+
+/**
+ * 지금 에이전트를 바꾸면 맥락을 넘겨야 하는가(= 사용량이 드는 구간인가).
+ *
+ * 백엔드끼리 세션을 물려줄 방법은 없으므로(Claude 의 sessionId 로 Codex 를 resume 할 수 없다)
+ * 맥락은 지난 대화를 새 세션에 통째로 다시 말해 주는 것으로만 넘어간다([[shared/handoff]]).
+ * 그 한 번이 그대로 입력 토큰이라 대화가 길수록 비싸다 — 그래서 이 구간에서는 사용자에게 먼저
+ * 물어보고([[Composer]] 의 확인 대화상자), main 도 확인받지 않은 요청은 거절한다([[ipc]]).
  *
  * `messageCount` 는 이 워크스페이스의 트랜스크립트 항목 수다(main 은 기록 파일, 렌더러는 불러온
  * 기록에서 읽는다). sessionId 만으로는 부족하다 — 유휴 세션이 정리된 워크스페이스에도 sessionId
  * 는 resume 용으로 남아 있고([[agent/orchestrator]]), 반대로 /clear 로 비운 워크스페이스는
  * sessionId 가 없어도 대화가 있었던 곳이라 트랜스크립트로 함께 판정해야 한다.
- *
- * 규칙을 여기(shared)에 두는 이유는 렌더러와 main 이 같은 답을 내야 하기 때문이다. 렌더러는 이
- * 값으로 선택 UI 를 노출할지 정하고, main 은 같은 값으로 요청을 거절한다.
  */
-export function canSwitchAgentBackend(
-  workspace: Pick<Workspace, 'archived' | 'sessionId' | 'status'>,
+export function agentSwitchNeedsHandoff(
+  workspace: Pick<Workspace, 'sessionId'>,
   messageCount: number
 ): boolean {
-  return (
-    !workspace.archived &&
-    workspace.status !== 'running' &&
-    workspace.sessionId === null &&
-    messageCount === 0
-  )
+  return workspace.sessionId !== null || messageCount > 0
 }
 
 /**
@@ -1533,6 +1560,53 @@ export interface ScriptExitEvent {
 
 export type ScriptRunState = 'idle' | 'running' | 'exited'
 
+// ── Preview 패널(워크트리의 dev 서버를 앱 안에서 보는 탭) ────────────────
+
+/**
+ * Preview `<webview>` 가 쓰는 Electron 세션 파티션.
+ *
+ * 앱의 기본 세션과 **반드시** 갈라 둔다. 이유가 둘이다:
+ *  1. 격리 — 미리보는 페이지가 앱이 들고 있는 쿠키·스토리지·자격증명에 닿지 못한다.
+ *  2. CSP — 메인은 프로덕션에서 defaultSession 의 모든 응답에 `default-src 'self'` 를 씌운다
+ *     ([[main/index]] applyContentSecurityPolicy). 같은 세션을 쓰면 그 헤더가 미리보는
+ *     dev 서버 페이지에도 붙어 자기 스크립트조차 못 불러온다. 파티션이 다르면 아예 걸리지 않는다.
+ *
+ * `persist:` 접두사로 디스크에 남긴다 — 로그인해 둔 dev 앱을 앱 재시작마다 다시 로그인하지 않도록.
+ */
+export const PREVIEW_PARTITION = 'persist:wooi-preview'
+
+/** Preview 를 특정 주소로 열라는 신호(evtPreviewOpen 페이로드). */
+export interface PreviewOpenEvent {
+  workspaceId: string
+  url: string
+}
+
+/**
+ * 컴포저에 넣을 것 한 건. 스크린샷은 이미지만, 요소 픽커는 이미지(크롭)와 텍스트를 함께 싣는다.
+ * 둘을 한 건으로 묶는 것이 요점이다 — 픽커의 그림과 설명은 짝이라, 따로 흘려보내면 컴포저에서
+ * 순서가 갈리거나 한쪽만 도착한다.
+ */
+export interface ComposerAttachment {
+  image?: ImageAttachment
+  /** 초안 끝에 붙일 텍스트 블록(요소 픽커의 구조화 정보). */
+  text?: string
+}
+
+/** 컴포저에 넣을 것이 도착했다(evtComposerAttach 페이로드). */
+export type ComposerAttachEvent = ComposerAttachment & { workspaceId: string }
+
+/** Preview 가 모은 문제의 개수(evtPreviewIssues 페이로드). */
+export interface PreviewIssueCountEvent {
+  workspaceId: string
+  errors: number
+  warnings: number
+}
+
+/** Preview 캡처 결과. 성공하면 이미지는 evtComposerAttach 로 따로 흘러가고 여기엔 아무것도 없다. */
+export interface PreviewCaptureResult {
+  error?: string
+}
+
 // ── 분리 가능한 패널(별도 창) ────────────────────────────────────────────
 
 /**
@@ -2270,6 +2344,30 @@ export const IPC = {
   paneSetWorkspace: 'pane:setWorkspace',
   /** 분리한 창에서 리포 설정을 요청한다(메인 창을 앞으로 가져와 모달을 연다). */
   paneOpenRepoSettings: 'pane:openRepoSettings',
+  // Preview 패널 (워크트리의 dev 서버를 앱 안에서 보는 탭)
+  /** Preview 가 마지막으로 본 주소를 워크스페이스에 영속한다(주소창 입력·내비게이션 후). */
+  previewSetUrl: 'preview:setUrl',
+  /** 이 워크스페이스의 Preview 를 특정 주소로 연다(스크립트 패널의 "Open in Preview"). */
+  previewOpen: 'preview:open',
+  /** Preview 화면을 캡처해 컴포저 첨부로 흘려보낸다. 인자는 webview 게스트의 webContents id. */
+  previewCapture: 'preview:capture',
+  /**
+   * 요소 픽커를 켠다. 사용자가 미리보는 페이지에서 요소를 고를 때까지 기다렸다가,
+   * 선택자·outerHTML·적용된 CSS·크롭 이미지를 컴포저로 흘려보낸다.
+   */
+  previewPickElement: 'preview:pickElement',
+  /** 진행 중인 요소 픽을 취소한다(Esc·패널 언마운트). */
+  previewCancelPick: 'preview:cancelPick',
+  /** 이 게스트의 콘솔·네트워크 문제를 이 워크스페이스 것으로 모으기 시작한다(dom-ready 에서). */
+  previewWatchIssues: 'preview:watchIssues',
+  /** 수집을 멈춘다(패널이 사라질 때). */
+  previewUnwatchIssues: 'preview:unwatchIssues',
+  /** 모아 둔 문제 목록을 읽는다(개수만 방송되므로 패널을 열 때 한 번 가져간다). */
+  previewListIssues: 'preview:listIssues',
+  /** 모아 둔 문제를 비운다. */
+  previewClearIssues: 'preview:clearIssues',
+  /** 고른 문제들을 컴포저에 넣는다. */
+  previewSendIssues: 'preview:sendIssues',
   // Dock 미확인 배지
   appSetBadge: 'app:setBadge',
   // 앱 버전 / 자동 업데이트
@@ -2329,6 +2427,21 @@ export const IPC = {
   evtPaneWorkspace: 'evt:paneWorkspace',
   /** 분리한 창이 요청한 리포 설정 열기 — 메인 창이 받아 모달을 띄운다. */
   evtOpenRepoSettings: 'evt:openRepoSettings',
+  /**
+   * Preview 를 특정 주소로 열라는 신호. 스크립트 패널과 Preview 탭이 서로 **다른 창**에 있을 수
+   * 있어(둘 다 분리 가능) renderer 안에서 직접 부를 수 없다 — main 을 거쳐 모든 창에 방송한다.
+   */
+  evtPreviewOpen: 'evt:previewOpen',
+  /**
+   * Preview 가 모은 문제의 **개수**. 목록이 아니라 개수만 보내는 것이 요점이다 — 매 콘솔 줄을
+   * IPC 로 밀면 폭주하는 dev 로그가 메시지 홍수가 되어 메인 힙을 밀어 올린다([[main/previewIssues]]).
+   */
+  evtPreviewIssues: 'evt:previewIssues',
+  /**
+   * 컴포저에 붙일 이미지(Preview 스크린샷). 캡처는 어느 창에서든 일어날 수 있지만 컴포저는
+   * 메인 창에만 있으므로, main 이 받아 방송하고 컴포저가 있는 창만 집어 간다.
+   */
+  evtComposerAttach: 'evt:composerAttach',
   /** 자동 업데이트 상태 변화(확인 중/최신/발견/다운로드 진행/준비됨/오류). */
   evtUpdate: 'evt:update',
   /** 원격 공지 목록이 갱신됨(main 이 주기적으로 가져온 결과). */
