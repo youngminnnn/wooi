@@ -85,12 +85,14 @@ const REPO_MIME = 'application/x-wooi-repo'
 const WORKSPACE_MIME = 'application/x-wooi-workspace'
 
 export default function Sidebar({
+  width,
   onNewWorkspace,
   onNewFromIssue,
   onFanout,
   onStackWorkspace,
   onOpenQuickSwitch
 }: {
+  width: number
   onNewWorkspace: (repoId: string, agentBackend?: AgentBackendId) => void
   onNewFromIssue: (repoId: string) => void
   /** 같은 프롬프트를 후보 여럿에게 뿌리는 생성 모달을 연다. */
@@ -238,7 +240,10 @@ export default function Sidebar({
   })
 
   return (
-    <aside className="w-72 shrink-0 flex flex-col bg-[var(--bg-2)]">
+    <aside
+      style={{ width }}
+      className="shrink-0 min-w-0 overflow-hidden flex flex-col bg-[var(--bg-2)]"
+    >
       {hasActiveWorkspaces && (
         <div className="px-2 pt-2 shrink-0 space-y-0.5">
           <button
@@ -251,8 +256,8 @@ export default function Sidebar({
             }`}
             title="Overview — all active sessions at a glance"
           >
-            <LayoutDashboard size={15} />
-            <span className="font-medium">Overview</span>
+            <LayoutDashboard size={15} className="shrink-0" />
+            <span className="min-w-0 truncate font-medium">Overview</span>
           </button>
           {/* 퀵 스위처의 상시 진입점. 별도 안내문 없이도 ⌘K 의 존재와 용도를 알려 주고,
               키보드 단축키를 모르거나 마우스로 쓰는 경우에도 팔레트에 닿을 수 있게 한다
@@ -263,15 +268,15 @@ export default function Sidebar({
             className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm text-neutral-400 hover:bg-[var(--surface)] hover:text-neutral-200 transition-colors"
             title="Search workspaces by name, branch, or repo"
           >
-            <Search size={15} />
-            <span className="flex-1 text-left font-medium">Search workspaces</span>
-            <kbd className="text-xs leading-none font-medium text-neutral-600">⌘K</kbd>
+            <Search size={15} className="shrink-0" />
+            <span className="flex-1 min-w-0 truncate text-left font-medium">Search workspaces</span>
+            <kbd className="shrink-0 text-xs leading-none font-medium text-neutral-600">⌘K</kbd>
           </button>
         </div>
       )}
 
       <div data-tour="repos" className="flex items-center justify-between px-3 h-10 shrink-0">
-        <span className="text-xs uppercase tracking-wider text-neutral-500 font-semibold">
+        <span className="min-w-0 truncate text-xs uppercase tracking-wider text-neutral-500 font-semibold">
           Repositories
         </span>
         <button

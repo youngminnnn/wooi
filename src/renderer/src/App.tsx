@@ -7,7 +7,7 @@ import {
   orderVisibleWorkspaces
 } from '@shared/types'
 import type { AgentBackendId } from '@shared/types'
-import { useStore } from './store'
+import { DEFAULT_SIDEBAR_WIDTH, useStore } from './store'
 import { nextPermissionMode } from './lib/permission'
 import { OPEN_REPO_SETTINGS_EVENT, openRepoSettings } from './lib/repoSettings'
 import { OPEN_FILE_QUICK_OPEN_EVENT, openFileQuickOpen } from './lib/fileViewer'
@@ -58,6 +58,9 @@ export default function App(): React.JSX.Element {
   // 작업 패널을 별도 창으로 떼어 뒀으면 여기서는 그리지 않는다 — 분리는 복제가 아니라 이동이다.
   const workPaneDetached = useStore((s) => s.detachedPanes.work)
   const rightBase = useRef(rightWidth)
+  const sidebarWidth = useStore((s) => s.sidebarWidth)
+  const setSidebarWidth = useStore((s) => s.setSidebarWidth)
+  const sidebarBase = useRef(sidebarWidth)
 
   // 사이드바 오른쪽의 메인 컨텐츠 영역 너비를 측정한다. 우측 작업 패널은 고정 px 라서
   // 창이 좁아지면 채팅이 0 으로 찌그러지므로, 측정한 너비로 패널 폭을 동적으로 제한한다.
@@ -578,11 +581,19 @@ export default function App(): React.JSX.Element {
         {/* 사이드바는 리뷰 중에도 그대로 둔다 — 리뷰는 워크스페이스와 병행하는 작업이고,
             사이드바가 그 둘을 오가는 유일한 통로다. */}
         <Sidebar
+          width={sidebarWidth}
           onNewWorkspace={handleNewWorkspace}
           onNewFromIssue={setIssueRepoId}
           onFanout={handleFanout}
           onStackWorkspace={handleStackWorkspace}
           onOpenQuickSwitch={() => setQuickSwitchOpen(true)}
+        />
+        <Splitter
+          axis="x"
+          label="Resize sidebar"
+          onStart={() => (sidebarBase.current = useStore.getState().sidebarWidth)}
+          onDelta={(dx) => setSidebarWidth(sidebarBase.current + dx)}
+          onReset={() => setSidebarWidth(DEFAULT_SIDEBAR_WIDTH)}
         />
         {/* relative — 큰 파일 뷰어가 이 영역(대화 + 작업 패널)만 덮는 오버레이로 올라탄다. */}
         <div

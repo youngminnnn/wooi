@@ -212,6 +212,18 @@ function joinList(parts: string[]): string {
  * 그 마지막 상태를 여기 캐시해 다음 실행에서 복원한다(테마 캐시와 같은 방식).
  */
 const RIGHT_PANEL_KEY = 'wooi.rightPanelOpen'
+const SIDEBAR_WIDTH_KEY = 'wooi.sidebarWidth'
+export const DEFAULT_SIDEBAR_WIDTH = 288
+
+function readRememberedSidebarWidth(): number {
+  try {
+    const value = Number(localStorage.getItem(SIDEBAR_WIDTH_KEY))
+    if (Number.isFinite(value) && value > 0) return Math.max(180, Math.min(480, value))
+  } catch {
+    /* 기억 실패는 기본 너비로 폴백한다. */
+  }
+  return DEFAULT_SIDEBAR_WIDTH
+}
 
 /** 기억된 패널 상태를 읽는다. 토글한 적이 없으면(키 없음) null 을 돌려 기본값으로 폴백하게 한다. */
 function readRememberedRightPanel(): boolean | null {
@@ -320,6 +332,8 @@ interface UIState {
   scriptPanelOpen: Record<string, boolean>
   /** 우측 작업 패널(파일/변경/체크 + 터미널)의 너비(px). 세로 분할 드래그로 조절. */
   rightWidth: number
+  /** 왼쪽 사이드바 너비(px). */
+  sidebarWidth: number
   /** 우측 작업 패널 표시 여부. 숨기면 대화 영역이 전체 폭을 차지한다. */
   rightPanelOpen: boolean
   /** 우하단 터미널이 우측 컬럼 높이에서 차지하는 비율(0~1). 기본 0.5. 가로 분할 드래그로 조절. */
@@ -533,6 +547,7 @@ interface UIState {
   /** 해당 workspace 의 에이전트 목록 접힘 상태를 뒤집는다. */
   toggleAgentsCollapsed: (workspaceId: string) => void
   setRightWidth: (px: number) => void
+  setSidebarWidth: (px: number) => void
   toggleRightPanel: () => void
   setRightPanelOpen: (open: boolean) => void
   setTerminalRatio: (ratio: number) => void
@@ -728,6 +743,7 @@ export const useStore = create<UIState>((set, get) => ({
   scrollPositions: {},
   scriptPanelOpen: {},
   rightWidth: 460,
+  sidebarWidth: readRememberedSidebarWidth(),
   rightPanelOpen: true,
   terminalRatio: 0.5,
   detachedPanes: { work: false, scripts: false },
@@ -2030,6 +2046,16 @@ export const useStore = create<UIState>((set, get) => ({
 
   // 우측 패널 너비 — 대화/터미널이 너무 좁아지지 않도록 양끝을 클램프한다.
   setRightWidth: (px) => set({ rightWidth: Math.max(320, Math.min(900, Math.round(px))) }),
+
+  setSidebarWidth: (px) => {
+    const width = Math.max(180, Math.min(480, Math.round(px)))
+    try {
+      localStorage.setItem(SIDEBAR_WIDTH_KEY, String(width))
+    } catch {
+      /* 기억은 편의 기능이므로 저장 실패 시 현재 세션에서만 적용한다. */
+    }
+    set({ sidebarWidth: width })
+  },
 
   // 우측 패널 표시 토글 — 숨기면 대화가 전체 폭을 쓰고, 다시 켜면 마지막 너비로 복귀한다.
   // 패널을 별도 창으로 떼어 뒀다면 그 창을 앞으로 가져온다 — 이미 "보이는" 상태라 여기서
