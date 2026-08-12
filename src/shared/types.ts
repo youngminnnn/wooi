@@ -1595,6 +1595,13 @@ export interface ComposerAttachment {
 /** 컴포저에 넣을 것이 도착했다(evtComposerAttach 페이로드). */
 export type ComposerAttachEvent = ComposerAttachment & { workspaceId: string }
 
+/** Preview 가 모은 문제의 개수(evtPreviewIssues 페이로드). */
+export interface PreviewIssueCountEvent {
+  workspaceId: string
+  errors: number
+  warnings: number
+}
+
 /** Preview 캡처 결과. 성공하면 이미지는 evtComposerAttach 로 따로 흘러가고 여기엔 아무것도 없다. */
 export interface PreviewCaptureResult {
   error?: string
@@ -2351,6 +2358,16 @@ export const IPC = {
   previewPickElement: 'preview:pickElement',
   /** 진행 중인 요소 픽을 취소한다(Esc·패널 언마운트). */
   previewCancelPick: 'preview:cancelPick',
+  /** 이 게스트의 콘솔·네트워크 문제를 이 워크스페이스 것으로 모으기 시작한다(dom-ready 에서). */
+  previewWatchIssues: 'preview:watchIssues',
+  /** 수집을 멈춘다(패널이 사라질 때). */
+  previewUnwatchIssues: 'preview:unwatchIssues',
+  /** 모아 둔 문제 목록을 읽는다(개수만 방송되므로 패널을 열 때 한 번 가져간다). */
+  previewListIssues: 'preview:listIssues',
+  /** 모아 둔 문제를 비운다. */
+  previewClearIssues: 'preview:clearIssues',
+  /** 고른 문제들을 컴포저에 넣는다. */
+  previewSendIssues: 'preview:sendIssues',
   // Dock 미확인 배지
   appSetBadge: 'app:setBadge',
   // 앱 버전 / 자동 업데이트
@@ -2415,6 +2432,11 @@ export const IPC = {
    * 있어(둘 다 분리 가능) renderer 안에서 직접 부를 수 없다 — main 을 거쳐 모든 창에 방송한다.
    */
   evtPreviewOpen: 'evt:previewOpen',
+  /**
+   * Preview 가 모은 문제의 **개수**. 목록이 아니라 개수만 보내는 것이 요점이다 — 매 콘솔 줄을
+   * IPC 로 밀면 폭주하는 dev 로그가 메시지 홍수가 되어 메인 힙을 밀어 올린다([[main/previewIssues]]).
+   */
+  evtPreviewIssues: 'evt:previewIssues',
   /**
    * 컴포저에 붙일 이미지(Preview 스크린샷). 캡처는 어느 창에서든 일어날 수 있지만 컴포저는
    * 메인 창에만 있으므로, main 이 받아 방송하고 컴포저가 있는 창만 집어 간다.
