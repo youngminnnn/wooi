@@ -269,9 +269,7 @@ export default function Sidebar({
             title="Search workspaces by name, branch, or repo"
           >
             <Search size={15} className="shrink-0" />
-            <span className="flex-1 min-w-0 truncate text-left font-medium">
-              Search workspaces
-            </span>
+            <span className="flex-1 min-w-0 truncate text-left font-medium">Search workspaces</span>
             <kbd className="shrink-0 text-xs leading-none font-medium text-neutral-600">⌘K</kbd>
           </button>
         </div>
