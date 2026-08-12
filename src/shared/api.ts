@@ -472,6 +472,16 @@ export interface WooiApi {
       workspaceId: string,
       userMessageId: string
     ): Promise<{ result?: RewindActionResult; error?: string }>
+    /**
+     * `/wooi:*` 즉시 실행 명령을 에이전트 없이 바로 돌린다([[shared/wooiCommands]]).
+     * `rest` 는 명령 뒤에 적은 나머지 텍스트 그대로 — 인자 파싱은 메인이 한다.
+     * 결과는 도구가 돌려준 값을 그대로 담은 JSON 이다(카드가 요약해 보여 준다).
+     */
+    wooiRun(
+      workspaceId: string,
+      name: string,
+      rest: string
+    ): Promise<{ result?: unknown; error?: string }>
   }
 
   rateLimits: {

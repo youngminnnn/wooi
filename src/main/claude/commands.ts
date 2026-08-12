@@ -3,6 +3,7 @@ import type { SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
 import { AsyncQueue } from './asyncQueue'
 import { resolveClaudeExecutable } from './executable'
 import { MCP_SETTING_SOURCES } from './mcp'
+import { resolveWooiPlugin } from '../agent/plugin'
 import { INTERACTIVE_COMMANDS } from '@shared/types'
 import type { SlashCommandInfo } from '@shared/types'
 
@@ -15,6 +16,14 @@ import type { SlashCommandInfo } from '@shared/types'
  * 자동완성을 빠르게 띄운다(프로젝트 스코프 명령/스킬은 cwd 에 따라 다를 수 있다).
  */
 const cache = new Map<string, Promise<SlashCommandInfo[]>>()
+
+/**
+ * 캐시 키. cwd 만으로는 부족하다 — team 모드 워크스페이스는 위임 커맨드가 더 실린 플러그인을
+ * 물기 때문에, 같은 worktree 라도 목록이 다르다. 모드를 토글하면 그 키가 새로 조회된다.
+ */
+function cacheKey(cwd: string, team: boolean): string {
+  return `${team ? 'team' : 'solo'}\0${cwd}`
+}
 
 /**
  * SDK supportedCommands() 가 돌려주지 않는 내장 명령을 자동완성에 보강한다.
@@ -62,19 +71,20 @@ const BUILTIN_COMMANDS: SlashCommandInfo[] = [
 
 /** 플러그인/스킬 리로드 후 자동완성 명령 목록을 다시 받도록 캐시를 비운다. */
 export function clearCommandsCache(cwd?: string): void {
-  if (cwd) cache.delete(cwd)
-  else cache.clear()
+  if (!cwd) return cache.clear()
+  for (const team of [true, false]) cache.delete(cacheKey(cwd, team))
 }
 
-export function listSlashCommands(cwd: string): Promise<SlashCommandInfo[]> {
-  const cached = cache.get(cwd)
+export function listSlashCommands(cwd: string, team = false): Promise<SlashCommandInfo[]> {
+  const key = cacheKey(cwd, team)
+  const cached = cache.get(key)
   if (cached) return cached
 
-  const promise = fetchCommands(cwd).catch(() => [] as SlashCommandInfo[])
-  cache.set(cwd, promise)
+  const promise = fetchCommands(cwd, team).catch(() => [] as SlashCommandInfo[])
+  cache.set(key, promise)
   // 빈 결과(미설치/로그아웃/실패)는 다음 호출에서 다시 시도하도록 캐시에서 비운다.
   void promise.then((cmds) => {
-    if (cmds.length === 0) cache.delete(cwd)
+    if (cmds.length === 0) cache.delete(key)
   })
   return promise
 }
@@ -82,17 +92,23 @@ export function listSlashCommands(cwd: string): Promise<SlashCommandInfo[]> {
 /** CLI 기동/응답이 지연돼도 자동완성이 멈추지 않도록 둔 상한. */
 const FETCH_TIMEOUT_MS = 8000
 
-async function fetchCommands(cwd: string): Promise<SlashCommandInfo[]> {
+async function fetchCommands(cwd: string, team: boolean): Promise<SlashCommandInfo[]> {
   const input = new AsyncQueue<SDKUserMessage>()
   // session.ts 와 동일 — 패키징 빌드에서 app.asar 내부 경로로 CLI 를 spawn 해 ENOTDIR 로
   // 실패하면 명령 목록이 빈 채로 와 자동완성이 안 뜨므로, unpacked 바이너리 경로를 명시한다.
   const claudeExecutable = resolveClaudeExecutable()
+  // 세션과 같은 플러그인을 물린다 — 그래야 `/wooi:*` 가 이 목록에 실려 자동완성에 뜬다.
+  // 여기서 빠뜨리면 세션에서는 동작하는데 입력창에서는 보이지 않는, 찾기 어려운 어긋남이 된다.
+  const wooiPlugin = resolveWooiPlugin(team)
   const q = query({
     prompt: input,
     options: {
       cwd,
       // 프로젝트/유저 스코프 슬래시 명령·스킬이 자동완성에 뜨도록 CLI 와 동일하게 설정을 로드.
       settingSources: MCP_SETTING_SOURCES,
+      ...(wooiPlugin
+        ? { plugins: [{ type: 'local' as const, path: wooiPlugin, skipMcpDiscovery: true }] }
+        : {}),
       ...(claudeExecutable ? { pathToClaudeCodeExecutable: claudeExecutable } : {})
     }
   })

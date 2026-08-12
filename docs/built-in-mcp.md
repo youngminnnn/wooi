@@ -325,10 +325,69 @@ context and cannot ask questions mid-run.
 Claude can launch several Wooi subagent tool calls concurrently. Codex currently
 serializes MCP tool calls, so multiple delegated runs complete one after another.
 
+## Slash commands
+
+Every tool also has a slash command, so you can trigger it yourself instead of waiting for the
+agent to decide to call it. Commands are namespaced with the plugin name, so they never collide
+with your own commands: `/wooi:pr`, `/wooi:children`, and so on. The catalog is
+`src/shared/wooiCommands.ts`.
+
+| Command | Tool | How it runs |
+| --- | --- | --- |
+| `/wooi:pr [extra instructions]` | `open_pull_request` | agent |
+| `/wooi:new <what it should do>` | `create_workspace` | agent |
+| `/wooi:stack <what it should do>` | `create_stacked_workspace` | agent |
+| `/wooi:report [what to report]` | `report_to_parent` | agent |
+| `/wooi:notify <what changed>` | `notify_child` | agent |
+| `/wooi:send <what changed>` | `send_to_workspace` | agent |
+| `/wooi:team [what to delegate]` | `switch_to_agent_team` | agent |
+| `/wooi:peers` | `list_workspace_peers` | direct |
+| `/wooi:children` | `check_stacked_work` | direct |
+| `/wooi:related [paths…]` | `check_related_work` | direct |
+| `/wooi:issues [limit]` | `list_issues` | direct |
+| `/wooi:run <name>` | `run_script` | direct |
+| `/wooi:stop <name>` | `stop_script` | direct |
+| `/wooi:logs <name> [lines]` | `read_script_output` | direct |
+| `/wooi:archive <workspace id>` | `archive_workspace` | direct |
+
+In a team-mode workspace, one more command per agent backend appears — `/wooi:claude` and
+`/wooi:codex` — matching the `claude_subagent` and `codex_subagent` tools. They take
+`<what it should do>` and hand it to the agent, which writes the full brief. They are absent
+outside team mode, because the underlying tools are.
+
+**Direct** commands run the tool in the main process and show the result in a card. They cost no
+turn and no tokens, and they do not show an approval card — you named the tool yourself, so there
+is nothing to confirm. Only the commands in the table above can run this way, and their arguments
+go through a parser before reaching the tool.
+
+**Agent** commands hand the request to the agent, because their arguments are prose that has to be
+written from the conversation: a pull-request body, a handoff brief, a report. The command expands
+into a prompt that tells the agent which tool to call.
+
+### How each backend gets them
+
+Wooi generates a Claude Code plugin from the catalog at startup and writes it under `userData`
+(`src/main/agent/plugin.ts`). The plugin is passed to sessions with `skipMcpDiscovery`, since Wooi
+already provides the `wooi` MCP server in-process. Claude Code then supplies both the autocomplete
+entries and the prompt expansion, so nothing about the command list is hardcoded.
+
+Two variants are generated — with and without the delegate commands — and a session is given the
+one that matches its mode. They cannot be merged into one plugin: a plugin's name is also its
+command prefix, so both must be named `wooi`, and a session can load only one of them.
+
+Codex reads the same plugin format, but its slash-command handling lives in its TUI rather than in
+the app-server protocol that Wooi drives, and there is no RPC to list or expand commands. So for
+Codex, Wooi supplies the autocomplete entries and expands the prompt itself
+(`src/main/codex/manager.ts`). Direct commands are intercepted in the composer and behave
+identically on both backends.
+
 ## Implementation map
 
 The tool catalog and schemas live in `src/main/agent/tools/catalog.ts`; handlers are
 registered in `src/main/agent/tools/index.ts`. Claude uses the in-process adapter in
 `src/main/claude/wooiMcp.ts`, while Codex uses the stdio adapter in
 `src/main/codex/toolShim.ts`. Both transports forward execution to the same registry and
-handlers under `src/main/agent/tools/`.
+handlers under `src/main/agent/tools/`. Slash commands live in
+`src/shared/wooiCommands.ts`; the generated Claude plugin is written by
+`src/main/agent/plugin.ts` and direct execution goes through the `command:wooiRun` IPC handler in
+`src/main/ipc.ts`.

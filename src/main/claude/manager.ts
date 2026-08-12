@@ -27,6 +27,7 @@ import { claudeMode, type HostCommand, type HostEvent, type SessionConfig } from
 import { runAgentTool } from '../agent/tools'
 import { RATE_LIMIT_CONTINUATION, RateLimitResumeCoordinator } from '../rateLimitResume'
 import type {
+  AgentBackendId,
   AgentSettings,
   ChatEvent,
   ChatItem,
@@ -304,6 +305,15 @@ export class SessionManager implements AgentBackend {
     return agentSettingsFor(getStore().getState().settings, CLAUDE_META.id)
   }
 
+  /**
+   * 이 워크스페이스가 위임할 수 있는 백엔드. 세션 설정과 자동완성 목록이 같은 판단을 써야 하므로
+   * 한 곳에 둔다 — 어긋나면 세션에는 있는 명령이 입력창에 안 뜨거나 그 반대가 된다.
+   */
+  private delegateBackendsOf(workspaceId: string): AgentBackendId[] {
+    const ws = this.getWorkspace(workspaceId)
+    return ws ? delegateBackendsFor(ws, getStore().getState().settings) : []
+  }
+
   /** store 에서 세션 생성에 필요한 설정을 계산한다(예전 ensure() 의 역할). */
   private configFor(ws: Workspace): SessionConfig {
     const settings = getStore().getState().settings
@@ -461,8 +471,13 @@ export class SessionManager implements AgentBackend {
   }
 
   /** 입력창 자동완성용 슬래시 명령 목록을 조회한다. */
-  async listCommands(cwd: string): Promise<SlashCommandInfo[]> {
-    return this.request<SlashCommandInfo[]>((reqId) => ({ type: 'listCommands', reqId, cwd }))
+  async listCommands(workspaceId: string, cwd: string): Promise<SlashCommandInfo[]> {
+    return this.request<SlashCommandInfo[]>((reqId) => ({
+      type: 'listCommands',
+      reqId,
+      cwd,
+      team: this.delegateBackendsOf(workspaceId).length > 0
+    }))
   }
 
   /**

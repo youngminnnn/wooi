@@ -446,6 +446,6 @@ export class AgentOrchestrator {
   listCommands(workspaceId: string, cwd: string): Promise<SlashCommandInfo[]> {
     const backend = this.backendFor(workspaceId)
     if (!backend.meta.capabilities.slashCommands) return Promise.resolve([])
-    return backend.listCommands(cwd)
+    return backend.listCommands(workspaceId, cwd)
   }
 }

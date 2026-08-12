@@ -29,7 +29,8 @@ import {
   ShieldCheck,
   RotateCcw,
   Activity,
-  BookMarked
+  BookMarked,
+  Wrench
 } from 'lucide-react'
 import { useStore } from '../store'
 import { permissionModeFooter } from '../lib/permission'
@@ -83,6 +84,8 @@ import type {
   SlashCommandInfo,
   Workspace
 } from '@shared/types'
+import { matchWooiCommand, parseWooiCommandArgs, wooiCommandName } from '@shared/wooiCommands'
+import type { WooiCommandSpec } from '@shared/wooiCommands'
 
 /** Claude 가 받는 이미지 형식. 클립보드의 다른 형식은 붙여넣기 시 무시한다. */
 const IMAGE_TYPES: Record<string, ImageMediaType> = {
@@ -149,7 +152,8 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
   const agentSwitch = useAgentSwitch(workspace)
 
   // 슬래시 명령 자동완성: 명령 목록(워크스페이스당 1회 조회)과 메뉴 선택 인덱스.
-  const [commands, setCommands] = useState<SlashCommandInfo[] | null>(null)
+  // 받아 둔 목록 + 그것이 무엇에 대한 목록인지(commandsKey). 아래 fresh 참고.
+  const [commands, setCommands] = useState<{ key: string; list: SlashCommandInfo[] } | null>(null)
   const [loadingCommands, setLoadingCommands] = useState(false)
   const [menuIdx, setMenuIdx] = useState(0)
 
@@ -160,6 +164,8 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
   const [commandCard, setCommandCard] = useState<CommandCardState | null>(null)
   // /model·/effort·/fast·/agent 선택 카드(로컬 처리, 닫으면 사라짐).
   const [pickerCard, setPickerCard] = useState<PickerKind | null>(null)
+  // `/wooi:*` 즉시 실행 결과 카드(임시 표시, 닫으면 사라짐).
+  const [wooiCard, setWooiCard] = useState<WooiCardState | null>(null)
   // `#` 로 적은 기억. 어느 CLAUDE.md 에 남길지 고르는 동안만 들고 있는다.
   const [memoryDraft, setMemoryDraft] = useState<string | null>(null)
   // 카드 응답을 현재 요청과만 맞추기 위한 단조 토큰(워크스페이스/명령 전환 시 stale 응답 무시).
@@ -187,6 +193,7 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
   useEffect(() => {
     setSideAnswer(null)
     setCommandCard(null)
+    setWooiCard(null)
     setPickerCard(null)
     setMemoryDraft(null)
     setImages([])
@@ -298,21 +305,39 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
   // "!" 로 시작하면 Claude Code CLI 의 bash 모드처럼 — 메시지가 아니라 터미널 명령으로 다룬다.
   const bashMode = text.startsWith('!')
 
+  /**
+   * 받아 둔 목록이 **무엇에 대한** 목록인지. 이 값이 달라지면 캐시는 낡은 것이다.
+   *
+   * 목록은 한 번 받으면 계속 쓰는데(아래 effect 의 가드), 이 두 값은 목록 자체를 바꾼다 —
+   * 에이전트 팀으로 바꾸면 `/wooi:claude` 같은 위임 명령이 생기고([[shared/wooiCommands]]),
+   * 메인 에이전트를 바꾸면 백엔드가 답하는 명령이 통째로 달라진다. 실측으로, 팀으로 바꾼 뒤에도
+   * `/wooi:c` 에 위임 명령이 뜨지 않았다.
+   *
+   * effect 로 캐시를 비우지 않고 키를 함께 들고 있는 이유: 비우는 방식은 한 프레임 동안 낡은
+   * 목록이 그대로 보이고, setState-in-effect 로 렌더가 한 번 더 돈다. 키가 어긋나면 캐시가
+   * 없는 것으로 치는 편이 파생값에 가깝다.
+   *
+   * 워크스페이스 전환은 여기서 다루지 않는다 — ChatView 가 `key={workspace.id}` 로 이 컴포넌트를
+   * 통째로 다시 만들어 상태가 저절로 비워진다([[App]]).
+   */
+  const commandsKey = `${workspace.agentBackend}:${workspace.multiAgent ? 'team' : 'solo'}`
+  const fresh = commands?.key === commandsKey ? commands.list : null
+
   // 슬래시 모드 진입 시 명령 목록을 lazy 하게 조회한다.
   useEffect(() => {
-    if (slashQuery === null || commands !== null || loadingCommands) return
+    if (slashQuery === null || fresh !== null || loadingCommands) return
     setLoadingCommands(true)
     void window.api.commands.list(workspace.id).then((list) => {
-      setCommands(list)
+      setCommands({ key: commandsKey, list })
       setLoadingCommands(false)
     })
-  }, [slashQuery, commands, loadingCommands, workspace.id])
+  }, [slashQuery, fresh, loadingCommands, workspace.id, commandsKey])
 
   // 접두사 우선, 없으면 부분일치로 필터링. 접두사 매치를 위로 올린다.
   const matches = useMemo(() => {
-    if (slashQuery === null || !commands) return []
+    if (slashQuery === null || !fresh) return []
     const q = slashQuery.toLowerCase()
-    const scored = commands
+    const scored = fresh
       .map((c) => {
         // 이름 우선, 없으면 별칭(/cost·/stats 등)으로도 매칭한다.
         const names = [c.name, ...(c.aliases ?? [])].map((n) => n.toLowerCase())
@@ -326,7 +351,7 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
       .filter((x) => x.rank < 2)
       .sort((a, b) => a.rank - b.rank || a.c.name.localeCompare(b.c.name))
     return scored.map((x) => x.c)
-  }, [slashQuery, commands])
+  }, [slashQuery, fresh])
 
   const menuOpen = slashQuery !== null && (loadingCommands || matches.length > 0)
 
@@ -495,6 +520,7 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
     if (memo) {
       setSideAnswer(null)
       setCommandCard(null)
+      setWooiCard(null)
       setPickerCard(null)
       setMemoryDraft(memo)
       setText('')
@@ -530,6 +556,16 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
       return
     }
 
+    // `/wooi:*` 중 즉시 실행 명령은 에이전트를 거치지 않고 메인에서 도구를 바로 돌린다.
+    // 나머지(`agent` 모드)는 가로채지 않고 그대로 흘려보낸다 — Claude 는 CLI 가 플러그인 본문으로,
+    // Codex 는 매니저가 로컬로 확장한다([[shared/wooiCommands]]).
+    const wooi = images.length ? null : matchWooiCommand(trimmed)
+    if (wooi && wooi.spec.mode === 'direct') {
+      runWooiCommand(wooi.spec, wooi.rest)
+      historyIdx.current = -1
+      return
+    }
+
     // /diff·/copy·/help·/clear·/memory 는 Wooi UI 에서 직접 처리한다(에이전트로 보내지 않는다).
     // runLocal 이 입력창 텍스트를 알맞게 정리하므로(대부분 비우고, /help 만 '/' 로 메뉴를 띄움)
     // 여기서는 setText 를 호출하지 않는다.
@@ -548,6 +584,7 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
       const question = (sideQ[1] ?? '').trim()
       if (!question) return // 질문 없이 "/btw" 만 보낸 경우는 무시.
       setPickerCard(null)
+      setWooiCard(null)
       void window.api.chat.sideQuestion(workspace.id, question)
       setText('')
       historyIdx.current = -1
@@ -589,9 +626,41 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
     })
   }
 
+  /**
+   * `/wooi:*` 즉시 실행 명령을 돌리고 결과를 카드로 띄운다.
+   *
+   * 인자가 틀리면 실행하지 않고 입력창에 그대로 남긴다 — 사용법 토스트를 보고 이어서 고쳐 칠 수
+   * 있어야 한다(`/add-dir` 과 같은 처리). 그 외에는 입력창을 비우고 카드만 뜬다.
+   */
+  const runWooiCommand = (spec: WooiCommandSpec, rest: string): void => {
+    const parsed = parseWooiCommandArgs(spec.name, rest)
+    if ('error' in parsed) {
+      pushToast('info', parsed.error)
+      taRef.current?.focus()
+      return
+    }
+
+    setSideAnswer(null)
+    setCommandCard(null)
+    setPickerCard(null)
+    setText('')
+    const seq = ++cmdSeq.current
+    const title = `/${wooiCommandName(spec)}`
+    setWooiCard({ title, status: 'loading' })
+    void window.api.commands.wooiRun(workspace.id, spec.name, rest).then(({ result, error }) => {
+      if (cmdSeq.current !== seq) return
+      setWooiCard((prev) => {
+        if (!prev || prev.title !== title) return prev
+        if (error) return { ...prev, status: 'error', error }
+        return { ...prev, status: 'done', result }
+      })
+    })
+  }
+
   /** 인터랙티브 명령을 실행하고 결과를 카드로 띄운다(사이드 답변 카드는 비켜 준다). */
   const runInteractive = (cmd: (typeof INTERACTIVE_COMMANDS)[number]): void => {
     setSideAnswer(null)
+    setWooiCard(null)
     setPickerCard(null)
     const seq = ++cmdSeq.current
     setCommandCard({ kind: cmd.kind, title: `/${cmd.name}`, status: 'loading' })
@@ -632,9 +701,10 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
       return
     }
 
-    if (commandCard || sideAnswer) {
+    if (commandCard || wooiCard || sideAnswer) {
       e.preventDefault()
       if (commandCard) setCommandCard(null)
+      else if (wooiCard) setWooiCard(null)
       else setSideAnswer(null)
       taRef.current?.focus()
       return
@@ -686,6 +756,7 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
   const runLocal = (kind: LocalCommand, raw: string): void => {
     setSideAnswer(null)
     setCommandCard(null)
+    setWooiCard(null)
     setPickerCard(null)
 
     if (kind === 'help') {
@@ -880,9 +951,18 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
             onClose={() => setCommandCard(null)}
           />
         )}
-        {sideAnswer && !menuOpen && !mentionOpen && !commandCard && !pickerCard && !memoryDraft && (
-          <SideAnswerCard answer={sideAnswer} onClose={() => setSideAnswer(null)} />
+        {wooiCard && !menuOpen && !mentionOpen && !commandCard && !pickerCard && !memoryDraft && (
+          <WooiCommandCard card={wooiCard} onClose={() => setWooiCard(null)} />
         )}
+        {sideAnswer &&
+          !menuOpen &&
+          !mentionOpen &&
+          !commandCard &&
+          !wooiCard &&
+          !pickerCard &&
+          !memoryDraft && (
+            <SideAnswerCard answer={sideAnswer} onClose={() => setSideAnswer(null)} />
+          )}
         {pickerCard && !menuOpen && !mentionOpen && !memoryDraft && (
           <PickerCard
             kind={pickerCard}
@@ -1334,6 +1414,52 @@ function SideAnswerCard({
 }
 
 /**
+ * `/wooi:*` 즉시 실행 결과 카드.
+ *
+ * 결과를 예쁘게 파싱하지 않고 JSON 을 그대로 보여 준다. 도구 12개는 저마다 다른 모양을
+ * 돌려주는데 각각에 전용 렌더러를 붙이면 도구를 하나 늘릴 때마다 렌더러가 하나 늘어난다 —
+ * 그건 정확히 [[agent/tools/catalog]] 가 피하려던 비용이다. 이 카드는 "방금 무슨 일이
+ * 일어났는지" 를 확인하는 자리이고, 읽어서 판단할 일이 있으면 그건 에이전트에게 물을 일이다.
+ */
+function WooiCommandCard({
+  card,
+  onClose
+}: {
+  card: WooiCardState
+  onClose: () => void
+}): React.JSX.Element {
+  return (
+    <div className="absolute bottom-full mb-2 left-0 right-0 max-h-80 overflow-y-auto rounded-xl border border-[var(--accent-500)]/30 bg-[var(--bg-3)] shadow-2xl z-20">
+      <div className="flex items-center gap-2 px-3 py-2 border-b border-[var(--border)] sticky top-0 bg-[var(--bg-3)]">
+        <Wrench size={13} className="text-[var(--accent-400)] shrink-0" />
+        <span className="text-xs font-medium text-[var(--accent-300)] shrink-0">{card.title}</span>
+        <span className="ml-auto shrink-0 text-xs text-neutral-600 select-none">Esc to close</span>
+        <button
+          onClick={onClose}
+          title="Dismiss (Esc)"
+          className="shrink-0 h-5 w-5 grid place-items-center rounded text-neutral-500 hover:text-neutral-200 hover:bg-[var(--surface-3)]"
+        >
+          <X size={13} />
+        </button>
+      </div>
+      <div className="px-3 py-2 text-sm leading-relaxed text-neutral-200">
+        {card.status === 'loading' && <span className="text-neutral-500">Running…</span>}
+        {card.status === 'error' && (
+          <span className="text-[var(--danger-400)] whitespace-pre-wrap">
+            {card.error || 'The command failed.'}
+          </span>
+        )}
+        {card.status === 'done' && (
+          <pre className="whitespace-pre-wrap break-words font-mono text-xs text-neutral-300">
+            {JSON.stringify(card.result ?? null, null, 2)}
+          </pre>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/**
  * "/model"·"/effort"·"/fast"·"/agent" 면 그 종류를 돌려준다(뒤따르는 인자는 무시하고 선택 카드를 연다).
  *
  * `allowFast` 는 이 워크스페이스의 백엔드가 fast mode 를 지원하는지다 — 지원하지 않으면(Codex)
@@ -1410,6 +1536,21 @@ export function matchMemory(text: string): string | null {
 /** Claude side-question capability 가 있는 워크스페이스에서만 `/btw` 를 로컬 처리한다. */
 export function matchSideQuestion(text: string, supported: boolean): RegExpExecArray | null {
   return supported ? /^\/btw(?:\s+([\s\S]+))?$/.exec(text) : null
+}
+
+/**
+ * `/wooi:*` 즉시 실행 결과 카드의 임시 상태(트랜스크립트에 저장되지 않음).
+ *
+ * CommandPanelKind 를 늘리지 않고 따로 두는 이유: 그쪽은 백엔드 제어 채널에 붙은 명령들이라
+ * capability 게이트와 종류별 전용 렌더러를 달고 다닌다. Wooi 도구 결과는 도구가 돌려준 값
+ * 그대로라 종류가 없다 — 같은 카드 하나로 12개를 다 보여 줄 수 있다.
+ */
+type WooiCardState = {
+  /** `/wooi:children` 처럼 사용자가 친 그대로. 응답을 카드와 맞추는 열쇠로도 쓴다. */
+  title: string
+  status: 'loading' | 'done' | 'error'
+  result?: unknown
+  error?: string
 }
 
 /** 인터랙티브 명령 결과 카드의 임시 상태(트랜스크립트에 저장되지 않음). */
