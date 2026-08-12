@@ -18,7 +18,18 @@ const carryPathClass =
 // mode 와 삭제 버튼은 내용에 딱 맞게 좁게. self-stretch 로 높이는 입력창과 맞춘다.
 const carryModeClass = carryFieldBase + ' shrink-0 self-stretch w-16 px-1.5 text-xs'
 const carryRemoveClass =
-  'shrink-0 self-stretch grid w-7 place-items-center rounded-lg border border-[var(--border-2)] text-xs text-neutral-400 hover:bg-[var(--surface-2)] hover:text-neutral-100'
+  'shrink-0 grid h-9 w-9 place-items-center rounded-lg border border-[var(--border-2)] text-xs text-neutral-400 hover:bg-[var(--surface-2)] hover:text-neutral-100 disabled:cursor-not-allowed disabled:opacity-30'
+
+const sectionClass = 'rounded-xl border border-[var(--border)] bg-[var(--bg-2)]/25 p-4'
+const sectionTitleClass = 'text-sm font-semibold text-neutral-100'
+const sectionDescriptionClass = 'mt-1 text-xs leading-relaxed text-neutral-500'
+
+function normalizeRunName(name: string): string {
+  return name
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+}
 
 export default function RepoConfigModal({
   repoId,
@@ -49,19 +60,23 @@ export default function RepoConfigModal({
     return checked.ok ? null : checked.reason
   })
   const hasCarryError = carryErrors.some(Boolean)
-  const runNames = runScripts.map((script) =>
-    script.name
-      .toUpperCase()
-      .replace(/[^A-Z0-9]+/g, '_')
-      .replace(/^_+|_+$/g, '')
-  )
-  const hasRunError = runScripts.some(
-    (script, index) =>
-      !runNames[index] ||
-      runNames[index] === 'SETUP' ||
-      !script.command.trim() ||
-      runNames.indexOf(runNames[index]) !== index
-  )
+  const runNames = runScripts.map((script) => normalizeRunName(script.name))
+  const runErrors = runScripts.map((script, index) => {
+    if (!runNames[index]) return 'Enter a name.'
+    if (runNames[index] === 'SETUP') return '“Setup” is reserved.'
+    if (runNames.indexOf(runNames[index]) !== index) return 'Use a unique name.'
+    if (!script.command.trim()) return 'Enter a command.'
+    return null
+  })
+  const hasRunError = runErrors.some(Boolean)
+  const errorCount = runErrors.filter(Boolean).length + carryErrors.filter(Boolean).length
+  const isDirty = repo
+    ? name !== repo.name ||
+      setupScript !== repo.setupScript ||
+      archiveScript !== repo.archiveScript ||
+      JSON.stringify(runScripts) !== JSON.stringify(repo.runScripts) ||
+      JSON.stringify(carryItems) !== JSON.stringify(repo.carryItems)
+    : false
 
   useEffect(() => {
     if (!repo) onClose()
@@ -130,22 +145,36 @@ export default function RepoConfigModal({
     onClose()
   }
 
+  const requestClose = async (): Promise<void> => {
+    if (!isDirty) {
+      onClose()
+      return
+    }
+    const ok = await confirm({
+      title: 'Discard unsaved changes?',
+      body: 'Your changes to this repository will be lost.',
+      confirmLabel: 'Discard changes',
+      danger: true
+    })
+    if (ok) onClose()
+  }
+
   return (
     <Modal
       title={`Repository settings · ${repo.name}`}
-      onClose={onClose}
-      width={520}
+      onClose={() => void requestClose()}
+      width={720}
       footer={
         <>
-          <button
-            className={
-              ghostBtn + ' mr-auto text-[var(--danger-400)] hover:bg-[var(--danger-500)]/15'
-            }
-            onClick={removeRepo}
-          >
-            Remove repo
-          </button>
-          <button className={ghostBtn} onClick={onClose}>
+          {isDirty && (
+            <span className="mr-auto self-center text-xs text-neutral-500">Unsaved changes</span>
+          )}
+          {errorCount > 0 && (
+            <span className="self-center text-xs text-[var(--danger-400)]">
+              Fix {errorCount} {errorCount === 1 ? 'error' : 'errors'} to save
+            </span>
+          )}
+          <button className={ghostBtn} onClick={() => void requestClose()}>
             Cancel
           </button>
           <button
@@ -162,147 +191,208 @@ export default function RepoConfigModal({
       }
     >
       <div className="space-y-4">
-        <div>
-          <label className={labelClass}>Display name</label>
-          <input className={inputClass} value={name} onChange={(e) => setName(e.target.value)} />
-          <p className="mt-1.5 text-xs text-neutral-600 truncate" title={repo.path}>
-            {repo.path}
-          </p>
-        </div>
-
-        <div>
-          <label className={labelClass}>Setup script</label>
-          <input
-            className={inputClass + ' font-mono'}
-            value={setupScript}
-            onChange={(e) => setSetup(e.target.value)}
-            placeholder="e.g. npm install"
-          />
-          <p className="mt-1.5 text-xs text-neutral-600">
-            Runs once right after a workspace is created (if set).
-          </p>
-        </div>
-
-        <div>
-          <label className={labelClass}>Run scripts</label>
-          <div className="space-y-1.5">
-            {runScripts.map((script, i) => (
-              <div key={script.id} className="flex items-center gap-1.5">
-                <input
-                  className={carryFieldBase + ' w-24 px-2 py-2 text-sm'}
-                  value={script.name}
-                  placeholder="Web"
-                  onChange={(e) =>
-                    setRunScripts((items) =>
-                      items.map((x, n) => (n === i ? { ...x, name: e.target.value } : x))
-                    )
-                  }
-                />
-                <input
-                  className={carryPathClass}
-                  value={script.command}
-                  placeholder="npm run dev"
-                  onChange={(e) =>
-                    setRunScripts((items) =>
-                      items.map((x, n) => (n === i ? { ...x, command: e.target.value } : x))
-                    )
-                  }
-                  onKeyDown={(e) => {
-                    if (
-                      e.key !== 'Enter' ||
-                      e.nativeEvent.isComposing ||
-                      !script.name.trim() ||
-                      !script.command.trim()
-                    )
-                      return
-                    e.preventDefault()
-                    setRunScripts((items) => [
-                      ...items,
-                      { id: crypto.randomUUID(), name: '', command: '', autoStart: false }
-                    ])
-                  }}
-                />
-                <label className="flex shrink-0 items-center gap-1 text-xs text-neutral-400">
-                  <input
-                    type="checkbox"
-                    checked={script.autoStart}
-                    onChange={(e) =>
-                      setRunScripts((items) =>
-                        items.map((x, n) => (n === i ? { ...x, autoStart: e.target.checked } : x))
-                      )
-                    }
-                  />{' '}
-                  Auto
-                </label>
-                <button
-                  className={carryRemoveClass}
-                  onClick={() =>
-                    setRunScripts((items) =>
-                      i > 0 ? [items[i], ...items.slice(0, i), ...items.slice(i + 1)] : items
-                    )
-                  }
-                  title="Move up"
-                >
-                  ↑
-                </button>
-                <button
-                  className={carryRemoveClass}
-                  onClick={() => setRunScripts((items) => items.filter((_, n) => n !== i))}
-                  title="Remove"
-                >
-                  ✕
-                </button>
-              </div>
-            ))}
-          </div>
-          <button
-            className={ghostBtn + ' mt-1.5 text-xs'}
-            onClick={() =>
-              setRunScripts((items) => [
-                ...items,
-                { id: crypto.randomUUID(), name: '', command: '', autoStart: false }
-              ])
-            }
-          >
-            + Add run script
-          </button>
-          {hasRunError && (
-            <p className="mt-1 text-xs text-[var(--danger-400)]">
-              Names and commands are required. Names must be unique after normalization and cannot
-              be Setup.
+        <section className={sectionClass} aria-labelledby="repo-general-heading">
+          <h4 id="repo-general-heading" className={sectionTitleClass}>
+            General
+          </h4>
+          <p className={sectionDescriptionClass}>Identify this repository throughout Wooi.</p>
+          <div className="mt-4">
+            <label className={labelClass} htmlFor="repo-display-name">
+              Display name
+            </label>
+            <input
+              id="repo-display-name"
+              className={inputClass}
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+            />
+            <p className="mt-1.5 text-xs text-neutral-600 truncate" title={repo.path}>
+              {repo.path}
             </p>
-          )}
-          <p className="mt-1.5 text-xs text-neutral-600">
-            Dev command you start/stop from the scripts panel. Each workspace gets a unique{' '}
-            <span className="font-mono">$PORT</span> (also{' '}
-            <span className="font-mono">$WOOI_DEV_PORT</span>) — use it so parallel dev processes
-            don&rsquo;t collide, e.g. <span className="font-mono">vite --port $PORT</span>.
-          </p>
-        </div>
+          </div>
+        </section>
 
-        <div>
-          <label className={labelClass}>Archive script</label>
-          <input
-            className={inputClass + ' font-mono'}
-            value={archiveScript}
-            onChange={(e) => setArchive(e.target.value)}
-            placeholder="e.g. docker compose down"
-          />
-          <p className="mt-1.5 text-xs text-neutral-600">
-            Runs in the worktree when a workspace is archived (before the worktree is removed).
+        <section className={sectionClass} aria-labelledby="repo-automation-heading">
+          <h4 id="repo-automation-heading" className={sectionTitleClass}>
+            Automation
+          </h4>
+          <p className={sectionDescriptionClass}>
+            Commands that run during the workspace lifecycle.
           </p>
-        </div>
+          <div className="mt-4">
+            <label className={labelClass} htmlFor="repo-setup-script">
+              Setup command
+            </label>
+            <input
+              id="repo-setup-script"
+              className={inputClass + ' font-mono'}
+              value={setupScript}
+              onChange={(e) => setSetup(e.target.value)}
+              placeholder="e.g. npm install"
+            />
+            <p className="mt-1.5 text-xs text-neutral-600">
+              Runs once right after a workspace is created (if set).
+            </p>
+          </div>
 
-        <div>
-          <label className={labelClass}>Carry into new workspaces</label>
-          <p className="mb-2 text-xs text-neutral-600">
+          <div className="mt-5">
+            <div className="mb-2 flex items-end justify-between gap-4">
+              <div>
+                <p className={labelClass + ' mb-0'}>Run scripts</p>
+                <p className="mt-1 text-xs text-neutral-600">
+                  Start and stop these from the Scripts panel.
+                </p>
+              </div>
+            </div>
+            {runScripts.length > 0 && (
+              <div className="mb-1.5 grid grid-cols-[7.5rem_minmax(0,1fr)_5.5rem_5rem] gap-2 px-1 text-[11px] font-medium uppercase tracking-wide text-neutral-600">
+                <span>Name</span>
+                <span>Command</span>
+                <span>Auto-start</span>
+                <span className="sr-only">Actions</span>
+              </div>
+            )}
+            <div className="space-y-1.5">
+              {runScripts.map((script, i) => (
+                <div key={script.id}>
+                  <div className="grid grid-cols-[7.5rem_minmax(0,1fr)_5.5rem_5rem] items-center gap-2">
+                    <input
+                      aria-label={`Script ${i + 1} name`}
+                      aria-invalid={runErrors[i] ? true : undefined}
+                      className={carryFieldBase + ' min-w-0 px-2.5 py-2 text-sm'}
+                      value={script.name}
+                      placeholder="Web"
+                      onChange={(e) =>
+                        setRunScripts((items) =>
+                          items.map((x, n) => (n === i ? { ...x, name: e.target.value } : x))
+                        )
+                      }
+                    />
+                    <input
+                      aria-label={`Script ${i + 1} command`}
+                      aria-invalid={runErrors[i] ? true : undefined}
+                      className={carryPathClass}
+                      value={script.command}
+                      placeholder="npm run dev"
+                      onChange={(e) =>
+                        setRunScripts((items) =>
+                          items.map((x, n) => (n === i ? { ...x, command: e.target.value } : x))
+                        )
+                      }
+                      onKeyDown={(e) => {
+                        if (
+                          e.key !== 'Enter' ||
+                          e.nativeEvent.isComposing ||
+                          !script.name.trim() ||
+                          !script.command.trim()
+                        )
+                          return
+                        e.preventDefault()
+                        setRunScripts((items) => [
+                          ...items,
+                          { id: crypto.randomUUID(), name: '', command: '', autoStart: false }
+                        ])
+                      }}
+                    />
+                    <label className="flex items-center gap-1.5 text-xs text-neutral-400">
+                      <input
+                        type="checkbox"
+                        checked={script.autoStart}
+                        onChange={(e) =>
+                          setRunScripts((items) =>
+                            items.map((x, n) =>
+                              n === i ? { ...x, autoStart: e.target.checked } : x
+                            )
+                          )
+                        }
+                      />{' '}
+                      Auto
+                    </label>
+                    <div className="flex gap-1">
+                      <button
+                        className={carryRemoveClass}
+                        disabled={i === 0}
+                        onClick={() =>
+                          setRunScripts((items) =>
+                            i > 0
+                              ? items.map((item, index) =>
+                                  index === i - 1 ? items[i] : index === i ? items[i - 1] : item
+                                )
+                              : items
+                          )
+                        }
+                        title="Move up"
+                        aria-label={`Move ${script.name || `script ${i + 1}`} up`}
+                      >
+                        ↑
+                      </button>
+                      <button
+                        className={carryRemoveClass}
+                        onClick={() => setRunScripts((items) => items.filter((_, n) => n !== i))}
+                        title="Remove"
+                        aria-label={`Remove ${script.name || `script ${i + 1}`}`}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  </div>
+                  {runErrors[i] && (
+                    <p className="mt-1 text-xs text-[var(--danger-400)]">{runErrors[i]}</p>
+                  )}
+                </div>
+              ))}
+            </div>
+            {runScripts.length === 0 && (
+              <div className="rounded-lg border border-dashed border-[var(--border-2)] px-4 py-3 text-sm text-neutral-500">
+                No run scripts yet. Add one for a dev server, API, or worker.
+              </div>
+            )}
+            <button
+              className={ghostBtn + ' mt-1.5 text-xs'}
+              onClick={() =>
+                setRunScripts((items) => [
+                  ...items,
+                  { id: crypto.randomUUID(), name: '', command: '', autoStart: false }
+                ])
+              }
+            >
+              + Add run script
+            </button>
+            <p className="mt-2 text-xs text-neutral-600">
+              Each workspace receives a unique <span className="font-mono">$PORT</span>. For
+              example: <span className="font-mono text-neutral-500">vite --port $PORT</span>.
+            </p>
+          </div>
+
+          <div className="mt-5">
+            <label className={labelClass} htmlFor="repo-archive-script">
+              Archive command
+            </label>
+            <input
+              id="repo-archive-script"
+              className={inputClass + ' font-mono'}
+              value={archiveScript}
+              onChange={(e) => setArchive(e.target.value)}
+              placeholder="e.g. docker compose down"
+            />
+            <p className="mt-1.5 text-xs text-neutral-600">
+              Runs in the worktree when a workspace is archived (before the worktree is removed).
+            </p>
+          </div>
+        </section>
+
+        <section className={sectionClass} aria-labelledby="repo-files-heading">
+          <h4 id="repo-files-heading" className={sectionTitleClass}>
+            Workspace files
+          </h4>
+          <p className={sectionDescriptionClass}>
             New worktrees only contain git-tracked files, so ignored ones (
             <span className="font-mono">CLAUDE.local.md</span>,{' '}
             <span className="font-mono">.env</span>, …) are missing unless listed here. Paths are
             relative to the repo root and are skipped if they don&rsquo;t exist.
           </p>
 
-          <div className="space-y-1.5">
+          <div className="mt-4 space-y-1.5">
             {carryItems.map((item, i) => (
               <div key={i}>
                 <div className="flex items-center gap-1.5">
@@ -334,6 +424,7 @@ export default function RepoConfigModal({
                     }}
                   />
                   <select
+                    aria-label={`How to carry ${item.path || `file ${i + 1}`}`}
                     className={carryModeClass}
                     value={item.mode}
                     onChange={(e) => updateCarry(i, { mode: e.target.value as CarryMode })}
@@ -376,7 +467,34 @@ export default function RepoConfigModal({
               other. Use Copy if the agent is expected to write to it.
             </p>
           )}
-        </div>
+        </section>
+
+        <section
+          className="rounded-xl border border-[var(--danger-500)]/35 bg-[var(--danger-500)]/5 p-4"
+          aria-labelledby="repo-danger-heading"
+        >
+          <h4 id="repo-danger-heading" className="text-sm font-semibold text-[var(--danger-400)]">
+            Danger zone
+          </h4>
+          <div className="mt-2 flex items-center justify-between gap-6">
+            <p className="text-xs leading-relaxed text-neutral-500">
+              Remove this repository
+              {app.workspaces.filter((w) => w.repoId === repoId).length > 0
+                ? ` and its ${app.workspaces.filter((w) => w.repoId === repoId).length} workspace(s)`
+                : ''}
+              . Worktree directories are deleted, but branches are kept.
+            </p>
+            <button
+              className={
+                ghostBtn +
+                ' shrink-0 border-[var(--danger-500)]/50 text-[var(--danger-400)] hover:bg-[var(--danger-500)]/15'
+              }
+              onClick={removeRepo}
+            >
+              Remove repository…
+            </button>
+          </div>
+        </section>
       </div>
     </Modal>
   )

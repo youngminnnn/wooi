@@ -833,22 +833,21 @@
         >
         <span class="ko"
           >병렬로 돌리는 건 어렵지 않습니다. 어려운 건
-          <span class="grad">머지까지</span>입니다.</span
+          <span class="grad">병합까지</span>입니다.</span
         >
       </h1>
 
       <p class="subtitle">
         <span class="en"
-          >Every agent you add is one more branch to rebase and one more PR waiting on a reviewer.
-          Wooi stacks dependent work so it never collides — rebasing the chain and retargeting PR
-          bases when a parent merges — and turns each review into a diff you work on, not a
-          transcript you read.</span
+          >Running agents side by side is the horizontal axis. Wooi adds the vertical one: dependent
+          work branches off the work it depends on, and the whole chain stays valid as parents
+          merge. Agents build those chains themselves through Wooi's built-in tools, and every
+          review lands on the diff instead of in a transcript.</span
         >
         <span class="ko"
-          >에이전트를 하나 더 돌릴 때마다 rebase 할 브랜치와 리뷰를 기다리는 PR 이 하나씩
-          늘어납니다. Wooi 는 이어지는 작업을 쌓아 애초에 부딪히지 않게 하고 — 부모가 병합되면
-          체인을 rebase 하고 PR base 를 옮깁니다 — 리뷰는 읽고 마는 기록이 아니라 그 위에서 작업하는
-          diff 로 만듭니다.</span
+          >에이전트를 나란히 돌리는 건 가로축입니다. Wooi 는 세로축을 더합니다. 이어지는 작업은
+          자기가 딛고 선 작업에서 분기하고, 부모가 병합돼도 체인 전체가 유효하게 남습니다. 그 체인은
+          에이전트가 내장 도구로 직접 쌓고, 리뷰는 채팅 로그가 아니라 diff 위에 붙습니다.</span
         >
       </p>
 
@@ -904,13 +903,14 @@
               >Running agents in isolated worktrees is table stakes now — plenty of orchestrators
               already do it. But worktrees solve file collisions; they don't solve dependencies. The
               unsolved half is downstream: branches that were written in parallel and have to land
-              in sequence, and a review queue that grows as fast as the agents write.</span
+              in sequence, and a review queue that grows as fast as the agents write. Here's where
+              Wooi puts its weight.</span
             >
             <span class="ko"
               >격리된 worktree 에서 에이전트를 돌리는 건 여러 오케스트레이터가 이미 지원합니다.
               하지만 worktree 는 파일 충돌은 막아도 의존성은 못 풉니다. 안 풀린 쪽은 그 다음입니다.
-              병렬로 쓰였지만 순서대로 머지돼야 하는 브랜치들, 그리고 에이전트가 코드를 쓰는
-              속도만큼 쌓이는 리뷰 대기열.</span
+              병렬로 쓰였지만 순서대로 병합돼야 하는 브랜치들, 그리고 에이전트가 코드를 쓰는
+              속도만큼 쌓이는 리뷰 대기열. Wooi 가 힘을 싣는 자리가 여기입니다.</span
             >
           </p>
         </div>
@@ -919,123 +919,92 @@
           <div class="why-card">
             <div class="emoji">🧱</div>
             <h3>
-              <span class="en">Dependent work stacks instead of conflicting</span
-              ><span class="ko">이어지는 작업은 충돌하지 않고 쌓입니다</span>
+              <span class="en">The whole stacked-PR lifecycle</span
+              ><span class="ko">Stacked PR의 전 과정을 다룹니다</span>
             </h3>
             <p>
               <span class="en"
-                >Conflicts between parallel branches usually get cleaned up after they happen.
-                Wooi's answer is structural: work that builds on other work branches off it instead
-                of off the default branch. When the parent merges, Wooi rebases the children and
-                retargets their PR bases — so the rest of the stack stays valid instead of turning
-                into a pile of conflicts.</span
+                >Build dependent work as a PR stack. Wooi imports stacks from GitHub, reviews every
+                layer together, and keeps the chain valid through restacks and merges.</span
               >
               <span class="ko"
-                >병렬 브랜치 충돌은 보통 터진 뒤에 수습합니다. Wooi 의 답은 구조적입니다. 앞선 작업
-                위에서 이어지는 작업은 기본 브랜치가 아니라 그 작업의 브랜치에서 분기합니다. 부모가
-                병합되면 Wooi 가 자식들을 rebase 하고 PR base 를 옮깁니다. 남은 스택은 충돌 더미가
-                되는 대신 그대로 유효합니다.</span
+                >의존 작업을 PR 스택으로 쌓습니다. GitHub 스택을 가져와 모든 레이어를 함께 리뷰하고,
+                restack과 병합 뒤에도 체인을 유효하게 유지합니다.</span
               >
             </p>
           </div>
           <div class="why-card">
             <div class="emoji">🤖</div>
             <h3>
-              <span class="en">Agents stack their own work</span
-              ><span class="ko">에이전트가 스스로 쌓습니다</span>
+              <span class="en">Agents orchestrate the app, not just the repo</span
+              ><span class="ko">에이전트가 앱을 조종합니다</span>
             </h3>
             <p>
               <span class="en"
-                >You can stack a workspace yourself, or the agent can do it. It can see which files
-                the other workspaces are already changing <em>before</em> it starts, and open the
-                next workspace on top of its own branch when what it just finished is a complete,
-                reviewable unit. One prompt can end up as a three-PR stack you never arranged.</span
+                >Built-in tools let agents split work, build stacks, form teams, and message other
+                workspaces. Permission and receive policies keep files, diffs, and transcripts
+                inside their workspace.</span
               >
               <span class="ko"
-                >워크스페이스는 직접 쌓을 수도 있고, 에이전트가 쌓게 둘 수도 있습니다. 에이전트는
-                다른 워크스페이스가 지금 어떤 파일을 건드리고 있는지 <em>시작하기 전에</em> 확인할
-                수 있고, 방금 끝낸 작업이 리뷰 가능한 한 덩어리면 자기 브랜치 위에 다음
-                워크스페이스를 엽니다. 프롬프트 하나가 직접 짜지 않은 3단 PR 스택이 되기도
-                합니다.</span
+                >내장 도구로 작업을 나누고 스택을 쌓으며, 팀을 꾸리거나 다른 워크스페이스에 메시지를
+                보냅니다. 파일과 diff, 대화 기록은 권한·수신 정책이 허용한 범위를 벗어나지
+                않습니다.</span
               >
             </p>
           </div>
           <div class="why-card">
             <div class="emoji">🔍</div>
             <h3>
-              <span class="en">PR review, on the diff</span
-              ><span class="ko">PR 리뷰를 diff 위에서</span>
+              <span class="en">The diff and the stack are the review surface</span
+              ><span class="ko">diff와 스택 위에서 바로 리뷰합니다</span>
             </h3>
             <p>
               <span class="en"
-                >When agents write code faster, review becomes the constraint. Every agent can
-                review a PR; what's missing is somewhere to work the result. Findings land inline on
-                the diff they're about — edit, discard, post one or post the batch, straight to
-                GitHub.</span
+                >Each review has its own worktree, with findings anchored to diff lines. Stack
+                reviews read every layer together, while workspace comments send the exact code
+                location back to the agent.</span
               >
               <span class="ko"
-                >에이전트가 코드를 빨리 쓸수록 병목은 리뷰로 옮겨갑니다. PR 리뷰는 어떤 에이전트든
-                합니다. 없는 건 그 결과를 다룰 화면입니다. 지적이 해당 diff 줄 위에 바로 붙습니다.
-                고치고, 버리고, 낱개로든 한꺼번에든 GitHub 에 그대로 게시합니다.</span
+                >리뷰마다 전용 worktree가 있고 지적은 diff 줄에 붙습니다. 스택 리뷰는 모든 레이어를
+                함께 읽으며, 워크스페이스 코멘트는 정확한 코드 위치를 에이전트에게
+                돌려보냅니다.</span
               >
             </p>
           </div>
           <div class="why-card">
-            <div class="emoji">🧵</div>
-            <h3><span class="en">True parallelism</span><span class="ko">진짜 병렬</span></h3>
+            <div class="emoji">🎛️</div>
+            <h3>
+              <span class="en">Two agent backends, integrated deeply</span
+              ><span class="ko">두 백엔드를 얕지 않게</span>
+            </h3>
             <p>
               <span class="en"
-                >Kick off a refactor, a feature, and a bugfix at the same time and watch all three
-                from one sidebar.</span
+                >Wooi exposes each backend's own models, permissions, effort, fast mode, rate
+                limits, and MCP servers. Switch between Claude Code and Codex mid-conversation with
+                the existing context carried over.</span
               >
               <span class="ko"
-                >리팩터링·기능 추가·버그 수정을 한꺼번에 시작하고 사이드바 하나에서 셋 다
-                지켜봅니다.</span
+                >각 백엔드의 모델·권한·effort·fast mode·레이트리밋·MCP 서버를 그대로 살립니다. 대화
+                도중 Claude Code와 Codex를 바꿔도 기존 맥락이 이어집니다.</span
               >
             </p>
           </div>
           <div class="why-card">
             <div class="emoji">🔒</div>
-            <h3><span class="en">Isolated by default</span><span class="ko">기본이 격리</span></h3>
-            <p>
-              <span class="en"
-                >A separate worktree + branch per task means agents never collide in a shared
-                working tree.</span
-              >
-              <span class="ko"
-                >작업마다 별도 worktree + 브랜치라, 공유 작업 트리에서 에이전트끼리 충돌하지
-                않습니다.</span
-              >
-            </p>
-          </div>
-          <div class="why-card">
-            <div class="emoji">🚢</div>
             <h3>
-              <span class="en">Straight from diff to PR</span
-              ><span class="ko">diff 에서 바로 PR 로</span>
+              <span class="en">Quiet where it counts</span
+              ><span class="ko">조용해야 할 곳에서 조용합니다</span>
             </h3>
             <p>
               <span class="en"
-                >Open a GitHub PR for an agent's work in one click, without switching to the browser
-                first.</span
+                >No telemetry or servers of its own: settings and transcripts stay local. Updates
+                wait for active work, ignored files carry into new worktrees, and sessions survive
+                restarts.</span
               >
               <span class="ko"
-                >에이전트가 만든 변경을 브라우저로 옮겨 가지 않고 그 자리에서 GitHub PR 로
-                엽니다.</span
-              >
-            </p>
-          </div>
-          <div class="why-card">
-            <div class="emoji">🕵️</div>
-            <h3><span class="en">No telemetry</span><span class="ko">텔레메트리 없음</span></h3>
-            <p>
-              <span class="en"
-                >No servers of its own and no analytics. Settings and transcripts stay on your
-                machine, in local storage only.</span
-              >
-              <span class="ko"
-                >자체 서버도, 분석 수집도 없습니다. 설정과 대화 기록은 내 컴퓨터 로컬에만
-                저장됩니다.</span
+                >텔레메트리와 자체 서버가 없어 설정·대화 기록은 로컬에 남습니다. 업데이트는 작업이
+                끝날 때까지 기다립니다. 필요한 ignore 파일은 새 worktree로 전달되고, 세션은 재시작
+                뒤에도 이어집니다.</span
               >
             </p>
           </div>
@@ -1102,7 +1071,7 @@
           </div>
           <div class="concept-step">
             <div class="num">03</div>
-            <h3><span class="en">Land the work</span><span class="ko">머지까지</span></h3>
+            <h3><span class="en">Land the work</span><span class="ko">병합까지</span></h3>
             <p>
               <span class="en"
                 >Open a GitHub PR in one click. If the task builds on another, stack it and Wooi
@@ -1142,96 +1111,11 @@
           <h2>
             <span class="en"
               >Everything you need to run agents in parallel — and land what they write</span
-            ><span class="ko">에이전트를 병렬로 돌리고, 그 결과를 머지하기까지</span>
+            ><span class="ko">에이전트를 병렬로 돌리고, 그 결과를 병합하기까지</span>
           </h2>
         </div>
 
         <div class="features">
-          <!-- Workspaces -->
-          <div class="feature">
-            <div class="feature-label">
-              <div class="feature-icon">🗂️</div>
-              <h3><span class="en">Workspaces</span><span class="ko">워크스페이스</span></h3>
-            </div>
-            <ul>
-              <li>
-                <strong
-                  ><span class="en">No default prompt</span
-                  ><span class="ko">기본 프롬프트 없음</span></strong
-                >
-                —
-                <span class="en"
-                  >the input box starts empty; the session begins only when you send your first
-                  message.</span
-                >
-                <span class="ko"
-                  >입력창은 빈 상태로 시작하고, 첫 메시지를 보낼 때 비로소 세션이 시작됩니다.</span
-                >
-              </li>
-              <li>
-                <strong
-                  ><span class="en">Automatic creation</span
-                  ><span class="ko">자동 생성</span></strong
-                >
-                —
-                <span class="en"
-                  >workspaces get an auto-generated name (like <code>witty-otter</code>) and branch
-                  off the default branch. Turn on manual setup to choose the name and base branch
-                  yourself.</span
-                >
-                <span class="ko"
-                  >자동 생성된 이름(<code>witty-otter</code> 등)을 받고 기본 브랜치에서 분기됩니다.
-                  직접 입력을 켜면 이름·베이스 브랜치를 직접 고를 수 있습니다.</span
-                >
-              </li>
-              <li>
-                <strong
-                  ><span class="en">Choose Claude Code or Codex</span
-                  ><span class="ko">Claude Code 또는 Codex 선택</span></strong
-                >
-                —
-                <span class="en"
-                  >pick the coding agent when creating a workspace. The workspace keeps that agent
-                  for its lifetime.</span
-                >
-                <span class="ko"
-                  >워크스페이스를 만들 때 코딩 에이전트를 고릅니다. 선택한 에이전트는 생성 후에도
-                  유지됩니다.</span
-                >
-              </li>
-              <li>
-                <strong
-                  ><span class="en">Per-workspace model & effort</span
-                  ><span class="ko">워크스페이스별 모델·effort</span></strong
-                >
-                —
-                <span class="en"
-                  >set from the status line or by typing <code>/model</code> and
-                  <code>/effort</code>. Options depend on the selected agent and model.</span
-                >
-                <span class="ko"
-                  >상태줄에서 고르거나 <code>/model</code>·<code>/effort</code> 로 바꿉니다.
-                  선택지는 에이전트와 모델에 따라 달라집니다.</span
-                >
-              </li>
-              <li>
-                <strong
-                  ><span class="en">Sessions resume across restarts</span
-                  ><span class="ko">재시작 간 세션 resume</span></strong
-                >
-                —
-                <span class="en"
-                  >your conversation context is restored, so the next message continues where you
-                  left off.</span
-                >
-                <span class="ko"
-                  >대화 맥락이 복원되어, 재시작 후 첫 메시지에서 하던 작업을 이어갑니다.</span
-                >
-              </li>
-            </ul>
-          </div>
-
-          <!-- Permissions -->
           <!-- Stacked PRs -->
           <div class="feature">
             <div class="feature-label">
@@ -1258,44 +1142,19 @@
               </li>
               <li>
                 <strong
-                  ><span class="en">Stack a workspace</span
-                  ><span class="ko">워크스페이스 쌓기</span></strong
-                >
-                —
-                <span class="en"
-                  >pick <strong>Stack a new workspace</strong> from a workspace's menu; the new one
-                  branches off that workspace's branch and its PR targets that branch instead of the
-                  default branch.</span
-                >
-                <span class="ko"
-                  >워크스페이스 메뉴에서 <strong>Stack a new workspace</strong> 를 고르면 그
-                  브랜치에서 분기한 워크스페이스가 생기고, PR 도 기본 브랜치가 아닌 그 부모 브랜치를
-                  대상으로 열립니다.</span
-                >
-              </li>
-              <li>
-                <strong
                   ><span class="en">Or let the agent stack it</span
                   ><span class="ko">에이전트가 쌓게 두기</span></strong
                 >
                 —
                 <span class="en"
-                  >agents get Wooi's own tools alongside their usual ones.
-                  <code>check_related_work</code> lists the other workspaces open on this repo and
-                  the file paths each is changing (paths only, never diffs), so an agent can steer
-                  clear of a sibling before it starts rather than resolving the collision
-                  afterwards. <code>create_stacked_workspace</code> opens the next workspace on top
-                  of the current branch when the work just finished is a complete, reviewable unit,
-                  and <code>report_to_parent</code> hands the result back up the chain.</span
+                  ><code>create_stacked_workspace</code> opens the next workspace on top of the
+                  current branch when the work just finished is a complete, reviewable unit. See
+                  <strong>Agent orchestration</strong> below.</span
                 >
                 <span class="ko"
-                  >에이전트는 자기 도구 외에 Wooi 의 도구도 함께 씁니다.
-                  <code>check_related_work</code> 는 이 리포에 열려 있는 다른 워크스페이스와 각각이
-                  바꾸고 있는 파일 경로를 알려 줍니다(경로만, diff 는 절대 넘기지 않습니다). 충돌을
-                  나중에 수습하는 대신 시작 전에 피할 수 있습니다.
-                  <code>create_stacked_workspace</code> 는 방금 끝낸 작업이 리뷰 가능한 한 덩어리일
-                  때 현재 브랜치 위에 다음 워크스페이스를 열고, <code>report_to_parent</code> 로
-                  결과를 부모에게 돌려 줍니다.</span
+                  ><code>create_stacked_workspace</code> 는 방금 끝낸 작업이 리뷰 가능한 한 덩어리일
+                  때 현재 브랜치 위에 다음 워크스페이스를 엽니다. 아래
+                  <strong>에이전트 오케스트레이션</strong>을 참고하세요.</span
                 >
               </li>
               <li>
@@ -1356,6 +1215,194 @@
                 <span class="ko"
                   >에이전트가 <code>git checkout -b</code> 와 <code>gh pr create</code> 로 직접
                   체인을 만들어도, PR 의 base 링크에서 스택을 복원해 똑같이 보여 줍니다.</span
+                >
+              </li>
+              <li>
+                <strong
+                  ><span class="en">The parent is the default base — for everyone</span
+                  ><span class="ko">기본 base 는 누가 열든 부모</span></strong
+                >
+                —
+                <span class="en"
+                  >stacking a workspace records the parent as that branch's merge base, so a bare
+                  <code>gh pr create</code> — yours or an agent's — targets the parent. If a PR
+                  still lands on the wrong base, Wooi says so and offers to retarget it instead of
+                  quietly dropping the stack.</span
+                >
+                <span class="ko"
+                  >워크스페이스를 스택으로 만들면 그 브랜치의 merge base 에 부모를 기록합니다.
+                  그래서 그냥 실행한 <code>gh pr create</code> 도 — 사용자가 치든 에이전트가 치든 —
+                  부모 브랜치를 향합니다. 그래도 엉뚱한 base 로 열렸다면, 조용히 스택을 잃는 대신
+                  알려 주고 리타겟할지 물어봅니다.</span
+                >
+              </li>
+              <li>
+                <strong
+                  ><span class="en">GitHub stacks come in too</span
+                  ><span class="ko">GitHub 스택도 가져오기</span></strong
+                >
+                —
+                <span class="en"
+                  >Wooi reads GitHub's server-side stack object and its explicit layer order when
+                  available, then falls back to the PR base chain. If the remote branch has diverged
+                  from the local expectation, synchronization stops instead of overwriting it.</span
+                >
+                <span class="ko"
+                  >GitHub의 서버 스택 객체가 있으면 명시된 레이어 순서를 읽고, 없을 때만 PR base
+                  체인으로 복원합니다. 원격 브랜치가 로컬의 예상과 갈라졌다면 덮어쓰지 않고 동기화를
+                  멈춥니다.</span
+                >
+              </li>
+              <li>
+                <strong
+                  ><span class="en">Review the stack as a stack</span
+                  ><span class="ko">스택을 스택답게 리뷰</span></strong
+                >
+                —
+                <span class="en"
+                  >one session reads every layer together and looks for ordering, boundary,
+                  granularity, churn, and cross-layer dependency problems. Findings stay attached to
+                  the PR they concern.</span
+                >
+                <span class="ko"
+                  >세션 하나가 모든 레이어를 함께 읽습니다. 순서·경계·크기·되돌림·레이어 간 의존성을
+                  짚고 지적은 해당 PR에 남깁니다.</span
+                >
+              </li>
+            </ul>
+          </div>
+
+          <!-- Agent orchestration -->
+          <div class="feature">
+            <div class="feature-label">
+              <div class="feature-icon">🤖</div>
+              <h3>
+                <span class="en">Agent orchestration</span
+                ><span class="ko">에이전트 오케스트레이션</span>
+              </h3>
+            </div>
+            <ul>
+              <li>
+                <strong
+                  ><span class="en">A built-in MCP server, nothing to configure</span
+                  ><span class="ko">설정 없이 붙는 내장 MCP 서버</span></strong
+                >
+                —
+                <span class="en"
+                  >Wooi attaches a server named <code>wooi</code> to every Claude Code and Codex
+                  session it starts. The agent doesn't just edit files in its worktree; it can drive
+                  Wooi itself — split a task, open the workspaces for the pieces, stack them in
+                  dependency order, and pass results along the chain.</span
+                >
+                <span class="ko"
+                  >Wooi 가 띄우는 모든 Claude Code·Codex 세션에 <code>wooi</code> 서버가 붙습니다.
+                  에이전트는 자기 worktree 의 파일만 고치지 않습니다. Wooi 자체를 조종합니다. 작업을
+                  쪼개고, 조각마다 워크스페이스를 열고, 의존 순서대로 쌓고, 결과를 체인을 따라
+                  넘깁니다.</span
+                >
+              </li>
+              <li>
+                <strong
+                  ><span class="en">See the neighbours first</span
+                  ><span class="ko">옆자리부터 확인</span></strong
+                >
+                —
+                <span class="en"
+                  ><code>check_related_work</code> lists the other workspaces open on this repo and
+                  the paths each is changing, flags overlaps with what this agent plans to touch,
+                  and tells it to check with you first. Paths only — diffs are never shared between
+                  workspaces.</span
+                >
+                <span class="ko"
+                  ><code>check_related_work</code> 는 이 리포에 열려 있는 다른 워크스페이스가 각각
+                  어떤 경로를 바꾸는지 알려 줍니다. 이 에이전트가 건드리려는 경로와 겹치면
+                  사용자에게 먼저 물어보라고 안내합니다. 넘어가는 건 경로뿐입니다. diff 는
+                  워크스페이스 사이를 넘지 않습니다.</span
+                >
+              </li>
+              <li>
+                <strong
+                  ><span class="en">Fan out or stack up</span
+                  ><span class="ko">펼치거나 쌓거나</span></strong
+                >
+                —
+                <span class="en"
+                  ><code>create_workspace</code> starts an independent workspace off the default
+                  branch; <code>create_stacked_workspace</code> starts a child off the committed tip
+                  of the current branch. Either can be handed a first message that starts the new
+                  agent's turn immediately.</span
+                >
+                <span class="ko"
+                  ><code>create_workspace</code> 는 기본 브랜치에서 독립 워크스페이스를 만듭니다.
+                  <code>create_stacked_workspace</code> 는 현재 브랜치의 커밋된 끝에서 자식
+                  워크스페이스를 만듭니다. 둘 다 첫 메시지를 함께 넘겨 새 에이전트의 턴을 바로
+                  시작할 수 있습니다.</span
+                >
+              </li>
+              <li>
+                <strong
+                  ><span class="en">Talk along the chain</span
+                  ><span class="ko">체인을 따라 주고받기</span></strong
+                >
+                —
+                <span class="en"
+                  ><code>report_to_parent</code> records a result for the parent without
+                  interrupting it, <code>check_stacked_work</code> lists the children with their
+                  branch, PR state, and latest report, and <code>notify_child</code> sends an update
+                  that starts a turn in a child.</span
+                >
+                <span class="ko"
+                  ><code>report_to_parent</code> 은 부모의 턴을 끊지 않고 결과를 기록합니다.
+                  <code>check_stacked_work</code> 는 자식들의 브랜치·PR 상태·최신 보고를 나열합니다.
+                  <code>notify_child</code> 는 자식에게 소식을 보내 턴을 시작합니다.</span
+                >
+              </li>
+              <li>
+                <strong><span class="en">Fenced in</span><span class="ko">울타리</span></strong> —
+                <span class="en"
+                  >most tools act only on the calling workspace; tools that take a workspace id can
+                  only name one the caller created. Read-only tools run without a prompt;
+                  state-changing ones follow the workspace's permission mode and show an approval
+                  card.</span
+                >
+                <span class="ko"
+                  >대부분의 도구는 호출한 워크스페이스에만 작용합니다. 워크스페이스 id 를 받는
+                  도구는 호출자가 직접 만든 것만 겨냥할 수 있습니다. 읽기 전용 도구는 승인 없이
+                  돌고, 상태를 바꾸는 도구는 권한 모드를 따라 승인 카드를 띄웁니다.</span
+                >
+              </li>
+              <li>
+                <strong
+                  ><span class="en">Talk across workspaces</span
+                  ><span class="ko">워크스페이스 사이에서 대화하기</span></strong
+                >
+                —
+                <span class="en"
+                  ><code>list_workspace_peers</code> and <code>send_to_workspace</code> carry a
+                  short text message to another open workspace. The receiver can accept, hold for
+                  approval, or refuse it; files, diffs, and transcripts do not travel with it.</span
+                >
+                <span class="ko"
+                  ><code>list_workspace_peers</code>·<code>send_to_workspace</code>로 다른 열린
+                  워크스페이스에 짧은 평문 메시지를 보냅니다. 받는 쪽이 즉시 수신·승인 대기·거절을
+                  정하며 파일·diff·대화 기록은 함께 가지 않습니다.</span
+                >
+              </li>
+              <li>
+                <strong
+                  ><span class="en">Grow into an agent team</span
+                  ><span class="ko">필요할 때 에이전트 팀으로</span></strong
+                >
+                —
+                <span class="en"
+                  >an agent can request that a solo workspace become an agent team. Once you
+                  approve, Wooi carries the conversation over and automatically continues the task
+                  after the switch.</span
+                >
+                <span class="ko"
+                  >에이전트가 단독 워크스페이스를 에이전트 팀으로 바꾸도록 요청할 수 있습니다.
+                  사용자가 승인하면 기존 대화를 넘기고 전환 뒤 하던 작업을 자동으로 이어
+                  갑니다.</span
                 >
               </li>
             </ul>
@@ -1425,33 +1472,53 @@
               </li>
               <li>
                 <strong
-                  ><span class="en">Start a review</span><span class="ko">리뷰 시작</span></strong
+                  ><span class="en">Review a stack as one unit</span
+                  ><span class="ko">스택 전체를 하나로 리뷰</span></strong
                 >
                 —
                 <span class="en"
-                  >hit <strong>Review PR</strong> on the Overview board, pick a repo and one of its
-                  open PRs (or type a number), and say what you want looked at. A review gets its
-                  own row in the sidebar and runs alongside your workspaces.</span
+                  >one session reads every layer together, separates stack findings from layer
+                  findings, anchors inline comments to the correct PR, and records partial success
+                  when verdict submission stops partway through.</span
                 >
                 <span class="ko"
-                  >Overview 보드의 <strong>Review PR</strong> 을 누르고 리포와 열린 PR 을 고른
-                  뒤(번호 직접 입력도 됩니다) 무엇을 봐 주면 좋을지 적습니다. 리뷰는 사이드바에 자기
-                  행을 갖고 워크스페이스 옆에서 나란히 돕니다.</span
+                  >세션 하나가 모든 레이어를 함께 읽습니다. 스택 전체의 문제와 각 레이어의 문제를
+                  나누고 인라인 지적은 올바른 PR에 연결합니다. 레이어별 판정을 올리다 일부만
+                  성공해도 그 상태를 기록합니다.</span
                 >
               </li>
               <li>
                 <strong
-                  ><span class="en">Claude or Codex</span
-                  ><span class="ko">Claude 또는 Codex</span></strong
+                  ><span class="en">Send your diff feedback to the agent</span
+                  ><span class="ko">내 diff 피드백을 에이전트에게</span></strong
                 >
                 —
                 <span class="en"
-                  >pick the agent when you start; the review stays on it, and follow-up turns resume
-                  the same session.</span
+                  >comment on a changed line in a regular workspace and reply with that file and
+                  line attached. The agent gets the code location instead of a detached
+                  description.</span
                 >
                 <span class="ko"
-                  >시작할 때 에이전트를 고르면 리뷰는 끝까지 그 에이전트로 돌고, 후속 질문도 같은
-                  세션을 이어받습니다.</span
+                  >일반 워크스페이스의 변경 줄에 코멘트를 달고 파일·줄 위치와 함께 회신합니다.
+                  코드와 떨어진 설명을 다시 채팅에 옮길 필요가 없습니다.</span
+                >
+              </li>
+              <li>
+                <strong
+                  ><span class="en">Keep your place in a big diff</span
+                  ><span class="ko">큰 diff 에서 자리 잃지 않기</span></strong
+                >
+                —
+                <span class="en"
+                  >tick a file as <strong>viewed</strong> and it collapses out of the way. The mark
+                  is stored against a fingerprint of that file's contents, so a new commit that
+                  changes the file puts it back to unviewed on its own — and files that didn't
+                  change stay checked.</span
+                >
+                <span class="ko"
+                  >파일에 <strong>봤음</strong> 표시를 하면 접혀 비켜 줍니다. 이 표시는 파일 내용의
+                  지문과 함께 저장되므로 새 커밋이 그 파일을 바꾸면 저절로 안 본 상태로 돌아갑니다.
+                  바뀌지 않은 파일은 표시가 그대로 남습니다.</span
                 >
               </li>
               <li>
@@ -1500,54 +1567,188 @@
                   에서는 approve/request changes 를 숨깁니다(GitHub 이 거부하므로).</span
                 >
               </li>
+            </ul>
+          </div>
+
+          <!-- Agent backends -->
+          <div class="feature">
+            <div class="feature-label">
+              <div class="feature-icon">🎛️</div>
+              <h3><span class="en">Agent backends</span><span class="ko">에이전트 백엔드</span></h3>
+            </div>
+            <ul>
               <li>
-                <strong><span class="en">Persistent</span><span class="ko">영속</span></strong> —
+                <strong
+                  ><span class="en">Backend-specific controls</span
+                  ><span class="ko">백엔드별 컨트롤</span></strong
+                >
+                —
                 <span class="en"
-                  >reviews survive restarts and can be archived, restored, or deleted; deleting
-                  cleans up the review worktree too.</span
+                  >models, reasoning effort, permission modes, slash commands, and account details
+                  all come from the selected backend, so a workspace only shows controls that
+                  actually work there.</span
                 >
                 <span class="ko"
-                  >앱을 껐다 켜도 남고 아카이브·복원·삭제할 수 있습니다. 삭제하면 리뷰 worktree 도
-                  함께 정리됩니다.</span
+                  >모델·reasoning effort·권한 모드·슬래시 명령·계정 정보가 전부 선택한 백엔드에서
+                  옵니다. 워크스페이스에는 거기서 실제로 동작하는 컨트롤만 뜹니다.</span
+                >
+              </li>
+              <li>
+                <strong
+                  ><span class="en">Permission modes, cycled with Shift+Tab</span
+                  ><span class="ko">Shift+Tab 으로 순환하는 권한 모드</span></strong
+                >
+                —
+                <span class="en"
+                  >Claude Code offers default, accept edits, plan, and auto; Codex offers read only,
+                  auto, full access, and plan. Prompts offer "Always allow" alongside Allow/Deny —
+                  Enter = Allow, Esc = Deny.</span
+                >
+                <span class="ko"
+                  >Claude Code 는 default·accept edits·plan·auto 를, Codex 는 read only·auto·full
+                  access·plan 을 제공합니다. 권한 프롬프트는 Allow/Deny 외에 "Always allow" 도
+                  제공합니다(Enter=Allow / Esc=Deny).</span
+                >
+              </li>
+              <li>
+                <strong
+                  ><span class="en">Switch agents without losing the conversation</span
+                  ><span class="ko">대화를 버리지 않고 에이전트 교체</span></strong
+                >
+                —
+                <span class="en"
+                  >use <code>/agent</code> after work has started. Because Claude and Codex cannot
+                  resume each other's native session IDs, Wooi sends a bounded handoff with your
+                  next message and shows its estimated cost first.</span
+                >
+                <span class="ko"
+                  >작업이 시작된 뒤에도 <code>/agent</code>를 쓸 수 있습니다. Claude와 Codex는
+                  서로의 세션 ID를 이어받을 수 없으므로 Wooi가 제한된 크기의 인수인계를 다음
+                  메시지와 함께 보내고 예상 비용을 미리 보여 줍니다.</span
+                >
+              </li>
+              <li>
+                <strong
+                  ><span class="en">Capabilities only one side has</span
+                  ><span class="ko">한쪽에만 있는 기능</span></strong
+                >
+                —
+                <span class="en"
+                  ><code>/rewind</code> (roll code back to a file checkpoint) and
+                  <code>/btw</code> (a side question that doesn't derail the turn) appear where the
+                  backend supports them, and mid-turn steering is used where it exists instead of
+                  being queued.</span
+                >
+                <span class="ko"
+                  ><code>/rewind</code>(파일 체크포인트로 되돌리기)와 <code>/btw</code>(턴을
+                  흐트러뜨리지 않는 곁가지 질문)는 백엔드가 지원할 때 나타납니다. 턴 중간 steering
+                  도 되는 쪽에서는 큐잉 없이 그대로 씁니다.</span
+                >
+              </li>
+              <li>
+                <strong
+                  ><span class="en">Rate limits, normalized</span
+                  ><span class="ko">정규화된 레이트리밋</span></strong
+                >
+                —
+                <span class="en"
+                  >account usage from either backend shows in one status line, pinned to the window
+                  that actually paces you — Claude's 5-hour session window, Codex's weekly one — so
+                  the number doesn't swap out from under you.</span
+                >
+                <span class="ko"
+                  >양쪽 백엔드의 계정 사용량을 상태줄 하나로 보여 주되 실제로 페이스를 좌우하는 창에
+                  고정합니다(Claude 는 5시간 세션 창, Codex 는 주간 창). 볼 때마다 다른 숫자로
+                  바뀌지 않습니다.</span
+                >
+              </li>
+              <li>
+                <strong
+                  ><span class="en">Your MCP servers come along</span
+                  ><span class="ko">내 MCP 서버도 그대로</span></strong
+                >
+                —
+                <span class="en"
+                  >servers configured in your own Claude/Codex CLI setup are resolved and injected
+                  into the session alongside Wooi's own <code>wooi</code> server.</span
+                >
+                <span class="ko"
+                  >Claude·Codex CLI 에 설정해 둔 MCP 서버를 읽어 Wooi 자체 <code>wooi</code> 서버와
+                  함께 세션에 붙입니다.</span
                 >
               </li>
             </ul>
           </div>
 
+          <!-- Workspaces -->
           <div class="feature">
             <div class="feature-label">
-              <div class="feature-icon">🛡️</div>
-              <h3><span class="en">Permissions</span><span class="ko">권한</span></h3>
+              <div class="feature-icon">🗂️</div>
+              <h3><span class="en">Workspaces</span><span class="ko">워크스페이스</span></h3>
             </div>
             <ul>
               <li>
                 <strong
-                  ><span class="en">Cycle modes with Shift+Tab</span
-                  ><span class="ko">Shift+Tab 으로 모드 순환</span></strong
+                  ><span class="en">Choose Claude Code or Codex</span
+                  ><span class="ko">Claude Code 또는 Codex 선택</span></strong
                 >
                 —
                 <span class="en"
-                  >Claude Code offers default, accept edits, plan, and auto; Codex offers read only,
-                  auto, full access, and plan.</span
+                  >pick the coding agent when creating a workspace and change it later with
+                  <code>/agent</code>. If work has started, the new agent receives a bounded
+                  conversation handoff; stacked workspaces initially inherit their parent's.</span
                 >
                 <span class="ko"
-                  >Claude Code는 default·accept edits·plan·auto를, Codex는 read only·auto·full
-                  access·plan을 제공합니다.</span
+                  >워크스페이스를 만들 때 코딩 에이전트를 고르고 나중에도 <code>/agent</code>로 바꿀
+                  수 있습니다. 이미 작업을 시작했다면 새 에이전트가 제한된 크기의 대화 인수인계를
+                  받습니다. 스택 워크스페이스는 처음에 부모의 에이전트를 물려받습니다.</span
                 >
               </li>
               <li>
                 <strong
-                  ><span class="en">"Always allow"</span
-                  ><span class="ko">"Always allow"</span></strong
+                  ><span class="en">Per-workspace model & effort</span
+                  ><span class="ko">워크스페이스별 모델·effort</span></strong
                 >
                 —
                 <span class="en"
-                  >permission prompts offer auto-approve for the rest of the session alongside
-                  Allow/Deny — Enter = Allow, Esc = Deny.</span
+                  >set from the status line or by typing <code>/model</code>, <code>/effort</code>,
+                  and <code>/fast</code>. Options depend on the selected agent and model.</span
                 >
                 <span class="ko"
-                  >권한 프롬프트는 Allow/Deny 외에 세션 동안 자동 허용을 제공합니다 — Enter=Allow /
-                  Esc=Deny.</span
+                  >상태줄에서 고르거나 <code>/model</code>·<code>/effort</code>·<code>/fast</code>
+                  로 바꿉니다. 선택지는 에이전트와 모델에 따라 달라집니다.</span
+                >
+              </li>
+              <li>
+                <strong
+                  ><span class="en">Sessions resume across restarts</span
+                  ><span class="ko">재시작 간 세션 resume</span></strong
+                >
+                —
+                <span class="en"
+                  >your conversation context is restored, so the next message continues where you
+                  left off.</span
+                >
+                <span class="ko"
+                  >대화 맥락이 복원되어, 재시작 후 첫 메시지에서 하던 작업을 이어갑니다.</span
+                >
+              </li>
+              <li>
+                <strong
+                  ><span class="en">Carried files</span><span class="ko">Carry files</span></strong
+                >
+                —
+                <span class="en"
+                  >a new worktree only contains git-tracked files, so list the ignored ones you need
+                  (<code>.env</code>, <code>CLAUDE.local.md</code>, …) per repo.
+                  <strong>Copy</strong> gives each workspace its own version,
+                  <strong>Link</strong> shares one original.</span
+                >
+                <span class="ko"
+                  >새 worktree 에는 git 이 추적하는 파일만 들어오므로, 필요한 ignore 파일
+                  (<code>.env</code>, <code>CLAUDE.local.md</code> 등)을 리포마다 적어 둡니다.
+                  <strong>Copy</strong> 는 워크스페이스마다 자기 사본을, <strong>Link</strong> 는
+                  원본 하나를 공유합니다.</span
                 >
               </li>
             </ul>
@@ -1565,6 +1766,21 @@
             <ul>
               <li>
                 <strong
+                  ><span class="en">Fan out one prompt</span
+                  ><span class="ko">프롬프트 하나를 여러 곳에 펼치기</span></strong
+                >
+                —
+                <span class="en"
+                  >send the same prompt to several independent workspaces, compare their responses
+                  and diffs side by side, then adopt one winner and archive the alternatives.</span
+                >
+                <span class="ko"
+                  >같은 프롬프트를 여러 독립 워크스페이스에 보내 응답과 diff를 나란히 비교합니다.
+                  하나를 채택한 뒤 나머지는 아카이브할 수 있습니다.</span
+                >
+              </li>
+              <li>
+                <strong
                   ><span class="en">Status at a glance</span
                   ><span class="ko">한눈에 보는 상태</span></strong
                 >
@@ -1576,36 +1792,6 @@
                 <span class="ko"
                   >사이드바에서 실행 중(spinner)·권한 대기(노란 방패)·미확인 응답(파란 점)을 구분해
                   보여줍니다.</span
-                >
-              </li>
-              <li>
-                <strong
-                  ><span class="en">OS notifications & Dock badge</span
-                  ><span class="ko">OS 알림 · Dock 배지</span></strong
-                >
-                —
-                <span class="en"
-                  >when the window is inactive, completions / errors / permission requests appear as
-                  notifications and a Dock badge count.</span
-                >
-                <span class="ko"
-                  >창이 비활성이면 완료·에러·권한 요청을 OS 알림으로 띄우고 Dock 배지에
-                  집계합니다.</span
-                >
-              </li>
-              <li>
-                <strong
-                  ><span class="en">Jump to what needs you</span
-                  ><span class="ko">확인 필요한 곳으로 이동</span></strong
-                >
-                —
-                <span class="en"
-                  >"Needs input" / "Next unread" buttons jump straight to the session that needs
-                  you.</span
-                >
-                <span class="ko"
-                  >"Needs input / Next unread" 버튼으로 사용자 확인이 필요한 세션으로 바로
-                  이동합니다.</span
                 >
               </li>
               <li>
@@ -1634,14 +1820,6 @@
             </div>
             <ul>
               <li>
-                <strong><span class="en">All files</span><span class="ko">All files</span></strong>
-                —
-                <span class="en"
-                  >a file tree of the worktree with a read-only, syntax-highlighted viewer.</span
-                >
-                <span class="ko">worktree 파일 트리와 읽기 전용·구문 강조 뷰어.</span>
-              </li>
-              <li>
                 <strong><span class="en">Changes</span><span class="ko">Changes</span></strong> —
                 <span class="en"
                   >a per-file diff against the base branch (same as a PR diff), covering commits +
@@ -1655,19 +1833,27 @@
                 >
               </li>
               <li>
-                <strong><span class="en">Check</span><span class="ko">Check</span></strong> —
-                <span class="en">CI check results for the PR on the current branch.</span>
-                <span class="ko">현재 브랜치 PR 의 CI 체크 결과.</span>
+                <strong><span class="en">Preview</span><span class="ko">Preview</span></strong> —
+                <span class="en"
+                  >open the workspace's dev server inside Wooi, capture the page or pick an element
+                  into the composer, and send collected console and network failures to the agent.
+                  It runs in a separate, permission-denied session.</span
+                >
+                <span class="ko"
+                  >워크스페이스의 dev 서버를 Wooi 안에서 엽니다. 화면을 캡처하거나 특정 요소를 골라
+                  입력창에 넣습니다. 수집한 콘솔·네트워크 오류도 에이전트에게 보냅니다. Preview는
+                  권한을 차단한 별도 세션에서 실행됩니다.</span
+                >
               </li>
               <li>
                 <strong><span class="en">Terminal</span><span class="ko">Terminal</span></strong> —
                 <span class="en"
-                  >a per-workspace login-shell terminal that survives workspace switches, preserving
-                  running commands and shell state.</span
+                  >per-workspace login-shell terminals with multiple tabs. They survive workspace
+                  switches, preserving running commands and shell state.</span
                 >
                 <span class="ko"
-                  >workspace 별 로그인 셸 터미널. 전환했다 돌아와도 실행 중이던 명령과 셸 상태가
-                  유지됩니다.</span
+                  >워크스페이스별 로그인 셸 터미널에 탭을 여러 개 둘 수 있습니다. 전환했다 돌아와도
+                  실행 중이던 명령과 셸 상태가 유지됩니다.</span
                 >
               </li>
             </ul>
@@ -1680,45 +1866,6 @@
               <h3><span class="en">Composing messages</span><span class="ko">메시지 작성</span></h3>
             </div>
             <ul>
-              <li>
-                <strong
-                  ><span class="en">Slash-command autocomplete</span
-                  ><span class="ko">슬래시 명령 자동완성</span></strong
-                >
-                —
-                <span class="en"
-                  >type <code>/</code> to see the commands available for the workspace's selected
-                  agent.</span
-                >
-                <span class="ko"
-                  ><code>/</code> 를 치면 워크스페이스에서 선택한 에이전트가 지원하는 명령 목록이
-                  뜹니다.</span
-                >
-              </li>
-              <li>
-                <strong
-                  ><span class="en">Inline shell commands</span
-                  ><span class="ko">인라인 셸 명령</span></strong
-                >
-                —
-                <span class="en"
-                  >start a message with <code>!</code> to run it as a shell command, with output
-                  shown right in the chat.</span
-                >
-                <span class="ko"
-                  >메시지를 <code>!</code> 로 시작하면 셸 명령으로 실행되고 결과가 채팅에 바로
-                  표시됩니다.</span
-                >
-              </li>
-              <li>
-                <strong
-                  ><span class="en">Image attachments</span
-                  ><span class="ko">이미지 첨부</span></strong
-                >
-                —
-                <span class="en">paste or drop images into the input box to send them along.</span>
-                <span class="ko">입력창에 이미지를 붙여넣거나 끌어다 놓으면 함께 전송됩니다.</span>
-              </li>
               <li>
                 <strong
                   ><span class="en">Status line & auto-compact</span
@@ -1844,7 +1991,7 @@
                   >약관·개인정보처리방침에 동의한 뒤 Claude Code 또는 Codex를 연결합니다. 둘 중
                   하나만 있으면 되며, Codex는 ChatGPT 또는 OpenAI API 키로 연결할 수 있습니다.
                   GitHub 은 이 단계에서 건너뛸 수 있습니다 — 바로 작업을 시작하면, PR
-                  생성·머지·스택·Check 를 처음 쓰는 순간 Wooi 가 연결을 요청하고 연결 후 원래 하려던
+                  생성·병합·스택·Check 를 처음 쓰는 순간 Wooi 가 연결을 요청하고 연결 후 원래 하려던
                   동작을 이어서 실행합니다.</span
                 >
               </p>
