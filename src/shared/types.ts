@@ -2982,6 +2982,8 @@ export type PrState =
   | 'draft'
   | 'review_required'
   | 'changes_requested'
+  | 'ci_pending'
+  | 'ci_failed'
   | 'approved'
   | 'conflict'
   | 'open'
@@ -2998,7 +3000,7 @@ export interface PrStatus {
   title: string
   /** 구조화된 상태값. 색·아이콘 매핑의 단일 출처. */
   state: PrState
-  /** 표시용 라벨: Draft / Review required / Changes requested / Ready to merge / Conflict / Open / Merged / Closed */
+  /** 표시용 라벨: Draft / Review required / Changes requested / CI running / CI failed / Ready to merge / Conflict / Open / Merged / Closed */
   label: string
 }
 

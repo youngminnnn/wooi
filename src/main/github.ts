@@ -32,6 +32,7 @@ interface GhPr {
   mergeable: string // MERGEABLE | CONFLICTING | UNKNOWN
   // BEHIND | BLOCKED | CLEAN | DIRTY | DRAFT | HAS_HOOKS | UNKNOWN | UNSTABLE
   mergeStateStatus: string
+  statusCheckRollup?: RollupItem[]
 }
 
 function runLoginShell(
@@ -158,6 +159,15 @@ function stateFor(pr: GhPr): PrState {
   if (pr.reviewDecision === 'CHANGES_REQUESTED') return 'changes_requested'
   if (pr.reviewDecision === 'REVIEW_REQUIRED') return 'review_required'
 
+  // BLOCKED 는 리뷰뿐 아니라 필수 CI 대기/실패에도 쓰인다. 승인된 PR 을 Review required 로
+  // 되돌리지 않도록 실제 체크 결과를 먼저 분리한다. 실패와 실행 중이 섞이면 실패를 우선한다.
+  const checkStates = (pr.statusCheckRollup ?? [])
+    .map(toCheck)
+    .filter((check): check is PrCheck => check !== null)
+    .map((check) => check.state)
+  if (checkStates.includes('failure')) return 'ci_failed'
+  if (checkStates.includes('pending')) return 'ci_pending'
+
   // 여기까지 오면 reviewDecision 은 APPROVED 또는 ''(필수 리뷰 없음/ruleset 로 미노출).
   // 병합 차단 여부는 mergeStateStatus 로 확정한다.
   switch (pr.mergeStateStatus) {
@@ -183,6 +193,8 @@ const PR_LABELS: Record<PrState, string> = {
   draft: 'Draft',
   review_required: 'Review required',
   changes_requested: 'Changes requested',
+  ci_pending: 'CI running',
+  ci_failed: 'CI failed',
   approved: 'Ready to merge',
   conflict: 'Conflict',
   open: 'Open',
@@ -199,7 +211,7 @@ export async function getPrStatus(worktreePath: string, branch?: string): Promis
   if (!(await connected())) return null
   const target = branch ? ` '${branch}'` : ''
   const { stdout, code } = await runLoginShell(
-    `gh pr view${target} --json number,url,title,state,isDraft,reviewDecision,mergeable,mergeStateStatus`,
+    `gh pr view${target} --json number,url,title,state,isDraft,reviewDecision,mergeable,mergeStateStatus,statusCheckRollup`,
     worktreePath
   )
   if (code !== 0) return null
@@ -325,7 +337,7 @@ export function invalidateOpenPrs(): void {
 
 async function fetchOpenPrs(worktreePath: string): Promise<OpenPrRow[]> {
   const { stdout, code } = await runLoginShell(
-    `gh pr list --state open --limit 200 --json number,url,title,state,isDraft,reviewDecision,mergeable,mergeStateStatus,headRefName,baseRefName`,
+    `gh pr list --state open --limit 200 --json number,url,title,state,isDraft,reviewDecision,mergeable,mergeStateStatus,statusCheckRollup,headRefName,baseRefName`,
     worktreePath
   )
   if (code !== 0) return []

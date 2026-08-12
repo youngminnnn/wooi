@@ -118,7 +118,7 @@ describe('gh 연결됨 (무회귀)', () => {
     setGithubConnected(true)
   })
 
-  it('PR 조회가 예전과 동일한 gh 명령을 실행하고 결과를 파싱한다', async () => {
+  it('PR 조회가 체크 롤업까지 함께 조회하고 결과를 파싱한다', async () => {
     reply = () =>
       ({
         code: 0,
@@ -143,8 +143,40 @@ describe('gh 연결됨 (무회귀)', () => {
     })
     // 연결돼 있으면 확인용 셸을 추가로 띄우지 않는다.
     expect(commands).toEqual([
-      'gh pr view --json number,url,title,state,isDraft,reviewDecision,mergeable,mergeStateStatus'
+      'gh pr view --json number,url,title,state,isDraft,reviewDecision,mergeable,mergeStateStatus,statusCheckRollup'
     ])
+  })
+
+  it.each([
+    {
+      name: '실행 중인 CI',
+      check: { __typename: 'CheckRun', name: 'test', status: 'IN_PROGRESS' },
+      state: 'ci_pending',
+      label: 'CI running'
+    },
+    {
+      name: '실패한 CI',
+      check: { __typename: 'CheckRun', name: 'test', status: 'COMPLETED', conclusion: 'FAILURE' },
+      state: 'ci_failed',
+      label: 'CI failed'
+    }
+  ])('승인 후 $name 상태를 review required 와 구분한다', async ({ check, state, label }) => {
+    reply = () => ({
+      code: 0,
+      stdout: JSON.stringify({
+        number: 8,
+        url: 'https://github.com/o/r/pull/8',
+        title: 'Approved but blocked by CI',
+        state: 'OPEN',
+        isDraft: false,
+        reviewDecision: 'APPROVED',
+        mergeable: 'MERGEABLE',
+        mergeStateStatus: 'BLOCKED',
+        statusCheckRollup: [check]
+      })
+    })
+
+    await expect(getPrStatus('/tmp/wt')).resolves.toMatchObject({ state, label })
   })
 
   it('쓰기 액션은 확인 없이 바로 gh 를 실행한다', async () => {
