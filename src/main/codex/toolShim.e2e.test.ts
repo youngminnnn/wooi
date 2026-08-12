@@ -182,9 +182,9 @@ describe.skipIf(!existsSync(SHIM))('codex tool shim', () => {
       visited.add(file)
 
       const source = readFileSync(file, 'utf8')
-      const imports = [
-        ...source.matchAll(/^import\s+(?:[^"']+\s+from\s+)?["']([^"']+)["']/gm)
-      ].map((m) => m[1])
+      const imports = [...source.matchAll(/^import\s+(?:[^"']+\s+from\s+)?["']([^"']+)["']/gm)].map(
+        (m) => m[1]
+      )
       for (const spec of imports) {
         if (spec.startsWith('node:')) continue
         expect(spec.startsWith('.'), `${file} has unpackaged dependency ${spec}`).toBe(true)
