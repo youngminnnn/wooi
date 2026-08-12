@@ -40,7 +40,7 @@ export function soloThreadInstructions(): string {
     'bypasses approval and hides the work from the user.',
     `If the user asks for one, call the \`${WOOI_MCP_SERVER_NAME}\` MCP server's`,
     '`switch_to_agent_team` tool first; the user approves the switch and the subagent tools',
-    'arrive from the next message.'
+    'arrive on your next turn, which Wooi starts on its own as soon as this one ends.'
   ].join('\n')
 }
 

@@ -12,7 +12,7 @@ import { codexMcpServerEnv } from '../mcpSettings'
 import { getTranscripts } from '../transcripts'
 import { log } from '../logger'
 import { IPC, agentSettingsFor, normalizePermissionMode, workspaceDisplayName } from '@shared/types'
-import { CODEX_META, type AgentBackend } from '../agent/backend'
+import { CODEX_META, type AgentBackend, type TurnEndHook } from '../agent/backend'
 import { canLeadAgentTeam, delegateBackendsFor } from '../agent/multiAgent'
 import { delegateThreadInstructions, soloThreadInstructions } from '../subagent/catalog'
 import { abortAllSubAgents, abortSubAgents } from '../agent/tools/subagent'
@@ -104,7 +104,8 @@ export class CodexSessionManager implements AgentBackend {
 
   constructor(
     private dispatch: Dispatch,
-    private getWindow: () => BrowserWindow | null
+    private getWindow: () => BrowserWindow | null,
+    private onTurnEnd?: TurnEndHook
   ) {
     this.rateLimitResume = new RateLimitResumeCoordinator({
       backend: CODEX_META.id,
@@ -681,6 +682,10 @@ export class CodexSessionManager implements AgentBackend {
 
   private emit(workspaceId: string, event: ChatEvent): void {
     if (event.type === 'status') {
+      // 턴이 끝났다 — 소유자가 이어서 한 턴을 더 보냈다면 이 종료는 없던 일로 한다(Claude 쪽 emit
+      // 과 같은 규칙이고, 같아야 한다. 한쪽만 고치면 백엔드에 따라 자동 재개가 되기도 안 되기도
+      // 한다). 왜 idle 을 방송하면 안 되는지는 [[agent/orchestrator]] 의 handleTurnEnd 에 있다.
+      if (event.status !== 'running' && this.onTurnEnd?.(workspaceId, event.status)) return
       getStore().update((st) => {
         const w = st.workspaces.find((x) => x.id === workspaceId)
         if (w) {

@@ -4,7 +4,7 @@ import { SessionManager } from '../claude/manager'
 import { CodexSessionManager } from '../codex/manager'
 import { detectCodex } from '../codex/executable'
 import { isInstalled } from '../shell'
-import { backendMeta, type AgentBackend } from './backend'
+import { backendMeta, type AgentBackend, type TurnEndHook } from './backend'
 
 /**
  * 백엔드 **구현**을 아는 유일한 모듈. 메타데이터 카탈로그(AGENT_BACKENDS·backendMeta)는 매니저를
@@ -15,10 +15,11 @@ import { backendMeta, type AgentBackend } from './backend'
 /** main → renderer 채널 방송 함수. 각 백엔드가 이벤트를 렌더러로 흘려보낼 때 쓴다. */
 export type Dispatch = (channel: string, payload: unknown) => void
 
-/** 백엔드 구현이 메인으로부터 받는 의존성(이벤트 방송 + 활성 창 접근). */
+/** 백엔드 구현이 메인으로부터 받는 의존성(이벤트 방송 + 활성 창 접근 + 턴 종료 통지). */
 export interface BackendDeps {
   dispatch: Dispatch
   getWindow: () => BrowserWindow | null
+  onTurnEnd?: TurnEndHook
 }
 
 /** 백엔드별 CLI 실행 파일 이름. 설치 감지의 단일 출처. */
@@ -57,9 +58,9 @@ export async function backendAvailability(
 export function createBackend(id: AgentBackendId, deps: BackendDeps): AgentBackend {
   switch (id) {
     case 'codex':
-      return new CodexSessionManager(deps.dispatch, deps.getWindow)
+      return new CodexSessionManager(deps.dispatch, deps.getWindow, deps.onTurnEnd)
     case 'claude':
     default:
-      return new SessionManager(deps.dispatch, deps.getWindow)
+      return new SessionManager(deps.dispatch, deps.getWindow, deps.onTurnEnd)
   }
 }
