@@ -67,6 +67,7 @@ import {
   divergedStep,
   stepFromRestack
 } from './cascade'
+import type { StackProgressSink } from './cascade'
 import {
   getAuthStatus,
   claudeLoginStart,
@@ -145,6 +146,7 @@ import type {
   RewindActionResult,
   StackCascadeResult,
   StackCascadeStep,
+  StackOpProgress,
   StackedBranch,
   StackSyncPlan,
   UpdateFromBaseResult,
@@ -189,6 +191,44 @@ export function registerIpc(ctx: IpcContext): void {
         win.webContents.send(channel, payload)
       } catch (err) {
         log.error(`dispatch failed on ${channel}`, err)
+      }
+    }
+  }
+
+  const stackProgress = (
+    workspaceId: string,
+    kind: StackOpProgress['kind'],
+    total: number | null
+  ): { sink: StackProgressSink; finish: () => void } => {
+    const state: StackOpProgress = {
+      workspaceId,
+      kind,
+      total,
+      done: [],
+      current: null,
+      finished: false,
+      startedAt: Date.now()
+    }
+    // 단계 배열은 뒤에서 계속 자라므로 매 방송마다 복사한다. preload 경계를 건넌 사진이 다음
+    // 단계 때문에 뒤늦게 바뀌는 일은 없어야 렌더러가 받은 순서를 그대로 믿을 수 있다.
+    const emit = (): void => dispatch(IPC.evtStackProgress, { ...state, done: [...state.done] })
+    emit()
+    return {
+      sink: {
+        start: (branch, stepKind) => {
+          state.current = { branch, kind: stepKind }
+          emit()
+        },
+        step: (step) => {
+          state.done.push(step)
+          state.current = null
+          emit()
+        }
+      },
+      finish: () => {
+        state.current = null
+        state.finished = true
+        emit()
       }
     }
   }
@@ -1203,14 +1243,18 @@ export function registerIpc(ctx: IpcContext): void {
   const restackWholeStack = async (
     worktreePath: string,
     stack: StackedBranch[],
-    returnTo: string
+    returnTo: string,
+    progress?: StackProgressSink
   ): Promise<RestackResult> => {
     if (!(await isWorktreeClean(worktreePath))) {
-      return {
+      const result: RestackResult = {
         status: 'dirty',
         baseBranch: '',
         message: 'Commit or stash your changes before restacking the stack.'
       }
+      progress?.start(returnTo, 'restack')
+      progress?.step(stepFromRestack(returnTo, null, result))
+      return result
     }
     // rebase 시작 전, 각 스택 브랜치의 현재 tip 을 잡아 둔다(상위 브랜치의 --onto oldBase 로 쓴다).
     const oldTip = new Map<string, string>()
@@ -1220,10 +1264,12 @@ export function registerIpc(ctx: IpcContext): void {
     }
     let anyChanged = false
     for (const entry of stack) {
+      progress?.start(entry.branch, 'restack')
       // 캐스케이드와 같은 가드. 여기도 상위 브랜치에는 oldBase 를 넘겨 무조건 rebase 하고,
       // restackOnto 가 push 직전에 fetch 해 lease 를 되살리므로 force-push 가 그대로 통한다
       // — 즉 이 버튼도 GitHub 의 서버측 rebase 를 덮어쓸 수 있다(cascade.ts 의 실측 기록 참고).
       if ((await detectRemoteDivergence(worktreePath, entry.branch)) === 'diverged') {
+        progress?.step(divergedStep(entry.branch, entry.prNumber))
         return {
           status: 'error',
           baseBranch: entry.baseBranch,
@@ -1231,7 +1277,16 @@ export function registerIpc(ctx: IpcContext): void {
         }
       }
       const co = await checkoutBranch(worktreePath, entry.branch)
-      if (co.error) return { status: 'error', baseBranch: entry.baseBranch, message: co.error }
+      if (co.error) {
+        progress?.step({
+          branch: entry.branch,
+          prNumber: entry.prNumber,
+          kind: 'restack',
+          status: 'failed',
+          message: co.error
+        })
+        return { status: 'error', baseBranch: entry.baseBranch, message: co.error }
+      }
       // base 가 다른 스택 멤버면(=상위 브랜치) 그 base 의 이전 tip 을 oldBase 로 넘겨 정확히 재배치한다.
       const oldBase = oldTip.get(entry.baseBranch)
       const res = await restackOnto(worktreePath, entry.baseBranch, oldBase).catch((err) => ({
@@ -1239,6 +1294,7 @@ export function registerIpc(ctx: IpcContext): void {
         baseBranch: entry.baseBranch,
         message: err instanceof Error ? err.message : String(err)
       }))
+      progress?.step(stepFromRestack(entry.branch, entry.prNumber, res))
       if (res.status === 'conflict' || res.status === 'error' || res.status === 'dirty') return res
       if (res.status === 'restacked') anyChanged = true
     }
@@ -1259,20 +1315,29 @@ export function registerIpc(ctx: IpcContext): void {
         message: 'The agent is running — wait for it to finish before restacking.'
       }
     }
-    if (ws.stack && ws.stack.length > 1) {
-      return restackWholeStack(ws.worktreePath, ws.stack, ws.branch)
+    const operation = stackProgress(workspaceId, 'restack', ws.stack?.length ?? null)
+    try {
+      if (ws.stack && ws.stack.length > 1) {
+        return await restackWholeStack(ws.worktreePath, ws.stack, ws.branch, operation.sink)
+      }
+      // 단일 브랜치도 안전하지 않다. oldBase 를 넘기지 않아 "뒤처졌을 때만" rebase 하지만, base 가
+      // 앞서간 상황이 바로 아래층이 병합된 직후 — GitHub 이 이 브랜치를 이미 서버에서 rebase 해 둔
+      // 그 순간이다. 그대로 두면 옛 커밋을 재생해 그 결과를 덮어쓴다.
+      operation.sink.start(ws.branch, 'restack')
+      if ((await detectRemoteDivergence(ws.worktreePath, ws.branch)) === 'diverged') {
+        operation.sink.step(divergedStep(ws.branch, ws.prNumber))
+        return { status: 'error', baseBranch: ws.baseBranch, message: divergedMessage(ws.branch) }
+      }
+      const result = await restackOnto(ws.worktreePath, ws.baseBranch).catch((err) => ({
+        status: 'error' as const,
+        baseBranch: ws.baseBranch,
+        message: err instanceof Error ? err.message : String(err)
+      }))
+      operation.sink.step(stepFromRestack(ws.branch, ws.prNumber, result))
+      return result
+    } finally {
+      operation.finish()
     }
-    // 단일 브랜치도 안전하지 않다. oldBase 를 넘기지 않아 "뒤처졌을 때만" rebase 하지만, base 가
-    // 앞서간 상황이 바로 아래층이 병합된 직후 — GitHub 이 이 브랜치를 이미 서버에서 rebase 해 둔
-    // 그 순간이다. 그대로 두면 옛 커밋을 재생해 그 결과를 덮어쓴다.
-    if ((await detectRemoteDivergence(ws.worktreePath, ws.branch)) === 'diverged') {
-      return { status: 'error', baseBranch: ws.baseBranch, message: divergedMessage(ws.branch) }
-    }
-    return restackOnto(ws.worktreePath, ws.baseBranch).catch((err) => ({
-      status: 'error' as const,
-      baseBranch: ws.baseBranch,
-      message: err instanceof Error ? err.message : String(err)
-    }))
   })
 
   // 모델 B: worktree 내부 스택의 다른 브랜치로 체크아웃 전환한다(clean 워킹트리 필요).
@@ -1690,7 +1755,8 @@ export function registerIpc(ctx: IpcContext): void {
   const runMergeCascade = async (
     workspaceId: string,
     mergedBranch: string,
-    newBase: string
+    newBase: string,
+    progress?: StackProgressSink
   ): Promise<StackCascadeResult> => {
     const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
     if (!ws) return { steps: [] }
@@ -1709,7 +1775,8 @@ export function registerIpc(ctx: IpcContext): void {
           worktreePath: child.worktreePath,
           mergedBranch,
           newBase: grandparentBranch,
-          entries: [{ branch: child.branch, baseBranch: mergedBranch, prNumber: child.prNumber }]
+          entries: [{ branch: child.branch, baseBranch: mergedBranch, prNumber: child.prNumber }],
+          progress
         }))
       )
       store.update((st) => {
@@ -1730,9 +1797,13 @@ export function registerIpc(ctx: IpcContext): void {
         () => 'unknown' as const
       )
       if (remote === 'diverged') {
-        steps.push(divergedStep(child.branch, child.prNumber))
+        const step = divergedStep(child.branch, child.prNumber)
+        progress?.start(child.branch, 'restack')
+        steps.push(step)
+        progress?.step(step)
         continue
       }
+      progress?.start(child.branch, 'restack')
       const r = await restackOnto(child.worktreePath, grandparentBranch, mergedBranch).catch(
         (err): RestackResult => ({
           status: 'error',
@@ -1740,7 +1811,9 @@ export function registerIpc(ctx: IpcContext): void {
           message: err instanceof Error ? err.message : String(err)
         })
       )
-      steps.push(stepFromRestack(child.branch, child.prNumber, r))
+      const step = stepFromRestack(child.branch, child.prNumber, r)
+      steps.push(step)
+      progress?.step(step)
     }
     if (children.length) broadcastState()
 
@@ -1758,7 +1831,8 @@ export function registerIpc(ctx: IpcContext): void {
           worktreePath: ws.worktreePath,
           mergedBranch,
           newBase: mergedBase,
-          entries: above
+          entries: above,
+          progress
         }))
       )
       // git 히스토리 쪽(rebase + force-push).
@@ -1768,7 +1842,8 @@ export function registerIpc(ctx: IpcContext): void {
           mergedBranch,
           newBase: mergedBase,
           entries: above,
-          allEntries: stack
+          allEntries: stack,
+          progress
         }))
       )
 
@@ -1837,21 +1912,30 @@ export function registerIpc(ctx: IpcContext): void {
       if (!ws || ws.archived) return { error: 'Workspace not found.' }
       const plan = ws.stackSync
       if (!plan) return { error: 'Nothing to sync.' }
-      const cascade = await runMergeCascade(workspaceId, plan.mergedBranch, plan.newBase).catch(
-        (err): StackCascadeResult => ({
-          steps: [
-            {
-              branch: plan.mergedBranch,
-              prNumber: null,
-              kind: 'retarget',
-              status: 'failed',
-              message: err instanceof Error ? err.message : String(err)
-            }
-          ]
+      const operation = stackProgress(workspaceId, 'sync', plan.affected.length)
+      try {
+        const cascade = await runMergeCascade(
+          workspaceId,
+          plan.mergedBranch,
+          plan.newBase,
+          operation.sink
+        ).catch((err): StackCascadeResult => {
+          const step: StackCascadeStep = {
+            branch: plan.mergedBranch,
+            prNumber: null,
+            kind: 'retarget',
+            status: 'failed',
+            message: err instanceof Error ? err.message : String(err)
+          }
+          operation.sink.start(step.branch, step.kind)
+          operation.sink.step(step)
+          return { steps: [step] }
         })
-      )
-      clearStackSync(workspaceId, true)
-      return { cascade }
+        clearStackSync(workspaceId, true)
+        return { cascade }
+      } finally {
+        operation.finish()
+      }
     }
   )
 

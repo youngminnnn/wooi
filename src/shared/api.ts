@@ -57,6 +57,7 @@ import type {
   ReviewVerdict,
   RewindActionResult,
   StackCascadeResult,
+  StackOpProgress,
   ScriptExitEvent,
   ScriptOutputEvent,
   ScriptStatus,
@@ -659,6 +660,8 @@ export interface WooiApi {
   /** 컴포저에 붙일 이미지가 도착했다(Preview 스크린샷). 컴포저가 있는 창만 반응한다. */
   onComposerAttach(cb: (e: ComposerAttachEvent) => void): () => void
   onState(cb: (state: AppState) => void): () => void
+  /** restack·stack sync 의 브랜치별 진행 스트림. */
+  onStackProgress(cb: (progress: StackOpProgress) => void): () => void
   /** PR 리뷰 진행 상황·결과 스트림. */
   onReview(cb: (e: ReviewEnvelope) => void): () => void
   /** OS 알림 클릭 시 main 이 보내는 workspace 선택 요청. */

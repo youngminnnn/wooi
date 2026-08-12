@@ -1860,6 +1860,21 @@ export interface StackCascadeResult {
   steps: StackCascadeStep[]
 }
 
+export interface StackOpProgress {
+  workspaceId: string
+  /** restack = 사용자가 직접 누른 rebase, sync = 부모 병합 후 캐스케이드. */
+  kind: 'restack' | 'sync'
+  /** 예상 대상 브랜치 수. 모르면 null(단일 브랜치 restack). */
+  total: number | null
+  /** 끝난 단계들(순서대로). 실패·건너뜀도 담는다 — 조용히 삼키지 않는다. */
+  done: StackCascadeStep[]
+  /** 지금 돌고 있는 단계. 시작 전/끝난 뒤에는 null. */
+  current: { branch: string; kind: StackCascadeStepKind } | null
+  /** 작업이 끝났는가. 렌더러가 스피너를 내리고 결과 줄만 남긴다. */
+  finished: boolean
+  startedAt: number
+}
+
 /**
  * 캐스케이드에서 사용자가 알아야 할(성공이 아닌) 단계만 추린다.
  * diverged 는 실패가 아니라 "일부러 하지 않았다"지만, 하지 않았다는 사실 자체를 사용자가
@@ -2658,6 +2673,8 @@ export const IPC = {
   evtScriptOutput: 'evt:scriptOutput',
   evtScriptExit: 'evt:scriptExit',
   evtState: 'evt:state',
+  /** restack·stack sync 의 브랜치별 진행 스트림. */
+  evtStackProgress: 'evt:stackProgress',
   /** PR 리뷰 진행 상황·결과 스트림. 트랜스크립트와 분리된 임시 스트림(영속하지 않음). */
   evtReview: 'evt:review',
   /** OS 알림 클릭 등으로 특정 workspace 를 선택하도록 renderer 에 요청. */

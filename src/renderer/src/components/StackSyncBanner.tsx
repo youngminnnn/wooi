@@ -1,5 +1,5 @@
-import React, { useState } from 'react'
-import { GitMerge, Loader2, X } from 'lucide-react'
+import React from 'react'
+import { AlertTriangle, Check, GitMerge, Loader2, Minus, X } from 'lucide-react'
 import type { Workspace } from '@shared/types'
 import { useStore } from '../store'
 
@@ -21,7 +21,8 @@ export default function StackSyncBanner({
   const applyStackSync = useStore((s) => s.applyStackSync)
   const dismissStackSync = useStore((s) => s.dismissStackSync)
   const requireGithub = useStore((s) => s.requireGithub)
-  const [busy, setBusy] = useState(false)
+  const progress = useStore((s) => s.stackProgress[workspace.id])
+  const busy = !!progress && !progress.finished
 
   const plan = workspace.stackSync
   if (!plan) return null
@@ -65,6 +66,41 @@ export default function StackSyncBanner({
               <span className="font-mono">origin</span> and take whichever side is right.
             </div>
           )}
+          {progress && (
+            <div className="mt-2 space-y-1 border-t border-[var(--warning-400)]/20 pt-2">
+              {plan.affected.map((affected) => {
+                const current = progress.current?.branch === affected.branch
+                const done = [...progress.done]
+                  .reverse()
+                  .find((step) => step.branch === affected.branch)
+                const problem = done && ['conflict', 'failed', 'diverged'].includes(done.status)
+                return (
+                  <div key={affected.branch} className="flex items-center gap-1.5 text-[11px]">
+                    <span className="w-3 shrink-0 grid place-items-center">
+                      {current ? (
+                        <Loader2 size={11} className="animate-spin text-[var(--warning-300)]" />
+                      ) : problem ? (
+                        <AlertTriangle size={11} className="text-[var(--warning-400)]" />
+                      ) : done?.status === 'ok' ? (
+                        <Check size={11} className="text-[var(--success-400)]" />
+                      ) : done?.status === 'skipped' ? (
+                        <Minus size={11} className="text-neutral-500" />
+                      ) : (
+                        <span className="text-neutral-600">·</span>
+                      )}
+                    </span>
+                    <span className="font-mono text-neutral-300">{affected.branch}</span>
+                    {current && <span className="text-neutral-500">{progress.current?.kind}…</span>}
+                    {done && !current && (
+                      <span className={problem ? 'text-[var(--warning-300)]' : 'text-neutral-500'}>
+                        {done.status}
+                      </span>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
           <button
@@ -73,8 +109,7 @@ export default function StackSyncBanner({
             // 계획이 workspace 에 남아 있으면(연결이 끊긴 뒤에도) 계속 뜨므로 실행 직전에 요구한다.
             onClick={() => {
               void requireGithub('Syncing a stack retargets its pull requests on GitHub.', () => {
-                setBusy(true)
-                return applyStackSync(workspace.id).finally(() => setBusy(false))
+                return applyStackSync(workspace.id)
               })
             }}
             className="flex items-center gap-1.5 h-7 px-2.5 rounded-md bg-[var(--warning-500)]/90 text-black text-xs font-medium hover:bg-[var(--warning-400)] disabled:opacity-60"

@@ -71,6 +71,32 @@ beforeEach(() => {
 })
 
 describe('cascadeRetarget', () => {
+  it('streams starts in branch order and every returned step exactly once', async () => {
+    vi.mocked(getPrMeta)
+      .mockResolvedValueOnce(meta({ number: 2, baseRefName: 'a' }))
+      .mockResolvedValueOnce(null)
+    vi.mocked(retargetPr).mockResolvedValue({})
+    const starts: Array<[string, string]> = []
+    const streamed: unknown[] = []
+
+    const steps = await cascadeRetarget({
+      worktreePath: WT,
+      mergedBranch: 'a',
+      newBase: 'main',
+      entries: [entry('b', 'a', 2), entry('c', 'a', 3)],
+      progress: {
+        start: (branch, kind) => starts.push([branch, kind]),
+        step: (step) => streamed.push(step)
+      }
+    })
+
+    expect(starts).toEqual([
+      ['b', 'retarget'],
+      ['c', 'retarget']
+    ])
+    expect(streamed).toEqual(steps)
+  })
+
   it('retargets a child whose base is the merged branch', async () => {
     vi.mocked(getPrMeta).mockResolvedValue(meta({ number: 2, baseRefName: 'a' }))
     vi.mocked(retargetPr).mockResolvedValue({})
@@ -381,6 +407,31 @@ describe('cascadeRestackBranchStack — remote divergence guard', () => {
     expect(steps[0]).toMatchObject({ branch: 'b', status: 'diverged' })
     expect(steps[1]).toMatchObject({ branch: 'c', status: 'skipped' })
     expect(steps[1].message).toMatch(/diverged/)
+  })
+
+  it('streams diverged and all following skipped steps in returned order', async () => {
+    divergedRemote()
+    const starts: Array<[string, string]> = []
+    const streamed: unknown[] = []
+
+    const steps = await cascadeRestackBranchStack({
+      worktreePath: WT,
+      mergedBranch: 'a',
+      newBase: 'main',
+      entries: [entry('b', 'a', 2), entry('c', 'b', 3)],
+      allEntries: [entry('a', 'main', 1), entry('b', 'a', 2), entry('c', 'b', 3)],
+      progress: {
+        start: (branch, kind) => starts.push([branch, kind]),
+        step: (step) => streamed.push(step)
+      }
+    })
+
+    expect(starts).toEqual([
+      ['b', 'restack'],
+      ['c', 'restack']
+    ])
+    expect(streamed).toEqual(steps)
+    expect(streamed).toHaveLength(2)
   })
 
   it('still returns the worktree to its original branch — nothing was left mid-rebase', async () => {

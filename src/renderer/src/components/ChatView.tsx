@@ -44,6 +44,7 @@ import ArchiveSuggestBanner from './ArchiveSuggestBanner'
 import PeerInboxBanner from './PeerInboxBanner'
 import ExportMenu from './ExportMenu'
 import HeaderButton from './HeaderButton'
+import BaseSyncControl from './BaseSyncControl'
 import { AgentBackendMark, GithubMark } from './BrandIcons'
 import { useGithubDisconnected } from '../lib/github'
 import { useMultiAgent } from '../lib/multiAgent'
@@ -120,7 +121,6 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
   const workPaneDetached = useStore((s) => s.detachedPanes.work)
   const [showDiff, setShowDiff] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
-  const [updating, setUpdating] = useState(false)
 
   // Composer 의 /diff 명령이 이 workspace 를 대상으로 보내는 신호를 받아 diff 모달을 연다
   // (Composer 는 ChatView 의 로컬 showDiff 상태에 직접 접근할 수 없어 window 이벤트로 전달한다).
@@ -229,24 +229,6 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
         setTimeout(() => void refreshPr(workspace.id), 4000)
       }
     })
-  }
-
-  // base 브랜치를 현재 브랜치로 머지해 드리프트를 해소한다. 충돌 시 워킹트리에 충돌이 남고,
-  // 사용자는 에디터/에이전트로 해결하거나 Abort 로 되돌릴 수 있다.
-  const updateFromBase = async (): Promise<void> => {
-    setUpdating(true)
-    const res = await window.api.git.updateFromBase(workspace.id)
-    setUpdating(false)
-    if (res.status === 'updated') pushToast('success', `Updated from ${res.baseBranch}.`)
-    else if (res.status === 'up-to-date')
-      pushToast('info', `Already up to date with ${res.baseBranch}.`)
-    else if (res.status === 'conflict')
-      pushToast(
-        'error',
-        `Merge conflicts in ${res.conflictedFiles?.length ?? 0} file(s). Resolve them, or abort the merge.`
-      )
-    else pushToast('error', res.message ?? 'Failed to update from base.')
-    await refresh()
   }
 
   const abortMerge = async (): Promise<void> => {
@@ -364,7 +346,7 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
             >
               <RefreshCw size={10} className={refreshing ? 'animate-spin' : ''} />
             </button>
-            {/* base 가 앞서 있으면(behind) 머지로 끌어오기. 충돌 중에는 해결/Abort 안내로 대체. */}
+            {/* 충돌 중에는 해결/Abort 안내가 base 동기화 컨트롤 자리를 그대로 차지한다. */}
             {git?.conflicted ? (
               <span className="flex items-center gap-1.5">
                 <span
@@ -383,18 +365,7 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
                 </button>
               </span>
             ) : (
-              git &&
-              git.behind > 0 && (
-                <button
-                  onClick={updateFromBase}
-                  disabled={updating}
-                  className="flex items-center gap-1 text-[var(--accent-300)] hover:text-[var(--accent-200)] disabled:opacity-50"
-                  title={`Merge ${workspace.baseBranch} into this branch (${git.behind} behind)`}
-                >
-                  <GitMerge size={10} className={updating ? 'animate-pulse' : ''} />
-                  Update from base
-                </button>
-              )
+              git && <BaseSyncControl workspace={workspace} git={git} refresh={refresh} />
             )}
             {setupFailed && (
               <button
