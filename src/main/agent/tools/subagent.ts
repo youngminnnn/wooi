@@ -87,7 +87,7 @@ export function runDelegateTool(backend: AgentBackendId) {
 
     // 요청마다 다시 확인한다 — 도구 정의는 세션을 열 때 정해지지만, 그 사이 사용자가 멀티
     // 에이전트 모드를 껐을 수 있다.
-    if (!delegateBackendsFor(ws, settings).includes(backend)) {
+    if (!delegateBackendsFor(ws).includes(backend)) {
       throw new Error(
         `This workspace is not set up to run ${AGENT_BACKEND_LABELS[backend]} subagents. ` +
           // 켜는 길을 함께 적는다 — 이 실패를 보는 모델은 위임하려던 참이고, 그 길이 있다는
@@ -164,7 +164,7 @@ function repoPathOf(ws: Workspace): string | null {
 
 /** 이 워크스페이스에서 등록해야 할 위임 도구 이름들(카탈로그와 짝을 맞추기 위한 노출). */
 export function delegateToolBackends(ws: Workspace): AgentBackendId[] {
-  return delegateBackendsFor(ws, getStore().getState().settings)
+  return delegateBackendsFor(ws)
 }
 
 /** 진단용 — 지금 도는 위임 실행 수. */

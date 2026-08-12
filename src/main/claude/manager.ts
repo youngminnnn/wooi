@@ -22,7 +22,7 @@ import {
   workspaceDisplayName
 } from '@shared/types'
 import { CLAUDE_META, CLAUDE_MODELS, type AgentBackend } from '../agent/backend'
-import { agentDefaultsFor, agentTeamEligibility, delegateBackendsFor } from '../agent/multiAgent'
+import { agentDefaultsFor, canLeadAgentTeam, delegateBackendsFor } from '../agent/multiAgent'
 import { claudeMode, type HostCommand, type HostEvent, type SessionConfig } from './protocol'
 import { runAgentTool } from '../agent/tools'
 import { RATE_LIMIT_CONTINUATION, RateLimitResumeCoordinator } from '../rateLimitResume'
@@ -311,7 +311,7 @@ export class SessionManager implements AgentBackend {
    */
   private delegateBackendsOf(workspaceId: string): AgentBackendId[] {
     const ws = this.getWorkspace(workspaceId)
-    return ws ? delegateBackendsFor(ws, getStore().getState().settings) : []
+    return ws ? delegateBackendsFor(ws) : []
   }
 
   /** store 에서 세션 생성에 필요한 설정을 계산한다(예전 ensure() 의 역할). */
@@ -339,8 +339,8 @@ export class SessionManager implements AgentBackend {
       },
       resumeSessionId: ws.sessionId,
       additionalDirs: ws.additionalDirs ?? [],
-      delegateBackends: delegateBackendsFor(ws, settings),
-      canSwitchToAgentTeam: agentTeamEligibility(ws, settings).ok,
+      delegateBackends: delegateBackendsFor(ws),
+      canSwitchToAgentTeam: canLeadAgentTeam(ws),
       agentDefaults: agentDefaultsFor(settings)
     }
   }

@@ -35,7 +35,6 @@ import {
   NOTIFICATION_CHANNEL_LABELS,
   NOTIFICATION_EVENT_LABELS,
   agentSettingsFor,
-  experimentsOf,
   normalizePermissionMode
 } from '@shared/types'
 import type {
@@ -313,8 +312,6 @@ function GeneralPage({
     applyTheme(theme)
     save({ theme })
   }
-  // 저장된 설정에 항목이 없을 수 있으므로(구버전에서 올라옴) 항상 기본값과 병합해 읽는다.
-  const experiments = experimentsOf(settings)
   return (
     <PageFrame title="General" description="Choose how Wooi looks and how new workspaces start.">
       <SettingGroup title="Appearance">
@@ -367,20 +364,6 @@ function GeneralPage({
           </select>
         </SettingRow>
       </SettingGroup>
-      <SettingGroup title="Experimental">
-        <SettingRow
-          title="Multi-agent delegation"
-          description="Let a workspace hand tasks to a different coding agent — Claude Code delegating to Codex, or the reverse. Rough edges expected."
-        >
-          <Switch
-            label="Multi-agent delegation"
-            checked={experiments.multiAgent}
-            // 실험 스위치는 켜고 끄는 즉시 다음 세션부터 반영된다. 이미 만들어 둔 멀티 에이전트
-            // 워크스페이스의 설정은 지우지 않으므로, 껐다 켜면 그대로 살아난다.
-            onChange={(value) => save({ experiments: { ...experiments, multiAgent: value } })}
-          />
-        </SettingRow>
-      </SettingGroup>
     </PageFrame>
   )
 }
@@ -393,13 +376,10 @@ function AgentsPage({
   save: (patch: Partial<AppSettings>) => void
 }): React.JSX.Element {
   const availableBackends = useAvailableBackends()
-  const experiments = experimentsOf(settings)
   const [editing, setEditing] = useState<AgentBackendId>(settings.defaultAgentBackend)
-  // 팀 모드는 메인 에이전트와 직교하는 workspace 기본값이다. 둘을 조합한 선택지로 만들면
-  // 백엔드가 늘 때마다 목록이 두 배가 되므로 각각 독립된 컨트롤로 보여 준다.
-  const canDefaultToTeam =
-    experiments.multiAgent &&
-    availableBackends.some((b) => b.id === settings.defaultAgentBackend && b.capabilities.delegate)
+  // Solo/팀은 여기서 고르지 않는다. 새 워크스페이스는 언제나 Solo 로 시작하고, 팀은 필요해지는
+  // 순간 그 워크스페이스에서 켠다 — 만들기도 전에 정하게 하면 사용자가 가장 모르는 때에 고르게
+  // 하는 셈이다([[main/workspaces]] createWorkspace).
   const backend = useBackend(editing)
   const models = useModels(editing)
   const agent = agentSettingsFor(settings, editing)
@@ -418,27 +398,8 @@ function AgentsPage({
       {availableBackends.length > 1 && (
         <SettingGroup title="Default agent">
           <SettingRow
-            title="Work mode"
-            description="Choose whether new workspaces start with one agent or an agent team."
-          >
-            <select
-              className={inputClass + ' w-60 text-sm'}
-              value={canDefaultToTeam && settings.defaultMultiAgent === true ? 'team' : 'solo'}
-              onChange={(event) => save({ defaultMultiAgent: event.target.value === 'team' })}
-            >
-              <option value="solo">Solo — one agent does the work</option>
-              {canDefaultToTeam && (
-                <option value="team">Agent team — the lead can delegate tasks</option>
-              )}
-            </select>
-          </SettingRow>
-          <SettingRow
-            title="Lead agent"
-            description={
-              canDefaultToTeam && settings.defaultMultiAgent === true
-                ? 'The agent you talk to. It can delegate to other available agents.'
-                : 'Each workspace stays with the agent it was created with.'
-            }
+            title="Agent"
+            description="Each workspace stays with the agent it was created with. It can delegate to the others once you make it an agent team from its header."
           >
             <select
               className={inputClass + ' w-60 text-sm'}
@@ -446,13 +407,7 @@ function AgentsPage({
               onChange={(event) => {
                 const next = event.target.value as AgentBackendId
                 setEditing(next)
-                const canDelegate = Boolean(
-                  availableBackends.find((item) => item.id === next)?.capabilities.delegate
-                )
-                save({
-                  defaultAgentBackend: next,
-                  ...(!canDelegate ? { defaultMultiAgent: false } : {})
-                })
+                save({ defaultAgentBackend: next })
               }}
             >
               {availableBackends.map((item) => (

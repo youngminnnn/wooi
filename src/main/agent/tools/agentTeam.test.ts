@@ -41,7 +41,7 @@ const solo: Partial<Workspace> = {
 beforeEach(() => {
   vi.clearAllMocks()
   state.workspaces = [{ ...solo }]
-  state.settings = { ...DEFAULT_SETTINGS, experiments: { multiAgent: true } }
+  state.settings = { ...DEFAULT_SETTINGS }
 })
 
 async function switch_(from = 'ws-1'): Promise<Record<string, unknown>> {
@@ -85,16 +85,6 @@ describe('switch_to_agent_team', () => {
     await expect(switch_()).resolves.toMatchObject({ alreadyOn: true })
     expect(restartBeforeNextMessage).not.toHaveBeenCalled()
     expect(update).not.toHaveBeenCalled()
-  })
-
-  // 켤 수 없는 조건에서 켜 주면 "팀인데 팀원이 없는" 상태가 된다 — 모델은 도구를 찾다가
-  // 턴을 버리고, 사용자는 배지만 바뀐 것을 본다. 조건은 delegateBackendsFor 와 같은 것을 본다.
-  it('실험 기능이 꺼져 있으면 켜지 않고 이유를 말한다', async () => {
-    state.settings = { ...DEFAULT_SETTINGS, experiments: { multiAgent: false } }
-
-    await expect(switch_()).rejects.toThrow(/Experiments/)
-    expect(state.workspaces[0].multiAgent).toBe(false)
-    expect(restartBeforeNextMessage).not.toHaveBeenCalled()
   })
 
   it('사라진 워크스페이스면 던진다', async () => {

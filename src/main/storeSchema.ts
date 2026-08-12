@@ -1,11 +1,6 @@
 import { CLAUDE_DEFAULT_MODEL } from './agent/backend'
 import { randomUUID } from 'node:crypto'
-import {
-  BASE_DEV_PORT,
-  DEFAULT_AGENT_BACKEND,
-  DEFAULT_EXPERIMENTS,
-  DEFAULT_NOTIFICATION_SETTINGS
-} from '@shared/types'
+import { BASE_DEV_PORT, DEFAULT_AGENT_BACKEND, DEFAULT_NOTIFICATION_SETTINGS } from '@shared/types'
 import type {
   AppState,
   AppSettings,
@@ -74,12 +69,6 @@ function normalizeMode(mode: unknown): PermissionMode {
 
 export const DEFAULT_SETTINGS: AppSettings = {
   defaultAgentBackend: DEFAULT_AGENT_BACKEND,
-  // 새 워크스페이스는 단일 에이전트로 시작한다 — 멀티 에이전트는 사용자가 고르는 것이지
-  // 기본으로 열어 줄 것이 아니다(위임된 Codex 실행은 승인 프롬프트 없이 파일을 고칠 수 있다).
-  defaultMultiAgent: false,
-  // 실험 스위치의 기본값은 DEFAULT_EXPERIMENTS 가 정한다. 기존 사용자도 load 의 기본값 병합으로
-  // 같은 값을 받으므로 schemaVersion 을 올릴 필요가 없다.
-  experiments: DEFAULT_EXPERIMENTS,
   agents: {
     // Claude 는 검증된 기본 모델을 지정한다(1M 윈도를 잡는 `[1m]` 접미사 포함).
     claude: { model: DEFAULT_MODEL, effort: null, permissionMode: 'default', fastMode: false },

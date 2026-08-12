@@ -307,23 +307,28 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
             </div>
           )}
           <div className="flex min-w-0 items-center gap-1.5 overflow-hidden text-xs text-neutral-500">
-            {/* 멀티 에이전트는 이름 옆 브랜드 마크만으로는 드러나지 않는다 — 그 마크는 메인
-                에이전트일 뿐이라, 이 워크스페이스에서 다른 종류도 돌 수 있다는 사실은 따로
-                말해 줘야 한다. 위임이 실제로 열려 있을 때만 뜬다(useMultiAgent). */}
-            {multiAgent.canUse && (
+            {/* 팀은 이름 옆 브랜드 마크만으로는 드러나지 않는다 — 그 마크는 메인 에이전트일
+                뿐이라, 이 워크스페이스에서 **다른 제품의 에이전트가 파일을 고칠 수 있다**는
+                사실은 따로 말해 줘야 한다.
+
+                Solo 일 때는 아무것도 그리지 않는다. Solo 는 사용자가 고른 적 없는 기본값이고
+                (생성에서도 설정에서도 묻지 않는다), 고르지 않은 상태에 이름표를 달면 뭔가
+                설정했다는 인상만 남는다. `Solo | Agent team` 토글은 이번에 없앤 "두 종류 중
+                하나" 프레이밍을 그대로 되살리기도 한다 — 팀은 종류가 아니라 켜진 능력이다.
+                사이드바 행 마크도 같은 규칙을 쓴다.
+
+                그래서 이 배지는 **끄는 자리**다. 켜는 것은 대화가 맡는다("Codex 한테 리뷰
+                시켜줘" → switch_to_agent_team 승인 카드) — 켜기가 사용자가 방금 말로 요청한
+                일인 반면, 끄기는 아무도 요청하지 않았는데 능력을 줄이는 일이라 사람만 한다
+                ([[agent/tools/agentTeam]] 가 켜는 쪽만 도구로 연 것과 같은 비대칭). */}
+            {multiAgent.active && (
               <button
-                onClick={() =>
-                  void window.api.workspace.setMultiAgent(workspace.id, !multiAgent.active)
-                }
+                onClick={() => void window.api.workspace.setMultiAgent(workspace.id, false)}
                 className="shrink-0 flex items-center gap-1 rounded px-1.5 py-0.5 bg-[var(--surface-2)] text-neutral-400 hover:text-neutral-200 hover:bg-[var(--surface-3)]"
-                title={
-                  multiAgent.active
-                    ? `Agent team led by ${agentLabel}. Click to switch to Solo; applies from the next message.`
-                    : 'Solo workspace. Click to let the lead agent delegate tasks; applies from the next message.'
-                }
+                title={`Agent team led by ${agentLabel}. Click to turn delegation off; applies from the next message.`}
               >
-                <Users size={10} className={multiAgent.active ? 'multi-agent-mark' : ''} />
-                {multiAgent.active ? 'Agent team' : 'Solo'}
+                <Users size={10} className="multi-agent-mark" />
+                Agent team
               </button>
             )}
             <GitBranch size={11} className="shrink-0" />

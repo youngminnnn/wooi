@@ -279,9 +279,13 @@ export async function createWorkspace(
       repoId: repo.id,
       agentBackend,
       // 모드 하나만 저장한다. 어떤 종류로 위임할지는 미리 고르지 않고 대화에서 정해진다.
-      // 호출자가 말하지 않으면 전역 기본값을 따른다 — 기본 설정에서는 모달 없이 만들어지므로
-      // 이 폴백이 없으면 설정에서 고른 "Multi-agent" 가 그 경로에서 통째로 무시된다.
-      multiAgent: args.multiAgent ?? settings.defaultMultiAgent === true,
+      //
+      // **새 워크스페이스는 언제나 Solo 다.** 전역 기본값을 두지 않는 것이 요점이다 — 팀은
+      // 워크스페이스의 종류가 아니라 언제든 켤 수 있는 능력이고, 무엇을 위임할 만한지는 만드는
+      // 순간이 아니라 대화 중에 드러난다. 틀리는 대가도 비대칭이다: Solo 로 시작했다 팀이
+      // 필요해지면 한 턴이면 되지만, 팀으로 두고 안 쓰면 그 워크스페이스가 사는 내내 위임 도구가
+      // 매 요청에 실린다(catalog 의 alwaysLoad). 명시적으로 요청하는 경로는 fan-out 슬롯뿐이다.
+      multiAgent: args.multiAgent === true,
       name: rawName,
       displayName: null,
       branch,

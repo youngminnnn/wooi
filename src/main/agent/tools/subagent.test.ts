@@ -30,7 +30,6 @@ beforeEach(() => {
     workspaces: [WORKSPACE],
     repos: [{ id: 'r1', path: '/tmp/repo' }],
     settings: {
-      experiments: { multiAgent: true },
       agents: { claude: {}, codex: {} }
     }
   }
