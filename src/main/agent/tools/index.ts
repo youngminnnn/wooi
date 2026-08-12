@@ -1,3 +1,4 @@
+import { listWorkspacePeers, sendToWorkspace } from './peer'
 import { openPullRequest } from './pullRequest'
 import { checkRelatedWork } from './relatedWork'
 import { initRegistry, registerAgentTool, type AgentToolDeps } from './registry'
@@ -39,6 +40,8 @@ export function initAgentTools(deps: AgentToolDeps): void {
   registerAgentTool('stop_script', stopScript)
   registerAgentTool('read_script_output', readScriptOutput)
   registerAgentTool('check_related_work', checkRelatedWork)
+  registerAgentTool('list_workspace_peers', listWorkspacePeers)
+  registerAgentTool('send_to_workspace', sendToWorkspace)
   registerAgentTool('list_issues', listIssues)
   registerAgentTool('create_workspace', createIndependentWorkspace)
   registerAgentTool('archive_workspace', archiveWorkspaceTool)

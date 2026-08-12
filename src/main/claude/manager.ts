@@ -12,7 +12,14 @@ import {
 import { getStore } from '../store'
 import { getTranscripts } from '../transcripts'
 import { log } from '../logger'
-import { IPC, agentSettingsFor, workspaceDisplayName } from '@shared/types'
+import {
+  DEFAULT_PEER_INBOUND,
+  IPC,
+  agentSettingsFor,
+  nativePeerInbound,
+  peerSessionName,
+  workspaceDisplayName
+} from '@shared/types'
 import { CLAUDE_META, CLAUDE_MODELS, type AgentBackend } from '../agent/backend'
 import { agentDefaultsFor, delegateBackendsFor } from '../agent/multiAgent'
 import { claudeMode, type HostCommand, type HostEvent, type SessionConfig } from './protocol'
@@ -273,6 +280,15 @@ export class SessionManager implements AgentBackend {
       .workspaces.find((w) => w.id === id)
   }
 
+  /** 세션 이름에 실을 리포 이름. 사라진 리포는 워크트리 경로로 이름을 지을 근거가 없어 비워 둔다. */
+  private getRepoName(repoId: string): string {
+    return (
+      getStore()
+        .getState()
+        .repos.find((r) => r.id === repoId)?.name ?? 'repo'
+    )
+  }
+
   private getRepoPath(repoId: string): string | null {
     return (
       getStore()
@@ -300,6 +316,12 @@ export class SessionManager implements AgentBackend {
       permissionMode: claudeMode(ws.permissionMode),
       autoCompact: settings.autoCompact,
       autoResumeAfterRateLimit: settings.autoResumeAfterRateLimit,
+      // 네이티브 cross-session messaging 용. 이름은 사용자의 다른 터미널 세션이 `/list-agents` 로
+      // 보는 값이고, 수신 정책은 워크스페이스의 것을 접어 넘긴다([[types]] nativePeerInbound).
+      peer: {
+        name: peerSessionName(this.getRepoName(ws.repoId), ws.branch),
+        inbound: nativePeerInbound(ws.peerInbound ?? DEFAULT_PEER_INBOUND)
+      },
       resumeSessionId: ws.sessionId,
       additionalDirs: ws.additionalDirs ?? [],
       delegateBackends: delegateBackendsFor(ws, settings),

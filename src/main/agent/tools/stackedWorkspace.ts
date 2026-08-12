@@ -4,6 +4,7 @@ import { isWorktreeClean, summarizeBranch } from '../../git'
 import type { BranchSummary } from '../../git'
 import { getStore } from '../../store'
 import { createWorkspace } from '../../workspaces'
+import { deliverOrHold } from './peer'
 import type { AgentToolHandler } from './registry'
 import { resolveTargetWorkspace } from './target'
 
@@ -242,7 +243,17 @@ export const notifyChild: AgentToolHandler = async (deps, workspaceId, args) => 
     )
   }
 
-  deps.sendMessage(child.id, notificationMessage(message, parent))
+  // 배달 자체는 peer 경로와 한 곳에서 한다([[agent/tools/peer]] deliverOrHold). 여기서 직접
+  // sendMessage 를 부르면 대상이 수신을 닫아 둔 것(peerInbound: 'refuse')을 이 도구만 무시하게
+  // 된다 — 사용자가 그은 선을 스택이라는 이유로 뚫는 셈이다. 자기가 만든 자식은 저쪽의 생성자
+  // 예외에 걸려 지금까지처럼 곧바로 전달된다.
+  const { delivered } = deliverOrHold(
+    deps,
+    parent,
+    child,
+    notificationMessage(message, parent),
+    message
+  )
 
   return {
     notified: {
@@ -250,8 +261,10 @@ export const notifyChild: AgentToolHandler = async (deps, workspaceId, args) => 
       name: workspaceDisplayName(child),
       branch: child.branch
     },
-    note:
-      child.status === 'running'
+    delivered,
+    note: !delivered
+      ? 'Wooi is holding this for the user to approve — it is not delivered yet.'
+      : child.status === 'running'
         ? 'That workspace is mid-turn, so it reads this when the current turn ends.'
         : 'That workspace was idle, so this starts a turn there right away.'
   }

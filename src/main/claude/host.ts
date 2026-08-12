@@ -72,6 +72,7 @@ function ensure(workspaceId: string, config: SessionConfig): ClaudeSession {
     permissionMode: config.permissionMode,
     autoCompact: config.autoCompact,
     autoResumeAfterRateLimit: config.autoResumeAfterRateLimit,
+    peer: config.peer,
     resumeSessionId: config.resumeSessionId,
     additionalDirs: config.additionalDirs,
     // 워크스페이스마다 자기 것을 만든다 — 도구가 어느 워크스페이스에서 불렸는지는 이 클로저가

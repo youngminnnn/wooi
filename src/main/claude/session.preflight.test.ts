@@ -64,6 +64,7 @@ async function runFirstTurn(autoCompact: boolean, usage: typeof contextUsage) {
     fastMode: true,
     permissionMode: 'default',
     autoCompact,
+    peer: { name: 'wooi/repo/test', inbound: 'refuse' },
     // 이 값이 있어야 preflight 경로로 들어간다(= fast mode/모델 변경 후 첫 메시지, 앱 재시작 후 첫 메시지).
     resumeSessionId: 'prev-session-id',
     additionalDirs: [],

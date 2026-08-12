@@ -57,7 +57,7 @@ function start(reply: { ok: boolean; data?: unknown; error?: string }): Harness 
   socket.listen(path)
 
   shim = spawn(process.execPath, [SHIM], {
-    env: { ...process.env, WOOI_TOOL_SOCKET: path },
+    env: { ...process.env, WOOI_TOOL_SOCKET: path, WOOI_TOOL_WORKSPACE: 'ws-1' },
     stdio: ['pipe', 'pipe', 'pipe']
   })
 
@@ -97,17 +97,16 @@ describe.skipIf(!existsSync(SHIM))('codex tool shim', () => {
     expect(list.tools.map((t) => t.name)).toEqual(agentToolsFor().map((t) => t.name))
   })
 
-  it('모든 도구 스키마에 workspaceId 를 필수로 더한다', async () => {
-    // 이 전송 계층은 "누가 불렀는가" 를 실어 주지 못한다 — 그래서 인자로 받는다.
-    // 빠지면 메인이 호출자를 특정할 수 없어 전부 거절된다.
+  it('스키마에 전송용 인자를 덧붙이지 않는다', async () => {
+    // 한때 호출자 id 를 인자로 받았는데, 대상을 지목하는 도구의 `workspaceId` 와 이름이 겹쳐
+    // 모델이 둘을 동시에 적을 수 없었다. 호출자는 이제 env 로 온다.
     const h = start({ ok: true })
     h.send({ id: 1, method: 'tools/list', params: {} })
     const list = (await h.next(1)).result as {
-      tools: Array<{ inputSchema: { properties: Record<string, unknown>; required: string[] } }>
+      tools: Array<{ name: string; inputSchema: { properties: Record<string, unknown> } }>
     }
     for (const tool of list.tools) {
-      expect(tool.inputSchema.properties).toHaveProperty('workspaceId')
-      expect(tool.inputSchema.required).toContain('workspaceId')
+      expect(Object.keys(tool.inputSchema.properties)).not.toContain('callerWorkspaceId')
     }
   })
 
@@ -118,32 +117,27 @@ describe.skipIf(!existsSync(SHIM))('codex tool shim', () => {
       tools: Array<{ name: string; inputSchema: { properties: Record<string, unknown> } }>
     }
     const create = list.tools.find((t) => t.name === 'create_stacked_workspace')!
-    expect(Object.keys(create.inputSchema.properties).sort()).toEqual([
-      'name',
-      'task',
-      'workspaceId'
-    ])
+    expect(Object.keys(create.inputSchema.properties).sort()).toEqual(['name', 'task'])
   })
 
-  it('호출을 메인으로 넘기며 workspaceId 를 인자에서 떼어 낸다', async () => {
-    // 메인의 핸들러는 Claude 와 공유하므로 workspaceId 가 args 에 섞여 들어가면 안 된다.
-    const h = start({ ok: true, data: { branch: 'feat/next' } })
+  it('대상을 지목하는 도구의 workspaceId 는 대상 그대로 메인에 닿는다', async () => {
+    // 이 세 도구가 Codex 에서 언제나 실패했던 회귀. 호출자는 env(WOOI_TOOL_WORKSPACE)에서 오고,
+    // 인자의 workspaceId 는 손대지 않은 채 대상으로 넘어가야 한다.
+    const h = start({ ok: true, data: { delivered: false } })
     h.send({
       id: 1,
       method: 'tools/call',
       params: {
-        name: 'create_stacked_workspace',
-        arguments: { workspaceId: 'ws-1', name: 'feat/next', task: 'do it' }
+        name: 'send_to_workspace',
+        arguments: { workspaceId: 'ws-them', message: 'heads up' }
       }
     })
-    const res = (await h.next(1)).result as { content: Array<{ text: string }> }
-
+    await h.next(1)
     expect(h.forwarded()).toEqual({
       workspaceId: 'ws-1',
-      tool: 'create_stacked_workspace',
-      args: { name: 'feat/next', task: 'do it' }
+      tool: 'send_to_workspace',
+      args: { workspaceId: 'ws-them', message: 'heads up' }
     })
-    expect(JSON.parse(res.content[0].text)).toEqual({ branch: 'feat/next' })
   })
 
   it('메인이 거절하면 프로토콜 오류가 아니라 도구 실패로 돌려준다', async () => {
@@ -152,7 +146,7 @@ describe.skipIf(!existsSync(SHIM))('codex tool shim', () => {
     h.send({
       id: 1,
       method: 'tools/call',
-      params: { name: 'create_stacked_workspace', arguments: { workspaceId: 'ws-1' } }
+      params: { name: 'create_stacked_workspace', arguments: {} }
     })
     const res = (await h.next(1)).result as { isError: boolean; content: Array<{ text: string }> }
 

@@ -74,6 +74,7 @@ describe('ClaudeSession session limit handling', () => {
       fastMode: false,
       permissionMode: 'default',
       autoCompact: false,
+      peer: { name: 'wooi/repo/test', inbound: 'refuse' },
       resumeSessionId: null,
       additionalDirs: [],
       wooiMcp,

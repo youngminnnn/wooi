@@ -41,6 +41,7 @@ import StackPopover from './StackPopover'
 import StackSyncBanner from './StackSyncBanner'
 import StackBaseBanner from './StackBaseBanner'
 import ArchiveSuggestBanner from './ArchiveSuggestBanner'
+import PeerInboxBanner from './PeerInboxBanner'
 import ExportMenu from './ExportMenu'
 import HeaderButton from './HeaderButton'
 import { AgentBackendMark, GithubMark } from './BrandIcons'
@@ -544,6 +545,9 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
 
       {/* PR 이 병합돼 할 일이 남지 않았을 때 정리를 제안하는 배너(worktree 제거는 승인 후에만). */}
       <ArchiveSuggestBanner workspace={workspace} />
+
+      {/* 다른 워크스페이스가 보낸 메시지의 승인 배너(전달하면 여기서 턴이 시작된다). */}
+      <PeerInboxBanner workspace={workspace} />
 
       {/* 대화 */}
       <MessageList workspaceId={workspace.id} running={running} />

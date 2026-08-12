@@ -32,6 +32,7 @@ import type {
   PaneKind,
   PaneState,
   PermissionDecision,
+  PeerInboundPolicy,
   PermissionMode,
   PermissionRequest,
   PrChecks,
@@ -127,6 +128,15 @@ export interface WooiApi {
     ): Promise<{ archiveScriptFailure?: ArchiveScriptFailure }>
     /** 한 레포의 아카이브된 워크스페이스를 모두 영구 삭제한다(브랜치·기록 포함). 삭제된 개수를 반환. */
     removeArchived(repoId: string): Promise<{ count: number }>
+    /**
+     * 대기 중인 peer 메시지를 전달한다 — **그 워크스페이스에서 턴이 시작된다.**
+     * 이미 사라진 메시지(다른 창에서 처리했거나 워크스페이스가 지워졌으면) 는 조용히 무시된다.
+     */
+    deliverPeerMessage(workspaceId: string, messageId: string): Promise<void>
+    /** 대기 중인 peer 메시지를 버린다. 전달되지 않고, 발신 워크스페이스는 답을 받지 못한다. */
+    dismissPeerMessage(workspaceId: string, messageId: string): Promise<void>
+    /** 다른 워크스페이스에서 오는 메시지를 받는 방식. 기본은 'hold'(승인 후 전달). */
+    setPeerInbound(workspaceId: string, policy: PeerInboundPolicy): Promise<void>
     setPermissionMode(workspaceId: string, mode: PermissionMode): Promise<void>
     setModel(workspaceId: string, model: string | null): Promise<void>
     setEffort(workspaceId: string, effort: EffortSetting | null): Promise<void>

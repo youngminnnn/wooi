@@ -104,6 +104,7 @@ import type {
   MemoryScope,
   PaneKind,
   PermissionDecision,
+  PeerInboundPolicy,
   PermissionMode,
   PrMergeMethod,
   Repo,
@@ -454,6 +455,73 @@ export function registerIpc(ctx: IpcContext): void {
         changed = true
       })
       if (changed) broadcastState()
+    }
+  )
+
+  /**
+   * 대기 중인 peer 메시지를 전달한다 — 여기가 **턴 비용을 승인하는 자리**다.
+   *
+   * 먼저 큐에서 꺼내고 나서 보낸다. 순서를 뒤집으면 전달은 됐는데 큐에서 안 빠진 창이 남아
+   * 같은 메시지를 두 번 보낼 수 있다(창이 둘이면 실제로 그렇게 된다).
+   *
+   * 보관해 둔 `text` 를 그대로 보낸다 — 출처 문단은 받은 순간에 이미 씌워져 있고, 지금
+   * 다시 만들면 발신 워크스페이스가 사라진 경우 근거가 없다([[types]] PendingPeerMessage).
+   */
+  ipcMain.handle(
+    IPC.workspacePeerInboxDeliver,
+    async (_e, workspaceId: string, messageId: string): Promise<void> => {
+      let text: string | null = null
+      store.update((st) => {
+        const w = st.workspaces.find((x) => x.id === workspaceId)
+        const pending = w?.peerInbox?.find((m) => m.id === messageId)
+        if (!w || !pending) return
+        text = pending.text
+        w.peerInbox = w.peerInbox?.filter((m) => m.id !== messageId)
+      })
+      // 이미 다른 창이 처리했거나 워크스페이스가 사라졌으면 조용히 끝낸다.
+      if (text === null) return
+      ctx.sessions.sendMessage(workspaceId, text)
+      broadcastState()
+    }
+  )
+
+  /** 대기 중인 peer 메시지를 버린다. 발신 쪽에는 알리지 않는다 — 거절도 사용자의 사정이다. */
+  ipcMain.handle(
+    IPC.workspacePeerInboxDismiss,
+    async (_e, workspaceId: string, messageId: string): Promise<void> => {
+      let changed = false
+      store.update((st) => {
+        const w = st.workspaces.find((x) => x.id === workspaceId)
+        if (!w?.peerInbox?.some((m) => m.id === messageId)) return
+        w.peerInbox = w.peerInbox.filter((m) => m.id !== messageId)
+        changed = true
+      })
+      if (changed) broadcastState()
+    }
+  )
+
+  /**
+   * 수신 정책을 바꾼다. `accept` 로 열면 대기 중이던 것도 함께 흘려보낸다 — 정책을 열어 놓고
+   * 이미 와 있던 메시지만 계속 대기 상태로 남기면 사용자가 "왜 안 오지" 를 겪는다.
+   */
+  ipcMain.handle(
+    IPC.workspaceSetPeerInbound,
+    async (_e, workspaceId: string, policy: PeerInboundPolicy): Promise<void> => {
+      const release: string[] = []
+      store.update((st) => {
+        const w = st.workspaces.find((x) => x.id === workspaceId)
+        if (!w) return
+        w.peerInbound = policy
+        if (policy === 'accept') {
+          for (const m of w.peerInbox ?? []) release.push(m.text)
+          w.peerInbox = []
+        }
+        // 'refuse' 로 닫으면 대기 중이던 것도 버린다 — 받지 않겠다고 한 뒤에 남아 있는 승인
+        // 카드는 그 선언과 모순이다.
+        if (policy === 'refuse') w.peerInbox = []
+      })
+      for (const text of release) ctx.sessions.sendMessage(workspaceId, text)
+      broadcastState()
     }
   )
 

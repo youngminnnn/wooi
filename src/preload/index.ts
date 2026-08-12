@@ -36,6 +36,12 @@ const api: WooiApi = {
     remove: (workspaceId, deleteBranch) =>
       ipcRenderer.invoke(IPC.workspaceRemove, workspaceId, deleteBranch),
     removeArchived: (repoId) => ipcRenderer.invoke(IPC.workspaceRemoveArchived, repoId),
+    deliverPeerMessage: (workspaceId, messageId) =>
+      ipcRenderer.invoke(IPC.workspacePeerInboxDeliver, workspaceId, messageId),
+    dismissPeerMessage: (workspaceId, messageId) =>
+      ipcRenderer.invoke(IPC.workspacePeerInboxDismiss, workspaceId, messageId),
+    setPeerInbound: (workspaceId, policy) =>
+      ipcRenderer.invoke(IPC.workspaceSetPeerInbound, workspaceId, policy),
     setPermissionMode: (workspaceId, mode) =>
       ipcRenderer.invoke(IPC.workspaceSetPermissionMode, workspaceId, mode),
     setModel: (workspaceId, model) => ipcRenderer.invoke(IPC.workspaceSetModel, workspaceId, model),
