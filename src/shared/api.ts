@@ -13,6 +13,7 @@ import type {
   ClaudeLoginEvent,
   CodexLoginEvent,
   CodexLoginMethod,
+  CodexMcpServer,
   CommandPanelKind,
   CommandResult,
   CreateWorkspaceArgs,
@@ -505,6 +506,16 @@ export interface WooiApi {
     inventory(): Promise<McpInventory>
     /** ~/.claude.json 을 기본 편집기로 연다(없으면 담긴 폴더를 연다). */
     openConfig(): Promise<void>
+    /**
+     * `~/.codex/config.toml` 에 설정된 MCP 서버 목록. Codex 가 설치돼 있지 않으면 빈 목록이다.
+     * 호출하면 codex app-server 가 뜨므로, 렌더러는 Codex 로그인 상태일 때만 부른다.
+     */
+    codexServers(): Promise<{ servers?: CodexMcpServer[]; error?: string }>
+    /** 그 서버의 `enabled` 를 사용자 파일에 쓰고 갱신된 목록을 돌려준다. */
+    setCodexServerEnabled(
+      name: string,
+      enabled: boolean
+    ): Promise<{ servers?: CodexMcpServer[]; error?: string }>
   }
 
   auth: {

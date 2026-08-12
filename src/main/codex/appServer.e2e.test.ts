@@ -110,6 +110,52 @@ describe.skipIf(!CODEX)('codex app-server (실물)', () => {
   })
 
   /**
+   * 설정 화면의 "From ~/.codex/config.toml" 목록이 기대는 계약을 못 박는다.
+   *
+   * 그 목록은 mcpServerStatus/list 가 아니라 config/read 를 본다. 이유가 딱 하나 있다 —
+   * **꺼 둔 서버가 응답에 남아야** 설정 화면에서 다시 켤 수 있기 때문이다. 상태 목록 쪽은
+   * 안 뜬 서버를 "초기화 실패" 로 내거나 아예 빼므로 토글의 근거가 되지 못한다.
+   *
+   * 여기가 깨지면 증상은 "껐더니 목록에서 사라져 다시 못 켠다" 로 나타난다.
+   */
+  describe('설정용 MCP 목록', () => {
+    it('config/read 가 mcp_servers 를 enabled 필드와 함께 돌려준다', async () => {
+      const rpc = await start().rpc()
+      const result = await rpc.request<{
+        config?: { mcp_servers?: Record<string, Record<string, unknown>> }
+      }>(RPC.configRead, { includeLayers: false })
+      const table = result?.config?.mcp_servers
+      expect(table, 'config/read did not return mcp_servers').toBeTypeOf('object')
+      // 항목 하나하나는 사용자 설정이라 개수·이름을 못 박지 않는다. 우리가 읽는 필드가
+      // 있는 모양인지만 본다(빈 설정이면 검사할 것이 없으므로 통과).
+      for (const server of Object.values(table ?? {})) {
+        expect(server).toBeTypeOf('object')
+        if ('enabled' in server) expect(typeof server.enabled).toBe('boolean')
+      }
+    }, 60_000)
+
+    // 빌드 산출물이 없으면 `-c` 등록 자체가 생략되므로 함께 건너뛴다.
+    it.skipIf(!existsSync(SHIM))(
+      '`-c` 로 얹은 서버도 같은 테이블에 섞여 온다(설정 화면이 걸러내야 하는 이유)',
+      async () => {
+        process.env.WOOI_TOOL_SOCKET = join(tmpdir(), 'wooi-e2e-unused.sock')
+        process.env.WOOI_TOOL_SHIM = SHIM
+        try {
+          const rpc = await start().rpc()
+          const result = await rpc.request<{
+            config?: { mcp_servers?: Record<string, unknown> }
+          }>(RPC.configRead, { includeLayers: false })
+          expect(Object.keys(result?.config?.mcp_servers ?? {})).toContain(WOOI_MCP_SERVER_NAME)
+        } finally {
+          delete process.env.WOOI_TOOL_SOCKET
+          delete process.env.WOOI_TOOL_SHIM
+        }
+      },
+      60_000
+    )
+  })
+
+  /**
    * Wooi 도구가 실제로 이 연결에 등록되는지 본다.
    *
    * `-c` 오버라이드는 codex 의 CLI 표면이라 우리가 통제할 수 없다 — 형식이 바뀌거나 무시되기

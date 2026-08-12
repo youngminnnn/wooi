@@ -3,11 +3,13 @@ import { ExternalLink, FileWarning, Pencil, Plus, RefreshCw, Trash2 } from 'luci
 import { isValidMcpServerName, mcpSettingsOf } from '@shared/types'
 import type {
   AppSettings,
+  CodexMcpServer,
   InheritedMcpServer,
   McpInventory,
   McpSettings,
   WooiMcpServer
 } from '@shared/types'
+import { useStore } from '../store'
 import Modal, { ghostBtn, inputClass, labelClass, primaryBtn } from './Modal'
 import { PageFrame, SettingGroup, Switch } from './SettingsPrimitives'
 
@@ -19,6 +21,9 @@ import { PageFrame, SettingGroup, Switch } from './SettingsPrimitives'
  *    파일을 읽기만 한다 — 다른 도구와 소유권이 겹치는 파일을 앱이 고쳐 쓰면 상대의 편집을
  *    조용히 뭉갠다. 그래서 편집은 "파일 열기" 한 가지고, 우리가 줄 수 있는 건 주입 제외뿐이다.
  *  - **Wooi 관리**: 이 앱이 소유하는 목록(wooi.json). 자유롭게 추가·수정·삭제한다.
+ *  - **Codex**: `~/.codex/config.toml`. 여기만은 토글이 사용자 파일에 직접 쓴다 — codex 는 자기
+ *    설정을 스스로 읽으므로 "우리 목록에서 빼기" 에 해당하는 경로가 없다. 그 차이를 섹션 설명에
+ *    적어 둔다. 목록은 파일을 파싱하지 않고 codex app-server 에 물어본다.
  *
  * 이름이 겹치면 `~/.claude.json` 이 이긴다. 그 규칙을 문장으로만 적어 두면 아무도 안 읽으므로,
  * 가려진 항목 행에 직접 표시하고 해소 방법(승계 항목 끄기)까지 같은 자리에 적는다.
@@ -34,6 +39,12 @@ export default function McpServersPage({
   const [inventory, setInventory] = useState<McpInventory | null>(null)
   const [editing, setEditing] = useState<WooiMcpServer | null>(null)
   const [loading, setLoading] = useState(true)
+  // Codex 목록을 읽으려면 app-server 프로세스가 떠야 한다. Codex 를 실제로 쓰는 사람에게만
+  // 그 비용을 지운다 — 로그인 상태를 "이 에이전트를 쓴다" 의 대리 신호로 삼는다.
+  const codexLoggedIn = useStore((state) => state.authStatus?.agents.codex.loggedIn ?? false)
+  const [codexServers, setCodexServers] = useState<CodexMcpServer[] | null>(null)
+  const [codexError, setCodexError] = useState<string | null>(null)
+  const [codexBusy, setCodexBusy] = useState<string | null>(null)
 
   const load = useCallback(
     (): Promise<void> =>
@@ -52,6 +63,26 @@ export default function McpServersPage({
   const refresh = (): void => {
     setLoading(true)
     void load()
+  }
+
+  useEffect(() => {
+    if (!codexLoggedIn) return
+    void window.api.mcp.codexServers().then((result) => {
+      setCodexServers(result.servers ?? [])
+      setCodexError(result.error ?? null)
+    })
+  }, [codexLoggedIn])
+
+  const toggleCodex = (name: string, enabled: boolean): void => {
+    setCodexBusy(name)
+    void window.api.mcp
+      .setCodexServerEnabled(name, enabled)
+      .then((result) => {
+        // 실패하면 목록을 건드리지 않는다 — 스위치가 되돌아가는 것이 곧 "안 됐다" 는 신호다.
+        if (result.servers) setCodexServers(result.servers)
+        setCodexError(result.error ?? null)
+      })
+      .finally(() => setCodexBusy(null))
   }
 
   const disabledInherited = useMemo(() => new Set(mcp.disabledInherited), [mcp.disabledInherited])
@@ -165,13 +196,50 @@ export default function McpServersPage({
         )}
       </SettingGroup>
 
-      <p className="text-xs leading-relaxed text-neutral-600">
-        Entries in ~/.claude.json are read-only here — Wooi never writes that file, so other tools
-        keep ownership of it. If a name appears in both lists, the ~/.claude.json entry wins; turn
-        it off above to let the Wooi-managed one take the name. Codex sessions receive Wooi-managed{' '}
-        <span className="text-neutral-400">stdio</span> servers only, and pick up changes after Wooi
-        restarts.
-      </p>
+      {codexLoggedIn && (
+        <SettingGroup title="From ~/.codex/config.toml">
+          {codexServers === null ? (
+            <p className="px-4 py-8 text-center text-sm text-neutral-600">
+              Asking Codex for its servers…
+            </p>
+          ) : codexError ? (
+            <p className="px-4 py-8 text-center text-sm text-[var(--danger-400)]">{codexError}</p>
+          ) : codexServers.length === 0 ? (
+            <p className="px-4 py-8 text-center text-sm text-neutral-600">
+              Codex has no MCP servers configured.
+            </p>
+          ) : (
+            codexServers.map((server) => (
+              <CodexServerRow
+                key={server.name}
+                server={server}
+                busy={codexBusy === server.name}
+                onToggle={(enabled) => toggleCodex(server.name, enabled)}
+              />
+            ))
+          )}
+        </SettingGroup>
+      )}
+
+      <div className="space-y-2 text-xs leading-relaxed text-neutral-600">
+        <p>
+          Entries in ~/.claude.json are read-only here — Wooi never writes that file, so other tools
+          keep ownership of it. If a name appears in both lists, the ~/.claude.json entry wins; turn
+          it off above to let the Wooi-managed one take the name.
+        </p>
+        {codexLoggedIn && (
+          <p>
+            The ~/.codex/config.toml switches are the exception:{' '}
+            <span className="text-neutral-400">they write that file</span>, because Codex reads its
+            own config and Wooi cannot leave a server out on its side. Changes apply to Codex right
+            away.
+          </p>
+        )}
+        <p>
+          Codex sessions receive Wooi-managed <span className="text-neutral-400">stdio</span>{' '}
+          servers only, and pick up changes after Wooi restarts.
+        </p>
+      </div>
 
       {editing && (
         <McpServerEditor
@@ -296,6 +364,45 @@ function InheritedServerRow({
         )}
       </div>
       <Switch label={`Inject ${server.name}`} checked={enabled} onChange={onToggle} />
+    </div>
+  )
+}
+
+/**
+ * Codex 설정 파일의 서버 한 줄.
+ *
+ * 다른 두 섹션과 달리 이 토글은 **사용자 파일을 고친다** — 그래서 되돌리는 데 앱이 필요 없다는
+ * 뜻이기도 하고, 우리가 남의 파일에 쓴다는 뜻이기도 하다. 행마다 반복하면 시끄러우므로 섹션
+ * 아래 설명 한 줄로 알린다.
+ */
+function CodexServerRow({
+  server,
+  busy,
+  onToggle
+}: {
+  server: CodexMcpServer
+  busy: boolean
+  onToggle: (enabled: boolean) => void
+}): React.JSX.Element {
+  return (
+    <div className="flex items-center gap-3 px-4 py-3">
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <span className="truncate text-sm font-medium text-neutral-200">{server.name}</span>
+          <span className="rounded bg-[var(--surface-2)] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-neutral-400">
+            codex
+          </span>
+        </div>
+        <p className="mt-0.5 truncate font-mono text-xs text-neutral-600">
+          {server.detail || 'Unrecognized entry — open the file to see it'}
+        </p>
+      </div>
+      <Switch
+        label={`Enable ${server.name}`}
+        checked={server.enabled}
+        disabled={busy}
+        onChange={onToggle}
+      />
     </div>
   )
 }

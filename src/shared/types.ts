@@ -911,6 +911,21 @@ export interface InheritedMcpServer {
   detail: string
 }
 
+/**
+ * `~/.codex/config.toml` 의 MCP 서버 1개.
+ *
+ * Codex 는 자기 설정 파일을 스스로 읽으므로 Claude 쪽처럼 "우리 목록에서 빼기" 로 끌 수 없다 —
+ * 유일한 off 스위치가 그 파일의 `enabled` 다. 그래서 이 항목의 토글만은 사용자 파일에 직접
+ * 쓴다(app-server 의 config/value/write). 목록도 파일을 파싱하지 않고 app-server 에 물어본다.
+ */
+export interface CodexMcpServer {
+  name: string
+  /** codex 가 실제로 띄우는 명령줄(표시용). */
+  detail: string
+  /** config.toml 의 `enabled`. 값이 없으면 켜진 것으로 본다 — codex 기본값이 그렇다. */
+  enabled: boolean
+}
+
 /** 설정 화면이 "무엇이 주입되는가" 를 그리기 위해 필요한 전부. */
 export interface McpInventory {
   /** 승계 목록의 출처 파일 경로(없어도 "이 파일을 여세요" 안내에 쓴다). */
@@ -2129,6 +2144,10 @@ export const IPC = {
   mcpInventory: 'mcp:inventory',
   /** 승계 서버를 고치려면 그 파일을 직접 열어야 한다(우리는 쓰지 않는다). */
   mcpOpenConfig: 'mcp:openConfig',
+  /** `~/.codex/config.toml` 의 MCP 서버 목록(app-server 에 질의). */
+  mcpCodexList: 'mcp:codexList',
+  /** 그 서버의 `enabled` 를 사용자 파일에 쓰고 codex 에 재적용한다. */
+  mcpCodexSetEnabled: 'mcp:codexSetEnabled',
   authGetStatus: 'auth:getStatus',
   /** 앱 내부 PTY 에서 `claude auth login` 을 시작한다(별도 Terminal 창 없이). */
   authClaudeLoginStart: 'auth:claudeLoginStart',

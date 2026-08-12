@@ -8,6 +8,7 @@ import {
   type EffortSetting,
   type ImageAttachment,
   type McpAction,
+  type CodexMcpServer,
   type McpServerInfo,
   type PermissionDecision,
   type PermissionMode,
@@ -330,6 +331,33 @@ export class AgentOrchestrator {
     const backend = this.get(id)
     if (!backend.meta.capabilities.rateLimits) return
     await backend.refreshRateLimits(allowShortLived)
+  }
+
+  /**
+   * 백엔드가 자기 설정 파일에 들고 있는 MCP 서버 목록(설정 화면용).
+   *
+   * 쓸 수 없는 백엔드(CLI 미설치)에는 **프로세스를 띄우지 않고** 빈 목록으로 끊는다 —
+   * 설정 화면을 여는 것만으로 안 쓰는 에이전트가 뜨면 순수 비용이다.
+   */
+  async configuredMcpServers(id: AgentBackendId): Promise<CodexMcpServer[]> {
+    const { available } = await backendAvailability(id)
+    if (!available) return []
+    const backend = this.get(id)
+    if (!backend.listConfiguredMcpServers) return []
+    return backend.listConfiguredMcpServers()
+  }
+
+  /** 그 목록의 서버 하나를 켜고 끈다. 지원하지 않는 백엔드면 에러로 알린다. */
+  setMcpServerEnabled(
+    id: AgentBackendId,
+    serverName: string,
+    enabled: boolean
+  ): Promise<CodexMcpServer[]> {
+    const backend = this.get(id)
+    if (!backend.setMcpServerEnabled) {
+      throw new Error(`${backend.meta.label} does not manage MCP servers in its own config.`)
+    }
+    return backend.setMcpServerEnabled(serverName, enabled)
   }
 
   mcpAction(workspaceId: string, serverName: string, action: McpAction): Promise<McpServerInfo[]> {

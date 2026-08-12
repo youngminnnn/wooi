@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto'
 import { log } from '../logger'
-import { AppServer } from './appServer'
+import { AppServer, wooiMcpServerTable } from './appServer'
 import { detectCodex } from './executable'
+import { WOOI_MCP_SERVER_NAME } from '../agent/tools/catalog'
 import { CodexThread } from './thread'
 import { turnPolicyFor, type SandboxPolicy } from './modes'
 import {
@@ -25,6 +26,7 @@ import type {
   ChatEvent,
   ChatItem,
   CommandPanelKind,
+  CodexMcpServer,
   CommandResult,
   McpAction,
   McpServerInfo,
@@ -418,6 +420,14 @@ async function handle(msg: CodexCommand): Promise<void> {
       await respond(msg.reqId, () => mcpAction(msg.serverName, msg.action))
       break
 
+    case 'mcpConfigList':
+      await respond(msg.reqId, listConfiguredMcpServers)
+      break
+
+    case 'mcpSetEnabled':
+      await respond(msg.reqId, () => setMcpServerEnabled(msg.serverName, msg.enabled))
+      break
+
     case 'compact':
       await ensure(msg.workspaceId, msg.config).compact()
       break
@@ -704,6 +714,61 @@ async function mcpAction(serverName: string, action: McpAction): Promise<McpServ
   }
   await client.request(RPC.mcpReload, {})
   return listMcpServers()
+}
+
+/**
+ * 설정 화면용 — `~/.codex/config.toml` 에 **설정된** MCP 서버 목록.
+ *
+ * `/mcp` 패널이 쓰는 mcpServerStatus/list 와 다른 것을 본다. 그쪽은 런타임 상태라 꺼 둔 서버가
+ * "초기화 실패" 로 보이거나 아예 빠지고, 그러면 설정 화면에서 다시 켤 방법이 사라진다.
+ * config/read 는 `enabled: false` 인 항목까지 그대로 돌려주므로 토글의 근거로 맞다.
+ *
+ * Wooi 가 `-c` 로 밀어 넣은 서버도 이 응답에 섞여 온다(실측) — 그건 사용자의 파일에 있는 것이
+ * 아니라 우리가 이번 프로세스에만 얹은 것이므로 걸러낸다. 그러지 않으면 설정 화면에 같은
+ * 서버가 "Wooi 관리" 와 "Codex 설정" 양쪽에 두 번 나온다.
+ */
+async function listConfiguredMcpServers(): Promise<CodexMcpServer[]> {
+  const client = await rpc()
+  const result = await client.request<{
+    config?: { mcp_servers?: Record<string, Record<string, unknown>> }
+  }>(RPC.configRead, { includeLayers: false })
+  const ours = new Set([WOOI_MCP_SERVER_NAME, ...Object.keys(wooiMcpServerTable())])
+  return Object.entries(result.config?.mcp_servers ?? {})
+    .filter(([name]) => !ours.has(name))
+    .map(([name, server]) => ({
+      name,
+      detail: describeCodexMcpServer(server),
+      // codex 기본값은 "켜짐" 이다 — 키가 없다고 꺼진 것으로 그리면 전부 꺼진 것처럼 보인다.
+      enabled: server.enabled !== false
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name))
+}
+
+/** 목록의 한 줄 요약. stdio 는 명령줄, 원격은 URL. */
+function describeCodexMcpServer(server: Record<string, unknown>): string {
+  if (typeof server.url === 'string') return server.url
+  if (typeof server.command !== 'string') return ''
+  const args = Array.isArray(server.args) ? server.args.filter((a) => typeof a === 'string') : []
+  return [server.command, ...args].join(' ')
+}
+
+/**
+ * 서버 하나를 켜고 끈다. **사용자의 config.toml 에 직접 쓴다** — Claude 쪽(~/.claude.json)은
+ * 우리가 절대 쓰지 않고 주입 단계에서 빼지만, codex 는 자기 설정을 스스로 읽으므로 그 방법이
+ * 없다. 쓰고 나서 reload 해야 이미 떠 있는 app-server 에 반영된다.
+ */
+async function setMcpServerEnabled(
+  serverName: string,
+  enabled: boolean
+): Promise<CodexMcpServer[]> {
+  const client = await rpc()
+  await client.request(RPC.configValueWrite, {
+    keyPath: `mcp_servers.${serverName}.enabled`,
+    value: enabled,
+    mergeStrategy: 'replace'
+  })
+  await client.request(RPC.mcpReload, {})
+  return listConfiguredMcpServers()
 }
 
 /** rate limit 창 하나를 UsageInfo 모양으로. 데이터가 없으면 null. */

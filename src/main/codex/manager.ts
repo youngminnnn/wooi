@@ -28,6 +28,7 @@ import type {
   CommandResult,
   EffortSetting,
   ImageAttachment,
+  CodexMcpServer,
   McpAction,
   McpServerInfo,
   ModelOption,
@@ -551,6 +552,21 @@ export class CodexSessionManager implements AgentBackend {
       reqId,
       serverName,
       action
+    }))
+  }
+
+  /** 설정 화면용 — `~/.codex/config.toml` 에 설정된 MCP 서버 목록(워크스페이스와 무관). */
+  listConfiguredMcpServers(): Promise<CodexMcpServer[]> {
+    return this.request<CodexMcpServer[]>((reqId) => ({ type: 'mcpConfigList', reqId }))
+  }
+
+  /** 그 서버의 `enabled` 를 사용자 파일에 쓰고, 갱신된 목록을 돌려준다. */
+  setMcpServerEnabled(serverName: string, enabled: boolean): Promise<CodexMcpServer[]> {
+    return this.request<CodexMcpServer[]>((reqId) => ({
+      type: 'mcpSetEnabled',
+      reqId,
+      serverName,
+      enabled
     }))
   }
 
