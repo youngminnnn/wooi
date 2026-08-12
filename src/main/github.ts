@@ -218,7 +218,14 @@ export async function getPrStatus(worktreePath: string, branch?: string): Promis
   try {
     const pr = JSON.parse(stdout.trim()) as GhPr
     const state = stateFor(pr)
-    return { number: pr.number, url: pr.url, title: pr.title ?? '', state, label: PR_LABELS[state] }
+    return {
+      number: pr.number,
+      url: pr.url,
+      title: pr.title ?? '',
+      state,
+      label: PR_LABELS[state],
+      needsBaseUpdate: pr.mergeStateStatus === 'BEHIND'
+    }
   } catch {
     return null
   }
@@ -352,7 +359,14 @@ async function fetchOpenPrs(worktreePath: string): Promise<OpenPrRow[]> {
 /** 캐시된 행을 사이드바·헤더가 쓰는 PrStatus 로 옮긴다. */
 function statusFromRow(pr: GhPr): PrStatus {
   const state = stateFor(pr)
-  return { number: pr.number, url: pr.url, title: pr.title ?? '', state, label: PR_LABELS[state] }
+  return {
+    number: pr.number,
+    url: pr.url,
+    title: pr.title ?? '',
+    state,
+    label: PR_LABELS[state],
+    needsBaseUpdate: pr.mergeStateStatus === 'BEHIND'
+  }
 }
 
 /**

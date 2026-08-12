@@ -3002,6 +3002,8 @@ export interface PrStatus {
   state: PrState
   /** 표시용 라벨: Draft / Review required / Changes requested / CI running / CI failed / Ready to merge / Conflict / Open / Merged / Closed */
   label: string
+  /** GitHub 가 base 브랜치 업데이트가 필요하다고 판정했는지(`mergeStateStatus === 'BEHIND'`). */
+  needsBaseUpdate: boolean
 }
 
 /**
