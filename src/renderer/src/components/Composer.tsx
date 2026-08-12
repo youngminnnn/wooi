@@ -13,7 +13,6 @@ import {
   Gauge,
   Receipt,
   Bot,
-  GitBranch,
   Folder,
   FileText,
   ChevronRight,
@@ -974,7 +973,7 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
             }}
           />
         )}
-        {/* 입력창 위 상태줄: 브랜치 · 디렉토리 · (교체 가능하면 에이전트) · 모델 · effort · 컨텍스트 사용량. */}
+        {/* 입력창 위 상태줄: 디렉토리 · (교체 가능하면 에이전트) · 모델 · effort · 컨텍스트 사용량. */}
         <StatusLine workspace={workspace} onPick={openPicker} />
         {queue.length > 0 && (
           <div className="mb-2 space-y-1">
@@ -2318,7 +2317,7 @@ function useHandoffEstimate(workspace: Workspace, enabled: boolean): number {
 
 /**
  * 입력창 바로 위에 항상 노출되는 상태줄.
- * 현재 브랜치 · worktree 디렉토리명 · 컨텍스트 사용량을 한 줄로 보여 준다(옵셔널/토글 없음).
+ * worktree 디렉토리명 · 컨텍스트 사용량을 한 줄로 보여 준다(옵셔널/토글 없음).
  * 컨텍스트는 Claude Code CLI 의 컨텍스트 게이지에 대응 — 막대 + 퍼센트로 표시하고,
  * 자동 압축이 도는 동안에는 진행 표시로, 사용량 데이터가 아직 없으면(첫 턴 전) "—" 로 바뀐다.
  */
@@ -2338,7 +2337,6 @@ function StatusLine({
     if (app.rateLimitsByAgent) return app.rateLimitsByAgent[workspace.agentBackend]
     return workspace.agentBackend === 'claude' ? app.rateLimits : undefined
   })
-  const liveBranch = useStore((s) => s.gitStatus[workspace.id]?.branch)
   const backend = useWorkspaceBackend(workspace)
   const models = useModels(workspace.agentBackend)
   const defaults = useAgentSettings(workspace.agentBackend)
@@ -2353,11 +2351,6 @@ function StatusLine({
   // worktree 절대 경로의 마지막 구간(디렉토리명). 비정상 경로면 전체 경로로 폴백한다.
   const dirName = workspace.worktreePath.split('/').filter(Boolean).pop() ?? workspace.worktreePath
 
-  // 라이브 git 브랜치를 우선 표시한다. workspace.branch 는 생성 시점에 고정된 값이라
-  // 세션 도중 브랜치명을 바꾸면 반영되지 못하므로, git status 로 읽은 현재 브랜치를
-  // 사용한다. 아직 git 상태를 못 받았거나 불명('?')이면 저장된 branch 로 폴백한다.
-  const branch = liveBranch && liveBranch !== '?' ? liveBranch : workspace.branch
-
   // 표시는 "유효 값" 기준: workspace 오버라이드 → (모델은 init 으로 확정된 lastModel) → 전역 설정.
   const modelText = modelLabel(models, workspace.model ?? workspace.lastModel ?? defaults.model)
   const effortText = effortLabel(backend, workspace.effort ?? defaults.effort)
@@ -2370,10 +2363,6 @@ function StatusLine({
 
   return (
     <div className="flex items-center gap-3 mb-1.5 px-1 text-xs text-neutral-500">
-      <span className="flex items-center gap-1 min-w-0 shrink" title={`Branch: ${branch}`}>
-        <GitBranch size={11} className="shrink-0 text-neutral-600" />
-        <span className="truncate">{branch}</span>
-      </span>
       <span
         className="flex items-center gap-1 min-w-0 shrink"
         title={`Directory: ${workspace.worktreePath}`}
