@@ -32,7 +32,7 @@ import {
 import { useStore } from '../store'
 import RowActionsMenu, { type RowAction } from './RowActionsMenu'
 import { useAvailableBackends } from '../lib/backends'
-import { useMultiAgent, type MultiAgentState } from '../lib/multiAgent'
+import { useMultiAgent } from '../lib/multiAgent'
 import { AgentBackendMark, GithubMark } from './BrandIcons'
 import {
   QUICK_SWITCH_HINT_DISMISSED,
@@ -484,29 +484,6 @@ export default function Sidebar({
  * 리포 이름 옆 아이콘. GitHub 소유자 아바타(avatarDataUrl)가 있으면 그 이미지를,
  * 없거나 로드에 실패하면 기본 리포 아이콘(FolderGit2)으로 폴백한다.
  */
-/**
- * 멀티 에이전트 모드를 켜고 끄는 액션(실험 기능).
- *
- * 워크스페이스는 기본 설정에서 모달 없이 자동 생성되므로, 만든 **뒤에** 켜는 이 경로가 사실상
- * 주된 진입점이다. 생성 모달의 모드 선택은 "만들 때부터 정해 두고 싶은" 경우를 위한 것이다.
- *
- * 스위치가 **하나뿐인 것**이 요점이다. 어떤 종류의 에이전트를 쓸지는 여기서 고르는 것이 아니라
- * 대화에서 정해진다 — 미리 고르게 하면 "Codex 한테 시켜줘" 라고 말했는데 메뉴에서 체크를 안 했다는
- * 이유로 안 되는, 설명하기 어려운 실패가 생긴다.
- */
-function multiAgentAction(workspace: Workspace, state: MultiAgentState): RowAction[] {
-  if (!state.canUse) return []
-  return [
-    {
-      key: 'multiAgent',
-      label: state.active ? 'Turn off multi-agent mode' : 'Turn on multi-agent mode',
-      icon: <Users size={13} />,
-      onSelect: () => void window.api.workspace.setMultiAgent(workspace.id, !state.active),
-      separatorBefore: true
-    }
-  ]
-}
-
 function RepoIcon({ repo }: { repo: Repo }): React.JSX.Element {
   const [failed, setFailed] = useState(false)
   if (repo.avatarDataUrl && !failed) {
@@ -604,8 +581,7 @@ function WorkspaceRow({
     if (active) void select(null)
   }
 
-  // 멀티 에이전트 상태 — 행 배지와 메뉴 토글이 같은 판단을 쓴다. 훅을 두 번 부르면 행마다
-  // store 구독이 하나 더 늘어나므로(워크스페이스가 많을수록 손해) 한 번 읽어 나눠 쓴다.
+  // 팀 여부 — 행 마크와 그 툴팁이 쓴다.
   const multiAgent = useMultiAgent(workspace)
 
   const fanoutGroup = useStore((s) => fanoutGroupOf(s.app?.fanoutGroups, workspace.id))
@@ -684,9 +660,6 @@ function WorkspaceRow({
         )
       }
     },
-    // 멀티 에이전트 모드 토글(실험 기능). 대부분의 워크스페이스는 모달 없이 자동 생성되므로,
-    // 만든 뒤에 켜는 이 경로가 사실상 주된 진입점이다. 다음 세션부터 적용된다.
-    ...multiAgentAction(workspace, multiAgent),
     {
       key: 'mute',
       label: workspace.muted ? 'Unmute notifications' : 'Mute notifications',
