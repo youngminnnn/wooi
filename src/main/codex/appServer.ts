@@ -2,7 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { WOOI_MCP_SERVER_NAME } from '../agent/tools/catalog'
 import { log } from '../logger'
-import { enabledWooiMcpServers } from '../mcpSettings'
+import { CODEX_MCP_SERVERS_ENV, type CodexStdioServer } from '@shared/types'
 import { RpcClient, type ServerRequestHandler } from './jsonrpc'
 import { RPC, type InitializeResult } from './wire'
 import { withWooiCodexConfig } from './config'
@@ -96,38 +96,28 @@ function toml(value: string): string {
   return JSON.stringify(value)
 }
 
-/** codex 설정의 `mcp_servers` 테이블 한 항목(stdio 전용). */
-type CodexMcpServer = { command: string; args: string[]; env: Record<string, string> }
-
 /**
- * Wooi 스코프 MCP 서버를 codex 가 이해하는 형태로 옮긴다.
+ * Wooi 스코프 MCP 서버 테이블. **메인이 계산해 env 로 내려 준 것**을 그대로 읽는다.
  *
- * **stdio 만** 옮긴다. codex 의 원격(HTTP/SSE) MCP 지원은 실험 플래그
- * (`experimental_use_rmcp_client`) 뒤에 있고 스키마도 Claude 쪽과 다르다 — 조용히 어긋난
- * 설정을 밀어 넣느니 목록에서 빼고 UI 에서 "Claude Code 에만 주입됨" 으로 알리는 편이 낫다.
+ * 이 파일은 codex-host(유틸리티 프로세스)에서 돈다. 거기서는 `import { app } from 'electron'`
+ * 이 로드 시점에 throw 하므로(logger.ts 의 같은 주석) 설정 store 로 이어지는 import 를 하나라도
+ * 들이면 호스트가 로그 한 줄 없이 죽는다 — 겉으로는 "Codex host crashed" 로만 보인다.
+ * 그래서 shim 경로(WOOI_TOOL_SHIM)와 같은 방식으로 값만 받는다.
  *
  * 이름이 Wooi 내장 도구 서버와 겹치면 건너뛴다. 그 이름을 뺏기면 앱 조작 통로가 통째로
  * 남의 서버로 바뀐다(Claude 쪽 session.ts 와 같은 판단).
  */
-export function wooiMcpServerTable(): Record<string, CodexMcpServer> {
-  const table: Record<string, CodexMcpServer> = {}
-  const skipped: string[] = []
-  for (const server of enabledWooiMcpServers()) {
-    const name = server.name.trim()
-    if (name === WOOI_MCP_SERVER_NAME) continue
-    if (server.transport !== 'stdio') {
-      skipped.push(name)
-      continue
-    }
-    table[name] = { command: server.command, args: server.args, env: server.env }
+export function wooiMcpServerTable(): Record<string, CodexStdioServer> {
+  const raw = process.env[CODEX_MCP_SERVERS_ENV]
+  if (!raw) return {}
+  try {
+    const parsed = JSON.parse(raw) as Record<string, CodexStdioServer>
+    delete parsed[WOOI_MCP_SERVER_NAME]
+    return parsed
+  } catch (err) {
+    log.warn(`codex: could not read ${CODEX_MCP_SERVERS_ENV} — no Wooi MCP servers injected`, err)
+    return {}
   }
-  if (skipped.length) {
-    log.warn(
-      `codex: Wooi-managed HTTP/SSE MCP server(s) [${skipped.join(', ')}] are not injected — ` +
-        `codex only takes stdio servers from Wooi`
-    )
-  }
-  return table
 }
 
 /** 같은 테이블을 app-server spawn 용 `-c` 인자로 편다(사용자의 config.toml 은 건드리지 않는다). */

@@ -912,6 +912,24 @@ export interface InheritedMcpServer {
 }
 
 /**
+ * codex 설정의 `mcp_servers` 테이블 한 항목(stdio 전용) — Wooi 가 주입하는 쪽의 모양.
+ *
+ * 이 타입과 아래 env 이름이 **shared 에 있는 이유**가 있다. 값을 만드는 쪽은 메인
+ * (main/mcpSettings.ts, 설정 store 를 읽는다)이고 쓰는 쪽은 codex-host(유틸리티 프로세스,
+ * main/codex/appServer.ts)인데, 호스트가 메인 쪽 모듈을 **값으로** import 하면 번들이
+ * store → `import { app } from 'electron'` 까지 끌고 들어가 로드 시점에 죽는다. 그래서 둘의
+ * 접점만 electron 을 모르는 이 파일에 둔다.
+ */
+export interface CodexStdioServer {
+  command: string
+  args: string[]
+  env: Record<string, string>
+}
+
+/** codex-host fork 에 실리는 env 변수 이름. 값은 CodexStdioServer 테이블의 JSON. */
+export const CODEX_MCP_SERVERS_ENV = 'WOOI_MCP_SERVERS'
+
+/**
  * `~/.codex/config.toml` 의 MCP 서버 1개.
  *
  * Codex 는 자기 설정 파일을 스스로 읽으므로 Claude 쪽처럼 "우리 목록에서 빼기" 로 끌 수 없다 —

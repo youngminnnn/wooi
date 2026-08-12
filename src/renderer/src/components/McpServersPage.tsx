@@ -41,7 +41,10 @@ export default function McpServersPage({
   const [loading, setLoading] = useState(true)
   // Codex 목록을 읽으려면 app-server 프로세스가 떠야 한다. Codex 를 실제로 쓰는 사람에게만
   // 그 비용을 지운다 — 로그인 상태를 "이 에이전트를 쓴다" 의 대리 신호로 삼는다.
-  const codexLoggedIn = useStore((state) => state.authStatus?.agents.codex.loggedIn ?? false)
+  // 다만 **조회만** 미루고 섹션 자체는 늘 그린다. 통째로 숨기면 "왜 Codex 가 안 보이지" 를
+  // 화면 안에서 알아낼 방법이 없어진다(실제로 그렇게 헤맸다).
+  const codex = useStore((state) => state.authStatus?.agents.codex)
+  const codexLoggedIn = codex?.loggedIn ?? false
   const [codexServers, setCodexServers] = useState<CodexMcpServer[] | null>(null)
   const [codexError, setCodexError] = useState<string | null>(null)
   const [codexBusy, setCodexBusy] = useState<string | null>(null)
@@ -196,30 +199,36 @@ export default function McpServersPage({
         )}
       </SettingGroup>
 
-      {codexLoggedIn && (
-        <SettingGroup title="From ~/.codex/config.toml">
-          {codexServers === null ? (
-            <p className="px-4 py-8 text-center text-sm text-neutral-600">
-              Asking Codex for its servers…
-            </p>
-          ) : codexError ? (
-            <p className="px-4 py-8 text-center text-sm text-[var(--danger-400)]">{codexError}</p>
-          ) : codexServers.length === 0 ? (
-            <p className="px-4 py-8 text-center text-sm text-neutral-600">
-              Codex has no MCP servers configured.
-            </p>
-          ) : (
-            codexServers.map((server) => (
-              <CodexServerRow
-                key={server.name}
-                server={server}
-                busy={codexBusy === server.name}
-                onToggle={(enabled) => toggleCodex(server.name, enabled)}
-              />
-            ))
-          )}
-        </SettingGroup>
-      )}
+      <SettingGroup title="From ~/.codex/config.toml">
+        {!codex?.installed ? (
+          <p className="px-4 py-8 text-center text-sm text-neutral-600">
+            Codex is not installed — its MCP servers appear here once it is.
+          </p>
+        ) : !codexLoggedIn ? (
+          <p className="px-4 py-8 text-center text-sm text-neutral-600">
+            Sign in to Codex from Integrations to see and manage its MCP servers.
+          </p>
+        ) : codexServers === null ? (
+          <p className="px-4 py-8 text-center text-sm text-neutral-600">
+            Asking Codex for its servers…
+          </p>
+        ) : codexError ? (
+          <p className="px-4 py-8 text-center text-sm text-[var(--danger-400)]">{codexError}</p>
+        ) : codexServers.length === 0 ? (
+          <p className="px-4 py-8 text-center text-sm text-neutral-600">
+            Codex has no MCP servers configured.
+          </p>
+        ) : (
+          codexServers.map((server) => (
+            <CodexServerRow
+              key={server.name}
+              server={server}
+              busy={codexBusy === server.name}
+              onToggle={(enabled) => toggleCodex(server.name, enabled)}
+            />
+          ))
+        )}
+      </SettingGroup>
 
       <div className="space-y-2 text-xs leading-relaxed text-neutral-600">
         <p>
