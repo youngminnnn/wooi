@@ -25,7 +25,7 @@ export function UserMessage({
 }): React.JSX.Element {
   return (
     <div className="flex justify-end" title={title}>
-      <div className="max-w-[85%] bg-[var(--surface-4)] text-neutral-100 rounded-2xl rounded-br-md px-3.5 py-2 text-base">
+      <div className="min-w-0 max-w-[85%] break-words bg-[var(--surface-4)] text-neutral-100 rounded-2xl rounded-br-md px-3.5 py-2 text-base">
         {children}
         {text && <div className="whitespace-pre-wrap">{text}</div>}
       </div>
