@@ -27,6 +27,7 @@ export default function StackSyncBanner({
   if (!plan) return null
 
   const closed = plan.affected.filter((a) => a.prClosed)
+  const diverged = plan.affected.filter((a) => a.remoteDiverged)
   const names = plan.affected.map((a) => (a.prNumber ? `#${a.prNumber}` : a.branch)).join(', ')
 
   return (
@@ -50,6 +51,20 @@ export default function StackSyncBanner({
               </>
             )}
           </div>
+          {/* 갈라짐은 "실패 예고"가 아니라 "여기는 손대지 않는다"는 예고다 — 깨끗한 worktree 라
+              캐스케이드가 조용히 넘어갈 수 있으므로, 승인 전에 따로 떼어 보여 준다. */}
+          {diverged.length > 0 && (
+            <div className="mt-1 text-[var(--warning-300)]">
+              {diverged.map((d) => (d.prNumber ? `#${d.prNumber}` : d.branch)).join(', ')}{' '}
+              {diverged.length > 1 ? 'were' : 'was'} rewritten on the remote without Wooi pushing —
+              GitHub rebases the branches above a stacked pull request when a lower one merges, and
+              your worktree still holds the older commits. Syncing retargets{' '}
+              {diverged.length > 1 ? 'them' : 'it'} but skips the rebase, because replaying the old
+              commits would fold the merged layer back into{' '}
+              {diverged.length > 1 ? 'those PRs' : 'that PR'}. Check the branch against{' '}
+              <span className="font-mono">origin</span> and take whichever side is right.
+            </div>
+          )}
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
           <button

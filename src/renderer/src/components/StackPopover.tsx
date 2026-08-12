@@ -54,6 +54,8 @@ interface Row {
   pr: PrStatus | null
   behind?: number
   ahead?: number
+  /** GitHub 이 보고한 스택 내 1-기반 위치. GitHub 스택으로 발행된 PR 에만 있다. */
+  ghPosition?: number | null
   onActivate: () => void
   onCreatePr: () => void
 }
@@ -185,6 +187,10 @@ export default function StackPopover({ workspace }: { workspace: Workspace }): R
         depth: depthOf(e.branch),
         isCurrent: e.branch === workspace.branch,
         pr: branchPr[e.branch] ?? null,
+        // 모델 B 는 워크스페이스 하나가 브랜치 전부를 들고 있어, 저장된 위치는 현재
+        // 체크아웃된 브랜치의 것 하나뿐이다. 나머지 행에 순서를 지어내지 않는다 — 이 목록의
+        // 배열 순서 자체가 이미 GitHub 이 준 순서다(팝오버 머리글이 그렇게 밝힌다).
+        ghPosition: e.branch === workspace.branch ? (workspace.ghStackPosition ?? null) : null,
         onActivate: () => void switchTo(e.branch),
         onCreatePr: () => createPrFor(workspace.id, e.branch)
       }))
@@ -201,6 +207,7 @@ export default function StackPopover({ workspace }: { workspace: Workspace }): R
         pr,
         behind: git?.behind,
         ahead: git?.ahead,
+        ghPosition: m.ghStackPosition ?? null,
         onActivate: () => {
           if (m.id !== workspace.id) void select(m.id)
           setOpen(false)
@@ -226,6 +233,12 @@ export default function StackPopover({ workspace }: { workspace: Workspace }): R
   const openPrCount = rows.filter(
     (r) => r.pr && r.pr.state !== 'merged' && r.pr.state !== 'closed'
   ).length
+
+  // GitHub 이 서버에 스택 객체를 들고 있으면 그 번호를 밝힌다. 이 스택의 순서가 Wooi 의 추측이
+  // 아니라 GitHub 이 알려 준 것이라는 뜻이라, 사용자가 github.com 에서 같은 스택을 찾을 수 있다.
+  // 모델 A 는 멤버마다 값이 따로 있으므로 아무 멤버에게서나 집는다(같은 스택이면 번호가 같다).
+  const ghStackNumber =
+    workspace.ghStackNumber ?? members.find((m) => m.ghStackNumber != null)?.ghStackNumber ?? null
 
   return (
     <div className="relative" ref={ref}>
@@ -254,6 +267,14 @@ export default function StackPopover({ workspace }: { workspace: Workspace }): R
         >
           <div className="px-3 py-1.5 text-[11px] uppercase tracking-wider text-neutral-500">
             {branchMode ? `Branch stack · ${count} branches` : `Stack · ${count} workspaces`}
+            {ghStackNumber != null && (
+              <span
+                className="ml-1 text-[var(--accent-300)]/80"
+                title="This chain is a stack on GitHub — the order below is GitHub's, not inferred from PR base links"
+              >
+                · GitHub stack #{ghStackNumber}
+              </span>
+            )}
           </div>
           <div className="max-h-96 overflow-y-auto">
             {rows.map((r) => {
@@ -303,6 +324,14 @@ export default function StackPopover({ workspace }: { workspace: Workspace }): R
                       {r.pr && (
                         <span className="shrink-0 tabular-nums opacity-80">
                           · #{r.pr.number} {r.pr.label}
+                        </span>
+                      )}
+                      {r.ghPosition != null && (
+                        <span
+                          className="shrink-0 tabular-nums text-[var(--accent-300)]/70"
+                          title={`Position ${r.ghPosition} in GitHub's stack (1 is closest to the base branch)`}
+                        >
+                          · L{r.ghPosition}
                         </span>
                       )}
                       {r.behind !== undefined && r.behind > 0 && (

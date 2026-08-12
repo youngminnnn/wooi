@@ -64,6 +64,55 @@ export function buildStackFromPrs(
   return out
 }
 
+/** GitHub 스택 엔트리 1개(ghStack.ts 의 `GhStackEntry` 가 이 모양을 만족한다). */
+export interface GhStackEdge {
+  /** 1-기반. 1 이 base 에 가장 가깝다. */
+  position: number
+  prNumber: number
+  headRef: string
+  baseRef: string
+  /** OPEN | CLOSED | MERGED. */
+  state: string
+}
+
+/**
+ * GitHub 이 서버에 들고 있는 스택 객체를 worktree 내부 브랜치 스택(모델 B)으로 옮긴다.
+ * `buildStackFromPrs` 와 같은 계약이다 — 같은 반환형, anchor 가 없으면 null, 2개 미만이면 null.
+ * 그래서 호출부는 이쪽을 먼저 시도하고 null 이면 그대로 폴백으로 떨어질 수 있다.
+ *
+ * base 링크 복원보다 나은 점은 **순서가 명시적**이라는 것이다. 리타겟이 도중에 실패해 base
+ * 체인이 잠시 끊겨도 position 은 그대로라 스택이 통째로 사라지지 않는다.
+ *
+ * 두 가지를 일부러 좁게 잡는다.
+ * - 병합·닫힌 엔트리는 뺀다. 폴백이 보는 것도 열린 PR 뿐이라, 두 경로가 서로 다른 모양의
+ *   스택을 만들어 캐스케이드가 경로에 따라 다르게 도는 일을 막는다.
+ * - 남은 엔트리 중 하나라도 다른 워크스페이스 소유(exclude)면 통째로 null 을 돌려준다.
+ *   그건 계층마다 worktree 를 따로 둔 모델 A 스택이라는 뜻이고, 모델 B 로 흡수하면 남의
+ *   worktree 브랜치를 이 worktree 의 스택으로 잘못 기록하게 된다. 경계 처리는 폴백이 이미
+ *   제대로 하므로 넘긴다.
+ */
+export function buildStackFromGhStack(
+  anchor: string,
+  stack: { baseRef: string; entries: GhStackEdge[] },
+  exclude: Set<string>
+): StackedBranch[] | null {
+  const live = [...stack.entries]
+    .filter((e) => e.state === 'OPEN')
+    .sort((a, b) => a.position - b.position)
+  if (live.length < 2) return null
+  if (!live.some((e) => e.headRef === anchor)) return null
+  if (live.some((e) => exclude.has(e.headRef))) return null
+
+  return live.map((e, i) => ({
+    branch: e.headRef,
+    // 맨 아래만 PR 이 신고한 base 를 그대로 믿는다 — 아래쪽이 병합되면 GitHub 이 그 PR 을
+    // 조부모로 옮겨 주므로 그 값이 실제 base 다. 그 위는 PR 의 base 대신 position 순서를
+    // 따른다(리타겟이 밀려 base 가 아직 낡아 있을 수 있고, 그때 믿을 것은 순서뿐이다).
+    baseBranch: i === 0 ? e.baseRef || stack.baseRef : live[i - 1].headRef,
+    prNumber: e.prNumber
+  }))
+}
+
 /**
  * 현재 브랜치의 PR base 가 스택 관계와 어긋났는지 판정한다([[types]] BaseMismatch).
  * 어긋나지 않았거나 판단할 근거가 없으면 null(= 호출부는 PR 의 base 를 그대로 채택한다).

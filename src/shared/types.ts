@@ -616,6 +616,17 @@ export interface Workspace {
    */
   baseMismatchDismissed?: string | null
   /**
+   * 이 워크스페이스의 PR 이 속한 **GitHub 스택** 번호(GitHub 이 서버에 들고 있는 stacked PR
+   * 객체). 세 필드 모두 옵셔널이고 폴백 경로에서는 아예 없다 — Wooi 의 체인은 여전히
+   * parentWorkspaceId / ws.stack 이 소유하고, 이 값들은 그 위에 얹히는 메타데이터일 뿐이다.
+   * GitHub 이 스택을 모르면(= base 로만 연결된 오늘의 Wooi PR 들) 전부 null 로 남는다.
+   */
+  ghStackNumber?: number | null
+  /** 그 스택 안에서의 1-기반 위치(1 이 base 에 가장 가깝다). GitHub 이 보고한 값 그대로. */
+  ghStackPosition?: number | null
+  /** 위 두 값을 GitHub 과 마지막으로 맞춘 시각. 값이 낡았는지 판단할 유일한 근거다. */
+  ghStackSyncedAt?: number | null
+  /**
    * 이 워크스페이스가 부모에게 올린 마지막 인계 보고(`report_to_parent`). 없으면 아직 보고 전.
    * 스택 뿌리(parentWorkspaceId 가 null)에는 채워지지 않는다.
    */
@@ -1490,8 +1501,15 @@ export interface StackCascadeStep {
   branch: string
   prNumber: number | null
   kind: StackCascadeStepKind
-  /** skipped = 이미 원하는 상태였음(GitHub 가 자동 retarget 한 경우 등). */
-  status: 'ok' | 'skipped' | 'conflict' | 'failed'
+  /**
+   * - skipped: 이미 원하는 상태였음(GitHub 가 자동 retarget 한 경우 등).
+   * - diverged: 리모트 브랜치가 로컬 tip 과 갈라져 있어 rebase 를 **하지 않았다**. 워킹트리가
+   *   깨끗해도 "할 일 없음"이 아니다 — GitHub 은 스택 아래층이 병합되면 위 브랜치들의 원격 ref
+   *   를 서버에서 다시 쓴다(실측). 그 위에 옛 커밋을 재생하면 위 레이어가 아래층 변경까지 자기
+   *   PR 에 끌어안아 자기만의 diff 를 잃는다. force-with-lease 는 이걸 막지 못하므로(cascade.ts
+   *   참고) 명시적으로 멈추고 사용자에게 알린다.
+   */
+  status: 'ok' | 'skipped' | 'conflict' | 'failed' | 'diverged'
   /** status==='conflict' 일 때 충돌 파일들(RestackResult 와 같은 의미). */
   conflictedFiles?: string[]
   /** 실패·건너뜀 사유(사용자에게 그대로 보여 준다). */
@@ -1503,9 +1521,15 @@ export interface StackCascadeResult {
   steps: StackCascadeStep[]
 }
 
-/** 캐스케이드에서 사용자가 알아야 할(성공이 아닌) 단계만 추린다. */
+/**
+ * 캐스케이드에서 사용자가 알아야 할(성공이 아닌) 단계만 추린다.
+ * diverged 는 실패가 아니라 "일부러 하지 않았다"지만, 하지 않았다는 사실 자체를 사용자가
+ * 알아야 스택이 조용히 어긋난 채로 남지 않는다 — 그래서 문제 목록에 함께 올린다.
+ */
 export function cascadeProblems(result: StackCascadeResult): StackCascadeStep[] {
-  return result.steps.filter((s) => s.status === 'conflict' || s.status === 'failed')
+  return result.steps.filter(
+    (s) => s.status === 'conflict' || s.status === 'failed' || s.status === 'diverged'
+  )
 }
 
 /**
@@ -1524,6 +1548,12 @@ export interface StackSyncPlan {
     prNumber: number | null
     /** base 브랜치가 삭제돼 GitHub 가 PR 을 닫아 버렸는지(복구 단계 필요). */
     prClosed: boolean
+    /**
+     * 리모트 브랜치가 로컬 tip 과 갈라져 있는지. 승인 **전에** 알려야 하는 사실이라 계획에
+     * 함께 담는다 — 이 상태에서 "Sync stack" 을 누르면 캐스케이드가 그 브랜치의 rebase 를
+     * 건너뛰므로(diverged 단계), 무엇이 안 될지 미리 보여 준다.
+     */
+    remoteDiverged?: boolean
   }>
   detectedAt: number
 }

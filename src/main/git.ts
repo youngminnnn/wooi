@@ -581,6 +581,31 @@ export async function restackOnto(
   return { status: 'restacked', baseBranch, pushed }
 }
 
+// ── 리모트 tip 조회 (캐스케이드 갈라짐 판정용) ────────────────────────────
+// 여기서 `origin/<branch>`(리모트 추적 ref)를 쓰지 않는 것이 요점이다. 그건 마지막 fetch 시점의
+// 사진이라, "내가 모르는 사이에 리모트가 바뀌었나"라는 바로 그 질문에는 답할 수 없다.
+// `ls-remote` 는 객체를 받아오지 않고 ref 만 물어보므로 fetch 보다 훨씬 싸다.
+
+/** 리모트(origin)가 지금 들고 있는 브랜치 tip sha. 브랜치가 없거나 조회에 실패하면 null. */
+export async function remoteTipSha(worktreePath: string, branch: string): Promise<string | null> {
+  if (!branch) return null
+  const res = await gitTry(worktreePath, ['ls-remote', '--heads', 'origin', branch])
+  if (!res.ok) return null
+  const sha = res.stdout.split('\n')[0]?.split('\t')[0]?.trim()
+  return sha && /^[0-9a-f]{7,40}$/i.test(sha) ? sha : null
+}
+
+/** 이 저장소가 그 커밋을 알고 있는지. 모르면 리모트가 우리에게 없는 히스토리를 들고 있다는 뜻이다. */
+export async function hasCommit(worktreePath: string, sha: string): Promise<boolean> {
+  if (!sha) return false
+  return (await gitTry(worktreePath, ['cat-file', '-e', `${sha}^{commit}`])).ok
+}
+
+/** a 가 b 의 조상인지(같아도 true). */
+export async function isAncestor(worktreePath: string, a: string, b: string): Promise<boolean> {
+  return (await gitTry(worktreePath, ['merge-base', '--is-ancestor', a, b])).ok
+}
+
 /** 진행 중인 rebase 를 취소해 워크스페이스를 rebase 직전 상태로 되돌린다(충돌 포기용). */
 export async function abortRebase(worktreePath: string): Promise<void> {
   await git(worktreePath, ['rebase', '--abort']).catch(() => {})

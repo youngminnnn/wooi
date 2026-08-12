@@ -124,6 +124,12 @@ async function connectedFresh(): Promise<boolean> {
   return probeGithub()
 }
 
+// ghStack.ts 가 gh 를 부를 때 쓰는 통로. 복사하지 않고 빌려 쓰는 이유는 위의 두 가지 규칙 때문이다
+// — 로그인 셸로 띄워야 GUI 앱 PATH 에 없는 gh 를 찾고, GITHUB_TOKEN/GH_TOKEN 을 지워야 SSO
+// 미인증 토큰이 정상 자격증명을 가리지 않는다. 어느 한쪽만 다르게 구현되면 그쪽 조회만 조용히
+// 실패한다. (스택 발행 계열은 여전히 ghStack.ts 밖으로 나가지 않는다 — 그쪽 경계는 그대로다.)
+export { runLoginShell as runGh, connected as ghReadReady }
+
 const NOT_CONNECTED =
   'GitHub is not connected. Connect the GitHub CLI (gh) in Settings → Integrations.'
 
