@@ -403,9 +403,28 @@ function Item({
       return <TaskCard item={item} />
     case 'handoff':
       return <HandoffCard item={item} />
+    case 'unknown':
+      return <UnknownCard item={item} />
     default:
       return null
   }
+}
+
+function UnknownCard({
+  item
+}: {
+  item: Extract<ChatItem, { type: 'unknown' }>
+}): React.JSX.Element {
+  const backend = item.backend === 'claude' ? 'Claude Code' : 'Codex'
+  return (
+    <div className="rounded-lg border border-[var(--border-2)] bg-[var(--surface)] px-3 py-2 text-xs text-neutral-500">
+      <div>
+        Wooi didn&apos;t recognize something from {backend} — {item.what}. The conversation
+        continued without it.
+      </div>
+      {item.hint && <div className="mt-1 text-neutral-600">{item.hint}</div>}
+    </div>
+  )
 }
 
 /**
@@ -844,6 +863,8 @@ function itemText(it: ChatItem): string {
       return `${it.name} ${it.description} ${it.summary ?? ''}`
     case 'handoff':
       return `${it.childName} ${it.childBranch} ${it.summary}`
+    case 'unknown':
+      return it.what
     default:
       return ''
   }
