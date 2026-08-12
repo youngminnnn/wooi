@@ -549,3 +549,25 @@ code.hljs {
 .multi-agent-mark {
   color: var(--accent-400);
 }
+/* 채팅 폭은 창 폭뿐 아니라 work panel에도 좌우되므로 viewport가 아닌 헤더 자체를 기준으로
+   액션을 정리한다. 식별 영역은 항상 남겨 워크스페이스와 변경 상태가 사라지지 않게 한다. */
+.workspace-header {
+  container-type: inline-size;
+}
+
+.workspace-header-identity {
+  flex: 1 1 auto;
+}
+
+@container (max-width: 800px) {
+  .workspace-header-action-secondary {
+    display: none;
+  }
+}
+
+@container (max-width: 600px) {
+  .workspace-header-stack,
+  .workspace-header-pr {
+    display: none;
+  }
+}

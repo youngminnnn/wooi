@@ -280,8 +280,8 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
   return (
     <div className="h-full flex flex-col min-w-0">
       {/* 헤더 */}
-      <div className="h-12 shrink-0 flex items-center gap-3 px-4 border-b border-[var(--border)]">
-        <div className="min-w-0">
+      <div className="workspace-header h-12 shrink-0 flex items-center gap-3 px-4 border-b border-[var(--border)]">
+        <div className="workspace-header-identity min-w-0">
           {editingName !== null ? (
             <input
               autoFocus
@@ -292,7 +292,7 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
                 if (e.key === 'Enter') commitName()
                 else if (e.key === 'Escape') setEditingName(null)
               }}
-              className="text-base font-semibold text-neutral-100 bg-[var(--surface)] border border-[var(--border-strong)] rounded px-1.5 py-0.5 outline-none"
+              className="w-full min-w-0 text-base font-semibold text-neutral-100 bg-[var(--surface)] border border-[var(--border-strong)] rounded px-1.5 py-0.5 outline-none"
             />
           ) : (
             <div className="group/name flex items-center gap-1 min-w-0">
@@ -324,7 +324,7 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
               </button>
             </div>
           )}
-          <div className="flex items-center gap-1.5 text-xs text-neutral-500">
+          <div className="flex min-w-0 items-center gap-1.5 overflow-hidden text-xs text-neutral-500">
             {/* 멀티 에이전트는 이름 옆 브랜드 마크만으로는 드러나지 않는다 — 그 마크는 메인
                 에이전트일 뿐이라, 이 워크스페이스에서 다른 종류도 돌 수 있다는 사실은 따로
                 말해 줘야 한다. 위임이 실제로 열려 있을 때만 뜬다(useMultiAgent). */}
@@ -344,13 +344,13 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
                 {multiAgent.active ? 'Agent team' : 'Solo'}
               </button>
             )}
-            <GitBranch size={11} />
-            <span className="truncate">{workspace.branch}</span>
+            <GitBranch size={11} className="shrink-0" />
+            <span className="min-w-0 truncate">{workspace.branch}</span>
             {git && (
               <button
                 onClick={() => setShowDiff(true)}
                 disabled={git.changedFiles === 0}
-                className="text-neutral-500 hover:text-neutral-200 disabled:hover:text-neutral-500 disabled:cursor-default"
+                className="shrink-0 whitespace-nowrap text-neutral-500 hover:text-neutral-200 disabled:hover:text-neutral-500 disabled:cursor-default"
                 title={git.changedFiles > 0 ? 'View changes' : 'No changes'}
               >
                 · {git.changedFiles} changed{git.ahead > 0 ? ` · ↑${git.ahead}` : ''}
@@ -359,7 +359,7 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
             )}
             <button
               onClick={refresh}
-              className="text-neutral-600 hover:text-neutral-300"
+              className="shrink-0 text-neutral-600 hover:text-neutral-300"
               title="Refresh git & PR status"
             >
               <RefreshCw size={10} className={refreshing ? 'animate-spin' : ''} />
@@ -409,132 +409,139 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
           </div>
         </div>
 
-        <div className="flex-1" />
-
-        <HeaderButton
-          title={
-            scriptsDetached
-              ? 'Scripts — open in a separate window'
-              : devRunning
-                ? 'Scripts — dev running'
-                : 'Run project scripts'
-          }
-          shortcut="⇧⌘S"
-          onClick={() =>
-            scriptsDetached
-              ? void window.api.pane.focus('scripts')
-              : setShowScripts(workspace.id, !showScripts)
-          }
-          active={showScripts || scriptsDetached}
-          indicator={devRunning}
-        >
-          <Terminal size={15} />
-        </HeaderButton>
-        <HeaderButton
-          title="Open a file in the big viewer"
-          shortcut="⇧⌘O"
-          onClick={openFileQuickOpen}
-        >
-          <FileSearch size={15} />
-        </HeaderButton>
-        <HeaderButton
-          title="Open in editor"
-          shortcut="⇧⌘E"
-          onClick={() => void window.api.workspace.openInEditor(workspace.id)}
-        >
-          <Code2 size={15} />
-        </HeaderButton>
-        <HeaderButton
-          title="Reveal in Finder"
-          shortcut="⇧⌘F"
-          onClick={() => void window.api.workspace.revealInFinder(workspace.id)}
-        >
-          <FolderOpen size={15} />
-        </HeaderButton>
-        <ExportMenu workspaceId={workspace.id} title={displayName} />
-        <HeaderButton title="Archive workspace" shortcut="⇧⌘⌫" onClick={archiveWorkspace} danger>
-          <Archive size={15} />
-        </HeaderButton>
-        <HeaderButton
-          title={
-            workPaneDetached
-              ? 'Work panel — open in a separate window'
-              : rightPanelOpen
-                ? 'Hide work panel'
-                : 'Show work panel'
-          }
-          shortcut="⌘J"
-          onClick={toggleRightPanel}
-          active={rightPanelOpen || workPaneDetached}
-        >
-          <PanelRight size={15} />
-        </HeaderButton>
-
-        {/* Stack 조망·전환: 에이전트나 모델 A 로 만들어진 스택을 관리한다(우측 패널과 무관). */}
-        <div className="flex items-center gap-1 pl-2 ml-0.5 border-l border-[var(--border)] empty:hidden empty:border-l-0 empty:pl-0">
-          <StackPopover workspace={workspace} />
-        </div>
-
-        {/* PR 상태 + 링크: 헤더 우측 끝. 상태별 색·아이콘으로 한눈에 구분. 조회 중이면 스피너를 곁들인다. */}
-        {(pr || (git && git.ahead > 0) || prRefreshing) && (
-          <div className="flex items-center gap-1 pl-2 ml-0.5 border-l border-[var(--border)]">
-            {prRefreshing && (
-              <span title="Refreshing pull request…" className="shrink-0 grid place-items-center">
-                <Loader2 size={12} className="animate-spin text-neutral-500" />
-              </span>
-            )}
-            {pr
-              ? (() => {
-                  const { Icon, iconClass, badgeClass } = PR_STYLE[pr.state]
-                  return (
-                    <button
-                      onClick={() => void window.api.openExternal(pr.url)}
-                      className={
-                        'flex items-center gap-1.5 text-xs px-2 py-1 rounded-md border ' +
-                        badgeClass +
-                        (prRefreshing ? ' opacity-60' : '')
-                      }
-                      title={`${pr.label} — open pull request #${pr.number} in browser`}
-                    >
-                      <Icon size={12} className={iconClass} />
-                      <span className="opacity-75">#{pr.number}</span>
-                      <span className="font-medium">{pr.label}</span>
-                      <ExternalLink size={10} className="opacity-70" />
-                    </button>
-                  )
-                })()
-              : null}
-            {pr ? (
-              <PrActionsMenu workspaceId={workspace.id} pr={pr} />
-            ) : (
-              // 조회 중에는 "Create PR" 을 감춰 깜빡임을 막고 스피너만 보여 준다(끝나면 실제 상태로 결정).
-              // gh 미연결이면 버튼을 숨기지 않고 "Connect GitHub" 로 바꿔 기능의 존재를 알린다.
-              !prRefreshing && (
-                <button
-                  onClick={createPr}
-                  className="flex items-center gap-1.5 text-xs px-2 py-1 rounded-md bg-[var(--surface)] border border-[var(--border)] text-neutral-300 hover:border-[var(--border-strong)]"
-                  title={
-                    githubDisconnected
-                      ? 'Connect GitHub to open a pull request for this branch'
-                      : 'Open a pull request for this branch'
-                  }
-                >
-                  {githubDisconnected ? (
-                    <>
-                      <GithubMark size={12} />
-                      Connect GitHub
-                    </>
-                  ) : (
-                    <>
-                      <GitPullRequestCreate size={12} className="text-[var(--accent-400)]" />
-                      Create PR
-                    </>
-                  )}
-                </button>
-              )
-            )}
+        <div className="workspace-header-actions flex shrink-0 items-center gap-3">
+          <div className="workspace-header-action-secondary contents">
+            <HeaderButton
+              title={
+                scriptsDetached
+                  ? 'Scripts — open in a separate window'
+                  : devRunning
+                    ? 'Scripts — dev running'
+                    : 'Run project scripts'
+              }
+              shortcut="⇧⌘S"
+              onClick={() =>
+                scriptsDetached
+                  ? void window.api.pane.focus('scripts')
+                  : setShowScripts(workspace.id, !showScripts)
+              }
+              active={showScripts || scriptsDetached}
+              indicator={devRunning}
+            >
+              <Terminal size={15} />
+            </HeaderButton>
+            <HeaderButton
+              title="Open a file in the big viewer"
+              shortcut="⇧⌘O"
+              onClick={openFileQuickOpen}
+            >
+              <FileSearch size={15} />
+            </HeaderButton>
+            <HeaderButton
+              title="Open in editor"
+              shortcut="⇧⌘E"
+              onClick={() => void window.api.workspace.openInEditor(workspace.id)}
+            >
+              <Code2 size={15} />
+            </HeaderButton>
+            <HeaderButton
+              title="Reveal in Finder"
+              shortcut="⇧⌘F"
+              onClick={() => void window.api.workspace.revealInFinder(workspace.id)}
+            >
+              <FolderOpen size={15} />
+            </HeaderButton>
+            <ExportMenu workspaceId={workspace.id} title={displayName} />
+            <HeaderButton
+              title="Archive workspace"
+              shortcut="⇧⌘⌫"
+              onClick={archiveWorkspace}
+              danger
+            >
+              <Archive size={15} />
+            </HeaderButton>
           </div>
-        )}
+          <HeaderButton
+            title={
+              workPaneDetached
+                ? 'Work panel — open in a separate window'
+                : rightPanelOpen
+                  ? 'Hide work panel'
+                  : 'Show work panel'
+            }
+            shortcut="⌘J"
+            onClick={toggleRightPanel}
+            active={rightPanelOpen || workPaneDetached}
+          >
+            <PanelRight size={15} />
+          </HeaderButton>
+
+          {/* Stack 조망·전환: 에이전트나 모델 A 로 만들어진 스택을 관리한다(우측 패널과 무관). */}
+          <div className="workspace-header-stack flex items-center gap-1 pl-2 ml-0.5 border-l border-[var(--border)] empty:hidden empty:border-l-0 empty:pl-0">
+            <StackPopover workspace={workspace} />
+          </div>
+
+          {/* PR 상태 + 링크: 헤더 우측 끝. 상태별 색·아이콘으로 한눈에 구분. 조회 중이면 스피너를 곁들인다. */}
+          {(pr || (git && git.ahead > 0) || prRefreshing) && (
+            <div className="workspace-header-pr flex items-center gap-1 pl-2 ml-0.5 border-l border-[var(--border)]">
+              {prRefreshing && (
+                <span title="Refreshing pull request…" className="shrink-0 grid place-items-center">
+                  <Loader2 size={12} className="animate-spin text-neutral-500" />
+                </span>
+              )}
+              {pr
+                ? (() => {
+                    const { Icon, iconClass, badgeClass } = PR_STYLE[pr.state]
+                    return (
+                      <button
+                        onClick={() => void window.api.openExternal(pr.url)}
+                        className={
+                          'flex items-center gap-1.5 text-xs px-2 py-1 rounded-md border ' +
+                          badgeClass +
+                          (prRefreshing ? ' opacity-60' : '')
+                        }
+                        title={`${pr.label} — open pull request #${pr.number} in browser`}
+                      >
+                        <Icon size={12} className={iconClass} />
+                        <span className="opacity-75">#{pr.number}</span>
+                        <span className="font-medium">{pr.label}</span>
+                        <ExternalLink size={10} className="opacity-70" />
+                      </button>
+                    )
+                  })()
+                : null}
+              {pr ? (
+                <PrActionsMenu workspaceId={workspace.id} pr={pr} />
+              ) : (
+                // 조회 중에는 "Create PR" 을 감춰 깜빡임을 막고 스피너만 보여 준다(끝나면 실제 상태로 결정).
+                // gh 미연결이면 버튼을 숨기지 않고 "Connect GitHub" 로 바꿔 기능의 존재를 알린다.
+                !prRefreshing && (
+                  <button
+                    onClick={createPr}
+                    className="flex items-center gap-1.5 text-xs px-2 py-1 rounded-md bg-[var(--surface)] border border-[var(--border)] text-neutral-300 hover:border-[var(--border-strong)]"
+                    title={
+                      githubDisconnected
+                        ? 'Connect GitHub to open a pull request for this branch'
+                        : 'Open a pull request for this branch'
+                    }
+                  >
+                    {githubDisconnected ? (
+                      <>
+                        <GithubMark size={12} />
+                        Connect GitHub
+                      </>
+                    ) : (
+                      <>
+                        <GitPullRequestCreate size={12} className="text-[var(--accent-400)]" />
+                        Create PR
+                      </>
+                    )}
+                  </button>
+                )
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* 외부 병합으로 스택이 stale 해졌을 때의 승인 배너(force-push 는 승인 후에만). */}
