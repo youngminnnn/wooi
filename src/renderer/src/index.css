@@ -354,6 +354,15 @@ a:focus-visible {
 }
 
 /*
+  스크롤은 되되 스크롤바는 그리지 않는 영역(터미널 탭바처럼 높이가 한 줄뿐이라 9px 스크롤바가
+  내용을 밀어내는 곳).
+*/
+.no-scrollbar::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+/*
   문법 하이라이트 규칙 — 예전엔 main.tsx 가 'highlight.js/styles/github-dark.css' 를 통째로
   import 했지만, 그 색은 하드코딩이라 라이트 모드의 밝은 코드 표면에서 읽히지 않았다.
   github-dark 와 github(light) 는 규칙(선택자 그룹) 구조가 완전히 동일하므로, 규칙은 한 번만

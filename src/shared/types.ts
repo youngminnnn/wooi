@@ -686,6 +686,16 @@ export interface Workspace {
   archived: boolean
   /** 이 워크스페이스의 모든 알림(OS 알림·소리·Dock 배지)을 음소거한다. 레거시는 undefined=false. */
   muted?: boolean
+  /**
+   * 우하단 터미널의 탭 목록(각 탭 = 독립 PTY). 없거나 비어 있으면 첫 조회 때 탭 하나를 만들어
+   * 채운다 — 레거시 워크스페이스는 마이그레이션 없이 "탭 1개" 로 읽힌다.
+   *
+   * 셸 세션 자체는 영속하지 않는다(PTY 는 프로세스 수명). 앱을 다시 켜면 이 목록(개수·이름)만
+   * 복원되고 셸은 새로 뜬다.
+   */
+  terminalTabs?: TerminalTab[]
+  /** 마지막으로 보고 있던 터미널 탭. terminalTabs 에 없는 값이면 첫 탭으로 되돌린다. */
+  activeTerminalTabId?: string
   createdAt: number
   lastActiveAt: number
 }
@@ -2069,11 +2079,22 @@ export const IPC = {
   fsRead: 'fs:read',
   /** 입력창 `@` 자동완성용 파일 검색(git ls-files 기반 퍼지 매칭). */
   fsSearch: 'fs:search',
-  // 인터랙티브 터미널 (worktree PTY)
+  // 인터랙티브 터미널 (worktree PTY — 탭 하나당 하나)
   terminalStart: 'terminal:start',
   terminalInput: 'terminal:input',
   terminalResize: 'terminal:resize',
+  /** 워크스페이스의 터미널 PTY 를 전부 끊는다(탭 구성은 남는다). */
   terminalKill: 'terminal:kill',
+  /** 워크스페이스의 탭 구성을 읽는다(없으면 탭 하나를 만들어 돌려준다). */
+  terminalTabs: 'terminal:tabs',
+  /** 새 탭을 만들고 그 탭을 활성으로 잡는다. */
+  terminalTabCreate: 'terminal:tabCreate',
+  /** 탭을 닫고 그 PTY 를 종료한다. 마지막 탭을 닫으면 빈 탭 하나가 새로 생긴다. */
+  terminalTabClose: 'terminal:tabClose',
+  /** 탭 이름을 바꾼다(빈 문자열이면 기본 이름으로 되돌린다). */
+  terminalTabRename: 'terminal:tabRename',
+  /** 보고 있는 탭을 바꾼다. */
+  terminalTabSelect: 'terminal:tabSelect',
   /** 입력창의 `!명령` (Claude Code CLI bash 모드)을 PTY 에서 실행한다. */
   terminalRunCommand: 'terminal:runCommand',
   /** 입력창의 `!명령` 을 1회 실행하고 출력을 대화 흐름(트랜스크립트)에 인라인으로 흘려보낸다. */
@@ -2133,6 +2154,8 @@ export const IPC = {
   evtTerminalData: 'evt:terminalData',
   /** 터미널 PTY 종료. */
   evtTerminalExit: 'evt:terminalExit',
+  /** 터미널 탭 구성 변경(생성·닫기·이름 변경·선택). 메인 창과 분리한 패널 창이 함께 따라간다. */
+  evtTerminalTabs: 'evt:terminalTabs',
   /** 앱 내부 Claude 로그인 진행 이벤트(인증 URL 노출 / 코드 입력 요청 / 완료). */
   evtClaudeLogin: 'evt:claudeLogin',
   /** 앱 내부 Codex 로그인 진행 이벤트(브라우저 인증 URL 노출 / 완료). */
@@ -2670,8 +2693,25 @@ export const MENTION_DROP_HINT_BYTES = 256 * 1024
 
 // ── 인터랙티브 터미널 (worktree PTY) ──────────────────────────────────────
 
+/** 터미널 탭 하나 = PTY 하나. 셸 세션은 영속하지 않고 이 메타데이터만 저장한다. */
+export interface TerminalTab {
+  id: string
+  /** 사용자가 탭을 더블클릭해 붙인 이름. 없으면 화면이 순번으로 이름을 만든다(Terminal, Terminal 2 …). */
+  title?: string
+}
+
+/** 한 워크스페이스의 터미널 탭 구성. 탭이 바뀔 때마다 모든 창에 이 형태로 방송된다. */
+export interface TerminalTabsState {
+  workspaceId: string
+  tabs: TerminalTab[]
+  /** 지금 보고 있는 탭. tabs 가 비어 있지 않은 한 항상 그중 하나를 가리킨다. */
+  activeId: string
+}
+
 export interface TerminalDataEvent {
   workspaceId: string
+  /** 이 출력을 낸 탭(PTY). */
+  terminalId: string
   data: string
   /** true 면 재부착 시 누적 버퍼 재생 — 수신 측은 화면을 비우고 data 로 다시 채운다. */
   reset?: boolean
@@ -2679,6 +2719,8 @@ export interface TerminalDataEvent {
 
 export interface TerminalExitEvent {
   workspaceId: string
+  /** 종료된 탭(PTY). */
+  terminalId: string
   code: number | null
 }
 

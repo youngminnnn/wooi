@@ -193,7 +193,8 @@ export default function App(): React.JSX.Element {
         return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)
       }
 
-      if (e.key === 'Tab' && e.shiftKey) {
+      // ⇧⇥ 만 받는다 — ⌃⇥ 계열은 터미널 탭 전환이라 권한 모드를 건드리면 안 된다.
+      if (e.key === 'Tab' && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
         const ws = st.app?.workspaces.find((w) => w.id === st.selectedWorkspaceId)
         if (!ws) return
         // 순환 목록은 그 워크스페이스의 백엔드가 정한다(Claude 와 Codex 는 모드가 서로 다르다).

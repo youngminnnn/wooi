@@ -55,6 +55,7 @@ import type {
   SlashCommandInfo,
   TerminalDataEvent,
   TerminalExitEvent,
+  TerminalTabsState,
   TranscriptSearchResult,
   UpdateFromBaseResult,
   UpdateStatus,
@@ -411,9 +412,9 @@ export interface WooiApi {
   }
 
   terminal: {
-    /** workspace PTY 를 보장하고 현재 화면 버퍼를 재생한다. */
-    start(workspaceId: string, cols: number, rows: number): Promise<void>
-    input(workspaceId: string, data: string): Promise<void>
+    /** 탭(terminalId)의 PTY 를 보장하고 현재 화면 버퍼를 재생한다. */
+    start(workspaceId: string, terminalId: string, cols: number, rows: number): Promise<void>
+    input(workspaceId: string, terminalId: string, data: string): Promise<void>
     /**
      * 입력창의 `!명령` 을 PTY 에서 실행한다(Claude Code CLI 의 bash 모드).
      * 터미널이 아직 안 떠 있으면 기본 크기로 띄운 뒤 명령을 보낸다.
@@ -426,10 +427,22 @@ export interface WooiApi {
     exec(workspaceId: string, command: string): Promise<void>
     /** 진행 중인 인라인 `!명령`(exec)을 중단한다. itemId 는 해당 bash 아이템의 id. */
     killInline(workspaceId: string, itemId: string): Promise<void>
-    resize(workspaceId: string, cols: number, rows: number): Promise<void>
+    resize(workspaceId: string, terminalId: string, cols: number, rows: number): Promise<void>
+    /** workspace 의 모든 터미널 PTY 를 끊는다(탭 구성은 남는다). */
     kill(workspaceId: string): Promise<void>
+    /** 탭 구성을 읽는다. 탭이 하나도 없으면 메인이 하나 만들어 돌려준다. */
+    tabs(workspaceId: string): Promise<TerminalTabsState>
+    /** 새 탭을 만들고 그 탭으로 옮겨 간다. 갱신된 구성을 돌려준다. */
+    createTab(workspaceId: string): Promise<TerminalTabsState>
+    /** 탭을 닫고 그 PTY 를 종료한다. 마지막 탭을 닫으면 빈 탭이 새로 생긴다. */
+    closeTab(workspaceId: string, terminalId: string): Promise<TerminalTabsState>
+    /** 탭 이름을 바꾼다(빈 문자열이면 기본 이름으로 되돌린다). */
+    renameTab(workspaceId: string, terminalId: string, title: string): Promise<TerminalTabsState>
+    selectTab(workspaceId: string, terminalId: string): Promise<TerminalTabsState>
     onData(cb: (e: TerminalDataEvent) => void): () => void
     onExit(cb: (e: TerminalExitEvent) => void): () => void
+    /** 탭 구성 변경 방송 — 다른 창(분리한 작업 패널)에서 바꾼 것도 여기로 들어온다. */
+    onTabs(cb: (e: TerminalTabsState) => void): () => void
   }
 
   /**
