@@ -96,7 +96,7 @@ export function WorkspaceAgents({
               {/* 좌측 마크가 "어떤 에이전트로 돌고 있나"(Claude Code / Codex)를, 옆 텍스트가
                 "어떤 서브에이전트인가"(Explore 등)를 나타낸다 — 두 축이 겹치지 않는다. */}
               <span className="shrink-0 translate-y-0.5">
-                <AgentBackendMark backend={agentBackend} size={14} />
+                <AgentBackendMark backend={agentBackend} size={10} />
               </span>
               {/* 타입 이름도 결국 잘린다 — `humanize-korean:translationese-research-distiller`
                   처럼 긴 이름이 오면 shrink-0 은 행을 사이드바 폭 밖으로 밀어내 경과 시간까지
