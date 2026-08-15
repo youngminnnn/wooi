@@ -1,16 +1,18 @@
 import { useEffect, useRef, useState } from 'react'
 import { ChevronDown, GitMerge, Loader2, RefreshCw } from 'lucide-react'
-import type { GitStatus, Workspace } from '@shared/types'
+import type { GitStatus, PrState, Workspace } from '@shared/types'
 import { useStore } from '../store'
 
 export default function BaseSyncControl({
   workspace,
   git,
+  prState,
   prNeedsBaseUpdate,
   refresh
 }: {
   workspace: Workspace
   git: GitStatus
+  prState?: PrState
   prNeedsBaseUpdate?: boolean
   refresh: () => Promise<void>
 }): React.JSX.Element | null {
@@ -51,7 +53,13 @@ export default function BaseSyncControl({
   }, [menuOpen])
 
   const busy = !!progress && !progress.finished
-  if (git.behind <= 0 && !prNeedsBaseUpdate && !workspace.stackSync && !busy && !showFinished)
+  // 병합된 PR 의 브랜치는 main 보다 뒤처져 있는 것이 정상이다. 이 값을 일반 rebase 신호로
+  // 취급하면 병합 직후에도 "Rebase onto main" 이 남는다. 다만 병합 때문에 생긴 stackSync 와
+  // 이미 진행 중인 작업의 완료 표시는 계속 노출해야 한다.
+  if (
+    (prState === 'merged' && !workspace.stackSync && !busy && !showFinished) ||
+    (git.behind <= 0 && !prNeedsBaseUpdate && !workspace.stackSync && !busy && !showFinished)
+  )
     return null
 
   const doneBranches = new Set(progress?.done.map((step) => step.branch) ?? []).size

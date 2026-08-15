@@ -386,6 +386,7 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
                 <BaseSyncControl
                   workspace={workspace}
                   git={git}
+                  prState={pr?.state}
                   prNeedsBaseUpdate={pr?.needsBaseUpdate}
                   refresh={refresh}
                 />

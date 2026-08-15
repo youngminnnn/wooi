@@ -201,6 +201,27 @@ describe('gh 연결됨 (무회귀)', () => {
     })
   })
 
+  it('이미 병합된 PR 에 남은 BEHIND 값은 base 업데이트 필요로 보지 않는다', async () => {
+    reply = () => ({
+      code: 0,
+      stdout: JSON.stringify({
+        number: 10,
+        url: 'https://github.com/o/r/pull/10',
+        title: 'Already merged',
+        state: 'MERGED',
+        isDraft: false,
+        reviewDecision: 'APPROVED',
+        mergeable: 'UNKNOWN',
+        mergeStateStatus: 'BEHIND'
+      })
+    })
+
+    await expect(getPrStatus('/tmp/wt')).resolves.toMatchObject({
+      state: 'merged',
+      needsBaseUpdate: false
+    })
+  })
+
   it('쓰기 액션은 확인 없이 바로 gh 를 실행한다', async () => {
     reply = () => ({ code: 0, stdout: '' })
     await expect(closePr('/tmp/wt')).resolves.toEqual({})
