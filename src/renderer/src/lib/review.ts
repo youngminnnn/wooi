@@ -159,11 +159,20 @@ export function selectionSummary(session: ReviewSession, view: ReviewViewState):
  * 키에 **PR 번호가 들어간다** — 스택에서는 같은 경로·같은 줄이 여러 레이어에 있고, 그 둘은
  * 서로 다른 코드다. 번호를 빼면 아래 레이어의 지적이 위 레이어의 같은 줄 아래에도 그려진다.
  */
-export function indexFindingsByRow(findings: ReviewFinding[]): Map<string, ReviewFinding[]> {
+export function indexFindingsByRow(
+  findings: ReviewFinding[],
+  /** 옛 단일 PR 레코드의 번호 없는 앵커를 현재 유일한 레이어에 귀속시킨다. */
+  defaultPrNumber?: number
+): Map<string, ReviewFinding[]> {
   const map = new Map<string, ReviewFinding[]>()
   for (const f of findings) {
     if (!f.anchor) continue
-    const key = rowKey(f.anchor.prNumber, f.anchor.file, f.anchor.side, f.anchor.line)
+    const key = rowKey(
+      f.anchor.prNumber ?? defaultPrNumber,
+      f.anchor.file,
+      f.anchor.side,
+      f.anchor.line
+    )
     const list = map.get(key)
     if (list) list.push(f)
     else map.set(key, [f])

@@ -3,6 +3,8 @@ import type { PostedComment, ReviewActivityItem, ReviewFinding, ReviewSession } 
 import {
   buildSubmitPlan,
   emptyView,
+  findingsForRow,
+  indexFindingsByRow,
   isPosted,
   matchesPrQuery,
   orderedAnchoredFindings,
@@ -288,6 +290,35 @@ describe('orderedAnchoredFindings', () => {
 
   it('diff 를 아직 못 읽었으면 갈 곳이 없다', () => {
     expect(orderedAnchoredFindings([], [at('a10', 'a.ts', 10)])).toEqual([])
+  })
+})
+
+describe('findingsForRow', () => {
+  const anchored = (prNumber?: number): ReviewFinding => ({
+    ...finding('inline'),
+    anchor: {
+      ...(prNumber === undefined ? {} : { prNumber }),
+      file: 'src/a.ts',
+      side: 'RIGHT',
+      line: 12,
+      startLine: null,
+      snappedFrom: null
+    }
+  })
+  const row = { kind: 'add' as const, oldLine: null, newLine: 12, text: 'added' }
+
+  it('PR 번호가 있는 단일 리뷰 앵커를 해당 레이어의 줄에 표시한다', () => {
+    const item = anchored(7)
+    expect(findingsForRow(indexFindingsByRow([item]), 7, 'src/a.ts', row)).toEqual([item])
+  })
+
+  it('옛 단일 리뷰 앵커는 번호 없는 조회와 계속 맞는다', () => {
+    const item = anchored()
+    expect(findingsForRow(indexFindingsByRow([item], 7), 7, 'src/a.ts', row)).toEqual([item])
+  })
+
+  it('다른 PR 레이어의 같은 파일과 줄에는 표시하지 않는다', () => {
+    expect(findingsForRow(indexFindingsByRow([anchored(7)]), 8, 'src/a.ts', row)).toEqual([])
   })
 })
 
