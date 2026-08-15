@@ -368,10 +368,21 @@ export function exhaustedResetTimes(
     .filter((at) => Number.isFinite(at) && at > now)
 }
 
-/** 스냅샷이 "아직 제한 중" 이라고 말하는지. reset 시각이 지났는지는 보지 않는다. */
-export function isRateLimited(snapshot: RateLimitSnapshot | undefined): boolean {
+/**
+ * 스냅샷이 "아직 제한 중" 이라고 말하는지.
+ *
+ * Claude usage 응답은 창이 reset 된 직후에도 utilization=100 을 잠시 유지할 수 있다. 새로 조회한
+ * 스냅샷의 resetsAt 이 이미 지났다면 서버가 알려 준 해제 시각을 우선해 풀린 것으로 본다. 시각이
+ * 없거나 해석할 수 없을 때만 100% 자체를 제한의 근거로 남긴다.
+ */
+export function isRateLimited(snapshot: RateLimitSnapshot | undefined, now = Date.now()): boolean {
   if (!snapshot?.available) return false
-  return snapshot.windows.some((window) => (window.utilization ?? 0) >= 100)
+  return snapshot.windows.some((window) => {
+    if ((window.utilization ?? 0) < 100) return false
+    if (!window.resetsAt) return true
+    const resetsAt = Date.parse(window.resetsAt)
+    return !Number.isFinite(resetsAt) || resetsAt > now
+  })
 }
 
 /** reset 시각을 모를 때 다음 확인까지 기다릴 시간. 시도마다 배로 늘려 한 시간에서 멈춘다. */

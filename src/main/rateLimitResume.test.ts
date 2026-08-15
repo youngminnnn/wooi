@@ -76,14 +76,22 @@ describe('rate-limit resume scheduling', () => {
     expect(retryTime(undefined, NOW, 2)).toBe(NOW + 20 * 60_000 + 15_000)
   })
 
-  it('reset 시각이 이미 지났어도 100% 면 아직 제한으로 본다', () => {
-    // 이 창은 exhaustedResetTimes 로는 걸러진다(미래가 아니므로) — 그것만 보고 "풀렸다" 고
-    // 판단하면 다시 걸릴 게 뻔한 턴을 보내게 된다.
+  it('새 스냅샷의 reset 시각이 지났다면 사용률 갱신이 늦어도 제한이 풀린 것으로 본다', () => {
     const limits = snapshot([
       { label: '5-hour', utilization: 100, resetsAt: '2026-08-09T23:00:00Z' }
     ])
     expect(exhaustedResetTimes(limits, NOW)).toEqual([])
-    expect(isRateLimited(limits)).toBe(true)
+    expect(isRateLimited(limits, NOW)).toBe(false)
+    expect(
+      isRateLimited(
+        snapshot([{ label: '5-hour', utilization: 100, resetsAt: '2026-08-10T01:00:00Z' }]),
+        NOW
+      )
+    ).toBe(true)
+    // reset 시각을 받지 못했다면 100% 신호를 버릴 근거가 없으므로 계속 제한으로 본다.
+    expect(isRateLimited(snapshot([{ label: '5-hour', utilization: 100, resetsAt: null }]), NOW)).toBe(
+      true
+    )
     expect(isRateLimited(snapshot([{ label: '5-hour', utilization: 40, resetsAt: null }]))).toBe(
       false
     )
@@ -271,6 +279,45 @@ describe('RateLimitResumeCoordinator', () => {
 
     await coordinator.noteRateLimit(WORKSPACE_ID)
     await vi.advanceTimersByTimeAsync(5 * 60_000 + 15_000)
+
+    expect(sent).toHaveBeenCalledWith(WORKSPACE_ID)
+    expect(store.getState().workspaces[0].pendingRateLimitResume).toBeNull()
+    expect(store.getState().workspaces[0].rateLimited).toBeNull()
+  })
+
+  it('Claude 사용률이 100%로 늦게 갱신돼도 reset 시각이 지났으면 이어 보낸다', async () => {
+    const { getStore } = await import('./store')
+    const store = getStore()
+    seedWorkspace(store)
+    const sent = vi.fn()
+    const coordinator = new RateLimitResumeCoordinator({
+      backend: 'claude',
+      refreshLimits: async () => {
+        store.update((state) => {
+          state.rateLimitsByAgent = {
+            ...state.rateLimitsByAgent,
+            claude: {
+              fetchedAt: Date.now(),
+              available: true,
+              subscriptionType: 'pro',
+              windows: [
+                {
+                  label: '5-hour',
+                  utilization: 100,
+                  resetsAt: new Date(Date.now() - 1_000).toISOString()
+                }
+              ]
+            }
+          }
+        })
+      },
+      sendContinuation: sent,
+      emitItem: () => {},
+      broadcastState: () => {}
+    })
+
+    await coordinator.noteRateLimit(WORKSPACE_ID, Date.now() + 60_000)
+    await vi.advanceTimersByTimeAsync(75_000)
 
     expect(sent).toHaveBeenCalledWith(WORKSPACE_ID)
     expect(store.getState().workspaces[0].pendingRateLimitResume).toBeNull()
