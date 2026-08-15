@@ -29,8 +29,16 @@ insert into public.machines (id, owner_uid, name)
 values ('11111111-1111-1111-1111-111111111111',
         'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'alice-laptop');
 
-insert into public.machine_state (machine_id, rev, nonce, state_ct)
-values ('11111111-1111-1111-1111-111111111111', 1, '\x00'::bytea, '\x01'::bytea);
+-- 상태는 기기별로 봉인되므로(0006) 기기가 먼저 있어야 한다. 여기서는 service role 로
+-- 심는다 — 소유권 검증은 뒤의 시나리오가 따로 다룬다.
+insert into public.devices (id, machine_id, user_uid, name, platform, pub_key)
+values ('33333333-3333-3333-3333-333333333333',
+        '11111111-1111-1111-1111-111111111111',
+        'cccccccc-cccc-cccc-cccc-cccccccccccc', 'seed-phone', 'ios', 'seed-dpk');
+
+insert into public.machine_state (machine_id, device_id, rev, nonce, state_ct)
+values ('11111111-1111-1111-1111-111111111111',
+        '33333333-3333-3333-3333-333333333333', 1, '\x00'::bytea, '\x01'::bytea);
 
 insert into public.pairings (code_hash, machine_id, machine_name, machine_pub_key)
 values ('deadbeef', '11111111-1111-1111-1111-111111111111', 'alice-laptop', 'mpk');
@@ -78,8 +86,14 @@ delete from public.machines where name = 'alice-laptop';
 insert into public.machines (id, owner_uid, name)
 values ('11111111-1111-1111-1111-111111111111',
         'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'alice-laptop');
-insert into public.machine_state (machine_id, rev, nonce, state_ct)
-values ('11111111-1111-1111-1111-111111111111', 1, '\x00'::bytea, '\x01'::bytea);
+-- 위 delete 가 cascade 로 기기까지 지웠으므로 다시 심는다(상태는 기기별이다).
+insert into public.devices (id, machine_id, user_uid, name, platform, pub_key)
+values ('33333333-3333-3333-3333-333333333333',
+        '11111111-1111-1111-1111-111111111111',
+        'cccccccc-cccc-cccc-cccc-cccccccccccc', 'seed-phone', 'ios', 'seed-dpk');
+insert into public.machine_state (machine_id, device_id, rev, nonce, state_ct)
+values ('11111111-1111-1111-1111-111111111111',
+        '33333333-3333-3333-3333-333333333333', 1, '\x00'::bytea, '\x01'::bytea);
 commit;
 
 -- ── Alice(랩탑)가 폰 기기 행을 만든다 ───────────────────────────────────
@@ -87,10 +101,10 @@ begin;
 set local role authenticated;
 set local request.jwt.claims =
   '{"sub":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","role":"authenticated"}';
-insert into public.devices (id, machine_id, user_uid, name, platform, pub_key)
-values ('22222222-2222-2222-2222-222222222222',
-        '11111111-1111-1111-1111-111111111111',
-        'cccccccc-cccc-cccc-cccc-cccccccccccc', 'alice-phone', 'ios', 'dpk');
+-- 시드가 이미 같은 (machine_id, user_uid) 로 기기를 만들어 두었다(unique 제약).
+-- 랩탑이 그 행을 자기 자격으로 갱신할 수 있는지를 본다 — 그게 실제 재페어링 경로다.
+update public.devices set name = 'alice-phone', pub_key = 'dpk'
+ where id = '33333333-3333-3333-3333-333333333333';
 select 'laptop_inserted_device' as check, count(*) as n from public.devices;
 commit;
 
@@ -103,11 +117,11 @@ select 'phone_sees_machine' as check, count(*) as n from public.machines;
 select 'phone_sees_state' as check, count(*) as n from public.machine_state;
 insert into public.commands (machine_id, device_id, nonce, payload_ct)
 values ('11111111-1111-1111-1111-111111111111',
-        '22222222-2222-2222-2222-222222222222', '\x00'::bytea, '\x02'::bytea);
+        '33333333-3333-3333-3333-333333333333', '\x00'::bytea, '\x02'::bytea);
 select 'phone_sent_command' as check, count(*) as n from public.commands;
 -- 허용된 self-update: 푸시 토큰
 update public.devices set expo_push_token = 'ExponentPushToken[x]'
- where id = '22222222-2222-2222-2222-222222222222';
+ where id = '33333333-3333-3333-3333-333333333333';
 select 'phone_set_push_token' as check, count(*) as n from public.devices
  where expo_push_token is not null;
 commit;
@@ -118,7 +132,7 @@ set local role authenticated;
 set local request.jwt.claims =
   '{"sub":"cccccccc-cccc-cccc-cccc-cccccccccccc","role":"authenticated"}';
 update public.devices set pub_key = 'attacker-key'
- where id = '22222222-2222-2222-2222-222222222222';
+ where id = '33333333-3333-3333-3333-333333333333';
 commit;
 
 -- ── 랩탑이 revoke → 폰의 접근이 즉시 끊긴다 ─────────────────────────────
@@ -127,7 +141,7 @@ set local role authenticated;
 set local request.jwt.claims =
   '{"sub":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","role":"authenticated"}';
 update public.devices set revoked_at = now()
- where id = '22222222-2222-2222-2222-222222222222';
+ where id = '33333333-3333-3333-3333-333333333333';
 commit;
 
 begin;

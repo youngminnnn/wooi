@@ -132,35 +132,39 @@ export class StateMirror {
     const rev = ++this.rev
     const state = { ...snapshot.state, rev }
     try {
-      // 현재 테이블은 machine_id 하나만 PK 라 기기별 암호문을 보존할 수 없다. 마지막 기기가
-      // 앞선 행을 덮는 거짓 지원보다, 스키마가 device_id 를 키에 포함할 때까지 첫 기기만 지원한다.
-      const device = this.options.keystore.listDevices()[0]
-      if (!device) return
-      const header = {
-        v: 1,
-        machineId: state.machine.id,
-        deviceId: device.deviceId,
-        kind: 'state'
-      } as const
-      const { laptopToPhone } = deriveDirectionKeys(
-        fromBase64Url(device.sessionKey),
-        device.deviceId
-      )
-      const box = sealJson(laptopToPhone, header, state)
+      // 기기마다 자기 키로 봉인해 자기 행에 올린다(0006 이 PK 를 machine_id+device_id 로 넓혔다).
+      // 상태는 기기별 키로 봉인되므로 한 행을 공유할 수 없다 — 공유하면 나중에 봉인한 쪽이
+      // 앞 기기가 열 수 없는 암호문으로 행을 덮어쓴다.
+      const devices = this.options.keystore.listDevices()
+      if (devices.length === 0) return
+
+      const rows = devices.map((device) => {
+        const header = {
+          v: 1,
+          machineId: state.machine.id,
+          deviceId: device.deviceId,
+          kind: 'state'
+        } as const
+        const { laptopToPhone } = deriveDirectionKeys(
+          fromBase64Url(device.sessionKey),
+          device.deviceId
+        )
+        const box = sealJson(laptopToPhone, header, state)
+        return {
+          machine_id: state.machine.id,
+          device_id: device.deviceId,
+          rev,
+          nonce: toPgBytea(box.nonce),
+          state_ct: toPgBytea(box.ct),
+          updated_at: new Date().toISOString()
+        }
+      })
+
       if (this.disposed) return
       const { error } = await this.options
         .supabase()
         .from('machine_state')
-        .upsert(
-          {
-            machine_id: state.machine.id,
-            rev,
-            nonce: toPgBytea(box.nonce),
-            state_ct: toPgBytea(box.ct),
-            updated_at: new Date().toISOString()
-          },
-          { onConflict: 'machine_id' }
-        )
+        .upsert(rows, { onConflict: 'machine_id,device_id' })
       if (error) throw error
       this.lastPublishedJson = snapshot.json
     } catch (err) {

@@ -25,6 +25,7 @@ const device = {
 
 interface PublishedRow {
   machine_id: string
+  device_id: string
   rev: number
   // **문자열이다.** bytea 컬럼은 `\x` + hex 를 받는다. 여기 타입을 Uint8Array 로 두었더니
   // 왕복 테스트가 와이어 형식을 건너뛰어, 실제로는 깨져 있던 인코딩을 통과시켰다.
@@ -39,8 +40,8 @@ let upsert: ReturnType<typeof vi.fn>
 beforeEach(() => {
   vi.useFakeTimers()
   rows = []
-  upsert = vi.fn(async (row: PublishedRow) => {
-    rows.push(row)
+  upsert = vi.fn(async (published: PublishedRow[]) => {
+    rows.push(...published)
     return { error: null }
   })
 })
@@ -215,10 +216,54 @@ describe('bytea 와이어 형식', () => {
     const m = mirror()
     m.publishNow(appState(), [])
     await vi.waitFor(() => expect(upsert).toHaveBeenCalled())
-    const row = upsert.mock.calls[0]![0] as PublishedRow
+    const row = (upsert.mock.calls[0]![0] as PublishedRow[])[0]!
     expect(typeof row.nonce).toBe('string')
     expect(row.nonce).toMatch(/^\\x[0-9a-f]+$/)
     expect(fromPgBytea(row.nonce).length).toBe(24)
+    m.dispose()
+  })
+})
+
+describe('다중 기기', () => {
+  it('기기마다 자기 키로 봉인해 자기 행에 올린다', async () => {
+    // 한 행을 공유하면 나중에 봉인한 쪽이 앞 기기가 열 수 없는 암호문으로 덮어쓴다.
+    // 그래서 0006 이 PK 를 (machine_id, device_id) 로 넓혔고, 여기서 그 계약을 고정한다.
+    const second = {
+      deviceId: '99999999-9999-9999-9999-999999999999',
+      name: 'second phone',
+      platform: 'android' as const,
+      sessionKey: toBase64Url(generateSessionKey()),
+      createdAt: 0
+    }
+    const client = { from: vi.fn(() => ({ upsert })) } as unknown as SupabaseClient
+    const keystore = { listDevices: () => [device, second] } as unknown as RemoteKeystore
+    const m = new StateMirror({ supabase: () => client, keystore, machine: () => machine })
+
+    m.publishNow(appState(), [])
+    await vi.waitFor(() => expect(rows.length).toBe(2))
+    expect(rows.map((r) => r.device_id).sort()).toEqual([device.deviceId, second.deviceId].sort())
+
+    // 각 기기가 **자기 키로만** 열 수 있어야 한다.
+    for (const d of [device, second]) {
+      const row = rows.find((r) => r.device_id === d.deviceId)!
+      const header = { v: 1, machineId: machine.id, deviceId: d.deviceId, kind: 'state' } as const
+      const { laptopToPhone } = deriveDirectionKeys(fromBase64Url(d.sessionKey), d.deviceId)
+      const opened = openJson(laptopToPhone, header, {
+        nonce: fromPgBytea(row.nonce),
+        ct: fromPgBytea(row.state_ct)
+      }) as { machine: { id: string } }
+      expect(opened.machine.id).toBe(machine.id)
+
+      // 남의 키로는 열리지 않는다.
+      const other = d === device ? second : device
+      const otherKeys = deriveDirectionKeys(fromBase64Url(other.sessionKey), other.deviceId)
+      expect(() =>
+        openJson(otherKeys.laptopToPhone, header, {
+          nonce: fromPgBytea(row.nonce),
+          ct: fromPgBytea(row.state_ct)
+        })
+      ).toThrow()
+    }
     m.dispose()
   })
 })
