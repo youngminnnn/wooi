@@ -198,7 +198,7 @@ const RESTARTABLE_AUTH_ERROR =
 
 /** fast-mode cooldown이 아닌 계정 전체 사용량 제한 문구만 좁게 식별한다. */
 export const RATE_LIMIT_ERROR =
-  /(?:usage limit|rate limit|quota).*(?:reached|exceeded|reset|available)|(?:reached|exceeded).*(?:usage limit|rate limit|quota)|hit your limit/i
+  /(?:usage limit|rate[ _-]?limit|quota).*(?:reached|exceeded|reset|available)|(?:reached|exceeded).*(?:usage limit|rate[ _-]?limit|quota)|hit your limit|assistant error:\s*rate_limit/i
 
 /**
  * CLI 는 사용량 제한을 알릴 때 해제 시각을 epoch 로 덧붙인다

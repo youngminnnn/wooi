@@ -255,6 +255,28 @@ describe('RateLimitResumeCoordinator', () => {
     )
   })
 
+  it('해제 시각을 몰라도 백오프 뒤 사용량 조회가 실패하면 실제 턴으로 확인한다', async () => {
+    const { getStore } = await import('./store')
+    const store = getStore()
+    seedWorkspace(store)
+    const sent = vi.fn()
+    const coordinator = new RateLimitResumeCoordinator({
+      backend: 'claude',
+      // fetchedAt 이 바뀌지 않는 실제 조회 장애를 재현한다.
+      refreshLimits: async () => {},
+      sendContinuation: sent,
+      emitItem: () => {},
+      broadcastState: () => {}
+    })
+
+    await coordinator.noteRateLimit(WORKSPACE_ID)
+    await vi.advanceTimersByTimeAsync(5 * 60_000 + 15_000)
+
+    expect(sent).toHaveBeenCalledWith(WORKSPACE_ID)
+    expect(store.getState().workspaces[0].pendingRateLimitResume).toBeNull()
+    expect(store.getState().workspaces[0].rateLimited).toBeNull()
+  })
+
   it('이어 보낸 턴이 곧바로 다시 걸리면 시도 횟수를 이어받아 결국 멈춘다', async () => {
     const { getStore } = await import('./store')
     const store = getStore()

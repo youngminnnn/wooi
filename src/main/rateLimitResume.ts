@@ -266,16 +266,12 @@ export class RateLimitResumeCoordinator {
     if (!current) return
     const pending = current.pendingRateLimitResume!
     const snapshot = getStore().getState().rateLimitsByAgent?.[this.deps.backend]
-    // 제한 해제 시각에는 반드시 새 usage 응답을 확인한다. 네트워크 실패로 오래된 스냅샷만 남은
-    // 상태에서 작업을 보내면 즉시 또 실패하므로, 확인 자체가 안 됐으면 나중에 다시 본다.
+    // 새 usage 응답을 얻지 못하면 예약해 둔 백오프 시각에 실제 턴으로 확인한다. Claude SDK 의
+    // `Assistant error: rate_limit` 은 해제 시각을 주지 않고 usage 조회도 종종 타임아웃되므로,
+    // 조회 성공만 고집하면 제한이 풀린 뒤에도 영원히 이어가지 못한다. 실제 턴이 다시 제한되면
+    // noteRateLimit 이 더 긴 백오프로 재예약하고 MAX_ATTEMPTS 가 무한 전송을 막는다.
     if (!snapshot || snapshot.fetchedAt === previousFetchedAt) {
-      this.waitLonger(
-        workspaceId,
-        pending.attempt,
-        Date.now() + backoffWait(pending.attempt) + RESET_GRACE_MS,
-        'Wooi could not confirm that the usage limit reset, so automatic continuation stopped.',
-        (next) => `Wooi could not confirm the usage limit reset. It will check again ${next}.`
-      )
+      this.continueNow(workspaceId, current, pending)
       return
     }
     // reset 시각이 이미 지났더라도 사용률이 100% 면 아직 제한이다 — 지난 시각만 보고 풀린 것으로
@@ -293,6 +289,14 @@ export class RateLimitResumeCoordinator {
 
     // 예약 당시의 세션이 그대로일 때만 이어 간다. /clear·계정 전환 등으로 바뀌었다면 과거 작업을
     // 새 맥락에 주입하지 않는다.
+    this.continueNow(workspaceId, current, pending)
+  }
+
+  private continueNow(
+    workspaceId: string,
+    current: Workspace,
+    pending: NonNullable<Workspace['pendingRateLimitResume']>
+  ): void {
     if (current.sessionId !== pending.sessionId) return this.cancel(workspaceId)
     // 이어 보낸 턴이 곧바로 또 걸리면 이 횟수를 물려받아 무한 재시도를 막는다(streak 주석 참고).
     this.streak.set(workspaceId, { attempt: pending.attempt + 1, at: Date.now() })
