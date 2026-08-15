@@ -55,7 +55,10 @@ export default function ReviewDiffView({
   viewedKeys: Set<string>
   onToggleViewed: (path: string, prNumber: number) => void
 }): React.JSX.Element {
-  const index = useMemo(() => indexFindingsByRow(view.findings), [view.findings])
+  const index = useMemo(
+    () => indexFindingsByRow(view.findings, diffs.length === 1 ? diffs[0].prNumber : undefined),
+    [view.findings, diffs]
+  )
   const counts = useMemo(() => countByFile(view.findings), [view.findings])
 
   /**
@@ -125,7 +128,7 @@ export default function ReviewDiffView({
                 key={key}
                 file={file}
                 fileId={key}
-                prNumber={stacked ? layer.prNumber : undefined}
+                prNumber={layer.prNumber}
                 session={session}
                 view={view}
                 index={index}
@@ -173,8 +176,8 @@ function FileBlock({
   file: ReviewFileDiff
   /** 파일 블록의 DOM id. 좌측 목록의 "이 파일로 이동" 이 이 값을 찾는다. */
   fileId: string
-  /** 이 파일이 속한 레이어. 단일 PR 리뷰면 undefined(앵커에도 번호가 없다). */
-  prNumber?: number
+  /** 이 파일이 속한 레이어. 최신 단일 PR 앵커에도 번호가 들어가므로 항상 넘긴다. */
+  prNumber: number
   session: ReviewSession
   view: ReviewViewState
   index: Map<string, ReviewFinding[]>
