@@ -378,7 +378,8 @@ async function handle(msg: CodexCommand): Promise<void> {
     case 'send':
       await ensure(msg.workspaceId, msg.config).send(msg.text, msg.images, {
         prefix: msg.prefix,
-        silent: msg.silent
+        silent: msg.silent,
+        origin: msg.origin
       })
       break
 

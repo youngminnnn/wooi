@@ -684,15 +684,14 @@ function WorkspaceRow({
       onSelect: () => void window.api.workspace.setMuted(workspace.id, !workspace.muted),
       separatorBefore: true
     },
-    // 다른 워크스페이스가 보내는 메시지를 받는 방식. 기본(hold)은 승인 배너를 거치므로 대부분은
-    // 건드릴 일이 없고, 여기 있는 것은 양극단 둘이다 — 늘 깨워도 되는 워크스페이스와,
-    // 아예 방해받고 싶지 않은 워크스페이스.
+    // 다른 워크스페이스가 보내는 메시지를 받는 방식. 기본은 협업을 멈추지 않는 자동 전달이고,
+    // 여기서 비용·집중이 더 중요한 워크스페이스만 승인 대기나 완전 차단으로 좁힌다.
     {
       key: 'peer-inbound',
       label:
         (workspace.peerInbound ?? DEFAULT_PEER_INBOUND) === 'accept'
-          ? 'Hold messages to approve'
-          : 'Auto-accept messages',
+          ? 'Require approval for messages'
+          : 'Deliver messages automatically',
       icon: <MessagesSquare size={13} />,
       onSelect: () =>
         void window.api.workspace.setPeerInbound(
@@ -704,7 +703,7 @@ function WorkspaceRow({
       ? [
           {
             key: 'peer-unblock',
-            label: 'Allow workspace messages',
+            label: 'Allow messages with approval',
             icon: <MessagesSquare size={13} />,
             onSelect: () => void window.api.workspace.setPeerInbound(workspace.id, 'hold')
           }

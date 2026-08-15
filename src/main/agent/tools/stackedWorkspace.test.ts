@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { z } from 'zod'
 import { AGENT_TOOLS } from './catalog'
 import type { AgentToolDeps } from './registry'
-import type { AppSettings, ModelOption, Workspace } from '@shared/types'
+import type { AppSettings, ModelOption, Repo, Workspace } from '@shared/types'
 import { DEFAULT_SETTINGS } from '../../storeSchema'
 
 /**
@@ -18,10 +18,13 @@ const summarize = vi.hoisted(() => vi.fn())
 const create = vi.hoisted(() => vi.fn())
 const state = vi.hoisted(() => ({
   workspaces: [] as Partial<Workspace>[],
-  settings: {} as AppSettings
+  settings: {} as AppSettings,
+  repos: [] as Partial<Repo>[]
 }))
 const update = vi.hoisted(() =>
-  vi.fn((fn: (st: { workspaces: Partial<Workspace>[] }) => void) => fn(state))
+  vi.fn((fn: (st: { workspaces: Partial<Workspace>[]; repos: Partial<Repo>[] }) => void) =>
+    fn(state)
+  )
 )
 
 vi.mock('../../git', () => ({ isWorktreeClean: clean, summarizeBranch: summarize }))
@@ -67,8 +70,9 @@ const child: Partial<Workspace> = {
   prNumber: null
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.clearAllMocks()
+  state.repos = [{ id: 'repo-1', name: 'wooi' }]
   state.workspaces = [{ ...parent }]
   state.settings = { ...DEFAULT_SETTINGS }
   clean.mockResolvedValue(true)
@@ -79,6 +83,8 @@ beforeEach(() => {
   )
   summarize.mockResolvedValue(null)
   create.mockResolvedValue({ workspaceId: 'ws-new', name: 'feat/next', branch: 'feat/next' })
+  const { resetPeerRateLimitForTest } = await import('./peer')
+  resetPeerRateLimitForTest()
 })
 
 async function create_(args: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
@@ -441,7 +447,7 @@ describe('notify_child', () => {
 
     const [, text] = sendMessage.mock.calls[0]
     expect(text).toContain('feat/base')
-    expect(text).toContain('not from the user')
+    expect(text).toContain('not the user')
   })
 
   it('도는 중이면 현재 턴 뒤에 읽힌다고 알려 준다', async () => {
@@ -450,7 +456,7 @@ describe('notify_child', () => {
     const result = await notify({ workspaceId: 'ws-child', message: 'Schema changed.' })
     expect(result.note).toMatch(/current turn ends/)
     // 도는 중이라고 막지는 않는다 — 낡은 전제로 일하는 중일 때가 바로 알려야 할 때다.
-    expect(sendMessage).toHaveBeenCalledTimes(1)
+    expect(sendMessage).not.toHaveBeenCalled()
   })
 
   it('자기가 만들지 않은 워크스페이스는 거부한다 — 대상 경계는 target.ts 가 정한다', async () => {

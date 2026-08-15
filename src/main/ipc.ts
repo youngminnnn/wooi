@@ -138,6 +138,7 @@ import type {
   MemoryScope,
   PaneKind,
   PermissionDecision,
+  PendingPeerMessage,
   PeerInboundPolicy,
   PermissionMode,
   PrMergeMethod,
@@ -153,6 +154,7 @@ import type {
   Workspace
 } from '@shared/types'
 import type { AgentOrchestrator } from './agent/orchestrator'
+import { deliverApprovedPeerMessage } from './agent/tools/peer'
 import type { PaneWindows } from './paneWindows'
 import {
   cancelPreviewPick,
@@ -555,17 +557,22 @@ export function registerIpc(ctx: IpcContext): void {
   ipcMain.handle(
     IPC.workspacePeerInboxDeliver,
     async (_e, workspaceId: string, messageId: string): Promise<void> => {
-      let text: string | null = null
+      let pendingMessage: PendingPeerMessage | null = null
       store.update((st) => {
         const w = st.workspaces.find((x) => x.id === workspaceId)
         const pending = w?.peerInbox?.find((m) => m.id === messageId)
         if (!w || !pending) return
-        text = pending.text
+        pendingMessage = pending
         w.peerInbox = w.peerInbox?.filter((m) => m.id !== messageId)
       })
       // 이미 다른 창이 처리했거나 워크스페이스가 사라졌으면 조용히 끝낸다.
-      if (text === null) return
-      ctx.sessions.sendMessage(workspaceId, text)
+      if (pendingMessage === null) return
+      const pending = pendingMessage as PendingPeerMessage
+      deliverApprovedPeerMessage(
+        { sendMessage: (id, text, opts) => ctx.sessions.sendMessage(id, text, undefined, opts) },
+        workspaceId,
+        pending
+      )
       broadcastState()
     }
   )
@@ -592,20 +599,26 @@ export function registerIpc(ctx: IpcContext): void {
   ipcMain.handle(
     IPC.workspaceSetPeerInbound,
     async (_e, workspaceId: string, policy: PeerInboundPolicy): Promise<void> => {
-      const release: string[] = []
+      const release: PendingPeerMessage[] = []
       store.update((st) => {
         const w = st.workspaces.find((x) => x.id === workspaceId)
         if (!w) return
         w.peerInbound = policy
         if (policy === 'accept') {
-          for (const m of w.peerInbox ?? []) release.push(m.text)
+          for (const m of w.peerInbox ?? []) release.push(m)
           w.peerInbox = []
         }
         // 'refuse' 로 닫으면 대기 중이던 것도 버린다 — 받지 않겠다고 한 뒤에 남아 있는 승인
         // 카드는 그 선언과 모순이다.
         if (policy === 'refuse') w.peerInbox = []
       })
-      for (const text of release) ctx.sessions.sendMessage(workspaceId, text)
+      for (const pending of release) {
+        deliverApprovedPeerMessage(
+          { sendMessage: (id, text, opts) => ctx.sessions.sendMessage(id, text, undefined, opts) },
+          workspaceId,
+          pending
+        )
+      }
       broadcastState()
     }
   )

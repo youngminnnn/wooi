@@ -680,10 +680,11 @@ export interface Workspace {
    */
   handoff?: StackedHandoff | null
   /**
-   * 다른 워크스페이스에서 온 메시지를 받는 방식([[PeerInboundPolicy]]). 없으면 `hold`.
+   * 다른 워크스페이스에서 온 메시지를 받는 방식([[PeerInboundPolicy]]). 없으면 `accept`.
    *
    * 옵셔널로 두는 것이 요점이다 — 저장된 워크스페이스는 이 필드가 없으므로 마이그레이션 없이
-   * 전부 안전한 기본값(`hold`)으로 읽힌다.
+   * 전부 앱 안의 협업에 맞춘 기본값(`accept`)으로 읽힌다. 앱 바깥 Claude Code 세션에는 이
+   * 폴백을 적용하지 않는다([[nativePeerInbound]]).
    */
   peerInbound?: PeerInboundPolicy
   /**
@@ -1229,8 +1230,44 @@ export interface ImageAttachment {
  */
 export type ChatAttachment = Pick<ImageAttachment, 'name' | 'mediaType'>
 
+/** 합쳐진 사용자 턴 안의 peer 메시지 한 건. 발신자가 사라져도 칩을 그릴 수 있게 스냅샷한다. */
+export interface PeerMessagePart {
+  fromName: string
+  fromBranch: string
+  fromRepoName: string
+  crossRepo: boolean
+  /** 앱이 모델용으로 덧댄 권한 문단을 제외한, 발신 에이전트의 원문. */
+  message: string
+  /** 답장 도구와 스택 관계를 모델용 전문에서 복원한다. */
+  route: 'peer' | 'notifyChild'
+}
+
+/** 다른 Wooi 워크스페이스가 시작한 사용자 턴을 화면에서 구분하기 위한 출처 스냅샷. */
+export interface PeerMessageOrigin {
+  kind: 'peer'
+  /** 한 턴 중 들어온 것을 한 사용자 메시지로 묶으므로 발신자가 여러 명일 수 있다. */
+  messages: PeerMessagePart[]
+}
+
+export type ChatUserOrigin = PeerMessageOrigin
+
+/** 백엔드까지 함께 흘려 보낼 사용자 턴의 표시·모델용 옵션. */
+export interface SendMessageOptions {
+  prefix?: string
+  silent?: boolean
+  origin?: ChatUserOrigin
+}
+
 export type ChatItem =
-  | { id: string; type: 'user'; text: string; ts: number; attachments?: ChatAttachment[] }
+  | {
+      id: string
+      type: 'user'
+      text: string
+      ts: number
+      attachments?: ChatAttachment[]
+      /** 없으면 사용자가 직접 보낸 기존 메시지다. */
+      origin?: ChatUserOrigin
+    }
   | { id: string; type: 'assistant'; text: string; ts: number; streaming?: boolean }
   | { id: string; type: 'thinking'; text: string; ts: number; streaming?: boolean }
   | {
@@ -1414,17 +1451,18 @@ export interface StackedHandoff {
  * 막을 수 없다 — 형제도 남의 리포도 정당한 대상이다. 그래서 "누가 보낼 수 있는가" 대신
  * **"내가 받아서 턴을 돌릴 것인가"** 를 대상이 정한다.
  *
- * - `hold`(기본): 받아 두되 전달하지 않는다. 사용자가 승인해야 턴이 시작된다.
- * - `accept`: 바로 전달한다. 스택 자식처럼 깨어나는 것이 당연한 관계에 쓴다.
+ * - `accept`(기본): 바로 전달한다. 워크스페이스끼리의 협업이 사람의 중계 없이 이어진다.
+ * - `hold`: 받아 두되 전달하지 않는다. 사용자가 승인해야 턴이 시작된다.
  * - `refuse`: 받지 않는다. 발신자에게 거절로 알린다.
  *
- * `hold` 가 기본인 이유는 비용 하나다 — 전달은 곧 턴이고, 사용자가 승인하지 않은 턴 비용을
- * 남의 워크스페이스가 일으켜서는 안 된다([[agent/tools/stackedWorkspace]] 의 비대칭과 같은 근거).
+ * 앱 안의 발신자는 Wooi 가 만든 도구·대상 제한·중복 방어를 통과하고 출처도 대화에 남으므로
+ * `accept` 를 기본으로 삼는다. 비용을 매번 승인하는 대신 협업이 멈추지 않는 쪽을 택하되,
+ * 사용자는 `hold`·`refuse` 로 이 워크스페이스의 경계를 다시 좁힐 수 있다.
  */
 export type PeerInboundPolicy = 'accept' | 'hold' | 'refuse'
 
 /** 수신 정책을 정하지 않은 워크스페이스의 기본값. 레거시 레코드(필드 없음)도 이 값으로 읽힌다. */
-export const DEFAULT_PEER_INBOUND: PeerInboundPolicy = 'hold'
+export const DEFAULT_PEER_INBOUND: PeerInboundPolicy = 'accept'
 
 /**
  * 전달을 기다리는 peer 메시지 1건. **수신 워크스페이스 레코드에** 쌓인다.
@@ -1446,6 +1484,8 @@ export interface PendingPeerMessage {
   crossRepo: boolean
   /** 에이전트가 쓴 본문(평문). 대기 카드가 사용자에게 보여 주는 것이 이 문장이다. */
   message: string
+  /** 승인 뒤에도 원래 도구에 맞는 답장 규칙을 만들기 위한 전달 경로. */
+  route?: 'peer' | 'notifyChild'
   /**
    * 승인되면 대상 대화에 실제로 들어갈 완성된 문장 — 출처 문단까지 이미 씌운 것.
    *
@@ -1489,14 +1529,13 @@ export function peerSessionName(repoName: string, branch: string): string {
 /**
  * Wooi 의 수신 정책을 **네이티브** cross-session messaging 의 `crossSessionInbound` 로 옮긴다.
  *
- * 세 값을 두 값으로 접는데, 접히는 자리가 `hold` 다. 네이티브의 `hold` 는 CLI 가 승인 다이얼로그를
- * 그려야 풀리는데 SDK 세션은 그것을 띄울 수 없고 풀어 줄 API 도 없다 — 즉 `hold` 로 넘기면
- * 메시지가 영영 갇힌다(사용자에게는 "보냈는데 아무 일도 안 일어남" 으로 보인다).
+ * 네이티브의 `hold` 는 CLI 가 승인 다이얼로그를 그려야 풀리지만 SDK 세션은 그 다이얼로그를
+ * 띄울 수도 없고 보류된 메시지를 풀어 줄 API 도 없다. 그대로 넘기면 메시지가 영영 갇히므로
+ * `hold`·`refuse` 를 모두 `refuse` 로 접을 수밖에 없다.
  *
- * 그래서 `hold` 는 `refuse` 로 접는다. Wooi 의 승인 배너는 **앱 안의** peer 메시지만 다루고,
- * 앱 바깥 세션이 보내는 것은 우리가 붙잡아 둘 방법이 없으므로, 승인을 원한다는 뜻은 곧
- * "승인 없이 들어오게 두지 않는다" 로 읽는 것이 맞다. 열려면 사용자가 명시적으로 자동 수신을
- * 켠 것(`accept`)이어야 한다.
+ * 앱 안의 peer 전달 기본값은 `accept` 지만 여기서는 그 폴백을 보지 않고 **저장된 `accept`** 만
+ * 인정한다. 네이티브 경로에는 Wooi 의 대상 제한·중복 방어가 없고 앱 바깥의 로컬 Claude Code
+ * 세션도 들어오므로, 정책 필드가 없는 워크스페이스까지 자동으로 열어서는 안 된다.
  *
  * 이 접기가 **승인 배너를 우회하는 구멍도 함께 막는다.** Wooi 워크스페이스도 같은 머신의
  * Claude Code 세션이라 네이티브 `ListAgents` 에 그대로 보이므로, 모델이 우리 도구 대신 네이티브
@@ -1504,7 +1543,7 @@ export function peerSessionName(repoName: string, branch: string): string {
  * `crossSessionInbound` 를 통과해야 하는데, `hold` 워크스페이스는 여기서 `refuse` 가 되므로
  * 배너를 건너뛴 전달이 성립하지 않는다. 두 경로가 같은 정책 하나로 수렴한다.
  */
-export function nativePeerInbound(policy: PeerInboundPolicy): 'accept' | 'refuse' {
+export function nativePeerInbound(policy: PeerInboundPolicy | undefined): 'accept' | 'refuse' {
   return policy === 'accept' ? 'accept' : 'refuse'
 }
 

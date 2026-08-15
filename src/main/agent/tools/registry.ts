@@ -1,5 +1,11 @@
 import { log } from '../../logger'
-import type { AgentBackendId, ChatEvent, ChatItem, ModelOption } from '@shared/types'
+import type {
+  AgentBackendId,
+  ChatEvent,
+  ChatItem,
+  ModelOption,
+  SendMessageOptions
+} from '@shared/types'
 import type { ScriptRunner } from '../../scripts'
 
 /**
@@ -25,7 +31,7 @@ export interface AgentToolDeps {
    * 쓰고, 반대 방향(자식 → 부모)은 쓰지 않는다 — 부모는 사람과 대화 중일 수 있고, 사용자가
    * 승인하지 않은 턴 비용이 발생한다. 자식의 보고는 기록만 하고 부모가 직접 읽는다.
    */
-  sendMessage: (workspaceId: string, text: string) => void
+  sendMessage: (workspaceId: string, text: string, opts?: SendMessageOptions) => void
   /**
    * 워크스페이스 대화에 항목 하나를 남긴다(트랜스크립트 영속 + 화면 반영).
    *

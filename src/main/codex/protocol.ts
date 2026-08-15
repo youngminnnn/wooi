@@ -8,7 +8,8 @@ import type {
   McpAction,
   PermissionDecision,
   PermissionMode,
-  PermissionRequest
+  PermissionRequest,
+  SendMessageOptions
 } from '@shared/types'
 
 /**
@@ -70,6 +71,8 @@ export type CodexCommand =
       prefix?: string
       /** 이 전송을 기록에서 지운다([[claude/protocol]] 의 같은 필드와 같은 뜻). */
       silent?: boolean
+      /** 화면에 일반 사용자 말풍선 대신 출처가 있는 자동 메시지로 남긴다. */
+      origin?: SendMessageOptions['origin']
     }
   | { type: 'interrupt'; workspaceId: string }
   | { type: 'setPermissionMode'; workspaceId: string; mode: PermissionMode }

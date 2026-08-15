@@ -15,6 +15,7 @@ import {
   type PermissionDecision,
   type PermissionMode,
   type RewindActionResult,
+  type SendMessageOptions,
   type SlashCommandInfo
 } from '@shared/types'
 import type { AgentBackendMeta, ModelOption } from '@shared/types'
@@ -22,6 +23,7 @@ import type { AgentBackend } from './backend'
 import { backendAvailability, createBackend, type Dispatch } from './registry'
 import { AGENT_BACKENDS, backendMeta } from './backend'
 import { log } from '../logger'
+import { flushBufferedPeerMessages, resetAllPeerSessions, resetPeerSession } from './tools/peer'
 
 /**
  * 여러 에이전트 백엔드를 소유하고, 워크스페이스가 지정한 백엔드(workspace.agentBackend)로 호출을
@@ -289,8 +291,17 @@ export class AgentOrchestrator {
    * 것이 없다 — 사용자에게는 턴 하나가 이어서 도는 것으로만 보인다.
    */
   private handleTurnEnd(workspaceId: string, status: 'idle' | 'error'): boolean {
+    if (status === 'error') {
+      // 오류 뒤 백엔드가 같은 프로세스를 재사용할지 새 세션을 만들지 확정할 수 없다. 보안 규칙이
+      // 빠진 표식만 보내는 것보다 다음 건에 전문을 한 번 더 싣는 쪽으로 기울인다.
+      resetPeerSession(workspaceId)
+    }
     const resume = this.pendingResume.get(workspaceId)
-    if (!resume) return false
+    if (!resume) {
+      // accept 메시지는 running 턴을 끊지 않고 여기까지 모은다. 여기서 true 를 돌려 idle 방송을
+      // 막아야 합쳐진 사용자 메시지가 시작하는 다음 턴 사이에 거짓 idle 틈이 생기지 않는다.
+      return status === 'idle' && flushBufferedPeerMessages(workspaceId)
+    }
     // 어느 쪽으로 끝났든 예약은 여기서 소진된다. 남겨 두면 한참 뒤 다른 턴이 끝날 때 뜬금없이
     // 되살아난다.
     this.pendingResume.delete(workspaceId)
@@ -326,7 +337,12 @@ export class AgentOrchestrator {
     this.pendingResume.delete(workspaceId)
   }
 
-  sendMessage(workspaceId: string, text: string, images?: ImageAttachment[]): void {
+  sendMessage(
+    workspaceId: string,
+    text: string,
+    images?: ImageAttachment[],
+    opts?: SendMessageOptions
+  ): void {
     // 사용자가 먼저 말을 걸었다 — 이 전송이 세션을 다시 열므로 자동 이어가기는 할 일이 없다.
     this.cancelResume(workspaceId)
     // 세션이 없으면 dispose 는 no-op 이고, 어차피 이 전송이 새로 연다.
@@ -337,7 +353,7 @@ export class AgentOrchestrator {
       workspaceId,
       text,
       images,
-      prefix ? { prefix } : undefined
+      prefix ? { ...opts, prefix } : opts
     )
     this.trimIdleSessions()
   }
@@ -396,6 +412,7 @@ export class AgentOrchestrator {
   clearSession(workspaceId: string): void {
     // 맥락을 비운 대화에 옛 턴의 이어가기를 밀어 넣지 않는다 — 이어갈 대화가 이미 없다.
     this.cancelResume(workspaceId)
+    resetPeerSession(workspaceId)
     this.backendFor(workspaceId).clearSession(workspaceId)
   }
 
@@ -413,6 +430,7 @@ export class AgentOrchestrator {
     // 세션이 사라졌으면 이어갈 턴도 사라진 것이다. (자동 이어가기 자신이 부르는 dispose 는
     // 이미 예약을 꺼내 간 뒤라 여기서 지울 것이 없다 — [[handleTurnEnd]])
     this.cancelResume(workspaceId)
+    resetPeerSession(workspaceId)
     this.backendFor(workspaceId).dispose(workspaceId)
   }
 
@@ -420,6 +438,7 @@ export class AgentOrchestrator {
     this.lastUsedAt.clear()
     this.pendingRestart.clear()
     this.pendingResume.clear()
+    resetAllPeerSessions()
     for (const backend of this.backends.values()) backend.disposeAll()
   }
 
@@ -427,6 +446,7 @@ export class AgentOrchestrator {
     this.lastUsedAt.clear()
     this.pendingRestart.clear()
     this.pendingResume.clear()
+    resetAllPeerSessions()
     for (const backend of this.backends.values()) backend.abortAll()
   }
 
@@ -436,6 +456,7 @@ export class AgentOrchestrator {
     this.lastUsedAt.clear()
     this.pendingRestart.clear()
     this.pendingResume.clear()
+    resetAllPeerSessions()
     for (const backend of this.backends.values()) backend.recycleAll()
   }
 

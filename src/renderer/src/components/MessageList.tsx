@@ -15,7 +15,8 @@ import {
   X,
   Square,
   ListTodo,
-  Layers
+  Layers,
+  MessagesSquare
 } from 'lucide-react'
 import { useStore } from '../store'
 import { DiffLine } from './DiffView'
@@ -27,6 +28,79 @@ import { useAvailableBackends } from '../lib/backends'
 import { AgentBackendMark } from './BrandIcons'
 import { AGENT_BACKEND_LABELS, canSwitchAgentBackend } from '@shared/types'
 import type { ChatItem } from '@shared/types'
+
+function PeerMessage({
+  item,
+  title
+}: {
+  item: Extract<ChatItem, { type: 'user' }>
+  title: string
+}): React.JSX.Element {
+  const [expanded, setExpanded] = useState(false)
+  const origin = item.origin
+  if (!origin || origin.kind !== 'peer') return <UserMessage text={item.text} title={title} />
+  const messages = origin.messages
+  const senders = new Set(
+    messages.map((message) => `${message.fromRepoName}\0${message.fromBranch}`)
+  )
+  const only = messages[0]
+
+  return (
+    <div className="flex justify-end my-2" title={title}>
+      <button
+        type="button"
+        aria-expanded={expanded}
+        onClick={() => setExpanded((value) => !value)}
+        className="max-w-[min(42rem,88%)] rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2.5 py-1.5 text-left text-xs text-neutral-400 hover:border-[var(--border-strong)] hover:text-neutral-300"
+      >
+        <span className="flex items-center gap-1.5">
+          <MessagesSquare size={12} className="shrink-0 text-neutral-500" />
+          {messages.length === 1 ? (
+            <>
+              <span>Message from</span>
+              <span className="truncate font-mono text-neutral-300">{only.fromBranch}</span>
+            </>
+          ) : (
+            <span>
+              {messages.length} messages from {senders.size} workspace
+              {senders.size === 1 ? '' : 's'}
+            </span>
+          )}
+          {messages.length === 1 && only.crossRepo && (
+            <span className="shrink-0 rounded bg-[var(--surface-2)] px-1.5 py-0.5 text-[10px] text-neutral-500">
+              {only.fromRepoName}
+            </span>
+          )}
+          <ChevronRight
+            size={12}
+            className={`ml-auto shrink-0 transition-transform ${expanded ? 'rotate-90' : ''}`}
+          />
+        </span>
+        {expanded && (
+          <span className="mt-2 block border-t border-[var(--border)] pt-2 text-sm leading-relaxed text-neutral-300">
+            {messages.map((message, index) => (
+              <span
+                key={`${message.fromRepoName}:${message.fromBranch}:${index}`}
+                className="block"
+              >
+                {messages.length > 1 && (
+                  <span className="mb-1 block text-xs text-neutral-500">
+                    <span className="font-mono text-neutral-400">{message.fromBranch}</span>
+                    {message.crossRepo ? ` · ${message.fromRepoName}` : ''}
+                  </span>
+                )}
+                <span className="block whitespace-pre-wrap break-words">{message.message}</span>
+                {index < messages.length - 1 && (
+                  <span className="my-2 block border-t border-[var(--border)]" />
+                )}
+              </span>
+            ))}
+          </span>
+        )}
+      </button>
+    </div>
+  )
+}
 
 export default function MessageList({
   workspaceId,
@@ -335,6 +409,7 @@ function Item({
 
   switch (item.type) {
     case 'user':
+      if (item.origin?.kind === 'peer') return <PeerMessage item={item} title={time} />
       return (
         <UserMessage text={item.text} title={time}>
           {item.attachments && item.attachments.length > 0 && (

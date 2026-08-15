@@ -36,6 +36,11 @@ describe('peerSessionName', () => {
 })
 
 describe('nativePeerInbound', () => {
+  it('저장된 정책이 없으면 앱 바깥 세션에는 refuse 다', () => {
+    // 앱 안의 자동 전달 기본값을 네이티브 경로까지 넓히지 않는 보안 경계다.
+    expect(nativePeerInbound(undefined)).toBe('refuse')
+  })
+
   it('hold 는 refuse 로 접는다', () => {
     // 네이티브 hold 는 CLI 승인 다이얼로그가 있어야 풀리는데 SDK 세션은 그것을 못 띄우고
     // 풀어 줄 API 도 없다 — 그대로 넘기면 메시지가 영영 갇힌다.

@@ -14,7 +14,6 @@ import { wooiMcpSettings } from '../mcpSettings'
 import { getTranscripts } from '../transcripts'
 import { log } from '../logger'
 import {
-  DEFAULT_PEER_INBOUND,
   IPC,
   agentSettingsFor,
   nativePeerInbound,
@@ -44,6 +43,7 @@ import type {
   PermissionRequest,
   RateLimitSnapshot,
   RewindActionResult,
+  SendMessageOptions,
   SlashCommandInfo,
   UsageInfo,
   Workspace
@@ -336,7 +336,7 @@ export class SessionManager implements AgentBackend {
       // 보는 값이고, 수신 정책은 워크스페이스의 것을 접어 넘긴다([[types]] nativePeerInbound).
       peer: {
         name: peerSessionName(this.getRepoName(ws.repoId), ws.branch),
-        inbound: nativePeerInbound(ws.peerInbound ?? DEFAULT_PEER_INBOUND)
+        inbound: nativePeerInbound(ws.peerInbound)
       },
       resumeSessionId: ws.sessionId,
       additionalDirs: ws.additionalDirs ?? [],
@@ -361,7 +361,7 @@ export class SessionManager implements AgentBackend {
     workspaceId: string,
     text: string,
     images?: ImageAttachment[],
-    opts?: { prefix?: string; silent?: boolean }
+    opts?: SendMessageOptions
   ): void {
     this.rateLimitResume.cancel(workspaceId)
     const ws = this.getWorkspace(workspaceId)
@@ -373,7 +373,8 @@ export class SessionManager implements AgentBackend {
       text,
       images,
       prefix: opts?.prefix,
-      silent: opts?.silent
+      silent: opts?.silent,
+      origin: opts?.origin
     })
   }
 
