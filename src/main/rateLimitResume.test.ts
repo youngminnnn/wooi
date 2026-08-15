@@ -89,9 +89,9 @@ describe('rate-limit resume scheduling', () => {
       )
     ).toBe(true)
     // reset 시각을 받지 못했다면 100% 신호를 버릴 근거가 없으므로 계속 제한으로 본다.
-    expect(isRateLimited(snapshot([{ label: '5-hour', utilization: 100, resetsAt: null }]), NOW)).toBe(
-      true
-    )
+    expect(
+      isRateLimited(snapshot([{ label: '5-hour', utilization: 100, resetsAt: null }]), NOW)
+    ).toBe(true)
     expect(isRateLimited(snapshot([{ label: '5-hour', utilization: 40, resetsAt: null }]))).toBe(
       false
     )
