@@ -4,6 +4,7 @@ import { SessionManager } from '../claude/manager'
 import { CodexSessionManager } from '../codex/manager'
 import { detectCodex } from '../codex/executable'
 import { detectAntigravity } from '../antigravity/executable'
+import { AntigravitySessionManager } from '../antigravity/manager'
 import { isInstalled } from '../shell'
 import { backendMeta, type AgentBackend, type TurnEndHook } from './backend'
 
@@ -67,10 +68,7 @@ export function createBackend(id: AgentBackendId, deps: BackendDeps): AgentBacke
     case 'codex':
       return new CodexSessionManager(deps.dispatch, deps.getWindow, deps.onTurnEnd)
     case 'antigravity':
-      // 같은 PR 의 후속 커밋에서 매니저를 붙인다. 여기만 default 로 흘리지 않고 명시적으로 끊는
-      // 이유는, 등록은 끝났는데 구현이 없는 구간에서 Antigravity 워크스페이스가 조용히 Claude 로
-      // 돌아 버리는 것이 실패 중 가장 나쁘기 때문이다.
-      throw new Error('The Antigravity backend is not wired up yet.')
+      return new AntigravitySessionManager(deps.dispatch, deps.getWindow, deps.onTurnEnd)
     // default 도 Claude 로 받는다 — 저장된 값이 낡거나 알 수 없는 식별자일 수 있기 때문이다
     // (backendMeta 도 같은 이유로 폴백을 둔다).
     case 'claude':

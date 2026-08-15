@@ -1,10 +1,11 @@
-import { spawn } from 'node:child_process'
+import { spawn, type ChildProcess } from 'node:child_process'
 import { log } from '../logger'
 import type { AntigravityStreamReader } from './stream'
 
 export interface AntigravityExecDeps {
   cwd: string
   abort: AbortController
+  onSpawn?: (child: ChildProcess) => void
 }
 
 export interface AntigravityExecOutcome {
@@ -30,6 +31,7 @@ export function execAntigravity(
       env: process.env,
       signal: deps.abort.signal
     })
+    deps.onSpawn?.(child)
 
     const out: AntigravityExecOutcome = {
       error: null,

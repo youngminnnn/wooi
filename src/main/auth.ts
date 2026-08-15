@@ -5,7 +5,7 @@ import type { AgentAuthStatus, AuthStatus, GithubAuthStatus } from '@shared/type
 import { log } from './logger'
 import { runLoginShell, isInstalled } from './shell'
 import { setGithubConnected } from './github'
-import { detectAntigravity } from './antigravity/executable'
+import { getAntigravityAccountStatus } from './antigravity/account'
 
 /**
  * Claude / GitHub CLI 연동 상태를 조회하고 로그인·로그아웃을 트리거한다.
@@ -116,10 +116,8 @@ async function getCodexStatus(): Promise<AgentAuthStatus> {
   }
 }
 
-/** 매니저가 붙기 전에는 설치 상태만 보고한다. 브라우저 OAuth 확인은 후속 백엔드 구현이 맡는다. */
 async function getAntigravityStatus(): Promise<AgentAuthStatus> {
-  const install = await detectAntigravity()
-  return { installed: install.path !== null, loggedIn: false }
+  return getAntigravityAccountStatus()
 }
 
 export async function getAuthStatus(): Promise<AuthStatus> {
