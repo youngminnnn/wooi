@@ -4,6 +4,7 @@ import { isWorktreeClean, summarizeBranch } from '../../git'
 import type { BranchSummary } from '../../git'
 import { getStore } from '../../store'
 import { createWorkspace } from '../../workspaces'
+import { resolveRequestedAgentOptions } from './agentOptions'
 import { deliverOrHold } from './peer'
 import type { AgentToolHandler } from './registry'
 import { resolveTargetWorkspace } from './target'
@@ -92,6 +93,10 @@ export const createStackedWorkspace: AgentToolHandler = async (deps, workspaceId
   }
 
   const name = typeof args.name === 'string' ? args.name.trim() : ''
+  // 에이전트를 생략하면 자식은 **부모를 물려받는다**(resolveWorkspaceAgentBackend). 모델·effort 는
+  // 물려받지 않고 그 백엔드의 전역 기본값으로 시작하므로, 이어서 같은 모델로 돌리려면 명시해야
+  // 한다. 검증도 여기서 끝낸다([[agent/tools/agentOptions]]).
+  const agentOptions = await resolveRequestedAgentOptions(deps, args, ws)
   const result = await createWorkspace(deps, {
     repoId: ws.repoId,
     parentWorkspaceId: ws.id,
@@ -99,6 +104,7 @@ export const createStackedWorkspace: AgentToolHandler = async (deps, workspaceId
     // 사람이 UI 에서 만든 스택 자식은 부모가 있어도 생성자가 없고, 그 구분이 대상을 받는
     // 도구의 권한 판정 근거가 된다([[agent/tools/target]]).
     createdByWorkspaceId: ws.id,
+    ...agentOptions,
     ...(name ? { name } : {})
   })
   if (result.error) throw new Error(result.error)

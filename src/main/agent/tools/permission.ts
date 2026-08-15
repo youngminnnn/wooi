@@ -208,18 +208,46 @@ function defaultBranchFor(workspace: Workspace): string {
   return repoOf(workspace)?.defaultBranch ?? 'the default branch'
 }
 
+/**
+ * 새 워크스페이스를 무엇으로 돌릴지 — 에이전트·모델·effort 중 **호출이 명시한 것만** 적는다.
+ *
+ * 카드 아래 입력 JSON 에도 같은 값이 있지만, 사람이 실제로 읽는 것은 이 한 문장이다. 여기 만드는
+ * 워크스페이스는 화면을 가져가지 않으므로, 승인 뒤에는 그 선택이 눈에 띄지 않은 채로 남는다.
+ */
+function agentChoicePhrase(a: Record<string, unknown>): string {
+  const text = (key: string): string =>
+    typeof a[key] === 'string' ? (a[key] as string).trim() : ''
+  const backend = text('agentBackend')
+  const model = text('model')
+  const effort = text('effort')
+  if (!backend && !model && !effort) return ''
+  const parts = [
+    backend ? (AGENT_BACKEND_LABELS[backend as AgentBackendId] ?? backend) : '',
+    model ? `\`${model}\`` : '',
+    effort ? `${effort} reasoning effort` : ''
+  ].filter(Boolean)
+  return ` It would run on ${parts.join(' · ')}.`
+}
+
 /** 카드 한 줄 설명. 무엇이 일어나는지 사용자가 보고 판단할 수 있어야 한다. */
 function titleFor(tool: string, args: unknown, workspace: Workspace): string {
   const a = (args ?? {}) as Record<string, unknown>
   if (tool === 'create_stacked_workspace') {
     const name = typeof a.name === 'string' && a.name.trim() ? ` on \`${a.name.trim()}\`` : ''
     // 셋업 스크립트 실행은 사용자가 알고 승인해야 하는 부분이라 문장에 남긴다.
-    return `The agent wants to create a stacked workspace${name} — this makes a branch, a worktree, and runs the repository's setup script.`
+    return (
+      `The agent wants to create a stacked workspace${name} — this makes a branch, a worktree, ` +
+      `and runs the repository's setup script.${agentChoicePhrase(a)}`
+    )
   }
   if (tool === 'create_workspace') {
     const name = typeof a.name === 'string' && a.name.trim() ? ` on \`${a.name.trim()}\`` : ''
     // 스택과 달리 "무엇 위에 쌓이는지" 가 없으므로, 사용자가 판단할 거리는 어디서 갈라지는가다.
-    return `The agent wants to create a new workspace${name} branching off \`${defaultBranchFor(workspace)}\` — this makes a branch, a worktree, and runs the repository's setup script.`
+    return (
+      `The agent wants to create a new workspace${name} branching off ` +
+      `\`${defaultBranchFor(workspace)}\` — this makes a branch, a worktree, and runs the ` +
+      `repository's setup script.${agentChoicePhrase(a)}`
+    )
   }
   if (tool === 'archive_workspace') {
     const target = targetWorkspace(a.workspaceId)

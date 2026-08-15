@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { z } from 'zod'
 import type { AgentToolDeps } from './registry'
-import type { Repo, Workspace } from '@shared/types'
+import type { AppSettings, ModelOption, Repo, Workspace } from '@shared/types'
+import { DEFAULT_SETTINGS } from '../../storeSchema'
 import { AGENT_TOOLS } from './catalog'
 
 /**
@@ -18,7 +19,8 @@ const create = vi.hoisted(() => vi.fn())
 const archive = vi.hoisted(() => vi.fn())
 const state = vi.hoisted(() => ({
   workspaces: [] as Partial<Workspace>[],
-  repos: [] as Partial<Repo>[]
+  repos: [] as Partial<Repo>[],
+  settings: {} as AppSettings
 }))
 
 vi.mock('../../git', () => ({ isWorktreeClean: clean }))
@@ -26,7 +28,9 @@ vi.mock('../../workspaces', () => ({ createWorkspace: create, archiveWorkspace: 
 vi.mock('../../store', () => ({ getStore: () => ({ getState: () => state }) }))
 
 const sendMessage = vi.fn()
-const deps = { scripts: {}, sendMessage } as unknown as AgentToolDeps
+// 모델 목록은 백엔드에 물어봐야 알 수 있다 — 빈 목록은 "알 수 없다" 라서 검증을 건너뛴다.
+const listModels = vi.fn<(backend: string) => Promise<ModelOption[]>>()
+const deps = { scripts: {}, sendMessage, listModels } as unknown as AgentToolDeps
 
 const repo: Partial<Repo> = { id: 'repo-1', defaultBranch: 'main' }
 
@@ -77,6 +81,8 @@ beforeEach(() => {
   vi.clearAllMocks()
   state.workspaces = [{ ...caller }, { ...child }]
   state.repos = [{ ...repo }]
+  state.settings = { ...DEFAULT_SETTINGS }
+  listModels.mockResolvedValue([{ id: 'claude-opus-5[1m]', label: 'Opus 5' }])
   clean.mockResolvedValue(true)
   create.mockResolvedValue({ workspaceId: 'ws-new', name: 'feat/other', branch: 'feat/other' })
   // 아카이브는 결과 객체를 돌려준다 — 스크립트가 실패했을 때만 내용이 찬다.
@@ -127,6 +133,54 @@ describe('create_workspace', () => {
     await create_()
 
     expect(create.mock.calls[0][1]).not.toHaveProperty('agentBackend')
+  })
+
+  it('MCP 스키마에서 모델과 effort 도 고를 수 있다', () => {
+    const spec = AGENT_TOOLS.find((tool) => tool.name === 'create_workspace')
+    const schema = z.object(spec!.inputSchema)
+
+    expect(schema.safeParse({ model: 'claude-opus-5[1m]', effort: 'high' }).success).toBe(true)
+    // effort 는 백엔드 메타가 아는 값만 받는다 — 오타를 새 워크스페이스까지 가져가지 않는다.
+    expect(schema.safeParse({ effort: 'very-high' }).success).toBe(false)
+  })
+
+  it('선택한 모델과 effort 를 새 워크스페이스에 넘긴다', async () => {
+    await create_({ model: 'claude-opus-5[1m]', effort: 'high' })
+
+    expect(create).toHaveBeenCalledWith(
+      deps,
+      expect.objectContaining({ model: 'claude-opus-5[1m]', effort: 'high' })
+    )
+  })
+
+  it('모델·effort 를 생략하면 백엔드 기본값을 쓰도록 넘기지 않는다', async () => {
+    await create_()
+
+    expect(create.mock.calls[0][1]).not.toHaveProperty('model')
+    expect(create.mock.calls[0][1]).not.toHaveProperty('effort')
+  })
+
+  // 잘못된 모델은 생성을 막지 않고 저장된다 — 사고는 화면도 가져가지 않는 새 워크스페이스의
+  // 첫 턴에서야 터진다. 도구 오류로 돌려주면 모델이 같은 턴 안에서 고쳐 다시 부를 수 있다.
+  it('그 agent 가 주지 않는 모델은 고를 수 있는 값과 함께 거절한다', async () => {
+    await expect(create_({ model: 'gpt-9' })).rejects.toThrow('claude-opus-5[1m]')
+    expect(create).not.toHaveBeenCalled()
+  })
+
+  it('그 agent 가 모르는 effort 도 거절한다', async () => {
+    // 'minimal' 은 Codex 쪽 단계다. 검증은 **고른 agent** 의 목록으로 한다.
+    await expect(create_({ effort: 'minimal' })).rejects.toThrow('Claude Code')
+    expect(create).not.toHaveBeenCalled()
+  })
+
+  // 목록을 못 얻는 이유는 여럿이다(CLI 미설치·조회 실패). 그때 거절하면 사용자가 정당하게
+  // 고른 모델까지 막힌다 — 모르는 것은 모르는 대로 두고 값을 그대로 넘긴다.
+  it('모델 목록을 못 얻으면 검증 없이 그대로 넘긴다', async () => {
+    listModels.mockResolvedValue([])
+
+    await create_({ model: 'some-new-model' })
+
+    expect(create).toHaveBeenCalledWith(deps, expect.objectContaining({ model: 'some-new-model' }))
   })
 
   // 부모가 없어도 "내가 만들었다" 는 남아야 한다. 이게 없으면 자기가 만든 워크스페이스를

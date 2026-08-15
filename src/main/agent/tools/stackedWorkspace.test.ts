@@ -1,6 +1,9 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { z } from 'zod'
+import { AGENT_TOOLS } from './catalog'
 import type { AgentToolDeps } from './registry'
-import type { Workspace } from '@shared/types'
+import type { AppSettings, ModelOption, Workspace } from '@shared/types'
+import { DEFAULT_SETTINGS } from '../../storeSchema'
 
 /**
  * 스택 인계에서 지켜야 할 것들.
@@ -13,7 +16,10 @@ import type { Workspace } from '@shared/types'
 const clean = vi.hoisted(() => vi.fn())
 const summarize = vi.hoisted(() => vi.fn())
 const create = vi.hoisted(() => vi.fn())
-const state = vi.hoisted(() => ({ workspaces: [] as Partial<Workspace>[] }))
+const state = vi.hoisted(() => ({
+  workspaces: [] as Partial<Workspace>[],
+  settings: {} as AppSettings
+}))
 const update = vi.hoisted(() =>
   vi.fn((fn: (st: { workspaces: Partial<Workspace>[] }) => void) => fn(state))
 )
@@ -25,16 +31,20 @@ vi.mock('../../store', () => ({ getStore: () => ({ getState: () => state, update
 const sendMessage = vi.fn()
 const postToTranscript = vi.fn()
 const broadcastState = vi.fn()
+// 모델 목록은 백엔드에 물어봐야 알 수 있다 — 빈 목록은 "알 수 없다" 라서 검증을 건너뛴다.
+const listModels = vi.fn<(backend: string) => Promise<ModelOption[]>>()
 const deps = {
   scripts: {},
   broadcastState,
   sendMessage,
-  postToTranscript
+  postToTranscript,
+  listModels
 } as unknown as AgentToolDeps
 
 const parent: Partial<Workspace> = {
   id: 'ws-parent',
   repoId: 'repo-1',
+  agentBackend: 'claude',
   branch: 'feat/base',
   baseBranch: 'main',
   name: 'base',
@@ -60,7 +70,13 @@ const child: Partial<Workspace> = {
 beforeEach(() => {
   vi.clearAllMocks()
   state.workspaces = [{ ...parent }]
+  state.settings = { ...DEFAULT_SETTINGS }
   clean.mockResolvedValue(true)
+  listModels.mockImplementation(async (backend) =>
+    backend === 'codex'
+      ? [{ id: 'gpt-5-codex', label: 'GPT-5 Codex' }]
+      : [{ id: 'claude-opus-5[1m]', label: 'Opus 5' }]
+  )
   summarize.mockResolvedValue(null)
   create.mockResolvedValue({ workspaceId: 'ws-new', name: 'feat/next', branch: 'feat/next' })
 })
@@ -122,6 +138,55 @@ describe('create_stacked_workspace', () => {
   it('공백뿐인 이름도 안 준 것으로 본다', async () => {
     await create_({ name: '   ' })
     expect(create.mock.calls[0][1]).not.toHaveProperty('name')
+  })
+
+  it('MCP 스키마에서 자식의 agent·모델·effort 를 고를 수 있다', () => {
+    const spec = AGENT_TOOLS.find((tool) => tool.name === 'create_stacked_workspace')
+    const schema = z.object(spec!.inputSchema)
+
+    expect(
+      schema.safeParse({ agentBackend: 'codex', model: 'gpt-5-codex', effort: 'high' }).success
+    ).toBe(true)
+    expect(schema.safeParse({ agentBackend: 'unknown' }).success).toBe(false)
+    expect(schema.safeParse({ effort: 'very-high' }).success).toBe(false)
+  })
+
+  it('고른 agent·모델·effort 를 자식에게 넘긴다', async () => {
+    await create_({ agentBackend: 'claude', model: 'claude-opus-5[1m]', effort: 'high' })
+
+    expect(create).toHaveBeenCalledWith(
+      deps,
+      expect.objectContaining({
+        agentBackend: 'claude',
+        model: 'claude-opus-5[1m]',
+        effort: 'high'
+      })
+    )
+  })
+
+  it('아무것도 안 고르면 넘기지 않는다 — 자식은 부모 agent 와 그 백엔드 기본값으로 시작한다', async () => {
+    await create_()
+
+    for (const key of ['agentBackend', 'model', 'effort'])
+      expect(create.mock.calls[0][1]).not.toHaveProperty(key)
+  })
+
+  // agent 를 생략한 자식은 부모를 물려받으므로, 검증도 **부모의** 백엔드 목록으로 해야 한다.
+  // 여기가 어긋나면 자식이 못 쓰는 값을 통과시키거나 쓸 수 있는 값을 거절한다.
+  it('agent 를 생략하면 부모 백엔드의 목록으로 검증한다', async () => {
+    state.workspaces = [{ ...parent, agentBackend: 'codex' }]
+
+    // 'ultracode' 는 Claude 쪽 단계다 — 부모가 Codex 면 자식도 Codex 라 걸러야 한다.
+    await expect(create_({ effort: 'ultracode' })).rejects.toThrow('Codex')
+    expect(create).not.toHaveBeenCalled()
+
+    await create_({ model: 'gpt-5-codex' })
+    expect(listModels).toHaveBeenCalledWith('codex')
+  })
+
+  it('그 agent 가 주지 않는 모델은 고를 수 있는 값과 함께 거절한다', async () => {
+    await expect(create_({ model: 'gpt-9' })).rejects.toThrow('claude-opus-5[1m]')
+    expect(create).not.toHaveBeenCalled()
   })
 
   it('새 브랜치가 갈라진 base 를 알려 준다', async () => {

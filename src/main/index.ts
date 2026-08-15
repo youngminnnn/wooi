@@ -136,6 +136,7 @@ initAgentTools({
   broadcastState: () => dispatch(IPC.evtState, getStore().getState()),
   sendMessage: (workspaceId, text) => sessions.sendMessage(workspaceId, text),
   emitChatEvent: (workspaceId, event) => dispatch(IPC.evtChat, { workspaceId, event }),
+  listModels: (backend) => sessions.listModels(backend),
   postToTranscript: (workspaceId, item) => {
     getTranscripts().upsert(workspaceId, item)
     dispatch(IPC.evtChat, { workspaceId, event: { type: 'item', item } })

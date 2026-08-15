@@ -1,3 +1,4 @@
+import { DEFAULT_AGENT_BACKEND } from '@shared/types'
 import type {
   AgentAuthStatus,
   AgentBackendId,
@@ -17,7 +18,8 @@ import type {
   PermissionMode,
   PermissionModeInfo,
   RewindActionResult,
-  SlashCommandInfo
+  SlashCommandInfo,
+  Workspace
 } from '@shared/types'
 
 /**
@@ -409,4 +411,23 @@ export const DEFAULT_BACKEND_ID: AgentBackendId = 'claude'
 /** 식별자에 해당하는 백엔드 메타를 돌려준다(없으면 기본 백엔드). */
 export function backendMeta(id: AgentBackendId): AgentBackendMeta {
   return AGENT_BACKENDS[id] ?? AGENT_BACKENDS[DEFAULT_BACKEND_ID]
+}
+
+/**
+ * 생성 요청에 agent 가 명시되지 않았을 때의 기본값.
+ *
+ * 스택 자식은 부모 작업의 연속이므로 부모 agent 를 물려받고, 스택 뿌리만 전역 기본값을 쓴다.
+ * 이 규칙을 renderer 호출부에 맡기면 수동 생성·agent tool 같은 다른 생성 경로가 서로 달라진다.
+ *
+ * 워크스페이스를 만드는 [[workspaces]] 가 아니라 **메타만 아는 이 파일**에 둔다 — 만들기
+ * 전에 같은 답을 알아야 하는 곳이 또 있기 때문이다(에이전트 도구는 넘겨받은 모델·effort 를
+ * 어느 백엔드의 목록으로 검증할지 정해야 한다, [[agent/tools/agentOptions]]). 저쪽에서
+ * import 하면 git·github·scripts 까지 딸려 온다.
+ */
+export function resolveWorkspaceAgentBackend(
+  explicit: AgentBackendId | undefined,
+  parent: Pick<Workspace, 'agentBackend'> | null | undefined,
+  configuredDefault: AgentBackendId | undefined
+): AgentBackendId {
+  return explicit ?? parent?.agentBackend ?? configuredDefault ?? DEFAULT_AGENT_BACKEND
 }
