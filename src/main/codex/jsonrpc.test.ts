@@ -59,6 +59,18 @@ describe('프레이밍', () => {
     await expect(promise).resolves.toEqual({ thread: { id: 't1' } })
   })
 
+  it('멀티바이트 문자가 Buffer 청크 경계에서 잘려도 UTF-8을 보존한다', () => {
+    const h = harness()
+    const line = JSON.stringify({ method: 'message', params: { text: '해석될 수 있어' } }) + '\n'
+    const bytes = Buffer.from(line, 'utf8')
+    const split = bytes.indexOf(Buffer.from('있', 'utf8')) + 1
+
+    h.feed(bytes.subarray(0, split))
+    h.feed(bytes.subarray(split))
+
+    expect(h.notifications).toEqual([['message', { text: '해석될 수 있어' }]])
+  })
+
   it('한 청크에 담긴 여러 메시지를 모두 처리한다', () => {
     const h = harness()
     h.feed('{"method":"a","params":1}\n{"method":"b","params":2}\n')

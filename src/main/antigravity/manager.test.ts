@@ -34,7 +34,7 @@ vi.mock('electron', () => ({
 vi.mock('../store', () => ({ getStore: () => fixture.store }))
 vi.mock('../transcripts', () => ({ getTranscripts: () => ({ upsert: vi.fn() }) }))
 
-import { AntigravitySessionManager, parseModelsText } from './manager'
+import { AntigravitySessionManager, composeAntigravityPrompt, parseModelsText } from './manager'
 
 type TestState = {
   conversationId: string | null
@@ -94,6 +94,27 @@ describe('AntigravitySessionManager bookkeeping', () => {
   it('recycleAll preserves the conversation id', () => {
     manager.recycleAll()
     expect(state.conversationId).toBe('conversation-1')
+  })
+})
+
+describe('composeAntigravityPrompt', () => {
+  it('첫 턴에는 워크스페이스 문맥과 절대 경로를 넣는다', () => {
+    const prompt = composeAntigravityPrompt('Implement it.', '/tmp/worktree', null)
+    expect(prompt).toContain('git worktree at /tmp/worktree')
+    expect(prompt).toContain('Read CLAUDE.md')
+    expect(prompt).toContain('Implement it.')
+  })
+
+  it('기존 대화의 후속 턴에는 문맥을 반복하지 않는다', () => {
+    expect(composeAntigravityPrompt('Continue.', '/tmp/worktree', 'conversation-1')).toBe(
+      'Continue.'
+    )
+  })
+
+  it('호출자가 준 prefix를 첫 턴 문맥과 함께 보존한다', () => {
+    const prompt = composeAntigravityPrompt('Review this.', '/tmp/worktree', null, 'Agent handoff')
+    expect(prompt).toContain('git worktree at /tmp/worktree')
+    expect(prompt).toContain('\n\nAgent handoff\n\nReview this.')
   })
 })
 

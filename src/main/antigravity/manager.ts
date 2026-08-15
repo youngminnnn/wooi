@@ -83,6 +83,22 @@ const MODELS_TIMEOUT_MS = 20_000
 /** SIGTERM 을 보낸 뒤 SIGKILL 까지 기다리는 시간. 정상 종료가 마무리될 만큼만 준다. */
 const KILL_GRACE_MS = 3_000
 
+/**
+ * 실제 첫 요청이 프로젝트 작업인데도 도구 없이 Go 예제만 답한 트랜스크립트가 있었다. `agy`에는
+ * system-prompt 플래그가 없고 자동 문맥 탐색에서도 CLAUDE.md가 보이지 않으므로 첫 턴에만 보낸다.
+ */
+export function composeAntigravityPrompt(
+  text: string,
+  worktreePath: string,
+  conversationId: string | null,
+  callerPrefix?: string
+): string {
+  const workspaceContext = conversationId
+    ? undefined
+    : `You are working in the git worktree at ${worktreePath}, dedicated to this one task. Work there.\nPrefer changing the project's files over answering with standalone code when the request can be satisfied by a change.\nRead CLAUDE.md if the project has one and follow its instructions.\nYour output is rendered as chat markdown in a GUI, not a terminal.`
+  return [workspaceContext, callerPrefix, text].filter(Boolean).join('\n\n')
+}
+
 export class AntigravitySessionManager implements AgentBackend {
   readonly meta = ANTIGRAVITY_META
   private states = new Map<string, State>()
@@ -118,7 +134,12 @@ export class AntigravitySessionManager implements AgentBackend {
     }
 
     state.running = true
-    const prompt = pending.opts?.prefix ? `${pending.opts.prefix}\n\n${pending.text}` : pending.text
+    const prompt = composeAntigravityPrompt(
+      pending.text,
+      ws.worktreePath,
+      state.conversationId,
+      pending.opts?.prefix
+    )
     const mapper = createMapperState(randomUUID())
     // silent도 CLI echo는 오므로 반드시 등록한다. 화면·기록에서만 사용자 버블을 생략한다.
     rememberOptimisticUser(mapper, prompt)

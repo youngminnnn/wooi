@@ -36,6 +36,8 @@ export interface MapperState {
   runId: string
   /** step_index → 지금까지 받은 assistant 조각. DONE 때 완성 아이템을 저장하는 데 쓴다. */
   assistantText: Map<number, string>
+  /** 이 실행에서 마지막으로 저장한 비어 있지 않은 assistant. result.response 로 최종 교정한다. */
+  lastAssistant?: { id: string; text: string; ts: number }
   /** ACTIVE 에만 있던 도구 이름과 인자를 DONE 때 다시 실어 영속하기 위한 스냅샷. */
   tools: Map<number, { name: string; input: unknown }>
   /** 로컬에 먼저 그린 사용자 입력과 CLI echo 를 한 번씩 짝짓기 위한 서명. */
@@ -123,6 +125,7 @@ export function mapEvent(
     // result.error 는 실패의 유일한 설명일 수 있다(로그인 전 실행이 그렇다 — protocol.ts 참고).
     // 오류 카드를 따로 한 장 세워 이유를 보여 주고, result 카드는 턴의 마무리로 남긴다.
     const failure = stringValue(result.error)
+    const response = stringValue(result.response)
     const item: ChatItem = {
       id: itemId(state, 'result'),
       type: 'result',
@@ -136,20 +139,39 @@ export function mapEvent(
       // agy 는 비용을 보고하지 않는다. 0 을 넣지 않으면 UI 가 비용 필드를 올바르게 숨긴다.
       ts
     }
-    if (!failure) return itemResult(item)
-    const error: ChatItem = {
-      id: itemId(state, 'result:error'),
-      type: 'error',
-      text: clampText(failure),
-      ts
+    const events: ChatEvent[] = []
+    const persist: ChatItem[] = []
+    if (response && response !== state.lastAssistant?.text) {
+      /**
+       * agy 1.1.13 은 text_delta 를 글자가 아니라 바이트 단위로 잘라 UTF-8 경계의 문자를
+       * U+FFFD 로 망가뜨리지만 result.response 는 깨끗하다. 실측 한 응답에서 델타 합계는
+       * length 1080·U+FFFD 9개, response 는 length 1074·U+FFFD 0개였고, 차이 6자는 파괴된
+       * 문자 3개가 대체 문자 3개씩으로 늘어난 결과였다. 잠깐의 깨짐보다 실시간 표시의 가치가
+       * 더 크므로 델타 스트리밍은 유지하고, 곧이어 여기서 정본 response 로 같은 버블을 교정한다.
+       */
+      const assistant: ChatItem = {
+        id: state.lastAssistant?.id ?? itemId(state, 'result:assistant'),
+        type: 'assistant',
+        text: response,
+        ts: state.lastAssistant?.ts ?? ts
+      }
+      events.push({ type: 'item', item: assistant })
+      persist.push(assistant)
+      state.lastAssistant = assistant
     }
-    return {
-      events: [
-        { type: 'item', item: error },
-        { type: 'item', item }
-      ],
-      persist: [error, item]
+    if (failure) {
+      const error: ChatItem = {
+        id: itemId(state, 'result:error'),
+        type: 'error',
+        text: clampText(failure),
+        ts
+      }
+      events.push({ type: 'item', item: error })
+      persist.push(error)
     }
+    events.push({ type: 'item', item })
+    persist.push(item)
+    return { events, persist }
   }
 
   return unknown(`event "${stringValue(event.event) ?? 'unknown'}"`, ts, onUnknown)
@@ -175,6 +197,7 @@ function mapAssistant(step: Step, index: number, state: MapperState, ts: number)
   state.assistantText.delete(index)
   if (!accumulated) return { events, persist: [] }
   const item: ChatItem = { id: stepItemId(state, index), type: 'assistant', text: accumulated, ts }
+  state.lastAssistant = item
   return { events, persist: [item] }
 }
 

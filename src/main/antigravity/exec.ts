@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process'
+import { StringDecoder } from 'node:string_decoder'
 import { log } from '../logger'
 import type { AntigravityStreamReader } from './stream'
 
@@ -39,16 +40,26 @@ export function execAntigravity(
       stderr: '',
       exitCode: null
     }
+    // 청크별 toString 은 경계에 걸친 다중 바이트 문자의 양쪽을 U+FFFD 로 만든다. ASCII 테스트는
+    // 이를 못 잡았지만 3바이트인 한글에는 흔하며, JSON 문자열 안의 U+FFFD 는 파싱도 성공해 조용히
+    // 훼손된다(사용자 트랜스크립트의 `있` → `���`로 발견). StringDecoder 는 미완성 바이트를 다음
+    // 청크까지 보류한다. stdout/stderr 는 독립된 바이트 스트림이므로 디코더도 각각 둔다.
+    const stdoutDecoder = new StringDecoder('utf8')
+    const stderrDecoder = new StringDecoder('utf8')
 
-    child.stdout.on('data', (chunk: Buffer) => reader.push(chunk.toString()))
+    child.stdout.on('data', (chunk: Buffer) => reader.push(stdoutDecoder.write(chunk)))
     child.stderr.on('data', (chunk: Buffer) => {
-      out.stderr += chunk.toString()
+      out.stderr += stderrDecoder.write(chunk)
     })
     child.on('error', (err) => {
       if (deps.abort.signal.aborted) out.aborted = true
       else out.error = String(err)
     })
     child.on('close', (code) => {
+      // 스트림이 문자 중간에서 끝날 수도 있다. 꼬리를 버리면 마지막 문자가 조용히 사라진다.
+      const stdoutRemainder = stdoutDecoder.end()
+      if (stdoutRemainder) reader.push(stdoutRemainder)
+      out.stderr += stderrDecoder.end()
       reader.end()
       out.exitCode = code
       if (deps.abort.signal.aborted) out.aborted = true

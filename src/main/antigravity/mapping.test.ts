@@ -189,6 +189,94 @@ describe('사용자 echo와 결과', () => {
     })
     expect(result.costUsd).toBeUndefined()
   })
+
+  it('깨진 델타를 같은 assistant id의 깨끗한 최종 응답으로 교정한다', () => {
+    const state = createMapperState('run1')
+    map(
+      step({
+        step_index: 2,
+        step_type: 'agent_response',
+        state: 'ACTIVE',
+        text_delta: '현재 프로젝트의 �'
+      }),
+      state
+    )
+    const streamed = map(
+      step({
+        step_index: 2,
+        step_type: 'agent_response',
+        state: 'DONE',
+        text_delta: '�� 구조입니다.'
+      }),
+      state
+    ).persist[0]
+    const result = map(
+      {
+        event: 'result',
+        result: {
+          conversation_id: 'c',
+          status: 'SUCCESS',
+          response: '현재 프로젝트의 구조입니다.',
+          duration_seconds: 1,
+          num_turns: 1
+        }
+      },
+      state
+    )
+    const assistants = result.persist.filter((item) => item.type === 'assistant')
+
+    expect(assistants).toEqual([
+      expect.objectContaining({
+        id: streamed.id,
+        type: 'assistant',
+        text: '현재 프로젝트의 구조입니다.'
+      })
+    ])
+    expect(new Set([streamed.id, ...assistants.map((item) => item.id)]).size).toBe(1)
+    expect(
+      result.events.map((event) => (event.type === 'item' ? event.item.type : event.type))
+    ).toEqual(['assistant', 'result'])
+  })
+
+  it('result.response가 비어 있으면 스트리밍한 assistant를 그대로 둔다', () => {
+    const state = createMapperState('run1')
+    const streamed = map(
+      step({ step_index: 2, step_type: 'agent_response', state: 'DONE', text_delta: 'hello' }),
+      state
+    ).persist[0]
+    const result = map(
+      {
+        event: 'result',
+        result: {
+          conversation_id: 'c',
+          status: 'SUCCESS',
+          response: '',
+          duration_seconds: 1,
+          num_turns: 1
+        }
+      },
+      state
+    )
+
+    expect(streamed).toMatchObject({ type: 'assistant', text: 'hello' })
+    expect(result.persist.filter((item) => item.type === 'assistant')).toEqual([])
+  })
+
+  it('assistant 델타가 없어도 result.response로 assistant를 만든다', () => {
+    const result = map({
+      event: 'result',
+      result: {
+        conversation_id: 'c',
+        status: 'SUCCESS',
+        response: 'final answer',
+        duration_seconds: 1,
+        num_turns: 1
+      }
+    } as AntigravityEvent)
+
+    expect(result.persist[0]).toMatchObject({ type: 'assistant', text: 'final answer' })
+    expect(result.persist[1]).toMatchObject({ type: 'result' })
+  })
 })
 
 describe('모르는 입력', () => {
@@ -350,7 +438,11 @@ describe('턴 소요 시간', () => {
     const real: AntigravityEvent = JSON.parse(
       '{"event":"result","result":{"conversation_id":"c","status":"SUCCESS","response":"ok","duration_seconds":753.7,"num_turns":2}}'
     )
-    const item = mapEvent(real, state).persist[0] as Extract<ChatItem, { type: 'result' }>
+    const item = mapEvent(real, state).persist.find(
+      (persisted): persisted is Extract<ChatItem, { type: 'result' }> => persisted.type === 'result'
+    )
+    expect(item).toBeDefined()
+    if (!item) throw new Error('result item missing')
     expect(item.durationMs).toBeGreaterThanOrEqual(2_000)
     expect(item.durationMs).toBeLessThan(60_000)
   })
