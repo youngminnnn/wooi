@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
+  Dimensions,
   Keyboard,
   Platform,
   Pressable,
@@ -184,22 +185,29 @@ function PermissionCard({
  * 실제 높이를 받아 직접 패딩을 준다. SafeAreaView 가 이미 bottom inset 을 주므로 그만큼 뺀다.
  */
 function useKeyboardInset(): number {
-  const [height, setHeight] = useState(0)
+  const [inset, setInset] = useState(0)
   useEffect(() => {
     const show = Keyboard.addListener(
       Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
-      (event) => setHeight(event.endCoordinates.height)
+      (event) => {
+        // **키보드 높이가 아니라 "창 아래에서 키보드 상단까지"** 를 쓴다.
+        // Expo SDK 54 의 Android edge-to-edge 에서는 화면이 내비게이션 바 아래까지 이어지는데,
+        // endCoordinates.height 에는 그 영역이 빠져 있다(실측: 창 880, 키보드 상단 488.3,
+        // 높이 376.7 → 15dp 부족). 그래서 높이만 쓰면 컴포저가 딱 그만큼 가려진다.
+        const windowHeight = Dimensions.get('window').height
+        setInset(Math.max(0, windowHeight - event.endCoordinates.screenY))
+      }
     )
     const hide = Keyboard.addListener(
       Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
-      () => setHeight(0)
+      () => setInset(0)
     )
     return () => {
       show.remove()
       hide.remove()
     }
   }, [])
-  return height
+  return inset
 }
 
 function isChatItem(value: unknown): value is ChatItem {
