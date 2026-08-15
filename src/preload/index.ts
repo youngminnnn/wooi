@@ -151,6 +151,7 @@ const api: WooiApi = {
       ipcRenderer.invoke(IPC.reviewPost, reviewId, findingId, body),
     dismiss: (reviewId, findingId) => ipcRenderer.invoke(IPC.reviewDismiss, reviewId, findingId),
     close: (reviewId) => ipcRenderer.invoke(IPC.reviewClose, reviewId),
+    removeArchived: () => ipcRenderer.invoke(IPC.reviewRemoveArchived),
     load: (reviewId) => ipcRenderer.invoke(IPC.reviewLoad, reviewId),
     setFileViewed: (reviewId, path, viewed, prNumber) =>
       ipcRenderer.invoke(IPC.reviewSetFileViewed, reviewId, path, viewed, prNumber),

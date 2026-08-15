@@ -2544,6 +2544,8 @@ export const IPC = {
   reviewDismiss: 'review:dismiss',
   /** 리뷰를 닫고 리뷰용 워크트리를 정리한다. */
   reviewClose: 'review:close',
+  /** 아카이브된 리뷰를 한 번에 영구 삭제한다. */
+  reviewRemoveArchived: 'review:removeArchived',
   /** 리뷰 화면 진입 시 사이드카(diff·지적·활동)를 읽어온다. */
   reviewLoad: 'review:load',
   /** 파일 1건의 "봤음" 표시를 켜고 끈다. */

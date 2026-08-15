@@ -377,6 +377,8 @@ export interface WooiApi {
     dismiss(reviewId: string, findingId: string): Promise<{ error?: string }>
     /** 리뷰를 완전히 삭제한다(워크트리·ref·결과 기록 모두). */
     close(reviewId: string): Promise<void>
+    /** 아카이브된 리뷰를 모두 완전히 삭제한다. */
+    removeArchived(): Promise<{ count: number }>
     /** 리뷰 화면 진입 시 diff·지적·활동을 한 번에 읽어온다. */
     load(reviewId: string): Promise<ReviewBundle>
     /**
