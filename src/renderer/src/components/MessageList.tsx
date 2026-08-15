@@ -24,6 +24,7 @@ import { AgentMessage, ErrorRow, ToolUseRow, UserMessage } from './ChatPrimitive
 import { formatTime } from '../lib/format'
 import { buildTaskCards, taskLabel, type TaskEntry } from '../lib/tasks'
 import { useTranscriptJump } from '../lib/transcriptJump'
+import { compactHistoryWindow } from '../lib/compactHistory'
 import { useAvailableBackends } from '../lib/backends'
 import { AgentBackendMark } from './BrandIcons'
 import { AGENT_BACKEND_LABELS, canSwitchAgentBackend } from '@shared/types'
@@ -121,29 +122,52 @@ export default function MessageList({
   // 트랜스크립트는 비동기로 로드되므로, 내용이 처음 채워질 때 스크롤 위치를 1회 복원한다.
   const restoredRef = useRef(false)
   const [showJump, setShowJump] = useState(false)
+  const [expandedBoundaryId, setExpandedBoundaryId] = useState<string>()
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const [activeIdx, setActiveIdx] = useState(0)
+  const searchInputRef = useRef<HTMLInputElement>(null)
+  const jumpTarget = useStore((s) => s.jumpTarget)
+
+  const compactWindow = useMemo(() => compactHistoryWindow(items), [items])
+  const historyExpanded = expandedBoundaryId === compactWindow.boundary?.id
+  const jumpTargetIndex =
+    jumpTarget?.workspaceId === workspaceId
+      ? items.findIndex((item) => item.id === jumpTarget.itemId)
+      : -1
+  const jumpInHiddenHistory = jumpTargetIndex >= 0 && jumpTargetIndex <= compactWindow.boundaryIndex
+  const displayExpanded = historyExpanded || searchOpen || jumpInHiddenHistory
+  const collapsed = compactWindow.boundaryIndex >= 0 && !displayExpanded
+  // slice 가 핵심 최적화다. 접힌 과거는 DOM뿐 아니라 task 카드 계산·검색 대상에서도 빠진다.
+  const renderedItems = collapsed ? items.slice(compactWindow.boundaryIndex + 1) : items
+
+  // 점프 훅은 목적지를 찾으면 jumpTarget 을 지운다. 그 뒤에도 과거가 열린 채 남도록 경계 id를
+  // 확정한다. microtask 로 넘겨 effect 본문에서 동기 setState 하는 추가 렌더도 피한다.
+  useEffect(() => {
+    if (!jumpInHiddenHistory || !compactWindow.boundary) return
+    const boundaryId = compactWindow.boundary.id
+    queueMicrotask(() => setExpandedBoundaryId(boundaryId))
+  }, [compactWindow.boundary, jumpInHiddenHistory])
 
   // 할 일 도구 호출들을 체크리스트 카드로 묶는다. 카드로 대체된 도구 행·결과는 목록 단계에서
   // 걸러 내, 검색과 스크롤도 실제로 보이는 항목만 대상으로 삼게 한다.
   const { visibleItems, resolved, cardByItemId, latestCardItemId } = useMemo(() => {
-    const { cardByItemId: cards, hiddenItemIds } = buildTaskCards(items)
+    const { cardByItemId: cards, hiddenItemIds } = buildTaskCards(renderedItems)
     const resolvedIds = new Set<string>()
-    for (const it of items) if (it.type === 'tool_result') resolvedIds.add(it.toolId)
+    for (const it of renderedItems) if (it.type === 'tool_result') resolvedIds.add(it.toolId)
     return {
       cardByItemId: cards,
       resolved: resolvedIds,
       // 진행 중 스피너는 마지막 카드에만 붙인다 — 앞선 카드들은 이미 지나간 스냅샷이라,
       // 전부 돌면 어떤 것이 지금 상태인지 알 수 없게 된다.
       latestCardItemId: cards.size ? Array.from(cards.keys())[cards.size - 1] : undefined,
-      visibleItems: hiddenItemIds.size ? items.filter((it) => !hiddenItemIds.has(it.id)) : items
+      visibleItems: hiddenItemIds.size
+        ? renderedItems.filter((it) => !hiddenItemIds.has(it.id))
+        : renderedItems
     }
-  }, [items])
+  }, [renderedItems])
 
   // ── 대화 내 검색(⌘F) ─────────────────────────────────────────────────────
-  const [searchOpen, setSearchOpen] = useState(false)
-  const [query, setQuery] = useState('')
-  const [activeIdx, setActiveIdx] = useState(0)
-  const searchInputRef = useRef<HTMLInputElement>(null)
-
   const matches = useMemo(() => {
     const q = query.trim().toLowerCase()
     if (!q) return [] as string[]
@@ -348,6 +372,24 @@ export default function MessageList({
       )}
       <div ref={containerRef} onScroll={onScroll} className="h-full overflow-y-auto">
         <div className="max-w-3xl mx-auto px-5 py-5 space-y-3">
+          {compactWindow.boundary && (
+            <button
+              type="button"
+              aria-expanded={displayExpanded}
+              onClick={() =>
+                setExpandedBoundaryId(historyExpanded ? undefined : compactWindow.boundary?.id)
+              }
+              className="mx-auto flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs text-neutral-500 hover:bg-[var(--surface)] hover:text-neutral-300"
+            >
+              <ChevronRight
+                size={12}
+                className={`transition-transform ${displayExpanded ? 'rotate-90' : ''}`}
+              />
+              {displayExpanded
+                ? 'Hide conversation before compaction'
+                : `Show ${compactWindow.boundaryIndex} earlier conversation items`}
+            </button>
+          )}
           {visibleItems.map((item) => (
             <div
               key={item.id}
@@ -456,6 +498,17 @@ function Item({
       return <ErrorRow text={item.text} />
     case 'system':
       return <div className="text-xs text-neutral-500 text-center py-1">{item.text}</div>
+    case 'compaction': {
+      const tokens =
+        typeof item.preTokens === 'number' && typeof item.postTokens === 'number'
+          ? ` (${formatTokenCount(item.preTokens)} → ${formatTokenCount(item.postTokens)} tokens)`
+          : ''
+      return (
+        <div className="text-xs text-neutral-500 text-center py-1">
+          Compacted conversation{tokens}.
+        </div>
+      )
+    }
     case 'bash':
       return (
         <BashBlock

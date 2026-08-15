@@ -1298,6 +1298,15 @@ export type ChatItem =
     }
   | { id: string; type: 'error'; text: string; ts: number }
   | { id: string; type: 'system'; text: string; ts: number }
+  | {
+      id: string
+      /** 이 지점 이전의 UI 기록은 모델 컨텍스트에서 압축됐으므로 기본 렌더링에서도 접는다. */
+      type: 'compaction'
+      trigger: 'auto' | 'manual'
+      ts: number
+      preTokens?: number
+      postTokens?: number
+    }
   /**
    * Wooi 가 백엔드에서 받은 것 중 **해석하지 못한 것**을 알리는 카드.
    *

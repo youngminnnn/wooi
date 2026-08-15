@@ -1265,19 +1265,17 @@ export class ClaudeSession {
       // 권한 모드가 CLI 쪽에서 바뀌면 status(=null)에 실려 온다 — 모델의 EnterPlanMode 가 대표적.
       this.syncPermissionMode(msg.permissionMode)
     } else if (msg.subtype === 'compact_boundary') {
-      // 압축 완료 — 토큰 변화를 기록으로 남기고 진행 배지를 내린다. 자동/수동 모두 여기로 온다.
+      // 압축 완료 — 경계를 별도 타입으로 남겨 렌더러가 앞선 무거운 기록을 기본 마운트하지 않게 한다.
       const meta = msg.compact_metadata
       const pre = meta?.pre_tokens
       const post = meta?.post_tokens
-      const delta =
-        typeof pre === 'number' && typeof post === 'number'
-          ? ` (${formatTokens(pre)} → ${formatTokens(post)} tokens)`
-          : ''
       this.emitItem({
         id: `compacted:${msg.uuid}`,
-        type: 'system',
-        text: `Compacted conversation${delta}.`,
-        ts: Date.now()
+        type: 'compaction',
+        trigger: meta?.trigger === 'manual' ? 'manual' : 'auto',
+        ts: Date.now(),
+        ...(typeof pre === 'number' ? { preTokens: pre } : {}),
+        ...(typeof post === 'number' ? { postTokens: post } : {})
       })
       this.deps.emit({ type: 'compacting', active: false, trigger: meta?.trigger })
     } else if (msg.subtype === 'task_started') {
@@ -1914,13 +1912,6 @@ export class ClaudeSession {
 function firstLine(text: string): string {
   const line = text.split('\n')[0]?.trim() ?? ''
   return line.length > 80 ? line.slice(0, 79) + '…' : line || '(message)'
-}
-
-/** 토큰 수를 1.2k / 45k / 1.0M 처럼 짧게 표기한다(압축 전후 안내 문구용). */
-function formatTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
-  if (n >= 1_000) return `${Math.round(n / 1_000)}k`
-  return String(n)
 }
 
 /** tool_result 의 content(string | 블록 배열)를 표시용 텍스트로 정규화한다. */
