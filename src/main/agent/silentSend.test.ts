@@ -2,7 +2,7 @@ import { beforeAll, describe, expect, it, vi } from 'vitest'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { ChatEvent, ChatItem } from '@shared/types'
+import type { ChatEvent, ChatItem, SendMessageOptions } from '@shared/types'
 import { testWooiMcp as wooiMcp } from '../claude/testWooiMcp'
 
 /**
@@ -41,7 +41,7 @@ beforeAll(() => {
 
 const SECRET = 'this line must never reach the screen'
 
-async function claudeSend(opts?: { prefix?: string; silent?: boolean }): Promise<{
+async function claudeSend(opts?: SendMessageOptions): Promise<{
   items: ChatItem[]
   events: ChatEvent[]
 }> {
@@ -73,7 +73,7 @@ async function claudeSend(opts?: { prefix?: string; silent?: boolean }): Promise
   return { items, events }
 }
 
-async function codexSend(opts?: { prefix?: string; silent?: boolean }): Promise<{
+async function codexSend(opts?: SendMessageOptions): Promise<{
   items: ChatItem[]
   events: ChatEvent[]
 }> {
@@ -133,5 +133,24 @@ describe.each(BACKENDS)('silent 전송 ($label)', ({ send }) => {
     const user = items.filter((item) => item.type === 'user')
     expect(user).toHaveLength(1)
     expect(JSON.stringify(user)).not.toContain('hidden context')
+  })
+
+  it('peer 전송이면 사용자 ChatItem 에 화면용 출처 원문을 남긴다', async () => {
+    const origin = {
+      kind: 'peer' as const,
+      messages: [
+        {
+          fromName: 'API work',
+          fromBranch: 'feat/api',
+          fromRepoName: 'wooi',
+          crossRepo: false,
+          message: 'schema changed',
+          route: 'peer' as const
+        }
+      ]
+    }
+    const { items } = await send({ origin })
+
+    expect(items.find((item) => item.type === 'user')).toMatchObject({ origin })
   })
 })

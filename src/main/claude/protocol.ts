@@ -11,7 +11,8 @@ import type {
   McpSettings,
   PermissionDecision,
   PermissionMode,
-  PermissionRequest
+  PermissionRequest,
+  SendMessageOptions
 } from '@shared/types'
 import { CLAUDE_META } from '../agent/backend'
 
@@ -149,6 +150,8 @@ export type HostCommand =
        * ([[agent/backend]] sendMessage) — prefix 와 달리 남길 사용자의 말 자체가 없다.
        */
       silent?: boolean
+      /** 화면에 일반 사용자 말풍선 대신 출처가 있는 자동 메시지로 남긴다. */
+      origin?: SendMessageOptions['origin']
     }
   | { type: 'interrupt'; workspaceId: string }
   | { type: 'setPermissionMode'; workspaceId: string; mode: ClaudePermissionMode }

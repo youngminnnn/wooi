@@ -18,6 +18,7 @@ import type {
   PermissionMode,
   PermissionModeInfo,
   RewindActionResult,
+  SendMessageOptions,
   SlashCommandInfo,
   Workspace
 } from '@shared/types'
@@ -68,7 +69,7 @@ export interface AgentBackend {
     workspaceId: string,
     text: string,
     images?: ImageAttachment[],
-    opts?: { prefix?: string; silent?: boolean }
+    opts?: SendMessageOptions
   ): void
   interrupt(workspaceId: string): Promise<void>
   setPermissionMode(workspaceId: string, mode: PermissionMode): Promise<void>

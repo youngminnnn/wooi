@@ -8,7 +8,8 @@ import type {
   ChatItem,
   EffortSetting,
   ImageAttachment,
-  PermissionMode
+  PermissionMode,
+  SendMessageOptions
 } from '@shared/types'
 import type { RpcClient } from './jsonrpc'
 import { NOTIFY, RPC, type FileUpdateChange, type ThreadResult } from './wire'
@@ -103,7 +104,7 @@ export class CodexThread {
   async send(
     text: string,
     images?: ImageAttachment[],
-    opts?: { prefix?: string; silent?: boolean }
+    opts?: SendMessageOptions
   ): Promise<void> {
     if (this.disposed) return
     const prompt = opts?.prefix ? `${opts.prefix}\n\n${text}` : text
@@ -127,6 +128,7 @@ export class CodexThread {
         type: 'user',
         text,
         ts: Date.now(),
+        ...(opts?.origin ? { origin: opts.origin } : {}),
         ...(attachments.length ? { attachments } : {})
       }
       this.deps.persist(item)

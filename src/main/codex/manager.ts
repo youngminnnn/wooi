@@ -46,6 +46,7 @@ import type {
   PermissionMode,
   PermissionRequest,
   RewindActionResult,
+  SendMessageOptions,
   SlashCommandInfo,
   Workspace
 } from '@shared/types'
@@ -308,7 +309,7 @@ export class CodexSessionManager implements AgentBackend {
     workspaceId: string,
     text: string,
     images?: ImageAttachment[],
-    opts?: { prefix?: string; silent?: boolean }
+    opts?: SendMessageOptions
   ): void {
     this.rateLimitResume.cancel(workspaceId)
     const ws = this.getWorkspace(workspaceId)
@@ -358,7 +359,8 @@ export class CodexSessionManager implements AgentBackend {
       text,
       images,
       prefix: opts?.prefix,
-      silent: opts?.silent
+      silent: opts?.silent,
+      origin: opts?.origin
     })
   }
 

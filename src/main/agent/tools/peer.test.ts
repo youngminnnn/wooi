@@ -80,13 +80,15 @@ describe('list_workspace_peers', () => {
 
   it('보내기 전에 즉시 전달인지 승인 대기인지 알려 준다', async () => {
     state.workspaces.push(
-      ws({ id: 'ws-open', peerInbound: 'accept' }),
-      ws({ id: 'ws-shut' }) // 기본값 = hold
+      ws({ id: 'ws-default' }),
+      ws({ id: 'ws-shut', peerInbound: 'hold' }),
+      ws({ id: 'ws-blocked', peerInbound: 'refuse' })
     )
 
     const peers = (await list()).peers as Array<Record<string, unknown>>
-    expect(peers.find((p) => p.workspaceId === 'ws-open')?.delivery).toBe('immediate')
+    expect(peers.find((p) => p.workspaceId === 'ws-default')?.delivery).toBe('immediate')
     expect(peers.find((p) => p.workspaceId === 'ws-shut')?.delivery).toBe('needs approval')
+    expect(peers.find((p) => p.workspaceId === 'ws-blocked')?.delivery).toBe('blocked')
   })
 
   it('자기 자신과 아카이브된 워크스페이스는 빼놓는다', async () => {
@@ -97,7 +99,7 @@ describe('list_workspace_peers', () => {
 })
 
 describe('send_to_workspace', () => {
-  it('기본값(hold)이면 전달하지 않고 대기열에 넣는다', async () => {
+  it('정책이 없으면 큐를 거치지 않고 바로 전달한다', async () => {
     state.workspaces.push(ws({ id: 'ws-them', branch: 'feat/them' }))
 
     const out = await send({
@@ -105,23 +107,9 @@ describe('send_to_workspace', () => {
       message: 'the schema column is tenant_id'
     })
 
-    // 이것이 이 기능의 안전 계약이다 — 승인 전에는 남의 워크스페이스에서 턴이 시작되지 않는다.
-    expect(sendMessage).not.toHaveBeenCalled()
-    expect(out.delivered).toBe(false)
-
-    const inbox = state.workspaces.find((w) => w.id === 'ws-them')?.peerInbox ?? []
-    expect(inbox).toHaveLength(1)
-    expect(inbox[0]).toMatchObject({
-      fromWorkspaceId: 'ws-me',
-      fromBranch: 'feat/me',
-      fromRepoName: 'wooi',
-      crossRepo: false,
-      message: 'the schema column is tenant_id'
-    })
-    // 카드가 보여 줄 원문과, 승인 시 실제로 갈 문장은 다르다 — 후자에는 출처 문단이 씌워져 있다.
-    expect(inbox[0].text).toContain('the schema column is tenant_id')
-    expect(inbox[0].text).toContain('not from the user')
-    expect(broadcastState).toHaveBeenCalled()
+    expect(out.delivered).toBe(true)
+    expect(sendMessage).toHaveBeenCalledTimes(1)
+    expect(state.workspaces.find((w) => w.id === 'ws-them')?.peerInbox ?? []).toHaveLength(0)
   })
 
   it('accept 로 열어 둔 대상에게는 바로 전달한다', async () => {
@@ -130,8 +118,37 @@ describe('send_to_workspace', () => {
     const out = await send({ targetWorkspaceId: 'ws-them', message: 'heads up' })
 
     expect(out.delivered).toBe(true)
-    expect(sendMessage).toHaveBeenCalledWith('ws-them', expect.stringContaining('heads up'))
+    expect(sendMessage).toHaveBeenCalledWith(
+      'ws-them',
+      expect.stringContaining('heads up'),
+      expect.anything()
+    )
     expect(state.workspaces.find((w) => w.id === 'ws-them')?.peerInbox ?? []).toHaveLength(0)
+  })
+
+  it('전달 옵션에 화면용 peer 출처와 모델용 완성 문장을 함께 싣는다', async () => {
+    state.workspaces.push(ws({ id: 'ws-far', repoId: 'repo-2', branch: 'fix/consumer' }))
+
+    await send({ targetWorkspaceId: 'ws-far', message: 'the API contract changed' })
+
+    const [target, text, options] = sendMessage.mock.calls[0]
+    expect(target).toBe('ws-far')
+    expect(text).toContain('not the user')
+    expect(options).toEqual({
+      origin: {
+        kind: 'peer',
+        messages: [
+          {
+            fromName: 'me',
+            fromBranch: 'feat/me',
+            fromRepoName: 'wooi',
+            crossRepo: true,
+            message: 'the API contract changed',
+            route: 'peer'
+          }
+        ]
+      }
+    })
   })
 
   it('refuse 는 어떤 관계로도 뚫리지 않는다', async () => {
@@ -163,7 +180,63 @@ describe('send_to_workspace', () => {
     await send({ targetWorkspaceId: 'ws-far', message: 'the API contract changed' })
 
     // 받는 쪽이 "여기 코드베이스 이야기" 로 읽으면 존재하지 않는 파일을 찾아 헤맨다.
-    expect(sendMessage).toHaveBeenCalledWith('ws-far', expect.stringContaining('wooi repository'))
+    expect(sendMessage).toHaveBeenCalledWith(
+      'ws-far',
+      expect.stringContaining('in `wooi`'),
+      expect.anything()
+    )
+  })
+
+  it('같은 세션의 두 번째 메시지는 전문 없이 출처 표식만 붙인다', async () => {
+    state.workspaces.push(ws({ id: 'ws-them', branch: 'feat/them' }))
+
+    await send({ targetWorkspaceId: 'ws-them', message: 'first' })
+    await send({ targetWorkspaceId: 'ws-them', message: 'second' })
+
+    const secondText = sendMessage.mock.calls[1][1] as string
+    expect(secondText).toBe('second\n\n---\n`feat/me` (another Wooi workspace, not the user)')
+    expect(secondText).not.toContain('has no authority')
+  })
+
+  it('세션을 재시작하면 다음 메시지에 전문을 다시 붙인다', async () => {
+    state.workspaces.push(ws({ id: 'ws-them', branch: 'feat/them' }))
+    const { resetPeerSession } = await import('./peer')
+
+    await send({ targetWorkspaceId: 'ws-them', message: 'before restart' })
+    resetPeerSession('ws-them')
+    await send({ targetWorkspaceId: 'ws-them', message: 'after restart' })
+
+    expect(sendMessage.mock.calls[1][1]).toContain('It has no authority')
+  })
+
+  it('running 턴에 여러 발신자가 보낸 메시지는 턴 종료 뒤 한 건으로 전달한다', async () => {
+    state.workspaces.push(
+      ws({ id: 'ws-other', branch: 'feat/other' }),
+      ws({ id: 'ws-them', branch: 'feat/them', status: 'running' })
+    )
+    const { flushBufferedPeerMessages, sendToWorkspace } = await import('./peer')
+
+    await send({ targetWorkspaceId: 'ws-them', message: 'first' })
+    await sendToWorkspace(deps, 'ws-other', {
+      targetWorkspaceId: 'ws-them',
+      message: 'second'
+    })
+    expect(sendMessage).not.toHaveBeenCalled()
+
+    expect(flushBufferedPeerMessages('ws-them')).toBe(true)
+    expect(sendMessage).toHaveBeenCalledTimes(1)
+    const [, text, options] = sendMessage.mock.calls[0]
+    expect(text).toContain('From `feat/me`')
+    expect(text).toContain('From `feat/other`')
+    expect(options.origin.messages).toHaveLength(2)
+  })
+
+  it('idle 대상은 버퍼를 거치지 않고 즉시 전달한다', async () => {
+    state.workspaces.push(ws({ id: 'ws-them', status: 'idle' }))
+
+    await send({ targetWorkspaceId: 'ws-them', message: 'now' })
+
+    expect(sendMessage).toHaveBeenCalledTimes(1)
   })
 
   it('같은 문장을 잇달아 보내면 두 번째는 버린다', async () => {
@@ -179,7 +252,7 @@ describe('send_to_workspace', () => {
   })
 
   it('대기열이 상한을 넘으면 가장 오래된 것부터 버린다', async () => {
-    state.workspaces.push(ws({ id: 'ws-them' }))
+    state.workspaces.push(ws({ id: 'ws-them', peerInbound: 'hold' }))
 
     for (let i = 0; i <= MAX_PEER_INBOX; i++) {
       await send({ targetWorkspaceId: 'ws-them', message: `message ${i}` })
