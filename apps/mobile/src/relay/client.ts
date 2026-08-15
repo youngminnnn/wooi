@@ -40,6 +40,7 @@ export type RemoteCommandChannel =
   | 'remote:ping'
   | 'chat:send'
   | 'chat:interrupt'
+  | 'permission:respond'
 
 export class RemoteCommandTimeoutError extends Error {
   constructor() {

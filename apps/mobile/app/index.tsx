@@ -29,17 +29,22 @@ function WorkspaceRow({
   workspace: RemoteWorkspace
   onPress: () => void
 }): React.JSX.Element {
+  const needsPermission = workspace.attention === 'permission'
   return (
-    <Pressable style={styles.row} onPress={onPress}>
+    <Pressable style={[styles.row, needsPermission && styles.permissionRow]} onPress={onPress}>
       <View
-        style={[styles.dot, { backgroundColor: STATUS_COLORS[workspace.status] ?? '#676771' }]}
+        style={[
+          styles.dot,
+          { backgroundColor: needsPermission ? '#8b7cf6' : STATUS_COLORS[workspace.status] ?? '#676771' },
+          needsPermission && styles.permissionDot
+        ]}
       />
       <View style={styles.rowContent}>
         <View style={styles.nameLine}>
           <Text style={styles.name} numberOfLines={1}>
             {workspaceDisplayName(workspace)}
           </Text>
-          {workspace.attention === 'permission' ? (
+          {needsPermission ? (
             <View style={styles.permissionBadge}>
               <Text style={styles.permissionText}>PERMISSION</Text>
             </View>
@@ -65,8 +70,10 @@ export default function WorkspaceListScreen(): React.JSX.Element {
   const workspaces = useMemo(
     () =>
       [...(state?.workspaces ?? [])].sort((left, right) => {
+        const permission =
+          Number(right.attention === 'permission') - Number(left.attention === 'permission')
         const attention = Number(right.attention !== null) - Number(left.attention !== null)
-        return attention || right.lastActiveAt - left.lastActiveAt
+        return permission || attention || right.lastActiveAt - left.lastActiveAt
       }),
     [state?.workspaces]
   )
@@ -173,7 +180,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     paddingVertical: 13
   },
+  permissionRow: {
+    backgroundColor: '#171426',
+    borderBottomColor: '#51478a',
+    borderLeftColor: '#8b7cf6',
+    borderLeftWidth: 3
+  },
   dot: { borderRadius: 5, height: 9, marginRight: 12, marginTop: 5, width: 9 },
+  permissionDot: { borderColor: '#c2b9ff', borderWidth: 2, height: 12, width: 12 },
   rowContent: { flex: 1 },
   nameLine: { alignItems: 'center', flexDirection: 'row', gap: 8 },
   name: { color: '#dedee2', flexShrink: 1, fontSize: 15, fontWeight: '600' },

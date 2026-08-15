@@ -20,6 +20,7 @@ import { PairingManager, type PairingState } from './pairing'
 import { StateMirror } from './mirror'
 import { RemoteCommandBridge } from './bridge'
 import type { AppState, PermissionRequest } from '@shared/types'
+import { pendingPermissions } from './permissions'
 
 /**
  * 원격 접근 기능의 파사드. main 의 나머지 부분은 이 파일만 안다.
@@ -139,7 +140,7 @@ export class RemoteBridge {
       // 붙자마자 현재 상태를 한 번 밀어 준다. 미러는 **변화**에만 반응하므로 이게 없으면
       // 방금 페어링한 폰은 랩탑에서 뭔가 일어날 때까지 빈 화면을 본다.
       const initial = this.getAppState()
-      if (initial) this.publishState(initial, [])
+      if (initial) this.publishState(initial, pendingPermissions.list())
     } catch (err) {
       // 키스토어 복호화 실패가 가장 흔하다 — 조용히 꺼진 것처럼 보이면 안 된다.
       this.fault = errorText(err)
@@ -189,7 +190,7 @@ export class RemoteBridge {
     await this.pairing?.confirm()
     // 새 기기는 직전 발행의 수신자가 아니었다. 중복 제거를 우회해 곧바로 한 번 더 보낸다.
     const current = this.getAppState()
-    if (current) this.mirror?.publishNow(current, [])
+    if (current) this.mirror?.publishNow(current, pendingPermissions.list())
     return this.emit()
   }
 

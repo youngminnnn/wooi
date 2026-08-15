@@ -17,6 +17,7 @@ import { getTranscripts } from '../transcripts'
 import { validateRemoteCommand } from './allowlist'
 import { fromPgBytea, toPgBytea } from './bytea'
 import type { RemoteKeystore } from './keystore'
+import { pendingPermissions } from './permissions'
 
 const FRESHNESS_MS = 5 * 60_000
 export const REMOTE_WATCH_TTL_MS = 60_000
@@ -187,8 +188,7 @@ export class RemoteCommandBridge {
     let accepted = false
     try {
       const args = validateRemoteCommand(payload.channel, payload.args, {
-        // M5에서 중앙 권한 요청 레지스트리를 연결한다. 지금은 모르는 입력 변경을 거절하는 쪽이 안전하다.
-        pendingPermissionTool: () => undefined
+        pendingPermissionTool: (requestId) => pendingPermissions.toolFor(requestId)
       })
       accepted = true
       const value = await this.dispatch(payload.channel, args, row.device_id)

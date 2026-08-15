@@ -137,6 +137,15 @@ describe('projectState', () => {
       null
     ])
   })
+
+  it('워크스페이스별 권한 attention과 요청 본문을 함께 투영한다', () => {
+    const pending = permission('ws-1')
+    const projection = projectState(appState(['idle', 'idle']), machine, [pending])
+
+    expect(projection.workspaces[0]?.attention).toBe('permission')
+    expect(projection.workspaces[1]?.attention).toBeNull()
+    expect(projection.pendingPermissions).toEqual([pending])
+  })
 })
 
 describe('StateMirror', () => {

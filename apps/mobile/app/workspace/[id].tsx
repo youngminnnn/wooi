@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   KeyboardAvoidingView,
   Platform,
@@ -13,7 +14,8 @@ import {
 } from 'react-native'
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router'
 import { SafeAreaView } from 'react-native-safe-area-context'
-import type { ChatItem } from '@shared/types'
+import * as LocalAuthentication from 'expo-local-authentication'
+import type { ChatItem, PermissionRequest } from '@shared/types'
 import { workspaceDisplayName } from '@shared/types'
 import { useRemoteStore } from '../../src/state/store'
 
@@ -27,6 +29,151 @@ function errorMessage(error: unknown): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function isPermissionRequest(value: unknown): value is PermissionRequest {
+  return (
+    isRecord(value) &&
+    typeof value.requestId === 'string' &&
+    typeof value.workspaceId === 'string' &&
+    typeof value.toolName === 'string' &&
+    isRecord(value.input)
+  )
+}
+
+function formatPermissionInput(request: PermissionRequest): string {
+  if (request.kind === 'command') {
+    const command = request.input.command
+    if (typeof command === 'string') return command
+    if (Array.isArray(command) && command.every((part) => typeof part === 'string')) {
+      return command.join(' ')
+    }
+  }
+  return JSON.stringify(request.input, null, 2)
+}
+
+function Diff({ value }: { value: string }): React.JSX.Element {
+  return (
+    <ScrollView horizontal style={styles.permissionCodeScroll}>
+      <View>
+        {value.split('\n').map((line, index) => (
+          <View
+            key={`${index}-${line}`}
+            style={[
+              styles.diffLine,
+              line.startsWith('+') && !line.startsWith('+++') && styles.diffAdded,
+              line.startsWith('-') && !line.startsWith('---') && styles.diffRemoved
+            ]}
+          >
+            <Text style={styles.permissionCode} selectable>{line || ' '}</Text>
+          </View>
+        ))}
+      </View>
+    </ScrollView>
+  )
+}
+
+function PermissionCard({
+  request,
+  command
+}: {
+  request: PermissionRequest
+  command: NonNullable<ReturnType<typeof useRemoteStore.getState>['command']>
+}): React.JSX.Element {
+  const [responding, setResponding] = useState(false)
+  const [responseError, setResponseError] = useState<string | null>(null)
+  const warnedAuthenticationUnavailable = useRef(false)
+
+  useEffect(() => {
+    setResponding(false)
+    setResponseError(null)
+  }, [request.requestId])
+
+  const authenticateAllow = useCallback(async (): Promise<boolean> => {
+    const result = await LocalAuthentication.authenticateAsync({
+      promptMessage: 'Approve action on your laptop',
+      cancelLabel: 'Cancel',
+      disableDeviceFallback: false,
+      biometricsSecurityLevel: 'strong'
+    })
+    if (result.success) return true
+    if (
+      result.error === 'not_available' ||
+      result.error === 'not_enrolled' ||
+      result.error === 'passcode_not_set'
+    ) {
+      // 휴대폰에는 세션 키와 갱신 토큰이 있어, 잠금 해제된 도난 기기에서 임의 명령을 승인하지 못하게 하는 유일한 방어선이다.
+      if (!warnedAuthenticationUnavailable.current) {
+        warnedAuthenticationUnavailable.current = true
+        Alert.alert(
+          'Device authentication unavailable',
+          'This device cannot verify biometrics or a passcode. The approval will proceed without authentication.'
+        )
+      }
+      return true
+    }
+    setResponseError('Device authentication was cancelled or unsuccessful. Nothing was sent.')
+    return false
+  }, [])
+
+  const respond = useCallback(async (behavior: 'allow' | 'deny', rememberForSession = false): Promise<void> => {
+    if (responding) return
+    setResponseError(null)
+    if (behavior === 'allow' && !(await authenticateAllow())) return
+    const stillPending = useRemoteStore.getState().state?.pendingPermissions.some(
+      (item) => isPermissionRequest(item) && item.requestId === request.requestId
+    )
+    if (stillPending !== true) return
+    setResponding(true)
+    const decision = behavior === 'deny'
+      ? { behavior: 'deny' as const }
+      : rememberForSession
+        ? { behavior: 'allow' as const, rememberForSession: true }
+        : { behavior: 'allow' as const }
+    try {
+      await command('permission:respond', [request.requestId, decision])
+    } catch (respondError) {
+      setResponseError(errorMessage(respondError))
+      setResponding(false)
+    }
+  }, [authenticateAllow, command, request.requestId, responding])
+
+  const substance = formatPermissionInput(request)
+  return (
+    <View style={styles.permissionCard}>
+      <View style={styles.permissionHeading}>
+        <Text style={styles.permissionEyebrow}>PERMISSION REQUIRED</Text>
+        {responding ? <ActivityIndicator color="#8b7cf6" size="small" /> : null}
+      </View>
+      <Text style={styles.permissionTitle}>{request.title ?? request.displayName ?? 'Approve this action?'}</Text>
+      <Text style={styles.permissionTool}>{request.toolName}</Text>
+      <View style={styles.permissionSubstance}>
+        {request.kind === 'fileChange' && request.diff !== undefined
+          ? <Diff value={request.diff} />
+          : <ScrollView style={styles.permissionTextScroll} nestedScrollEnabled>
+              <Text style={styles.permissionCode} selectable>{substance}</Text>
+            </ScrollView>}
+      </View>
+      {responseError ? <Text style={styles.permissionError}>{responseError}</Text> : null}
+      {request.rule ? (
+        <View style={styles.ruleBox}>
+          <Text style={styles.ruleLabel}>SESSION RULE</Text>
+          <Text style={styles.permissionRule}>{request.rule}</Text>
+        </View>
+      ) : null}
+      <View style={styles.permissionActions}>
+        <Pressable style={[styles.permissionButton, styles.denyButton, responding && styles.disabled]} disabled={responding} onPress={() => void respond('deny')}>
+          <Text style={styles.denyButtonText}>{responding ? 'Sending…' : 'Deny'}</Text>
+        </Pressable>
+        <Pressable style={[styles.permissionButton, responding && styles.disabled]} disabled={responding} onPress={() => void respond('allow')}>
+          <Text style={styles.allowButtonText}>Allow once</Text>
+        </Pressable>
+        <Pressable style={[styles.permissionButton, responding && styles.disabled]} disabled={responding} onPress={() => void respond('allow', true)}>
+          <Text style={styles.allowButtonText}>Allow for session</Text>
+        </Pressable>
+      </View>
+    </View>
+  )
 }
 
 function isChatItem(value: unknown): value is ChatItem {
@@ -186,6 +333,12 @@ export default function WorkspaceScreen(): React.JSX.Element {
   const workspace = useRemoteStore((store) =>
     store.state?.workspaces.find((item) => item.id === workspaceId)
   )
+  const permission = useRemoteStore((store) => {
+    const pending = store.state?.pendingPermissions.find(
+      (item) => isPermissionRequest(item) && item.workspaceId === workspaceId
+    )
+    return isPermissionRequest(pending) ? pending : undefined
+  })
   const [items, setItems] = useState<ChatItem[]>([])
   const [text, setText] = useState('')
   const [loading, setLoading] = useState(true)
@@ -328,6 +481,9 @@ export default function WorkspaceScreen(): React.JSX.Element {
           ListFooterComponent={loadingOlder ? <ActivityIndicator color="#8b7cf6" /> : null}
           ListEmptyComponent={loading ? <ActivityIndicator style={styles.loading} color="#8b7cf6" /> : <Text style={styles.empty}>No conversation yet</Text>}
         />
+        {permission !== undefined && command !== null ? (
+          <PermissionCard key={permission.requestId} request={permission} command={command} />
+        ) : null}
         <View style={styles.composer}>
           <TextInput
             style={styles.input}
@@ -374,6 +530,27 @@ const styles = StyleSheet.create({
   errorCard: { backgroundColor: '#251719', borderColor: '#5c3036', borderRadius: 6, borderWidth: 1, marginVertical: 4, padding: 10 },
   loading: { paddingVertical: 40 },
   empty: { color: '#707078', paddingVertical: 40, textAlign: 'center' },
+  permissionCard: { backgroundColor: '#121217', borderColor: '#51478a', borderTopWidth: 2, padding: 12 },
+  permissionHeading: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between' },
+  permissionEyebrow: { color: '#a99df4', fontSize: 10, fontWeight: '800', letterSpacing: 1 },
+  permissionTitle: { color: '#ededf0', fontSize: 15, fontWeight: '600', lineHeight: 20, marginTop: 7 },
+  permissionTool: { color: '#83838d', fontSize: 11, marginTop: 3 },
+  permissionSubstance: { backgroundColor: '#08080a', borderColor: '#29292f', borderRadius: 5, borderWidth: 1, marginTop: 9, maxHeight: 150 },
+  permissionTextScroll: { maxHeight: 145, padding: 9 },
+  permissionCodeScroll: { maxHeight: 145, paddingVertical: 7 },
+  permissionCode: { color: '#c7c7cf', fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace' }), fontSize: 11, lineHeight: 17 },
+  diffLine: { paddingHorizontal: 9 },
+  diffAdded: { backgroundColor: '#14251c' },
+  diffRemoved: { backgroundColor: '#2b171a' },
+  permissionError: { color: '#ef8d8d', fontSize: 11, lineHeight: 15, marginTop: 8 },
+  permissionActions: { flexDirection: 'row', gap: 8, marginTop: 10 },
+  permissionButton: { alignItems: 'center', borderColor: '#4a4a53', borderRadius: 6, borderWidth: 1, flex: 1, justifyContent: 'center', minHeight: 44, paddingHorizontal: 5 },
+  denyButton: { borderColor: '#8b4c54' },
+  denyButtonText: { color: '#ef9a9a', fontSize: 12, fontWeight: '700' },
+  allowButtonText: { color: '#d0d0d7', fontSize: 11, fontWeight: '600', textAlign: 'center' },
+  ruleBox: { backgroundColor: '#19191e', borderRadius: 4, marginTop: 8, paddingHorizontal: 8, paddingVertical: 6 },
+  ruleLabel: { color: '#777780', fontSize: 8, fontWeight: '700', letterSpacing: 0.8 },
+  permissionRule: { color: '#b0b0b8', fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace' }), fontSize: 10, marginTop: 3 },
   composer: { alignItems: 'flex-end', borderTopColor: '#202024', borderTopWidth: StyleSheet.hairlineWidth, flexDirection: 'row', gap: 9, padding: 10 },
   input: { backgroundColor: '#151519', borderColor: '#29292f', borderRadius: 8, borderWidth: 1, color: '#ededf0', flex: 1, fontSize: 14, maxHeight: 120, minHeight: 42, paddingHorizontal: 11, paddingVertical: 10 },
   sendButton: { backgroundColor: '#7465db', borderRadius: 7, justifyContent: 'center', minHeight: 42, paddingHorizontal: 14 },
