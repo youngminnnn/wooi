@@ -36,13 +36,16 @@ export default function RootLayout(): React.JSX.Element {
       onStatus: useRemoteStore.getState().setStatus,
       onState: useRemoteStore.getState().setState,
       onUpdatedAt: useRemoteStore.getState().setUpdatedAt,
-      onError: useRemoteStore.getState().setLastError
+      onError: useRemoteStore.getState().setLastError,
+      onActivity: useRemoteStore.getState().bumpActivity
     })
     client.current = relay
     useRemoteStore.getState().setRefresh(() => relay.refresh())
+    useRemoteStore.getState().setCommand((channel, args) => relay.command(channel, args))
     void relay.connect()
     return () => {
       useRemoteStore.getState().setRefresh(null)
+      useRemoteStore.getState().setCommand(null)
       relay.disconnect()
       client.current = null
     }

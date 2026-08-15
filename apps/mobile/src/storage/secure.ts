@@ -3,6 +3,8 @@ import type { SupportedStorage } from '@supabase/supabase-js'
 
 const PAIRING_KEY = 'wooi.remote.pairing.v1'
 const AUTH_PREFIX = 'wooi.remote.auth.'
+const SEQUENCE_PREFIX = 'wooi.remote.sequence.'
+let sequenceQueue: Promise<void> = Promise.resolve()
 
 const OPTIONS: SecureStore.SecureStoreOptions = {
   keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY
@@ -47,6 +49,32 @@ export async function savePairing(pairing: StoredPairing): Promise<void> {
 
 export async function clearPairing(): Promise<void> {
   await SecureStore.deleteItemAsync(PAIRING_KEY, OPTIONS)
+}
+
+export function nextCommandSequence(deviceId: string): Promise<number> {
+  let resolveSequence: (value: number) => void
+  let rejectSequence: (reason: unknown) => void
+  const result = new Promise<number>((resolve, reject) => {
+    resolveSequence = resolve
+    rejectSequence = reject
+  })
+  sequenceQueue = sequenceQueue
+    .catch(() => undefined)
+    .then(async () => {
+      try {
+        const key = `${SEQUENCE_PREFIX}${deviceId}`
+        const stored = await SecureStore.getItemAsync(key, OPTIONS)
+        const current = stored === null ? 0 : Number(stored)
+        const next = Number.isSafeInteger(current) && current >= 0 ? current + 1 : 1
+        if (!Number.isSafeInteger(next)) throw new Error('Command sequence is exhausted')
+        // 삽입 전에 저장해야 앱이 중단되어도 같은 번호를 다시 쓰지 않는다.
+        await SecureStore.setItemAsync(key, String(next), OPTIONS)
+        resolveSequence(next)
+      } catch (error) {
+        rejectSequence(error)
+      }
+    })
+  return result
 }
 
 function secureKey(key: string): string {

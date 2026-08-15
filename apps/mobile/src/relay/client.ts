@@ -4,10 +4,19 @@ import {
   type RealtimeChannel,
   type SupabaseClient
 } from '@supabase/supabase-js'
-import { deriveDirectionKeys, fromBase64Url, openJson } from '@shared/crypto'
-import { REMOTE_PROTOCOL_VERSION, type RemoteState } from '@shared/remote'
-import { secureAuthStorage, type StoredPairing } from '../storage/secure'
-import { decodePostgresBytea } from './bytea'
+import { deriveDirectionKeys, fromBase64Url, openJson, sealJson } from '@shared/crypto'
+import {
+  REMOTE_PROTOCOL_VERSION,
+  type RemoteCommandPayload,
+  type RemoteCommandResult,
+  type RemoteState
+} from '@shared/remote'
+import {
+  nextCommandSequence,
+  secureAuthStorage,
+  type StoredPairing
+} from '../storage/secure'
+import { decodePostgresBytea, encodePostgresBytea } from './bytea'
 import type { ConnectionStatus } from '../state/store'
 
 interface MachineStateRow {
@@ -18,11 +27,37 @@ interface MachineStateRow {
   updated_at: string
 }
 
+interface CommandResultRow {
+  id: string
+  status: string
+  result_nonce: string | null
+  result_ct: string | null
+}
+
+export type RemoteCommandChannel =
+  | 'remote:transcript'
+  | 'remote:watch'
+  | 'remote:ping'
+  | 'chat:send'
+  | 'chat:interrupt'
+
+export class RemoteCommandTimeoutError extends Error {
+  constructor() {
+    super('The laptop has not responded yet. The command is still queued and may run later.')
+    this.name = 'RemoteCommandTimeoutError'
+  }
+}
+
+const COMMAND_TIMEOUT_MS = 20_000
+const COMMAND_POLL_MS = 750
+const COMMAND_CT_MAX_BYTES = 64 * 1024
+
 export interface RelayClientHandlers {
   onStatus: (status: ConnectionStatus) => void
   onState: (state: RemoteState | null) => void
   onUpdatedAt: (updatedAt: number | null) => void
   onError: (message: string | null) => void
+  onActivity: () => void
 }
 
 function isMachineStateRow(value: unknown): value is MachineStateRow {
@@ -108,6 +143,7 @@ export class RelayClient {
     this.channel = channel
     channel
       .on('broadcast', { event: '*' }, () => {
+        this.handlers.onActivity()
         void this.refresh().catch((error: unknown) => {
           this.handlers.onError(error instanceof Error ? error.message : 'Could not refresh state')
           this.scheduleReconnect()
@@ -163,6 +199,35 @@ export class RelayClient {
     this.handlers.onError(null)
   }
 
+  async command(channel: RemoteCommandChannel, args: unknown[]): Promise<unknown> {
+    const seq = await nextCommandSequence(this.pairing.deviceId)
+    const payload: RemoteCommandPayload = { channel, args, seq, ts: Date.now() }
+    const header = {
+      v: REMOTE_PROTOCOL_VERSION,
+      machineId: this.pairing.machineId,
+      deviceId: this.pairing.deviceId,
+      kind: 'command'
+    } as const
+    const box = sealJson(this.keys.phoneToLaptop, header, payload)
+    if (box.ct.length > COMMAND_CT_MAX_BYTES) {
+      throw new Error('This command is too large to send')
+    }
+    const inserted = await this.client
+      .from('commands')
+      .insert({
+        machine_id: this.pairing.machineId,
+        device_id: this.pairing.deviceId,
+        nonce: encodePostgresBytea(box.nonce),
+        payload_ct: encodePostgresBytea(box.ct)
+      })
+      .select('id, status, result_nonce, result_ct')
+      .single()
+    if (inserted.error || !isCommandResultRow(inserted.data)) {
+      throw new Error('Could not queue the command. Check your relay connection and try again.')
+    }
+    return this.pollCommand(inserted.data.id)
+  }
+
   disconnect(): void {
     this.stopped = true
     this.clearTimers()
@@ -213,10 +278,71 @@ export class RelayClient {
     this.handlers.onStatus(status)
   }
 
+  private async pollCommand(id: string): Promise<unknown> {
+    const deadline = Date.now() + COMMAND_TIMEOUT_MS
+    while (Date.now() < deadline) {
+      const response = await this.client
+        .from('commands')
+        .select('id, status, result_nonce, result_ct')
+        .eq('id', id)
+        .eq('device_id', this.pairing.deviceId)
+        .maybeSingle()
+      if (response.error) throw new Error('Could not check the command result')
+      if (response.data !== null && isCommandResultRow(response.data)) {
+        if (response.data.status !== 'pending') return this.openCommandResult(response.data)
+      }
+      await wait(COMMAND_POLL_MS)
+    }
+    throw new RemoteCommandTimeoutError()
+  }
+
+  private openCommandResult(row: CommandResultRow): unknown {
+    if (row.result_nonce === null || row.result_ct === null) {
+      throw new Error('The laptop rejected the command without a readable result')
+    }
+    const opened = openJson(
+      this.keys.laptopToPhone,
+      {
+        v: REMOTE_PROTOCOL_VERSION,
+        machineId: this.pairing.machineId,
+        deviceId: this.pairing.deviceId,
+        kind: 'result'
+      },
+      {
+        nonce: decodePostgresBytea(row.result_nonce),
+        ct: decodePostgresBytea(row.result_ct)
+      }
+    )
+    if (!isRemoteCommandResult(opened)) throw new Error('The laptop returned an invalid result')
+    if (!opened.ok) throw new Error(opened.error)
+    return opened.value
+  }
+
   private clearTimers(): void {
     if (this.reconnectTimer !== null) clearTimeout(this.reconnectTimer)
     if (this.backgroundTimer !== null) clearTimeout(this.backgroundTimer)
     this.reconnectTimer = null
     this.backgroundTimer = null
   }
+}
+
+function isCommandResultRow(value: unknown): value is CommandResultRow {
+  if (typeof value !== 'object' || value === null) return false
+  const row = value as Record<string, unknown>
+  return (
+    typeof row.id === 'string' &&
+    typeof row.status === 'string' &&
+    (typeof row.result_nonce === 'string' || row.result_nonce === null) &&
+    (typeof row.result_ct === 'string' || row.result_ct === null)
+  )
+}
+
+function isRemoteCommandResult(value: unknown): value is RemoteCommandResult {
+  if (typeof value !== 'object' || value === null) return false
+  const result = value as Record<string, unknown>
+  return result.ok === true || (result.ok === false && typeof result.error === 'string')
+}
+
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }

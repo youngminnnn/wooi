@@ -18,6 +18,7 @@ import {
 } from './keystore'
 import { PairingManager, type PairingState } from './pairing'
 import { StateMirror } from './mirror'
+import { RemoteCommandBridge } from './bridge'
 import type { AppState, PermissionRequest } from '@shared/types'
 
 /**
@@ -52,6 +53,7 @@ export class RemoteBridge {
   private client: RemoteClient | null = null
   private pairing: PairingManager | null = null
   private mirror: StateMirror | null = null
+  private commandBridge: RemoteCommandBridge | null = null
   private readonly getAppState: () => AppState | null
   private unsubscribe: (() => void) | null = null
   private enabled = false
@@ -92,6 +94,8 @@ export class RemoteBridge {
     this.fault = null
 
     if (!next) {
+      this.commandBridge?.dispose()
+      this.commandBridge = null
       this.mirror?.dispose()
       this.mirror = null
       this.pairing?.dispose()
@@ -125,6 +129,13 @@ export class RemoteBridge {
         keystore,
         machine: () => client.getMachine()
       })
+      const machineId = client.getState().machineId
+      if (!machineId) throw new Error('remote client connected without a machine id')
+      this.commandBridge = new RemoteCommandBridge({
+        supabase: () => client.supabase(),
+        keystore,
+        machineId
+      })
       // 붙자마자 현재 상태를 한 번 밀어 준다. 미러는 **변화**에만 반응하므로 이게 없으면
       // 방금 페어링한 폰은 랩탑에서 뭔가 일어날 때까지 빈 화면을 본다.
       const initial = this.getAppState()
@@ -133,6 +144,16 @@ export class RemoteBridge {
       // 키스토어 복호화 실패가 가장 흔하다 — 조용히 꺼진 것처럼 보이면 안 된다.
       this.fault = errorText(err)
       this.enabled = false
+      this.commandBridge?.dispose()
+      this.commandBridge = null
+      this.mirror?.dispose()
+      this.mirror = null
+      this.pairing?.dispose()
+      this.pairing = null
+      await this.client?.dispose()
+      this.client = null
+      this.unsubscribe?.()
+      this.unsubscribe = null
       log.error('원격 활성화 실패', this.fault)
     }
     return this.emit()
@@ -229,6 +250,7 @@ export class RemoteBridge {
   }
 
   async dispose(): Promise<void> {
+    this.commandBridge?.dispose()
     this.mirror?.dispose()
     this.pairing?.dispose()
     this.unsubscribe?.()
@@ -236,6 +258,7 @@ export class RemoteBridge {
     this.client = null
     this.pairing = null
     this.mirror = null
+    this.commandBridge = null
   }
 
   // ── 내부 ────────────────────────────────────────────────────────────────

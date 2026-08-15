@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from 'react'
-import { FlatList, RefreshControl, StyleSheet, Text, View } from 'react-native'
+import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
+import { useRouter } from 'expo-router'
 import type { RemoteWorkspace } from '@shared/remote'
 import { workspaceDisplayName } from '@shared/types'
 import { useRemoteStore } from '../src/state/store'
@@ -21,9 +22,15 @@ function updatedLabel(timestamp: number): string {
   return `Updated ${Math.floor(hours / 24)}d ago`
 }
 
-function WorkspaceRow({ workspace }: { workspace: RemoteWorkspace }): React.JSX.Element {
+function WorkspaceRow({
+  workspace,
+  onPress
+}: {
+  workspace: RemoteWorkspace
+  onPress: () => void
+}): React.JSX.Element {
   return (
-    <View style={styles.row}>
+    <Pressable style={styles.row} onPress={onPress}>
       <View
         style={[styles.dot, { backgroundColor: STATUS_COLORS[workspace.status] ?? '#676771' }]}
       />
@@ -42,11 +49,12 @@ function WorkspaceRow({ workspace }: { workspace: RemoteWorkspace }): React.JSX.
           {workspace.branch}
         </Text>
       </View>
-    </View>
+    </Pressable>
   )
 }
 
 export default function WorkspaceListScreen(): React.JSX.Element {
+  const router = useRouter()
   const pairing = useRemoteStore((store) => store.pairing)
   const status = useRemoteStore((store) => store.status)
   const state = useRemoteStore((store) => store.state)
@@ -108,7 +116,9 @@ export default function WorkspaceListScreen(): React.JSX.Element {
       <FlatList
         data={workspaces}
         keyExtractor={(item) => item.id}
-        renderItem={({ item }) => <WorkspaceRow workspace={item} />}
+        renderItem={({ item }) => (
+          <WorkspaceRow workspace={item} onPress={() => router.push(`/workspace/${item.id}`)} />
+        )}
         contentContainerStyle={workspaces.length === 0 ? styles.emptyList : styles.list}
         refreshControl={
           <RefreshControl

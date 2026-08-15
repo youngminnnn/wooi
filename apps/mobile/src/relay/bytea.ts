@@ -10,3 +10,9 @@ export function decodePostgresBytea(value: string): Uint8Array {
   }
   return bytes
 }
+
+export function encodePostgresBytea(value: Uint8Array): string {
+  let hex = ''
+  for (const byte of value) hex += byte.toString(16).padStart(2, '0')
+  return `\\x${hex}`
+}
