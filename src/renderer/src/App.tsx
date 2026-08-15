@@ -47,7 +47,11 @@ export default function App(): React.JSX.Element {
   const authStatus = useStore((s) => s.authStatus)
   const rightWidth = useStore((s) => s.rightWidth)
   const setRightWidth = useStore((s) => s.setRightWidth)
-  const rightPanelOpen = useStore((s) => s.rightPanelOpen)
+  const rightPanelOpen = useStore((s) =>
+    selectedId
+      ? (s.rightPanelOpen[selectedId] ?? s.app?.settings.defaultRightPanelOpen ?? true)
+      : false
+  )
   // 작업 패널을 별도 창으로 떼어 뒀으면 여기서는 그리지 않는다 — 분리는 복제가 아니라 이동이다.
   const workPaneDetached = useStore((s) => s.detachedPanes.work)
   const rightBase = useRef(rightWidth)
