@@ -1170,6 +1170,8 @@ export interface AppSettings {
    * schemaVersion 을 올리지 않는다(showRunningAgents·pickedDefaults 와 같은 이유).
    */
   remoteEnabled: boolean
+  /** 원격 접근이 켜져 있을 때 휴대폰 푸시 알림도 보낸다. 별도 옵트인이며 기본은 꺼짐이다. */
+  remotePushEnabled: boolean
   /**
    * 별도 창으로 분리한 패널(work/scripts)의 마지막 위치·크기.
    *

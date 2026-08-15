@@ -19,8 +19,9 @@ import {
 import { PairingManager, type PairingState } from './pairing'
 import { StateMirror } from './mirror'
 import { RemoteCommandBridge } from './bridge'
-import type { AppState, PermissionRequest } from '@shared/types'
+import type { AppState, NotificationEvent, PermissionRequest } from '@shared/types'
 import { pendingPermissions } from './permissions'
+import { RemotePush, type RemotePushRequest } from './push'
 
 /**
  * 원격 접근 기능의 파사드. main 의 나머지 부분은 이 파일만 안다.
@@ -55,6 +56,7 @@ export class RemoteBridge {
   private pairing: PairingManager | null = null
   private mirror: StateMirror | null = null
   private commandBridge: RemoteCommandBridge | null = null
+  private push: RemotePush | null = null
   private readonly getAppState: () => AppState | null
   private unsubscribe: (() => void) | null = null
   private enabled = false
@@ -97,6 +99,8 @@ export class RemoteBridge {
     if (!next) {
       this.commandBridge?.dispose()
       this.commandBridge = null
+      this.push?.dispose()
+      this.push = null
       this.mirror?.dispose()
       this.mirror = null
       this.pairing?.dispose()
@@ -137,6 +141,16 @@ export class RemoteBridge {
         keystore,
         machineId
       })
+      this.push = new RemotePush({
+        supabase: () => client.supabase(),
+        keystore,
+        machineId: () => client.getState().machineId,
+        enabled: () =>
+          this.enabled &&
+          client.getState().status === 'online' &&
+          this.getAppState()?.settings.remotePushEnabled === true,
+        call: (request) => this.callPush(request)
+      })
       // 붙자마자 현재 상태를 한 번 밀어 준다. 미러는 **변화**에만 반응하므로 이게 없으면
       // 방금 페어링한 폰은 랩탑에서 뭔가 일어날 때까지 빈 화면을 본다.
       const initial = this.getAppState()
@@ -147,6 +161,8 @@ export class RemoteBridge {
       this.enabled = false
       this.commandBridge?.dispose()
       this.commandBridge = null
+      this.push?.dispose()
+      this.push = null
       this.mirror?.dispose()
       this.mirror = null
       this.pairing?.dispose()
@@ -164,6 +180,10 @@ export class RemoteBridge {
 
   publishState(appState: AppState, pendingPermissions: PermissionRequest[]): void {
     this.mirror?.publish(appState, pendingPermissions)
+  }
+
+  notifyPush(workspaceId: string, workspaceName: string, kind: NotificationEvent): void {
+    void this.push?.notify({ workspaceId, workspaceName, kind })
   }
 
   async startPairing(): Promise<RemoteStatus> {
@@ -252,6 +272,7 @@ export class RemoteBridge {
 
   async dispose(): Promise<void> {
     this.commandBridge?.dispose()
+    this.push?.dispose()
     this.mirror?.dispose()
     this.pairing?.dispose()
     this.unsubscribe?.()
@@ -260,6 +281,7 @@ export class RemoteBridge {
     this.pairing = null
     this.mirror = null
     this.commandBridge = null
+    this.push = null
   }
 
   // ── 내부 ────────────────────────────────────────────────────────────────
@@ -267,6 +289,25 @@ export class RemoteBridge {
   private ensureKeystore(): RemoteKeystore {
     this.keystore ??= getRemoteKeystore()
     return this.keystore
+  }
+
+  private async callPush(request: RemotePushRequest): Promise<void> {
+    const client = this.client
+    if (!client || !this.config) throw new Error('remote client is not connected')
+    const { data } = await client.supabase().auth.getSession()
+    const token = data.session?.access_token
+    if (!token) throw new Error('remote client has no session')
+
+    const response = await fetch(`${this.config.url}/functions/v1/push`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        apikey: this.config.anonKey,
+        Authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify(request)
+    })
+    if (!response.ok) throw new Error(`push Edge Function returned ${response.status}`)
   }
 
   private devices(): RemoteDeviceSummary[] {
@@ -313,6 +354,14 @@ export function initRemote(
 export function getRemoteBridge(): RemoteBridge {
   if (!bridge) throw new Error('remote bridge has not been initialised')
   return bridge
+}
+
+export function notifyRemotePush(
+  workspaceId: string,
+  workspaceName: string,
+  kind: NotificationEvent
+): void {
+  bridge?.notifyPush(workspaceId, workspaceName, kind)
 }
 
 export async function disposeRemote(): Promise<void> {

@@ -105,7 +105,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   // 미동의(null) 로 시작 — 기존 사용자도 load 의 기본값 병합으로 null 이 되어 (재)동의를 요구한다.
   acceptedTermsVersion: null,
   // 원격 접근은 옵트인이다. 꺼져 있으면 릴레이에 아무것도 보내지 않는다.
-  remoteEnabled: false
+  remoteEnabled: false,
+  // 푸시는 제3자 전달망을 지나므로 원격 접근과 별도로 명시적으로 켜야 한다.
+  remotePushEnabled: false
 }
 
 export const EMPTY_STATE: AppState = {
