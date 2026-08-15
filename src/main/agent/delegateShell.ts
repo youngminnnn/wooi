@@ -33,7 +33,12 @@ const LAUNCHERS: { backend: AgentBackendId; pattern: RegExp }[] = [
   // `codex exec …` · `codex e …`(별칭) · `codex review …`. 모두 비대화형 실행이다.
   { backend: 'codex', pattern: /(?:^|[\s;&|(])codex\s+(?:exec|e|review)(?:\s|$)/ },
   // `claude -p …` · `claude --print …`. 헤드리스 실행의 표준 형태다.
-  { backend: 'claude', pattern: /(?:^|[\s;&|(])claude\s+(?:.*\s)?(?:-p|--print)(?:\s|=|$)/ }
+  { backend: 'claude', pattern: /(?:^|[\s;&|(])claude\s+(?:.*\s)?(?:-p|--print)(?:\s|=|$)/ },
+  // `agy -p …` · `agy --print …` · `agy --prompt …`. 긴 옵션 접두사는 경계로 제외한다.
+  {
+    backend: 'antigravity',
+    pattern: /(?:^|[\s;&|(])agy\s+(?:.*\s)?(?:-p|--print|--prompt)(?:\s|=|$)/
+  }
 ]
 
 /** 이 명령이 어떤 에이전트 제품을 셸로 돌리려는 것인가. 아니면 null. */

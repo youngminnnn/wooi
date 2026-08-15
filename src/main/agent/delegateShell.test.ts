@@ -23,7 +23,13 @@ describe('delegateShellAttempt', () => {
     ['codex review --base main', 'codex'],
     ['claude -p "리팩터링해 줘"', 'claude'],
     ['claude --print "리팩터링해 줘"', 'claude'],
-    ['claude --model opus -p "일해"', 'claude']
+    ['claude --model opus -p "일해"', 'claude'],
+    ['agy -p "일해"', 'antigravity'],
+    ['agy --print "일해"', 'antigravity'],
+    ['agy --prompt "일해"', 'antigravity'],
+    ['agy --model X -p "일해"', 'antigravity'],
+    ['env FOO=1 agy -p "일해"', 'antigravity'],
+    ['cd foo && agy -p "일해"', 'antigravity']
   ])('%s → %s', (command, backend) => {
     expect(delegateShellAttempt(command)).toBe(backend)
   })
@@ -44,8 +50,20 @@ describe('delegateShellAttempt', () => {
   )
 
   it.each([
+    'agy --version',
+    'agy --help',
+    'agy models',
+    'agy',
+    'agy --print-timeout 30s',
+    'agy --prompt-interactive'
+  ])('Antigravity 탐색과 대화형 실행은 그냥 둔다: %s', (command) => {
+    expect(delegateShellAttempt(command)).toBeNull()
+  })
+
+  it.each([
     'git commit -m "codex exec 관련 수정"',
     'echo "claude -p" >> notes.md',
+    'echo "agy -p later"',
     'rg "codex exec" src',
     'npm run codex-exec'
   ])('이름만 스치는 명령은 잡지 않는다: %s', (command) => {
