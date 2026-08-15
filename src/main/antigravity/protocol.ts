@@ -25,15 +25,31 @@ export interface AntigravityInitEvent {
   conversation_id: string
 }
 
+/**
+ * 실측(agy 1.1.13)에서 실제로 관측한 값들. 문서는 앞의 넷만 적지만 `unknown` 과
+ * `error_message` 도 정상 흐름에서 나온다 — `unknown` 은 **매 턴** 온다.
+ */
 export type AntigravityStepType =
-  'user_input' | 'agent_response' | 'tool' | 'checkpoint' | (string & {})
+  | 'user_input'
+  | 'agent_response'
+  | 'tool'
+  | 'checkpoint'
+  | 'unknown'
+  | 'error_message'
+  | (string & {})
+
+/**
+ * 문서는 ACTIVE·DONE 만 적지만 실패한 도구 스텝은 **ERROR** 로 끝난다(실측). 이 값을 모르면
+ * 도구 카드가 영원히 "실행 중" 으로 남는다.
+ */
+export type AntigravityStepState = 'ACTIVE' | 'DONE' | 'ERROR' | (string & {})
 
 export interface AntigravityStepUpdateEvent {
   event: 'step_update'
   step_update: {
     conversation_id: string
     step_index: number
-    state: 'ACTIVE' | 'DONE'
+    state: AntigravityStepState
     step_type: AntigravityStepType
     tool_name?: string
     text_delta?: string

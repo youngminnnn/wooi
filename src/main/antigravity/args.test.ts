@@ -4,6 +4,7 @@ import { ANTIGRAVITY_PRINT_TIMEOUT, antigravityArgs, antigravityEffort } from '.
 
 const base = {
   prompt: 'fix it',
+  cwd: '/work/tree',
   conversationId: null,
   model: null,
   effort: null,
@@ -17,6 +18,8 @@ describe('antigravityArgs', () => {
       'fix it',
       '--output-format',
       'stream-json',
+      '--add-dir',
+      '/work/tree',
       '--print-timeout',
       '24h'
     ])
@@ -32,6 +35,8 @@ describe('antigravityArgs', () => {
       'conv-1',
       '--model',
       'gemini-pro',
+      '--add-dir',
+      '/work/tree',
       '--print-timeout',
       '24h'
     ])
@@ -56,6 +61,8 @@ describe('antigravityArgs', () => {
       'plan',
       '--allow-tool',
       'write_file',
+      '--add-dir',
+      '/work/tree',
       '--add-dir',
       '/tmp/a',
       '--add-dir',
@@ -89,5 +96,23 @@ describe('antigravityEffort', () => {
     ['ultracode', 'high']
   ])('%s 를 %s 로 변환한다', (input, expected) => {
     expect(antigravityEffort(input)).toBe(expected)
+  })
+})
+
+/**
+ * `--add-dir <cwd>` 가 빠지면 이 백엔드는 조용히 무너진다 — 에이전트가 워크트리 밖
+ * (`~/.gemini/antigravity-cli/scratch`)에 파일을 쓰고 Changes 패널은 영원히 비어 있다.
+ * agy 1.1.13 에서 실측한 동작이라 회귀로 못박는다(args.ts 주석 참고).
+ */
+describe('cwd 를 작업 루트로 못박는다', () => {
+  it('추가 디렉터리가 없어도 cwd 는 항상 --add-dir 로 나간다', () => {
+    const args = antigravityArgs(base)
+    expect(args).toContain('--add-dir')
+    expect(args[args.indexOf('--add-dir') + 1]).toBe('/work/tree')
+  })
+
+  it('cwd 가 사용자 추가 디렉터리보다 먼저 나간다', () => {
+    const args = antigravityArgs({ ...base, extraDirs: ['/tmp/extra'] })
+    expect(args.filter((_, i) => args[i - 1] === '--add-dir')).toEqual(['/work/tree', '/tmp/extra'])
   })
 })

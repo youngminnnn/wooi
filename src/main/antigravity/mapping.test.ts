@@ -139,7 +139,7 @@ describe('도구', () => {
         step_index: 6,
         step_type: 'tool',
         state: 'DONE',
-        tool_info: { name: 'write_file', output: 'ok' }
+        tool_info: { name: 'write_to_file', output: 'ok' }
       })
     )
     expect(done.events).toContainEqual({ type: 'workingTreeChanged' })
@@ -184,7 +184,7 @@ describe('사용자 echo와 결과', () => {
       type: 'result',
       subtype: 'error',
       isError: true,
-      durationMs: 1250,
+      // durationMs 는 CLI 값이 아니라 우리가 잰 벽시계 시간이라 여기서 고정하지 않는다.
       numTurns: 3
     })
     expect(result.costUsd).toBeUndefined()
@@ -288,5 +288,70 @@ describe('실측 — 로그인 전 result', () => {
     expect(out.map((i) => i.type)).toEqual(['error', 'result'])
     expect(out[0]).toMatchObject({ text: 'authentication failed or timed out' })
     expect(out[1]).toMatchObject({ subtype: 'error', isError: true })
+  })
+})
+
+/**
+ * 아래는 전부 실물 `agy` 1.1.13 이 실제로 내보낸 모양이다. 문서에 없는 것들이라, 실측 없이는
+ * 알 수 없었고 그대로 두면 조용히 깨졌을 자리들이다.
+ */
+describe('실측 — 문서에 없는 스텝 모양', () => {
+  it('권한 거부는 state:"ERROR" 로 끝난다 — DONE 만 종료로 보면 카드가 영원히 실행 중이다', () => {
+    const state = createMapperState('run1')
+    const active: AntigravityEvent = JSON.parse(
+      '{"event":"step_update","step_update":{"conversation_id":"c","step_index":3,"state":"ACTIVE","step_type":"tool","tool_name":"run_command","tool_info":{"name":"run_command","parameters":{"CommandLine":"echo hi-from-agy"}}}}'
+    )
+    const failed: AntigravityEvent = JSON.parse(
+      '{"event":"step_update","step_update":{"conversation_id":"c","step_index":3,"state":"ERROR","step_type":"tool","tool_name":"run_command","duration_seconds":0.13,"tool_info":{"name":"run_command","parameters":{"CommandLine":"echo hi-from-agy"},"error":{"type":"TOOL_ERROR","message":"User denied permission to run command:\\necho hi-from-agy"}}}}'
+    )
+    expect(mapEvent(active, state).persist).toEqual([])
+    const out = mapEvent(failed, state).persist[0] as Extract<ChatItem, { type: 'bash' }>
+    expect(out).toMatchObject({ type: 'bash', command: 'echo hi-from-agy', running: false })
+    expect(out.output).toContain('User denied permission')
+  })
+
+  it('step_type "unknown" 은 정상 값이라 unknown 카드를 만들지 않는다', () => {
+    // 실측에서 **매 턴** step_index 1 에 들어온다. 카드로 만들면 턴마다 한 장씩 쌓인다.
+    const real: AntigravityEvent = JSON.parse(
+      '{"event":"step_update","step_update":{"conversation_id":"c","step_index":1,"state":"DONE","step_type":"unknown","duration_seconds":0.001039}}'
+    )
+    expect(mapEvent(real, createMapperState('run1'))).toEqual({ events: [], persist: [] })
+  })
+
+  it('step_type "error_message" 도 페이로드가 없어 카드를 만들지 않는다', () => {
+    const real: AntigravityEvent = JSON.parse(
+      '{"event":"step_update","step_update":{"conversation_id":"c","step_index":3,"state":"DONE","step_type":"error_message"}}'
+    )
+    expect(mapEvent(real, createMapperState('run1'))).toEqual({ events: [], persist: [] })
+  })
+
+  it('agent_response 의 최종 텍스트는 DONE 이벤트에 통째로 실려 온다', () => {
+    // 실측: stream-json 이어도 텍스트는 조각으로 나뉘지 않고 DONE 한 번에 온다.
+    const real: AntigravityEvent = JSON.parse(
+      '{"event":"step_update","step_update":{"conversation_id":"c","step_index":7,"state":"DONE","step_type":"agent_response","text_delta":"Created NOTES.md.","duration_seconds":1.7}}'
+    )
+    const out = mapEvent(real, createMapperState('run1'))
+    expect(out.persist[0]).toMatchObject({ type: 'assistant', text: 'Created NOTES.md.' })
+  })
+
+  it('텍스트 없는 agent_response(도구 호출 턴)는 빈 말풍선을 만들지 않는다', () => {
+    const real: AntigravityEvent = JSON.parse(
+      '{"event":"step_update","step_update":{"conversation_id":"c","step_index":2,"state":"DONE","step_type":"agent_response","duration_seconds":1.77,"usage":{"input_tokens":16509,"output_tokens":71,"thinking_tokens":0,"cache_read_tokens":0,"total_tokens":16580}}}'
+    )
+    expect(mapEvent(real, createMapperState('run1')).persist).toEqual([])
+  })
+})
+
+describe('턴 소요 시간', () => {
+  it('CLI 의 duration_seconds 가 아니라 우리가 잰 시간을 쓴다', () => {
+    // 실측에서 이어진 턴의 duration_seconds 가 753 초로 왔다 — 응답이 걸린 시간이 아니다.
+    const state = createMapperState('run1')
+    state.turnStartedAt = Date.now() - 2_000
+    const real: AntigravityEvent = JSON.parse(
+      '{"event":"result","result":{"conversation_id":"c","status":"SUCCESS","response":"ok","duration_seconds":753.7,"num_turns":2}}'
+    )
+    const item = mapEvent(real, state).persist[0] as Extract<ChatItem, { type: 'result' }>
+    expect(item.durationMs).toBeGreaterThanOrEqual(2_000)
+    expect(item.durationMs).toBeLessThan(60_000)
   })
 })

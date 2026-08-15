@@ -23,6 +23,8 @@ export interface Mapped {
 const NOTHING: Mapped = { events: [], persist: [] }
 
 export interface MapperState {
+  /** 이 실행이 시작된 시각. 턴 소요 시간을 우리가 재기 위한 기준점이다(아래 durationMs 참고). */
+  turnStartedAt: number
   /**
    * 이 실행(프로세스) 하나를 가리키는 접두사. **아이템 id 충돌을 막는 유일한 장치다.**
    *
@@ -42,7 +44,13 @@ export interface MapperState {
 
 /** @param runId 이 프로세스 실행을 가리키는 값. 실행마다 반드시 달라야 한다(MapperState.runId). */
 export function createMapperState(runId: string): MapperState {
-  return { runId, assistantText: new Map(), tools: new Map(), pendingUserEchoes: [] }
+  return {
+    runId,
+    turnStartedAt: Date.now(),
+    assistantText: new Map(),
+    tools: new Map(),
+    pendingUserEchoes: []
+  }
 }
 
 export function rememberOptimisticUser(state: MapperState, text: string): void {
@@ -87,9 +95,20 @@ export function mapEvent(
         return mapTool(step, index, state, ts)
       case 'user_input':
         return mapUser(step, index, state, ts)
+      // 아래 셋은 **의도적으로 무시**한다. 해석하지 못한 데이터에만 쓰는 unknown 카드로 만들면
+      // 안 된다 — 그 카드는 "Wooi 가 못 알아봤다" 는 뜻이라 매 턴 한 장씩 쌓이면 거짓 신호가 된다.
+      //
+      // - checkpoint: agy 내부 대화 체크포인트. Wooi 대응물이 없다.
+      // - unknown: 이름과 달리 **정상 값**이다. 실측에서 매 턴 step_index 1 에 1ms 짜리로 온다.
+      // - error_message · system_message: 실측에서 페이로드 없이 왔다. 실제 실패는 도구 스텝의
+      //   ERROR 와 result.error 가 각각 전달하므로 여기서 보여 줄 것이 없다.
+      //
+      // 이 목록은 관측할 때마다 는다. 모르는 값을 전부 무시하도록 넓히지는 않는다 — 그러면
+      // 진짜로 놓친 것까지 조용히 사라져 unknown 카드가 무의미해진다.
       case 'checkpoint':
-        // agy 내부 대화 체크포인트이며 Wooi 대응물이 없다. 해석 실패가 아니라 의도적으로 무시한
-        // 것이므로, 해석하지 못한 데이터에만 쓰는 unknown 카드로 만들지 않는다.
+      case 'unknown':
+      case 'error_message':
+      case 'system_message':
         return NOTHING
       default:
         return unknown(`step type "${stepType}"`, ts, onUnknown)
@@ -109,7 +128,10 @@ export function mapEvent(
       type: 'result',
       subtype: status.toLowerCase(),
       isError: status === 'ERROR' || status === 'INVALID',
-      durationMs: (numberValue(result.duration_seconds) ?? 0) * 1000,
+      // **CLI 의 duration_seconds 를 쓰지 않는다.** 실측에서 이어진 턴이 753초로 왔다 — 턴에
+      // 실제로 걸린 시간이 아니라 대화가 열려 있던 시간을 재는 것으로 보인다. 사용자에게는
+      // "이 응답이 얼마나 걸렸나" 가 필요하므로 우리가 잰 벽시계 시간을 쓴다.
+      durationMs: Math.max(0, ts - state.turnStartedAt),
       numTurns: numberValue(result.num_turns) ?? 0,
       // agy 는 비용을 보고하지 않는다. 0 을 넣지 않으면 UI 가 비용 필드를 올바르게 숨긴다.
       ts
@@ -163,7 +185,12 @@ function mapTool(step: Step, index: number, state: MapperState, ts: number): Map
   const input = info?.parameters ?? remembered?.input ?? {}
   if (step.state === 'ACTIVE') state.tools.set(index, { name, input })
 
-  if (isShellTool(name)) return mapShell(step, info, index, input, state, ts)
+  // **ERROR 도 종료 상태다.** 문서에는 ACTIVE·DONE 만 있지만 거부·실패한 도구는 ERROR 로 끝난다
+  // (실측 — 권한 거부가 `state:"ERROR"` + tool_info.error 로 왔다). DONE 만 종료로 보면 그 카드는
+  // 영원히 "실행 중" 으로 남고 결과도 남지 않는다.
+  const finished = step.state === 'DONE' || step.state === 'ERROR'
+
+  if (isShellTool(name)) return mapShell(info, index, input, state, ts, finished)
 
   const id = stepItemId(state, index)
   const use: ChatItem = {
@@ -174,7 +201,7 @@ function mapTool(step: Step, index: number, state: MapperState, ts: number): Map
     input: clampInput(input),
     ts
   }
-  if (step.state !== 'DONE') return { events: [{ type: 'item', item: use }], persist: [] }
+  if (!finished) return { events: [{ type: 'item', item: use }], persist: [] }
 
   state.tools.delete(index)
   const error = objectValue(info?.error)
@@ -206,24 +233,24 @@ function mapTool(step: Step, index: number, state: MapperState, ts: number): Map
 }
 
 function mapShell(
-  step: Step,
   info: Record<string, unknown> | undefined,
   index: number,
   input: unknown,
   state: MapperState,
-  ts: number
+  ts: number,
+  finished: boolean
 ): Mapped {
   const parameters = objectValue(input)
   /**
-   * 실측 문서 예시는 run_command + 대문자 `CommandLine` 하나뿐이다. `command`·`cmd`는 다른 버전의
-   * 가능성에 대비한 방어적 후보일 뿐 검증된 스키마로 읽으면 안 된다.
+   * `CommandLine` 은 실측으로 확정됐다(1.1.13 의 run_command 파라미터). 뒤의 둘은 버전이 바뀔
+   * 때를 대비한 방어일 뿐 관측된 적은 없다. 파일 경로 쪽도 같은 대문자 관례를 쓴다(`TargetFile`).
    */
   const command =
     stringValue(parameters?.CommandLine) ??
     stringValue(parameters?.command) ??
     stringValue(parameters?.cmd) ??
     ''
-  const done = step.state === 'DONE'
+  const done = finished
   const error = objectValue(info?.error)
   const output = error
     ? (stringValue(error.message) ?? safeString(error) ?? '')
@@ -340,23 +367,22 @@ function safeString(value: unknown): string | undefined {
   }
 }
 
+/**
+ * 아래 두 목록은 **실측이다.** agy 1.1.13 의 `init` 이벤트가 광고하는 도구 56개를 그대로 읽어
+ * 골랐다(추측이 아니다). 새 도구가 생기면 일반 도구 카드로 그려질 뿐이라 실패는 부드럽다.
+ */
 function isShellTool(name: string): boolean {
-  // run_command 만 문서 예시로 확인됐다. 나머지는 버전 차이에 대비한 미검증 방어 목록이다.
-  return ['run_command', 'shell', 'bash', 'execute_command'].includes(name.toLowerCase())
+  // 셸 실행은 run_command 하나다. command_status·send_command_input 은 그 실행을 조회·조작하는
+  // 별개 도구라 bash 카드로 접지 않는다.
+  return name.toLowerCase() === 'run_command'
 }
 
 function isFileWritingTool(name: string): boolean {
-  // agy 가 이름 목록을 문서화하지 않아 모두 미검증 후보다. 오탐은 git 재조회 한 번으로만 끝난다.
   return [
-    'write_file',
     'write_to_file',
-    'edit_file',
-    'create_file',
-    'delete_file',
-    'apply_patch',
-    'multi_edit',
     'replace_file_content',
     'multi_replace_file_content',
+    'sed_file',
     'notebook_edit'
   ].includes(name.toLowerCase())
 }

@@ -122,10 +122,23 @@ describe('parseModelsText — 실측 출력', () => {
     ).toEqual([])
   })
 
-  it('모델 라벨은 원문 그대로 남긴다', () => {
-    expect(parseModelsText('Gemini 3.1 Pro (High)\n* Gemini 3.6 Flash (High)\n')).toEqual([
-      { id: 'Gemini 3.1 Pro (High)', label: 'Gemini 3.1 Pro (High)' },
-      { id: 'Gemini 3.6 Flash (High)', label: 'Gemini 3.6 Flash (High)' }
+  it('탭으로 나뉜 슬러그와 표시 이름을 갈라 읽는다', () => {
+    // 실물 `agy models` 출력. 앞이 --model 에 넘길 값, 뒤가 사람이 읽는 이름이다.
+    expect(
+      parseModelsText(
+        'Fetching available models...\n' +
+          'gemini-3.1-pro-high\tGemini 3.1 Pro (High)\n' +
+          'claude-opus-4-6-thinking\tClaude Opus 4.6 (Thinking)\n'
+      )
+    ).toEqual([
+      { id: 'gemini-3.1-pro-high', label: 'Gemini 3.1 Pro (High)' },
+      { id: 'claude-opus-4-6-thinking', label: 'Claude Opus 4.6 (Thinking)' }
+    ])
+  })
+
+  it('한 열짜리 출력은 그대로 id 이자 label 로 쓴다', () => {
+    expect(parseModelsText('gemini-3.1-pro-high\n')).toEqual([
+      { id: 'gemini-3.1-pro-high', label: 'gemini-3.1-pro-high' }
     ])
   })
 })

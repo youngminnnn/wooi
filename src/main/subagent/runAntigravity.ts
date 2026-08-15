@@ -30,6 +30,8 @@ export async function runAntigravitySubAgent(deps: SubAgentRunDeps): Promise<Sub
 
   const args = antigravityArgs({
     prompt: deps.prompt,
+    // 부모 워크스페이스의 worktree. 빼면 서브런이 워크트리 밖 스크래치에 파일을 쓴다(args.ts 참고).
+    cwd: deps.cwd,
     // 서브런은 이어 붙이지 않는 일회성 프로세스이므로 이전 대화 ID가 항상 없다.
     conversationId: null,
     model: deps.model,

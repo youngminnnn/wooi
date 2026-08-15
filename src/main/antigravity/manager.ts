@@ -31,7 +31,11 @@ import { getTranscripts } from '../transcripts'
 import { log } from '../logger'
 import { runLoginShell } from '../shell'
 import { antigravityArgs } from './args'
-import { getAntigravityAccountStatus, getAntigravityRateLimits } from './account'
+import {
+  getAntigravityAccountStatus,
+  getAntigravityRateLimits,
+  getAntigravityUsageWindows
+} from './account'
 import { detectAntigravity } from './executable'
 import { execAntigravity } from './exec'
 import { createMapperState, mapEvent, mapExitStderr, rememberOptimisticUser } from './mapping'
@@ -59,12 +63,22 @@ type State = {
 /**
  * 모델 목록 캐시.
  *
- * **빈 목록은 캐시하지 않는다.** `agy` 가 아직 설치되지 않았거나 로그인 전이면 조회가 빈 배열로
- * 떨어지는데, 그것을 캐시하면 사용자가 그 사이에 설치·로그인해도 앱을 다시 켤 때까지 모델
- * 선택기가 영영 비어 있다. 성공한 답만 짧게 들고 있는다.
+ * 성공과 실패를 **다른 수명으로** 들고 있는다.
+ *
+ * 실패를 아예 캐시하지 않으면 조회가 멈춰 있을 때 부르는 쪽마다 타임아웃만큼 통째로 멈춘다 —
+ * `create_workspace` 의 모델 검증([[agent/tools/agentOptions]])처럼 사용자를 기다리게 하는
+ * 자리가 있다. 반대로 성공만큼 오래 캐시하면 설치·로그인 직후에도 선택기가 한참 비어 있다.
+ * 그래서 실패는 "연달아 부르는 것만 막을" 만큼만 짧게 잡는다.
  */
 let modelCache: { at: number; value: ModelOption[] } | null = null
 const MODEL_CACHE_MS = 60_000
+const MODEL_FAILURE_CACHE_MS = 15_000
+
+/**
+ * 모델 조회 상한. `agy models` 는 매번 서버에 물어 4초 남짓 걸리고(실측), 첫 호출은 자동
+ * 업데이트 확인까지 겹칠 수 있다. 짧게 잡으면 목록이 조용히 비는 쪽으로 실패한다.
+ */
+const MODELS_TIMEOUT_MS = 20_000
 
 /** SIGTERM 을 보낸 뒤 SIGKILL 까지 기다리는 시간. 정상 종료가 마무리될 만큼만 준다. */
 const KILL_GRACE_MS = 3_000
@@ -145,6 +159,7 @@ export class AntigravitySessionManager implements AgentBackend {
     })
     const args = antigravityArgs({
       prompt,
+      cwd: ws.worktreePath,
       conversationId: state.conversationId,
       model: state.model,
       effort: state.effort,
@@ -282,7 +297,8 @@ export class AntigravitySessionManager implements AgentBackend {
   }
 
   async listModels(): Promise<ModelOption[]> {
-    if (modelCache && Date.now() - modelCache.at < MODEL_CACHE_MS) return modelCache.value
+    const ttl = modelCache?.value.length ? MODEL_CACHE_MS : MODEL_FAILURE_CACHE_MS
+    if (modelCache && Date.now() - modelCache.at < ttl) return modelCache.value
     // **종료 코드를 믿지 않는다.** 1.1.13 실측: `agy models --output-format json` 은
     // `flags provided but not defined: -output-format` 을 찍고도(#777 이 실측대로였다),
     // 로그인 전 `agy models` 는 `Error: Please sign in…` 을 찍고도 **둘 다 exit 0** 이다.
@@ -290,16 +306,26 @@ export class AntigravitySessionManager implements AgentBackend {
     //
     // 출력 문자열은 `--model` 이 요구하는 정확한 label 이므로(#581, #710) slugify 하거나
     // 보기 좋게 바꾸지 않는다.
-    const json = await runLoginShell('agy models --output-format json', 8_000)
+    const json = await runLoginShell('agy models --output-format json', MODELS_TIMEOUT_MS)
     const fromJson = parseModelsJson(json.stdout)
     if (fromJson.length) return this.cacheModels(fromJson)
 
-    const plain = await runLoginShell('agy models', 8_000)
+    const plain = await runLoginShell('agy models', MODELS_TIMEOUT_MS)
     const fromText = parseModelsText(`${plain.stdout}\n${plain.stderr}`)
     if (fromText.length) return this.cacheModels(fromText)
-    // 검증되지 않은 ID는 과거 CLI에서 조용히 저가 모델로 downgrade됐다. 빈 목록이 정직한 fallback이다.
-    // 이 결과는 캐시하지 않는다 — 설치·로그인 전의 실패를 굳혀 두면 되돌릴 방법이 없다.
-    return []
+
+    // 검증되지 않은 ID 는 과거 CLI 에서 조용히 저가 모델로 downgrade 됐다(#581·#710). 그래서 빈
+    // 목록이 정직한 fallback 이고, `defaultModel: null` 덕에 워크스페이스는 CLI 기본 모델로 정상
+    // 동작한다 — 실측으로 확인했다.
+    //
+    // 이 경로는 드물지 않다. 실측에서 `agy models` 는 `-p` 턴이 멀쩡한 동안에도 아무것도 내놓지
+    // 않고 무기한 멈추는 상태가 됐다(`--version` 과 턴은 정상). 그래서 타임아웃이 장식이 아니라
+    // 이 기능을 지탱하는 부분이고, 빈 선택기는 눈에 띄지 않는 고장이므로 이유를 로그에 남긴다.
+    log.warn(
+      `antigravity: no models parsed (json rc=${json.code} plain rc=${plain.code}) — ` +
+        `${(plain.stderr || plain.stdout).trim().slice(0, 200)}`
+    )
+    return this.cacheModels([])
   }
 
   private cacheModels(value: ModelOption[]): ModelOption[] {
@@ -317,14 +343,13 @@ export class AntigravitySessionManager implements AgentBackend {
 
   async refreshRateLimits(allowShortLived: boolean): Promise<void> {
     if (!allowShortLived) return
-    const limits = await this.rateLimits()
-    const windows = [
-      toSnapshot('Primary', limits?.primary),
-      toSnapshot('Secondary', limits?.secondary)
-    ].filter((value): value is RateLimitSnapshot['windows'][number] => value !== null)
+    // 창 두 개로 접지 않고 **실제 창 전부**를 그대로 싣는다. agy 의 한도는 그룹(Gemini /
+    // Claude·GPT) × 버킷(weekly / 5h) 네 개이고, 라벨이 곧 어느 모델군의 무슨 창인지를 말한다.
+    // 임의로 두 개만 남기면 사용자를 실제로 멈추게 할 창이 사라질 수 있다.
+    const windows = await getAntigravityUsageWindows()
     const snapshot: RateLimitSnapshot = {
       fetchedAt: Date.now(),
-      available: limits !== null,
+      available: windows.length > 0,
       subscriptionType: null,
       windows
     }
@@ -340,19 +365,18 @@ export class AntigravitySessionManager implements AgentBackend {
 
   async runCommand(_workspaceId: string, kind: CommandPanelKind): Promise<CommandResult> {
     if (kind !== 'usage') throw new Error(`Antigravity does not support the ${kind} command.`)
-    const limits = await this.rateLimits()
+    const windows = await getAntigravityUsageWindows()
     return {
       kind: 'usage',
       usage: {
+        // agy 는 비용도 diff 통계도 보고하지 않는다. 0 은 "모른다" 가 아니라 "없다" 는 뜻이고,
+        // UI 는 rateLimits 만 그린다.
         totalCostUsd: 0,
         linesAdded: 0,
         linesRemoved: 0,
         subscriptionType: null,
-        rateLimitsAvailable: limits !== null,
-        rateLimits: [
-          toUsage('Primary', limits?.primary),
-          toUsage('Secondary', limits?.secondary)
-        ].filter((value): value is NonNullable<typeof value> => value !== null),
+        rateLimitsAvailable: windows.length > 0,
+        rateLimits: windows,
         extraUsage: null
       }
     }
@@ -502,17 +526,21 @@ export function parseModelsText(text: string): ModelOption[] {
   // 모델을 놓치면 사용자가 CLI 기본값으로 돌리면 되지만, 가짜 라벨은 조용히 잘못된 모델로 실행된다.
   if (/^\s*(Error|Usage)\s*:/im.test(text)) return []
 
-  return text
-    .split(/\r?\n/)
-    .map((line) => line.trim().replace(/^[*>●•]\s+/, ''))
-    .filter((line) => {
-      if (!line) return false
-      // 진행 표시·머리말. 목록 앞뒤에 섞여 오는 것들이다.
-      if (/^(Fetching|Available|Loading|No\b)/i.test(line)) return false
-      if (line.endsWith('...') || line.endsWith('…') || line.endsWith(':')) return false
-      return true
-    })
-    .map((label) => ({ id: label, label }))
+  return text.split(/\r?\n/).flatMap((raw) => {
+    const line = raw.trim().replace(/^[*>●•]\s+/, '')
+    if (!line) return []
+    // 진행 표시·머리말. 목록 앞뒤에 섞여 온다("Fetching available models...").
+    if (/^(Fetching|Available|Loading|No\b)/i.test(line)) return []
+    if (line.endsWith('...') || line.endsWith('…') || line.endsWith(':')) return []
+
+    // 실측 형식은 **탭으로 나뉜 2열**이다:
+    //   gemini-3.1-pro-high\tGemini 3.1 Pro (High)
+    // 앞이 `--model` 에 넘길 슬러그, 뒤가 사람이 읽는 이름이다. 줄 전체를 id 로 쓰면 탭까지
+    // 포함된 문자열이 `--model` 로 넘어간다.
+    const [slug, label] = line.split('\t').map((part) => part.trim())
+    if (slug && label) return [{ id: slug, label }]
+    return [{ id: slug, label: slug }]
+  })
 }
 
 function parseModelsJson(text: string): ModelOption[] {
@@ -540,26 +568,4 @@ function parseModelsJson(text: string): ModelOption[] {
   } catch {
     return []
   }
-}
-
-function toSnapshot(
-  label: string,
-  value: AgentRateLimits['primary']
-): RateLimitSnapshot['windows'][number] | null {
-  if (value?.usedPercent === undefined) return null
-  return {
-    label,
-    utilization: value.usedPercent,
-    resetsAt: value.resetsAt ? new Date(value.resetsAt * 1000).toISOString() : null
-  }
-}
-
-function toUsage(
-  label: string,
-  value: AgentRateLimits['primary']
-): { label: string; utilization: number | null; resetsAt: string | null } | null {
-  const snapshot = toSnapshot(label, value)
-  return snapshot
-    ? { label: snapshot.label, utilization: snapshot.utilization, resetsAt: snapshot.resetsAt }
-    : null
 }
