@@ -224,7 +224,9 @@ export async function getPrStatus(worktreePath: string, branch?: string): Promis
       title: pr.title ?? '',
       state,
       label: PR_LABELS[state],
-      needsBaseUpdate: pr.mergeStateStatus === 'BEHIND'
+      // mergeStateStatus 는 종결된 PR 에도 과거 BEHIND 값을 남길 수 있다. 업데이트 액션은
+      // 열린 PR 에만 의미가 있으므로 원본 lifecycle 상태로 함께 제한한다.
+      needsBaseUpdate: pr.state === 'OPEN' && pr.mergeStateStatus === 'BEHIND'
     }
   } catch {
     return null
@@ -365,7 +367,7 @@ function statusFromRow(pr: GhPr): PrStatus {
     title: pr.title ?? '',
     state,
     label: PR_LABELS[state],
-    needsBaseUpdate: pr.mergeStateStatus === 'BEHIND'
+    needsBaseUpdate: pr.state === 'OPEN' && pr.mergeStateStatus === 'BEHIND'
   }
 }
 
