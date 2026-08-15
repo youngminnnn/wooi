@@ -13,9 +13,10 @@ import {
 import { refreshAccountUsage, useStore } from '../store'
 import { useNow } from '../lib/useNow'
 import { formatCost, formatCountdown, formatDuration, formatTime } from '../lib/format'
-import { AGENT_BACKEND_LABELS, workspaceDisplayName } from '@shared/types'
+import { AGENT_BACKEND_IDS, AGENT_BACKEND_LABELS, workspaceDisplayName } from '@shared/types'
 import type { AgentBackendId, RateLimitSnapshot, UsageInfo, Workspace } from '@shared/types'
-import { ClaudeMark, CodexMark } from './BrandIcons'
+import { AgentBackendMark } from './BrandIcons'
+import { usesAccountUsageSnapshot } from '../lib/rateLimit'
 
 /** 요금제 사용률 재조회 주기. 5시간 창이 눈에 띄게 움직이는 단위가 분이라 1분이면 충분하다. */
 const USAGE_REFRESH_MS = 60_000
@@ -51,17 +52,21 @@ export default function Overview(): React.JSX.Element {
   const anyRunning = active.some((w) => w.status === 'running')
 
   const auth = useStore((s) => s.authStatus)
-  const connectedAgents = (['claude', 'codex'] as const).filter((id) => {
+  // **목록을 손으로 적지 않는다.** 예전에는 `['claude','codex']` 를 박아 뒀는데, 백엔드가 늘어도
+  // 컴파일이 통과해 버려 새 백엔드만 조용히 이 화면에서 빠졌다.
+  const connectedAgents = AGENT_BACKEND_IDS.filter((id) => {
     const hasActiveWorkspace = active.some((w) => w.agentBackend === id)
-    const hasSnapshot =
-      id === 'claude'
-        ? !!(app.rateLimitsByAgent?.claude ?? app.rateLimits)
-        : !!app.rateLimitsByAgent?.codex
+    // 레거시 Claude 스냅샷(app.rateLimits)은 backend별 맵이 생기기 전의 저장 형식이다.
+    const hasSnapshot = !!(
+      app.rateLimitsByAgent?.[id] ?? (id === 'claude' ? app.rateLimits : undefined)
+    )
     // 인증 조회는 앱 시작·focus 때 여러 번 겹칠 수 있고 일시 실패도 가능하다. 이미 이 backend를
     // 쓰는 workspace나 account snapshot이 있는데 loggedIn 하나만 보고 패널을 제거하지 않는다.
     return !!auth?.agents[id]?.loggedIn || hasActiveWorkspace || hasSnapshot
   })
-  const codexConnected = connectedAgents.includes('codex')
+  /** 계정 스냅샷 경로로 사용량을 읽는 백엔드들. 워크스페이스가 없어도 값이 나온다. */
+  const snapshotAgents = connectedAgents.filter(usesAccountUsageSnapshot)
+  const snapshotAgentsKey = snapshotAgents.join(',')
 
   // backend별 사용량을 주기적으로, 그리고 창으로 돌아올 때 다시 조회한다.
   const [usageNonce, setUsageNonce] = useState(0)
@@ -83,26 +88,41 @@ export default function Overview(): React.JSX.Element {
     }
   }, [])
 
-  // Codex account usage 는 이미 AppState 의 backend별 스냅샷으로 관리된다. Overview 에서
-  // workspace /usage 를 다시 실행하면 같은 rate-limit RPC를 중복 호출하므로, 전용 갱신 경로만
-  // 한 번 호출하고 저장된 스냅샷은 갱신이 끝나기 전에도 그대로 표시한다.
-  const lastCodexRefreshNonce = useRef<number | null>(null)
-  const [codexUsageLoading, setCodexUsageLoading] = useState(false)
-  const [codexSnapshot, setCodexSnapshot] = useState<RateLimitSnapshot | undefined>(
-    app.rateLimitsByAgent?.codex
+  // 계정 스냅샷 경로를 쓰는 백엔드의 사용량은 AppState 의 backend별 스냅샷으로 관리된다.
+  // Overview 에서 workspace /usage 를 다시 실행하면 같은 rate-limit 왕복을 중복하므로, 전용 갱신
+  // 경로만 한 번 호출하고 저장된 스냅샷은 갱신이 끝나기 전에도 그대로 표시한다.
+  const lastSnapshotRefreshNonce = useRef<number | null>(null)
+  const [usageLoading, setUsageLoading] = useState<Partial<Record<AgentBackendId, boolean>>>({})
+  const [snapshots, setSnapshots] = useState<Partial<Record<AgentBackendId, RateLimitSnapshot>>>(
+    () => ({ ...app.rateLimitsByAgent })
   )
   useEffect(() => {
-    if (!codexConnected || lastCodexRefreshNonce.current === usageNonce) return
-    lastCodexRefreshNonce.current = usageNonce
-    setCodexUsageLoading(true)
-    void refreshAccountUsage('codex')
-      .then((next) => {
-        // refresh 응답 자체가 최신 상태의 정본이다. evtState 방송 수신 여부에 화면 갱신을 의존하지 않는다.
-        setCodexSnapshot(next.rateLimitsByAgent?.codex)
-        useStore.setState({ app: next })
-      })
-      .finally(() => setCodexUsageLoading(false))
-  }, [codexConnected, usageNonce])
+    if (!snapshotAgents.length || lastSnapshotRefreshNonce.current === usageNonce) return
+    lastSnapshotRefreshNonce.current = usageNonce
+    for (const id of snapshotAgents) {
+      setUsageLoading((prev) => ({ ...prev, [id]: true }))
+      void refreshAccountUsage(id)
+        .then((next) => {
+          // refresh 응답 자체가 최신 상태의 정본이다. evtState 방송 수신 여부에 화면 갱신을
+          // 의존하지 않는다.
+          setSnapshots((prev) => ({ ...prev, [id]: next.rateLimitsByAgent?.[id] }))
+          useStore.setState((state) => ({
+            app: state.app
+              ? {
+                  ...state.app,
+                  rateLimitsByAgent: {
+                    ...state.app.rateLimitsByAgent,
+                    [id]: next.rateLimitsByAgent?.[id]
+                  }
+                }
+              : next
+          }))
+        })
+        .finally(() => setUsageLoading((prev) => ({ ...prev, [id]: false })))
+    }
+    // snapshotAgents 는 매 렌더 새 배열이라 내용으로 만든 키를 의존성에 쓴다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [snapshotAgentsKey, usageNonce])
 
   const now = useNow(anyRunning ? 1000 : 30_000, anyRunning || connectedAgents.length > 0)
   const claudeSnapshot = app.rateLimitsByAgent ? app.rateLimitsByAgent.claude : app.rateLimits
@@ -217,16 +237,12 @@ export default function Overview(): React.JSX.Element {
                 agentId={agentId}
                 targetId={target?.id}
                 snapshot={
-                  agentId === 'codex'
-                    ? (codexSnapshot ?? app.rateLimitsByAgent?.codex)
-                    : app.rateLimitsByAgent
-                      ? app.rateLimitsByAgent[agentId]
-                      : agentId === 'claude'
-                        ? app.rateLimits
-                        : undefined
+                  snapshots[agentId] ??
+                  app.rateLimitsByAgent?.[agentId] ??
+                  (agentId === 'claude' ? app.rateLimits : undefined)
                 }
                 refreshNonce={usageNonce}
-                refreshing={agentId === 'codex' && codexUsageLoading}
+                refreshing={!!usageLoading[agentId]}
                 now={now}
               />
             )
@@ -303,14 +319,14 @@ function AgentUsagePanel({
   now: number
 }): React.JSX.Element {
   const [usage, setUsage] = useState<UsageInfo | null>(null)
-  const [loading, setLoading] = useState(agentId === 'claude' && !!targetId)
+  const [loading, setLoading] = useState(!usesAccountUsageSnapshot(agentId) && !!targetId)
   const label = AGENT_BACKEND_LABELS[agentId]
   const panelLoading = loading || refreshing
 
   useEffect(() => {
-    // Codex 는 상위 Overview 가 rateLimits.refresh()로 갱신한 AppState 스냅샷을 사용한다.
-    // 여기서 /usage 를 호출하면 account/rateLimits/read와 account/read가 다시 직렬 실행된다.
-    if (agentId === 'codex') {
+    // 계정 스냅샷 경로는 상위 Overview가 이미 갱신하므로, 여기서 /usage까지 호출하면 같은
+    // rate-limit 왕복을 중복하게 된다.
+    if (usesAccountUsageSnapshot(agentId)) {
       setLoading(false)
       return
     }
@@ -361,7 +377,7 @@ function AgentUsagePanel({
   return (
     <section className="rounded-xl border border-[var(--surface-2)] bg-[var(--bg-2)] p-3.5">
       <div className="flex items-center gap-2 mb-3 text-sm font-medium text-neutral-200">
-        {agentId === 'claude' ? <ClaudeMark size={16} /> : <CodexMark size={16} />}
+        <AgentBackendMark backend={agentId} size={16} />
         {label}
         <span className="text-[11px] font-normal text-neutral-600">account usage</span>
         {panelLoading && <Loader2 size={11} className="ml-auto animate-spin text-neutral-500" />}

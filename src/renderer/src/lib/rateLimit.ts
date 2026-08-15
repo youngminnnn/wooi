@@ -107,3 +107,18 @@ export function shouldShowRateLimits(snapshot: RateLimitSnapshot | undefined): b
   if (!snapshot || !snapshot.available) return false
   return tightestWindow(snapshot.windows) != null
 }
+
+/**
+ * 이 백엔드의 사용량을 **계정 스냅샷 경로**로 가져오는가.
+ *
+ * 두 경로가 있다. Claude 는 워크스페이스의 `/usage` 명령으로 읽는데, 그 응답에는 한도뿐 아니라
+ * 이 계정의 비용·변경 줄 수까지 담겨 있어 대체할 것이 없다. 나머지 백엔드는 계정 단위 조회를
+ * 따로 갖고 있어, 메인이 갱신해 둔 `AppState.rateLimitsByAgent` 스냅샷을 그대로 그리면 된다.
+ *
+ * 굳이 갈라 두는 이유는 중복 조회다 — 스냅샷 경로를 쓰는 백엔드에서 워크스페이스 `/usage` 까지
+ * 부르면 같은 rate-limit 왕복을 두 번 하게 된다. 또 스냅샷 경로는 **워크스페이스가 없어도**
+ * 동작하므로, 로그인만 해 둔 백엔드도 Overview 에 사용량이 나온다.
+ */
+export function usesAccountUsageSnapshot(backend: AgentBackendId): boolean {
+  return backend !== 'claude'
+}

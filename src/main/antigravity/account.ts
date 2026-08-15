@@ -114,6 +114,26 @@ interface UsageWindow extends RateLimitWindow {
 }
 
 /**
+ * 호출부인 `usageWindows()` 는 `agy` 프로세스를 띄워 셸 모킹 없이는 테스트하기 어려우므로,
+ * 라벨 규칙만 단위 테스트할 수 있게 순수 함수로 떼어 내보낸다.
+ *
+ * CLI 의 긴 `bucket.name` 은 남은 몫을 설명해 Wooi 의 사용률과 함께 쓰면 뜻이 충돌하고
+ * ("Weekly Limit Remaining … 0% used"), 실기기 Overview 에서는 weekly·5h 행 모두
+ * `Claude and GPT m…` 로 잘려 구별되지 않았다. 그래서 짧은 `window` 를 쓰되, 실측한
+ * `weekly`·`5h` 외 값은 이름을 지어내지 않고 그대로 둔다. 끝의 `models` 제거도 지금까지
+ * 본 그룹명 목록이 아니라 앞으로 추가될 그룹까지 적용할 일반 규칙이다.
+ */
+export function usageWindowLabel(
+  groupName: string | undefined,
+  bucket: Record<string, unknown>
+): string {
+  const shortGroupName = groupName?.replace(/\s+models$/i, '')
+  const window = string(bucket.window)
+  const windowLabel = window === 'weekly' ? 'Weekly' : (window ?? string(bucket.name) ?? 'Limit')
+  return shortGroupName ? `${shortGroupName} · ${windowLabel}` : windowLabel
+}
+
+/**
  * 실측한 `/usage` 봉투를 창 목록으로 편다:
  *
  * ```
@@ -127,6 +147,9 @@ interface UsageWindow extends RateLimitWindow {
  * 1. **`remaining_fraction` 은 남은 비율**(1 = 100% 남음)이다. Wooi 는 *쓴* 비율을 쓰므로 뒤집는다.
  * 2. `reset_time` 은 **ISO 8601 문자열**이지 Unix 초가 아니다.
  * 3. 창이 둘이 아니라 **그룹(Gemini / Claude·GPT) × 버킷(weekly / 5h)** 이다.
+ *
+ * CLI 의 `bucket.name` 은 남은 몫을 설명하지만 Wooi 는 쓴 몫을 표시하므로, 숫자와 뜻이
+ * 충돌하지 않도록 라벨에는 짧은 `window` 값을 우선 사용한다.
  */
 async function usageWindows(): Promise<UsageWindow[]> {
   const result = await probeAntigravity()
@@ -144,9 +167,8 @@ async function usageWindows(): Promise<UsageWindow[]> {
       if (!bucket) continue
       const remaining = number(bucket.remaining_fraction)
       if (remaining === undefined) continue
-      const bucketName = string(bucket.name) ?? string(bucket.window) ?? 'Limit'
       out.push({
-        label: groupName ? `${groupName} · ${bucketName}` : bucketName,
+        label: usageWindowLabel(groupName, bucket),
         usedPercent: Math.round((1 - remaining) * 100),
         resetsAtIso: string(bucket.reset_time),
         resetsAt: unixSeconds(string(bucket.reset_time))
