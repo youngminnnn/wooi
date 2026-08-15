@@ -1,5 +1,11 @@
 import { z } from 'zod'
-import { AGENT_BACKEND_IDS, AGENT_BACKEND_LABELS, type AgentBackendId } from '@shared/types'
+import {
+  AGENT_BACKEND_IDS,
+  AGENT_BACKEND_LABELS,
+  type AgentBackendId,
+  type EffortSetting
+} from '@shared/types'
+import { AGENT_BACKENDS } from '../backend'
 
 /**
  * 에이전트에게 노출하는 Wooi 도구의 **정의**(이름 · 설명 · 스키마). 실행부는 [[agent/tools]] 에 있다.
@@ -101,6 +107,52 @@ export interface AgentToolSpec {
 }
 
 /**
+ * 워크스페이스를 만드는 두 도구가 공유하는 **에이전트 설정** 파라미터 — 무엇으로, 어떤 모델과
+ * 추론 강도로 돌릴지. 값의 검증은 [[agent/tools/agentOptions]] 가 한다.
+ *
+ * 스키마를 함수로 만든 이유는 문구가 갈리기 때문이다. 생략했을 때의 기본값이 독립 워크스페이스와
+ * 스택 자식에서 다르고(스택은 부모 에이전트를 물려받는다), 그 차이는 모델이 알아야 고를 수 있다.
+ */
+function agentOptionParams(inherits: 'default' | 'parent'): z.ZodRawShape {
+  const fallback =
+    inherits === 'parent'
+      ? 'Omit to inherit this workspace’s agent.'
+      : 'Omit to use Wooi’s default agent.'
+  // effort 는 백엔드 메타가 SSOT 다 — 백엔드가 단계를 늘리면 이 목록도 따라 늘어야 한다.
+  const efforts = Array.from(
+    new Set(Object.values(AGENT_BACKENDS).flatMap((meta) => meta.efforts.map((e) => e.id)))
+  ) as [EffortSetting, ...EffortSetting[]]
+  return {
+    agentBackend: z
+      .enum(AGENT_BACKEND_IDS as [AgentBackendId, ...AgentBackendId[]])
+      .optional()
+      .describe(
+        `Agent that will run the new workspace. ${fallback} Available ` +
+          `agents: ${AGENT_BACKEND_IDS.map((id) => `${id} (${AGENT_BACKEND_LABELS[id]})`).join(', ')}.`
+      ),
+    model: z
+      .string()
+      .optional()
+      .describe(
+        'Model the new workspace runs on, written as that agent’s own model id (Claude Code ' +
+          'takes ids like "claude-opus-5[1m]"; Codex has its own catalogue). Omit to use ' +
+          'whatever the agent is configured to default to — do not guess an id to fill this in. ' +
+          'Wooi rejects the call and lists the ids it accepts if this one is not among them. ' +
+          'The model does not carry over from this workspace, so name it here to keep the new ' +
+          'workspace on the same one.'
+      ),
+    effort: z
+      .enum(efforts)
+      .optional()
+      .describe(
+        'Reasoning effort for the new workspace. Omit to use that agent’s configured default. ' +
+          'Which values an agent accepts differs; Wooi rejects the call and lists them if this ' +
+          'one is not among them.'
+      )
+  }
+}
+
+/**
  * 워크스페이스와 무관하게 언제나 있는 도구들.
  *
  * 여기 없는 것도 있다 — 위임 서브에이전트 도구는 멀티 에이전트 워크스페이스에서만 존재하므로
@@ -133,6 +185,7 @@ export const AGENT_TOOLS: AgentToolSpec[] = [
           'Branch name for the new workspace, following the repository’s branch naming convention ' +
             '(e.g. "feat/inline-login"). Omit to let Wooi generate one.'
         ),
+      ...agentOptionParams('parent'),
       task: z
         .string()
         .optional()
@@ -421,13 +474,7 @@ export const AGENT_TOOLS: AgentToolSpec[] = [
           'Branch name for the new workspace, following the repository’s branch naming convention ' +
             '(e.g. "feat/inline-login"). Omit to let Wooi generate one.'
         ),
-      agentBackend: z
-        .enum(AGENT_BACKEND_IDS as [AgentBackendId, ...AgentBackendId[]])
-        .optional()
-        .describe(
-          'Agent that will run the new workspace. Omit to use Wooi’s default agent. Available ' +
-            `agents: ${AGENT_BACKEND_IDS.map((id) => `${id} (${AGENT_BACKEND_LABELS[id]})`).join(', ')}.`
-        ),
+      ...agentOptionParams('default'),
       task: z
         .string()
         .optional()

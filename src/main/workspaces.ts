@@ -1,12 +1,6 @@
 import { randomUUID } from 'node:crypto'
-import {
-  DEFAULT_AGENT_BACKEND,
-  SETUP_SCRIPT_ID,
-  agentSettingsFor,
-  normalizePermissionMode
-} from '@shared/types'
+import { SETUP_SCRIPT_ID, agentSettingsFor, normalizePermissionMode } from '@shared/types'
 import type {
-  AgentBackendId,
   ArchiveScriptFailure,
   CarryFailure,
   CreateWorkspaceArgs,
@@ -14,7 +8,7 @@ import type {
   Repo,
   Workspace
 } from '@shared/types'
-import { backendMeta } from './agent/backend'
+import { backendMeta, resolveWorkspaceAgentBackend } from './agent/backend'
 import {
   applyCarryExcludes,
   carryIntoWorktree,
@@ -121,20 +115,6 @@ export function startAutoRunScripts(scripts: ScriptRunner, ws: Workspace, repo: 
       ws.worktreePath,
       scriptEnvFor(repo, ws, script.id)
     )
-}
-
-/**
- * 생성 요청에 agent 가 명시되지 않았을 때의 기본값.
- *
- * 스택 자식은 부모 작업의 연속이므로 부모 agent 를 물려받고, 스택 뿌리만 전역 기본값을 쓴다.
- * 이 규칙을 renderer 호출부에 맡기면 수동 생성·agent tool 같은 다른 생성 경로가 서로 달라진다.
- */
-export function resolveWorkspaceAgentBackend(
-  explicit: AgentBackendId | undefined,
-  parent: Pick<Workspace, 'agentBackend'> | null | undefined,
-  configuredDefault: AgentBackendId | undefined
-): AgentBackendId {
-  return explicit ?? parent?.agentBackend ?? configuredDefault ?? DEFAULT_AGENT_BACKEND
 }
 
 /**
@@ -301,8 +281,12 @@ export async function createWorkspace(
       setupState: 'idle',
       sessionId: null,
       permissionMode,
-      model: null,
-      effort: null,
+      // 오버라이드는 **명시된 것만** 남긴다. null 은 "이 백엔드의 전역 기본값을 따른다" 는 뜻이고,
+      // 새 워크스페이스의 기본은 그쪽이다 — 부모의 모델을 상속시키지 않는다. 부모가 잠깐 올려
+      // 둔 값이 새 워크스페이스에 눌러앉으면, 사용자는 자기가 정한 적 없는 모델로 도는 것을
+      // 나중에야 발견한다(에이전트가 만드는 워크스페이스는 화면을 가져가지도 않는다).
+      model: args.model ?? null,
+      effort: args.effort ?? null,
       fastMode: null,
       status: 'idle',
       lastModel: null,

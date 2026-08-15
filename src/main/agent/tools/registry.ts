@@ -1,5 +1,5 @@
 import { log } from '../../logger'
-import type { ChatEvent, ChatItem } from '@shared/types'
+import type { AgentBackendId, ChatEvent, ChatItem, ModelOption } from '@shared/types'
 import type { ScriptRunner } from '../../scripts'
 
 /**
@@ -40,6 +40,15 @@ export interface AgentToolDeps {
    * 안 되는 상태다. 세션이 끝나면 사라져야 하고, 다시 열었을 때 옛 스피너가 남아 있으면 안 된다.
    */
   emitChatEvent: (workspaceId: string, event: ChatEvent) => void
+  /**
+   * 한 백엔드가 지금 고를 수 있는 모델 목록. 워크스페이스를 만드는 도구가 넘겨받은 모델 id 를
+   * 검증하는 데 쓴다([[agent/tools/agentOptions]]).
+   *
+   * 목록이 **정적이 아니라서** 도구 설명에 박아 둘 수 없다 — Codex 는 app-server 의
+   * `model/list` 로 환경마다 다른 카탈로그를 준다. 조회에 실패하거나 그 백엔드를 쓸 수 없으면
+   * 빈 목록이 오고(오케스트레이터가 삼킨다), 그때는 검증하지 않고 값을 그대로 받는다.
+   */
+  listModels: (backend: AgentBackendId) => Promise<ModelOption[]>
   /**
    * 워크스페이스를 아카이브할 때 그 워크스페이스에 매달린 것들을 끊는다([[workspaces]]
    * archiveWorkspace 가 요구하는 것과 같은 모양).

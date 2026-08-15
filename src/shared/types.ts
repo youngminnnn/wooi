@@ -2890,6 +2890,13 @@ export interface CreateWorkspaceArgs {
    */
   agentBackend?: AgentBackendId
   /**
+   * 이 워크스페이스만의 모델 오버라이드. 생략하면 null 로 저장돼 백엔드 전역 기본값을 따른다
+   * (`AgentSettings.model`). 백엔드가 아는 모델 id 여야 한다 — 검증은 넘기는 쪽이 한다.
+   */
+  model?: string | null
+  /** 이 워크스페이스만의 reasoning effort 오버라이드. 생략하면 백엔드 전역 기본값을 따른다. */
+  effort?: EffortSetting | null
+  /**
    * 팀 워크스페이스로 만들지. 생략하면 Solo 다 — 새 워크스페이스의 기본은 언제나 Solo 이고,
    * 이것을 켜서 넘기는 경로는 fan-out 슬롯뿐이다(사람이 후보별로 골라 둔 값).
    */

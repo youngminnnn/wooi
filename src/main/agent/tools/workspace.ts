@@ -1,7 +1,8 @@
-import { AGENT_BACKEND_IDS, workspaceDisplayName, type AgentBackendId } from '@shared/types'
+import { workspaceDisplayName } from '@shared/types'
 import { isWorktreeClean } from '../../git'
 import { getStore } from '../../store'
 import { archiveWorkspace, createWorkspace } from '../../workspaces'
+import { resolveRequestedAgentOptions } from './agentOptions'
 import type { AgentToolHandler } from './registry'
 import { callerWorkspace, resolveTargetWorkspace } from './target'
 
@@ -53,11 +54,9 @@ export const createIndependentWorkspace: AgentToolHandler = async (deps, workspa
   // 갈라지므로, 여기 미커밋 변경이 있든 없든 새 워크스페이스는 정확히 같은 것을 받는다.
   // 스택에서 clean 을 요구하는 것은 조용히 어긋난 스택을 막기 위함인데, 그 사고가 여기엔 없다.
   const name = typeof args.name === 'string' ? args.name.trim() : ''
-  const requestedBackend =
-    typeof args.agentBackend === 'string' &&
-    AGENT_BACKEND_IDS.includes(args.agentBackend as AgentBackendId)
-      ? (args.agentBackend as AgentBackendId)
-      : undefined
+  // 에이전트·모델·effort 는 여기서 검증하고 넘긴다 — 잘못된 값을 그대로 저장하면 사고는 새
+  // 워크스페이스의 첫 턴에서 터진다([[agent/tools/agentOptions]]). 부모는 없다(독립이다).
+  const agentOptions = await resolveRequestedAgentOptions(deps, args, null)
   const result = await createWorkspace(deps, {
     repoId: ws.repoId,
     // parentWorkspaceId 를 넘기지 않는 것이 이 도구의 전부다 — createWorkspace 는 그러면
@@ -66,7 +65,7 @@ export const createIndependentWorkspace: AgentToolHandler = async (deps, workspa
     // 대신 생성자는 남긴다. 부모가 없어도 "내가 만든 것" 이라는 사실은 남아야, 나중에 이
     // 워크스페이스를 아카이브할 수 있다([[agent/tools/target]]).
     createdByWorkspaceId: ws.id,
-    ...(requestedBackend ? { agentBackend: requestedBackend } : {}),
+    ...agentOptions,
     ...(name ? { name } : {})
   })
   if (result.error) throw new Error(result.error)

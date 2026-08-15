@@ -116,8 +116,17 @@ describe.skipIf(!existsSync(SHIM))('codex tool shim', () => {
     const list = (await h.next(1)).result as {
       tools: Array<{ name: string; inputSchema: { properties: Record<string, unknown> } }>
     }
-    const create = list.tools.find((t) => t.name === 'create_stacked_workspace')!
-    expect(Object.keys(create.inputSchema.properties).sort()).toEqual(['name', 'task'])
+    // 인자 이름을 여기 박아 두지 않는다 — 카탈로그가 인자를 하나 더 받을 때마다 이 테스트가
+    // 깨질 뿐이고, 정작 확인하려는 것(shim 이 카탈로그의 인자를 흘리거나 더하지 않는가)은
+    // 카탈로그 자신과 대조해야 나온다(바로 위 목록 테스트와 같은 이유).
+    const name = 'create_stacked_workspace'
+    const create = list.tools.find((t) => t.name === name)!
+    const spec = agentToolsFor().find((t) => t.name === name)!
+    expect(Object.keys(create.inputSchema.properties).sort()).toEqual(
+      Object.keys(spec.inputSchema).sort()
+    )
+    // 그래도 빈 스키마와는 갈라야 한다 — 전부 사라져도 위 비교는 통과한다.
+    expect(Object.keys(create.inputSchema.properties)).toContain('task')
   })
 
   it('대상을 지목하는 도구의 workspaceId 는 대상 그대로 메인에 닿는다', async () => {

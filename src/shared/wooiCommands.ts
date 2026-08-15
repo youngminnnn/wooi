@@ -104,6 +104,9 @@ export const WOOI_COMMANDS: WooiCommandSpec[] = [
       'rediscover — files and symbols as `path:line`, commands you ran and what they reported,',
       'approaches you ruled out and why. Write down only what you are sure of.',
       '',
+      'If the user named an agent, a model, or a reasoning effort for it, pass those as',
+      '`agentBackend`, `model` and `effort` — otherwise leave them out and let Wooi pick.',
+      '',
       'What the new workspace should do: $ARGUMENTS'
     ].join('\n')
   },
@@ -121,6 +124,9 @@ export const WOOI_COMMANDS: WooiCommandSpec[] = [
       'while this worktree is dirty. Write its `task` for an agent that cannot see this',
       'conversation: what to build, why it is a separate pull request, and what you already',
       'decided that it should not revisit.',
+      '',
+      'It runs on this workspace’s agent unless the user asked for another one; if they named an',
+      'agent, a model, or a reasoning effort, pass those as `agentBackend`, `model` and `effort`.',
       '',
       'What the stacked workspace should do: $ARGUMENTS'
     ].join('\n')
