@@ -12,3 +12,7 @@ docs/codex-protocol/*.schemas.json
 
 # 모바일은 독립 프로젝트다 — 자체 도구 체인을 쓴다.
 apps/mobile
+
+# supabase CLI 생성물 — 우리 코드가 아니다(eslint 는 이미 제외 중).
+supabase/.temp
+supabase/.branches
