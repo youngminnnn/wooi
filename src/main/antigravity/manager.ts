@@ -283,23 +283,20 @@ export class AntigravitySessionManager implements AgentBackend {
 
   async listModels(): Promise<ModelOption[]> {
     if (modelCache && Date.now() - modelCache.at < MODEL_CACHE_MS) return modelCache.value
-    // 1.1.12 릴리스 노트와 달리 같은 바이너리가 --output-format을 거부한다는 #777이 있어 plain
-    // fallback은 실제 호환 경로다. 출력 문자열은 --model이 요구하는 정확한 label이므로(#581, #710)
-    // slugify하거나 보기 좋게 바꾸지 않는다.
+    // **종료 코드를 믿지 않는다.** 1.1.13 실측: `agy models --output-format json` 은
+    // `flags provided but not defined: -output-format` 을 찍고도(#777 이 실측대로였다),
+    // 로그인 전 `agy models` 는 `Error: Please sign in…` 을 찍고도 **둘 다 exit 0** 이다.
+    // 그래서 성공 판정은 "무엇이 파싱됐는가" 로만 한다.
+    //
+    // 출력 문자열은 `--model` 이 요구하는 정확한 label 이므로(#581, #710) slugify 하거나
+    // 보기 좋게 바꾸지 않는다.
     const json = await runLoginShell('agy models --output-format json', 8_000)
-    if (json.code === 0) {
-      const parsed = parseModelsJson(json.stdout)
-      if (parsed.length) return this.cacheModels(parsed)
-    }
+    const fromJson = parseModelsJson(json.stdout)
+    if (fromJson.length) return this.cacheModels(fromJson)
+
     const plain = await runLoginShell('agy models', 8_000)
-    if (plain.code === 0) {
-      const parsed = plain.stdout
-        .split(/\r?\n/)
-        .map((line) => line.trim())
-        .filter(Boolean)
-        .map((label) => ({ id: label, label }))
-      if (parsed.length) return this.cacheModels(parsed)
-    }
+    const fromText = parseModelsText(`${plain.stdout}\n${plain.stderr}`)
+    if (fromText.length) return this.cacheModels(fromText)
     // 검증되지 않은 ID는 과거 CLI에서 조용히 저가 모델로 downgrade됐다. 빈 목록이 정직한 fallback이다.
     // 이 결과는 캐시하지 않는다 — 설치·로그인 전의 실패를 굳혀 두면 되돌릴 방법이 없다.
     return []
@@ -483,6 +480,39 @@ export class AntigravitySessionManager implements AgentBackend {
     })
     notification.show()
   }
+}
+
+/**
+ * 평문 `agy models` 출력에서 모델 라벨만 걸러낸다.
+ *
+ * **필요한 이유가 실측에서 나왔다.** 1.1.13 은 오류에도 exit 0 을 돌려주므로, 줄을 그대로 라벨로
+ * 삼으면 로그인 전에 이런 것들이 모델 선택기에 뜬다:
+ *
+ *   Fetching available models...
+ *   Error: Please sign in to view available models. Launch the CLI without arguments to sign in.
+ *
+ * 게다가 그 값이 `--model` 로 넘어간다. 그래서 진단 문장을 걸러내고, 모델 라벨이 가질 만한
+ * 모양(짧은 한 줄, 문장 부호 없음)만 남긴다. 애매하면 버리는 쪽을 택한다 — 놓친 모델은 사용자가
+ * CLI 기본값으로 돌리면 되지만, 가짜 라벨은 조용히 잘못된 모델로 실행된다.
+ */
+export function parseModelsText(text: string): ModelOption[] {
+  // **먼저 출력 전체를 본다.** 줄 단위 휴리스틱만으로는 부족하다 — 실측한 사용법 출력의
+  // "List available models" 는 어느 모양 규칙으로도 모델 라벨과 구분되지 않는다. 반면 두 실패
+  // 모드 모두 `Error:` 또는 `Usage:` 줄을 반드시 남기므로, 그게 보이면 **아무것도 건지지 않는다.**
+  // 모델을 놓치면 사용자가 CLI 기본값으로 돌리면 되지만, 가짜 라벨은 조용히 잘못된 모델로 실행된다.
+  if (/^\s*(Error|Usage)\s*:/im.test(text)) return []
+
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.trim().replace(/^[*>●•]\s+/, ''))
+    .filter((line) => {
+      if (!line) return false
+      // 진행 표시·머리말. 목록 앞뒤에 섞여 오는 것들이다.
+      if (/^(Fetching|Available|Loading|No\b)/i.test(line)) return false
+      if (line.endsWith('...') || line.endsWith('…') || line.endsWith(':')) return false
+      return true
+    })
+    .map((label) => ({ id: label, label }))
 }
 
 function parseModelsJson(text: string): ModelOption[] {

@@ -101,6 +101,9 @@ export function mapEvent(
     if (!result || typeof result !== 'object') return NOTHING
     const status = stringValue(result.status)
     if (!status) return NOTHING
+    // result.error 는 실패의 유일한 설명일 수 있다(로그인 전 실행이 그렇다 — protocol.ts 참고).
+    // 오류 카드를 따로 한 장 세워 이유를 보여 주고, result 카드는 턴의 마무리로 남긴다.
+    const failure = stringValue(result.error)
     const item: ChatItem = {
       id: itemId(state, 'result'),
       type: 'result',
@@ -111,7 +114,20 @@ export function mapEvent(
       // agy 는 비용을 보고하지 않는다. 0 을 넣지 않으면 UI 가 비용 필드를 올바르게 숨긴다.
       ts
     }
-    return itemResult(item)
+    if (!failure) return itemResult(item)
+    const error: ChatItem = {
+      id: itemId(state, 'result:error'),
+      type: 'error',
+      text: clampText(failure),
+      ts
+    }
+    return {
+      events: [
+        { type: 'item', item: error },
+        { type: 'item', item }
+      ],
+      persist: [error, item]
+    }
   }
 
   return unknown(`event "${stringValue(event.event) ?? 'unknown'}"`, ts, onUnknown)

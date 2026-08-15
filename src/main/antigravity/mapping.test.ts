@@ -273,3 +273,20 @@ describe('실행 간 아이템 id 충돌', () => {
     expect(first.id).not.toBe(second.id)
   })
 })
+
+/**
+ * 실물 `agy` 1.1.13 이 로그인 전 headless 실행에서 그대로 내보낸 result 이벤트다.
+ * `error` 는 문서의 stream-json 스키마에 없지만 실제로는 온다 — 유일한 실패 설명이라 버리면 안 된다.
+ */
+describe('실측 — 로그인 전 result', () => {
+  const real: AntigravityEvent = JSON.parse(
+    '{"event":"result","result":{"conversation_id":"","status":"ERROR","response":"","error":"authentication failed or timed out","duration_seconds":0,"num_turns":0,"usage":{"input_tokens":0,"output_tokens":0,"thinking_tokens":0,"cache_read_tokens":0,"total_tokens":0}}}'
+  )
+
+  it('실패 사유를 error 카드로 보여 주고 result 카드도 남긴다', () => {
+    const out = items(mapEvent(real, createMapperState('run1')))
+    expect(out.map((i) => i.type)).toEqual(['error', 'result'])
+    expect(out[0]).toMatchObject({ text: 'authentication failed or timed out' })
+    expect(out[1]).toMatchObject({ subtype: 'error', isError: true })
+  })
+})

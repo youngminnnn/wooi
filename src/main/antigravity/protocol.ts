@@ -57,6 +57,13 @@ export interface AntigravityResultEvent {
     response: string
     duration_seconds: number
     num_turns: number
+    /**
+     * 실패 사유. 문서의 stream-json 스키마에는 없고 비스트리밍 json 봉투에만 적혀 있지만,
+     * 1.1.13 실측에서 stream-json 의 result 도 싣는다 — 로그인 전 실행이
+     * `{"status":"ERROR","error":"authentication failed or timed out"}` 로 온다.
+     * 이걸 버리면 사용자는 이유 없는 오류 카드만 본다.
+     */
+    error?: string
     structured_output?: object
     json_schema?: object
     usage?: AntigravityUsage

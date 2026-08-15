@@ -10,9 +10,13 @@ export function turnArgsFor(mode: PermissionMode | null | undefined): string[] {
       return ['--dangerously-skip-permissions']
     case 'default':
     default:
-      // headless 에서는 default·accept-edits 모두 워크스페이스 편집만 통과시키지만,
-      // accept-edits 는 편집이 막히지 않음을 명시적으로 보장한다. --mode 가 headless 에 실제
-      // 적용된 버전은 1.1.12부터라 MIN_ANTIGRAVITY_VERSION도 정확히 그 버전이다.
+      // `--mode` 가 받는 값은 **accept-edits 와 plan 둘뿐**이다. 1.1.13 실측:
+      //   agy --help          → "--mode  Set the agent execution mode (accept-edits, plan)"
+      //   agy --mode default  → warning: unrecognized --mode value "default"
+      // 즉 Wooi 의 `default` 모드에 대응하는 CLI 값은 accept-edits 하나이고, 그래서 이 백엔드는
+      // "편집은 통과 / 셸 명령은 거부" 와 "전부 허용" 사이에 중간이 없다.
+      // `--mode` 가 headless 에 실제로 적용되는 것은 1.1.12부터라 MIN_ANTIGRAVITY_VERSION 도
+      // 정확히 그 버전이다.
       return ['--mode', 'accept-edits']
   }
 }

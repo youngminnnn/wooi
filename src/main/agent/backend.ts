@@ -402,8 +402,9 @@ export const CODEX_META: AgentBackendMeta = {
  * 우선순위 역전까지 있다(issue #798). 따라서 1.1.12 부터 headless 에 적용되는 `--mode` 세 값과
  * `--dangerously-skip-permissions`로 실제로 구분되는 세 단계만 노출한다.
  *
- * headless 에서는 default 와 accept-edits 가 모두 워크스페이스 편집만 허용해 같으므로 acceptEdits 는
- * 중복이고, 분류기·샌드박스가 없어 auto·readOnly 도 정직한 의미를 만들 수 없다. default·plan 은
+ * `--mode` 가 받는 값은 accept-edits 와 plan 둘뿐이라(1.1.13 실측 — `--mode default` 은
+ * `unrecognized --mode value` 경고로 떨어진다) acceptEdits 를 따로 둘 자리가 없고, 분류기·샌드박스가
+ * 없어 auto·readOnly 도 정직한 의미를 만들 수 없다. default·plan 은
  * 백엔드 전환 시 전역 기본값을 이어받도록 공통 식별자를 쓰며 나머지는 normalizePermissionMode 가
  * 버린다. `--sandbox`와 skip 조합도 탈출 승인을 자동 통과시킨다(issue #36). 네트워크는 막히고
  * (issue #765), readwrite glob 도 실패하므로(issue #798) "자율적이되 격리된" 모드는 선언하지 않는다.
