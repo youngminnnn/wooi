@@ -1,6 +1,6 @@
 import { hostname } from 'node:os'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
-import type { RemoteConnectionState } from '@shared/remote'
+import type { RemoteConnectionState, RemoteMachine } from '@shared/remote'
 
 export type { RemoteConnectionState }
 import { log } from '../logger'
@@ -111,6 +111,14 @@ export class RemoteClient {
 
   getState(): RemoteConnectionState {
     return this.state
+  }
+
+  getMachine(): RemoteMachine {
+    return {
+      id: this.options.keystore.identity().machineId,
+      name: this.options.machineName ?? hostname(),
+      appVersion: this.options.appVersion
+    }
   }
 
   /** 상태 변화를 구독한다. 반환값을 호출하면 해제된다. */

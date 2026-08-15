@@ -17,6 +17,8 @@ import {
   type RemoteKeystore
 } from './keystore'
 import { PairingManager, type PairingState } from './pairing'
+import { StateMirror } from './mirror'
+import type { AppState, PermissionRequest } from '@shared/types'
 
 /**
  * 원격 접근 기능의 파사드. main 의 나머지 부분은 이 파일만 안다.
@@ -49,13 +51,22 @@ export class RemoteBridge {
   private keystore: RemoteKeystore | null = null
   private client: RemoteClient | null = null
   private pairing: PairingManager | null = null
+  private mirror: StateMirror | null = null
+  private readonly getAppState: () => AppState | null
   private unsubscribe: (() => void) | null = null
   private enabled = false
   private fault: string | null = null
 
-  constructor(onChange: (status: RemoteStatus) => void, config = resolveRemoteConfig()) {
+  constructor(
+    onChange: (status: RemoteStatus) => void,
+    config = resolveRemoteConfig(),
+    // 기본값이 null 을 돌려준다 — 테스트가 상태 없이 브리지만 만들 수 있어야 하고,
+    // 그때는 초기 스냅샷을 건너뛰는 것이 맞다(가짜 빈 AppState 를 지어내면 폰이 그걸 본다).
+    getAppState: () => AppState | null = () => null
+  ) {
     this.config = config
     this.onChange = onChange
+    this.getAppState = getAppState
   }
 
   /** 지금 상태 스냅샷. 렌더러가 언제든 물어볼 수 있다. */
@@ -81,6 +92,8 @@ export class RemoteBridge {
     this.fault = null
 
     if (!next) {
+      this.mirror?.dispose()
+      this.mirror = null
       this.pairing?.dispose()
       this.pairing = null
       await this.client?.dispose()
@@ -107,6 +120,15 @@ export class RemoteBridge {
       this.unsubscribe = client.onChange(() => this.emit())
       this.client = client
       await client.connect()
+      this.mirror = new StateMirror({
+        supabase: () => client.supabase(),
+        keystore,
+        machine: () => client.getMachine()
+      })
+      // 붙자마자 현재 상태를 한 번 밀어 준다. 미러는 **변화**에만 반응하므로 이게 없으면
+      // 방금 페어링한 폰은 랩탑에서 뭔가 일어날 때까지 빈 화면을 본다.
+      const initial = this.getAppState()
+      if (initial) this.publishState(initial, [])
     } catch (err) {
       // 키스토어 복호화 실패가 가장 흔하다 — 조용히 꺼진 것처럼 보이면 안 된다.
       this.fault = errorText(err)
@@ -117,6 +139,10 @@ export class RemoteBridge {
   }
 
   // ── 페어링 ──────────────────────────────────────────────────────────────
+
+  publishState(appState: AppState, pendingPermissions: PermissionRequest[]): void {
+    this.mirror?.publish(appState, pendingPermissions)
+  }
 
   async startPairing(): Promise<RemoteStatus> {
     const client = this.client
@@ -140,6 +166,9 @@ export class RemoteBridge {
 
   async confirmPairing(): Promise<RemoteStatus> {
     await this.pairing?.confirm()
+    // 새 기기는 직전 발행의 수신자가 아니었다. 중복 제거를 우회해 곧바로 한 번 더 보낸다.
+    const current = this.getAppState()
+    if (current) this.mirror?.publishNow(current, [])
     return this.emit()
   }
 
@@ -200,11 +229,13 @@ export class RemoteBridge {
   }
 
   async dispose(): Promise<void> {
+    this.mirror?.dispose()
     this.pairing?.dispose()
     this.unsubscribe?.()
     await this.client?.dispose()
     this.client = null
     this.pairing = null
+    this.mirror = null
   }
 
   // ── 내부 ────────────────────────────────────────────────────────────────
@@ -246,8 +277,11 @@ export class RemoteBridge {
 let bridge: RemoteBridge | null = null
 
 /** main 엔트리가 한 번 호출한다. `onChange` 는 `evt:remote` 방송으로 이어진다. */
-export function initRemote(onChange: (status: RemoteStatus) => void): RemoteBridge {
-  bridge ??= new RemoteBridge(onChange)
+export function initRemote(
+  onChange: (status: RemoteStatus) => void,
+  getAppState: () => AppState
+): RemoteBridge {
+  bridge ??= new RemoteBridge(onChange, resolveRemoteConfig(), getAppState)
   return bridge
 }
 

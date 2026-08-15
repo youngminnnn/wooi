@@ -381,3 +381,30 @@ describe('상태 알림', () => {
     manager.dispose()
   })
 })
+
+describe('릴레이 5xx', () => {
+  it('502 를 만나도 페어링을 포기하지 않는다', async () => {
+    // Edge Function 은 콜드스타트·재배포 중에 502 를 낸다. 그때마다 사용자에게 QR 을 다시
+    // 띄우게 만들면 안 된다 — 실제로 이 경로에서 페어링이 끊기는 것을 보고 고친 것이다.
+    const manager = newManager()
+    await manager.start()
+
+    relay.override = { status: 502, json: null }
+    await vi.advanceTimersByTimeAsync(PAIRING_POLL_INTERVAL_MS + 10)
+    expect(manager.getState().phase).toBe('waiting')
+
+    phoneClaims()
+    await vi.advanceTimersByTimeAsync(PAIRING_POLL_INTERVAL_MS + 10)
+    expect(manager.getState().phase).toBe('confirming')
+    manager.dispose()
+  })
+
+  it('4xx 는 여전히 확정적 실패로 다룬다', async () => {
+    const manager = newManager()
+    await manager.start()
+    relay.override = { status: 404, json: { error: 'not found' } }
+    await vi.advanceTimersByTimeAsync(PAIRING_POLL_INTERVAL_MS + 10)
+    expect(manager.getState().phase).toBe('error')
+    manager.dispose()
+  })
+})

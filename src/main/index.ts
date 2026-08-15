@@ -19,6 +19,7 @@ import { TerminalManager } from './terminal'
 import { applyNavigationGuards, loadRenderer, rendererWebPreferences } from './windows'
 import { registerIpc } from './ipc'
 import { disposeRemote, getRemoteBridge, initRemote } from './remote'
+import type { AppState } from '@shared/types'
 import { log } from './logger'
 import { hydrateEnvFromLoginShell } from './env'
 import { initUpdater } from './updater'
@@ -63,6 +64,27 @@ function dispatch(channel: string, payload: unknown): void {
     } catch (err) {
       log.error(`dispatch failed on ${channel}`, err)
     }
+  }
+  mirrorToRemote(channel, payload)
+}
+
+/**
+ * 렌더러로 나가는 방송을 원격에도 흘린다.
+ *
+ * 렌더러 방송 **뒤에** 부르고 통째로 try/catch 로 감싼다 — 원격은 부가 기능이고,
+ * 여기서 던지면 데스크톱 UI 가 갱신을 잃는다. 원격이 꺼져 있으면 publishState 가
+ * 즉시 반환하므로 이 경로의 비용은 함수 호출 하나다.
+ *
+ * 지금은 `evt:state` 만 보낸다. 권한 요청 미러링은 main 에 통합 레지스트리가 없어서
+ * (Claude 는 session.ts 의 canUseTool, Codex 는 별도 경로) M5 에서 함께 만든다.
+ * 그때까지 pendingPermissions 는 비어 있고, 폰의 attention 배지도 아직 뜨지 않는다.
+ */
+function mirrorToRemote(channel: string, payload: unknown): void {
+  if (channel !== IPC.evtState) return
+  try {
+    getRemoteBridge().publishState(payload as AppState, [])
+  } catch {
+    // 브리지가 아직 초기화되지 않았거나(기동 초기) 원격이 꺼져 있다 — 정상이다.
   }
 }
 
@@ -224,7 +246,10 @@ app.whenReady().then(() => {
   // 원격 브리지는 IPC 등록보다 **먼저** 만들어야 한다 — 핸들러가 getRemoteBridge() 를 부른다.
   // 만드는 것 자체는 아무 자원도 잡지 않는다(설정을 읽을 뿐이다). 실제 연결은 아래에서
   // 사용자가 켜 둔 경우에만 일어난다.
-  initRemote((status) => dispatch(IPC.evtRemote, status))
+  initRemote(
+    (status) => dispatch(IPC.evtRemote, status),
+    () => getStore().getState()
+  )
   registerIpc({ sessions, scripts, terminals, panes, dispatch, getWindow: () => mainWindow })
   createWindow()
   sessions.prewarm()

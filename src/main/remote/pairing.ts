@@ -238,6 +238,16 @@ export class PairingManager {
       return
     }
 
+    // 5xx 는 릴레이의 일시적 딸꾹질이지 "페어링이 사라졌다"가 아니다. Edge Function 은
+    // 콜드스타트나 재배포 중에 502 를 낼 수 있는데, 그때마다 사용자에게 QR 을 다시 띄우게
+    // 만들 이유가 없다 — 네트워크 예외와 같이 취급해 만료까지 계속 시도한다.
+    // (4xx 는 다르다: 코드가 없거나 만료됐거나 남의 것이라는 서버의 확정적 답이다.)
+    if (res.status >= 500) {
+      log.error(`페어링 폴링이 ${res.status} 을 받았습니다 — 재시도합니다.`)
+      this.schedulePoll()
+      return
+    }
+
     if (res.status !== 200) {
       this.attempt = null
       this.fail(`pairing was lost: ${describe(res)}`)

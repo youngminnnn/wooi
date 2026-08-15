@@ -5,7 +5,8 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "dark",
+    "scheme": "wooi-remote",
     "ios": {
       "supportsTablet": true
     },
@@ -18,6 +19,17 @@
       },
       "predictiveBackGestureEnabled": false
     },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow Wooi Remote to scan the pairing code",
+          "recordAudioAndroid": false
+        }
+      ],
+      "expo-secure-store"
+    ],
     "web": {
       "favicon": "./assets/favicon.png"
     }
