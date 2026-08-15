@@ -5,7 +5,7 @@ import {
   type AgentBackendId,
   type EffortSetting
 } from '@shared/types'
-import { AGENT_BACKENDS } from '../backend'
+import { AGENT_BACKENDS, MAIN_AGENT_BACKEND_IDS } from '../backend'
 
 /**
  * 에이전트에게 노출하는 Wooi 도구의 **정의**(이름 · 설명 · 스키마). 실행부는 [[agent/tools]] 에 있다.
@@ -123,12 +123,14 @@ function agentOptionParams(inherits: 'default' | 'parent'): z.ZodRawShape {
     new Set(Object.values(AGENT_BACKENDS).flatMap((meta) => meta.efforts.map((e) => e.id)))
   ) as [EffortSetting, ...EffortSetting[]]
   return {
+    // teammate 전용 백엔드는 여기 오면 안 된다 — 메인 자리에 앉히면 그 워크스페이스는 첫 턴에
+    // 죽는다(registry 의 createBackend 가 throw 한다). 모델에게 고를 수 없는 값을 보여 주지 않는다.
     agentBackend: z
-      .enum(AGENT_BACKEND_IDS as [AgentBackendId, ...AgentBackendId[]])
+      .enum(MAIN_AGENT_BACKEND_IDS as [AgentBackendId, ...AgentBackendId[]])
       .optional()
       .describe(
         `Agent that will run the new workspace. ${fallback} Available ` +
-          `agents: ${AGENT_BACKEND_IDS.map((id) => `${id} (${AGENT_BACKEND_LABELS[id]})`).join(', ')}.`
+          `agents: ${MAIN_AGENT_BACKEND_IDS.map((id) => `${id} (${AGENT_BACKEND_LABELS[id]})`).join(', ')}.`
       ),
     model: z
       .string()

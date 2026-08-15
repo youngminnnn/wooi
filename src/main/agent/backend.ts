@@ -1,4 +1,4 @@
-import { DEFAULT_AGENT_BACKEND } from '@shared/types'
+import { AGENT_BACKEND_IDS, DEFAULT_AGENT_BACKEND } from '@shared/types'
 import type {
   AgentAuthStatus,
   AgentBackendId,
@@ -438,6 +438,17 @@ export const AGENT_BACKENDS: Record<AgentBackendId, AgentBackendMeta> = {
   codex: CODEX_META,
   copilot: COPILOT_META
 }
+
+/**
+ * 워크스페이스를 **구동할 수 있는** 백엔드만(capabilities.mainAgent).
+ *
+ * `AGENT_BACKEND_IDS` 와 갈라 두는 이유: 그 목록에는 teammate 전용 백엔드도 들어 있고, 그것을
+ * 메인 자리에 앉히면 워크스페이스가 첫 턴에 죽는다(createBackend 가 throw 한다). 에이전트를
+ * 고르게 하는 자리는 전부 이 목록을 봐야 한다 — 모델에게 주는 도구 스키마도 포함해서.
+ */
+export const MAIN_AGENT_BACKEND_IDS: AgentBackendId[] = AGENT_BACKEND_IDS.filter(
+  (id) => AGENT_BACKENDS[id].capabilities.mainAgent
+)
 
 /** 알 수 없는/누락 식별자의 폴백 백엔드. */
 export const DEFAULT_BACKEND_ID: AgentBackendId = 'claude'
