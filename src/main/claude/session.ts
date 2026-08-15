@@ -464,11 +464,7 @@ export class ClaudeSession {
    * 않는다([[agent/backend]] sendMessage). /rewind 체크포인트도 만들지 않는다 — 되돌릴 지점으로
    * 고를 사용자 메시지가 화면에 없기 때문이다(자동 /compact 주입이 걸러지는 것과 같은 길).
    */
-  send(
-    text: string,
-    images?: ImageAttachment[],
-    opts?: SendMessageOptions
-  ): void {
+  send(text: string, images?: ImageAttachment[], opts?: SendMessageOptions): void {
     const imgs = images ?? []
     const prompt = opts?.prefix ? `${opts.prefix}\n\n${text}` : text
     if (!opts?.silent) {

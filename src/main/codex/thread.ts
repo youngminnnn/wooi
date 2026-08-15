@@ -101,11 +101,7 @@ export class CodexThread {
    * 해야 한다 — 서버가 되돌려 주는 것이 그것이라, 어긋나면 mapper 가 그 echo 를 처음 보는
    * 사용자 메시지로 알고 인수인계 프롬프트 전문을 화면에 되살린다.
    */
-  async send(
-    text: string,
-    images?: ImageAttachment[],
-    opts?: SendMessageOptions
-  ): Promise<void> {
+  async send(text: string, images?: ImageAttachment[], opts?: SendMessageOptions): Promise<void> {
     if (this.disposed) return
     const prompt = opts?.prefix ? `${opts.prefix}\n\n${text}` : text
     const attachments = (images ?? []).map((image) => ({
