@@ -83,6 +83,13 @@ describe('rateLimitResetAt', () => {
   })
 })
 
+describe('RATE_LIMIT_ERROR', () => {
+  it('SDK assistant.error 의 rate_limit 코드도 제한으로 인식한다', async () => {
+    const { RATE_LIMIT_ERROR } = await import('./session')
+    expect(RATE_LIMIT_ERROR.test('Assistant error: rate_limit')).toBe(true)
+  })
+})
+
 describe('ClaudeSession session limit handling', () => {
   it('알려진 session limit 오류를 새 프로세스에서 재시도하지 않는다', async () => {
     const { ClaudeSession } = await import('./session')
