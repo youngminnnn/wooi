@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
+  ANTIGRAVITY_META,
   CLAUDE_META,
   CLAUDE_MODELS,
   CODEX_META,
@@ -17,10 +18,10 @@ import type { AgentBackendMeta } from '@shared/types'
 
 /**
  * 백엔드 메타는 **UI 의 유일한 근거**다 — 여기가 틀리면 입력창이 지원하지 않는 명령을 띄우거나,
- * 권한 모드 순환이 엉뚱한 값으로 넘어간다. 두 백엔드에 같은 불변식을 걸어 둔다.
+ * 권한 모드 순환이 엉뚱한 값으로 넘어간다. 모든 백엔드에 같은 불변식을 걸어 둔다.
  */
 
-const BACKENDS: AgentBackendMeta[] = [CLAUDE_META, CODEX_META]
+const BACKENDS: AgentBackendMeta[] = [CLAUDE_META, CODEX_META, ANTIGRAVITY_META]
 
 describe.each(BACKENDS.map((m) => [m.label, m] as const))('%s 메타', (_label, meta) => {
   it('기본 권한 모드가 자기 목록 안에 있다', () => {

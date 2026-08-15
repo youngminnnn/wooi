@@ -3,6 +3,7 @@ import type { AgentBackendId } from '@shared/types'
 import { SessionManager } from '../claude/manager'
 import { CodexSessionManager } from '../codex/manager'
 import { detectCodex } from '../codex/executable'
+import { detectAntigravity } from '../antigravity/executable'
 import { isInstalled } from '../shell'
 import { backendMeta, type AgentBackend, type TurnEndHook } from './backend'
 
@@ -25,7 +26,8 @@ export interface BackendDeps {
 /** 백엔드별 CLI 실행 파일 이름. 설치 감지의 단일 출처. */
 export const BACKEND_CLI: Record<AgentBackendId, string> = {
   claude: 'claude',
-  codex: 'codex'
+  codex: 'codex',
+  antigravity: 'agy'
 }
 
 /**
@@ -38,10 +40,15 @@ export const BACKEND_CLI: Record<AgentBackendId, string> = {
 export async function backendAvailability(
   id: AgentBackendId
 ): Promise<{ available: boolean; reason?: string }> {
-  // Codex 는 설치 여부만으로 부족하다 — 너무 오래된 버전은 app-server 표면이 달라 붙지 않으므로,
-  // 버전까지 보고 "업데이트하세요"라는 구체적인 안내를 돌려준다.
+  // Codex 와 Antigravity 는 설치 여부만으로 부족하다. 전자는 오래된 app-server 표면이 다르고,
+  // 후자는 구버전이 --mode 를 조용히 무시하고 worktree 를 오인하므로 버전까지 확인해 구체적인
+  // 업데이트 안내를 돌려준다.
   if (id === 'codex') {
     const install = await detectCodex()
+    return install.usable ? { available: true } : { available: false, reason: install.reason }
+  }
+  if (id === 'antigravity') {
+    const install = await detectAntigravity()
     return install.usable ? { available: true } : { available: false, reason: install.reason }
   }
 
@@ -59,6 +66,13 @@ export function createBackend(id: AgentBackendId, deps: BackendDeps): AgentBacke
   switch (id) {
     case 'codex':
       return new CodexSessionManager(deps.dispatch, deps.getWindow, deps.onTurnEnd)
+    case 'antigravity':
+      // 같은 PR 의 후속 커밋에서 매니저를 붙인다. 여기만 default 로 흘리지 않고 명시적으로 끊는
+      // 이유는, 등록은 끝났는데 구현이 없는 구간에서 Antigravity 워크스페이스가 조용히 Claude 로
+      // 돌아 버리는 것이 실패 중 가장 나쁘기 때문이다.
+      throw new Error('The Antigravity backend is not wired up yet.')
+    // default 도 Claude 로 받는다 — 저장된 값이 낡거나 알 수 없는 식별자일 수 있기 때문이다
+    // (backendMeta 도 같은 이유로 폴백을 둔다).
     case 'claude':
     default:
       return new SessionManager(deps.dispatch, deps.getWindow, deps.onTurnEnd)

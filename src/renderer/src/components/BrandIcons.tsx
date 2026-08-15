@@ -34,6 +34,16 @@ export function CodexMark({ size = 18 }: { size?: number }): React.JSX.Element {
   )
 }
 
+/** 공식 Antigravity 마크를 별도로 확보하는 동안 쓰는 중립 자리표시자이며 공식 브랜드 에셋이 아니다. */
+export function AntigravityMark({ size = 18 }: { size?: number }): React.JSX.Element {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-label="Antigravity">
+      <rect x="2.5" y="2.5" width="19" height="19" rx="4" stroke="currentColor" />
+      <path d="M7.5 17 12 7l4.5 10M9.25 13.25h5.5" stroke="currentColor" strokeWidth="1.75" />
+    </svg>
+  )
+}
+
 export function GithubMark({ size = 18 }: { size?: number }): React.JSX.Element {
   return (
     <svg width={size} height={size} viewBox="0 0 16 16" fill="currentColor" aria-label="GitHub">
@@ -52,7 +62,8 @@ export function GithubMark({ size = 18 }: { size?: number }): React.JSX.Element 
  */
 const BACKEND_MARKS: Record<AgentBackendId, (props: { size?: number }) => React.JSX.Element> = {
   claude: ClaudeMark,
-  codex: CodexMark
+  codex: CodexMark,
+  antigravity: AntigravityMark
 }
 
 export function AgentBackendMark({

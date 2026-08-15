@@ -74,7 +74,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
     claude: { model: DEFAULT_MODEL, effort: null, permissionMode: 'default', fastMode: false },
     // Codex 는 카탈로그 기본 모델·기본 effort 를 그대로 따른다(null = 백엔드 기본).
     // 모델과 effort는 Codex 카탈로그 기본값을 따르고 fast tier는 기본적으로 끈다.
-    codex: { model: null, effort: null, permissionMode: null, fastMode: false }
+    codex: { model: null, effort: null, permissionMode: null, fastMode: false },
+    // Antigravity CLI 의 모델·effort 기본값을 따르고, 대응 개념이 없는 fast mode 는 끈다.
+    antigravity: { model: null, effort: null, permissionMode: null, fastMode: false }
   },
   // 기본 다크 — 기존 사용자도 load 의 기본값 병합으로 다크를 유지한다.
   theme: 'dark',
