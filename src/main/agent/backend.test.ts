@@ -3,6 +3,8 @@ import {
   CLAUDE_META,
   CLAUDE_MODELS,
   CODEX_META,
+  COPILOT_META,
+  MAIN_AGENT_BACKEND_IDS,
   resolveWorkspaceAgentBackend,
   supportsAutoMode
 } from './backend'
@@ -105,9 +107,64 @@ describe('백엔드 간 관계', () => {
     expect(CODEX_META.capabilities.rateLimits).toBe(true)
   })
 
-  it('Codex 만 턴 중 steering 을 지원한다', () => {
+  it('Codex 와 Copilot 은 턴 중 steering 을 지원한다', () => {
     expect(CODEX_META.capabilities.steering).toBe(true)
+    // 실측: 도는 턴에 보낸 두 번째 prompt 가 그 턴 안에 반영됐다.
+    expect(COPILOT_META.capabilities.steering).toBe(true)
     expect(CLAUDE_META.capabilities.steering).toBe(false)
+  })
+})
+
+/**
+ * Copilot 의 메타는 전부 `copilot --acp --stdio` 에 직접 붙어 잰 결과다. 여기서 지키는 것은
+ * 값 자체가 아니라 **capability 와 구현이 어긋나지 않는다**는 것이다 — 켜 두기만 하고 구현이
+ * 없으면 오케스트레이터가 통과시켜 런타임에 터지고, 반대로 꺼 두면 있는 기능이 사라진다.
+ */
+describe('Copilot 백엔드 메타', () => {
+  it('워크스페이스를 구동할 수 있고 그래서 에이전트 후보에 들어간다', () => {
+    expect(COPILOT_META.capabilities.mainAgent).toBe(true)
+    expect(MAIN_AGENT_BACKEND_IDS).toContain('copilot')
+  })
+
+  it('권한 모드는 실측한 네 조합이고 readOnly·acceptEdits 는 없다', () => {
+    expect(COPILOT_META.permissionModes.map((m) => m.id)).toEqual([
+      'default',
+      'plan',
+      'fullAccess',
+      'auto'
+    ])
+    expect(COPILOT_META.defaultPermissionMode).toBe('default')
+    expect(normalizePermissionMode(COPILOT_META, 'readOnly')).toBe('default')
+  })
+
+  // 지원하지 않는 것을 켜 두면 오케스트레이터가 가드를 통과시켜 런타임에 터진다.
+  it('지원하지 않는 기능을 켜 두지 않는다', () => {
+    expect(COPILOT_META.capabilities.rewind).toBe(false)
+    expect(COPILOT_META.capabilities.sideQuestion).toBe(false)
+    expect(COPILOT_META.capabilities.effort).toBe(false)
+    expect(COPILOT_META.efforts).toEqual([])
+    expect(COPILOT_META.capabilities.fastMode).toBe(false)
+    expect(COPILOT_META.capabilities.rateLimits).toBe(false)
+    expect(COPILOT_META.capabilities.inAppLogin).toBe(false)
+  })
+
+  // /mcp 는 목록을 텍스트로 읽어 보여 줄 수 있지만 재연결·토글 RPC 는 없다. 둘은 다른 질문이라
+  // 이 조합(패널은 있고 동작은 없음)이 성립해야 한다.
+  it('MCP 목록은 보여 주되 서버 동작은 광고하지 않는다', () => {
+    expect(COPILOT_META.capabilities.interactiveCommands).toContain('mcp')
+    expect(COPILOT_META.capabilities.mcp).toBe(false)
+  })
+
+  it('패널은 실제로 파싱할 수 있는 것만 노출한다', () => {
+    expect(COPILOT_META.capabilities.interactiveCommands).toEqual(['context', 'usage', 'mcp'])
+    expect(COPILOT_META.capabilities.addDirectory).toBe(true)
+    expect(COPILOT_META.capabilities.slashCommands).toBe(true)
+  })
+
+  it('리뷰 러너가 있는 백엔드만 review 를 켠다', () => {
+    expect(CLAUDE_META.capabilities.review).toBe(true)
+    expect(CODEX_META.capabilities.review).toBe(true)
+    expect(COPILOT_META.capabilities.review).toBe(true)
   })
 })
 

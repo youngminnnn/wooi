@@ -946,6 +946,7 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
           <CommandCard
             card={commandCard}
             workspaceId={workspace.id}
+            mcpActionable={backend?.capabilities.mcp ?? true}
             onResult={(result) => setCommandCard((prev) => (prev ? { ...prev, result } : prev))}
             onClose={() => setCommandCard(null)}
           />
@@ -1594,8 +1595,15 @@ const MCP_STATUS_LABEL: Record<McpServerInfo['status'], string> = {
   disabled: 'disabled'
 }
 
-/** 상세 보기에서 서버 상태별로 가능한 동작 순서(키보드 커서 인덱스의 기준). */
-function mcpActionsFor(server: McpServerInfo): McpAction[] {
+/**
+ * 상세 보기에서 서버 상태별로 가능한 동작 순서(키보드 커서 인덱스의 기준).
+ *
+ * `canAct` 는 백엔드의 `capabilities.mcp` 다. 목록은 보여 줄 수 있어도 재연결·활성/비활성
+ * RPC 가 없는 백엔드가 있다(GitHub Copilot). 그때 버튼을 그리면 누르는 순간 에러 토스트만
+ * 뜨므로 아예 만들지 않는다 — 커서 인덱스도 이 목록을 기준으로 도니 함께 줄어든다.
+ */
+function mcpActionsFor(server: McpServerInfo, canAct: boolean): McpAction[] {
+  if (!canAct) return []
   return server.status === 'disabled' ? ['enable'] : ['reconnect', 'disable']
 }
 
@@ -1622,10 +1630,13 @@ const MCP_NAV_KEYS = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Enter'
 function McpPanel({
   servers,
   workspaceId,
+  canAct,
   onResult
 }: {
   servers: McpServerInfo[]
   workspaceId: string
+  /** 이 백엔드가 서버별 동작(재연결·활성/비활성)을 실제로 수행할 수 있는가. */
+  canAct: boolean
   onResult: (result: CommandResult) => void
 }): React.JSX.Element {
   const [selected, setSelected] = useState<string | null>(null)
@@ -1680,7 +1691,7 @@ function McpPanel({
       }
       stop() // 그 외 내비 키는 진행 중이어도 textarea 로 새지 않게 가둔다.
       if (busy) return
-      const acts = mcpActionsFor(current)
+      const acts = mcpActionsFor(current, canAct)
       const count = acts.length + 1 // +뒤로
       if (e.key === 'ArrowDown') setActionCursor((c) => (c + 1) % count)
       else if (e.key === 'ArrowUp') setActionCursor((c) => (c - 1 + count) % count)
@@ -1721,11 +1732,12 @@ function McpPanel({
         server={current}
         busy={busy}
         error={error}
+        canAct={canAct}
         cursor={actionCursor}
         activeRef={activeRef}
         onHover={setActionCursor}
         onActivate={(i) => {
-          const acts = mcpActionsFor(current)
+          const acts = mcpActionsFor(current, canAct)
           if (i >= acts.length) back()
           else runAction(acts[i], current.name)
         }}
@@ -1782,6 +1794,7 @@ function McpServerDetail({
   server,
   busy,
   error,
+  canAct,
   cursor,
   activeRef,
   onHover,
@@ -1790,13 +1803,14 @@ function McpServerDetail({
   server: McpServerInfo
   busy: McpAction | null
   error: string | null
+  canAct: boolean
   /** 키보드 커서 인덱스(0..actions.length, 마지막은 '뒤로'). */
   cursor: number
   activeRef: React.MutableRefObject<HTMLElement | null>
   onHover: (index: number) => void
   onActivate: (index: number) => void
 }): React.JSX.Element {
-  const actions = mcpActionsFor(server)
+  const actions = mcpActionsFor(server, canAct)
   const items = actions.length // '뒤로' 항목 인덱스
 
   return (
@@ -1914,11 +1928,14 @@ function McpHint({ text }: { text: string }): React.JSX.Element {
 function CommandCard({
   card,
   workspaceId,
+  mcpActionable,
   onResult,
   onClose
 }: {
   card: CommandCardState
   workspaceId: string
+  /** 이 백엔드가 /mcp 패널의 서버 동작을 수행할 수 있는가(capabilities.mcp). */
+  mcpActionable: boolean
   /** mcp 패널의 서버 동작 후 갱신된 결과를 카드에 반영하기 위한 콜백. */
   onResult: (result: CommandResult) => void
   onClose: () => void
@@ -1947,7 +1964,12 @@ function CommandCard({
           <span className="text-[var(--danger-400)]">{card.error || 'Command failed.'}</span>
         ) : (
           card.result && (
-            <CommandResultView result={card.result} workspaceId={workspaceId} onResult={onResult} />
+            <CommandResultView
+              result={card.result}
+              workspaceId={workspaceId}
+              mcpActionable={mcpActionable}
+              onResult={onResult}
+            />
           )
         )}
       </div>
@@ -1959,15 +1981,24 @@ function CommandCard({
 function CommandResultView({
   result,
   workspaceId,
+  mcpActionable,
   onResult
 }: {
   result: CommandResult
   workspaceId: string
+  mcpActionable: boolean
   onResult: (result: CommandResult) => void
 }): React.JSX.Element {
   switch (result.kind) {
     case 'mcp':
-      return <McpPanel servers={result.servers} workspaceId={workspaceId} onResult={onResult} />
+      return (
+        <McpPanel
+          servers={result.servers}
+          workspaceId={workspaceId}
+          canAct={mcpActionable}
+          onResult={onResult}
+        />
+      )
 
     case 'agents':
       return result.agents.length === 0 ? (
@@ -2020,7 +2051,10 @@ function CommandResultView({
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <span className="text-neutral-400">Session cost</span>
-            <span className="font-medium text-neutral-100">${u.totalCostUsd.toFixed(4)}</span>
+            {/* USD 로 셀 수 없는 백엔드는 표기를 직접 준다(Copilot 의 AI credits) — [[shared/types]] UsageInfo. */}
+            <span className="font-medium text-neutral-100">
+              {u.costLabel ?? `$${u.totalCostUsd.toFixed(4)}`}
+            </span>
           </div>
           <div className="flex items-center justify-between text-xs">
             <span className="text-neutral-500">Lines changed</span>

@@ -275,6 +275,8 @@ export const CLAUDE_META: AgentBackendMeta = {
   efforts: CLAUDE_EFFORTS,
   capabilities: {
     mainAgent: true,
+    // 리뷰 러너가 있다(review/runClaude.ts) — outputFormat 으로 구조화 출력을 CLI 가 강제한다.
+    review: true,
     sideQuestion: true,
     rewind: true,
     mcp: true,
@@ -372,6 +374,8 @@ export const CODEX_META: AgentBackendMeta = {
   efforts: CODEX_EFFORTS,
   capabilities: {
     mainAgent: true,
+    // 리뷰 러너가 있다(review/runCodex.ts) — `codex exec --output-schema` 로 JSON 을 강제한다.
+    review: true,
     sideQuestion: false,
     rewind: false,
     mcp: true,
@@ -397,32 +401,107 @@ export const CODEX_META: AgentBackendMeta = {
 }
 
 /**
- * Copilot 은 ACP 일회성 위임만 구현한다. 아래 선택지는 워크스페이스 UI 가 읽지 않지만 메타 계약을
- * 정직하게 채우기 위한 최소값이며, 메인 에이전트 경로로 승격시키는 폴백이 아니다.
+ * GitHub Copilot CLI 의 권한 모드.
+ *
+ * Copilot 은 권한을 **직교하는 두 축**으로 노출한다 — `mode`(agent/plan/autopilot)와
+ * `allow_all`(승인 프롬프트를 아예 끈다). 아래 넷은 그 조합에 붙인 이름이고, 실제 변환은
+ * [[copilot/modes]] 가 담당한다. 설명 문구는 실측한 동작 그대로다(CLI v1.0.80).
+ *
+ * `readOnly`·`acceptEdits` 는 **일부러 빠져 있다** — Copilot 에 대응 개념이 없고,
+ * 흉내내려면 "묻는다"를 "조용히 거절한다"로 바꿔야 해서 안 내놓느니만 못하다.
+ * `normalizePermissionMode` 가 그 값들을 `default` 로 떨어뜨린다.
+ */
+export const COPILOT_PERMISSION_MODES: PermissionModeInfo[] = [
+  {
+    id: 'default',
+    label: 'Agent',
+    // Copilot 은 읽기를 스스로 승인하고 쓰기·실행에만 request_permission 을 보낸다(실측).
+    // 그래서 "매번 묻는" Claude 의 default 와 달리 읽기는 지나간다 — 문구로 밝혀 둔다.
+    description: 'Ask before writing or running anything — reads go through',
+    footer: null
+  },
+  {
+    id: 'plan',
+    label: 'Plan mode',
+    description: 'Read-only — plan without executing',
+    footer: { symbol: '⏸', text: 'plan mode on' }
+  },
+  {
+    id: 'fullAccess',
+    label: 'Full access',
+    description: 'No approval prompts — Copilot runs everything itself',
+    footer: { symbol: '⏵⏵', text: 'full access on' }
+  },
+  {
+    id: 'auto',
+    label: 'Autopilot',
+    description: 'Runs to completion without asking (experimental)',
+    footer: { symbol: '⏵⏵', text: 'autopilot on' }
+  }
+]
+
+/**
+ * GitHub Copilot CLI 백엔드 메타.
+ *
+ * capability 값은 전부 `copilot --acp --stdio` (CLI v1.0.80) 에 직접 붙어 잰 결과다 — 근거를
+ * 각 줄에 남긴다. ACP 가 광고하는 값(`agentCapabilities`)을 그대로 믿지 않는다: 예를 들어
+ * `loadSession: true` 는 광고값이지만, 실제로 새 프로세스에서 `session/load` 를 걸어 대화가
+ * 이어지는 것까지 확인한 뒤에야 세션 재개를 켰다.
+ *
+ * `defaultModel: null` 은 Copilot 의 auto model selection 을 그대로 따른다는 뜻이다.
  */
 export const COPILOT_META: AgentBackendMeta = {
   id: 'copilot',
   label: 'GitHub Copilot CLI',
   defaultModel: null,
-  permissionModes: CODEX_PERMISSION_MODES.filter((mode) => mode.id === 'readOnly'),
-  defaultPermissionMode: 'readOnly',
-  autonomousPermissionMode: null,
+  permissionModes: COPILOT_PERMISSION_MODES,
+  defaultPermissionMode: 'default',
+  // autopilot 이 정확히 "알아서 끝까지 간다" 자리다. fullAccess 와 다르다 — 그쪽은 승인만
+  // 없앨 뿐 에이전트의 성격은 대화형 그대로다.
+  autonomousPermissionMode: 'auto',
+  // effort 를 넘길 자리가 없다(아래 capabilities.effort 근거).
   efforts: [],
   capabilities: {
-    mainAgent: false,
+    // 같은 세션에서 멀티턴이 이어지고(실측: 앞 턴의 값을 다음 턴이 기억), 새 프로세스에서
+    // session/load 로 대화가 복원된다. 메인 에이전트의 두 전제가 모두 성립한다.
+    mainAgent: true,
+    // 리뷰 러너가 있다(review/runCopilot.ts). 다만 ACP 에 스키마 강제가 없어 구조화 출력은
+    // 프롬프트로 유도하고 펜스 파싱으로 회수한다 — claude/codex 경로보다 헐겁다.
+    review: true,
+    // 메인 맥락을 건드리지 않는 1회성 질문 경로가 ACP 에 없다.
     sideQuestion: false,
+    // `/rewind` 가 없고, `/session` 의 Checkpoints 는 파일을 고친 뒤에도 0 이었다.
+    // `/chronicle` 은 standup·search·tips 류라 파일 되돌리기와 무관하다.
     rewind: false,
+    // 서버 목록은 `/mcp` 텍스트로 읽지만 재연결·활성/비활성 RPC 가 없다. 이 값은 그 **동작**만
+    // 가른다(orchestrator 의 mcpAction) — 목록 자체는 interactiveCommands 로 계속 보여 준다.
     mcp: false,
+    // 서버 플래그 `--effort` 는 있지만 모델마다 지원 범위가 달라, auto model selection 이 뽑은
+    // 모델에 따라 턴 전체가 깨진다(실측: "Reasoning effort 'low' is not supported for model
+    // 'claude-haiku-4.5'."). 사용자가 모델을 고를 수도 없으므로 피할 방법이 없다.
     effort: false,
+    // 대응 개념이 없다.
     fastMode: false,
-    interactiveCommands: [],
-    slashCommands: false,
-    steering: false,
+    // 슬래시 명령의 텍스트 출력을 파싱해 채운다([[copilot/panels]]).
+    interactiveCommands: ['context', 'usage', 'mcp'],
+    // `available_commands_update` 로 32개가 이름·설명·인자 힌트와 함께 온다.
+    slashCommands: true,
+    // 턴이 도는 중 보낸 두 번째 session/prompt 가 **그 턴 안에** 반영됐다(실측: t=17.8s 에
+    // 반영, 턴은 t=20.7s 종료). 다만 그 prompt 는 7ms 만에 end_turn 을 돌려주므로 턴 종료
+    // 신호로 쓰면 안 된다 — [[copilot/session]] 의 턴 소유권 참고.
+    steering: true,
+    // authMethods 가 주는 것은 `copilot login` 뿐이고, 이 명령은 로컬 데스크톱에서 브라우저를
+    // 열어 **루프백 콜백**으로 받는다. Claude 의 PTY 로그인처럼 가로챌 URL·프롬프트가 없다.
     inAppLogin: false,
+    // 계정 단위 플랜 사용률을 조회할 경로가 ACP 에 없다(`/usage` 는 세션 사용량이다).
     rateLimits: false,
-    addDirectory: false,
+    // `/add-dir <경로>` 가 동작한다("Added directory to allowed list: …").
+    addDirectory: true,
+    // session/new 의 mcpServers 로 위임 도구를 꽂을 수 있어 보이지만 실측하지 않았다.
+    // 켤 수는 있는데 아무 일도 안 일어나는 스위치가 제일 나쁘므로 검증 전까지 false 다.
     delegate: false
   },
+  // 실제 가용성은 copilot CLI 설치 여부로 런타임에 덮어쓴다(registry 의 backendAvailability).
   available: false
 }
 

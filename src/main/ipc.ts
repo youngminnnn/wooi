@@ -2126,12 +2126,13 @@ export function registerIpc(ctx: IpcContext): void {
       if (!repo) return { error: '리포를 찾을 수 없습니다.' }
       const settings = store.getState().settings
       const agentBackend = args.agentBackend ?? settings.defaultAgentBackend
-      // 리뷰 러너는 claude·codex 만 안다(review/run.ts). teammate-only 백엔드가 흘러들면 조용히
+      // 리뷰 러너는 백엔드마다 따로 있다(review/run.ts). 러너가 없는 백엔드가 흘러들면 조용히
       // Claude 로 떨어져 **사용자가 고른 것과 다른 제품**이 도는데, 그건 실패보다 나쁘다.
-      // 피커는 이미 mainAgent 로 걸리지만 IPC 는 렌더러에서 직접 닿는 표면이라 여기서도 막는다.
+      // 피커는 이미 capabilities.review 로 걸리지만 IPC 는 렌더러에서 직접 닿는 표면이라
+      // 여기서도 막는다. mainAgent 로 묻지 않는 이유는 [[shared/types]] 의 review 주석에 있다.
       const backendForReview = backendMeta(agentBackend)
-      if (!backendForReview.capabilities.mainAgent) {
-        return { error: `${backendForReview.label} can only be used as a teammate.` }
+      if (!backendForReview.capabilities.review) {
+        return { error: `${backendForReview.label} cannot run PR reviews.` }
       }
       // 모델·effort 는 고른 에이전트의 전역 기본값을 따른다(백엔드마다 모델 ID 가 다르므로
       // 다른 백엔드의 값을 흘리면 CLI 가 거부한다).
