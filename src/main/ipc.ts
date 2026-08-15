@@ -2139,6 +2139,8 @@ export function registerIpc(ctx: IpcContext): void {
     await reviewManager.remove(reviewId)
   })
 
+  ipcMain.handle(IPC.reviewRemoveArchived, () => reviewManager.removeArchived())
+
   ipcMain.handle(IPC.reviewLoad, (_e, reviewId: string) => reviewManager.loadBundle(reviewId))
 
   ipcMain.handle(

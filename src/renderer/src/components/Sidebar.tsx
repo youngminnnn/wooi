@@ -1149,15 +1149,39 @@ function ReviewRow({
  */
 function ArchivedReviewsSection({ reviews }: { reviews: ReviewSession[] }): React.JSX.Element {
   const [open, setOpen] = useState(false)
+  const confirm = useStore((s) => s.confirm)
+  const pushToast = useStore((s) => s.pushToast)
+
+  const removeAll = async (): Promise<void> => {
+    const ok = await confirm({
+      title: `Delete all ${reviews.length} archived reviews?`,
+      body: 'This permanently removes their findings, conversations, and review refs, and cannot be undone.',
+      confirmLabel: 'Delete all',
+      danger: true
+    })
+    if (!ok) return
+    const { count } = await window.api.review.removeArchived()
+    if (count > 0) pushToast('info', `Deleted ${count} archived reviews.`)
+  }
+
   return (
     <div className="mt-1">
-      <button
-        onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center gap-1 px-2 py-1 text-xs text-neutral-600 hover:text-neutral-400"
-      >
-        <ChevronRight size={11} className={open ? 'rotate-90 transition' : 'transition'} />
-        Archived ({reviews.length})
-      </button>
+      <div className="group/arcrevsec flex items-center">
+        <button
+          onClick={() => setOpen((v) => !v)}
+          className="flex-1 flex items-center gap-1 px-2 py-1 text-xs text-neutral-600 hover:text-neutral-400"
+        >
+          <ChevronRight size={11} className={open ? 'rotate-90 transition' : 'transition'} />
+          Archived ({reviews.length})
+        </button>
+        <button
+          onClick={removeAll}
+          className="opacity-0 group-hover/arcrevsec:opacity-100 mr-1.5 h-5 w-5 grid place-items-center rounded text-neutral-500 hover:bg-[var(--danger-500)]/15 hover:text-[var(--danger-400)]"
+          title="Delete all archived reviews"
+        >
+          <Trash2 size={12} />
+        </button>
+      </div>
       {open && (
         <div className="space-y-0.5">
           {reviews.map((r) => (

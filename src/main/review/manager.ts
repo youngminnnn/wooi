@@ -390,6 +390,16 @@ export class ReviewManager {
     this.broadcastState()
   }
 
+  /** 현재 아카이브된 리뷰만 스냅샷해 모두 완전 삭제한다. */
+  async removeArchived(): Promise<{ count: number }> {
+    const ids = getStore()
+      .getState()
+      .reviews.filter((review) => review.archived)
+      .map((review) => review.id)
+    for (const id of ids) await this.remove(id)
+    return { count: ids.length }
+  }
+
   /**
    * 앱 종료 시 — **워크트리만** 정리하고 레코드·ref·사이드카는 남긴다.
    * 여기서 지워 버리면 다음 실행에 리뷰가 사라져 영속화가 무의미해진다.
