@@ -487,9 +487,20 @@ function mapItem(
       return { events: [{ type: 'item', item: chat }], persist: done ? [chat] : [] }
     }
 
-    case 'contextCompaction':
-      // 압축은 codex 가 자동으로도 한다. 배지만 띄우고 대화에는 아무것도 남기지 않는다.
-      return { events: [{ type: 'compacting', active: !done, trigger: 'auto' }], persist: [] }
+    case 'contextCompaction': {
+      // app-server 는 수동/자동을 구분하지 않는다. 완료 경계를 남겨 어느 쪽이든 앞선 UI 기록을
+      // 다시 마운트하지 않게 한다(모델 히스토리 압축과 화면 렌더링 압축을 같은 지점에 맞춘다).
+      if (!done)
+        return { events: [{ type: 'compacting', active: true, trigger: 'auto' }], persist: [] }
+      const compacted: ChatItem = { id, type: 'compaction', trigger: 'auto', ts }
+      return {
+        events: [
+          { type: 'item', item: compacted },
+          { type: 'compacting', active: false, trigger: 'auto' }
+        ],
+        persist: [compacted]
+      }
+    }
 
     case 'error': {
       const text = item.message ?? item.text

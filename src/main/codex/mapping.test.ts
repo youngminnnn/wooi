@@ -406,13 +406,19 @@ describe('컨텍스트 사용량', () => {
 })
 
 describe('압축', () => {
-  it('시작·종료를 compacting 배지로 옮기고 대화에는 남기지 않는다', () => {
+  it('시작은 배지로, 종료는 접을 수 있는 영속 경계로 옮긴다', () => {
     const start = map(NOTIFY.itemStarted, { item: { id: 'k1', type: 'contextCompaction' } })
     expect(start.events).toEqual([{ type: 'compacting', active: true, trigger: 'auto' }])
     expect(start.persist).toHaveLength(0)
 
     const end = map(NOTIFY.itemCompleted, { item: { id: 'k1', type: 'contextCompaction' } })
-    expect(end.events).toEqual([{ type: 'compacting', active: false, trigger: 'auto' }])
+    expect(end.events).toEqual([
+      { type: 'item', item: expect.objectContaining({ type: 'compaction', trigger: 'auto' }) },
+      { type: 'compacting', active: false, trigger: 'auto' }
+    ])
+    expect(end.persist).toEqual([
+      expect.objectContaining({ id: 'codex:k1', type: 'compaction', trigger: 'auto' })
+    ])
   })
 })
 
