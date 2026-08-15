@@ -1,6 +1,6 @@
 {
   "name": "wooi",
-  "version": "1.15.1",
+  "version": "1.15.2",
   "description": "Parallel AI coding agents across isolated git worktrees — dependent work stacks instead of conflicting, and every PR review lands on the diff",
   "main": "./out/main/index.js",
   "type": "module",
