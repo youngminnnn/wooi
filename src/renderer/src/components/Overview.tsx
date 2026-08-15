@@ -13,7 +13,7 @@ import {
 import { refreshAccountUsage, useStore } from '../store'
 import { useNow } from '../lib/useNow'
 import { formatCost, formatCountdown, formatDuration, formatTime } from '../lib/format'
-import { workspaceDisplayName } from '@shared/types'
+import { AGENT_BACKEND_LABELS, workspaceDisplayName } from '@shared/types'
 import type { AgentBackendId, RateLimitSnapshot, UsageInfo, Workspace } from '@shared/types'
 import { ClaudeMark, CodexMark } from './BrandIcons'
 
@@ -304,7 +304,7 @@ function AgentUsagePanel({
 }): React.JSX.Element {
   const [usage, setUsage] = useState<UsageInfo | null>(null)
   const [loading, setLoading] = useState(agentId === 'claude' && !!targetId)
-  const label = agentId === 'claude' ? 'Claude Code' : 'Codex'
+  const label = AGENT_BACKEND_LABELS[agentId]
   const panelLoading = loading || refreshing
 
   useEffect(() => {

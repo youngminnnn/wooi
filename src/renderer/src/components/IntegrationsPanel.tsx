@@ -1,22 +1,22 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Check, Loader2, RefreshCw } from 'lucide-react'
 import { useStore } from '../store'
-import { ClaudeMark, CodexMark, GithubMark } from './BrandIcons'
+import { AntigravityMark, ClaudeMark, CodexMark, GithubMark } from './BrandIcons'
 import ClaudeLoginModal from './ClaudeLoginModal'
 import CodexLoginModal from './CodexLoginModal'
 import GithubLoginModal from './GithubLoginModal'
 
 /**
- * 연동(Claude Code · Codex · GitHub) 상태 + 로그인/로그아웃 패널.
+ * 연동(Claude Code · Codex · Antigravity · GitHub) 상태 + 로그인/로그아웃 패널.
  * 설정·온보딩·gh 연결 모달이 함께 쓴다.
  *
- * 에이전트는 **둘 중 하나만 연결해도 앱을 쓸 수 있다** — 그래서 두 행을 나란히, 대등하게 보여
+ * 에이전트는 **셋 중 하나만 연결해도 앱을 쓸 수 있다** — 그래서 세 행을 나란히, 대등하게 보여
  * 준다(어느 쪽도 필수로 표시하지 않는다). `only` 를 주면 해당 연동 행만 렌더한다.
  */
 export default function IntegrationsPanel({
   only
 }: {
-  only?: 'claude' | 'codex' | 'github'
+  only?: 'claude' | 'codex' | 'antigravity' | 'github'
 } = {}): React.JSX.Element {
   const auth = useStore((s) => s.authStatus)
   const refreshAuth = useStore((s) => s.refreshAuth)
@@ -56,11 +56,12 @@ export default function IntegrationsPanel({
 
   const claude = auth?.agents.claude
   const codex = auth?.agents.codex
+  const antigravity = auth?.agents.antigravity
   const github = auth?.github
 
   return (
     <div className="space-y-3">
-      {only !== 'github' && (
+      {(!only || only === 'claude') && (
         <IntegrationRow
           name="Claude Code"
           icon={<ClaudeMark size={18} />}
@@ -85,7 +86,7 @@ export default function IntegrationsPanel({
         />
       )}
 
-      {only !== 'github' && only !== 'claude' && (
+      {(!only || only === 'codex') && (
         <IntegrationRow
           name="Codex"
           icon={<CodexMark size={17} />}
@@ -108,7 +109,29 @@ export default function IntegrationsPanel({
         />
       )}
 
-      {only !== 'claude' && only !== 'codex' && (
+      {(!only || only === 'antigravity') && (
+        <IntegrationRow
+          name="Antigravity"
+          icon={<AntigravityMark size={17} />}
+          loading={!auth}
+          installed={!!antigravity?.installed}
+          installHint="curl -fsSL https://antigravity.google/cli/install.sh | bash"
+          installUrl="https://antigravity.google"
+          connected={!!antigravity?.loggedIn}
+          detail={
+            !antigravity?.installed
+              ? 'Not installed — install the Antigravity CLI to use it'
+              : antigravity.loggedIn
+                ? [antigravity.email, antigravity.planType].filter(Boolean).join(' · ') ||
+                  'Signed in'
+                : 'Run agy in a terminal to sign in'
+          }
+          warning={antigravity?.installed && antigravity.error ? antigravity.error : undefined}
+          // capabilities.inAppLogin 이 false라 앱 안에서 완료할 수 없는 연결·해제 버튼은 노출하지 않는다.
+        />
+      )}
+
+      {(!only || only === 'github') && (
         <IntegrationRow
           name="GitHub"
           icon={<GithubMark size={17} />}
@@ -133,8 +156,8 @@ export default function IntegrationsPanel({
 
       <div className="flex items-center justify-between pt-1">
         <p className="text-xs text-neutral-500 leading-relaxed pr-3">
-          Sign-in finishes in-app via your browser. Status refreshes automatically — or click
-          Refresh.
+          Most sign-ins finish in-app via your browser — Antigravity is the exception, and its row
+          says so. Status refreshes automatically — or click Refresh.
         </p>
         <button
           onClick={() => void refreshAuth()}
@@ -177,8 +200,8 @@ function IntegrationRow({
    * 웹페이지로 보내는 것보다 복사해서 바로 실행할 수 있는 편이 빠르다.
    */
   installHint?: string
-  onConnect: () => void | Promise<void>
-  onDisconnect: () => void | Promise<void>
+  onConnect?: () => void | Promise<void>
+  onDisconnect?: () => void | Promise<void>
 }): React.JSX.Element {
   // 로그아웃/재연결은 CLI 실행이 끝날 때까지 수 초가 걸릴 수 있어, 진행 중에는
   // 버튼에 스피너를 띄우고 버튼을 비활성화해 멈춘 것처럼 보이지 않게 한다.
@@ -219,7 +242,7 @@ function IntegrationRow({
         >
           Install
         </button>
-      ) : connected ? (
+      ) : connected && onConnect && onDisconnect ? (
         <div className="flex gap-1.5">
           <button
             onClick={() => run('connect', onConnect)}
@@ -237,7 +260,7 @@ function IntegrationRow({
             {busy === 'disconnect' ? 'Signing out…' : 'Sign out'}
           </button>
         </div>
-      ) : (
+      ) : !connected && onConnect ? (
         <button
           onClick={() => run('connect', onConnect)}
           disabled={busy !== null}
@@ -245,7 +268,7 @@ function IntegrationRow({
         >
           Sign in
         </button>
-      )}
+      ) : null}
     </div>
   )
 }

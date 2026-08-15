@@ -543,7 +543,7 @@ function UnknownCard({
 }: {
   item: Extract<ChatItem, { type: 'unknown' }>
 }): React.JSX.Element {
-  const backend = item.backend === 'claude' ? 'Claude Code' : 'Codex'
+  const backend = AGENT_BACKEND_LABELS[item.backend]
   return (
     <div className="rounded-lg border border-[var(--border-2)] bg-[var(--surface)] px-3 py-2 text-xs text-neutral-500">
       <div>
