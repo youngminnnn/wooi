@@ -201,6 +201,17 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
   // 사이드바 배지와 같은 판단을 쓴다 — 두 화면이 갈라지면 어느 쪽이 맞는지 알 수 없다.
   const multiAgent = useMultiAgent(workspace)
 
+  const turnOffAgentTeam = async (): Promise<void> => {
+    const ok = await confirm({
+      title: 'Switch to Solo mode?',
+      body: 'This workspace will no longer be able to delegate work to subagents. The change applies from the next message.',
+      confirmLabel: 'Switch to Solo',
+      danger: true
+    })
+    if (!ok) return
+    await window.api.workspace.setMultiAgent(workspace.id, false)
+  }
+
   const archiveWorkspace = async (): Promise<void> => {
     const ok = await confirm({
       title: `Archive "${displayName}"?`,
@@ -335,7 +346,7 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
                 ([[agent/tools/agentTeam]] 가 켜는 쪽만 도구로 연 것과 같은 비대칭). */}
             {multiAgent.active && (
               <button
-                onClick={() => void window.api.workspace.setMultiAgent(workspace.id, false)}
+                onClick={() => void turnOffAgentTeam()}
                 className="shrink-0 flex items-center gap-1 rounded px-1.5 py-0.5 bg-[var(--surface-2)] text-neutral-400 hover:text-neutral-200 hover:bg-[var(--surface-3)]"
                 title={`Agent team led by ${agentLabel}. Click to turn delegation off; applies from the next message.`}
               >
