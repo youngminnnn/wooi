@@ -6,10 +6,12 @@ import { deriveDirectionKeys, fromBase64Url, openJson, sealJson } from '@shared/
 import {
   REMOTE_IPC,
   REMOTE_MAX_EVENT_BYTES,
+  REMOTE_TRUNCATED_MARK,
   type RemoteCommandPayload,
   type RemoteCommandResult,
   type RemoteTranscriptQuery
 } from '@shared/remote'
+import { IPC, type ChatItem } from '@shared/types'
 import { invokeCommand } from '../commandRegistry'
 import { appendFileDurable } from '../fsutil'
 import { log } from '../logger'
@@ -162,7 +164,7 @@ export class RemoteCommandBridge {
       return
     }
 
-    const workspaceId = workspaceFrom(payload.args)
+    const workspaceId = workspaceFrom(payload.channel, payload.args)
     if (Math.abs(this.now() - payload.ts) > FRESHNESS_MS) {
       await this.reject(
         row,
@@ -341,8 +343,35 @@ function transcriptPage(workspaceId: string, query: RemoteTranscriptQuery): unkn
   )
   return page.map((item) => {
     if (jsonBytes(item) <= Math.min(REMOTE_MAX_EVENT_BYTES, perItemBudget)) return item
-    return { id: item.id, type: item.type, ts: item.ts }
+    // 본문만 표식으로 바꾸고 **타입이 요구하는 필드는 남긴다**. id/type/ts 만 남기면 폰의
+    // ChatItem 검증을 통과하지 못해, 큰 메시지 하나가 트랜스크립트 전체를 읽지 못하게 만든다.
+    return truncateItem(item)
   })
+}
+
+/**
+ * 너무 큰 아이템의 **본문만** 잘라 낸다. 폰이 id 를 보고 원본을 다시 당겨올 수 있도록
+ * 식별자와 타입별 필수 필드는 그대로 둔다.
+ */
+export function truncateItem(item: ChatItem): ChatItem {
+  const mark = REMOTE_TRUNCATED_MARK
+  switch (item.type) {
+    case 'user':
+    case 'assistant':
+    case 'thinking':
+    case 'error':
+    case 'system':
+      return { ...item, text: mark }
+    case 'tool_use':
+      return { ...item, input: { truncated: true } }
+    case 'tool_result':
+      return { ...item, text: mark }
+    case 'bash':
+      return { ...item, output: mark }
+    default:
+      // 나머지 타입은 본문이 크지 않다 — 그대로 둔다(잘라 봐야 얻을 것이 없다).
+      return item
+  }
 }
 
 function resultHeader(machineId: string, deviceId: string) {
@@ -353,7 +382,14 @@ function failure(error: string): RemoteCommandResult {
   return { ok: false, error }
 }
 
-function workspaceFrom(args: unknown[]): string | null {
+/**
+ * 감사 로그에 적을 워크스페이스 id.
+ *
+ * `permission:respond` 의 첫 인자는 workspaceId 가 아니라 requestId 다 — 그대로 적으면
+ * "이 폰이 어느 워크스페이스를 건드렸나"를 답하려는 로그가 거짓을 적게 된다.
+ */
+function workspaceFrom(channel: string, args: unknown[]): string | null {
+  if (channel === IPC.permissionRespond) return null
   return typeof args[0] === 'string' ? args[0] : null
 }
 

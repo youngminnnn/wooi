@@ -3,7 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
-  KeyboardAvoidingView,
+  Keyboard,
   Platform,
   Pressable,
   ScrollView,
@@ -13,7 +13,7 @@ import {
   View
 } from 'react-native'
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router'
-import { SafeAreaView } from 'react-native-safe-area-context'
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import * as LocalAuthentication from 'expo-local-authentication'
 import type { ChatItem, PermissionRequest } from '@shared/types'
 import { workspaceDisplayName } from '@shared/types'
@@ -176,6 +176,32 @@ function PermissionCard({
   )
 }
 
+/**
+ * 키보드가 가린 높이를 돌려준다.
+ *
+ * Android 는 `KeyboardAvoidingView` 만으로 부족하다 — Expo SDK 54 는 edge-to-edge 가 기본이라
+ * `adjustResize` 가 창을 줄이지 않고, 그래서 컴포저가 키보드 뒤에 그대로 남는다. 이벤트로
+ * 실제 높이를 받아 직접 패딩을 준다. SafeAreaView 가 이미 bottom inset 을 주므로 그만큼 뺀다.
+ */
+function useKeyboardInset(): number {
+  const [height, setHeight] = useState(0)
+  useEffect(() => {
+    const show = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
+      (event) => setHeight(event.endCoordinates.height)
+    )
+    const hide = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
+      () => setHeight(0)
+    )
+    return () => {
+      show.remove()
+      hide.remove()
+    }
+  }, [])
+  return height
+}
+
 function isChatItem(value: unknown): value is ChatItem {
   if (!isRecord(value) || typeof value.id !== 'string' || typeof value.ts !== 'number') return false
   switch (value.type) {
@@ -230,10 +256,11 @@ function isChatItem(value: unknown): value is ChatItem {
 }
 
 function parseTranscript(value: unknown): ChatItem[] {
-  if (!Array.isArray(value) || !value.every(isChatItem)) {
-    throw new Error('The laptop returned an invalid transcript')
-  }
-  return value
+  // 배열이 아니면 프로토콜이 어긋난 것이라 던진다. 하지만 **아이템 하나가 이상하다고
+  // 페이지 전체를 버리지는 않는다** — 랩탑이 큰 본문을 잘라 보내거나 우리가 모르는 타입이
+  // 하나 섞였을 때, 나머지 대화까지 못 읽게 되는 편이 훨씬 나쁘다.
+  if (!Array.isArray(value)) throw new Error('The laptop returned an invalid transcript')
+  return value.filter(isChatItem)
 }
 
 function RichText({ text, color = '#d7d7dc' }: { text: string; color?: string }): React.JSX.Element {
@@ -456,9 +483,15 @@ export default function WorkspaceScreen(): React.JSX.Element {
     [workspace]
   )
 
+  const insets = useSafeAreaInsets()
+  // 키보드가 올라오면 그 높이만큼, 아니면 하단 안전영역만큼 띄운다. SafeAreaView 의 bottom
+  // edge 와 동시에 쓰면 둘이 더해져 어긋나므로 여기서만 관리한다.
+  const keyboard = useKeyboardInset()
+  const keyboardInset = keyboard > 0 ? keyboard : insets.bottom
+
   return (
-    <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
-      <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+    <SafeAreaView style={styles.screen} edges={['top']}>
+      <View style={[styles.screen, { paddingBottom: keyboardInset }]}>
         <View style={styles.header}>
           <Pressable onPress={() => router.back()} hitSlop={12}><Text style={styles.back}>‹ Back</Text></Pressable>
           <View style={styles.headerTitle}><Text style={styles.title} numberOfLines={1}>{title}</Text><Text style={styles.connection}>{status}</Text></View>
@@ -499,7 +532,7 @@ export default function WorkspaceScreen(): React.JSX.Element {
             <Text style={styles.sendText}>{sending ? 'Sending…' : 'Send'}</Text>
           </Pressable>
         </View>
-      </KeyboardAvoidingView>
+      </View>
     </SafeAreaView>
   )
 }

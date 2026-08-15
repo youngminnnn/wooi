@@ -17,7 +17,7 @@ vi.mock('../transcripts', () => ({ getTranscripts: () => ({ load: () => [] }) })
 const { deriveDirectionKeys, generateSessionKey, openJson, sealJson, toBase64Url } =
   await import('@shared/crypto')
 const { REMOTE_IPC } = await import('@shared/remote')
-const { RemoteCommandBridge, REMOTE_WATCH_TTL_MS } = await import('./bridge')
+const { RemoteCommandBridge, REMOTE_WATCH_TTL_MS, truncateItem } = await import('./bridge')
 const { fromPgBytea, toPgBytea } = await import('./bytea')
 
 const machineId = 'machine-1'
@@ -324,5 +324,37 @@ describe('RemoteCommandBridge', () => {
     release?.()
     await settle()
     expect(invokeCommand.mock.calls.map((call) => call[1][1])).toEqual(['first', 'second'])
+  })
+})
+
+describe('트랜스크립트 잘림', () => {
+  it('큰 아이템의 본문만 바꾸고 타입 필수 필드는 남긴다', () => {
+    // id/type/ts 만 남기면 폰의 ChatItem 검증을 통과하지 못해, 큰 메시지 하나가
+    // 트랜스크립트 전체를 못 읽게 만든다 — 실기기에서 실제로 그렇게 실패했다.
+    const huge = 'x'.repeat(300_000)
+    const cut = truncateItem({ id: 'a', type: 'assistant', text: huge, ts: 1 }) as {
+      id: string
+      type: string
+      ts: number
+      text: string
+    }
+    expect(cut.id).toBe('a')
+    expect(cut.type).toBe('assistant')
+    expect(cut.ts).toBe(1)
+    expect(typeof cut.text).toBe('string')
+    expect(cut.text).not.toBe(huge)
+
+    const toolResult = truncateItem({
+      id: 'b',
+      type: 'tool_result',
+      toolId: 't',
+      text: huge,
+      isError: false,
+      ts: 2
+    }) as { toolId: string; isError: boolean; text: string }
+    // 폰은 tool_result 에 toolId·isError 를 요구한다 — 잘라도 남아 있어야 한다.
+    expect(toolResult.toolId).toBe('t')
+    expect(toolResult.isError).toBe(false)
+    expect(toolResult.text).not.toBe(huge)
   })
 })

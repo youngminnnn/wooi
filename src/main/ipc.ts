@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { handle } from './commandRegistry'
 import { getStore } from './store'
 import { getRemoteBridge } from './remote'
+import { resolveRemotePermission } from './remote/permissions'
 import { getTranscripts } from './transcripts'
 import { buildHandoffPrompt, estimateHandoffTokens, formatHandoffTokens } from '@shared/handoff'
 import { listDir, readFileInRoot, searchFiles } from './fsbrowse'
@@ -1034,6 +1035,10 @@ export function registerIpc(ctx: IpcContext): void {
     // Wooi 도구 승인은 백엔드가 아니라 메인이 띄운다([[agent/tools/permission]]). requestId 는
     // 어디서 나왔는지 구분되지 않으므로 양쪽에 흘리고, 자기 것이 아니면 무시한다.
     resolveToolPermission(requestId, decision)
+    // 답한 요청은 더 이상 대기 중이 아니다. 취소에는 evt:permissionCancel 이 있지만 **응답에는
+    // 대응하는 이벤트가 없어서**, 여기서 지우지 않으면 폰이 계속 "응답 대기 중"으로 보인다.
+    // 데스크톱에서 답하든 폰에서 답하든 이 핸들러를 지나므로 한 곳으로 충분하다.
+    resolveRemotePermission(requestId)
   })
 
   // ── 스크립트 ───────────────────────────────────────────────────────────

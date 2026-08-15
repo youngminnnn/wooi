@@ -19,6 +19,7 @@ import { TerminalManager } from './terminal'
 import { applyNavigationGuards, loadRenderer, rendererWebPreferences } from './windows'
 import { registerIpc } from './ipc'
 import { disposeRemote, getRemoteBridge, initRemote } from './remote'
+import { setPermissionChangeNotifier } from './remote/permissions'
 import { pendingPermissions } from './remote/permissions'
 import type { AppState, PermissionRequest } from '@shared/types'
 import { log } from './logger'
@@ -252,6 +253,7 @@ app.whenReady().then(() => {
   // 원격 브리지는 IPC 등록보다 **먼저** 만들어야 한다 — 핸들러가 getRemoteBridge() 를 부른다.
   // 만드는 것 자체는 아무 자원도 잡지 않는다(설정을 읽을 뿐이다). 실제 연결은 아래에서
   // 사용자가 켜 둔 경우에만 일어난다.
+  setPermissionChangeNotifier(() => mirrorToRemote(IPC.evtState, getStore().getState()))
   initRemote(
     (status) => dispatch(IPC.evtRemote, status),
     () => getStore().getState()
