@@ -208,9 +208,8 @@ function joinList(parts: string[]): string {
 }
 
 /**
- * 우측 작업 패널의 펼침/접힘 상태를 실행 간에 기억하기 위한 localStorage 키.
- * 권위 있는 기본값은 settings.defaultRightPanelOpen 이지만, 사용자가 한 번이라도 토글하면
- * 그 마지막 상태를 여기 캐시해 다음 실행에서 복원한다(테마 캐시와 같은 방식).
+ * 우측 작업 패널의 workspace 별 펼침/접힘 상태를 실행 간에 기억하기 위한 localStorage 키.
+ * 값이 없는 workspace 는 settings.defaultRightPanelOpen 을 따른다.
  */
 const RIGHT_PANEL_KEY = 'wooi.rightPanelOpen'
 const SIDEBAR_WIDTH_KEY = 'wooi.sidebarWidth'
@@ -226,22 +225,32 @@ function readRememberedSidebarWidth(): number {
   return DEFAULT_SIDEBAR_WIDTH
 }
 
-/** 기억된 패널 상태를 읽는다. 토글한 적이 없으면(키 없음) null 을 돌려 기본값으로 폴백하게 한다. */
-function readRememberedRightPanel(): boolean | null {
+/** 예전 단일 boolean 값도 읽어, 업그레이드 직후 기존 workspace 들의 초기값으로 쓸 수 있게 한다. */
+function readRememberedRightPanels(): Record<string, boolean> | boolean | null {
   try {
     const v = localStorage.getItem(RIGHT_PANEL_KEY)
     if (v === 'true') return true
     if (v === 'false') return false
+    if (v) {
+      const parsed: unknown = JSON.parse(v)
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return Object.fromEntries(
+          Object.entries(parsed).filter((entry): entry is [string, boolean] => {
+            return typeof entry[1] === 'boolean'
+          })
+        )
+      }
+    }
   } catch {
     /* private 모드 등에서 실패해도 무시 — 기본값으로 폴백한다. */
   }
   return null
 }
 
-/** 현재 패널 상태를 기억해 둔다(다음 실행 복원용). */
-function rememberRightPanel(open: boolean): void {
+/** workspace 별 패널 상태를 기억해 둔다(다음 실행 복원용). */
+function rememberRightPanels(openByWorkspace: Record<string, boolean>): void {
   try {
-    localStorage.setItem(RIGHT_PANEL_KEY, String(open))
+    localStorage.setItem(RIGHT_PANEL_KEY, JSON.stringify(openByWorkspace))
   } catch {
     /* 무시 — 기억은 편의 기능일 뿐이다. */
   }
@@ -336,8 +345,8 @@ interface UIState {
   rightWidth: number
   /** 왼쪽 사이드바 너비(px). */
   sidebarWidth: number
-  /** 우측 작업 패널 표시 여부. 숨기면 대화 영역이 전체 폭을 차지한다. */
-  rightPanelOpen: boolean
+  /** workspace 별 우측 작업 패널 표시 여부. 값이 없으면 설정의 기본값을 따른다. */
+  rightPanelOpen: Record<string, boolean>
   /** 우하단 터미널이 우측 컬럼 높이에서 차지하는 비율(0~1). 기본 0.5. 가로 분할 드래그로 조절. */
   terminalRatio: number
   /**
@@ -792,7 +801,7 @@ export const useStore = create<UIState>((set, get) => ({
   scriptPanelOpen: {},
   rightWidth: 460,
   sidebarWidth: readRememberedSidebarWidth(),
-  rightPanelOpen: true,
+  rightPanelOpen: {},
   terminalRatio: 0.5,
   detachedPanes: { work: false, scripts: false },
   fileViewer: null,
@@ -945,9 +954,14 @@ export const useStore = create<UIState>((set, get) => ({
     for (const w of app.workspaces) {
       if (!w.archived && w.status === 'running') seededRunningSince[w.id] = startedAt
     }
-    // 우측 패널: 기억된 상태가 있으면 복원하고, 없으면(처음 실행) 설정의 기본값을 따른다.
-    const remembered = readRememberedRightPanel()
-    const rightPanelOpen = remembered ?? app.settings.defaultRightPanelOpen
+    // 우측 패널: workspace 별 기억값을 복원한다. 예전 단일 값이면 기존 workspace 모두에
+    // 한 번 적용해 마이그레이션하고, 기억값이 없는 workspace 는 설정 기본값을 따른다.
+    const remembered = readRememberedRightPanels()
+    const rightPanelOpen =
+      typeof remembered === 'boolean'
+        ? Object.fromEntries(app.workspaces.map((workspace) => [workspace.id, remembered]))
+        : (remembered ?? {})
+    if (typeof remembered === 'boolean') rememberRightPanels(rightPanelOpen)
     set({ app, ready: true, runningSince: seededRunningSince, rightPanelOpen })
 
     // Overview에 들어간 뒤에야 Codex usage 조회를 시작하면 첫 화면에서 RPC 시간만큼 기다리게 된다.
@@ -1007,9 +1021,9 @@ export const useStore = create<UIState>((set, get) => ({
       if (!w.archived) void get().refreshPr(w.id)
     }
 
-    // 패널을 토글할 때마다(키보드 ⌘J·버튼·Composer 등 경로 무관) 마지막 상태를 기억해 둔다.
+    // 패널을 토글할 때마다(키보드 ⌘J·버튼 등 경로 무관) workspace 별 상태를 기억해 둔다.
     useStore.subscribe((state, prev) => {
-      if (state.rightPanelOpen !== prev.rightPanelOpen) rememberRightPanel(state.rightPanelOpen)
+      if (state.rightPanelOpen !== prev.rightPanelOpen) rememberRightPanels(state.rightPanelOpen)
     })
 
     // gh 가 연결되는 순간(미연결 → 연결) PR 상태를 한 번 훑어 헤더·사이드바의 PR 칩을 즉시 살린다.
@@ -2310,13 +2324,22 @@ export const useStore = create<UIState>((set, get) => ({
       void window.api.pane.focus('work')
       return
     }
-    set((s) => ({ rightPanelOpen: !s.rightPanelOpen }))
+    const workspaceId = get().selectedWorkspaceId
+    if (!workspaceId) return
+    set((s) => {
+      const current = s.rightPanelOpen[workspaceId] ?? s.app?.settings.defaultRightPanelOpen ?? true
+      return { rightPanelOpen: { ...s.rightPanelOpen, [workspaceId]: !current } }
+    })
   },
 
   // 패널 상태를 직접 지정한다. 온보딩에서 고른 기본값을 지금 화면에도 바로 반영하기 위한 것으로,
   // 토글과 같은 경로를 타므로 localStorage 기억값(⌘J 기록)까지 함께 갱신된다 — 그러지 않으면
   // 이미 토글한 적 있는 기존 사용자에게는 기억값이 새로 고른 기본값을 계속 덮어써 버린다.
-  setRightPanelOpen: (open) => set({ rightPanelOpen: open }),
+  setRightPanelOpen: (open) => {
+    const workspaceId = get().selectedWorkspaceId
+    if (!workspaceId) return
+    set((s) => ({ rightPanelOpen: { ...s.rightPanelOpen, [workspaceId]: open } }))
+  },
 
   // 터미널 비율 — 패널/터미널 어느 쪽도 사라지지 않도록 0.15~0.85 로 클램프한다.
   setTerminalRatio: (ratio) => set({ terminalRatio: Math.max(0.15, Math.min(0.85, ratio)) }),

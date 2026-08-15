@@ -128,7 +128,9 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
   const devRunning = useStore((s) =>
     (s.scriptStatus[workspace.id] ?? []).some((x) => x.state === 'running')
   )
-  const rightPanelOpen = useStore((s) => s.rightPanelOpen)
+  const rightPanelOpen = useStore(
+    (s) => s.rightPanelOpen[workspace.id] ?? s.app?.settings.defaultRightPanelOpen ?? true
+  )
   const toggleRightPanel = useStore((s) => s.toggleRightPanel)
   const workPaneDetached = useStore((s) => s.detachedPanes.work)
   const [showDiff, setShowDiff] = useState(false)
