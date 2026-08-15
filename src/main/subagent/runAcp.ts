@@ -15,13 +15,6 @@ export const READ_ONLY_TOOL_KINDS = new Set<acp.ToolKind>([
   'switch_mode'
 ])
 
-export function copilotEffort(effort: SubAgentRunDeps['effort']): string | null {
-  if (!effort) return null
-  if (effort === 'minimal') return 'low'
-  if (effort === 'ultracode') return 'xhigh'
-  return effort
-}
-
 type PermissionResponse = acp.RequestPermissionResponse
 
 export async function decideAcpPermission(
@@ -37,7 +30,9 @@ export async function decideAcpPermission(
   }
 
   const input = isRecord(tool.rawInput) ? tool.rawInput : {}
-  const toolName = tool.name || tool.title || tool.kind || 'other'
+  // 카드에 그대로 실리는 이름이다("… wants to use `X`"). 실측에서 Copilot 은 name 을 안 보내고
+  // title('Create file')만 보내므로 그게 사실상 정본이고, 둘 다 없을 때만 kind 로 떨어진다.
+  const toolName = tool.name || tool.title || describeKind(tool.kind)
   const decision = deps.canUseTool
     ? await deps.canUseTool(toolName, input, { title: tool.title ?? undefined })
     : { behavior: 'allow' as const, updatedInput: input }
@@ -65,15 +60,20 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
 
+/**
+ * ACP 의 메시지 청크는 **토큰 단위**로 온다(실측: 짧은 답 하나에 수십 건). 그대로 활동으로
+ * 올리면 청크마다 사이드바 목록을 통째로 다시 방송하게 된다 — Claude 경로가 텍스트 **블록**당
+ * 한 번 올리는 것과 자릿수가 다르다. 패널이 텍스트를 그리지도 않으므로 그 방송은 순수 낭비다.
+ *
+ * 그래서 청크는 모아 두고 **도구 호출이 끼어들 때** 한 줄로 flush 한다. Claude 의 블록 경계와
+ * 같은 굵기가 되고, 타이머 같은 장치도 필요 없다. 최종 텍스트는 어차피 결과로 따로 돌아간다.
+ */
 export function activityFromAcpUpdate(update: acp.SessionUpdate): SubAgentActivity | null {
-  if (update.sessionUpdate === 'agent_message_chunk' && update.content.type === 'text') {
-    return update.content.text.trim()
-      ? { kind: 'text', text: truncate(update.content.text.trim()) }
-      : null
-  }
   if (update.sessionUpdate !== 'tool_call' && update.sessionUpdate !== 'tool_call_update')
     return null
-  const toolName = update.name || update.title || update.kind || 'other'
+  // kind 는 사람이 읽는 이름이 아니다 — 'other' 를 도구 이름으로 올리면 사이드바에 "other" 가
+  // 그대로 뜬다. 이름도 제목도 없으면 그 백엔드 이름으로 정직하게 적는다.
+  const toolName = update.name || update.title || describeKind(update.kind)
   const input = 'rawInput' in update && isRecord(update.rawInput) ? update.rawInput : {}
   const hint = describeArg(
     input.file_path,
@@ -85,6 +85,11 @@ export function activityFromAcpUpdate(update: acp.SessionUpdate): SubAgentActivi
   )
   // ACP 는 이름을 구조적으로 주므로 Codex 용 activity.toolName ?? activity.text 폴백이 필요 없다.
   return { kind: 'tool', toolName, text: truncate(hint ? `${toolName}: ${hint}` : toolName) }
+}
+
+/** ToolKind 를 사람이 읽는 이름으로. 실측에서 Copilot 은 title 없이 kind 만 보내는 호출이 있다. */
+function describeKind(kind: acp.ToolKind | null | undefined): string {
+  return kind && kind !== 'other' ? kind : 'GitHub Copilot CLI tool'
 }
 
 export function resultFromAcpStop(
@@ -120,10 +125,19 @@ export async function runAcpSubAgent(deps: SubAgentRunDeps): Promise<SubAgentRes
     }
   }
 
-  const effort = copilotEffort(deps.effort)
-  const args = ['--acp', '--stdio', ...(effort ? [`--effort=${effort}`] : [])]
-  // ACP v1 session/new 과 서버 플래그 모두 모델 선택을 제공하지 않으므로 deps.model 은 의도적으로
-  // 무시한다. 존재하지 않는 설정을 도구 설명에 노출하면 매 요청의 프롬프트만 늘어난다.
+  // `deps.model` 과 `deps.effort` 를 **둘 다 무시한다.** 조용히 버리는 게 아니라 넘길 방법이 없다.
+  //
+  //  - 모델: ACP v1 `session/new` 에 모델 필드가 없고, 문서가 "모든 세션에 적용된다" 고 밝힌
+  //    서버 기동 옵션 목록에도 `--model` 이 없다.
+  //  - effort: `--effort` 는 서버 옵션으로 있지만, **모델마다 지원 범위가 다른데 어느 모델이
+  //    뽑힐지 우리가 정할 수 없다.** 실측에서 턴 전체가 이 한 줄로 깨졌다 —
+  //    `Reasoning effort 'low' is not supported for model 'claude-haiku-4.5'.`
+  //    auto model selection 만 되는 플랜에서는 사용자도 모델을 못 고르므로 피할 방법이 없다.
+  //    못 고르는 모델에 맞춰 effort 를 찍는 것은 도박이라, 안 넘기는 쪽이 언제나 도는 선택이다.
+  //
+  // 그래서 위임된 Copilot 은 CLI 기본값으로 돈다. 설정 화면에 Copilot 이 없어(teammate 전용)
+  // 사용자가 값을 정할 자리도 없으니 지금 이 무시가 보이는 차이를 만들지 않는다.
+  const args = ['--acp', '--stdio']
   const proc = spawn(install.path, args, { cwd: deps.cwd, stdio: ['pipe', 'pipe', 'pipe'] })
   let stderr = ''
   proc.stderr.setEncoding('utf8')
@@ -139,6 +153,8 @@ export async function runAcpSubAgent(deps: SubAgentRunDeps): Promise<SubAgentRes
   })
 
   let text = ''
+  /** 아직 활동으로 안 내보낸 메시지 청크. 도구 호출 경계에서 한 줄로 flush 한다. */
+  let pending = ''
   let sessionId: string | null = null
   let graceTimer: ReturnType<typeof setTimeout> | null = null
   try {
@@ -175,9 +191,16 @@ export async function runAcpSubAgent(deps: SubAgentRunDeps): Promise<SubAgentRes
                   update.content.type === 'text'
                 ) {
                   text += update.content.text
+                  pending += update.content.text
                 }
                 const activity = activityFromAcpUpdate(update)
-                if (activity) deps.onActivity(activity)
+                if (activity) {
+                  // 모아 둔 청크를 도구 호출 **앞에** 한 줄로 내보낸다(activityFromAcpUpdate 주석).
+                  if (pending.trim())
+                    deps.onActivity({ kind: 'text', text: truncate(pending.trim()) })
+                  pending = ''
+                  deps.onActivity(activity)
+                }
                 continue
               }
               return resultFromAcpStop(
