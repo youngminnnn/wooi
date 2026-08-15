@@ -153,13 +153,13 @@ describe('gh 연결됨 (무회귀)', () => {
       name: '실행 중인 CI',
       check: { __typename: 'CheckRun', name: 'test', status: 'IN_PROGRESS' },
       state: 'ci_pending',
-      label: 'CI running'
+      label: 'Checks pending'
     },
     {
       name: '실패한 CI',
       check: { __typename: 'CheckRun', name: 'test', status: 'COMPLETED', conclusion: 'FAILURE' },
       state: 'ci_failed',
-      label: 'CI failed'
+      label: 'Checks failed'
     }
   ])('승인 후 $name 상태를 review required 와 구분한다', async ({ check, state, label }) => {
     reply = () => ({
