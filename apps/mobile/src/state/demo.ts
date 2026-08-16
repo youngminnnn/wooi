@@ -274,6 +274,21 @@ export function createDemoSession(now: number = Date.now()): DemoSession {
         { id: 'docs', name: 'product-docs' }
       ],
       workspaces,
+      // 데모에도 요금제 사용량을 둔다 — 페어링 전에 앱을 훑어보는 사람에게 설정 화면이
+      // 절반만 채워진 채로 보이지 않게 하기 위해서다.
+      planUsage: [
+        {
+          agent: 'claude',
+          agentLabel: 'Claude Code',
+          plan: 'max',
+          fetchedAt: now - 3 * 60_000,
+          windows: [
+            { label: '5-hour', usedPct: 42, resetsAt: now + 2 * 3_600_000 + 10 * 60_000 },
+            { label: '7-day', usedPct: 78, resetsAt: now + 3 * 86_400_000 },
+            { label: 'Opus', usedPct: 12, resetsAt: now + 3 * 86_400_000 }
+          ]
+        }
+      ],
       pendingPermissions: [permission]
     },
     transcripts

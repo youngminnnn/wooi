@@ -137,6 +137,41 @@ export interface RemoteRepo {
 /** 페어링된 기기의 플랫폼. Supabase `devices.platform` 의 check 제약과 같은 값 집합이다. */
 export type RemoteDevicePlatform = 'ios' | 'android'
 
+/**
+ * 요금제 사용량 창 1개. 랩탑이 **사용률을 아는 창만** 실어 보내므로 `usedPct` 는 항상 숫자다
+ * (데스크톱이 값 없는 창을 목록에서 빼는 것과 같은 규칙 — 폰에서 "—" 행을 볼 이유가 없다).
+ */
+export interface RemotePlanWindow {
+  /** '5-hour' · 'Weekly' 처럼 창 이름. 라벨은 랩탑이 만든다. */
+  label: string
+  /** 0–100 으로 정규화한 **쓴** 비율(claude.ai·데스크톱과 같은 기준). */
+  usedPct: number
+  /** 리셋 시각(epoch ms). 모르거나 이미 지났으면 null. */
+  resetsAt: number | null
+}
+
+/**
+ * 계정 하나(= 백엔드 하나)의 요금제 사용량. **워크스페이스 단위가 아니다.**
+ *
+ * 폰에서 이게 필요한 이유는 데스크톱과 같다 — 한도가 차면 워크스페이스는 그냥 멈춘 것처럼
+ * 보이고, 왜 멈췄는지는 숫자를 봐야 안다. 다만 폰은 랩탑이 자는 동안에도 이 화면을 열 수
+ * 있으므로 `fetchedAt` 을 함께 싣는다(값이 몇 시간 묵었을 수 있고, 그걸 말해야 한다).
+ *
+ * 요금제 한도가 적용되지 않는 계정(API 키 등)이나 아직 사용률을 모르는 계정은 아예 목록에
+ * 실리지 않는다 — 0% 나 "N/A" 를 보여 주지 않는 데스크톱 규칙 그대로다.
+ */
+export interface RemotePlanUsage {
+  /** 백엔드 식별자(types.ts 의 AgentBackendId 와 같은 값 집합). */
+  agent: string
+  /** 'Claude Code' 같은 표시 이름. 폰이 백엔드 이름을 다시 짓지 않게 랩탑이 만들어 보낸다. */
+  agentLabel: string
+  /** 'pro'/'max'/'team' 등. 모르면 null. */
+  plan: string | null
+  /** 조회에 성공한 시각(epoch ms). 폰이 "N분 전"으로 값의 나이를 말한다. */
+  fetchedAt: number
+  windows: RemotePlanWindow[]
+}
+
 /** 랩탑 자신에 대한 최소 정보. */
 export interface RemoteMachine {
   id: string
@@ -153,6 +188,13 @@ export interface RemoteState {
   workspaces: RemoteWorkspace[]
   /** 지금 응답을 기다리는 권한 요청들(types.ts 의 PermissionRequest 모양). */
   pendingPermissions: unknown[]
+  /**
+   * 계정별 요금제 사용량. 보여 줄 것이 없으면 빈 배열이다.
+   *
+   * **옵셔널이다** — 이 필드를 싣기 전 랩탑과도 이야기하기 때문이다(RemoteWorkspace 의 v1 이후
+   * 필드들과 같은 이유). 폰은 `?? []` 로 받아 빈 목록과 똑같이 다룬다.
+   */
+  planUsage?: RemotePlanUsage[]
 }
 
 // ── 브리지 자체 명령 ──────────────────────────────────────────────────────

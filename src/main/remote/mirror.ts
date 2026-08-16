@@ -1,7 +1,21 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { deriveDirectionKeys, fromBase64Url, sealJson } from '@shared/crypto'
-import type { RemoteMachine, RemotePr, RemoteRateLimit, RemoteState } from '@shared/remote'
-import type { AgentBackendId, AppState, PermissionMode, PermissionRequest } from '@shared/types'
+import type {
+  RemoteMachine,
+  RemotePlanUsage,
+  RemotePlanWindow,
+  RemotePr,
+  RemoteRateLimit,
+  RemoteState
+} from '@shared/remote'
+import type {
+  AgentBackendId,
+  AppState,
+  PermissionMode,
+  PermissionRequest,
+  RateLimitSnapshot
+} from '@shared/types'
+import { AGENT_BACKEND_IDS } from '@shared/types'
 import { backendMeta } from '../agent/backend'
 import { getCachedPrStatus } from '../prStatusCache'
 import { log } from '../logger'
@@ -96,6 +110,50 @@ export function projectPr(workspaceId: string): RemotePr | null | undefined {
   }
 }
 
+/**
+ * 계정별 요금제 사용량 투영.
+ *
+ * 무엇을 **빼는지**가 핵심이다. 데스크톱은 스냅샷이 없거나(첫 조회 전) `available=false`
+ * (API 키 등 한도 미적용)거나 사용률을 아는 창이 하나도 없으면 아예 그리지 않는다 —
+ * 그 자리에 0% 나 "N/A" 를 두면 한도가 있는데 여유 있는 것처럼 읽히기 때문이다. 폰도 같은
+ * 규칙을 따라야 하므로, 판단은 여기서 하고 폰에는 **보여 줄 것만** 보낸다.
+ *
+ * 시각은 epoch ms 로 정규화해서 보낸다. 원본의 `resetsAt` 은 백엔드가 준 문자열이라
+ * 파싱 실패가 있을 수 있는데, 그 실패를 폰에서 처리하게 두면 화면마다 다르게 처리된다.
+ */
+export function projectPlanUsage(app: AppState): RemotePlanUsage[] {
+  const usage: RemotePlanUsage[] = []
+  for (const agent of AGENT_BACKEND_IDS) {
+    // 구버전 저장 데이터에는 rateLimitsByAgent 가 없고 단일 필드가 Claude 값을 뜻한다.
+    const snapshot: RateLimitSnapshot | undefined = app.rateLimitsByAgent
+      ? app.rateLimitsByAgent[agent]
+      : agent === 'claude'
+        ? app.rateLimits
+        : undefined
+    if (!snapshot?.available) continue
+    const windows = snapshot.windows.flatMap((window): RemotePlanWindow[] => {
+      if (window.utilization == null) return []
+      const at = window.resetsAt === null ? NaN : Date.parse(window.resetsAt)
+      return [
+        {
+          label: window.label,
+          usedPct: Math.min(100, Math.max(0, Math.round(window.utilization))),
+          resetsAt: Number.isNaN(at) ? null : at
+        }
+      ]
+    })
+    if (!windows.length) continue
+    usage.push({
+      agent,
+      agentLabel: backendMeta(agent).label,
+      plan: snapshot.subscriptionType,
+      fetchedAt: snapshot.fetchedAt,
+      windows
+    })
+  }
+  return usage
+}
+
 export function projectState(
   app: AppState,
   machine: RemoteMachine,
@@ -143,6 +201,7 @@ export function projectState(
       ),
       pr: projectPr(workspace.id)
     })),
+    planUsage: projectPlanUsage(app),
     pendingPermissions: pending.map((request) => ({
       requestId: request.requestId,
       workspaceId: request.workspaceId,
