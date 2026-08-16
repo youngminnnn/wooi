@@ -9,7 +9,7 @@ vi.mock('electron', () => ({
 
 const { deriveDirectionKeys, fromBase64Url, generateSessionKey, openJson, toBase64Url } =
   await import('@shared/crypto')
-const { REMOTE_PUSH_BODIES, RemotePush } = await import('./push')
+const { REMOTE_PUSH_BODIES, REMOTE_PUSH_NAME_MAX, RemotePush } = await import('./push')
 
 const machineId = 'machine-1'
 const sessionKey = generateSessionKey()
@@ -56,18 +56,46 @@ function remotePush(burstMs = 0): InstanceType<typeof RemotePush> {
 
 const notification = {
   workspaceId: 'workspace-1',
-  workspaceName: 'Highly Secret Workspace',
+  workspaceName: 'design-tokens',
   kind: 'needsInput' as const
 }
 
 describe('RemotePush', () => {
-  it('고정 본문만 평문으로 보내고 워크스페이스 정보는 기기별 암호문 안에만 둔다', async () => {
+  it('배너 본문에 워크스페이스 이름을 실어 열어 보지 않아도 알게 한다', async () => {
+    await remotePush().notify({ ...notification, kind: 'completed' })
+    expect(call.mock.calls[0]?.[0].body).toBe('design-tokens finished')
+  })
+
+  it('종류마다 이름 뒤 문구가 다르다', async () => {
+    await remotePush().notify(notification)
+    await remotePush().notify({ ...notification, kind: 'error' })
+    expect(call.mock.calls[0]?.[0].body).toBe('design-tokens needs your permission')
+    expect(call.mock.calls[1]?.[0].body).toBe('design-tokens encountered an error')
+  })
+
+  it('긴 이름은 배너 한 줄에 맞게 자른다', async () => {
+    const workspaceName = 'a'.repeat(REMOTE_PUSH_NAME_MAX + 20)
+    await remotePush().notify({ ...notification, workspaceName })
+
+    expect(call.mock.calls[0]?.[0].body).toBe(
+      `${'a'.repeat(REMOTE_PUSH_NAME_MAX - 1)}… needs your permission`
+    )
+  })
+
+  it('줄바꿈은 접고 빈 이름은 고정 문구로 되돌린다', async () => {
+    await remotePush().notify({ ...notification, workspaceName: 'two\n  lines' })
+    await remotePush().notify({ ...notification, workspaceName: '   ' })
+    expect(call.mock.calls[0]?.[0].body).toBe('two lines needs your permission')
+    expect(call.mock.calls[1]?.[0].body).toBe(REMOTE_PUSH_BODIES.needsInput)
+  })
+
+  it('본문에 이름과 고정 문구 말고 다른 것은 넣지 않는다', async () => {
     await remotePush().notify(notification)
 
-    const request = call.mock.calls[0]?.[0]
-    const serialized = JSON.stringify(request)
-    expect(Object.values(REMOTE_PUSH_BODIES)).toContain(request.body)
-    expect(serialized).not.toContain(notification.workspaceName)
+    const suffix = ' needs your permission'
+    const body = call.mock.calls[0]?.[0].body ?? ''
+    expect(body.endsWith(suffix)).toBe(true)
+    expect(body.slice(0, -suffix.length)).toBe(notification.workspaceName)
   })
 
   it('폰 방향 키와 push 헤더로 봉인한 페이로드가 왕복한다', async () => {
