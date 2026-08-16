@@ -49,6 +49,7 @@ export interface SessionDeps {
    */
   mcpSettings: McpSettings
   model: string | null
+  fallbackModels?: string[]
   /** reasoning effort 선택값(ultracode 포함). null 이면 effort 를 지정하지 않아 모델 기본 동작을 따른다. */
   effort: EffortSetting | null
   /**
@@ -321,6 +322,7 @@ export class ClaudeSession {
    * 주고받은 경우)은 그 안에 없어서 재시작 시 빈 세션으로 시작해 버린다.
    */
   private currentSessionId: string | null = null
+  private retryActive = false
   /** 직전에 CLI 가 보고한 fast mode 실제 상태. 바뀔 때만 이벤트·안내를 낸다. */
   private lastFastModeState: FastModeState | null = null
   /** "켜 뒀지만 실제로는 표준 속도" 안내를 이미 띄웠는지(세션당 1회만). */
@@ -486,6 +488,15 @@ export class ClaudeSession {
     }
     // 새 사용자 시도다 — 턴 상태와 자동 재시도 예산, 중단 표시를 리셋한다.
     this.beginTurn()
+    this.clearApiRetry()
+    if (this.currentSessionId && this.deps.model) {
+      this.deps.emit({
+        type: 'session',
+        sessionId: this.currentSessionId,
+        model: this.deps.model,
+        isFallback: false
+      })
+    }
     this.autoRetried = false
     this.interrupted = false
     this.markActive()
@@ -702,6 +713,11 @@ export class ClaudeSession {
       // effort 옵션으로 그대로 넘기고, null 이면 아무것도 넘기지 않아 모델 기본 동작을 따른다.
       const ultracode = this.deps.effort === 'ultracode'
       const sdkEffort = claudeEffort(this.deps.effort)
+      // 메인 경계에서도 거르지만 SDK 바로 앞에서 한 번 더 막는다. 설정 갱신 경쟁이나 테스트처럼
+      // Session 을 직접 만드는 호출이 있어도 primary 를 자기 fallback 으로 넘겨서는 안 된다.
+      const fallbackModels = (this.deps.fallbackModels ?? []).filter(
+        (model, index, all) => model !== this.deps.model && all.indexOf(model) === index
+      )
       // team 모드 세션에만 위임 커맨드가 든 변형을 물린다 — 쓸 수 없는 명령은 보이지 않아야 한다.
       const wooiPlugin = resolveWooiPlugin(!!this.deps.delegateBackends?.length)
       this.q = query({
@@ -774,6 +790,9 @@ export class ClaudeSession {
             : {}),
           ...(claudeExecutable ? { pathToClaudeCodeExecutable: claudeExecutable } : {}),
           ...(this.deps.model ? { model: this.deps.model } : {}),
+          ...(fallbackModels.length
+            ? { fallbackModel: fallbackModels.join(',') }
+            : {}),
           // reasoning effort 가 지정돼 있으면 그대로 전달한다(ultracode 는 settings 로 처리하므로 제외).
           ...(sdkEffort ? { effort: sdkEffort } : {}),
           // 이전 세션 ID 가 있으면 디스크에서 대화 맥락을 복원한다(과거 메시지는 재방출되지 않음).
@@ -1204,6 +1223,11 @@ export class ClaudeSession {
   // ── 메시지 → ChatEvent 변환 ────────────────────────────────────────────
 
   private handleMessage(msg: SDKMessage): void {
+    const retryMessage =
+      msg.type === 'system' &&
+      (msg.subtype === 'api_retry' ||
+        (msg.subtype === 'control_request_progress' && msg.status === 'api_retry'))
+    if (this.retryActive && !retryMessage) this.clearApiRetry()
     // SDK 가 우리의 send() 없이 새 턴을 시작하는 경우가 있다 — 예: 백그라운드 워크플로우의
     // task_notification 이 모델을 깨워 후속 작업을 돌릴 때. 이때 assistant/stream 출력이 흐르는데도
     // this.active 가 false 라 사이드바가 idle 로 보인다. 모델이 산출(assistant/stream)을 시작했는데
@@ -1243,7 +1267,22 @@ export class ClaudeSession {
   }
 
   private handleSystem(msg: Extract<SDKMessage, { type: 'system' }>): void {
-    if (msg.subtype === 'init') {
+    if (msg.subtype === 'api_retry') {
+      this.reportApiRetry(msg)
+    } else if (msg.subtype === 'control_request_progress' && msg.status === 'api_retry') {
+      if (
+        typeof msg.attempt === 'number' &&
+        typeof msg.max_retries === 'number' &&
+        typeof msg.retry_delay_ms === 'number'
+      ) {
+        this.reportApiRetry({
+          attempt: msg.attempt,
+          max_retries: msg.max_retries,
+          retry_delay_ms: msg.retry_delay_ms,
+          error_status: msg.error_status
+        })
+      }
+    } else if (msg.subtype === 'init') {
       log.info(`session: init received (session_id=${msg.session_id})`)
       this.currentSessionId = msg.session_id
       this.deps.onSessionId(msg.session_id)
@@ -1521,7 +1560,15 @@ export class ClaudeSession {
 
   /** 권위 있는 assistant 메시지로 각 블록을 확정·영속화한다. */
   private handleAssistant(msg: Extract<SDKMessage, { type: 'assistant' }>): void {
-    const m = msg.message as unknown as { id?: string; content?: Block[] }
+    const m = msg.message as unknown as { id?: string; model?: string; content?: Block[] }
+    if (m.model && this.currentSessionId) {
+      this.deps.emit({
+        type: 'session',
+        sessionId: this.currentSessionId,
+        model: m.model,
+        isFallback: (this.deps.fallbackModels ?? []).includes(m.model) && m.model !== this.deps.model
+      })
+    }
     const apiId = m.id ?? msg.uuid
     const blocks = m.content ?? []
 
@@ -1673,6 +1720,7 @@ export class ClaudeSession {
   }
 
   private handleResult(msg: Extract<SDKMessage, { type: 'result' }>): void {
+    this.clearApiRetry()
     log.info(`session: result received (subtype=${msg.subtype}, turns=${msg.num_turns})`)
 
     // CLI 가 이 턴에 fast mode 를 실제로 썼는지 알려 준다(설정과 다를 수 있다 — 미지원 모델·플랜
@@ -1749,6 +1797,30 @@ export class ClaudeSession {
       refreshUsage: msg.subtype === 'success',
       allowAutoCompact: !wasAutoCompact
     })
+  }
+
+  private reportApiRetry(msg: {
+    attempt: number
+    max_retries: number
+    retry_delay_ms: number
+    error_status?: number | null
+  }): void {
+    this.retryActive = true
+    this.deps.emit({
+      type: 'apiRetry',
+      retry: {
+        attempt: msg.attempt,
+        maxRetries: msg.max_retries,
+        retryDelayMs: msg.retry_delay_ms,
+        errorStatus: msg.error_status ?? null
+      }
+    })
+  }
+
+  private clearApiRetry(): void {
+    if (!this.retryActive) return
+    this.retryActive = false
+    this.deps.emit({ type: 'apiRetry', retry: null })
   }
 
   /**

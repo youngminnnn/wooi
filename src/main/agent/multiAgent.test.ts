@@ -56,7 +56,13 @@ describe('agentDefaultsFor', () => {
     const s = settings({
       agents: {
         ...DEFAULT_SETTINGS.agents,
-        codex: { model: 'gpt-5.5', effort: 'xhigh', permissionMode: null, fastMode: false }
+        codex: {
+          model: 'gpt-5.5',
+          effort: 'xhigh',
+          permissionMode: null,
+          fastMode: false,
+          fallbackModels: []
+        }
       }
     })
     expect(agentDefaultsFor(s).codex).toEqual({ model: 'gpt-5.5', effort: 'xhigh' })

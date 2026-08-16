@@ -323,6 +323,12 @@ export class SessionManager implements AgentBackend {
       cwd: ws.worktreePath,
       repoPath: this.getRepoPath(ws.repoId),
       model: ws.model ?? defaults.model,
+      // fallbackModel 은 요청 시점의 과부하·일시 불가를 다른 모델로 우회한다. 계정 플랜 한도를
+      // reset 뒤 같은 모델로 잇는 rateLimitResume 과 원인·복구 시점이 달라 한 경로로 합치지 않는다.
+      fallbackModels: defaults.fallbackModels.filter((model) => {
+        const primary = ws.model ?? defaults.model ?? CLAUDE_META.defaultModel
+        return model !== primary && CLAUDE_MODELS.some((m) => m.id === model)
+      }),
       effort: ws.effort ?? defaults.effort,
       fastMode: ws.fastMode ?? defaults.fastMode,
       // 다른 백엔드에서 넘어온 값(전역 기본값 이관 등)이 SDK 로 새지 않도록 여기서 걸러 낸다.

@@ -425,6 +425,7 @@ function AgentsPage({
   const agent = agentSettingsFor(settings, editing)
   const mode = backend ? normalizePermissionMode(backend, agent.permissionMode) : null
   const selectedModel = models.find((model) => model.id === agent.model)
+  const primaryModel = agent.model ?? backend?.defaultModel ?? null
   const efforts = effortOptionsFor(backend, selectedModel)
   const patchAgent = (patch: Partial<AgentSettings>): void =>
     save({ agents: { ...settings.agents, [editing]: { ...agent, ...patch } } })
@@ -507,7 +508,13 @@ function AgentsPage({
           <select
             className={inputClass + ' w-56 text-sm'}
             value={agent.model ?? ''}
-            onChange={(event) => patchAgent({ model: event.target.value || null })}
+            onChange={(event) => {
+              const model = event.target.value || null
+              patchAgent({
+                model,
+                fallbackModels: agent.fallbackModels.filter((id) => id !== model)
+              })
+            }}
           >
             <option value="">Default — let {backend?.label ?? 'agent'} decide</option>
             {models.map((model) => (
@@ -520,6 +527,47 @@ function AgentsPage({
             )}
           </select>
         </SettingRow>
+        {editing === 'claude' && (
+          <SettingRow
+            title="Fallback models"
+            description="Tried in order when the primary model is overloaded or temporarily unavailable."
+          >
+            <div className="space-y-1.5">
+              {[0, 1, 2].map((index) => {
+                const selected = agent.fallbackModels[index] ?? ''
+                const unavailable = new Set([
+                  primaryModel,
+                  ...agent.fallbackModels.filter((_, i) => i !== index)
+                ])
+                return (
+                  <div key={index} className="flex items-center gap-2">
+                    <span className="w-4 text-right text-xs text-neutral-600">{index + 1}</span>
+                    <select
+                      className={inputClass + ' w-56 text-sm'}
+                      value={selected}
+                      onChange={(event) => {
+                        const next = agent.fallbackModels.slice(0, 3)
+                        const value = event.target.value
+                        if (value) next[index] = value
+                        else next.splice(index, 1)
+                        patchAgent({ fallbackModels: next.filter(Boolean) })
+                      }}
+                    >
+                      <option value="">None</option>
+                      {models
+                        .filter((model) => model.id === selected || !unavailable.has(model.id))
+                        .map((model) => (
+                          <option key={model.id} value={model.id}>
+                            {model.label}
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+                )
+              })}
+            </div>
+          </SettingRow>
+        )}
         <SettingRow
           title="Reasoning effort"
           description="Higher effort is slower but more thorough. Workspace override available."

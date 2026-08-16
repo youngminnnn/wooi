@@ -5,6 +5,7 @@ import type {
   AgentBackendMeta,
   AppNotice,
   AppState,
+  ApiRetryState,
   ArchiveScriptFailure,
   AuthStatus,
   CarryFailure,
@@ -315,6 +316,10 @@ interface UIState {
    * 상태이므로, 앱을 다시 띄우면 비어 있는 것이 정상이다(그 시점엔 세션도 죽어 있다).
    */
   runningAgents: Record<string, RunningAgent[]>
+  /** API 재시도 중에만 존재하는 휘발성 사이드바 상태. */
+  apiRetries: Record<string, ApiRetryState>
+  /** 응답 본문이 보고한 실제 모델이 설정된 폴백일 때만 존재한다. */
+  activeFallbackModels: Record<string, string>
   /**
    * workspace 별 에이전트 목록 접힘 상태(true = 접힘). 기본값은 펼침이다.
    *
@@ -793,6 +798,8 @@ export const useStore = create<UIState>((set, get) => ({
   unread: {},
   runningSince: {},
   runningAgents: {},
+  apiRetries: {},
+  activeFallbackModels: {},
   agentsCollapsed: {},
   drafts: {},
   messageQueue: {},
@@ -1224,6 +1231,14 @@ export const useStore = create<UIState>((set, get) => ({
             if (event.model) w.lastModel = event.model
           }
         })
+        if (event.type === 'session' && event.model && event.isFallback !== undefined) {
+          set((s) => {
+            const activeFallbackModels = { ...s.activeFallbackModels }
+            if (event.isFallback) activeFallbackModels[workspaceId] = event.model!
+            else delete activeFallbackModels[workspaceId]
+            return { activeFallbackModels }
+          })
+        }
         // 실행 진입/종료에 맞춰 경과 시간 기준 시각을 갱신한다(running 진입 시 1회 기록).
         if (event.type === 'status') {
           set((s) => {
@@ -1333,6 +1348,13 @@ export const useStore = create<UIState>((set, get) => ({
           if (event.agents.length === 0) delete runningAgents[workspaceId]
           else runningAgents[workspaceId] = event.agents
           return { runningAgents }
+        })
+      } else if (event.type === 'apiRetry') {
+        set((s) => {
+          const apiRetries = { ...s.apiRetries }
+          if (event.retry) apiRetries[workspaceId] = event.retry
+          else delete apiRetries[workspaceId]
+          return { apiRetries }
         })
       }
     })

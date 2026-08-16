@@ -47,6 +47,11 @@ describe('current defaults', () => {
   it('rate-limit 자동 재개는 명시적으로 켜기 전까지 꺼져 있다', () => {
     expect(DEFAULT_SETTINGS.autoResumeAfterRateLimit).toBe(false)
   })
+
+  it('모델 폴백은 Claude 에만 소비되고 Codex 기본 동작은 빈 목록으로 남는다', () => {
+    expect(DEFAULT_SETTINGS.agents.claude.fallbackModels).toEqual([])
+    expect(DEFAULT_SETTINGS.agents.codex.fallbackModels).toEqual([])
+  })
 })
 
 describe('v12 → v13 (백엔드별 에이전트 설정 분리)', () => {

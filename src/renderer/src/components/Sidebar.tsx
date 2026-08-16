@@ -59,6 +59,7 @@ import {
 import { orderRowsWithPending } from '../lib/sidebarRows'
 import { useGithubDisconnected } from '../lib/github'
 import { WorkspaceAgents } from './WorkspaceAgents'
+import { WorkspaceApiRetry } from './WorkspaceApiRetry'
 import { useNow } from '../lib/useNow'
 import { formatCountdown, formatDuration } from '../lib/format'
 import { useDragReorder, type DragReorder } from '../lib/useDragReorder'
@@ -1017,6 +1018,7 @@ function WorkspaceRow({
       </div>
       {/* 행 안이 아니라 형제로 둔다 — 행은 role="button" 인 클릭·드래그 영역이라, 그 안에 접기
           버튼을 중첩하면 클릭이 워크스페이스 선택으로 새고 드래그 정렬과도 충돌한다. */}
+      <WorkspaceApiRetry workspaceId={workspace.id} depth={depth} />
       <WorkspaceAgents
         workspaceId={workspace.id}
         depth={depth}

@@ -877,6 +877,8 @@ export interface AgentSettings {
    * 속도로 돌린다(지원 모델·유료 플랜 필요). workspace 가 자체 값을 지정하면 그 값이 우선한다.
    */
   fastMode: boolean
+  /** Claude 가 과부하·일시 불가일 때 순서대로 시도할 모델 ID. 다른 백엔드는 사용하지 않는다. */
+  fallbackModels: string[]
   /** 새 워크스페이스의 기본 권한 모드. null 이면 백엔드의 defaultPermissionMode. */
   permissionMode: PermissionMode | null
 }
@@ -886,7 +888,8 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   model: null,
   effort: null,
   permissionMode: null,
-  fastMode: false
+  fastMode: false,
+  fallbackModels: []
 }
 
 /**
@@ -894,7 +897,7 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
  * 마이그레이션됐거나 백엔드가 나중에 추가됨) 안전한 기본값을 돌려준다.
  */
 export function agentSettingsFor(settings: AppSettings, id: AgentBackendId): AgentSettings {
-  return settings.agents?.[id] ?? DEFAULT_AGENT_SETTINGS
+  return { ...DEFAULT_AGENT_SETTINGS, ...settings.agents?.[id] }
 }
 
 // ── MCP 서버 (Wooi 스코프) ────────────────────────────────────────────────
@@ -1589,6 +1592,14 @@ export interface RunningAgent {
   lastToolName?: string
 }
 
+/** API 가 다음 시도를 기다리는 동안만 보이는 세션 상태. ChatItem 이 아니므로 기록하지 않는다. */
+export interface ApiRetryState {
+  attempt: number
+  maxRetries: number
+  retryDelayMs: number
+  errorStatus: number | null
+}
+
 /** main → renderer 스트리밍 이벤트. renderer 는 이를 트랜스크립트에 반영한다. */
 export type ChatEvent =
   /** id 기준 append-or-replace. 권위 있는 완성 항목. */
@@ -1598,7 +1609,9 @@ export type ChatEvent =
   /** workspace 실행 상태 변화. */
   | { type: 'status'; status: WorkspaceStatus }
   /** 세션 ID·모델 확정/갱신 (init 메시지 기준). */
-  | { type: 'session'; sessionId: string; model?: string }
+  | { type: 'session'; sessionId: string; model?: string; isFallback?: boolean }
+  /** API 재시도 진행 상태. null 이면 진행/종료되어 표시를 즉시 지운다. */
+  | { type: 'apiRetry'; retry: ApiRetryState | null }
   /**
    * 한 턴이 끝난 뒤의 컨텍스트 윈도 사용량(마지막 요청의 입력 토큰 합 / 모델 컨텍스트 윈도).
    * 입력창의 사용량 미터와 자동 압축 판단의 단일 출처.
