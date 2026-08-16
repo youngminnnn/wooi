@@ -4,6 +4,7 @@ import { SessionManager } from '../claude/manager'
 import { CodexSessionManager } from '../codex/manager'
 import { detectCodex } from '../codex/executable'
 import { detectGrok } from '../grok/executable'
+import { GrokSessionManager } from '../grok/manager'
 import { isInstalled } from '../shell'
 import { backendMeta, type AgentBackend, type TurnEndHook } from './backend'
 
@@ -63,9 +64,8 @@ export async function backendAvailability(
  */
 export function createBackend(id: AgentBackendId, deps: BackendDeps): AgentBackend {
   switch (id) {
-    // TODO(piece 3): [[grok/manager]] 가 추가되면 GrokSessionManager 생성 분기를 연결한다.
     case 'grok':
-      throw new Error('Grok Build backend manager is not implemented yet')
+      return new GrokSessionManager(deps.dispatch, deps.getWindow, deps.onTurnEnd)
     case 'codex':
       return new CodexSessionManager(deps.dispatch, deps.getWindow, deps.onTurnEnd)
     case 'claude':
