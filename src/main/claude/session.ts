@@ -790,9 +790,7 @@ export class ClaudeSession {
             : {}),
           ...(claudeExecutable ? { pathToClaudeCodeExecutable: claudeExecutable } : {}),
           ...(this.deps.model ? { model: this.deps.model } : {}),
-          ...(fallbackModels.length
-            ? { fallbackModel: fallbackModels.join(',') }
-            : {}),
+          ...(fallbackModels.length ? { fallbackModel: fallbackModels.join(',') } : {}),
           // reasoning effort 가 지정돼 있으면 그대로 전달한다(ultracode 는 settings 로 처리하므로 제외).
           ...(sdkEffort ? { effort: sdkEffort } : {}),
           // 이전 세션 ID 가 있으면 디스크에서 대화 맥락을 복원한다(과거 메시지는 재방출되지 않음).
@@ -1566,7 +1564,8 @@ export class ClaudeSession {
         type: 'session',
         sessionId: this.currentSessionId,
         model: m.model,
-        isFallback: (this.deps.fallbackModels ?? []).includes(m.model) && m.model !== this.deps.model
+        isFallback:
+          (this.deps.fallbackModels ?? []).includes(m.model) && m.model !== this.deps.model
       })
     }
     const apiId = m.id ?? msg.uuid
