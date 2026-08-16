@@ -26,6 +26,7 @@ import type { AgentBackend } from './backend'
 import { backendAvailability, createBackend, type Dispatch } from './registry'
 import { AGENT_BACKENDS, backendMeta } from './backend'
 import { log } from '../logger'
+import { rememberModels } from '../modelCatalog'
 import { flushBufferedPeerMessages, resetAllPeerSessions, resetPeerSession } from './tools/peer'
 
 /**
@@ -217,7 +218,11 @@ export class AgentOrchestrator {
     try {
       const { available } = await backendAvailability(id)
       if (!available) return []
-      return await this.get(id).listModels()
+      const models = await this.get(id).listModels()
+      // 지나가는 길에 적어 둔다 — 원격 미러는 동기라 여기까지 기다릴 수 없는데,
+      // 폰에 보낼 모델 라벨은 이 목록이 있어야 만든다([[main/modelCatalog]]).
+      rememberModels(id, models)
+      return models
     } catch (err) {
       log.error(`agent: model list failed for ${id}`, err)
       return []

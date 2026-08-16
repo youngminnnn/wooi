@@ -27,6 +27,7 @@ function workspace(
     parentWorkspaceId: null,
     rateLimit: null,
     permissionModeFooter: null,
+    statusLine: null,
     pr: null,
     actsWithoutAsking: false,
     lastActiveAt,
@@ -56,6 +57,13 @@ export function createDemoSession(now: number = Date.now()): DemoSession {
         status: 'running',
         model: 'Claude Opus 4.1',
         effort: 'high',
+        // 라벨·사용량은 랩탑이 만들어 보내는 것과 같은 모양이다(main/remote/mirror 의 projectStatusLine).
+        statusLine: {
+          model: 'Opus 5 (1M context)',
+          effort: 'High',
+          context: { usedTokens: 128_400, maxTokens: 1_000_000, percentage: 0.13 },
+          compacting: false
+        },
         attention: 'permission',
         multiAgent: true,
         // 문구는 랩탑이 백엔드 서술자에서 뽑아 보내는 것과 같은 값이다(src/main/agent/backend.ts).
@@ -75,6 +83,12 @@ export function createDemoSession(now: number = Date.now()): DemoSession {
         agentBackend: 'codex',
         model: 'gpt-5.4',
         effort: 'xhigh',
+        statusLine: {
+          model: 'GPT-5.4',
+          effort: 'Extra high',
+          context: { usedTokens: 291_000, maxTokens: 400_000, percentage: 0.73 },
+          compacting: false
+        },
         parentWorkspaceId: 'mobile-checkout',
         muted: true,
         prNumber: 185,
@@ -95,7 +109,13 @@ export function createDemoSession(now: number = Date.now()): DemoSession {
         unread: true,
         agentBackend: 'codex',
         model: 'gpt-5.4',
-        effort: 'high'
+        effort: 'high',
+        statusLine: {
+          model: 'GPT-5.4',
+          effort: 'High',
+          context: { usedTokens: 372_000, maxTokens: 400_000, percentage: 0.93 },
+          compacting: false
+        }
       },
       now - 12 * 60_000
     ),
@@ -107,7 +127,14 @@ export function createDemoSession(now: number = Date.now()): DemoSession {
         displayName: 'Usage limit recovery',
         branch: 'test/usage-recovery',
         rateLimit: { kind: 'resuming', at: now + 18 * 60_000 },
-        model: 'Claude Sonnet 4'
+        model: 'Claude Sonnet 4',
+        // 첫 턴 전이라 사용량은 아직 없다 — 게이지는 자리만 잡고 '—' 로 나온다.
+        statusLine: {
+          model: 'Sonnet 5 (1M context)',
+          effort: 'Model default',
+          context: null,
+          compacting: false
+        }
       },
       now - 20 * 60_000
     ),
@@ -121,7 +148,13 @@ export function createDemoSession(now: number = Date.now()): DemoSession {
         status: 'running',
         model: 'Claude Sonnet 4',
         permissionMode: 'acceptEdits',
-        permissionModeFooter: { symbol: '⏵⏵', text: 'accept edits on', tone: 'caution' }
+        permissionModeFooter: { symbol: '⏵⏵', text: 'accept edits on', tone: 'caution' },
+        statusLine: {
+          model: 'Sonnet 5 (1M context)',
+          effort: 'Model default',
+          context: { usedTokens: 640_000, maxTokens: 1_000_000, percentage: 0.64 },
+          compacting: true
+        }
       },
       now - 2 * 60_000
     ),
@@ -138,7 +171,13 @@ export function createDemoSession(now: number = Date.now()): DemoSession {
         model: 'gpt-5.4-mini',
         prNumber: 42,
         pr: { number: 42, state: 'merged', label: 'Merged' },
-        permissionModeFooter: { symbol: '⏸', text: 'plan mode on', tone: 'readOnly' }
+        permissionModeFooter: { symbol: '⏸', text: 'plan mode on', tone: 'readOnly' },
+        statusLine: {
+          model: 'GPT-5.4 mini',
+          effort: 'Medium',
+          context: { usedTokens: 84_000, maxTokens: 400_000, percentage: 0.21 },
+          compacting: false
+        }
       },
       now - 45 * 60_000
     )

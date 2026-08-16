@@ -137,6 +137,28 @@ export interface RemoteWorkspace {
    * 없을 수 있다(undefined) — 이 필드를 싣기 전 랩탑과도 이야기한다. 그때는 점도 배지도 없다.
    */
   unread?: boolean
+  /**
+   * 컴포저 위 상태줄. 데스크톱 Composer 의 `StatusLine` 과 같은 값들이다 — 무엇을 보내려는
+   * 순간 그 메시지가 **어떤 모델로, 얼마나 생각하며, 얼마나 남은 맥락으로** 돌지가 보여야
+   * 한다. 폰에서는 그걸 확인하러 랩탑으로 돌아가는 비용이 더 크다.
+   *
+   * **라벨은 랩탑이 만들어 보낸다.** 폰에는 모델 카탈로그도 백엔드별 effort 목록도 전역
+   * 기본값도 없어서 같은 문구를 스스로 지어낼 수 없고, 지어내게 두면 두 화면이 갈린다
+   * (permissionModeFooter 와 같은 이유다).
+   */
+  statusLine?: {
+    /** 유효 모델의 표시 라벨. 카탈로그를 아직 못 읽었으면 모델 ID 그대로. */
+    model: string
+    /** 유효 reasoning effort 의 표시 라벨. 지정이 없으면 'Model default'. */
+    effort: string
+    /**
+     * 컨텍스트 윈도 사용량. **첫 턴 전에는 null** — 데스크톱도 그때는 게이지 대신 '—' 를
+     * 보여 준다. 0% 로 채워 보내면 "맥락이 텅 비어 있다"는 다른 말이 된다.
+     */
+    context: { usedTokens: number; maxTokens: number; percentage: number } | null
+    /** 지금 대화를 압축 중인가. 그동안 사용량은 낡은 값이라 게이지 대신 이것을 보여 준다. */
+    compacting: boolean
+  } | null
 }
 
 /** 모바일이 보는 리포 1개(이름만 — 경로·스크립트·아바타는 보내지 않는다). */

@@ -33,6 +33,10 @@ import { workspaceDisplayName } from '@shared/types'
 import { formatToolGroup } from '@shared/toolGroups'
 import { BrandMark } from '../../src/components/BrandMark'
 import { DemoBanner } from '../../src/components/DemoBanner'
+import {
+  PermissionModeFooter,
+  WorkspaceStatusBar
+} from '../../src/components/WorkspaceStatusBar'
 import { PR_COLORS } from '../../src/state/prColors'
 import { isLaptopAway, useRemoteStore } from '../../src/state/store'
 import { agoLabel, untilLabel, useNow } from '../../src/state/useNow'
@@ -50,10 +54,6 @@ function errorMessage(error: unknown): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function modeToneColor(tone: 'readOnly' | 'caution'): string {
-  return tone === 'readOnly' ? theme.readonly : theme.warning
 }
 
 function isPermissionRequest(value: unknown): value is PermissionRequest {
@@ -691,6 +691,7 @@ export default function WorkspaceScreen(): React.JSX.Element {
   )
 
   const modeFooter = workspace?.permissionModeFooter ?? null
+  const statusLine = workspace?.statusLine ?? null
 
   const repoName = useRemoteStore(
     (store) => store.state?.repos.find((repo) => repo.id === workspace?.repoId)?.name ?? null
@@ -811,37 +812,38 @@ export default function WorkspaceScreen(): React.JSX.Element {
         {permission !== undefined && command !== null ? (
           <PermissionCard key={permission.requestId} request={permission} command={command} />
         ) : null}
-        <View style={styles.composer}>
-          <TextInput
-            style={styles.input}
-            value={text}
-            onChangeText={setText}
-            editable={!sending}
-            multiline
-            maxLength={32 * 1024}
-            placeholder="Follow up…"
-            placeholderTextColor="#66666f"
-          />
-          <Pressable
-            style={[styles.sendButton, (sending || text.trim().length === 0) && styles.disabled]}
-            disabled={sending || text.trim().length === 0}
-            onPress={() => void send()}
-          >
-            <Text style={styles.sendText}>{sending ? 'Sending…' : 'Send'}</Text>
-          </Pressable>
-        </View>
-        {/* 데스크톱과 같은 자리에 둔다 — 무엇을 보내려는 순간 그 모드가 눈에 들어와야 한다.
-            헤더에 있으면 스크롤과 함께 시야에서 사라지고, 정작 필요한 때 보이지 않는다.
-            띄울 것이 없는 모드(Claude 의 'default')에서는 데스크톱처럼 아무것도 띄우지 않는다. */}
-        {modeFooter !== null && modeFooter !== undefined ? (
-          <View style={styles.modeFooter}>
-            {/* 색은 데스크톱 컴포저와 같은 두 갈래다 — 읽기 전용은 '멈춤' 색, 스스로 실행하는
-                모드는 경고 색. 어느 쪽인지는 랩탑이 정해서 보낸다(모드 의미에 달린 판단이다). */}
-            <Text style={[styles.modeText, { color: modeToneColor(modeFooter.tone) }]}>
-              {modeFooter.symbol} {modeFooter.text}
-            </Text>
+        {/* 데스크톱과 같은 순서다 — 상태줄은 입력창 위, 권한 모드는 입력창 아래.
+            무엇을 보내려는 순간에 "어떤 모델로, 얼마나 생각하며, 얼마나 남은 맥락으로,
+            그리고 물어보긴 하는지"가 한눈에 들어와야 한다.
+
+            셋을 한 블록으로 묶고 경계선은 바깥에 둔다 — 선이 입력창에 붙어 있으면 상태줄이
+            대화 쪽에 딸린 것처럼 읽히고, 상태줄을 못 받는 옛 랩탑에서는 선이 통째로 사라진다. */}
+        <View style={styles.dock}>
+          <WorkspaceStatusBar status={statusLine} />
+          <View style={styles.composer}>
+            <TextInput
+              style={styles.input}
+              value={text}
+              onChangeText={setText}
+              editable={!sending}
+              multiline
+              maxLength={32 * 1024}
+              placeholder="Follow up…"
+              placeholderTextColor="#66666f"
+            />
+            <Pressable
+              style={[styles.sendButton, (sending || text.trim().length === 0) && styles.disabled]}
+              disabled={sending || text.trim().length === 0}
+              onPress={() => void send()}
+            >
+              <Text style={styles.sendText}>{sending ? 'Sending…' : 'Send'}</Text>
+            </Pressable>
           </View>
-        ) : null}
+          {/* 띄울 것이 없는 모드(Claude 의 'default')에서는 데스크톱처럼 아무것도 띄우지 않는다. */}
+          {modeFooter !== null && modeFooter !== undefined ? (
+            <PermissionModeFooter footer={modeFooter} />
+          ) : null}
+        </View>
       </View>
     </SafeAreaView>
   )
@@ -1032,21 +1034,17 @@ const styles = StyleSheet.create({
     fontSize: 10,
     marginTop: 3
   },
-  modeFooter: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 6,
-    paddingBottom: 8,
-    paddingHorizontal: 14
-  },
-  modeText: { fontSize: 11 },
-  composer: {
-    alignItems: 'flex-end',
+  dock: {
     borderTopColor: theme.border,
     borderTopWidth: StyleSheet.hairlineWidth,
+    paddingTop: 8
+  },
+  composer: {
+    alignItems: 'flex-end',
     flexDirection: 'row',
     gap: 9,
-    padding: 10
+    paddingBottom: 10,
+    paddingHorizontal: 10
   },
   input: {
     backgroundColor: theme.bg2,

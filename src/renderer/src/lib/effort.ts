@@ -1,4 +1,4 @@
-import type { AgentBackendMeta, EffortOptionInfo, EffortSetting, ModelOption } from '@shared/types'
+import type { AgentBackendMeta, EffortOptionInfo, ModelOption } from '@shared/types'
 
 export type { EffortOptionInfo as EffortOption }
 
@@ -22,11 +22,8 @@ export function effortOptionsFor(
   return narrowed.length ? narrowed : all
 }
 
-/** effort 값을 친근한 라벨로. null(미지정)이면 "Model default". 목록에 없으면 ID 를 그대로. */
-export function effortLabel(
-  meta: AgentBackendMeta | undefined,
-  effort: EffortSetting | null
-): string {
-  if (!effort) return 'Model default'
-  return meta?.efforts.find((e) => e.id === effort)?.label ?? effort
-}
+/**
+ * effort 라벨은 shared 에 있다(`@shared/agentLabels`) — 폰에 보내는 상태줄도 같은 문구를
+ * 써야 해서 main 쪽 미러가 함께 쓴다. 여기서는 그대로 다시 내보낸다.
+ */
+export { effortLabel } from '@shared/agentLabels'

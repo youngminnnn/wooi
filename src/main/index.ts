@@ -20,7 +20,8 @@ import { applyNavigationGuards, loadRenderer, rendererWebPreferences } from './w
 import { registerIpc } from './ipc'
 import { disposeRemote, getRemoteBridge, hasLocalRemoteOverride, initRemote } from './remote'
 import { pendingPermissions } from './remote/permissions'
-import type { AppState, PermissionRequest } from '@shared/types'
+import { rememberCompacting, rememberContextUsage } from './contextUsageCache'
+import type { AppState, ChatEvent, PermissionRequest } from '@shared/types'
 import { log } from './logger'
 import { hydrateEnvFromLoginShell } from './env'
 import { initUpdater } from './updater'
@@ -84,6 +85,10 @@ function mirrorToRemote(channel: string, payload: unknown): void {
       pendingPermissions.add(payload as PermissionRequest)
     } else if (channel === IPC.evtPermissionCancel) {
       pendingPermissions.remove(payload as string)
+    } else if (channel === IPC.evtChat) {
+      // 채팅 이벤트는 델타까지 포함해 초당 수십 개가 지나간다. 폰 상태줄이 쓰는 두 종류만
+      // 적어 두고 **값이 실제로 바뀌었을 때만** 방송으로 이어 간다 — 나머지는 여기서 끊는다.
+      if (!rememberChatStatus(payload)) return
     } else if (channel !== IPC.evtState) {
       return
     }
@@ -93,6 +98,30 @@ function mirrorToRemote(channel: string, payload: unknown): void {
   } catch {
     // 브리지가 아직 초기화되지 않았거나(기동 초기) 원격이 꺼져 있다 — 정상이다.
   }
+}
+
+/**
+ * 채팅 이벤트에서 폰 상태줄이 쓰는 것(컨텍스트 사용량·압축 진행)을 캐시에 적는다.
+ *
+ * 이 값들은 AppState 에 없어서(휘발성이라 영속하지 않는다) 미러가 읽을 곳이 따로 필요하다.
+ * [[main/contextUsageCache]] 참고.
+ *
+ * @returns 폰이 보는 값이 바뀌었으면 true — 그때만 상태를 다시 발행한다.
+ */
+function rememberChatStatus(payload: unknown): boolean {
+  const message = payload as { workspaceId?: string; event?: ChatEvent }
+  const workspaceId = message?.workspaceId
+  const event = message?.event
+  if (typeof workspaceId !== 'string' || event === undefined) return false
+  if (event.type === 'context') {
+    return rememberContextUsage(workspaceId, {
+      usedTokens: event.usedTokens,
+      maxTokens: event.maxTokens,
+      percentage: event.percentage
+    })
+  }
+  if (event.type === 'compacting') return rememberCompacting(workspaceId, event.active)
+  return false
 }
 
 const sessions = new AgentOrchestrator(dispatch, () => mainWindow)
