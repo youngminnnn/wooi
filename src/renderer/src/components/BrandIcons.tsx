@@ -34,6 +34,14 @@ export function CodexMark({ size = 18 }: { size?: number }): React.JSX.Element {
   )
 }
 
+export function GrokMark({ size = 18 }: { size?: number }): React.JSX.Element {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-label="Grok Build">
+      <path d="M4.15 3.5h5.1l10.6 17h-5.1L4.15 3.5Zm11.1 0h4.6l-5.3 8.5-2.3-3.7 3-4.8ZM9.45 12l2.3 3.7-3 4.8h-4.6l5.3-8.5Z" />
+    </svg>
+  )
+}
+
 export function GithubMark({ size = 18 }: { size?: number }): React.JSX.Element {
   return (
     <svg width={size} height={size} viewBox="0 0 16 16" fill="currentColor" aria-label="GitHub">
@@ -53,12 +61,7 @@ export function GithubMark({ size = 18 }: { size?: number }): React.JSX.Element 
 const BACKEND_MARKS: Record<AgentBackendId, (props: { size?: number }) => React.JSX.Element> = {
   claude: ClaudeMark,
   codex: CodexMark,
-  // TODO(piece 3): 정식 Grok 브랜드 마크로 교체한다. 유니온 확장 뒤 웹 타입체크용 임시 자리다.
-  grok: ({ size = 18 }) => (
-    <span style={{ fontSize: size, lineHeight: 1 }} aria-label="Grok Build">
-      G
-    </span>
-  )
+  grok: GrokMark
 }
 
 export function AgentBackendMark({

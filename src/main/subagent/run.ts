@@ -2,6 +2,7 @@ import type { PermissionResult } from '@anthropic-ai/claude-agent-sdk'
 import type { AgentBackendId, EffortSetting, PermissionMode } from '@shared/types'
 import { runClaudeSubAgent } from './runClaude'
 import { runCodexSubAgent } from './runCodex'
+import { runGrokSubAgent } from './runGrok'
 
 /**
  * 위임 실행(서브런)의 백엔드 분배기.
@@ -53,9 +54,9 @@ export interface SubAgentRunDeps {
   abort: AbortController
   onActivity: (activity: SubAgentActivity) => void
   /**
-   * 도구 승인 콜백. **부모 세션의 canUseTool 을 그대로 넘긴다** — 직접 권한 UI 를 호출하지
-   * 않는 것이 요점이다. 그래야 사용자가 저장해 둔 always-allow 규칙, auto 모드, 파일 변경 diff 가
-   * 위임 실행에도 똑같이 적용된다(네이티브 Task 서브에이전트와 같은 경험).
+   * 서브런 내부 도구의 승인 콜백. 호출부의 `askSubAgentPermission` 은 `fullAccess` 만 즉시
+   * 허용하고, 그 밖의 모드에서는 서브에이전트임을 밝힌 별도 권한 카드를 매번 띄운다. 부모
+   * 세션의 always-allow 규칙이나 auto 모드 생략 규칙은 적용하지 않는다([[agent/tools/permission]]).
    *
    * 주지 않으면 막지 않고 통과시킨다. Codex 경로는 `codex exec` 가 비대화형이라 이 값을 아예
    * 쓰지 않으며, 그 경로에서는 샌드박스가 유일한 방어선이다.
@@ -63,7 +64,7 @@ export interface SubAgentRunDeps {
   canUseTool?: SubAgentPermission
 }
 
-/** 부모 세션의 canUseTool 과 같은 모양. Claude 경로만 사용한다. */
+/** Claude 와 Grok 위임 경로가 공유하는 도구 승인 콜백 모양. */
 export type SubAgentPermission = (
   toolName: string,
   input: Record<string, unknown>,
@@ -79,5 +80,7 @@ export interface SubAgentResult {
 }
 
 export function runSubAgent(deps: SubAgentRunDeps): Promise<SubAgentResult> {
-  return deps.backend === 'codex' ? runCodexSubAgent(deps) : runClaudeSubAgent(deps)
+  if (deps.backend === 'codex') return runCodexSubAgent(deps)
+  if (deps.backend === 'grok') return runGrokSubAgent(deps)
+  return runClaudeSubAgent(deps)
 }
