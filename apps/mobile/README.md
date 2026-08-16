@@ -93,8 +93,12 @@ fingerprint 도 달라져, 그 네이티브 기능이 없는 예전 바이너리
 
 ```sh
 # apps/mobile/app.json 의 expo.version 을 올려 커밋한 뒤
-git tag mobile-v1.1.0 && git push origin mobile-v1.1.0
+git tag mobile-v0.2.0 && git push origin mobile-v0.2.0
 ```
+
+첫 버전은 `0.1.0` 이다. 데스크톱은 이미 1.x 지만 이쪽은 아직 아무에게도 나간 적이 없고,
+`0.x` 는 "아직 굳지 않았다"를 뜻한다 — 같은 1.x 를 달면 성숙도가 같다는 뜻이 되어 버린다.
+스토어에 한 번 제출하면 버전은 되돌릴 수 없으므로, 내릴 수 있는 시점은 제출 전뿐이다.
 
 `mobile-release` 워크플로가 태그와 `app.json` 의 version 이 같은지 먼저 확인하고, 다르면
 굽기 전에 끊는다. 어긋난 채로 나가면 스토어에는 옛 버전이 올라가는데 릴리즈 이름만 새 버전이
