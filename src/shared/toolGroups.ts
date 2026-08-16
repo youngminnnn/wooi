@@ -1,4 +1,4 @@
-import type { ChatItem } from '@shared/types'
+import type { ChatItem } from './types'
 
 export type ToolKind =
   'read' | 'search' | 'list' | 'bash' | 'mcp' | 'agent' | 'other' | 'uncollapsible'

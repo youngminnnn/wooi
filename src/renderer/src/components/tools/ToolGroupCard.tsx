@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { ChevronRight, Loader2, Wrench } from 'lucide-react'
 import type { ChatItem } from '@shared/types'
-import { formatToolGroup, type ToolGroup } from '../../lib/toolGroups'
+import { formatToolGroup, type ToolGroup } from '@shared/toolGroups'
 import { ToolCard } from './ToolCard'
 import type { ToolGroupStyleProps } from './styleProps'
 
