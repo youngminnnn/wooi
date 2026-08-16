@@ -121,7 +121,11 @@ describe('ClaudeSession background tasks', () => {
     )
     await tick()
 
-    expect(latestAgents(events).map((task) => task.taskId).sort()).toEqual(['agent', 'bash'])
+    expect(
+      latestAgents(events)
+        .map((task) => task.taskId)
+        .sort()
+    ).toEqual(['agent', 'bash'])
     expect(latestAgents(events).find((task) => task.taskId === 'agent')?.taskType).toBeUndefined()
     expect(latestAgents(events).find((task) => task.taskId === 'bash')?.taskType).toBe('local_bash')
     session.dispose()

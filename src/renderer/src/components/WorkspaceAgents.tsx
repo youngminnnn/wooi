@@ -62,9 +62,7 @@ export function WorkspaceAgents({
         title={collapsed ? 'Show running work' : 'Hide running work'}
       >
         {collapsed ? <ChevronRight size={11} /> : <ChevronDown size={11} />}
-        <span className="flex-1 text-left">
-          {rows.length} running
-        </span>
+        <span className="flex-1 text-left">{rows.length} running</span>
         {collapsed && (
           <span className="tabular-nums text-neutral-600">
             {formatDuration(now - oldest.startedAt)}
