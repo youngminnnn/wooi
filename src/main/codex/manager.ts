@@ -101,6 +101,7 @@ export class CodexSessionManager implements AgentBackend {
     string,
     { resolve: (v: unknown) => void; reject: (e: Error) => void }
   >()
+  private validModelIds: Set<string> | null = null
   private readonly rateLimitResume: RateLimitResumeCoordinator
 
   constructor(
@@ -551,8 +552,57 @@ export class CodexSessionManager implements AgentBackend {
   }
 
   /** codex 카탈로그의 모델 목록(model/list). */
-  listModels(): Promise<ModelOption[]> {
-    return this.request<ModelOption[]>((reqId) => ({ type: 'listModels', reqId }))
+  async listModels(): Promise<ModelOption[]> {
+    const models = await this.request<ModelOption[]>((reqId) => ({ type: 'listModels', reqId }))
+    if (models.length === 0) return models
+
+    this.validModelIds = new Set(models.map((model) => model.id))
+    this.reconcileStoredModels()
+    return models
+  }
+
+  /**
+   * 별도 model/list 요청을 만들지 않고 이미 UI 카탈로그 갱신에 쓰이는 성공 응답에만 올라탄다 —
+   * 턴 시작을 막지 않으면서 같은 시점의 실제 선택지를 근거로 삼기 위해서다. 실패·빈 목록은
+   * app-server 준비 전일 수 있으므로 "전부 은퇴"가 아니라 "아직 모름"으로 취급한다. 사라진 모델은
+   * 후속 모델을 추측하지 않고 null 로 돌려 Codex 카탈로그가 정한 기본값을 따르게 한다.
+   */
+  private reconcileStoredModels(): void {
+    const validModelIds = this.validModelIds
+    if (!validModelIds || validModelIds.size === 0) return
+
+    const store = getStore()
+    const state = store.getState()
+    const hasStaleWorkspaceModel = state.workspaces.some(
+      (workspace) =>
+        workspace.agentBackend === CODEX_META.id &&
+        !!workspace.model &&
+        !validModelIds.has(workspace.model)
+    )
+    const codexDefaultModel = state.settings.agents.codex.model
+    const hasStaleDefault = !!codexDefaultModel && !validModelIds.has(codexDefaultModel)
+    if (!hasStaleWorkspaceModel && !hasStaleDefault) return
+
+    let changed = false
+    store.update((st) => {
+      for (const workspace of st.workspaces) {
+        const model = workspace.model
+        if (workspace.agentBackend !== CODEX_META.id || !model || validModelIds.has(model)) continue
+        log.info(`codex model catalog: dropped stored model ${model} for workspace ${workspace.id}`)
+        workspace.model = null
+        changed = true
+      }
+
+      const defaults = st.settings.agents.codex
+      if (defaults.model && !validModelIds.has(defaults.model)) {
+        log.info(
+          `codex model catalog: dropped stored default model ${defaults.model} for Codex settings`
+        )
+        defaults.model = null
+        changed = true
+      }
+    })
+    if (changed) this.dispatch(IPC.evtState, store.getState())
   }
 
   // ── 계정 ─────────────────────────────────────────────────────────────────
