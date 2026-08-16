@@ -42,7 +42,8 @@
     "relay:prod:config": "node scripts/relay.mjs production config",
     "remote:keystore-probe": "electron scripts/keystore-probe.mjs",
     "remote:state-probe": "electron scripts/remote-state-probe.mjs",
-    "typecheck:mobile": "npm --prefix apps/mobile exec tsc -- --noEmit"
+    "typecheck:mobile": "npm --prefix apps/mobile exec tsc -- --noEmit",
+    "test:mobile": "npm --prefix apps/mobile test"
   },
   "lint-staged": {
     "*.{ts,tsx,js,jsx,mjs,cjs}": [
