@@ -73,6 +73,7 @@ export type CodexCommand =
       silent?: boolean
       /** 화면에 일반 사용자 말풍선 대신 출처가 있는 자동 메시지로 남긴다. */
       origin?: SendMessageOptions['origin']
+      skill?: { name: string; path: string; prompt: string }
     }
   | { type: 'interrupt'; workspaceId: string }
   | { type: 'setPermissionMode'; workspaceId: string; mode: PermissionMode }
@@ -80,6 +81,7 @@ export type CodexCommand =
   | { type: 'disposeAll' }
   | { type: 'permissionResponse'; requestId: string; decision: PermissionDecision }
   | { type: 'listModels'; reqId: string }
+  | { type: 'listSkills'; reqId: string; cwd: string }
   /** /context·/usage·/permissions 카드용 데이터 조회. */
   | { type: 'runCommand'; reqId: string; workspaceId: string; kind: CommandPanelKind }
   | { type: 'mcpAction'; reqId: string; serverName: string; action: McpAction }
@@ -121,6 +123,7 @@ export type CodexEvent =
   /** 계정 상태가 바뀌었다(app-server 의 account/updated). auth 상태를 다시 읽으라는 신호. */
   | { type: 'accountChanged' }
   | { type: 'mcpOauthLoginCompleted'; name: string; success: boolean; error?: string }
+  | { type: 'skillsChanged' }
   | { type: 'response'; reqId: string; ok: true; data: unknown }
   | { type: 'response'; reqId: string; ok: false; error: string }
 

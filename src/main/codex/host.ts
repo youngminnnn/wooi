@@ -135,6 +135,11 @@ function routeNotification(method: string, params: unknown): void {
     return
   }
 
+  if (method === NOTIFY.skillsChanged) {
+    post({ type: 'skillsChanged' })
+    return
+  }
+
   const threadId = (params as { threadId?: string })?.threadId
   if (!threadId) return
 
@@ -391,11 +396,12 @@ async function handle(msg: CodexCommand): Promise<void> {
       break
 
     case 'send':
-      await ensure(msg.workspaceId, msg.config).send(msg.text, msg.images, {
-        prefix: msg.prefix,
-        silent: msg.silent,
-        origin: msg.origin
-      })
+      await ensure(msg.workspaceId, msg.config).send(
+        msg.text,
+        msg.images,
+        { prefix: msg.prefix, silent: msg.silent, origin: msg.origin },
+        msg.skill
+      )
       break
 
     case 'interrupt':
@@ -429,6 +435,13 @@ async function handle(msg: CodexCommand): Promise<void> {
 
     case 'listModels':
       await respond(msg.reqId, listModels)
+      break
+
+    case 'listSkills':
+      await respond(msg.reqId, async () => {
+        const result = await (await rpc()).request(RPC.skillsList, { cwds: [msg.cwd] })
+        return result
+      })
       break
 
     case 'runCommand':
