@@ -995,7 +995,7 @@ export function registerIpc(ctx: IpcContext): void {
     broadcastState()
   })
 
-  ipcMain.handle(IPC.chatClearGoal, (_e, workspaceId: string) => {
+  handle(IPC.chatClearGoal, (_e, workspaceId: string) => {
     return ctx.sessions.clearGoal(workspaceId)
   })
 
@@ -2470,7 +2470,7 @@ export function registerIpc(ctx: IpcContext): void {
     }
   )
 
-  ipcMain.handle(
+  handle(
     IPC.mcpCodexOauthLogin,
     async (_e, serverName: string): Promise<{ authorizationUrl?: string; error?: string }> => {
       try {
