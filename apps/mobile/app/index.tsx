@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react'
-import { Pressable, RefreshControl, SectionList, StyleSheet, Text, View } from 'react-native'
+import { Image, Pressable, RefreshControl, SectionList, StyleSheet, Text, View } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import type { RemoteWorkspace } from '@shared/remote'
@@ -180,9 +180,11 @@ export default function WorkspaceListScreen(): React.JSX.Element {
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
       <View style={styles.header}>
-        <View>
-          <Text style={styles.eyebrow}>WOOI</Text>
-          <Text style={styles.title}>{machineName}</Text>
+        <Image source={require('../assets/icon.png')} style={styles.headerMark} />
+        <View style={styles.headerText}>
+          <Text style={styles.title} numberOfLines={1}>
+            {machineName}
+          </Text>
           <Text style={styles.updated}>
             {state === null
               ? status === 'connecting'
@@ -243,7 +245,7 @@ export default function WorkspaceListScreen(): React.JSX.Element {
           <RefreshControl
             refreshing={refreshing}
             onRefresh={() => void refresh()}
-            tintColor="#8b7cf6"
+            tintColor={theme.accent}
           />
         }
         ListEmptyComponent={
@@ -275,10 +277,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     paddingTop: 18
   },
-  eyebrow: { color: theme.textDim, fontSize: 10, fontWeight: '700', letterSpacing: 1.5 },
-  title: { color: theme.text, fontSize: 22, fontWeight: '600', marginTop: 5 },
-  updated: { color: theme.textDim, fontSize: 12, marginTop: 5 },
-  connection: { alignItems: 'center', flexDirection: 'row', gap: 6, marginTop: 4 },
+  headerMark: { borderRadius: 9, height: 36, marginRight: 11, marginTop: 2, width: 36 },
+  headerText: { flex: 1 },
+  title: { color: theme.text, fontSize: 21, fontWeight: '600', letterSpacing: -0.3 },
+  updated: { color: theme.textDim, fontSize: 12, marginTop: 3 },
+  connection: { alignItems: 'center', flexDirection: 'row', gap: 6, marginLeft: 10, marginTop: 5 },
   connectionDot: { borderRadius: 4, height: 7, width: 7 },
   connectionText: { color: theme.textDim, fontSize: 11, textTransform: 'capitalize' },
   banner: { backgroundColor: '#2a1719', color: '#e69393', fontSize: 12, padding: 10 },
@@ -308,7 +311,9 @@ const styles = StyleSheet.create({
     backgroundColor: theme.surface,
     borderBottomColor: theme.border,
     borderLeftColor: theme.accent,
-    borderLeftWidth: 3
+    borderLeftWidth: 3,
+    // 테두리는 폭을 더한다. 빼 주지 않으면 이 줄만 3px 밀려 왼쪽 아이콘 열이 어긋난다.
+    paddingLeft: 15
   },
   statusSlot: { alignItems: 'center', marginRight: 11, marginTop: 3, width: 16 },
   rowContent: { flex: 1 },
