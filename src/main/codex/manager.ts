@@ -17,6 +17,8 @@ import { canLeadAgentTeam, delegateBackendsFor } from '../agent/multiAgent'
 import { delegateThreadInstructions, soloThreadInstructions } from '../subagent/catalog'
 import { abortAllSubAgents, abortSubAgents } from '../agent/tools/subagent'
 import { durationLabel } from './rateLimits'
+import { CodexSkillsCache, mergeSkillCommands } from './skills'
+import type { SkillsListResponse } from './wire'
 import { RATE_LIMIT_CONTINUATION, RateLimitResumeCoordinator } from '../rateLimitResume'
 import {
   expandWooiCommand,
@@ -52,6 +54,20 @@ import type {
 } from '@shared/types'
 
 type Dispatch = (channel: string, payload: unknown) => void
+
+const CODEX_COMMAND_NAMES = new Set([
+  'model',
+  'effort',
+  'fast',
+  'agent',
+  'mcp',
+  'context',
+  'usage',
+  'permissions',
+  'compact',
+  'review',
+  'fork'
+])
 
 function describe(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
@@ -103,6 +119,22 @@ export class CodexSessionManager implements AgentBackend {
   >()
   private validModelIds: Set<string> | null = null
   private readonly rateLimitResume: RateLimitResumeCoordinator
+  /** 자동완성 hot path 는 이 캐시만 읽는다. app-server 의 skills/changed 알림만 이를 비운다. */
+  private readonly skills = new CodexSkillsCache(async (cwd) => {
+    const response = await this.request<SkillsListResponse>((reqId) => ({
+      type: 'listSkills',
+      reqId,
+      cwd
+    }))
+    for (const entry of response.data) {
+      for (const error of entry.errors) {
+        log.warn(
+          `codex: skill load failed at ${error.path ?? entry.cwd ?? cwd}: ${error.message ?? 'unknown error'}`
+        )
+      }
+    }
+    return response
+  })
 
   constructor(
     private dispatch: Dispatch,
@@ -236,6 +268,9 @@ export class CodexSessionManager implements AgentBackend {
           error: msg.error
         })
         break
+      case 'skillsChanged':
+        this.skills.invalidate()
+        break
       case 'response': {
         const pending = this.pendingRequests.get(msg.reqId)
         if (pending) {
@@ -352,6 +387,24 @@ export class CodexSessionManager implements AgentBackend {
         text: expandWooiCommand(wooi.spec, wooi.rest)
       })
       return
+    }
+
+    if (!images?.length) {
+      const match = text.trim().match(/^\/([^\s]+)(?:\s+([\s\S]*))?$/)
+      const skill =
+        match && !CODEX_COMMAND_NAMES.has(match[1])
+          ? this.skills.find(ws.worktreePath, match[1])
+          : undefined
+      if (skill) {
+        this.send({
+          type: 'send',
+          workspaceId,
+          config: this.configFor(ws),
+          text,
+          skill: { name: skill.name, path: skill.path, prompt: match?.[2] ?? '' }
+        })
+        return
+      }
     }
 
     if (!images?.length && text.trim().startsWith('!')) {
@@ -695,9 +748,9 @@ export class CodexSessionManager implements AgentBackend {
     return Promise.reject(new Error('Codex does not support rewind.'))
   }
 
-  listCommands(workspaceId: string): Promise<SlashCommandInfo[]> {
+  async listCommands(workspaceId: string, cwd: string): Promise<SlashCommandInfo[]> {
     const backends = this.delegateBackendsOf(workspaceId)
-    return Promise.resolve([
+    const commands: SlashCommandInfo[] = [
       { name: 'model', description: 'Choose the model' },
       { name: 'effort', description: 'Choose reasoning effort' },
       { name: 'fast', description: 'Toggle Fast service tier' },
@@ -720,7 +773,9 @@ export class CodexSessionManager implements AgentBackend {
         description: c.description,
         ...(c.argumentHint ? { argumentHint: c.argumentHint } : {})
       }))
-    ])
+    ]
+    const response = await this.skills.list(cwd)
+    return mergeSkillCommands(commands, response)
   }
 
   // ── 내부 ───────────────────────────────────────────────────────────────
