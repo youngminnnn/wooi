@@ -1,5 +1,5 @@
 import { hostname } from 'node:os'
-import { app } from 'electron'
+import { app, powerMonitor } from 'electron'
 import type { RemoteDeviceSummary, RemoteStatus } from '@shared/remote'
 
 export type { RemoteDeviceSummary, RemoteStatus }
@@ -60,6 +60,7 @@ export class RemoteBridge {
   private readonly getAppState: () => AppState | null
   private readonly onWorkspaceRead: (workspaceId: string) => void
   private unsubscribe: (() => void) | null = null
+  private resumeListener: (() => void) | null = null
   private enabled = false
   private fault: string | null = null
 
@@ -112,6 +113,7 @@ export class RemoteBridge {
       this.pairing = null
       await this.client?.dispose()
       this.client = null
+      this.detachResume()
       this.unsubscribe?.()
       this.unsubscribe = null
       return this.emit()
@@ -133,6 +135,13 @@ export class RemoteBridge {
       })
       this.unsubscribe = client.onChange(() => this.emit())
       this.client = client
+      // 랩탑이 깨어나면 곧바로 다시 붙는다. 그냥 두면 다음 heartbeat 까지 최대 1분 동안
+      // 폰에는 여전히 자고 있는 것으로 보이고, 그 사이 보낸 커맨드는 이유 없이 대기한다.
+      // 소켓도 수면 중에 죽어 있으므로 어차피 다시 세워야 한다.
+      this.resumeListener = () => {
+        void client.connect()
+      }
+      powerMonitor.on('resume', this.resumeListener)
       await client.connect()
       this.mirror = new StateMirror({
         supabase: () => client.supabase(),
@@ -177,6 +186,7 @@ export class RemoteBridge {
       this.pairing = null
       await this.client?.dispose()
       this.client = null
+      this.detachResume()
       this.unsubscribe?.()
       this.unsubscribe = null
       log.error('원격 활성화 실패', this.fault)
@@ -283,6 +293,7 @@ export class RemoteBridge {
     this.push?.dispose()
     this.mirror?.dispose()
     this.pairing?.dispose()
+    this.detachResume()
     this.unsubscribe?.()
     await this.client?.dispose()
     this.client = null
@@ -293,6 +304,11 @@ export class RemoteBridge {
   }
 
   // ── 내부 ────────────────────────────────────────────────────────────────
+
+  private detachResume(): void {
+    if (this.resumeListener) powerMonitor.off('resume', this.resumeListener)
+    this.resumeListener = null
+  }
 
   private ensureKeystore(): RemoteKeystore {
     this.keystore ??= getRemoteKeystore()

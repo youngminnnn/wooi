@@ -53,8 +53,16 @@ const COMMAND_TIMEOUT_MS = 20_000
 const COMMAND_POLL_MS = 750
 const COMMAND_CT_MAX_BYTES = 64 * 1024
 
+/**
+ * 랩탑 생존 확인 주기. 브로드캐스트에 얹을 수 없다 — 랩탑이 죽으면 브로드캐스트도 멈추므로,
+ * 정확히 알아야 할 순간에 아무 신호도 오지 않는다. 그래서 별도 타이머로 직접 확인한다.
+ */
+const LIVENESS_POLL_MS = 30_000
+
 export interface RelayClientHandlers {
   onStatus: (status: ConnectionStatus) => void
+  /** 랩탑이 마지막으로 heartbeat 를 찍은 시각(ms). 행이 없으면 null. */
+  onLaptopSeen: (seenAt: number | null) => void
   onState: (state: RemoteState | null) => void
   onUpdatedAt: (updatedAt: number | null) => void
   onError: (message: string | null) => void
@@ -92,6 +100,7 @@ export class RelayClient {
   private channel: RealtimeChannel | null = null
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private backgroundTimer: ReturnType<typeof setTimeout> | null = null
+  private livenessTimer: ReturnType<typeof setInterval> | null = null
   private appStateSubscription: { remove: () => void } | null = null
   private reconnectAttempt = 0
   private stopped = false
@@ -126,6 +135,8 @@ export class RelayClient {
       }
       await this.client.realtime.setAuth(token)
       await this.refresh()
+      await this.pollLiveness()
+      this.startLiveness()
       this.subscribe()
       if (this.appStateSubscription === null) {
         this.appStateSubscription = AppState.addEventListener('change', this.handleAppState)
@@ -258,13 +269,18 @@ export class RelayClient {
       if (this.backgroundTimer !== null) clearTimeout(this.backgroundTimer)
       this.backgroundTimer = null
       if (this.channel === null) void this.connect()
-      else void this.refresh().catch(() => this.scheduleReconnect())
+      else {
+        void this.refresh().catch(() => this.scheduleReconnect())
+        void this.pollLiveness()
+        this.startLiveness()
+      }
       return
     }
     if (this.backgroundTimer === null) {
       this.backgroundTimer = setTimeout(() => {
         this.backgroundTimer = null
         void this.dropChannel()
+        this.stopLiveness()
         this.setStatus('offline')
       }, 30_000)
     }
@@ -339,6 +355,31 @@ export class RelayClient {
     if (this.backgroundTimer !== null) clearTimeout(this.backgroundTimer)
     this.reconnectTimer = null
     this.backgroundTimer = null
+    this.stopLiveness()
+  }
+
+  private startLiveness(): void {
+    this.stopLiveness()
+    this.livenessTimer = setInterval(() => {
+      void this.pollLiveness()
+    }, LIVENESS_POLL_MS)
+  }
+
+  private stopLiveness(): void {
+    if (this.livenessTimer !== null) clearInterval(this.livenessTimer)
+    this.livenessTimer = null
+  }
+
+  /** 실패해도 조용히 넘긴다 — 생존 표시가 없다고 화면이 죽을 이유는 없다. */
+  private async pollLiveness(): Promise<void> {
+    const response = await this.client
+      .from('machines')
+      .select('last_seen_at')
+      .eq('id', this.pairing.machineId)
+      .maybeSingle()
+    if (response.error || response.data === null) return
+    const seenAt = Date.parse((response.data as { last_seen_at: string }).last_seen_at)
+    this.handlers.onLaptopSeen(Number.isFinite(seenAt) ? seenAt : null)
   }
 }
 

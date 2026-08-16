@@ -56,6 +56,7 @@ export default function RootLayout(): React.JSX.Element {
       onStatus: useRemoteStore.getState().setStatus,
       onState: useRemoteStore.getState().setState,
       onUpdatedAt: useRemoteStore.getState().setUpdatedAt,
+      onLaptopSeen: useRemoteStore.getState().setLaptopSeenAt,
       onError: useRemoteStore.getState().setLastError,
       onActivity: useRemoteStore.getState().bumpActivity
     })

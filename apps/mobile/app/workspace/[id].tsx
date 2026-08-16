@@ -18,7 +18,8 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import * as LocalAuthentication from 'expo-local-authentication'
 import type { ChatItem, PermissionRequest } from '@shared/types'
 import { workspaceDisplayName } from '@shared/types'
-import { useRemoteStore } from '../../src/state/store'
+import { isLaptopAway, useRemoteStore } from '../../src/state/store'
+import { agoLabel, useNow } from '../../src/state/useNow'
 
 const PAGE_SIZE = 100
 const WATCH_REFRESH_MS = 40_000
@@ -368,6 +369,9 @@ export default function WorkspaceScreen(): React.JSX.Element {
   const workspace = useRemoteStore((store) =>
     store.state?.workspaces.find((item) => item.id === workspaceId)
   )
+  const laptopSeenAt = useRemoteStore((store) => store.laptopSeenAt)
+  const now = useNow()
+  const laptopAway = isLaptopAway(laptopSeenAt, now)
   const permission = useRemoteStore((store) => {
     const pending = store.state?.pendingPermissions.find(
       (item) => isPermissionRequest(item) && item.workspaceId === workspaceId
@@ -509,7 +513,17 @@ export default function WorkspaceScreen(): React.JSX.Element {
             </Pressable>
           ) : <View style={styles.headerSpacer} />}
         </View>
-        {status === 'offline' ? <Text style={styles.offline}>The relay is offline. Queued commands will run when the laptop wakes.</Text> : null}
+        {/* 두 가지는 다른 문제다: 내 신호가 안 나가는 것과, 받을 상대가 없는 것. */}
+        {status === 'offline' ? (
+          <Text style={styles.offline}>
+            This phone is not connected. Anything you send is queued until it reconnects.
+          </Text>
+        ) : laptopAway && laptopSeenAt !== null ? (
+          <Text style={styles.offline}>
+            Your laptop is asleep or offline — last seen {agoLabel(laptopSeenAt, now)}. Anything you
+            send will run when it wakes.
+          </Text>
+        ) : null}
         {error ? <Text style={styles.errorBanner}>{error}</Text> : null}
         <FlatList
           inverted

@@ -4,7 +4,8 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import type { RemoteWorkspace } from '@shared/remote'
 import { workspaceDisplayName } from '@shared/types'
-import { useRemoteStore } from '../src/state/store'
+import { isLaptopAway, useRemoteStore } from '../src/state/store'
+import { agoLabel, useNow } from '../src/state/useNow'
 
 const STATUS_COLORS: Record<string, string> = {
   idle: '#676771',
@@ -62,6 +63,9 @@ export default function WorkspaceListScreen(): React.JSX.Element {
   const router = useRouter()
   const pairing = useRemoteStore((store) => store.pairing)
   const status = useRemoteStore((store) => store.status)
+  const laptopSeenAt = useRemoteStore((store) => store.laptopSeenAt)
+  const now = useNow()
+  const laptopAway = isLaptopAway(laptopSeenAt, now)
   const state = useRemoteStore((store) => store.state)
   const updatedAt = useRemoteStore((store) => store.updatedAt)
   const lastError = useRemoteStore((store) => store.lastError)
@@ -119,6 +123,13 @@ export default function WorkspaceListScreen(): React.JSX.Element {
           <Text style={styles.connectionText}>{status}</Text>
         </View>
       </View>
+      {/* 폰이 끊긴 것과 랩탑이 자는 것을 섞어 말하지 않는다 — 사용자가 할 수 있는 일이 다르다. */}
+      {laptopAway && laptopSeenAt !== null ? (
+        <Text style={styles.banner}>
+          Your laptop is asleep or offline — last seen {agoLabel(laptopSeenAt, now)}. Anything you
+          send will run when it wakes.
+        </Text>
+      ) : null}
       {lastError ? <Text style={styles.banner}>{lastError}</Text> : null}
       <FlatList
         data={workspaces}
