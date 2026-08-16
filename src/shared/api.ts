@@ -223,6 +223,7 @@ export interface WooiApi {
     /** 텍스트(+선택적 붙여넣기 이미지)를 보낸다. 이미지는 base64 로 세션에 직접 전달된다. */
     send(workspaceId: string, text: string, images?: ImageAttachment[]): Promise<void>
     interrupt(workspaceId: string): Promise<void>
+    stopTask(workspaceId: string, taskId: string): Promise<void>
     getHistory(workspaceId: string): Promise<ChatItem[]>
     /**
      * 활성 워크스페이스별 누적 비용(USD). backend 가 보고한 값만 담는다.

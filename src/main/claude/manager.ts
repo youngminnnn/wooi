@@ -498,6 +498,10 @@ export class SessionManager implements AgentBackend {
     this.forceIdle(workspaceId)
   }
 
+  async stopTask(workspaceId: string, taskId: string): Promise<void> {
+    this.sendIfHost({ type: 'stopTask', workspaceId, taskId })
+  }
+
   async setPermissionMode(workspaceId: string, mode: PermissionMode): Promise<void> {
     getStore().update((st) => {
       const w = st.workspaces.find((x) => x.id === workspaceId)
