@@ -1,6 +1,7 @@
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native'
 import { ChevronRight } from 'lucide-react-native'
-import { theme } from '../../theme'
+import { useTheme, useThemedStyles } from '../../state/theme'
+import type { Theme } from '../../theme'
 
 interface SettingsRowProps {
   label: string
@@ -21,6 +22,8 @@ export function SettingsRow({
   disabled = false,
   loading = false
 }: SettingsRowProps): React.JSX.Element {
+  const theme = useTheme()
+  const styles = useThemedStyles(makeStyles)
   return (
     <Pressable
       accessibilityRole={onPress === undefined ? undefined : 'button'}
@@ -46,18 +49,19 @@ export function SettingsRow({
   )
 }
 
-const styles = StyleSheet.create({
-  row: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    minHeight: 48,
-    paddingHorizontal: 16,
-    paddingVertical: 12
-  },
-  pressed: { backgroundColor: theme.surface2 },
-  label: { color: theme.text, flexShrink: 0, fontSize: 14.5 },
-  destructive: { color: theme.danger },
-  disabled: { opacity: 0.55 },
-  trailing: { alignItems: 'center', flex: 1, flexDirection: 'row', gap: 7, justifyContent: 'flex-end' },
-  value: { color: theme.textDim, flexShrink: 1, fontSize: 13, marginLeft: 16, textAlign: 'right' }
-})
+const makeStyles = (theme: Theme) =>
+  StyleSheet.create({
+    row: {
+      alignItems: 'center',
+      flexDirection: 'row',
+      minHeight: 48,
+      paddingHorizontal: 16,
+      paddingVertical: 12
+    },
+    pressed: { backgroundColor: theme.surface2 },
+    label: { color: theme.text, flexShrink: 0, fontSize: 14.5 },
+    destructive: { color: theme.danger },
+    disabled: { opacity: 0.55 },
+    trailing: { alignItems: 'center', flex: 1, flexDirection: 'row', gap: 7, justifyContent: 'flex-end' },
+    value: { color: theme.textDim, flexShrink: 1, fontSize: 13, marginLeft: 16, textAlign: 'right' }
+  })

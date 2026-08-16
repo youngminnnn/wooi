@@ -8,8 +8,15 @@ import { attentionCount } from '../src/notifications/badge'
 import { openPushPayload } from '../src/notifications/payload'
 import { requestPushToken } from '../src/notifications/register'
 import { useRemoteStore } from '../src/state/store'
+import {
+  AppThemeProvider,
+  hydrateThemePreference,
+  useTheme,
+  useThemedStyles,
+  useThemeName
+} from '../src/state/theme'
 import { clearCommandSequence, clearPairing, loadPairing } from '../src/storage/secure'
-import { theme } from '../src/theme'
+import type { Theme } from '../src/theme'
 
 // 배너는 내용이 없다(고정 문구). 소리는 울리되 배지는 **여기서** 건드리지 않는다 —
 // 읽음 계산은 폰이 미러된 상태로 로컬로 하고(notifications/badge.ts), 서버가 준 숫자가 아니다.
@@ -23,8 +30,24 @@ Notifications.setNotificationHandler({
   })
 })
 
+/**
+ * 테마 provider 는 **본체 바깥**에 있어야 한다 — 같은 컴포넌트가 자기가 그린 context 를
+ * 읽을 수는 없으므로, provider 를 두는 컴포넌트와 색을 쓰는 컴포넌트를 나눈다.
+ */
 export default function RootLayout(): React.JSX.Element {
+  return (
+    <AppThemeProvider>
+      <RootShell />
+    </AppThemeProvider>
+  )
+}
+
+function RootShell(): React.JSX.Element {
   const router = useRouter()
+  const theme = useTheme()
+  const styles = useThemedStyles(makeStyles)
+  // 상태바 글자색은 색이 아니라 밝기의 문제다 — 어두운 테마 위에는 밝은 글자, 반대면 반대.
+  const statusBarStyle = useThemeName() === 'dark' ? 'light' : 'dark'
   const pathname = usePathname()
   const client = useRef<RelayClient | null>(null)
   const pushRegistered = useRef(false)
@@ -46,8 +69,10 @@ export default function RootLayout(): React.JSX.Element {
     void Notifications.setBadgeCountAsync(attentionCount(remoteState)).catch(() => undefined)
   }, [remoteState])
 
+  // 페어링과 테마 선호를 **함께** 기다린다. 테마만 늦게 도착하면 첫 화면이 기본값(다크)으로
+  // 한 번 그려졌다가 사용자가 고른 테마로 튄다.
   useEffect(() => {
-    void loadPairing().then((stored) => {
+    void Promise.all([loadPairing(), hydrateThemePreference()]).then(([stored]) => {
       const store = useRemoteStore.getState()
       store.setPairing(stored)
       store.setHydrated(true)
@@ -142,8 +167,8 @@ export default function RootLayout(): React.JSX.Element {
   if (!hydrated) {
     return (
       <View style={styles.loading}>
-        <ActivityIndicator color="#8b7cf6" />
-        <StatusBar style="light" />
+        <ActivityIndicator color={theme.accent} />
+        <StatusBar style={statusBarStyle} />
       </View>
     )
   }
@@ -151,12 +176,13 @@ export default function RootLayout(): React.JSX.Element {
   return (
     <>
       <Stack screenOptions={{ headerShown: false, contentStyle: styles.content }} />
-      <StatusBar style="light" />
+      <StatusBar style={statusBarStyle} />
     </>
   )
 }
 
-const styles = StyleSheet.create({
-  loading: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: theme.bg },
-  content: { backgroundColor: theme.bg }
-})
+const makeStyles = (theme: Theme) =>
+  StyleSheet.create({
+    loading: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: theme.bg },
+    content: { backgroundColor: theme.bg }
+  })

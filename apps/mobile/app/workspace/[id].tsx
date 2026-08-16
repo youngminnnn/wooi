@@ -37,11 +37,12 @@ import {
   PermissionModeFooter,
   WorkspaceStatusBar
 } from '../../src/components/WorkspaceStatusBar'
-import { PR_COLORS } from '../../src/state/prColors'
+import { usePrColors } from '../../src/state/prColors'
 import { isLaptopAway, useRemoteStore } from '../../src/state/store'
 import { agoLabel, untilLabel, useNow } from '../../src/state/useNow'
 import { useDeviceAuthentication } from '../../src/state/useDeviceAuth'
-import { theme } from '../../src/theme'
+import { useTheme, useThemedStyles } from '../../src/state/theme'
+import type { Theme } from '../../src/theme'
 import { buildChatRows, type ChatRowModel, type ToolCardModel } from '../../src/chat/rows'
 
 const PAGE_SIZE = 100
@@ -78,6 +79,7 @@ function formatPermissionInput(request: PermissionRequest): string {
 }
 
 function Diff({ value }: { value: string }): React.JSX.Element {
+  const styles = useThemedStyles(makeStyles)
   return (
     <ScrollView horizontal style={styles.permissionCodeScroll}>
       <View>
@@ -107,6 +109,8 @@ function PermissionCard({
   request: PermissionRequest
   command: NonNullable<ReturnType<typeof useRemoteStore.getState>['command']>
 }): React.JSX.Element {
+  const theme = useTheme()
+  const styles = useThemedStyles(makeStyles)
   const [pending, setPending] = useState<'deny' | 'once' | 'session' | null>(null)
   const responding = pending !== null
   const [responseError, setResponseError] = useState<string | null>(null)
@@ -151,7 +155,7 @@ function PermissionCard({
     <View style={styles.permissionCard}>
       <View style={styles.permissionHeading}>
         <Text style={styles.permissionEyebrow}>PERMISSION REQUIRED</Text>
-        {responding ? <ActivityIndicator color="#8b7cf6" size="small" /> : null}
+        {responding ? <ActivityIndicator color={theme.accent} size="small" /> : null}
       </View>
       <Text style={styles.permissionTitle}>
         {request.title ?? request.displayName ?? 'Approve this action?'}
@@ -310,11 +314,14 @@ const RENDER_CHARS = 8000
 
 function RichText({
   text,
-  color = theme.text
+  color
 }: {
   text: string
   color?: string
 }): React.JSX.Element {
+  const theme = useTheme()
+  const styles = useThemedStyles(makeStyles)
+  const tint = color ?? theme.text
   const [expanded, setExpanded] = useState(false)
   const hidden = expanded ? 0 : Math.max(0, text.length - RENDER_CHARS)
   // 서러게이트 쌍 한가운데서 자르면 이모지가 깨진 글자로 남는다.
@@ -329,7 +336,7 @@ function RichText({
         const fenced = part.startsWith('```') && part.endsWith('```')
         if (!fenced) {
           return (
-            <Text key={index} style={[styles.bodyText, { color }]} selectable>
+            <Text key={index} style={[styles.bodyText, { color: tint }]} selectable>
               {part}
             </Text>
           )
@@ -371,6 +378,8 @@ function Collapsible({
   expandable?: boolean
   children?: React.ReactNode
 }): React.JSX.Element {
+  const theme = useTheme()
+  const styles = useThemedStyles(makeStyles)
   const [open, setOpen] = useState(false)
   const Chevron = open ? ChevronDown : ChevronRight
   const tint = error ? theme.danger : theme.textFaint
@@ -410,6 +419,8 @@ function Collapsible({
 }
 
 function ToolCard({ card }: { card: ToolCardModel }): React.JSX.Element {
+  const theme = useTheme()
+  const styles = useThemedStyles(makeStyles)
   return (
     <Collapsible
       icon={card.use ? Wrench : CornerDownRight}
@@ -429,6 +440,8 @@ function ToolCard({ card }: { card: ToolCardModel }): React.JSX.Element {
 }
 
 function ChatRow({ row }: { row: ChatRowModel }): React.JSX.Element | null {
+  const theme = useTheme()
+  const styles = useThemedStyles(makeStyles)
   if (row.kind === 'tool') return <ToolCard card={row.card} />
   if (row.kind === 'tool-group') {
     return (
@@ -475,13 +488,13 @@ function ChatRow({ row }: { row: ChatRowModel }): React.JSX.Element | null {
     case 'error':
       return (
         <View style={styles.errorCard}>
-          <RichText text={item.text} color="#ef8d8d" />
+          <RichText text={item.text} color={theme.dangerFg} />
         </View>
       )
     case 'system':
       return (
         <View style={styles.compactCard}>
-          <RichText text={item.text} color="#91919a" />
+          <RichText text={item.text} color={theme.textDim} />
         </View>
       )
     case 'unknown':
@@ -536,6 +549,9 @@ function ChatRow({ row }: { row: ChatRowModel }): React.JSX.Element | null {
 }
 
 export default function WorkspaceScreen(): React.JSX.Element {
+  const theme = useTheme()
+  const styles = useThemedStyles(makeStyles)
+  const prColors = usePrColors()
   const params = useLocalSearchParams<{ id: string }>()
   const workspaceId = Array.isArray(params.id) ? params.id[0] : params.id
   const router = useRouter()
@@ -759,7 +775,7 @@ export default function WorkspaceScreen(): React.JSX.Element {
             </View>
             {workspace?.pr ? (
               <Text
-                style={[styles.headerPr, { color: PR_COLORS[workspace.pr.state] ?? theme.textDim }]}
+                style={[styles.headerPr, { color: prColors[workspace.pr.state] ?? theme.textDim }]}
                 numberOfLines={1}
               >
                 #{workspace.pr.number} · {workspace.pr.label}
@@ -800,7 +816,7 @@ export default function WorkspaceScreen(): React.JSX.Element {
           contentContainerStyle={styles.list}
           onEndReached={() => void loadOlder()}
           onEndReachedThreshold={0.3}
-          ListFooterComponent={loadingOlder ? <ActivityIndicator color="#8b7cf6" /> : null}
+          ListFooterComponent={loadingOlder ? <ActivityIndicator color={theme.accent} /> : null}
           ListEmptyComponent={
             loading ? (
               <ActivityIndicator style={styles.loading} color={theme.accent} />
@@ -829,7 +845,7 @@ export default function WorkspaceScreen(): React.JSX.Element {
               multiline
               maxLength={32 * 1024}
               placeholder="Follow up…"
-              placeholderTextColor="#66666f"
+              placeholderTextColor={theme.textFaint}
             />
             <Pressable
               style={[styles.sendButton, (sending || text.trim().length === 0) && styles.disabled]}
@@ -849,223 +865,224 @@ export default function WorkspaceScreen(): React.JSX.Element {
   )
 }
 
-const styles = StyleSheet.create({
-  screen: { backgroundColor: theme.bg, flex: 1 },
-  header: {
-    alignItems: 'flex-start',
-    borderBottomColor: theme.border,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    flexDirection: 'row',
-    minHeight: 54,
-    paddingBottom: 10,
-    paddingHorizontal: 14,
-    paddingTop: 8
-  },
-  back: { color: theme.accent, fontSize: 15, marginTop: 13, width: 68 },
-  headerTitle: { alignItems: 'center', flex: 1 },
-  headerRepo: { color: theme.textDim, fontSize: 10, fontWeight: '700', letterSpacing: 0.8 },
-  headerMetaLine: { alignItems: 'center', flexDirection: 'row', gap: 5, marginTop: 2 },
-  headerMeta: { color: theme.textDim, fontSize: 11 },
-  headerPr: { fontSize: 11, marginTop: 2 },
-  headerLimit: { color: theme.warning, fontSize: 11, marginTop: 2 },
-  title: { color: theme.text, fontSize: 15, fontWeight: '600', maxWidth: '100%' },
-  connection: { color: theme.textDim, fontSize: 10, marginTop: 2, textTransform: 'capitalize' },
-  headerSpacer: { width: 68 },
-  stopButton: {
-    alignItems: 'center',
-    borderColor: 'rgba(255,100,103,0.42)',
-    borderRadius: 6,
-    borderWidth: 1,
-    marginTop: 9,
-    paddingVertical: 6,
-    width: 68
-  },
-  stopText: { color: theme.danger, fontSize: 12, fontWeight: '600' },
-  offline: {
-    backgroundColor: theme.border,
-    color: theme.textMuted,
-    fontSize: 11,
-    lineHeight: 16,
-    paddingHorizontal: 14,
-    paddingVertical: 7
-  },
-  errorBanner: {
-    backgroundColor: '#2a1719',
-    color: '#ef8d8d',
-    fontSize: 12,
-    lineHeight: 17,
-    paddingHorizontal: 14,
-    paddingVertical: 8
-  },
-  list: { paddingHorizontal: 14, paddingVertical: 12 },
-  message: {
-    borderBottomColor: theme.border,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    paddingVertical: 14
-  },
-  userMessage: {
-    backgroundColor: theme.surface,
-    borderRadius: 7,
-    marginVertical: 5,
-    paddingHorizontal: 11
-  },
-  label: {
-    color: theme.textDim,
-    fontSize: 9,
-    fontWeight: '700',
-    letterSpacing: 1,
-    marginBottom: 6
-  },
-  bodyText: { fontSize: 14, lineHeight: 21 },
-  moreButton: {
-    color: theme.accent,
-    fontSize: 12,
-    fontWeight: '600',
-    paddingVertical: 8
-  },
-  compactCard: {
-    backgroundColor: theme.bg2,
-    borderColor: theme.border,
-    borderRadius: 6,
-    borderWidth: StyleSheet.hairlineWidth,
-    marginVertical: 3,
-    paddingHorizontal: 10,
-    paddingVertical: 7
-  },
-  cardHead: { alignItems: 'center', flexDirection: 'row', gap: 8 },
-  cardTitle: { color: theme.textDim, flex: 1, fontSize: 12, fontWeight: '600' },
-  cardSubtitle: { color: theme.textFaint, fontSize: 11, marginLeft: 21, marginTop: 4 },
-  groupBody: { marginTop: 4 },
-  truncated: { color: theme.textFaint, fontSize: 10, marginTop: 6 },
-  codeScroll: { backgroundColor: theme.bg, borderRadius: 5, marginVertical: 7, padding: 10 },
-  code: {
-    color: theme.textMuted,
-    fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace' }),
-    fontSize: 12,
-    lineHeight: 18
-  },
-  footer: {
-    borderBottomColor: theme.border,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    color: theme.textDim,
-    fontSize: 10,
-    paddingVertical: 7,
-    textAlign: 'center'
-  },
-  errorText: { color: '#ef8d8d' },
-  errorCard: {
-    backgroundColor: '#251719',
-    borderColor: '#5c3036',
-    borderRadius: 6,
-    borderWidth: 1,
-    marginVertical: 4,
-    padding: 10
-  },
-  loading: { paddingVertical: 40 },
-  empty: { color: theme.textDim, paddingVertical: 40, textAlign: 'center' },
-  permissionCard: {
-    backgroundColor: theme.surface,
-    borderColor: theme.accentStrong,
-    borderTopWidth: 2,
-    padding: 12
-  },
-  permissionHeading: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'space-between'
-  },
-  permissionEyebrow: { color: theme.accent, fontSize: 10, fontWeight: '800', letterSpacing: 1 },
-  permissionTitle: {
-    color: theme.text,
-    fontSize: 15,
-    fontWeight: '600',
-    lineHeight: 20,
-    marginTop: 7
-  },
-  permissionTool: { color: theme.textDim, fontSize: 11, marginTop: 3 },
-  permissionSubstance: {
-    backgroundColor: theme.bg,
-    borderColor: theme.surface2,
-    borderRadius: 5,
-    borderWidth: 1,
-    marginTop: 9,
-    maxHeight: 150
-  },
-  permissionTextScroll: { maxHeight: 145, padding: 9 },
-  permissionCodeScroll: { maxHeight: 145, paddingVertical: 7 },
-  permissionCode: {
-    color: theme.textMuted,
-    fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace' }),
-    fontSize: 11,
-    lineHeight: 17
-  },
-  diffLine: { paddingHorizontal: 9 },
-  diffAdded: { backgroundColor: '#14251c' },
-  diffRemoved: { backgroundColor: '#2b171a' },
-  permissionError: { color: '#ef8d8d', fontSize: 11, lineHeight: 15, marginTop: 8 },
-  permissionScope: { color: theme.textFaint, fontSize: 11, lineHeight: 15, marginTop: 10 },
-  permissionActions: { flexDirection: 'row', gap: 8, marginTop: 8 },
-  permissionButton: {
-    alignItems: 'center',
-    borderColor: theme.border2,
-    borderRadius: 8,
-    borderWidth: 1,
-    flex: 1,
-    justifyContent: 'center',
-    minHeight: 44,
-    paddingHorizontal: 5
-  },
-  denyButtonText: { color: theme.textMuted, fontSize: 12, fontWeight: '600', textAlign: 'center' },
-  sessionButton: { borderColor: 'rgba(255,185,0,0.35)' },
-  sessionButtonText: { color: theme.warning, fontSize: 12, fontWeight: '600', textAlign: 'center' },
-  allowButton: { backgroundColor: theme.warning, borderColor: theme.warning },
-  allowButtonText: { color: theme.bg, fontSize: 13, fontWeight: '700', textAlign: 'center' },
-  ruleBox: {
-    backgroundColor: theme.bg3,
-    borderRadius: 4,
-    marginTop: 8,
-    paddingHorizontal: 8,
-    paddingVertical: 6
-  },
-  ruleLabel: { color: theme.textDim, fontSize: 8, fontWeight: '700', letterSpacing: 0.8 },
-  permissionRule: {
-    color: theme.textMuted,
-    fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace' }),
-    fontSize: 10,
-    marginTop: 3
-  },
-  dock: {
-    borderTopColor: theme.border,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    paddingTop: 8
-  },
-  composer: {
-    alignItems: 'flex-end',
-    flexDirection: 'row',
-    gap: 9,
-    paddingBottom: 10,
-    paddingHorizontal: 10
-  },
-  input: {
-    backgroundColor: theme.bg2,
-    borderColor: theme.surface2,
-    borderRadius: 8,
-    borderWidth: 1,
-    color: theme.text,
-    flex: 1,
-    fontSize: 14,
-    maxHeight: 120,
-    minHeight: 42,
-    paddingHorizontal: 11,
-    paddingVertical: 10
-  },
-  sendButton: {
-    backgroundColor: theme.accentStrong,
-    borderRadius: 7,
-    justifyContent: 'center',
-    minHeight: 42,
-    paddingHorizontal: 14
-  },
-  sendText: { color: '#ffffff', fontSize: 13, fontWeight: '700' },
-  disabled: { opacity: 0.45 }
-})
+const makeStyles = (theme: Theme) =>
+  StyleSheet.create({
+    screen: { backgroundColor: theme.bg, flex: 1 },
+    header: {
+      alignItems: 'flex-start',
+      borderBottomColor: theme.border,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      flexDirection: 'row',
+      minHeight: 54,
+      paddingBottom: 10,
+      paddingHorizontal: 14,
+      paddingTop: 8
+    },
+    back: { color: theme.accent, fontSize: 15, marginTop: 13, width: 68 },
+    headerTitle: { alignItems: 'center', flex: 1 },
+    headerRepo: { color: theme.textDim, fontSize: 10, fontWeight: '700', letterSpacing: 0.8 },
+    headerMetaLine: { alignItems: 'center', flexDirection: 'row', gap: 5, marginTop: 2 },
+    headerMeta: { color: theme.textDim, fontSize: 11 },
+    headerPr: { fontSize: 11, marginTop: 2 },
+    headerLimit: { color: theme.warningFg, fontSize: 11, marginTop: 2 },
+    title: { color: theme.text, fontSize: 15, fontWeight: '600', maxWidth: '100%' },
+    connection: { color: theme.textDim, fontSize: 10, marginTop: 2, textTransform: 'capitalize' },
+    headerSpacer: { width: 68 },
+    stopButton: {
+      alignItems: 'center',
+      borderColor: theme.dangerBorder,
+      borderRadius: 6,
+      borderWidth: 1,
+      marginTop: 9,
+      paddingVertical: 6,
+      width: 68
+    },
+    stopText: { color: theme.danger, fontSize: 12, fontWeight: '600' },
+    offline: {
+      backgroundColor: theme.border,
+      color: theme.textMuted,
+      fontSize: 11,
+      lineHeight: 16,
+      paddingHorizontal: 14,
+      paddingVertical: 7
+    },
+    errorBanner: {
+      backgroundColor: theme.dangerSurface,
+      color: theme.dangerFg,
+      fontSize: 12,
+      lineHeight: 17,
+      paddingHorizontal: 14,
+      paddingVertical: 8
+    },
+    list: { paddingHorizontal: 14, paddingVertical: 12 },
+    message: {
+      borderBottomColor: theme.border,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      paddingVertical: 14
+    },
+    userMessage: {
+      backgroundColor: theme.surface,
+      borderRadius: 7,
+      marginVertical: 5,
+      paddingHorizontal: 11
+    },
+    label: {
+      color: theme.textDim,
+      fontSize: 9,
+      fontWeight: '700',
+      letterSpacing: 1,
+      marginBottom: 6
+    },
+    bodyText: { fontSize: 14, lineHeight: 21 },
+    moreButton: {
+      color: theme.accent,
+      fontSize: 12,
+      fontWeight: '600',
+      paddingVertical: 8
+    },
+    compactCard: {
+      backgroundColor: theme.bg2,
+      borderColor: theme.border,
+      borderRadius: 6,
+      borderWidth: StyleSheet.hairlineWidth,
+      marginVertical: 3,
+      paddingHorizontal: 10,
+      paddingVertical: 7
+    },
+    cardHead: { alignItems: 'center', flexDirection: 'row', gap: 8 },
+    cardTitle: { color: theme.textDim, flex: 1, fontSize: 12, fontWeight: '600' },
+    cardSubtitle: { color: theme.textFaint, fontSize: 11, marginLeft: 21, marginTop: 4 },
+    groupBody: { marginTop: 4 },
+    truncated: { color: theme.textFaint, fontSize: 10, marginTop: 6 },
+    codeScroll: { backgroundColor: theme.bg, borderRadius: 5, marginVertical: 7, padding: 10 },
+    code: {
+      color: theme.textMuted,
+      fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace' }),
+      fontSize: 12,
+      lineHeight: 18
+    },
+    footer: {
+      borderBottomColor: theme.border,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      color: theme.textDim,
+      fontSize: 10,
+      paddingVertical: 7,
+      textAlign: 'center'
+    },
+    errorText: { color: theme.dangerFg },
+    errorCard: {
+      backgroundColor: theme.dangerSurface,
+      borderColor: theme.dangerBorder,
+      borderRadius: 6,
+      borderWidth: 1,
+      marginVertical: 4,
+      padding: 10
+    },
+    loading: { paddingVertical: 40 },
+    empty: { color: theme.textDim, paddingVertical: 40, textAlign: 'center' },
+    permissionCard: {
+      backgroundColor: theme.surface,
+      borderColor: theme.accentStrong,
+      borderTopWidth: 2,
+      padding: 12
+    },
+    permissionHeading: {
+      alignItems: 'center',
+      flexDirection: 'row',
+      justifyContent: 'space-between'
+    },
+    permissionEyebrow: { color: theme.accent, fontSize: 10, fontWeight: '800', letterSpacing: 1 },
+    permissionTitle: {
+      color: theme.text,
+      fontSize: 15,
+      fontWeight: '600',
+      lineHeight: 20,
+      marginTop: 7
+    },
+    permissionTool: { color: theme.textDim, fontSize: 11, marginTop: 3 },
+    permissionSubstance: {
+      backgroundColor: theme.bg,
+      borderColor: theme.surface2,
+      borderRadius: 5,
+      borderWidth: 1,
+      marginTop: 9,
+      maxHeight: 150
+    },
+    permissionTextScroll: { maxHeight: 145, padding: 9 },
+    permissionCodeScroll: { maxHeight: 145, paddingVertical: 7 },
+    permissionCode: {
+      color: theme.textMuted,
+      fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace' }),
+      fontSize: 11,
+      lineHeight: 17
+    },
+    diffLine: { paddingHorizontal: 9 },
+    diffAdded: { backgroundColor: theme.diffAddSurface },
+    diffRemoved: { backgroundColor: theme.diffRemoveSurface },
+    permissionError: { color: theme.dangerFg, fontSize: 11, lineHeight: 15, marginTop: 8 },
+    permissionScope: { color: theme.textFaint, fontSize: 11, lineHeight: 15, marginTop: 10 },
+    permissionActions: { flexDirection: 'row', gap: 8, marginTop: 8 },
+    permissionButton: {
+      alignItems: 'center',
+      borderColor: theme.border2,
+      borderRadius: 8,
+      borderWidth: 1,
+      flex: 1,
+      justifyContent: 'center',
+      minHeight: 44,
+      paddingHorizontal: 5
+    },
+    denyButtonText: { color: theme.textMuted, fontSize: 12, fontWeight: '600', textAlign: 'center' },
+    sessionButton: { borderColor: theme.warningBorder },
+    sessionButtonText: { color: theme.warningFg, fontSize: 12, fontWeight: '600', textAlign: 'center' },
+    allowButton: { backgroundColor: theme.warning, borderColor: theme.warning },
+    allowButtonText: { color: theme.onWarning, fontSize: 13, fontWeight: '700', textAlign: 'center' },
+    ruleBox: {
+      backgroundColor: theme.bg3,
+      borderRadius: 4,
+      marginTop: 8,
+      paddingHorizontal: 8,
+      paddingVertical: 6
+    },
+    ruleLabel: { color: theme.textDim, fontSize: 8, fontWeight: '700', letterSpacing: 0.8 },
+    permissionRule: {
+      color: theme.textMuted,
+      fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace' }),
+      fontSize: 10,
+      marginTop: 3
+    },
+    dock: {
+      borderTopColor: theme.border,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      paddingTop: 8
+    },
+    composer: {
+      alignItems: 'flex-end',
+      flexDirection: 'row',
+      gap: 9,
+      paddingBottom: 10,
+      paddingHorizontal: 10
+    },
+    input: {
+      backgroundColor: theme.bg2,
+      borderColor: theme.surface2,
+      borderRadius: 8,
+      borderWidth: 1,
+      color: theme.text,
+      flex: 1,
+      fontSize: 14,
+      maxHeight: 120,
+      minHeight: 42,
+      paddingHorizontal: 11,
+      paddingVertical: 10
+    },
+    sendButton: {
+      backgroundColor: theme.accentStrong,
+      borderRadius: 7,
+      justifyContent: 'center',
+      minHeight: 42,
+      paddingHorizontal: 14
+    },
+    sendText: { color: theme.onAccentStrong, fontSize: 13, fontWeight: '700' },
+    disabled: { opacity: 0.45 }
+  })

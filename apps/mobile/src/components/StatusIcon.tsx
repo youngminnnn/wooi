@@ -1,8 +1,8 @@
 import { ActivityIndicator, View } from 'react-native'
 import { AlertTriangle, GitBranch, Hourglass, ShieldQuestion } from 'lucide-react-native'
 import type { RemoteWorkspace } from '@shared/remote'
-import { PR_COLORS } from '../state/prColors'
-import { theme } from '../theme'
+import { usePrColors } from '../state/prColors'
+import { useTheme } from '../state/theme'
 
 /**
  * 워크스페이스 한 줄의 상태 표시.
@@ -21,6 +21,9 @@ export function StatusIcon({
   workspace: RemoteWorkspace
   hasLimit: boolean
 }): React.JSX.Element {
+  const theme = useTheme()
+  const prColors = usePrColors()
+
   if (workspace.attention === 'permission') {
     return <ShieldQuestion size={15} color={theme.accent} />
   }
@@ -28,15 +31,16 @@ export function StatusIcon({
     // 도는 것은 도는 것으로 보여야 한다 — 정지 아이콘은 "지금 일어나는 중"을 말하지 못한다.
     return <ActivityIndicator size="small" color={theme.info} />
   }
-  if (hasLimit) return <Hourglass size={14} color={theme.warning} />
+  if (hasLimit) return <Hourglass size={14} color={theme.warningFg} />
   if (workspace.status === 'error') return <AlertTriangle size={14} color={theme.danger} />
 
   // 남은 것은 idle 이다. PR 이 있으면 그 상태를 점 색으로 말하고, 없으면 조용한 점 하나.
-  const color = workspace.pr ? (PR_COLORS[workspace.pr.state] ?? theme.textFaint) : theme.textFaint
+  const color = workspace.pr ? (prColors[workspace.pr.state] ?? theme.textFaint) : theme.textFaint
   return <View style={{ backgroundColor: color, borderRadius: 5, height: 9, width: 9 }} />
 }
 
 /** 브랜치 한 줄 앞의 아이콘. 데스크톱 사이드바가 브랜치 이름 앞에 두는 것과 같다. */
 export function BranchIcon(): React.JSX.Element {
+  const theme = useTheme()
   return <GitBranch size={11} color={theme.textDim} />
 }

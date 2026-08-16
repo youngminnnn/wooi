@@ -1,7 +1,8 @@
 import { StyleSheet, Text, View } from 'react-native'
 import type { RemotePlanWindow } from '@shared/remote'
 import { untilLabel } from '../../state/useNow'
-import { theme } from '../../theme'
+import { useTheme, useThemedStyles } from '../../state/theme'
+import type { Theme } from '../../theme'
 
 /**
  * 사용률이 이 값을 넘으면 경고색으로 바꾼다(%). 데스크톱 Overview 의 usedTone 과 같은 두 단계다 —
@@ -10,7 +11,7 @@ import { theme } from '../../theme'
 const WARNING_PCT = 75
 const DANGER_PCT = 90
 
-function barColor(usedPct: number): string {
+function barColor(theme: Theme, usedPct: number): string {
   if (usedPct >= DANGER_PCT) return theme.danger
   if (usedPct >= WARNING_PCT) return theme.warning
   return theme.accent
@@ -27,6 +28,8 @@ export function UsageRow({
   usage: RemotePlanWindow
   now: number
 }): React.JSX.Element {
+  const theme = useTheme()
+  const styles = useThemedStyles(makeStyles)
   // 이미 지난 리셋 시각은 곧 갱신될 값이라 굳이 보여 주지 않는다(데스크톱 resetLabel 과 같은 규칙).
   const resets =
     usage.resetsAt !== null && usage.resetsAt > now ? untilLabel(usage.resetsAt, now) : null
@@ -39,7 +42,7 @@ export function UsageRow({
         <View
           style={[
             styles.fill,
-            { backgroundColor: barColor(usage.usedPct), width: `${usage.usedPct}%` }
+            { backgroundColor: barColor(theme, usage.usedPct), width: `${usage.usedPct}%` }
           ]}
         />
       </View>
@@ -49,30 +52,31 @@ export function UsageRow({
   )
 }
 
-const styles = StyleSheet.create({
-  row: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 10,
-    minHeight: 48,
-    paddingHorizontal: 16,
-    paddingVertical: 12
-  },
-  label: { color: theme.text, fontSize: 14.5, width: 92 },
-  track: {
-    backgroundColor: theme.surface3,
-    borderRadius: 3,
-    flex: 1,
-    height: 5,
-    overflow: 'hidden'
-  },
-  fill: { borderRadius: 3, height: '100%' },
-  percent: {
-    color: theme.textMuted,
-    fontSize: 13,
-    fontVariant: ['tabular-nums'],
-    textAlign: 'right',
-    width: 36
-  },
-  reset: { color: theme.textFaint, fontSize: 11, textAlign: 'right', width: 46 }
-})
+const makeStyles = (theme: Theme) =>
+  StyleSheet.create({
+    row: {
+      alignItems: 'center',
+      flexDirection: 'row',
+      gap: 10,
+      minHeight: 48,
+      paddingHorizontal: 16,
+      paddingVertical: 12
+    },
+    label: { color: theme.text, fontSize: 14.5, width: 92 },
+    track: {
+      backgroundColor: theme.surface3,
+      borderRadius: 3,
+      flex: 1,
+      height: 5,
+      overflow: 'hidden'
+    },
+    fill: { borderRadius: 3, height: '100%' },
+    percent: {
+      color: theme.textMuted,
+      fontSize: 13,
+      fontVariant: ['tabular-nums'],
+      textAlign: 'right',
+      width: 36
+    },
+    reset: { color: theme.textFaint, fontSize: 11, textAlign: 'right', width: 46 }
+  })
