@@ -20,14 +20,27 @@ export const MIRROR_DEBOUNCE_MS = 400
  * 아니므로(마찰이 아니라 방어가 사라진다) 모드를 늘릴 때 이 함수를 같이 본다.
  */
 export function actsWithoutAsking(backend: AgentBackendId, mode: PermissionMode): boolean {
-  // 읽기 전용은 애초에 아무것도 실행하지 못한다.
-  if (mode === 'plan' || mode === 'readOnly') return false
-  // 분류기가 대신 승인하거나(auto), 승인 자체가 없다(fullAccess).
-  if (mode === 'auto' || mode === 'fullAccess') return true
-  // 파일 편집이 프롬프트 없이 그대로 적용된다.
-  if (mode === 'acceptEdits') return true
-  // 'default' 만 남는다 — 여기서 백엔드가 갈린다.
-  return backend === 'codex'
+  switch (mode) {
+    // 읽기 전용은 애초에 아무것도 실행하지 못한다.
+    case 'plan':
+    case 'readOnly':
+      return false
+    // 분류기가 대신 승인하거나(auto), 승인 자체가 없다(fullAccess).
+    case 'auto':
+    case 'fullAccess':
+      return true
+    // 파일 편집이 프롬프트 없이 그대로 적용된다.
+    case 'acceptEdits':
+      return true
+    // 이름이 "승인을 묻는다"지만 **워크스페이스 밖으로 나갈 때만** 묻는다 — 안에서는 그냥
+    // 편집하고 실행한다. Codex 전용 모드다.
+    case 'askForApproval':
+      return true
+    // 여기서 백엔드가 갈린다. Claude 는 도구를 쓸 때마다 묻고, Codex 는 워크스페이스 안에서
+    // 묻지 않는다.
+    case 'default':
+      return backend === 'codex'
+  }
 }
 
 /**

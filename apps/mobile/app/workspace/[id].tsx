@@ -334,6 +334,17 @@ function ChatRow({ item }: { item: ChatItem }): React.JSX.Element {
       return <Collapsible title={`${item.name} · ${item.status}`} text={item.summary ?? item.description} error={item.status === 'failed'} />
     case 'handoff':
       return <Collapsible title={`Handoff · ${item.childName}`} text={item.summary} error={item.status === 'blocked'} />
+    case 'compaction':
+      return (
+        <Text style={styles.footer}>
+          Conversation compacted{item.trigger === 'auto' ? ' automatically' : ''}
+        </Text>
+      )
+    default:
+      // 랩탑이 더 새 버전이면 이 앱이 모르는 종류가 온다. 조용히 버리면 대화에 구멍이 난
+      // 것을 사용자가 알 방법이 없으므로, 자리만이라도 남긴다 — 데스크톱의 'unknown' 카드가
+      // 같은 이유로 존재한다.
+      return <Text style={styles.footer}>Unsupported item — open this workspace on your laptop</Text>
   }
 }
 

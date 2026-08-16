@@ -212,7 +212,8 @@ describe('StateMirror', () => {
       url: 'https://example/pr/12',
       title: 'Fix login',
       state: 'approved',
-      label: 'Ready to merge'
+      label: 'Ready to merge',
+      needsBaseUpdate: false
     })
     // 제목·URL 은 싣지 않는다 — 색과 한 줄 표시에 필요한 것만 릴레이를 지난다.
     expect(projectPr('ws-open')).toEqual({ number: 12, state: 'approved', label: 'Ready to merge' })
@@ -225,7 +226,7 @@ describe('StateMirror', () => {
     // 스스로 실행하는 모드는 전부 같은 무게(경고)로 보여야 한다.
     expect(projectPermissionModeFooter('codex', 'default')).toEqual({
       symbol: '⏵⏵',
-      text: 'auto mode on',
+      text: 'auto-review on',
       tone: 'caution'
     })
     expect(projectPermissionModeFooter('claude', 'acceptEdits')?.tone).toBe('caution')
@@ -236,7 +237,8 @@ describe('StateMirror', () => {
       text: 'plan mode on',
       tone: 'readOnly'
     })
-    expect(projectPermissionModeFooter('codex', 'readOnly')?.tone).toBe('readOnly')
+    // 그 백엔드에 없는 모드는 띄우지 않는다(readOnly 는 Claude 쪽 값이다).
+    expect(projectPermissionModeFooter('codex', 'readOnly')).toBeNull()
     // 그 백엔드에 없는 모드는 띄우지 않는다 — 지어내는 것보다 비우는 편이 정직하다.
     expect(projectPermissionModeFooter('claude', 'fullAccess')).toBeNull()
   })
@@ -260,6 +262,8 @@ describe('StateMirror', () => {
     // 읽기 전용은 실행 자체가 없다.
     expect(actsWithoutAsking('claude', 'plan')).toBe(false)
     expect(actsWithoutAsking('codex', 'readOnly')).toBe(false)
+    // 이름과 달리 워크스페이스 안에서는 묻지 않는다 — "밖으로 나갈 때만" 묻는 모드다.
+    expect(actsWithoutAsking('codex', 'askForApproval')).toBe(true)
     // 편집이 그대로 적용되거나, 승인이 자동이거나, 아예 없다.
     expect(actsWithoutAsking('claude', 'acceptEdits')).toBe(true)
     expect(actsWithoutAsking('claude', 'auto')).toBe(true)
