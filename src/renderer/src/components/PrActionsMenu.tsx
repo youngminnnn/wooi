@@ -13,6 +13,8 @@ import { useStore } from '../store'
 import { cascadeAffectedBranches } from '@shared/types'
 import type { PrMergeMethod, PrStatus } from '@shared/types'
 import PrEditModal from './PrEditModal'
+import HeaderChip from './HeaderChip'
+import MenuPanel, { menuItemCls } from './MenuPanel'
 
 /**
  * PR 라이프사이클 액션 메뉴(merge / close / reopen / ready-for-review).
@@ -134,31 +136,25 @@ export default function PrActionsMenu({
       ? 'Resolve merge conflicts before merging'
       : undefined
 
-  const itemCls =
-    'flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-neutral-200 hover:bg-[var(--surface-2)] disabled:opacity-40 disabled:hover:bg-transparent'
-
   return (
     <div className="relative" ref={ref}>
-      <button
+      <HeaderChip
+        variant="square"
         onClick={() => setOpen((v) => !v)}
         disabled={busy}
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label={`Pull request #${pr.number} actions`}
-        className="ml-0.5 grid h-6 w-6 place-items-center rounded-md border border-[var(--border)] bg-[var(--surface)] text-neutral-300 hover:border-[var(--border-strong)] focus-visible:outline-2 focus-visible:outline-[var(--accent-500)]"
         title="Pull request actions"
       >
         {busy ? <Loader2 size={12} className="animate-spin" /> : <ChevronDown size={12} />}
-      </button>
+      </HeaderChip>
       {open && (
-        <div
-          role="menu"
-          className="absolute right-0 z-30 mt-1 w-56 overflow-hidden rounded-lg border border-[var(--border-strong)] bg-[var(--surface)] py-1 shadow-xl"
-        >
+        <MenuPanel role="menu" className="absolute right-0 z-30 mt-1 w-56 overflow-hidden">
           {/* 제목·본문 편집은 열린 PR 이든 닫힌 PR 이든 GitHub 이 허용한다 — 상태로 막지 않는다. */}
           <button
             role="menuitem"
-            className={itemCls}
+            className={menuItemCls}
             onClick={() =>
               gated('Editing a pull request needs GitHub.', async () => setEditing(true))
             }
@@ -170,7 +166,7 @@ export default function PrActionsMenu({
           {isClosed ? (
             <button
               role="menuitem"
-              className={itemCls}
+              className={menuItemCls}
               onClick={() =>
                 gated('Reopening a pull request needs GitHub.', () =>
                   run('Reopen', () => window.api.pr.reopen(workspaceId), `Reopened #${pr.number}.`)
@@ -185,7 +181,7 @@ export default function PrActionsMenu({
               {isDraft && (
                 <button
                   role="menuitem"
-                  className={itemCls}
+                  className={menuItemCls}
                   onClick={() =>
                     gated('Marking a pull request ready needs GitHub.', () =>
                       run(
@@ -202,7 +198,7 @@ export default function PrActionsMenu({
               )}
               <button
                 role="menuitem"
-                className={itemCls}
+                className={menuItemCls}
                 disabled={mergeDisabled}
                 title={mergeTitle}
                 onClick={() => gated(MERGE_REASON, () => merge('squash'))}
@@ -212,7 +208,7 @@ export default function PrActionsMenu({
               </button>
               <button
                 role="menuitem"
-                className={itemCls}
+                className={menuItemCls}
                 disabled={mergeDisabled}
                 title={mergeTitle}
                 onClick={() => gated(MERGE_REASON, () => merge('merge'))}
@@ -222,7 +218,7 @@ export default function PrActionsMenu({
               </button>
               <button
                 role="menuitem"
-                className={itemCls}
+                className={menuItemCls}
                 disabled={mergeDisabled}
                 title={mergeTitle}
                 onClick={() => gated(MERGE_REASON, () => merge('rebase'))}
@@ -233,7 +229,7 @@ export default function PrActionsMenu({
               <div className="my-1 border-t border-[var(--border)]" />
               <button
                 role="menuitem"
-                className={itemCls}
+                className={menuItemCls}
                 onClick={() => gated('Closing a pull request needs GitHub.', closePr)}
               >
                 <GitPullRequestClosed size={13} className="text-neutral-400" />
@@ -244,7 +240,7 @@ export default function PrActionsMenu({
           <div className="my-1 border-t border-[var(--border)]" />
           <button
             role="menuitem"
-            className={itemCls}
+            className={menuItemCls}
             onClick={() => {
               setOpen(false)
               void window.api.openExternal(pr.url)
@@ -253,7 +249,7 @@ export default function PrActionsMenu({
             <ExternalLink size={13} className="text-neutral-400" />
             Open in browser
           </button>
-        </div>
+        </MenuPanel>
       )}
       {editing && (
         <PrEditModal workspaceId={workspaceId} pr={pr} onClose={() => setEditing(false)} />

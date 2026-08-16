@@ -28,7 +28,7 @@ export default function Toaster(): React.JSX.Element {
                       a.run()
                       dismiss(t.id)
                     }}
-                    className="rounded-md border border-[var(--border-strong)] bg-[var(--surface-2)] px-2 py-1 text-xs font-medium text-neutral-100 hover:border-[var(--accent-500)] focus-visible:outline-2 focus-visible:outline-[var(--accent-500)]"
+                    className="rounded-md border border-[var(--border-strong)] bg-[var(--surface-2)] px-2 py-1 text-xs font-medium text-neutral-100 hover:border-[var(--accent-500)]"
                   >
                     {a.label}
                   </button>

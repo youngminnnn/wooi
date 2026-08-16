@@ -44,6 +44,7 @@ import ArchiveSuggestBanner from './ArchiveSuggestBanner'
 import PeerInboxBanner from './PeerInboxBanner'
 import ExportMenu from './ExportMenu'
 import HeaderButton from './HeaderButton'
+import HeaderChip from './HeaderChip'
 import BaseSyncControl from './BaseSyncControl'
 import { AgentBackendMark, GithubMark } from './BrandIcons'
 import { useGithubDisconnected } from '../lib/github'
@@ -376,8 +377,8 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
             >
               <RefreshCw size={10} className={refreshing ? 'animate-spin' : ''} />
             </button>
-            {/* 충돌 중에는 해결/Abort 안내가 base 동기화 컨트롤 자리를 그대로 차지한다. */}
-            {git?.conflicted ? (
+            {/* 충돌은 액션 묶음과 떨어져 있어도 현재 작업 트리 상태를 설명하므로 메타데이터에 남긴다. */}
+            {git?.conflicted && (
               <span className="flex items-center gap-1.5">
                 <span
                   className="flex items-center gap-1 text-[var(--danger-400)]"
@@ -394,16 +395,6 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
                   abort
                 </button>
               </span>
-            ) : (
-              git && (
-                <BaseSyncControl
-                  workspace={workspace}
-                  git={git}
-                  prState={pr?.state}
-                  prNeedsBaseUpdate={pr?.needsBaseUpdate}
-                  refresh={refresh}
-                />
-              )
             )}
             {setupFailed && (
               <button
@@ -485,14 +476,26 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
             <PanelRight size={15} />
           </HeaderButton>
 
+          <div className="workspace-header-basesync flex items-center gap-1.5 pl-2 ml-0.5 border-l border-[var(--border)] empty:hidden empty:border-l-0 empty:pl-0">
+            {git && (
+              <BaseSyncControl
+                workspace={workspace}
+                git={git}
+                prState={pr?.state}
+                prNeedsBaseUpdate={pr?.needsBaseUpdate}
+                refresh={refresh}
+              />
+            )}
+          </div>
+
           {/* Stack 조망·전환: 에이전트나 모델 A 로 만들어진 스택을 관리한다(우측 패널과 무관). */}
-          <div className="workspace-header-stack flex items-center gap-1 pl-2 ml-0.5 border-l border-[var(--border)] empty:hidden empty:border-l-0 empty:pl-0">
+          <div className="workspace-header-stack flex items-center gap-1.5 pl-2 ml-0.5 border-l border-[var(--border)] empty:hidden empty:border-l-0 empty:pl-0">
             <StackPopover workspace={workspace} />
           </div>
 
           {/* PR 상태 + 링크: 헤더 우측 끝. 상태별 색·아이콘으로 한눈에 구분. 조회 중이면 스피너를 곁들인다. */}
           {(pr || (git && git.ahead > 0) || prRefreshing) && (
-            <div className="workspace-header-pr flex items-center gap-1 pl-2 ml-0.5 border-l border-[var(--border)]">
+            <div className="workspace-header-pr flex items-center gap-1.5 pl-2 ml-0.5 border-l border-[var(--border)]">
               {prRefreshing && (
                 <span title="Refreshing pull request…" className="shrink-0 grid place-items-center">
                   <Loader2 size={12} className="animate-spin text-neutral-500" />
@@ -502,20 +505,17 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
                 ? (() => {
                     const { Icon, iconClass, badgeClass } = PR_STYLE[pr.state]
                     return (
-                      <button
+                      <HeaderChip
                         onClick={() => void window.api.openExternal(pr.url)}
-                        className={
-                          'flex items-center gap-1.5 text-xs px-2 py-1 rounded-md border ' +
-                          badgeClass +
-                          (prRefreshing ? ' opacity-60' : '')
-                        }
+                        toneClass={badgeClass}
+                        className={prRefreshing ? 'opacity-60' : ''}
                         title={`${pr.label} — open pull request #${pr.number} in browser`}
                       >
                         <Icon size={12} className={iconClass} />
                         <span className="opacity-75">#{pr.number}</span>
                         <span className="font-medium">{pr.label}</span>
                         <ExternalLink size={10} className="opacity-70" />
-                      </button>
+                      </HeaderChip>
                     )
                   })()
                 : null}
@@ -525,9 +525,8 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
                 // 조회 중에는 "Create PR" 을 감춰 깜빡임을 막고 스피너만 보여 준다(끝나면 실제 상태로 결정).
                 // gh 미연결이면 버튼을 숨기지 않고 "Connect GitHub" 로 바꿔 기능의 존재를 알린다.
                 !prRefreshing && (
-                  <button
+                  <HeaderChip
                     onClick={createPr}
-                    className="flex items-center gap-1.5 text-xs px-2 py-1 rounded-md bg-[var(--surface)] border border-[var(--border)] text-neutral-300 hover:border-[var(--border-strong)]"
                     title={
                       githubDisconnected
                         ? 'Connect GitHub to open a pull request for this branch'
@@ -545,7 +544,7 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
                         Create PR
                       </>
                     )}
-                  </button>
+                  </HeaderChip>
                 )
               )}
             </div>
@@ -641,7 +640,7 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
             </span>
             <button
               onClick={retryLastMessage}
-              className="flex items-center gap-1.5 rounded-md bg-[var(--danger-500)]/90 px-2.5 py-1 text-xs font-medium text-white hover:bg-[var(--danger-500)] focus-visible:outline-2 focus-visible:outline-[var(--danger-300)]"
+              className="flex items-center gap-1.5 rounded-md bg-[var(--danger-500)]/90 px-2.5 py-1 text-xs font-medium text-white hover:bg-[var(--danger-500)]"
             >
               <RotateCw size={12} />
               Retry last message

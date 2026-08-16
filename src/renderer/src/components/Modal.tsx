@@ -73,7 +73,7 @@ export default function Modal({
           <button
             onClick={onClose}
             aria-label="Close dialog"
-            className="h-7 w-7 grid place-items-center rounded-md text-neutral-400 hover:bg-[var(--surface-2)] hover:text-neutral-100 focus-visible:outline-2 focus-visible:outline-[var(--accent-500)]"
+            className="h-7 w-7 grid place-items-center rounded-md text-neutral-400 hover:bg-[var(--surface-2)] hover:text-neutral-100"
           >
             <X size={15} />
           </button>
