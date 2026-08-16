@@ -16,7 +16,9 @@ import {
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router'
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import type { ChatItem, PermissionRequest } from '@shared/types'
-import { AGENT_BACKEND_LABELS, workspaceDisplayName } from '@shared/types'
+import { workspaceDisplayName } from '@shared/types'
+import { BrandMark } from '../../src/components/BrandMark'
+import { PR_COLORS } from '../../src/state/prColors'
 import { isLaptopAway, useRemoteStore } from '../../src/state/store'
 import { agoLabel, untilLabel, useNow } from '../../src/state/useNow'
 import { useDeviceAuthentication } from '../../src/state/useDeviceAuth'
@@ -488,12 +490,9 @@ export default function WorkspaceScreen(): React.JSX.Element {
    */
   const headerMeta = useMemo(() => {
     if (workspace === undefined) return status
-    // 오래된 랩탑은 이 필드를 보내지 않고, 더 새 랩탑은 이 앱이 모르는 값을 보낸다.
-    // 둘 다 화면이 죽을 이유가 아니다.
-    const labels: Record<string, string | undefined> = AGENT_BACKEND_LABELS
-    const backend = workspace.agentBackend
+    // 에이전트는 이제 마크로 보여 준다(데스크톱과 같은 그림) — 여기서는 글자를 빼고
+    // 마크가 답하지 못하는 것만 남긴다.
     return [
-      backend === undefined ? null : (labels[backend] ?? backend),
       workspace.multiAgent ? '+ subagents' : null,
       workspace.model,
       workspace.branch
@@ -528,7 +527,15 @@ export default function WorkspaceScreen(): React.JSX.Element {
                 무엇을 보고 있는지 모르게 되면, 폰에서는 되돌아가 확인하는 비용이 크다. */}
             {repoName !== null ? <Text style={styles.headerRepo} numberOfLines={1}>{repoName}</Text> : null}
             <Text style={styles.title} numberOfLines={1}>{title}</Text>
-            <Text style={styles.headerMeta} numberOfLines={1}>{headerMeta}</Text>
+            <View style={styles.headerMetaLine}>
+              <BrandMark backend={workspace?.agentBackend} size={10} />
+              <Text style={styles.headerMeta} numberOfLines={1}>{headerMeta}</Text>
+            </View>
+            {workspace?.pr ? (
+              <Text style={[styles.headerPr, { color: PR_COLORS[workspace.pr.state] ?? '#77767f' }]} numberOfLines={1}>
+                #{workspace.pr.number} · {workspace.pr.label}
+              </Text>
+            ) : null}
             {limitLabel !== null ? <Text style={styles.headerLimit} numberOfLines={1}>{limitLabel}</Text> : null}
           </View>
           {workspace?.status === 'running' ? (
@@ -598,7 +605,9 @@ const styles = StyleSheet.create({
   back: { color: '#9b8df7', fontSize: 15, width: 68 },
   headerTitle: { alignItems: 'center', flex: 1 },
   headerRepo: { color: '#777680', fontSize: 10, fontWeight: '700', letterSpacing: 0.8 },
-  headerMeta: { color: '#77767f', fontSize: 11, marginTop: 2 },
+  headerMetaLine: { alignItems: 'center', flexDirection: 'row', gap: 5, marginTop: 2 },
+  headerMeta: { color: '#77767f', fontSize: 11 },
+  headerPr: { fontSize: 11, marginTop: 2 },
   headerLimit: { color: '#d0a24c', fontSize: 11, marginTop: 2 },
   title: { color: '#ededf0', fontSize: 15, fontWeight: '600', maxWidth: '100%' },
   connection: { color: '#6f6f77', fontSize: 10, marginTop: 2, textTransform: 'capitalize' },

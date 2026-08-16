@@ -16,6 +16,7 @@ const {
   StateMirror,
   actsWithoutAsking,
   projectPermissionModeFooter,
+  projectPr,
   projectRateLimit,
   projectState
 } = await import('./mirror')
@@ -194,6 +195,27 @@ describe('StateMirror', () => {
     stateMirror.dispose()
     await flush()
     expect(upsert).not.toHaveBeenCalled()
+  })
+
+  it('PR 을 아직 모르는 것과 PR 이 없는 것을 구분한다', async () => {
+    // 모르는 것을 "없음"으로 단정하면 폰이 그동안 idle 색을 칠했다가 나중에 색이 튀어나온다.
+    const { forgetPrStatus, rememberPrStatus } = await import('../prStatusCache')
+
+    forgetPrStatus('ws-unknown')
+    expect(projectPr('ws-unknown')).toBeUndefined()
+
+    rememberPrStatus('ws-none', null)
+    expect(projectPr('ws-none')).toBeNull()
+
+    rememberPrStatus('ws-open', {
+      number: 12,
+      url: 'https://example/pr/12',
+      title: 'Fix login',
+      state: 'approved',
+      label: 'Ready to merge'
+    })
+    // 제목·URL 은 싣지 않는다 — 색과 한 줄 표시에 필요한 것만 릴레이를 지난다.
+    expect(projectPr('ws-open')).toEqual({ number: 12, state: 'approved', label: 'Ready to merge' })
   })
 
   it('권한 모드 표시는 백엔드의 서술자에서 뽑는다', () => {

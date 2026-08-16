@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { handle } from './commandRegistry'
 import { getStore } from './store'
 import { getRemoteBridge } from './remote'
+import { rememberPrStatus } from './prStatusCache'
 import { getTranscripts } from './transcripts'
 import { buildHandoffPrompt, estimateHandoffTokens, formatHandoffTokens } from '@shared/handoff'
 import { listDir, readFileInRoot, searchFiles } from './fsbrowse'
@@ -1724,6 +1725,9 @@ export function registerIpc(ctx: IpcContext): void {
     const after = store.getState().workspaces.find((w) => w.id === workspaceId) ?? ws
     const status = await getWorkspacePrStatus(after, after.branch)
     if (status) persistPrNumber(workspaceId, after.branch, status.number)
+    // 원격 미러는 동기라 gh 를 부를 수 없다. 렌더러가 이미 시킨 이 조회의 답을 적어 두면
+    // 추가 비용 없이 폰도 같은 PR 색을 칠할 수 있다.
+    rememberPrStatus(workspaceId, status)
     return status
   })
 

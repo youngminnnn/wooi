@@ -1,8 +1,9 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { deriveDirectionKeys, fromBase64Url, sealJson } from '@shared/crypto'
-import type { RemoteMachine, RemoteRateLimit, RemoteState } from '@shared/remote'
+import type { RemoteMachine, RemotePr, RemoteRateLimit, RemoteState } from '@shared/remote'
 import type { AgentBackendId, AppState, PermissionMode, PermissionRequest } from '@shared/types'
 import { backendMeta } from '../agent/backend'
+import { getCachedPrStatus } from '../prStatusCache'
 import { log } from '../logger'
 import type { RemoteKeystore } from './keystore'
 
@@ -58,6 +59,17 @@ export function projectPermissionModeFooter(
   return info?.footer ?? null
 }
 
+/**
+ * PR 상태. 아직 조회된 적이 없으면 `undefined` 를 그대로 흘려보낸다 — 모르는 것을 "없음"으로
+ * 단정하지 않기 위해서다(폰은 그동안 PR 색을 칠하지 않고 기다린다).
+ */
+export function projectPr(workspaceId: string): RemotePr | null | undefined {
+  const status = getCachedPrStatus(workspaceId)
+  if (status === undefined) return undefined
+  if (status === null) return null
+  return { number: status.number, state: status.state, label: status.label }
+}
+
 export function projectState(
   app: AppState,
   machine: RemoteMachine,
@@ -102,7 +114,8 @@ export function projectState(
       permissionModeFooter: projectPermissionModeFooter(
         workspace.agentBackend,
         workspace.permissionMode
-      )
+      ),
+      pr: projectPr(workspace.id)
     })),
     pendingPermissions: pending.map((request) => ({
       requestId: request.requestId,

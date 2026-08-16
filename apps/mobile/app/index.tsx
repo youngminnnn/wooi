@@ -3,7 +3,9 @@ import { Pressable, RefreshControl, SectionList, StyleSheet, Text, View } from '
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import type { RemoteWorkspace } from '@shared/remote'
-import { AGENT_BACKEND_LABELS, workspaceDisplayName } from '@shared/types'
+import { workspaceDisplayName } from '@shared/types'
+import { BrandMark } from '../src/components/BrandMark'
+import { PR_COLORS } from '../src/state/prColors'
 import { isLaptopAway, useRemoteStore } from '../src/state/store'
 import { agoLabel, untilLabel, useNow } from '../src/state/useNow'
 
@@ -14,13 +16,18 @@ const STATUS_COLORS: Record<string, string> = {
 }
 
 /**
- * 에이전트 표시 이름. 값은 **다른 기기에서 온 문자열**이라 이 앱이 모르는 백엔드일 수 있다
- * (랩탑이 더 새 버전이면 늘 그렇다). 모르면 원문을 그대로 보여 준다 — 빈칸보다 낫고,
- * 무엇보다 화면이 죽지 않는다.
+ * 점 하나가 말할 것을 고른다. 우선순위는 데스크톱 StatusDot 과 같다 —
+ * 권한 대기 > 실행 중 > 사용량 제한 > 에러 > PR 상태 > idle.
+ * 지금 행동할 수 있는 것이 앞이고, PR 은 아무 일도 일어나지 않을 때에야 말한다.
  */
-function agentLabel(backend: string): string {
-  const labels: Record<string, string | undefined> = AGENT_BACKEND_LABELS
-  return labels[backend] ?? backend
+function dotColor(workspace: RemoteWorkspace, hasLimit: boolean): string {
+  if (workspace.attention === 'permission') return '#8b7cf6'
+  if (workspace.status === 'running') return STATUS_COLORS.running
+  if (hasLimit) return '#d0a24c'
+  if (workspace.status === 'error') return STATUS_COLORS.error
+  const pr = workspace.pr
+  if (pr) return PR_COLORS[pr.state] ?? STATUS_COLORS.idle
+  return STATUS_COLORS.idle
 }
 
 function updatedLabel(timestamp: number): string {
@@ -65,26 +72,16 @@ function WorkspaceRow({
   const needsPermission = workspace.attention === 'permission'
   const limit = rateLimitLabel(workspace, now)
   // 한 줄에 다 넣지 않고 우선순위대로 자른다. 폰 폭에서는 브랜치 이름만으로도 줄이 찬다.
-  const meta = [
-    showAgent && workspace.agentBackend !== undefined
-      ? agentLabel(workspace.agentBackend)
-      : null,
-    workspace.multiAgent ? '+ subagents' : null,
-    workspace.branch
-  ].filter((part): part is string => part !== null)
+  const meta = [workspace.multiAgent ? '+ subagents' : null, workspace.branch].filter(
+    (part): part is string => part !== null
+  )
 
   return (
     <Pressable style={[styles.row, needsPermission && styles.permissionRow]} onPress={onPress}>
       <View
         style={[
           styles.dot,
-          {
-            backgroundColor: needsPermission
-              ? '#8b7cf6'
-              : limit !== null
-                ? '#d0a24c'
-                : (STATUS_COLORS[workspace.status] ?? '#676771')
-          },
+          { backgroundColor: dotColor(workspace, limit !== null) },
           needsPermission && styles.permissionDot
         ]}
       />
@@ -103,9 +100,17 @@ function WorkspaceRow({
             </View>
           ) : null}
         </View>
-        <Text style={styles.branch} numberOfLines={1}>
-          {meta.join(' · ')}
-        </Text>
+        <View style={styles.metaLine}>
+          {showAgent ? <BrandMark backend={workspace.agentBackend} size={11} /> : null}
+          <Text style={styles.branch} numberOfLines={1}>
+            {meta.join(' · ')}
+          </Text>
+        </View>
+        {workspace.pr ? (
+          <Text style={[styles.pr, { color: PR_COLORS[workspace.pr.state] ?? '#77767f' }]}>
+            #{workspace.pr.number} · {workspace.pr.label}
+          </Text>
+        ) : null}
         {limit !== null ? <Text style={styles.limit}>{limit}</Text> : null}
         {parentName !== null ? (
           <Text style={styles.parent} numberOfLines={1}>
@@ -331,7 +336,9 @@ const styles = StyleSheet.create({
     paddingVertical: 1
   },
   permissionText: { color: '#12101f', fontSize: 9, fontWeight: '800', letterSpacing: 0.6 },
-  branch: { color: '#77767f', fontSize: 12, marginTop: 3 },
+  metaLine: { alignItems: 'center', flexDirection: 'row', gap: 5, marginTop: 3 },
+  branch: { color: '#77767f', flexShrink: 1, fontSize: 12 },
+  pr: { fontSize: 11, marginTop: 3 },
   limit: { color: '#d0a24c', fontSize: 11, marginTop: 3 },
   parent: { color: '#5f5f68', fontSize: 11, marginTop: 2 },
   emptyList: { flexGrow: 1, justifyContent: 'center' },

@@ -9,7 +9,7 @@ import { REMOTE_PROTOCOL_VERSION, REMOTE_IPC, REMOTE_MAX_EVENT_BYTES } from './r
  * 그 사실이 다른 곳에 적혀 있기만 하면 언젠가 깨지므로 여기서 강제한다.
  */
 describe('RN 공유 모듈의 무의존 제약', () => {
-  const files = ['types.ts', 'remote.ts']
+  const files = ['types.ts', 'remote.ts', 'brandMarks.ts']
 
   for (const file of files) {
     it(`${file} 은 어떤 것도 import 하지 않는다`, () => {

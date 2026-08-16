@@ -33,6 +33,16 @@ export interface RemoteRateLimit {
   at: number | null
 }
 
+/**
+ * PR 상태 투영. `state` 는 types.ts 의 PrState 와 같은 값 집합이고, 색 매핑의 단일 출처다.
+ * 라벨은 랩탑이 만들어 보낸다 — 폰이 같은 문구를 다시 지어내면 두 화면이 갈린다.
+ */
+export interface RemotePr {
+  number: number
+  state: string
+  label: string
+}
+
 /** 모바일이 보는 워크스페이스 1개. */
 export interface RemoteWorkspace {
   id: string
@@ -80,6 +90,14 @@ export interface RemoteWorkspace {
    * 라벨을 아는 쪽에서 만들어 보낸다.
    */
   permissionModeFooter?: { symbol: string; text: string } | null
+  /**
+   * 이 워크스페이스 브랜치의 PR 상태. 데스크톱 사이드바가 점 색으로 말하는 것과 같은 값이다.
+   *
+   * **아직 모를 수 있다(undefined)** — PR 조회는 gh 를 거쳐야 해서 비싸고, 랩탑이 한 번도
+   * 조회하지 않았을 수 있다. `null` 은 "PR 이 없다" 이고 그때는 색을 칠하지 않는다.
+   * 둘을 섞으면 모르는 동안 "PR 없음"으로 보였다가 나중에 색이 튀어나온다.
+   */
+  pr?: RemotePr | null
   /**
    * 이 워크스페이스의 에이전트가 **묻지 않고 실행**하는가.
    *
