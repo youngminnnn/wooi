@@ -19,6 +19,7 @@ import { MCP_SETTING_SOURCES, resolveUserMcpServers } from './mcp'
 import { isReadOnlyWooiTool, WOOI_MCP_SERVER_NAME } from '../agent/tools/catalog'
 import { delegateShellAttempt, delegateShellGuidance } from '../agent/delegateShell'
 import { resolveWooiPlugin } from '../agent/plugin'
+import { WriteIsolationGuard, type WriteIsolationRoot } from './writeIsolation'
 import { fastModeReasonText, planApprovalMode, planOptions, unknownItemId } from '@shared/types'
 import { supportsAutoMode } from '../agent/backend'
 import { asClaudeMode, claudeEffort, claudeMode, type ClaudePermissionMode } from './protocol'
@@ -43,6 +44,8 @@ export interface SessionDeps {
   cwd: string
   /** worktree 의 원본 repo 절대 경로. ~/.claude.json 의 project 스코프 MCP 조회에 쓴다(없으면 user 스코프만). */
   repoPath: string | null
+  /** 메인이 store 에서 계산한 다른 workspace 및 연결된 메인 checkout 경로. */
+  writeIsolationRoots?: WriteIsolationRoot[]
   /**
    * Wooi 스코프 MCP 설정. 메인이 store 에서 읽어 내려 준다 — 호스트에는 store 가 없다
    * ([[claude/protocol]] SessionConfig.mcpSettings).
@@ -264,6 +267,7 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
  * 사용자가 막히지 않게 한다(retryWithoutResume).
  */
 export class ClaudeSession {
+  private readonly writeIsolation: WriteIsolationGuard
   private input = new AsyncQueue<SDKUserMessage>()
   /**
    * SDK 가 입력 큐에서 꺼내 갔지만 아직 result 로 완료되지 않은 사용자 메시지.
@@ -393,6 +397,11 @@ export class ClaudeSession {
   private checkpoints: RewindPoint[] = []
 
   constructor(private deps: SessionDeps) {
+    this.writeIsolation = new WriteIsolationGuard(
+      deps.cwd,
+      [deps.cwd, ...deps.additionalDirs],
+      deps.writeIsolationRoots ?? []
+    )
     // resume + autoCompact 일 때만 preflight 한다(콜드스타트 이중 패스가 생길 수 있는 유일한 조건).
     this.preflightPending = Boolean(deps.resumeSessionId) && deps.autoCompact
   }
@@ -1080,6 +1089,17 @@ export class ClaudeSession {
     input: Record<string, unknown>,
     options: { title?: string; displayName?: string; decisionReason?: string }
   ): Promise<PermissionResult> => {
+    const isolationViolation = await this.writeIsolation.check(toolName, input, this.deps.cwd)
+    if (isolationViolation) {
+      return {
+        behavior: 'deny',
+        message:
+          `Cannot write to ${isolationViolation.path}: it belongs to ${isolationViolation.owner}. ` +
+          "Wooi keeps workspace file edits isolated. Work inside this workspace's worktree, " +
+          'or ask the user to add that directory with /add-dir.'
+      }
+    }
+
     // AskUserQuestion 은 "행위 승인" 대상이 아니라 모델이 사용자에게 답을 요청하는 도구다.
     // permission mode(auto 포함)·세션 always-allow 와 무관하게 항상 질문을 띄우고, 사용자가
     // 고른 답(updatedInput.answers)을 도구 입력에 합쳐 돌려줘야 한다. 자동 승인하면 answers 가

@@ -77,6 +77,8 @@ export function claudeEffort(effort: EffortSetting | null | undefined): ClaudeEf
 export interface SessionConfig {
   cwd: string
   repoPath: string | null
+  /** 다른 Wooi workspace 및 연결된 메인 checkout. 직접 파일 쓰기 도구의 경계를 세우는 스냅샷이다. */
+  writeIsolationRoots: Array<{ path: string; owner: string }>
   model: string | null
   /** reasoning effort 선택값(ultracode 포함). null 이면 지정하지 않는다(모델 기본 동작). */
   effort: EffortSetting | null
