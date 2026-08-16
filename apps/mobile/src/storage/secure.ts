@@ -51,6 +51,10 @@ export async function clearPairing(): Promise<void> {
   await SecureStore.deleteItemAsync(PAIRING_KEY, OPTIONS)
 }
 
+export async function clearCommandSequence(deviceId: string): Promise<void> {
+  await SecureStore.deleteItemAsync(`${SEQUENCE_PREFIX}${deviceId}`, OPTIONS)
+}
+
 export function nextCommandSequence(deviceId: string): Promise<number> {
   let resolveSequence: (value: number) => void
   let rejectSequence: (reason: unknown) => void

@@ -210,12 +210,13 @@ function openResult(row: StoredCommand): RemoteCommandResult {
   ) as RemoteCommandResult
 }
 
-function start(store = keystore()): void {
+function start(store = keystore(), onUnpairSelf?: (deviceId: string) => Promise<void>): void {
   bridge = new RemoteCommandBridge({
     supabase: () => relay as unknown as SupabaseClient,
     keystore: store,
     machineId,
-    now: () => now
+    now: () => now,
+    onUnpairSelf
   })
 }
 
@@ -305,6 +306,19 @@ describe('RemoteCommandBridge', () => {
     expect(bridge.isWatching('ws-1')).toBe(true)
     now += REMOTE_WATCH_TTL_MS + 1
     expect(bridge.isWatching('ws-1')).toBe(false)
+  })
+
+  it('자기 해제는 명령 행의 기기를 끊고 watch를 지운 뒤 IPC로 내려가지 않는다', async () => {
+    addCommand({ channel: REMOTE_IPC.watch, args: ['ws-1'], seq: 1, ts: now })
+    const unpair = addCommand({ channel: REMOTE_IPC.unpairSelf, args: [], seq: 2, ts: now })
+    const onUnpairSelf = vi.fn<(id: string) => Promise<void>>().mockResolvedValue(undefined)
+    start(keystore(), onUnpairSelf)
+    await settle()
+
+    expect(onUnpairSelf).toHaveBeenCalledOnce()
+    expect(onUnpairSelf).toHaveBeenCalledWith(unpair.device_id)
+    expect(bridge.isWatching('ws-1')).toBe(false)
+    expect(invokeCommand).not.toHaveBeenCalled()
   })
 
   it('행을 순서대로 하나씩 실행한다', async () => {

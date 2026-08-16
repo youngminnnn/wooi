@@ -3,6 +3,7 @@ import type { RemoteState } from '@shared/remote'
 import type { StoredPairing } from '../storage/secure'
 import type { RemoteCommandChannel } from '../relay/client'
 import { createDemoSession } from './demo'
+import type { UnpairOutcome } from './unpair'
 
 export type ConnectionStatus = 'offline' | 'connecting' | 'online'
 
@@ -32,6 +33,7 @@ interface RemoteStore {
   unpairedReason: string | null
   refresh: (() => Promise<void>) | null
   command: ((channel: RemoteCommandChannel, args: unknown[]) => Promise<unknown>) | null
+  unpair: (() => Promise<UnpairOutcome>) | null
   activityRev: number
   enterDemo: () => void
   leaveDemo: () => void
@@ -47,6 +49,8 @@ interface RemoteStore {
   setCommand: (
     command: ((channel: RemoteCommandChannel, args: unknown[]) => Promise<unknown>) | null
   ) => void
+  setUnpair: (unpair: (() => Promise<UnpairOutcome>) | null) => void
+  unpaired: (reason: string | null) => void
   bumpActivity: () => void
 }
 
@@ -62,6 +66,7 @@ export const useRemoteStore = create<RemoteStore>((set, get) => ({
   unpairedReason: null,
   refresh: null,
   command: null,
+  unpair: null,
   activityRev: 0,
   enterDemo: (): void => {
     const session = createDemoSession()
@@ -174,6 +179,7 @@ export const useRemoteStore = create<RemoteStore>((set, get) => ({
       unpairedReason: null,
       refresh: async () => undefined,
       command,
+      unpair: null,
       activityRev: get().activityRev + 1
     })
   },
@@ -186,7 +192,8 @@ export const useRemoteStore = create<RemoteStore>((set, get) => ({
       laptopSeenAt: null,
       lastError: null,
       refresh: null,
-      command: null
+      command: null,
+      unpair: null
     }),
   setHydrated: (hydrated): void => set({ hydrated }),
   setPairing: (pairing): void => set({ pairing }),
@@ -203,5 +210,19 @@ export const useRemoteStore = create<RemoteStore>((set, get) => ({
   setUnpairedReason: (unpairedReason): void => set({ unpairedReason }),
   setRefresh: (refresh): void => set({ refresh }),
   setCommand: (command): void => set({ command }),
+  setUnpair: (unpair): void => set({ unpair }),
+  unpaired: (reason): void =>
+    set({
+      pairing: null,
+      state: null,
+      refresh: null,
+      command: null,
+      unpair: null,
+      status: 'offline',
+      updatedAt: null,
+      laptopSeenAt: null,
+      lastError: null,
+      unpairedReason: reason
+    }),
   bumpActivity: (): void => set((current) => ({ activityRev: current.activityRev + 1 }))
 }))

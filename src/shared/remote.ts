@@ -157,7 +157,12 @@ export const REMOTE_IPC = {
   /** 라이브 뷰 구독. `[workspaceId | null]` — 이 리스가 있어야 delta 가 전송된다. */
   watch: 'remote:watch',
   /** 생존 확인. `[]` */
-  ping: 'remote:ping'
+  ping: 'remote:ping',
+  /**
+   * 폰이 스스로 페어링을 끊는다. `[]` — 브리지는 **명령을 보낸 그 기기만** revoke 하므로
+   * 인자를 받지 않는다(기기 id 를 인자로 받으면 폰이 다른 폰을 끊을 수 있게 된다).
+   */
+  unpairSelf: 'remote:unpairSelf'
 } as const
 
 /** `remote:transcript` 가 한 번에 돌려주는 최대 아이템 수. */

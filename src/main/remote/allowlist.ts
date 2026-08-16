@@ -209,7 +209,10 @@ export const REMOTE_COMMANDS: ReadonlyMap<string, RemoteCommandSpec> = new Map<
   [IPC.chatInterrupt, { validate: validateWorkspaceIdOnly, mutating: true }],
   [IPC.permissionRespond, { validate: validatePermissionRespond, mutating: true }],
   [IPC.workspaceSetPermissionMode, { validate: validateSetPermissionMode, mutating: true }],
-  [IPC.workspaceSetMuted, { validate: validateSetMuted, mutating: true }]
+  [IPC.workspaceSetMuted, { validate: validateSetMuted, mutating: true }],
+  // 인자를 받지 않고 명령 행의 기기만 끊으므로 다른 기기를 지정할 수 없다.
+  // 임의 기기를 받는 IPC.remoteRevokeDevice 는 이와 달리 영구 거부한다.
+  [REMOTE_IPC.unpairSelf, { validate: validateNoArgs, mutating: true }]
 ])
 
 /**

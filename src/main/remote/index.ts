@@ -186,6 +186,9 @@ export class RemoteBridge {
         machineId,
         onWatch: (workspaceId) => {
           if (workspaceId !== null) this.onWorkspaceRead(workspaceId)
+        },
+        onUnpairSelf: async (deviceId) => {
+          await this.revokeDevice(deviceId)
         }
       })
       this.push = new RemotePush({

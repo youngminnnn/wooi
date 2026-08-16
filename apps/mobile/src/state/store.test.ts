@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { isLaptopAway, LAPTOP_STALE_MS, useRemoteStore } from './store'
 import { agoLabel } from './useNow'
+import { unpairedNotice } from './unpairNotice'
 
 /**
  * 랩탑이 자리를 비웠는지의 판단. 이 값이 틀리면 화면이 가장 정확해야 할 순간에 거짓말을 한다 —
@@ -91,5 +92,45 @@ describe('데모 명령', () => {
     useRemoteStore.getState().leaveDemo()
     expect(useRemoteStore.getState().demo).toBe(false)
     expect(useRemoteStore.getState().state).toBeNull()
+  })
+})
+
+describe('페어링 해제', () => {
+  it('세션에 묶인 상태와 콜백을 한 번에 비운다', () => {
+    const store = useRemoteStore.getState()
+    store.setPairing({
+      url: 'https://relay.example',
+      anonKey: 'anon',
+      machineId: 'machine',
+      machineName: 'Laptop',
+      deviceId: 'phone',
+      sessionKey: 'key'
+    })
+    store.setStatus('online')
+    store.setUpdatedAt(123)
+    store.setLaptopSeenAt(456)
+    store.setLastError('old error')
+    store.setRefresh(async () => undefined)
+    store.setCommand(async () => undefined)
+    store.setUnpair(async () => 'revoked')
+
+    store.unpaired('Pair again')
+
+    const reset = useRemoteStore.getState()
+    expect(reset.pairing).toBeNull()
+    expect(reset.state).toBeNull()
+    expect(reset.refresh).toBeNull()
+    expect(reset.command).toBeNull()
+    expect(reset.unpair).toBeNull()
+    expect(reset.status).toBe('offline')
+    expect(reset.updatedAt).toBeNull()
+    expect(reset.laptopSeenAt).toBeNull()
+    expect(reset.lastError).toBeNull()
+    expect(reset.unpairedReason).toBe('Pair again')
+  })
+
+  it('확인된 해제는 조용히 끝내고 대기 중인 해제만 랩탑 정리를 안내한다', () => {
+    expect(unpairedNotice('revoked')).toBeNull()
+    expect(unpairedNotice('queued')).toContain('Settings → Integrations → Remote access')
   })
 })
