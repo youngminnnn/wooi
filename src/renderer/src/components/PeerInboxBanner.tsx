@@ -43,13 +43,19 @@ export default function PeerInboxBanner({
         <div className="min-w-0 flex-1 text-xs leading-relaxed text-neutral-200">
           <div className="flex items-center gap-1.5">
             <span className="font-medium">Message from</span>
-            <button
-              onClick={() => void selectWorkspace(pending.fromWorkspaceId)}
-              className="min-w-0 truncate rounded px-1 font-mono text-neutral-300 hover:bg-[var(--surface-2)] hover:text-neutral-100"
-              title={`Open ${pending.fromName}`}
-            >
-              {pending.fromBranch}
-            </button>
+            {pending.fromWorkspaceId ? (
+              <button
+                onClick={() => void selectWorkspace(pending.fromWorkspaceId!)}
+                className="min-w-0 truncate rounded px-1 font-mono text-neutral-300 hover:bg-[var(--surface-2)] hover:text-neutral-100"
+                title={`Open ${pending.fromName}`}
+              >
+                {pending.fromBranch}
+              </button>
+            ) : (
+              <span className="min-w-0 truncate rounded px-1 text-neutral-300">
+                {pending.fromName}
+              </span>
+            )}
             {/* 리포가 다르면 그 사실이 판단을 바꾼다 — 여기 코드베이스 이야기가 아니다. */}
             {pending.crossRepo && (
               <span className="shrink-0 rounded bg-[var(--surface-2)] px-1.5 py-0.5 text-[10px] text-neutral-400">

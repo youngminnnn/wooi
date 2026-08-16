@@ -15,6 +15,13 @@ import type { ChatItem } from '@shared/types'
  * ("Task #3 created successfully: …"). 따라서 한 항목만 봐서는 목록을 그릴 수 없고,
  * 트랜스크립트를 처음부터 되짚어(replay) 목록 상태를 누적해야 한다 — 이 모듈이 그 일을 한다.
  *
+ * CLI 2.1.233 부터 이 도구들(TaskCreate/TaskGet/TaskUpdate/TaskList/TodoWrite)은 모델에 따라
+ * 열리지 않는다. Opus 4.8·Sonnet 5·Fable 5 와 그보다 새 모델에서는 없고, Sonnet 4.6·Opus 4.7·
+ * Haiku 4.5 같은 이전 모델에는 남아 있다. Wooi 는 CLI 의 선택과 항목별 왕복 비용 절감을 존중해
+ * `CLAUDE_CODE_ENABLE_TODO_TOOLS=1` 로 억지로 되살리지 않는다. 따라서 새 모델의 트랜스크립트에
+ * 이 호출이 전혀 없어 체크리스트가 나오지 않는 것은 정상 동작이며, 이전 모델을 위해 재구성 로직은
+ * 계속 유지한다.
+ *
  * 되짚기는 이미 저장된 tool_use/tool_result 만 읽으므로 메인 프로세스·IPC·저장 포맷을 건드리지
  * 않는다. 덕분에 예전에 저장된 대화도 다시 열면 그대로 체크리스트로 보인다.
  */

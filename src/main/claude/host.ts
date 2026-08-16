@@ -66,6 +66,7 @@ function ensure(workspaceId: string, config: SessionConfig): ClaudeSession {
   const session = new ClaudeSession({
     cwd: config.cwd,
     repoPath: config.repoPath,
+    writeIsolationRoots: config.writeIsolationRoots,
     mcpSettings: config.mcpSettings,
     model: config.model,
     fallbackModels: config.fallbackModels,
@@ -142,6 +143,10 @@ async function handle(msg: HostCommand): Promise<void> {
 
     case 'interrupt':
       await sessions.get(msg.workspaceId)?.interrupt()
+      break
+
+    case 'stopTask':
+      await sessions.get(msg.workspaceId)?.stopTask(msg.taskId)
       break
 
     case 'setPermissionMode':

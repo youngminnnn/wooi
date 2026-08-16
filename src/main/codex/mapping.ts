@@ -7,6 +7,7 @@ import type {
   DeltaParams,
   FileChangePatchParams,
   GuardianWarningParams,
+  GuardianApprovalReviewParams,
   HookParams,
   ItemParams,
   McpServerStatusParams,
@@ -250,6 +251,15 @@ export function mapNotification(
       return { events: [{ type: 'item', item }], persist: [item] }
     }
 
+    case NOTIFY.guardianApprovalReviewStarted:
+    case NOTIFY.guardianApprovalReviewCompleted:
+      return mapGuardianApprovalReview(
+        method,
+        params as GuardianApprovalReviewParams,
+        ts,
+        onUnknown
+      )
+
     /**
      * `thread/status/changed` 는 **일부러 매핑하지 않는다.**
      *
@@ -262,6 +272,66 @@ export function mapNotification(
       // 구독하지 않는 알림(계정·rate limit·MCP 상태 등)은 상위 계층이 따로 처리한다.
       return NOTHING
   }
+}
+
+/**
+ * upstream 이 상세 payload 를 임시라고 명시했다. 그래서 카드의 정체성은 lifecycle 필드에만 기대고,
+ * review/action/decisionSource 는 현재 알아볼 수 있을 때만 장식한다. 모양이 바뀌어도 턴은 계속된다.
+ */
+function mapGuardianApprovalReview(
+  method: string,
+  params: GuardianApprovalReviewParams,
+  ts: number,
+  onUnknown?: (what: string) => void
+): Mapped {
+  if (!params || typeof params.reviewId !== 'string') {
+    onUnknown?.(`${method} payload`)
+    return NOTHING
+  }
+  const completed = method === NOTIFY.guardianApprovalReviewCompleted
+  const review = record(params.review)
+  const status = typeof review?.status === 'string' ? review.status : undefined
+  const risk = typeof review?.riskLevel === 'string' ? review.riskLevel : undefined
+  const rationale = typeof review?.rationale === 'string' ? review.rationale.trim() : ''
+  const action = guardianAction(params.action)
+  const source = typeof params.decisionSource === 'string' ? params.decisionSource : undefined
+  const lines = [
+    completed
+      ? `Codex auto-review ${status ?? 'completed'}.`
+      : 'Codex is auto-reviewing this action…'
+  ]
+  if (action) lines.push(`Action: ${action}`)
+  if (completed && risk) lines.push(`Risk: ${risk}`)
+  if (completed && rationale) lines.push(rationale)
+  if (completed && source) lines.push(`Decision source: ${source}`)
+  const item: ChatItem = {
+    id: `codex:guardian-review:${params.reviewId}`,
+    type: 'system',
+    text: lines.join('\n'),
+    ts:
+      completed && typeof params.completedAtMs === 'number'
+        ? params.completedAtMs
+        : (params.startedAtMs ?? ts)
+  }
+  return { events: [{ type: 'item', item }], persist: completed ? [item] : [] }
+}
+
+function record(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null
+}
+
+function guardianAction(value: unknown): string | null {
+  const action = record(value)
+  if (!action || typeof action.type !== 'string') return null
+  if (action.type === 'command' && typeof action.command === 'string') return action.command
+  if (action.type === 'execve' && typeof action.program === 'string') return action.program
+  if (action.type === 'networkAccess' && typeof action.target === 'string') return action.target
+  if (action.type === 'mcpToolCall' && typeof action.toolName === 'string') return action.toolName
+  if (action.type === 'applyPatch') return 'Apply patch'
+  if (action.type === 'requestPermissions') return 'Request permissions'
+  return null
 }
 
 // ── 턴 종료 ─────────────────────────────────────────────────────────────

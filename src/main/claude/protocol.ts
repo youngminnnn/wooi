@@ -77,6 +77,8 @@ export function claudeEffort(effort: EffortSetting | null | undefined): ClaudeEf
 export interface SessionConfig {
   cwd: string
   repoPath: string | null
+  /** 다른 Wooi workspace 및 연결된 메인 checkout. 직접 파일 쓰기 도구의 경계를 세우는 스냅샷이다. */
+  writeIsolationRoots: Array<{ path: string; owner: string }>
   model: string | null
   /** 과부하·일시 불가용 모델 폴백. 계정 rate limit 재개와는 별개의 SDK 라우팅이다. */
   fallbackModels: string[]
@@ -156,6 +158,7 @@ export type HostCommand =
       origin?: SendMessageOptions['origin']
     }
   | { type: 'interrupt'; workspaceId: string }
+  | { type: 'stopTask'; workspaceId: string; taskId: string }
   | { type: 'setPermissionMode'; workspaceId: string; mode: ClaudePermissionMode }
   | { type: 'dispose'; workspaceId: string }
   | { type: 'disposeAll' }

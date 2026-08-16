@@ -72,6 +72,8 @@ export interface AgentBackend {
     opts?: SendMessageOptions
   ): void
   interrupt(workspaceId: string): Promise<void>
+  /** 백엔드가 노출한 개별 실행만 중지한다. 현재 Claude SDK task 에만 해당한다. */
+  stopTask?(workspaceId: string, taskId: string): Promise<void>
   setPermissionMode(workspaceId: string, mode: PermissionMode): Promise<void>
   setModel(workspaceId: string, model: string | null): void
   /** 세션 맥락을 비우고 새 세션으로 시작(워크스페이스·worktree 유지). */
@@ -112,6 +114,8 @@ export interface AgentBackend {
   listConfiguredMcpServers?(): Promise<CodexMcpServer[]>
   /** 그 목록의 서버 하나를 켜고 끈다. 백엔드의 설정 파일에 기록된다. */
   setMcpServerEnabled?(serverName: string, enabled: boolean): Promise<CodexMcpServer[]>
+  /** 설정 화면에서 백엔드 고유 MCP OAuth 를 시작한다. 지원 백엔드에만 존재한다. */
+  loginMcpServer?(serverName: string): Promise<string>
   /** /rewind — 체크포인트로 파일 되돌리기(capabilities.rewind). */
   rewindAction(workspaceId: string, userMessageId: string): Promise<RewindActionResult>
   /** reasoning effort / ultracode 오버라이드(capabilities.effort). */

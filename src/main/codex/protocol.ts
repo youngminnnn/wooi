@@ -73,6 +73,7 @@ export type CodexCommand =
       silent?: boolean
       /** 화면에 일반 사용자 말풍선 대신 출처가 있는 자동 메시지로 남긴다. */
       origin?: SendMessageOptions['origin']
+      skill?: { name: string; path: string; prompt: string }
     }
   | { type: 'interrupt'; workspaceId: string }
   | { type: 'setPermissionMode'; workspaceId: string; mode: PermissionMode }
@@ -80,12 +81,14 @@ export type CodexCommand =
   | { type: 'disposeAll' }
   | { type: 'permissionResponse'; requestId: string; decision: PermissionDecision }
   | { type: 'listModels'; reqId: string }
+  | { type: 'listSkills'; reqId: string; cwd: string }
   /** /context·/usage·/permissions 카드용 데이터 조회. */
   | { type: 'runCommand'; reqId: string; workspaceId: string; kind: CommandPanelKind }
   | { type: 'mcpAction'; reqId: string; serverName: string; action: McpAction }
   // 설정 화면용 — 워크스페이스와 무관한 계정/설치 단위 조회라 workspaceId 를 싣지 않는다.
   | { type: 'mcpConfigList'; reqId: string }
   | { type: 'mcpSetEnabled'; reqId: string; serverName: string; enabled: boolean }
+  | { type: 'mcpOauthLogin'; reqId: string; serverName: string }
   /** /compact — 대화 압축을 시작한다(진행 상황은 일반 턴 알림으로 흐른다). */
   | { type: 'compact'; workspaceId: string; config: CodexConfig }
   | { type: 'review'; workspaceId: string; config: CodexConfig }
@@ -119,6 +122,8 @@ export type CodexEvent =
   | { type: 'login'; update: CodexLoginEvent }
   /** 계정 상태가 바뀌었다(app-server 의 account/updated). auth 상태를 다시 읽으라는 신호. */
   | { type: 'accountChanged' }
+  | { type: 'mcpOauthLoginCompleted'; name: string; success: boolean; error?: string }
+  | { type: 'skillsChanged' }
   | { type: 'response'; reqId: string; ok: true; data: unknown }
   | { type: 'response'; reqId: string; ok: false; error: string }
 

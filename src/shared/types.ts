@@ -1000,6 +1000,14 @@ export interface CodexMcpServer {
   detail: string
   /** config.toml 의 `enabled`. 값이 없으면 켜진 것으로 본다 — codex 기본값이 그렇다. */
   enabled: boolean
+  /** app-server 런타임이 보고한 인증 상태. unknown 은 판정 전/불가이며 로그인이 필요하다는 뜻이 아니다. */
+  authStatus: 'unknown' | 'unsupported' | 'notLoggedIn' | 'bearerToken' | 'oAuth'
+}
+
+export interface McpOauthLoginCompletedEvent {
+  name: string
+  success: boolean
+  error?: string
 }
 
 /** 설정 화면이 "무엇이 주입되는가" 를 그리기 위해 필요한 전부. */
@@ -1487,7 +1495,8 @@ export const DEFAULT_PEER_INBOUND: PeerInboundPolicy = 'accept'
 export interface PendingPeerMessage {
   /** 승인·거절이 지목하는 키. */
   id: string
-  fromWorkspaceId: string
+  /** 앱 밖 세션은 열어 볼 Wooi workspace가 없으므로 null이다. */
+  fromWorkspaceId: string | null
   /** 표시용 발신자 이름(수신 시점 스냅샷). */
   fromName: string
   fromBranch: string
@@ -1561,15 +1570,19 @@ export function nativePeerInbound(policy: PeerInboundPolicy | undefined): 'accep
 }
 
 /**
- * 지금 살아 있는 서브에이전트 1건의 표시용 스냅샷(사이드바 "Running agents" 패널).
+ * 지금 살아 있는 서브에이전트 또는 백그라운드 task 1건의 표시용 스냅샷(사이드바 running 패널).
  *
  * 트랜스크립트 ChatItem 이 아니라 **휘발성 상태**다 — 영속하지 않고, 세션이 끝나면 사라진다.
- * 서브에이전트는 이미 부모 턴의 tool_use/tool_result 카드로 트랜스크립트에 남으므로, 여기서
- * 다시 기록하면 이중 표시가 된다. 패널은 "지금 무엇이 돌고 있나"만 답한다.
+ * 이미 부모 턴의 tool_use/tool_result 카드로 트랜스크립트에 남으므로, 여기서 다시 기록하면
+ * 이중 표시가 된다. 패널은 "지금 무엇이 돌고 있나"만 답한다.
  */
 export interface RunningAgent {
   /** SDK task_id. 이 워크스페이스 안에서 유일하며, 갱신·종료를 이 값으로 병합한다. */
   taskId: string
+  /** 에이전트가 아닌 SDK 백그라운드 task 면 그 task_type. 없으면 서브에이전트다. */
+  taskType?: string
+  /** 이 항목만 중지할 수 있는 Claude 라이브 query 가 있음을 뜻한다. */
+  canStop?: boolean
   /** 서브에이전트 타입(SDK subagent_type). 예: 'Explore', 'code-reviewer'. */
   agentType: string
   /**
@@ -1625,7 +1638,7 @@ export type ChatEvent =
    */
   | { type: 'fastMode'; state: FastModeState; reason?: FastModeDisabledReason }
   /**
-   * 이 워크스페이스에서 지금 살아 있는 서브에이전트 **전체 목록**.
+   * 이 워크스페이스에서 지금 살아 있는 서브에이전트·백그라운드 task **전체 목록**.
    *
    * REPLACE 시맨틱이다 — 렌더러는 목록을 병합하지 말고 통째로 갈아끼운다. 시작/종료 엣지를
    * 짝지어 맞추는 방식이면 알림 하나만 유실돼도 스피너가 영구히 남는데, 매번 전량을 보내면
@@ -2538,6 +2551,7 @@ export const IPC = {
   workspaceAddDir: 'workspace:addDir',
   chatSend: 'chat:send',
   chatInterrupt: 'chat:interrupt',
+  chatStopTask: 'chat:stopTask',
   chatGetHistory: 'chat:getHistory',
   /** 워크스페이스별 누적 비용(USD). 대화 전체를 렌더러로 옮기지 않고 숫자만 받는다. */
   chatGetCosts: 'chat:getCosts',
@@ -2632,10 +2646,14 @@ export const IPC = {
   mcpInventory: 'mcp:inventory',
   /** 승계 서버를 고치려면 그 파일을 직접 열어야 한다(우리는 쓰지 않는다). */
   mcpOpenConfig: 'mcp:openConfig',
+  /** 앱 밖 Claude Code에 Wooi peer 도구를 등록하는 현재 실행본용 명령. */
+  mcpExternalSetupCommand: 'mcp:externalSetupCommand',
   /** `~/.codex/config.toml` 의 MCP 서버 목록(app-server 에 질의). */
   mcpCodexList: 'mcp:codexList',
   /** 그 서버의 `enabled` 를 사용자 파일에 쓰고 codex 에 재적용한다. */
   mcpCodexSetEnabled: 'mcp:codexSetEnabled',
+  mcpCodexOauthLogin: 'mcp:codexOauthLogin',
+  evtMcpCodexOauthLoginCompleted: 'mcp:codexOauthLoginCompleted',
   authGetStatus: 'auth:getStatus',
   /** 앱 내부 PTY 에서 `claude auth login` 을 시작한다(별도 Terminal 창 없이). */
   authClaudeLoginStart: 'auth:claudeLoginStart',

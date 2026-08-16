@@ -17,6 +17,8 @@ import { canLeadAgentTeam, delegateBackendsFor } from '../agent/multiAgent'
 import { delegateThreadInstructions, soloThreadInstructions } from '../subagent/catalog'
 import { abortAllSubAgents, abortSubAgents } from '../agent/tools/subagent'
 import { durationLabel } from './rateLimits'
+import { CodexSkillsCache, mergeSkillCommands } from './skills'
+import type { SkillsListResponse } from './wire'
 import { RATE_LIMIT_CONTINUATION, RateLimitResumeCoordinator } from '../rateLimitResume'
 import {
   expandWooiCommand,
@@ -52,6 +54,20 @@ import type {
 } from '@shared/types'
 
 type Dispatch = (channel: string, payload: unknown) => void
+
+const CODEX_COMMAND_NAMES = new Set([
+  'model',
+  'effort',
+  'fast',
+  'agent',
+  'mcp',
+  'context',
+  'usage',
+  'permissions',
+  'compact',
+  'review',
+  'fork'
+])
 
 function describe(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
@@ -101,7 +117,24 @@ export class CodexSessionManager implements AgentBackend {
     string,
     { resolve: (v: unknown) => void; reject: (e: Error) => void }
   >()
+  private validModelIds: Set<string> | null = null
   private readonly rateLimitResume: RateLimitResumeCoordinator
+  /** 자동완성 hot path 는 이 캐시만 읽는다. app-server 의 skills/changed 알림만 이를 비운다. */
+  private readonly skills = new CodexSkillsCache(async (cwd) => {
+    const response = await this.request<SkillsListResponse>((reqId) => ({
+      type: 'listSkills',
+      reqId,
+      cwd
+    }))
+    for (const entry of response.data) {
+      for (const error of entry.errors) {
+        log.warn(
+          `codex: skill load failed at ${error.path ?? entry.cwd ?? cwd}: ${error.message ?? 'unknown error'}`
+        )
+      }
+    }
+    return response
+  })
 
   constructor(
     private dispatch: Dispatch,
@@ -228,6 +261,16 @@ export class CodexSessionManager implements AgentBackend {
         this.recycleAll()
         this.dispatch(IPC.evtAuthChanged, undefined)
         break
+      case 'mcpOauthLoginCompleted':
+        this.dispatch(IPC.evtMcpCodexOauthLoginCompleted, {
+          name: msg.name,
+          success: msg.success,
+          error: msg.error
+        })
+        break
+      case 'skillsChanged':
+        this.skills.invalidate()
+        break
       case 'response': {
         const pending = this.pendingRequests.get(msg.reqId)
         if (pending) {
@@ -344,6 +387,24 @@ export class CodexSessionManager implements AgentBackend {
         text: expandWooiCommand(wooi.spec, wooi.rest)
       })
       return
+    }
+
+    if (!images?.length) {
+      const match = text.trim().match(/^\/([^\s]+)(?:\s+([\s\S]*))?$/)
+      const skill =
+        match && !CODEX_COMMAND_NAMES.has(match[1])
+          ? this.skills.find(ws.worktreePath, match[1])
+          : undefined
+      if (skill) {
+        this.send({
+          type: 'send',
+          workspaceId,
+          config: this.configFor(ws),
+          text,
+          skill: { name: skill.name, path: skill.path, prompt: match?.[2] ?? '' }
+        })
+        return
+      }
     }
 
     if (!images?.length && text.trim().startsWith('!')) {
@@ -551,8 +612,57 @@ export class CodexSessionManager implements AgentBackend {
   }
 
   /** codex 카탈로그의 모델 목록(model/list). */
-  listModels(): Promise<ModelOption[]> {
-    return this.request<ModelOption[]>((reqId) => ({ type: 'listModels', reqId }))
+  async listModels(): Promise<ModelOption[]> {
+    const models = await this.request<ModelOption[]>((reqId) => ({ type: 'listModels', reqId }))
+    if (models.length === 0) return models
+
+    this.validModelIds = new Set(models.map((model) => model.id))
+    this.reconcileStoredModels()
+    return models
+  }
+
+  /**
+   * 별도 model/list 요청을 만들지 않고 이미 UI 카탈로그 갱신에 쓰이는 성공 응답에만 올라탄다 —
+   * 턴 시작을 막지 않으면서 같은 시점의 실제 선택지를 근거로 삼기 위해서다. 실패·빈 목록은
+   * app-server 준비 전일 수 있으므로 "전부 은퇴"가 아니라 "아직 모름"으로 취급한다. 사라진 모델은
+   * 후속 모델을 추측하지 않고 null 로 돌려 Codex 카탈로그가 정한 기본값을 따르게 한다.
+   */
+  private reconcileStoredModels(): void {
+    const validModelIds = this.validModelIds
+    if (!validModelIds || validModelIds.size === 0) return
+
+    const store = getStore()
+    const state = store.getState()
+    const hasStaleWorkspaceModel = state.workspaces.some(
+      (workspace) =>
+        workspace.agentBackend === CODEX_META.id &&
+        !!workspace.model &&
+        !validModelIds.has(workspace.model)
+    )
+    const codexDefaultModel = state.settings.agents.codex.model
+    const hasStaleDefault = !!codexDefaultModel && !validModelIds.has(codexDefaultModel)
+    if (!hasStaleWorkspaceModel && !hasStaleDefault) return
+
+    let changed = false
+    store.update((st) => {
+      for (const workspace of st.workspaces) {
+        const model = workspace.model
+        if (workspace.agentBackend !== CODEX_META.id || !model || validModelIds.has(model)) continue
+        log.info(`codex model catalog: dropped stored model ${model} for workspace ${workspace.id}`)
+        workspace.model = null
+        changed = true
+      }
+
+      const defaults = st.settings.agents.codex
+      if (defaults.model && !validModelIds.has(defaults.model)) {
+        log.info(
+          `codex model catalog: dropped stored default model ${defaults.model} for Codex settings`
+        )
+        defaults.model = null
+        changed = true
+      }
+    })
+    if (changed) this.dispatch(IPC.evtState, store.getState())
   }
 
   // ── 계정 ─────────────────────────────────────────────────────────────────
@@ -629,13 +739,18 @@ export class CodexSessionManager implements AgentBackend {
     }))
   }
 
+  /** Codex 가 호스팅하는 OAuth 콜백 흐름을 시작하고 브라우저용 URL 을 돌려준다. */
+  loginMcpServer(serverName: string): Promise<string> {
+    return this.request<string>((reqId) => ({ type: 'mcpOauthLogin', reqId, serverName }))
+  }
+
   rewindAction(): Promise<RewindActionResult> {
     return Promise.reject(new Error('Codex does not support rewind.'))
   }
 
-  listCommands(workspaceId: string): Promise<SlashCommandInfo[]> {
+  async listCommands(workspaceId: string, cwd: string): Promise<SlashCommandInfo[]> {
     const backends = this.delegateBackendsOf(workspaceId)
-    return Promise.resolve([
+    const commands: SlashCommandInfo[] = [
       { name: 'model', description: 'Choose the model' },
       { name: 'effort', description: 'Choose reasoning effort' },
       { name: 'fast', description: 'Toggle Fast service tier' },
@@ -658,7 +773,9 @@ export class CodexSessionManager implements AgentBackend {
         description: c.description,
         ...(c.argumentHint ? { argumentHint: c.argumentHint } : {})
       }))
-    ])
+    ]
+    const response = await this.skills.list(cwd)
+    return mergeSkillCommands(commands, response)
   }
 
   // ── 내부 ───────────────────────────────────────────────────────────────

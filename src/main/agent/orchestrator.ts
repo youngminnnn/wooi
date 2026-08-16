@@ -393,6 +393,13 @@ export class AgentOrchestrator {
     return this.backendFor(workspaceId).interrupt(workspaceId)
   }
 
+  stopTask(workspaceId: string, taskId: string): Promise<void> {
+    const backend = this.backendFor(workspaceId)
+    const stopTask = backend.stopTask
+    if (!stopTask) return Promise.resolve()
+    return stopTask.call(backend, workspaceId, taskId)
+  }
+
   setPermissionMode(workspaceId: string, mode: PermissionMode): Promise<void> {
     return this.backendFor(workspaceId).setPermissionMode(workspaceId, mode)
   }
@@ -545,6 +552,15 @@ export class AgentOrchestrator {
       throw new Error(`${backend.meta.label} does not manage MCP servers in its own config.`)
     }
     return backend.setMcpServerEnabled(serverName, enabled)
+  }
+
+  /** MCP OAuth 를 지원하는 백엔드에서 authorization URL 을 받는다. */
+  loginMcpServer(id: AgentBackendId, serverName: string): Promise<string> {
+    const backend = this.get(id)
+    if (!backend.loginMcpServer) {
+      throw new Error(`${backend.meta.label} does not support MCP OAuth login.`)
+    }
+    return backend.loginMcpServer(serverName)
   }
 
   mcpAction(workspaceId: string, serverName: string, action: McpAction): Promise<McpServerInfo[]> {

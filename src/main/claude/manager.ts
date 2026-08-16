@@ -317,11 +317,22 @@ export class SessionManager implements AgentBackend {
 
   /** store 에서 세션 생성에 필요한 설정을 계산한다(예전 ensure() 의 역할). */
   private configFor(ws: Workspace): SessionConfig {
-    const settings = getStore().getState().settings
+    const state = getStore().getState()
+    const settings = state.settings
     const defaults = this.defaults()
+    const allowedRoots = [ws.worktreePath, ...(ws.additionalDirs ?? [])]
+    const isGranted = (path: string): boolean => allowedRoots.includes(path)
     return {
       cwd: ws.worktreePath,
       repoPath: this.getRepoPath(ws.repoId),
+      writeIsolationRoots: [
+        ...state.workspaces
+          .filter((other) => !isGranted(other.worktreePath))
+          .map((other) => ({ path: other.worktreePath, owner: `workspace "${other.name}"` })),
+        ...state.repos
+          .filter((repo) => !isGranted(repo.path))
+          .map((repo) => ({ path: repo.path, owner: `repository "${repo.name}" main checkout` }))
+      ],
       model: ws.model ?? defaults.model,
       // fallbackModel 은 요청 시점의 과부하·일시 불가를 다른 모델로 우회한다. 계정 플랜 한도를
       // reset 뒤 같은 모델로 잇는 rateLimitResume 과 원인·복구 시점이 달라 한 경로로 합치지 않는다.
@@ -502,6 +513,10 @@ export class SessionManager implements AgentBackend {
     this.sendIfHost({ type: 'interrupt', workspaceId })
     // 세션이 없거나 끊긴 경우에도 사이드바가 '진행 중'에 갇히지 않도록 idle 로 확정한다.
     this.forceIdle(workspaceId)
+  }
+
+  async stopTask(workspaceId: string, taskId: string): Promise<void> {
+    this.sendIfHost({ type: 'stopTask', workspaceId, taskId })
   }
 
   async setPermissionMode(workspaceId: string, mode: PermissionMode): Promise<void> {

@@ -75,6 +75,7 @@ const api: WooiApi = {
     send: (workspaceId, text, images) =>
       ipcRenderer.invoke(IPC.chatSend, workspaceId, text, images),
     interrupt: (workspaceId) => ipcRenderer.invoke(IPC.chatInterrupt, workspaceId),
+    stopTask: (workspaceId, taskId) => ipcRenderer.invoke(IPC.chatStopTask, workspaceId, taskId),
     getHistory: (workspaceId) => ipcRenderer.invoke(IPC.chatGetHistory, workspaceId),
     getCosts: () => ipcRenderer.invoke(IPC.chatGetCosts),
     sideQuestion: (workspaceId, question) =>
@@ -254,9 +255,12 @@ const api: WooiApi = {
   mcp: {
     inventory: () => ipcRenderer.invoke(IPC.mcpInventory),
     openConfig: () => ipcRenderer.invoke(IPC.mcpOpenConfig),
+    externalSetupCommand: () => ipcRenderer.invoke(IPC.mcpExternalSetupCommand),
     codexServers: () => ipcRenderer.invoke(IPC.mcpCodexList),
     setCodexServerEnabled: (name, enabled) =>
-      ipcRenderer.invoke(IPC.mcpCodexSetEnabled, name, enabled)
+      ipcRenderer.invoke(IPC.mcpCodexSetEnabled, name, enabled),
+    codexOauthLogin: (name) => ipcRenderer.invoke(IPC.mcpCodexOauthLogin, name),
+    onCodexOauthLoginCompleted: (cb) => subscribe(IPC.evtMcpCodexOauthLoginCompleted, cb)
   },
 
   auth: {

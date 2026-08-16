@@ -19,6 +19,7 @@ import { MCP_SETTING_SOURCES, resolveUserMcpServers } from './mcp'
 import { isReadOnlyWooiTool, WOOI_MCP_SERVER_NAME } from '../agent/tools/catalog'
 import { delegateShellAttempt, delegateShellGuidance } from '../agent/delegateShell'
 import { resolveWooiPlugin } from '../agent/plugin'
+import { WriteIsolationGuard, type WriteIsolationRoot } from './writeIsolation'
 import { fastModeReasonText, planApprovalMode, planOptions, unknownItemId } from '@shared/types'
 import { supportsAutoMode } from '../agent/backend'
 import { asClaudeMode, claudeEffort, claudeMode, type ClaudePermissionMode } from './protocol'
@@ -43,6 +44,8 @@ export interface SessionDeps {
   cwd: string
   /** worktree 의 원본 repo 절대 경로. ~/.claude.json 의 project 스코프 MCP 조회에 쓴다(없으면 user 스코프만). */
   repoPath: string | null
+  /** 메인이 store 에서 계산한 다른 workspace 및 연결된 메인 checkout 경로. */
+  writeIsolationRoots?: WriteIsolationRoot[]
   /**
    * Wooi 스코프 MCP 설정. 메인이 store 에서 읽어 내려 준다 — 호스트에는 store 가 없다
    * ([[claude/protocol]] SessionConfig.mcpSettings).
@@ -265,6 +268,7 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
  * 사용자가 막히지 않게 한다(retryWithoutResume).
  */
 export class ClaudeSession {
+  private readonly writeIsolation: WriteIsolationGuard
   private input = new AsyncQueue<SDKUserMessage>()
   /**
    * SDK 가 입력 큐에서 꺼내 갔지만 아직 result 로 완료되지 않은 사용자 메시지.
@@ -369,6 +373,8 @@ export class ClaudeSession {
    * 서브에이전트는 부모 턴의 tool_use/tool_result 로 이미 트랜스크립트에 남으므로 영속하지 않는다.
    */
   private agentTasks = new Map<string, RunningAgent>()
+  /** SDK 가 전량 교체로 알려 주는 라이브 백그라운드 task. 트랜스크립트에는 남기지 않는다. */
+  private backgroundTasks = new Map<string, RunningAgent>()
   /**
    * resume 콜드스타트의 "이중 패스"를 피하기 위한 상태.
    *
@@ -395,6 +401,11 @@ export class ClaudeSession {
   private checkpoints: RewindPoint[] = []
 
   constructor(private deps: SessionDeps) {
+    this.writeIsolation = new WriteIsolationGuard(
+      deps.cwd,
+      [deps.cwd, ...deps.additionalDirs],
+      deps.writeIsolationRoots ?? []
+    )
     // resume + autoCompact 일 때만 preflight 한다(콜드스타트 이중 패스가 생길 수 있는 유일한 조건).
     this.preflightPending = Boolean(deps.resumeSessionId) && deps.autoCompact
   }
@@ -601,6 +612,10 @@ export class ClaudeSession {
     // 위임 실행은 별도 프로세스/query 라 부모 query 의 interrupt 로는 끊기지 않는다. 여기서
     // 끊지 않으면 사용자가 멈춘 뒤에도 `codex exec` 가 계속 파일을 고친다.
     await this.q?.interrupt().catch(() => {})
+  }
+
+  async stopTask(taskId: string): Promise<void> {
+    await this.q?.stopTask(taskId)
   }
 
   async setPermissionMode(mode: ClaudePermissionMode): Promise<void> {
@@ -846,7 +861,13 @@ export class ClaudeSession {
       // 갇히므로 idle 로 확정한다. 앱은 살아 있어 부팅 시 store 정규화가 닿지 못하는 케이스다.
       // query 가 사라지면 딸린 워크플로우도 더 진행될 수 없으므로 추적 상태를 비운다.
       // 단, resume 폴백으로 재시도하는 경우는 턴이 새 세션에서 계속되므로 idle 로 풀지 않는다.
-      if (!retrying && (this.active || this.workflowTasks.size > 0 || this.agentTasks.size > 0)) {
+      if (
+        !retrying &&
+        (this.active ||
+          this.workflowTasks.size > 0 ||
+          this.agentTasks.size > 0 ||
+          this.backgroundTasks.size > 0)
+      ) {
         this.active = false
         this.busy = false
         this.workflowTasks.clear()
@@ -1077,7 +1098,11 @@ export class ClaudeSession {
    * 목록을 안심하고 비울 수 있다(호스트가 죽어 종료 알림이 아예 오지 않는 경우의 안전망).
    */
   private syncStatus(): void {
-    const shouldRun = this.active || this.workflowTasks.size > 0 || this.agentTasks.size > 0
+    const shouldRun =
+      this.active ||
+      this.workflowTasks.size > 0 ||
+      this.agentTasks.size > 0 ||
+      this.backgroundTasks.size > 0
     if (shouldRun === this.busy) return
     this.busy = shouldRun
     this.deps.emit({ type: 'status', status: shouldRun ? 'running' : 'idle' })
@@ -1097,6 +1122,17 @@ export class ClaudeSession {
     input: Record<string, unknown>,
     options: { title?: string; displayName?: string; decisionReason?: string }
   ): Promise<PermissionResult> => {
+    const isolationViolation = await this.writeIsolation.check(toolName, input, this.deps.cwd)
+    if (isolationViolation) {
+      return {
+        behavior: 'deny',
+        message:
+          `Cannot write to ${isolationViolation.path}: it belongs to ${isolationViolation.owner}. ` +
+          "Wooi keeps workspace file edits isolated. Work inside this workspace's worktree, " +
+          'or ask the user to add that directory with /add-dir.'
+      }
+    }
+
     // AskUserQuestion 은 "행위 승인" 대상이 아니라 모델이 사용자에게 답을 요청하는 도구다.
     // permission mode(auto 포함)·세션 always-allow 와 무관하게 항상 질문을 띄우고, 사용자가
     // 고른 답(updatedInput.answers)을 도구 입력에 합쳐 돌려줘야 한다. 자동 승인하면 answers 가
@@ -1317,6 +1353,8 @@ export class ClaudeSession {
       this.deps.emit({ type: 'compacting', active: false, trigger: meta?.trigger })
     } else if (msg.subtype === 'task_started') {
       this.handleTaskStarted(msg)
+    } else if (msg.subtype === 'background_tasks_changed') {
+      this.handleBackgroundTasksChanged(msg)
     } else if (msg.subtype === 'task_progress') {
       this.handleTaskProgress(msg)
     } else if (msg.subtype === 'task_updated') {
@@ -1374,6 +1412,7 @@ export class ClaudeSession {
       if (typeof msg.subagent_type === 'string') {
         this.agentTasks.set(msg.task_id, {
           taskId: msg.task_id,
+          canStop: true,
           agentType: msg.subagent_type,
           description: msg.description || msg.subagent_type,
           startedAt: Date.now()
@@ -1460,13 +1499,21 @@ export class ClaudeSession {
   private handleTaskNotification(
     msg: Extract<SDKMessage, { type: 'system'; subtype: 'task_notification' }>
   ): void {
+    // 완료 엣지도 즉시 반영한다. 뒤따르는 snapshot 을 놓쳐도 중지 버튼과 스피너가 남지 않는다.
+    const removedBackground = this.backgroundTasks.delete(msg.task_id)
     if (this.agentTasks.delete(msg.task_id)) {
       this.emitAgents()
       this.syncStatus()
       return
     }
     const state = this.workflowTasks.get(msg.task_id)
-    if (!state) return // 추적 중이 아닌 task 의 알림은 무시.
+    if (!state) {
+      if (removedBackground) {
+        this.emitAgents()
+        this.syncStatus()
+      }
+      return // 추적 중이 아닌 task 의 알림은 표시용 상태만 정리한다.
+    }
     state.status = msg.status // 'completed' | 'failed' | 'stopped'
     if (msg.summary) state.summary = msg.summary
     if (msg.usage) {
@@ -1487,7 +1534,32 @@ export class ClaudeSession {
    * 세션 정리에서 저절로 바로잡히고, 렌더러에 스피너가 영구히 남지 않는다.
    */
   private emitAgents(): void {
-    this.deps.emit({ type: 'agents', agents: [...this.agentTasks.values()] })
+    // 같은 SDK task 가 subagent 와 background snapshot 양쪽에 있어도 전용 에이전트 행 하나만 남긴다.
+    const background = [...this.backgroundTasks.values()].filter(
+      (task) => !this.agentTasks.has(task.taskId)
+    )
+    this.deps.emit({ type: 'agents', agents: [...this.agentTasks.values(), ...background] })
+  }
+
+  private handleBackgroundTasksChanged(
+    msg: Extract<SDKMessage, { type: 'system'; subtype: 'background_tasks_changed' }>
+  ): void {
+    const previous = this.backgroundTasks
+    this.backgroundTasks = new Map(
+      msg.tasks.map((task) => [
+        task.task_id,
+        {
+          taskId: task.task_id,
+          taskType: task.task_type,
+          canStop: true,
+          agentType: task.task_type,
+          description: task.description || task.task_type,
+          startedAt: previous.get(task.task_id)?.startedAt ?? Date.now()
+        }
+      ])
+    )
+    this.emitAgents()
+    this.syncStatus()
   }
 
   /**
@@ -1499,8 +1571,9 @@ export class ClaudeSession {
    * 계속 고치는 프로세스가 남는다.
    */
   private clearAgents(): void {
-    if (this.agentTasks.size === 0) return
+    if (this.agentTasks.size === 0 && this.backgroundTasks.size === 0) return
     this.agentTasks.clear()
+    this.backgroundTasks.clear()
     this.emitAgents()
   }
 

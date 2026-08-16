@@ -18,7 +18,9 @@ import {
   NOTIFY,
   type AccountReadResult,
   type ModelListResult,
-  type RateLimitsResult
+  type RateLimitsResult,
+  type McpServerOauthLoginCompletedParams,
+  normalizeMcpAuthStatus
 } from './wire'
 import type { CodexCommand, CodexConfig, CodexEvent, CodexLoginMethod } from './protocol'
 import type {
@@ -117,6 +119,24 @@ function routeNotification(method: string, params: unknown): void {
   // 계정이 바뀌었다(로그인·로그아웃·토큰 갱신). 메인이 상태를 다시 읽고 세션을 재활용한다.
   if (method === NOTIFY.accountUpdated) {
     post({ type: 'accountChanged' })
+    return
+  }
+
+  if (method === NOTIFY.mcpOauthLoginCompleted) {
+    const p = params as McpServerOauthLoginCompletedParams
+    if (p?.name && typeof p.success === 'boolean') {
+      post({
+        type: 'mcpOauthLoginCompleted',
+        name: p.name,
+        success: p.success,
+        error: typeof p.error === 'string' ? p.error : undefined
+      })
+    }
+    return
+  }
+
+  if (method === NOTIFY.skillsChanged) {
+    post({ type: 'skillsChanged' })
     return
   }
 
@@ -376,11 +396,12 @@ async function handle(msg: CodexCommand): Promise<void> {
       break
 
     case 'send':
-      await ensure(msg.workspaceId, msg.config).send(msg.text, msg.images, {
-        prefix: msg.prefix,
-        silent: msg.silent,
-        origin: msg.origin
-      })
+      await ensure(msg.workspaceId, msg.config).send(
+        msg.text,
+        msg.images,
+        { prefix: msg.prefix, silent: msg.silent, origin: msg.origin },
+        msg.skill
+      )
       break
 
     case 'interrupt':
@@ -416,6 +437,13 @@ async function handle(msg: CodexCommand): Promise<void> {
       await respond(msg.reqId, listModels)
       break
 
+    case 'listSkills':
+      await respond(msg.reqId, async () => {
+        const result = await (await rpc()).request(RPC.skillsList, { cwds: [msg.cwd] })
+        return result
+      })
+      break
+
     case 'runCommand':
       await respond(msg.reqId, () => runCommand(msg.workspaceId, msg.kind))
       break
@@ -430,6 +458,10 @@ async function handle(msg: CodexCommand): Promise<void> {
 
     case 'mcpSetEnabled':
       await respond(msg.reqId, () => setMcpServerEnabled(msg.serverName, msg.enabled))
+      break
+
+    case 'mcpOauthLogin':
+      await respond(msg.reqId, () => loginMcpServer(msg.serverName))
       break
 
     case 'compact':
@@ -733,9 +765,12 @@ async function mcpAction(serverName: string, action: McpAction): Promise<McpServ
  */
 async function listConfiguredMcpServers(): Promise<CodexMcpServer[]> {
   const client = await rpc()
-  const result = await client.request<{
-    config?: { mcp_servers?: Record<string, Record<string, unknown>> }
-  }>(RPC.configRead, { includeLayers: false })
+  const [result, authStatuses] = await Promise.all([
+    client.request<{
+      config?: { mcp_servers?: Record<string, Record<string, unknown>> }
+    }>(RPC.configRead, { includeLayers: false }),
+    listMcpAuthStatuses(client)
+  ])
   const ours = new Set([WOOI_MCP_SERVER_NAME, ...Object.keys(wooiMcpServerTable())])
   return Object.entries(result.config?.mcp_servers ?? {})
     .filter(([name]) => !ours.has(name))
@@ -743,9 +778,29 @@ async function listConfiguredMcpServers(): Promise<CodexMcpServer[]> {
       name,
       detail: describeCodexMcpServer(server),
       // codex 기본값은 "켜짐" 이다 — 키가 없다고 꺼진 것으로 그리면 전부 꺼진 것처럼 보인다.
-      enabled: server.enabled !== false
+      enabled: server.enabled !== false,
+      authStatus: authStatuses.get(name) ?? 'unknown'
     }))
     .sort((a, b) => a.name.localeCompare(b.name))
+}
+
+/** 런타임 목록에 없거나 새 상태가 온 서버는 unknown 으로 남겨, 로그인 필요로 오판하지 않는다. */
+async function listMcpAuthStatuses(
+  client: RpcClient
+): Promise<Map<string, CodexMcpServer['authStatus']>> {
+  const statuses = new Map<string, CodexMcpServer['authStatus']>()
+  let cursor: string | null = null
+  do {
+    const page: {
+      data?: Array<{ name?: string; authStatus?: string }>
+      nextCursor?: string | null
+    } = await client.request(RPC.mcpStatusList, { cursor, detail: 'toolsAndAuthOnly', limit: 100 })
+    for (const server of page.data ?? []) {
+      if (server.name) statuses.set(server.name, normalizeMcpAuthStatus(server.authStatus))
+    }
+    cursor = page.nextCursor ?? null
+  } while (cursor)
+  return statuses
 }
 
 /** 목록의 한 줄 요약. stdio 는 명령줄, 원격은 URL. */
@@ -773,6 +828,17 @@ async function setMcpServerEnabled(
   })
   await client.request(RPC.mcpReload, {})
   return listConfiguredMcpServers()
+}
+
+/** OAuth 완료는 별도 알림으로 오므로 이 요청은 브라우저를 열 URL 까지만 책임진다. */
+async function loginMcpServer(serverName: string): Promise<string> {
+  const result = await (
+    await rpc()
+  ).request<{ authorizationUrl?: string }>(RPC.mcpOauthLogin, {
+    name: serverName
+  })
+  if (!result.authorizationUrl) throw new Error('Codex did not return an authorization URL.')
+  return result.authorizationUrl
 }
 
 /** rate limit 창 하나를 UsageInfo 모양으로. 데이터가 없으면 null. */

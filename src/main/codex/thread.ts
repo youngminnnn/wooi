@@ -101,9 +101,15 @@ export class CodexThread {
    * 해야 한다 — 서버가 되돌려 주는 것이 그것이라, 어긋나면 mapper 가 그 echo 를 처음 보는
    * 사용자 메시지로 알고 인수인계 프롬프트 전문을 화면에 되살린다.
    */
-  async send(text: string, images?: ImageAttachment[], opts?: SendMessageOptions): Promise<void> {
+  async send(
+    text: string,
+    images?: ImageAttachment[],
+    opts?: SendMessageOptions,
+    skill?: { name: string; path: string; prompt: string }
+  ): Promise<void> {
     if (this.disposed) return
-    const prompt = opts?.prefix ? `${opts.prefix}\n\n${text}` : text
+    const modelText = skill?.prompt ?? text
+    const prompt = opts?.prefix ? `${opts.prefix}\n\n${modelText}` : modelText
     const attachments = (images ?? []).map((image) => ({
       name: image.name,
       mediaType: image.mediaType
@@ -133,7 +139,9 @@ export class CodexThread {
     try {
       const rpc = await this.deps.rpc()
       const threadId = await this.ensureThread(rpc)
-      const input = buildInput(prompt, images)
+      // app-server 는 TUI 의 `/skill` 확장을 하지 않는다. 명시적인 SkillUserInput 을 실어야
+      // 모델이 SKILL.md 를 호출 대상으로 받으므로, 자동완성 선택을 평문 슬래시로 보내지 않는다.
+      const input = buildInput(prompt, images, skill)
       const policy = turnPolicyFor(this.config.permissionMode, this.config.cwd)
 
       // 턴이 도는 중이면 새 턴을 만들지 않고 밀어 넣는다(Codex 네이티브 steering).
@@ -519,8 +527,13 @@ function wooiWorkspaceInstructions(workspaceId: string): string {
   )
 }
 
-function buildInput(text: string, images?: ImageAttachment[]): unknown[] {
+function buildInput(
+  text: string,
+  images?: ImageAttachment[],
+  skill?: { name: string; path: string }
+): unknown[] {
   const input: unknown[] = []
+  if (skill) input.push({ type: 'skill', name: skill.name, path: skill.path })
   if (text.trim()) input.push({ type: 'text', text })
 
   for (const image of images ?? []) {

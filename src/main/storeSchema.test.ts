@@ -342,6 +342,33 @@ describe('v20 → v21 (fan-out 그룹)', () => {
   })
 })
 
+describe('v22 → v23 (폐기된 Codex 모델 정리)', () => {
+  const v22File = (): Record<string, unknown> => ({
+    schemaVersion: 22,
+    repos: [],
+    workspaces: [
+      { id: 'c1', agentBackend: 'codex', model: 'gpt-5.4' },
+      { id: 'c2', agentBackend: 'codex', model: 'gpt-5.4-mini' },
+      { id: 'c3', agentBackend: 'codex', model: 'gpt-5.4-codex' },
+      { id: 'c4', agentBackend: 'codex', model: 'gpt-5-codex' },
+      { id: 'c5', agentBackend: 'codex', model: null },
+      { id: 'a1', agentBackend: 'claude', model: 'gpt-5.4' }
+    ]
+  })
+
+  it('Codex 의 gpt-5.4 계열만 카탈로그 기본값(null)으로 비운다', () => {
+    const workspaces = migrate(v22File(), 22).workspaces as Partial<Workspace>[]
+    expect(workspaces.map((workspace) => workspace.model)).toEqual([
+      null,
+      null,
+      null,
+      'gpt-5-codex',
+      null,
+      'gpt-5.4'
+    ])
+  })
+})
+
 describe('레거시 파일 전체 경로', () => {
   it('v0(버전 필드 없음) 파일을 현재 스키마까지 끝까지 변환한다', () => {
     const legacy = {

@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight } from 'lucide-react'
+import { ChevronDown, ChevronRight, Square } from 'lucide-react'
 import { useStore } from '../store'
 import { formatDuration } from '../lib/format'
 import { AgentBackendMark } from './BrandIcons'
@@ -6,7 +6,7 @@ import { AGENT_BACKEND_LABELS } from '@shared/types'
 import type { AgentBackendId } from '@shared/types'
 
 /**
- * 사이드바에서 워크스페이스 행 **바로 아래**에 붙는, 그 워크트리에서 지금 돌고 있는 서브에이전트 목록.
+ * 사이드바에서 워크스페이스 행 **바로 아래**에 붙는, 지금 돌고 있는 에이전트·task 목록.
  *
  * 워크스페이스 행 안이 아니라 형제로 렌더한다 — 행 자체가 role="button" 인 클릭·드래그 영역이라
  * 그 안에 버튼을 중첩하면 접기 클릭이 워크스페이스 선택으로 새고 드래그 정렬과도 충돌한다.
@@ -59,12 +59,10 @@ export function WorkspaceAgents({
         onClick={() => toggle(workspaceId)}
         style={{ paddingLeft: indent }}
         className="w-full flex items-center gap-1 pr-2 py-0.5 rounded-md text-xs text-neutral-500 hover:bg-[var(--surface)] hover:text-neutral-300 transition-colors"
-        title={collapsed ? 'Show running agents' : 'Hide running agents'}
+        title={collapsed ? 'Show running work' : 'Hide running work'}
       >
         {collapsed ? <ChevronRight size={11} /> : <ChevronDown size={11} />}
-        <span className="flex-1 text-left">
-          {rows.length} agent{rows.length > 1 ? 's' : ''}
-        </span>
+        <span className="flex-1 text-left">{rows.length} running</span>
         {collapsed && (
           <span className="tabular-nums text-neutral-600">
             {formatDuration(now - oldest.startedAt)}
@@ -76,13 +74,16 @@ export function WorkspaceAgents({
         rows.map((agent) => {
           // 위임 실행은 자기 백엔드를 싣고 오고, 네이티브 서브에이전트는 부모의 것을 따른다.
           const agentBackend = agent.backend ?? backend
+          const isTask = typeof agent.taskType === 'string'
           return (
             <div
               key={agent.taskId}
               style={{ paddingLeft: indent + 12 }}
               className="flex items-baseline gap-1.5 pr-2 py-0.5 text-xs"
               title={[
-                `${agent.agentType} · ${AGENT_BACKEND_LABELS[agentBackend]}`,
+                isTask
+                  ? `Background task · ${agent.taskType}`
+                  : `${agent.agentType} · ${AGENT_BACKEND_LABELS[agentBackend]}`,
                 agent.description,
                 agent.lastToolName ? `Last tool: ${agent.lastToolName}` : null,
                 typeof agent.toolUses === 'number' ? `${agent.toolUses} tool uses` : null,
@@ -95,9 +96,13 @@ export function WorkspaceAgents({
             >
               {/* 좌측 마크가 "어떤 에이전트로 돌고 있나"(Claude Code / Codex)를, 옆 텍스트가
                 "어떤 서브에이전트인가"(Explore 등)를 나타낸다 — 두 축이 겹치지 않는다. */}
-              <span className="shrink-0 translate-y-0.5">
-                <AgentBackendMark backend={agentBackend} size={10} />
-              </span>
+              {isTask ? (
+                <span className="shrink-0 text-neutral-500">●</span>
+              ) : (
+                <span className="shrink-0 translate-y-0.5">
+                  <AgentBackendMark backend={agentBackend} size={10} />
+                </span>
+              )}
               {/* 타입 이름도 결국 잘린다 — `humanize-korean:translationese-research-distiller`
                   처럼 긴 이름이 오면 shrink-0 은 행을 사이드바 폭 밖으로 밀어내 경과 시간까지
                   잘라 먹는다. 설명이 먼저 0 폭으로 줄고(basis 0), 그래도 모자라면 여기서 준다. */}
@@ -112,6 +117,17 @@ export function WorkspaceAgents({
               <span className="shrink-0 tabular-nums text-neutral-600">
                 {formatDuration(now - agent.startedAt)}
               </span>
+              {agent.canStop && (
+                <button
+                  type="button"
+                  aria-label={`Stop ${isTask ? 'background task' : 'agent'}: ${agent.description}`}
+                  title={`Stop ${isTask ? 'background task' : 'agent'}`}
+                  onClick={() => void window.api.chat.stopTask(workspaceId, agent.taskId)}
+                  className="shrink-0 rounded p-0.5 text-neutral-500 hover:bg-[var(--surface-2)] hover:text-red-400"
+                >
+                  <Square size={9} fill="currentColor" />
+                </button>
+              )}
             </div>
           )
         })}
