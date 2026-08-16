@@ -168,6 +168,9 @@ export class RelayClient {
       .from('machine_state')
       .select('machine_id, rev, nonce, state_ct, updated_at')
       .eq('machine_id', this.pairing.machineId)
+      // 상태 행은 기기별로 봉인된다(0006). 이 필터가 없으면 기기가 둘 이상일 때
+      // maybeSingle() 이 여러 행을 보고 실패하고, 남의 키로 봉인된 암호문을 잡을 수도 있다.
+      .eq('device_id', this.pairing.deviceId)
       .maybeSingle()
     if (response.error) throw new Error('Could not load laptop state')
     if (response.data === null) {
@@ -227,6 +230,18 @@ export class RelayClient {
       throw new Error('Could not queue the command. Check your relay connection and try again.')
     }
     return this.pollCommand(inserted.data.id)
+  }
+
+  /**
+   * 푸시 토큰을 릴레이에 올린다. 매 실행마다 한 번 — Edge Function 이 죽은 토큰을 null 로
+   * 지우기 때문에(DeviceNotRegistered) 재등록이 곧 자가 치유다.
+   */
+  async savePushToken(token: string | null): Promise<void> {
+    const { error } = await this.client
+      .from('devices')
+      .update({ expo_push_token: token })
+      .eq('id', this.pairing.deviceId)
+    if (error) throw new Error('Could not register this phone for notifications')
   }
 
   disconnect(): void {

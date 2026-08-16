@@ -4,6 +4,7 @@ import QRCode from 'qrcode'
 import { useNow } from '../lib/useNow'
 import { ghostBtn, primaryBtn } from './Modal'
 import type { RemoteDeviceSummary, RemoteStatus } from '@shared/remote'
+import type { AppSettings } from '@shared/types'
 
 /**
  * 원격 접근(모바일 컴패니언) 설정 패널.
@@ -12,7 +13,15 @@ import type { RemoteDeviceSummary, RemoteStatus } from '@shared/remote'
  * 승인해야만 세션키가 만들어진다 — QR 을 촬영한 공격자가 먼저 claim 하면 여기 뜨는 숫자와
  * 기기 이름이 달라지므로 사용자가 거부한다. 그래서 확인 단계는 눈에 띄고, 거부가 승인만큼 쉽다.
  */
-export default function RemoteAccessPanel(): React.JSX.Element {
+interface RemoteAccessPanelProps {
+  settings: AppSettings
+  save: (patch: Partial<AppSettings>) => void
+}
+
+export default function RemoteAccessPanel({
+  settings,
+  save
+}: RemoteAccessPanelProps): React.JSX.Element {
   const [status, setStatus] = useState<RemoteStatus | null>(null)
   const [busy, setBusy] = useState(false)
   const [confirmClear, setConfirmClear] = useState(false)
@@ -121,6 +130,26 @@ export default function RemoteAccessPanel(): React.JSX.Element {
               {pairing.phase === 'done' ? 'Pair another phone' : 'Pair a phone'}
             </button>
           )}
+
+          {/* 푸시는 원격 접근과 별개의 결정이다 — 폰이 랩탑을 **볼 수 있는 것**과
+              랩탑이 폰을 **깨우는 것**은 다른 거래이므로 스위치도 따로 둔다. */}
+          <label className="flex items-start gap-2.5 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={settings.remotePushEnabled}
+              disabled={busy}
+              onChange={(e) => save({ remotePushEnabled: e.target.checked })}
+              className="accent-blue-600 h-3.5 w-3.5 mt-0.5"
+            />
+            <span className="text-sm text-neutral-300">
+              Send notifications to paired phones
+              <span className="block text-xs text-neutral-600 leading-relaxed">
+                Only when you are away from this laptop. The banner never names a workspace — it
+                says something needs you, and the details are decrypted on your phone when you tap
+                it.
+              </span>
+            </span>
+          </label>
 
           <DeviceList
             devices={status.devices}

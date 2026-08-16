@@ -337,7 +337,7 @@ export default function SettingsModal({
                   <h4 className="mb-3 text-xs font-semibold uppercase tracking-wider text-neutral-500">
                     Remote access
                   </h4>
-                  <RemoteAccessPanel />
+                  <RemoteAccessPanel settings={settings} save={save} />
                 </div>
               </PageFrame>
             )}
