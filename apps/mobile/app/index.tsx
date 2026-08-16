@@ -2,7 +2,7 @@ import { useCallback, useMemo, useState } from 'react'
 import { Image, Pressable, RefreshControl, SectionList, StyleSheet, Text, View } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
-import { Settings } from 'lucide-react-native'
+import { Settings, Users } from 'lucide-react-native'
 import type { RemoteWorkspace } from '@shared/remote'
 import { workspaceDisplayName } from '@shared/types'
 import { BrandMark } from '../src/components/BrandMark'
@@ -60,10 +60,6 @@ function WorkspaceRow({
 }): React.JSX.Element {
   const needsPermission = workspace.attention === 'permission'
   const limit = rateLimitLabel(workspace, now)
-  // 한 줄에 다 넣지 않고 우선순위대로 자른다. 폰 폭에서는 브랜치 이름만으로도 줄이 찬다.
-  const meta = [workspace.multiAgent ? '+ subagents' : null, workspace.branch].filter(
-    (part): part is string => part !== null
-  )
 
   return (
     <Pressable style={[styles.row, needsPermission && styles.permissionRow]} onPress={onPress}>
@@ -88,9 +84,21 @@ function WorkspaceRow({
         <View style={styles.metaLine}>
           {/* 마크는 14px 아래로 내리지 않는다 — Claude 선버스트는 살이 가늘어 그보다 작으면
               주황색 얼룩으로 뭉개진다(데스크톱이 같은 이유로 14px 를 하한으로 쓴다). */}
-          {showAgent ? <BrandMark backend={workspace.agentBackend} size={14} /> : null}
+          {showAgent || workspace.multiAgent ? (
+            <View style={styles.agentMarks}>
+              {showAgent ? <BrandMark backend={workspace.agentBackend} size={14} /> : null}
+              {/* 팀이면 사람 아이콘 하나를 붙인다 — 데스크톱 사이드바와 같은 그림이다.
+                  글자('+ subagents')로 적으면 폰 폭에서 브랜치 이름을 밀어낸다. 개수와 무관한
+                  단일 글리프인 이유, 파랑이 아니라 보라인 이유는 데스크톱 index.css 참고. */}
+              {workspace.multiAgent ? (
+                <View accessible accessibilityLabel="Agent team">
+                  <Users size={13} color={theme.accent} />
+                </View>
+              ) : null}
+            </View>
+          ) : null}
           <Text style={styles.branch} numberOfLines={1}>
-            {meta.join(' · ')}
+            {workspace.branch}
           </Text>
         </View>
         {workspace.pr !== null && workspace.pr !== undefined ? (
@@ -360,6 +368,8 @@ const styles = StyleSheet.create({
   },
   permissionText: { color: '#12101f', fontSize: 9, fontWeight: '800', letterSpacing: 0.6 },
   metaLine: { alignItems: 'center', flexDirection: 'row', gap: 6, marginTop: 4 },
+  // 마크와 팀 글리프는 한 덩어리로 읽혀야 한다 — 브랜치와의 간격보다 좁게 붙인다.
+  agentMarks: { alignItems: 'center', flexDirection: 'row', gap: 3 },
   branch: { color: theme.textDim, flexShrink: 1, fontSize: 12.5 },
   pr: { fontSize: 11.5, marginTop: 4 },
   limit: { color: theme.warning, fontSize: 11.5, marginTop: 4 },
