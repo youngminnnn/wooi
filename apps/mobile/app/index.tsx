@@ -5,6 +5,7 @@ import { useRouter } from 'expo-router'
 import type { RemoteWorkspace } from '@shared/remote'
 import { workspaceDisplayName } from '@shared/types'
 import { BrandMark } from '../src/components/BrandMark'
+import { StatusIcon } from '../src/components/StatusIcon'
 import { DemoBanner } from '../src/components/DemoBanner'
 import { PR_COLORS } from '../src/state/prColors'
 import { isLaptopAway, useRemoteStore } from '../src/state/store'
@@ -15,21 +16,6 @@ const STATUS_COLORS: Record<string, string> = {
   idle: theme.textFaint,
   running: theme.accent,
   error: theme.danger
-}
-
-/**
- * 점 하나가 말할 것을 고른다. 우선순위는 데스크톱 StatusDot 과 같다 —
- * 권한 대기 > 실행 중 > 사용량 제한 > 에러 > PR 상태 > idle.
- * 지금 행동할 수 있는 것이 앞이고, PR 은 아무 일도 일어나지 않을 때에야 말한다.
- */
-function dotColor(workspace: RemoteWorkspace, hasLimit: boolean): string {
-  if (workspace.attention === 'permission') return theme.accent
-  if (workspace.status === 'running') return STATUS_COLORS.running
-  if (hasLimit) return theme.warning
-  if (workspace.status === 'error') return STATUS_COLORS.error
-  const pr = workspace.pr
-  if (pr) return PR_COLORS[pr.state] ?? STATUS_COLORS.idle
-  return STATUS_COLORS.idle
 }
 
 function updatedLabel(timestamp: number): string {
@@ -80,13 +66,9 @@ function WorkspaceRow({
 
   return (
     <Pressable style={[styles.row, needsPermission && styles.permissionRow]} onPress={onPress}>
-      <View
-        style={[
-          styles.dot,
-          { backgroundColor: dotColor(workspace, limit !== null) },
-          needsPermission && styles.permissionDot
-        ]}
-      />
+      <View style={styles.statusSlot}>
+        <StatusIcon workspace={workspace} hasLimit={limit !== null} />
+      </View>
       <View style={styles.rowContent}>
         <View style={styles.nameLine}>
           {/* 스택된 워크스페이스임을 한 글자로 알린다. 폰 폭에서 트리 들여쓰기는 이름을
@@ -103,20 +85,24 @@ function WorkspaceRow({
           ) : null}
         </View>
         <View style={styles.metaLine}>
-          {showAgent ? <BrandMark backend={workspace.agentBackend} size={11} /> : null}
+          {/* 마크는 14px 아래로 내리지 않는다 — Claude 선버스트는 살이 가늘어 그보다 작으면
+              주황색 얼룩으로 뭉개진다(데스크톱이 같은 이유로 14px 를 하한으로 쓴다). */}
+          {showAgent ? <BrandMark backend={workspace.agentBackend} size={14} /> : null}
           <Text style={styles.branch} numberOfLines={1}>
             {meta.join(' · ')}
           </Text>
         </View>
-        {workspace.pr ? (
-          <Text style={[styles.pr, { color: PR_COLORS[workspace.pr.state] ?? theme.textDim }]}>
+        {workspace.pr !== null && workspace.pr !== undefined ? (
+          <Text
+            style={[styles.pr, { color: PR_COLORS[workspace.pr.state] ?? theme.textDim }]}
+            numberOfLines={1}
+          >
             #{workspace.pr.number} · {workspace.pr.label}
+            {limit !== null ? <Text style={styles.limit}> · {limit}</Text> : null}
           </Text>
-        ) : null}
-        {limit !== null ? <Text style={styles.limit}>{limit}</Text> : null}
-        {parentName !== null ? (
-          <Text style={styles.parent} numberOfLines={1}>
-            stacked on {parentName}
+        ) : limit !== null ? (
+          <Text style={styles.limit} numberOfLines={1}>
+            {limit}
           </Text>
         ) : null}
       </View>
@@ -245,9 +231,7 @@ export default function WorkspaceListScreen(): React.JSX.Element {
           <WorkspaceRow
             workspace={item}
             parentName={
-              item.parentWorkspaceId == null
-                ? null
-                : (nameById.get(item.parentWorkspaceId) ?? null)
+              item.parentWorkspaceId == null ? null : (nameById.get(item.parentWorkspaceId) ?? null)
             }
             showAgent={showAgent}
             now={now}
@@ -301,7 +285,7 @@ const styles = StyleSheet.create({
   list: { paddingBottom: 24 },
   sectionHeader: {
     alignItems: 'center',
-    backgroundColor: theme.bg,
+    backgroundColor: theme.bg2,
     borderBottomColor: theme.border,
     borderBottomWidth: StyleSheet.hairlineWidth,
     flexDirection: 'row',
@@ -309,29 +293,34 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     paddingVertical: 8
   },
-  sectionName: { color: theme.textMuted, flex: 1, fontSize: 12, fontWeight: '700', letterSpacing: 0.3 },
+  sectionName: { color: theme.text, flex: 1, fontSize: 12, fontWeight: '700', letterSpacing: 0.4 },
   sectionCount: { color: theme.accent, fontSize: 11 },
   row: {
     alignItems: 'flex-start',
     borderBottomColor: theme.border,
     borderBottomWidth: StyleSheet.hairlineWidth,
     flexDirection: 'row',
-    minHeight: 66,
+    minHeight: 62,
     paddingHorizontal: 18,
-    paddingVertical: 13
+    paddingVertical: 12
   },
   permissionRow: {
-    backgroundColor: theme.surface2,
-    borderBottomColor: theme.accentStrong,
+    backgroundColor: theme.surface,
+    borderBottomColor: theme.border,
     borderLeftColor: theme.accent,
     borderLeftWidth: 3
   },
-  dot: { borderRadius: 5, height: 9, marginRight: 12, marginTop: 5, width: 9 },
-  permissionDot: { height: 10, width: 10 },
+  statusSlot: { alignItems: 'center', marginRight: 11, marginTop: 3, width: 16 },
   rowContent: { flex: 1 },
-  nameLine: { alignItems: 'center', flexDirection: 'row', gap: 6 },
+  nameLine: { alignItems: 'center', flexDirection: 'row', gap: 7 },
   stacked: { color: theme.textDim, fontSize: 13 },
-  name: { color: theme.text, flexShrink: 1, fontSize: 15, fontWeight: '500' },
+  name: {
+    color: theme.text,
+    flexShrink: 1,
+    fontSize: 15.5,
+    fontWeight: '600',
+    letterSpacing: -0.2
+  },
   muted: { color: theme.textDim, fontSize: 10 },
   permissionBadge: {
     backgroundColor: theme.accent,
@@ -340,10 +329,10 @@ const styles = StyleSheet.create({
     paddingVertical: 1
   },
   permissionText: { color: '#12101f', fontSize: 9, fontWeight: '800', letterSpacing: 0.6 },
-  metaLine: { alignItems: 'center', flexDirection: 'row', gap: 5, marginTop: 3 },
-  branch: { color: theme.textDim, flexShrink: 1, fontSize: 12 },
-  pr: { fontSize: 11, marginTop: 3 },
-  limit: { color: theme.warning, fontSize: 11, marginTop: 3 },
+  metaLine: { alignItems: 'center', flexDirection: 'row', gap: 6, marginTop: 4 },
+  branch: { color: theme.textDim, flexShrink: 1, fontSize: 12.5 },
+  pr: { fontSize: 11.5, marginTop: 4 },
+  limit: { color: theme.warning, fontSize: 11.5, marginTop: 4 },
   parent: { color: theme.textFaint, fontSize: 11, marginTop: 2 },
   emptyList: { flexGrow: 1, justifyContent: 'center' },
   empty: { alignItems: 'center', paddingHorizontal: 32 },
