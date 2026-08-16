@@ -23,6 +23,7 @@ import type {
   PermissionRequest,
   PrStatus,
   RunningAgent,
+  WorkspaceGoal,
   ReviewEnvelope,
   ReviewFinding,
   ReviewVerdict,
@@ -320,6 +321,8 @@ interface UIState {
   apiRetries: Record<string, ApiRetryState>
   /** 응답 본문이 보고한 실제 모델이 설정된 폴백일 때만 존재한다. */
   activeFallbackModels: Record<string, string>
+  /** workspace 별 현재 세션 목표. ChatEvent 로만 채우고 디스크에는 쓰지 않는다. */
+  goals: Record<string, WorkspaceGoal>
   /**
    * workspace 별 에이전트 목록 접힘 상태(true = 접힘). 기본값은 펼침이다.
    *
@@ -800,6 +803,7 @@ export const useStore = create<UIState>((set, get) => ({
   runningAgents: {},
   apiRetries: {},
   activeFallbackModels: {},
+  goals: {},
   agentsCollapsed: {},
   drafts: {},
   messageQueue: {},
@@ -1355,6 +1359,13 @@ export const useStore = create<UIState>((set, get) => ({
           if (event.retry) apiRetries[workspaceId] = event.retry
           else delete apiRetries[workspaceId]
           return { apiRetries }
+        })
+      } else if (event.type === 'goal') {
+        set((s) => {
+          const goals = { ...s.goals }
+          if (event.goal) goals[workspaceId] = event.goal
+          else delete goals[workspaceId]
+          return { goals }
         })
       }
     })
@@ -2299,11 +2310,14 @@ export const useStore = create<UIState>((set, get) => ({
       delete contextUsage[workspaceId]
       const compacting = { ...s.compacting }
       delete compacting[workspaceId]
+      const goals = { ...s.goals }
+      delete goals[workspaceId]
       return {
         transcripts: { ...s.transcripts, [workspaceId]: [] },
         loadedTranscripts: { ...s.loadedTranscripts, [workspaceId]: true },
         contextUsage,
-        compacting
+        compacting,
+        goals
       }
     }),
 

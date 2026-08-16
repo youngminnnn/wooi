@@ -31,6 +31,20 @@ export interface CodexError {
   additionalDetails?: unknown
 }
 
+export type ThreadGoalStatus =
+  'active' | 'paused' | 'blocked' | 'usageLimited' | 'budgetLimited' | 'complete'
+
+export interface ThreadGoal {
+  threadId?: string
+  objective?: string
+  status?: ThreadGoalStatus
+  tokenBudget?: number | null
+  tokensUsed?: number
+  timeUsedSeconds?: number
+  createdAt?: number
+  updatedAt?: number
+}
+
 // ── ThreadItem (턴 안에서 벌어지는 일들) ────────────────────────────────
 
 export interface FileUpdateChange {
@@ -437,6 +451,9 @@ export const RPC = {
   threadFork: 'thread/fork',
   threadCompact: 'thread/compact/start',
   threadShellCommand: 'thread/shellCommand',
+  threadGoalSet: 'thread/goal/set',
+  threadGoalGet: 'thread/goal/get',
+  threadGoalClear: 'thread/goal/clear',
   reviewStart: 'review/start',
   turnStart: 'turn/start',
   turnSteer: 'turn/steer',
@@ -459,6 +476,8 @@ export const RPC = {
 export const NOTIFY = {
   threadStarted: 'thread/started',
   threadStatusChanged: 'thread/status/changed',
+  threadGoalUpdated: 'thread/goal/updated',
+  threadGoalCleared: 'thread/goal/cleared',
   turnStarted: 'turn/started',
   skillsChanged: 'skills/changed',
   // 실패한 턴도 turn/completed 로 온다(status:'failed'). `turn/failed` 알림은 존재하지 않는다.

@@ -81,6 +81,7 @@ const api: WooiApi = {
     sideQuestion: (workspaceId, question) =>
       ipcRenderer.invoke(IPC.chatSideQuestion, workspaceId, question),
     clear: (workspaceId) => ipcRenderer.invoke(IPC.chatClear, workspaceId),
+    clearGoal: (workspaceId) => ipcRenderer.invoke(IPC.chatClearGoal, workspaceId),
     search: (query, opts) => ipcRenderer.invoke(IPC.chatSearch, query, opts)
   },
 

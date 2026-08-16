@@ -1011,6 +1011,10 @@ export function registerIpc(ctx: IpcContext): void {
     broadcastState()
   })
 
+  ipcMain.handle(IPC.chatClearGoal, (_e, workspaceId: string) => {
+    return ctx.sessions.clearGoal(workspaceId)
+  })
+
   // 활성 워크스페이스의 누적 비용만 모아 돌려준다. 대화 기록을 렌더러로 옮기지 않기 위한
   // 통로다 — 화면에 필요한 건 숫자 하나인데, 예전에는 그것 때문에 전체 트랜스크립트가
   // 렌더러 힙에 올라간 채 매 토큰마다 다시 합산됐다.

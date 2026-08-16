@@ -60,6 +60,7 @@ import { orderRowsWithPending } from '../lib/sidebarRows'
 import { useGithubDisconnected } from '../lib/github'
 import { WorkspaceAgents } from './WorkspaceAgents'
 import { WorkspaceApiRetry } from './WorkspaceApiRetry'
+import { WorkspaceGoal } from './WorkspaceGoal'
 import { useNow } from '../lib/useNow'
 import { formatCountdown, formatDuration } from '../lib/format'
 import { useDragReorder, type DragReorder } from '../lib/useDragReorder'
@@ -1025,6 +1026,7 @@ function WorkspaceRow({
         backend={workspace.agentBackend}
         now={now}
       />
+      <WorkspaceGoal workspaceId={workspace.id} depth={depth} />
     </>
   )
 }

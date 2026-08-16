@@ -423,6 +423,12 @@ export class AgentOrchestrator {
     this.backendFor(workspaceId).clearSession(workspaceId)
   }
 
+  async clearGoal(workspaceId: string): Promise<void> {
+    const clear = this.backendFor(workspaceId).clearGoal
+    if (!clear) throw new Error('This agent does not support clearing goals from Wooi.')
+    await clear.call(this.backendFor(workspaceId), workspaceId)
+  }
+
   respondPermission(requestId: string, decision: PermissionDecision): void {
     // requestId 는 워크스페이스에 매이지 않으므로, 어느 백엔드가 그 요청을 띄웠는지 알 수 없다.
     // 권한 응답은 멱등(대상 백엔드만 매칭, 나머지는 무시)이라 활성 백엔드 전부에 전달한다.

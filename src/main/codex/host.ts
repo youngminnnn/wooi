@@ -413,6 +413,24 @@ async function handle(msg: CodexCommand): Promise<void> {
       threads.get(msg.workspaceId)?.setPermissionMode(msg.mode)
       break
 
+    case 'goalSet':
+      await respond(msg.reqId, () =>
+        ensure(msg.workspaceId, msg.config).setGoal({
+          objective: msg.objective,
+          status: msg.status,
+          tokenBudget: msg.tokenBudget
+        })
+      )
+      break
+
+    case 'goalGet':
+      await respond(msg.reqId, () => ensure(msg.workspaceId, msg.config).getGoal())
+      break
+
+    case 'goalClear':
+      await respond(msg.reqId, () => ensure(msg.workspaceId, msg.config).clearGoal())
+      break
+
     case 'dispose':
       dispose(msg.workspaceId)
       break

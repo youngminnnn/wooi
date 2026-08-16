@@ -27,6 +27,7 @@ import {
   wooiCommandsFor
 } from '@shared/wooiCommands'
 import type { CodexCommand, CodexConfig, CodexEvent } from './protocol'
+import type { ThreadGoal, ThreadGoalStatus } from './wire'
 import type {
   AgentBackendId,
   AgentAuthStatus,
@@ -214,6 +215,10 @@ export class CodexSessionManager implements AgentBackend {
       this.dispatch(IPC.evtPermissionCancel, requestId)
     }
     this.pendingPermissions.clear()
+
+    for (const w of getStore().getState().workspaces) {
+      if (w.agentBackend === CODEX_META.id) this.clearGoalState(w.id)
+    }
 
     for (const w of this.runningCodexWorkspaces()) {
       const item: ChatItem = {
@@ -453,6 +458,47 @@ export class CodexSessionManager implements AgentBackend {
     this.sendIfHost({ type: 'setPermissionMode', workspaceId, mode })
   }
 
+  async setGoal(
+    workspaceId: string,
+    args: {
+      objective?: string | null
+      status?: ThreadGoalStatus | null
+      tokenBudget?: number | null
+    }
+  ): Promise<ThreadGoal> {
+    const ws = this.getWorkspace(workspaceId)
+    if (!ws) throw new Error('Workspace not found.')
+    return this.request((reqId) => ({
+      type: 'goalSet',
+      reqId,
+      workspaceId,
+      config: this.configFor(ws),
+      ...args
+    }))
+  }
+
+  async getGoal(workspaceId: string): Promise<ThreadGoal | null> {
+    const ws = this.getWorkspace(workspaceId)
+    if (!ws) throw new Error('Workspace not found.')
+    return this.request((reqId) => ({
+      type: 'goalGet',
+      reqId,
+      workspaceId,
+      config: this.configFor(ws)
+    }))
+  }
+
+  async clearGoal(workspaceId: string): Promise<void> {
+    const ws = this.getWorkspace(workspaceId)
+    if (!ws) return
+    await this.request((reqId) => ({
+      type: 'goalClear',
+      reqId,
+      workspaceId,
+      config: this.configFor(ws)
+    }))
+  }
+
   /**
    * 모델 오버라이드를 바꾼다. Codex 는 모델을 **턴 파라미터**로 받으므로 세션을 버릴 필요가 없다 —
    * 다음 턴부터 새 모델이 적용되고 대화 맥락은 그대로 이어진다(Claude 는 재시작이 필요하다).
@@ -539,6 +585,7 @@ export class CodexSessionManager implements AgentBackend {
       }
     })
     this.forceIdle(workspaceId)
+    this.clearGoalState(workspaceId)
   }
 
   /**
@@ -550,6 +597,7 @@ export class CodexSessionManager implements AgentBackend {
     // 위임 서브런은 메인에서 돌므로 dispose 로 끊기지 않는다. 여기서 안 끊으면 워크스페이스를
     // 닫아도 자식 프로세스가 남아 worktree 를 계속 건드린다.
     abortSubAgents(workspaceId)
+    this.clearGoalState(workspaceId)
     // 스레드가 사라지면 그 스레드가 기다리던 승인 요청은 응답받을 수 없으므로 거둔다.
     for (const [requestId, wsId] of this.pendingPermissions) {
       if (wsId !== workspaceId) continue
@@ -566,6 +614,9 @@ export class CodexSessionManager implements AgentBackend {
   disposeAll(): void {
     this.sendIfHost({ type: 'disposeAll' })
     abortAllSubAgents()
+    for (const ws of getStore().getState().workspaces) {
+      if (ws.agentBackend === CODEX_META.id) this.clearGoalState(ws.id)
+    }
     for (const requestId of this.pendingPermissions.keys()) {
       this.dispatch(IPC.evtPermissionCancel, requestId)
     }
@@ -798,6 +849,10 @@ export class CodexSessionManager implements AgentBackend {
       if (w) w.status = 'idle'
     })
     this.dispatch(IPC.evtChat, { workspaceId, event: { type: 'status', status: 'idle' } })
+  }
+
+  private clearGoalState(workspaceId: string): void {
+    this.dispatch(IPC.evtChat, { workspaceId, event: { type: 'goal', goal: null } })
   }
 
   private emit(workspaceId: string, event: ChatEvent): void {

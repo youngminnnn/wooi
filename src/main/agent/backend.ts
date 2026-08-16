@@ -78,6 +78,8 @@ export interface AgentBackend {
   setModel(workspaceId: string, model: string | null): void
   /** 세션 맥락을 비우고 새 세션으로 시작(워크스페이스·worktree 유지). */
   clearSession(workspaceId: string): void
+  /** 목표를 직접 지울 수 있는 백엔드만 구현한다. 미지원 백엔드에는 throwing stub 을 두지 않는다. */
+  clearGoal?(workspaceId: string): Promise<void>
   respondPermission(requestId: string, decision: PermissionDecision): void
   dispose(workspaceId: string): void
   disposeAll(): void

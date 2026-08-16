@@ -106,6 +106,46 @@ describe('승인용 diff 추적', () => {
   })
 })
 
+describe('goal 휘발성 상태', () => {
+  const goal = {
+    threadId: 'thr1',
+    objective: 'Ship the workspace goal indicator',
+    status: 'blocked',
+    tokenBudget: 10_000,
+    tokensUsed: 4_200,
+    timeUsedSeconds: 90,
+    createdAt: 1,
+    updatedAt: 2
+  }
+
+  it('updated 알림은 goal 이벤트만 만들고 트랜스크립트에는 쓰지 않는다', () => {
+    const { thread, events, persisted } = makeThread()
+    thread.handleNotification(NOTIFY.threadGoalUpdated, { threadId: 'thr1', goal })
+
+    expect(events).toContainEqual({
+      type: 'goal',
+      goal: {
+        backend: 'codex',
+        objective: goal.objective,
+        status: 'blocked',
+        tokenBudget: 10_000,
+        tokensUsed: 4_200,
+        timeUsedSeconds: 90
+      }
+    })
+    expect(persisted).toEqual([])
+  })
+
+  it('clear 알림과 세션 dispose가 목표를 제거한다', () => {
+    const { thread, events } = makeThread()
+    thread.handleNotification(NOTIFY.threadGoalUpdated, { goal })
+    thread.handleNotification(NOTIFY.threadGoalCleared, { threadId: 'thr1' })
+    thread.dispose()
+
+    expect(events.filter((event) => event.type === 'goal' && event.goal === null)).toHaveLength(2)
+  })
+})
+
 describe('컨텍스트 사용량 추적', () => {
   // codex 에는 "지금 사용량을 알려 달라"는 조회 API 가 없다 — 흘러가는 알림을 붙잡아 둬야
   // /context 카드가 언제든 답할 수 있다.
