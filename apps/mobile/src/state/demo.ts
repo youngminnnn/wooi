@@ -91,6 +91,8 @@ export function createDemoSession(now: number = Date.now()): DemoSession {
         branch: 'fix/relay-reconnect',
         status: 'error',
         attention: 'error',
+        // 미확인 점·배지를 데모에서도 보여 준다 — 에러로 끝난 턴도 랩탑에서는 미확인이다.
+        unread: true,
         agentBackend: 'codex',
         model: 'gpt-5.4',
         effort: 'high'
@@ -130,6 +132,8 @@ export function createDemoSession(now: number = Date.now()): DemoSession {
         name: 'release-notes',
         displayName: 'Release notes',
         branch: 'docs/release-notes',
+        // 조용히 끝난 턴의 미확인 — 왼쪽 상태 아이콘은 idle 인데 오른쪽 점만 켜지는 경우다.
+        unread: true,
         agentBackend: 'codex',
         model: 'gpt-5.4-mini',
         prNumber: 42,

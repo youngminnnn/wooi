@@ -154,10 +154,17 @@ export function projectPlanUsage(app: AppState): RemotePlanUsage[] {
   return usage
 }
 
+/**
+ * `unread` 는 랩탑 **렌더러**가 소유한다 — AppState 가 아니라 zustand 메모리에 있어서, 여기까지
+ * IPC(`remote:setUnread`)로 실려 온다. 그래서 기본값이 빈 집합이다: 렌더러가 아직 한 번도
+ * 올리지 않았으면 "미확인 없음"으로 보는 쪽이 맞다(없는 것을 미확인으로 칠하면 방금 뜬 폰이
+ * 전부 파란 점이 된다).
+ */
 export function projectState(
   app: AppState,
   machine: RemoteMachine,
-  pending: PermissionRequest[]
+  pending: PermissionRequest[],
+  unread: ReadonlySet<string> = new Set()
 ): RemoteState {
   const pendingWorkspaceIds = new Set(pending.map((request) => request.workspaceId))
   return {
@@ -199,7 +206,8 @@ export function projectState(
         workspace.agentBackend,
         workspace.permissionMode
       ),
-      pr: projectPr(workspace.id)
+      pr: projectPr(workspace.id),
+      unread: unread.has(workspace.id)
     })),
     planUsage: projectPlanUsage(app),
     pendingPermissions: pending.map((request) => ({
@@ -252,10 +260,10 @@ export class StateMirror {
     this.rev = options.startRev ?? Date.now()
   }
 
-  publish(app: AppState, pending: PermissionRequest[]): void {
+  publish(app: AppState, pending: PermissionRequest[], unread?: ReadonlySet<string>): void {
     if (this.disposed) return
     try {
-      const state = projectState(app, this.options.machine(), pending)
+      const state = projectState(app, this.options.machine(), pending, unread)
       const json = JSON.stringify(state)
       if (json === this.lastPublishedJson) return
       this.pending = { state, json }
@@ -277,10 +285,10 @@ export class StateMirror {
    * 릴레이에는 그 기기가 열 수 있는 암호문이 없는데, 투영 내용은 직전과 같아서
    * 일반 publish 는 "바뀐 게 없다"며 걸러 버린다.
    */
-  publishNow(app: AppState, pending: PermissionRequest[]): void {
+  publishNow(app: AppState, pending: PermissionRequest[], unread?: ReadonlySet<string>): void {
     if (this.disposed) return
     try {
-      const state = projectState(app, this.options.machine(), pending)
+      const state = projectState(app, this.options.machine(), pending, unread)
       this.pending = { state, json: JSON.stringify(state) }
       this.lastPublishedJson = null
       if (this.timer) clearTimeout(this.timer)

@@ -4,14 +4,16 @@ import { Stack, usePathname, useRouter } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
 import * as Notifications from 'expo-notifications'
 import { RelayClient } from '../src/relay/client'
+import { attentionCount } from '../src/notifications/badge'
 import { openPushPayload } from '../src/notifications/payload'
 import { requestPushToken } from '../src/notifications/register'
 import { useRemoteStore } from '../src/state/store'
 import { clearCommandSequence, clearPairing, loadPairing } from '../src/storage/secure'
 import { theme } from '../src/theme'
 
-// 배너는 내용이 없다(고정 문구). 소리는 울리되 배지는 건드리지 않는다 —
-// 읽음 계산은 폰이 로컬로 하고, 서버가 준 숫자가 아니다.
+// 배너는 내용이 없다(고정 문구). 소리는 울리되 배지는 **여기서** 건드리지 않는다 —
+// 읽음 계산은 폰이 미러된 상태로 로컬로 하고(notifications/badge.ts), 서버가 준 숫자가 아니다.
+// 알림이 배지를 +1 하게 두면 랩탑에서 이미 확인한 것까지 숫자에 남는다.
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowBanner: true,
@@ -33,6 +35,16 @@ export default function RootLayout(): React.JSX.Element {
   const demo = useRemoteStore((store) => store.demo)
   const pairing = useRemoteStore((store) => store.pairing)
   const status = useRemoteStore((store) => store.status)
+  const remoteState = useRemoteStore((store) => store.state)
+
+  // 앱 아이콘 배지는 미러된 상태를 따라간다. 랩탑에서 워크스페이스를 열어 미확인이 풀리면
+  // 다음 스냅샷이 오는 즉시 여기서 배지도 줄어든다 — 폰에서 열었을 때도 마찬가지다
+  // (`remote:watch` → 랩탑이 미확인 해제 → 새 스냅샷). 상태가 없으면(언페어·데모 종료) 0.
+  useEffect(() => {
+    // 실패는 삼킨다 — iOS 에서 알림 권한을 거절했으면 배지를 그릴 수 없는데, 그건 오류가
+    // 아니라 사용자의 선택이고 앱의 나머지는 그대로 돌아야 한다.
+    void Notifications.setBadgeCountAsync(attentionCount(remoteState)).catch(() => undefined)
+  }, [remoteState])
 
   useEffect(() => {
     void loadPairing().then((stored) => {

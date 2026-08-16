@@ -621,6 +621,13 @@ export interface WooiApi {
     revokeDevice(deviceId: string): Promise<RemoteStatus>
     /** 되돌릴 수 없다 — 모든 폰이 재페어링해야 한다. */
     clearData(): Promise<RemoteStatus>
+    /**
+     * 지금 미확인인 워크스페이스 id 전량. 폰의 미확인 점·앱 배지가 이걸로 그려진다.
+     *
+     * 미확인은 렌더러 메모리에만 살아서 원격 투영이 볼 수 없다 — 렌더러가 바뀔 때마다
+     * 올려 줘야 한다. 폰에서 호출할 수는 없다(allowlist.test.ts 가 잠근다).
+     */
+    setUnread(workspaceIds: string[]): Promise<void>
   }
 
   /**

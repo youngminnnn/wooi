@@ -257,7 +257,8 @@ const api: WooiApi = {
     pairConfirm: () => ipcRenderer.invoke(IPC.remotePairConfirm),
     pairCancel: () => ipcRenderer.invoke(IPC.remotePairCancel),
     revokeDevice: (deviceId) => ipcRenderer.invoke(IPC.remoteRevokeDevice, deviceId),
-    clearData: () => ipcRenderer.invoke(IPC.remoteClearData)
+    clearData: () => ipcRenderer.invoke(IPC.remoteClearData),
+    setUnread: (workspaceIds) => ipcRenderer.invoke(IPC.remoteSetUnread, workspaceIds)
   },
 
   settings: {

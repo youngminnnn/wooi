@@ -112,6 +112,9 @@ describe('원격 허용목록의 형태', () => {
       IPC.remotePairCancel,
       IPC.remoteRevokeDevice,
       IPC.remoteClearData,
+      // 폰이 자기 미확인 표시를 스스로 지우거나 남의 것을 켤 수 있으면 안 된다.
+      // 폰에서 읽었다는 사실은 remote:watch 한 경로로만 들어온다.
+      IPC.remoteSetUnread,
       // ── upstream 이 나중에 추가한 채널들 ──────────────────────────────
       // 전부 미등록이라 이미 기본 거부지만, **이름을 여기 박아 두어야** 나중에 누군가
       // 허용목록을 넓힐 때 이 테스트가 깨지고 그 결정이 리뷰에 남는다.
