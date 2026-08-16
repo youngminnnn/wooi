@@ -35,13 +35,20 @@ export function useModels(id: AgentBackendId | undefined): ModelOption[] {
 /** 참조 동일성 유지용 — 매 렌더마다 새 배열을 만들면 zustand 셀렉터가 무한 리렌더를 일으킨다. */
 const EMPTY: ModelOption[] = []
 
-/** 이 백엔드의 전역 기본값(모델·effort·권한 모드). */
+/**
+ * 이 백엔드의 전역 기본값(모델·effort·권한 모드).
+ *
+ * 셀렉터는 **저장된 값 그대로**(참조가 안정적인 조각)만 읽고, 기본값 병합은 셀렉터 밖에서
+ * 한다. `agentSettingsFor` 는 매 호출 새 객체를 만들므로 셀렉터 안에서 부르면 스냅샷이 매번
+ * 달라지고, zustand 가 올라탄 useSyncExternalStore 가 커밋마다 다시 렌더해 무한 루프에
+ * 빠진다(React #185 — `useModels` 의 EMPTY 상수, `useAvailableBackends` 와 같은 이유).
+ */
 export function useAgentSettings(id: AgentBackendId | undefined): AgentSettings {
-  return useStore((s) => {
-    const settings = s.app?.settings
+  const settings = useStore((s) => s.app?.settings)
+  return useMemo(() => {
     if (!settings || !id) return DEFAULT_AGENT_SETTINGS
     return agentSettingsFor(settings, id)
-  })
+  }, [settings, id])
 }
 
 /**
