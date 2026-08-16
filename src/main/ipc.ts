@@ -6,7 +6,6 @@ import { join } from 'node:path'
 import { handle } from './commandRegistry'
 import { getStore } from './store'
 import { getRemoteBridge } from './remote'
-import { resolveRemotePermission } from './remote/permissions'
 import { getTranscripts } from './transcripts'
 import { buildHandoffPrompt, estimateHandoffTokens, formatHandoffTokens } from '@shared/handoff'
 import { listDir, readFileInRoot, searchFiles } from './fsbrowse'
@@ -1035,10 +1034,14 @@ export function registerIpc(ctx: IpcContext): void {
     // Wooi 도구 승인은 백엔드가 아니라 메인이 띄운다([[agent/tools/permission]]). requestId 는
     // 어디서 나왔는지 구분되지 않으므로 양쪽에 흘리고, 자기 것이 아니면 무시한다.
     resolveToolPermission(requestId, decision)
-    // 답한 요청은 더 이상 대기 중이 아니다. 취소에는 evt:permissionCancel 이 있지만 **응답에는
-    // 대응하는 이벤트가 없어서**, 여기서 지우지 않으면 폰이 계속 "응답 대기 중"으로 보인다.
-    // 데스크톱에서 답하든 폰에서 답하든 이 핸들러를 지나므로 한 곳으로 충분하다.
-    resolveRemotePermission(requestId)
+    // 답한 요청은 더 이상 대기 중이 아니다 — 그 사실을 **방송**한다.
+    //
+    // 응답에는 전용 이벤트가 없어서 예전에는 원격 목록만 따로 지웠다. 그러면 폰에서 답했을 때
+    // 데스크톱 렌더러는 아무 신호도 못 받아 답한 권한 카드가 화면에 그대로 남는다(실기기 확인).
+    // 데스크톱에서 답할 때는 렌더러가 이미 낙관적으로 카드를 지우므로 이 방송이 무해한 no-op 이고,
+    // 폰에서 답할 때는 이것이 유일한 신호다. dispatch 를 지나면 원격 미러도 같은 tap 에서
+    // 대기 목록을 정리하므로(index.ts 의 mirrorToRemote), 정리 경로가 하나로 합쳐진다.
+    dispatch(IPC.evtPermissionCancel, requestId)
   })
 
   // ── 스크립트 ───────────────────────────────────────────────────────────

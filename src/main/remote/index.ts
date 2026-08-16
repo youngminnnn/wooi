@@ -58,6 +58,7 @@ export class RemoteBridge {
   private commandBridge: RemoteCommandBridge | null = null
   private push: RemotePush | null = null
   private readonly getAppState: () => AppState | null
+  private readonly onWorkspaceRead: (workspaceId: string) => void
   private unsubscribe: (() => void) | null = null
   private enabled = false
   private fault: string | null = null
@@ -67,11 +68,15 @@ export class RemoteBridge {
     config = resolveRemoteConfig(),
     // 기본값이 null 을 돌려준다 — 테스트가 상태 없이 브리지만 만들 수 있어야 하고,
     // 그때는 초기 스냅샷을 건너뛰는 것이 맞다(가짜 빈 AppState 를 지어내면 폰이 그걸 본다).
-    getAppState: () => AppState | null = () => null
+    getAppState: () => AppState | null = () => null,
+    // 폰이 워크스페이스를 열면 데스크톱의 미확인 표시를 푼다. 기본값은 no-op —
+    // 테스트가 이 배선까지 준비할 필요는 없다.
+    onWorkspaceRead: (workspaceId: string) => void = () => {}
   ) {
     this.config = config
     this.onChange = onChange
     this.getAppState = getAppState
+    this.onWorkspaceRead = onWorkspaceRead
   }
 
   /** 지금 상태 스냅샷. 렌더러가 언제든 물어볼 수 있다. */
@@ -139,7 +144,10 @@ export class RemoteBridge {
       this.commandBridge = new RemoteCommandBridge({
         supabase: () => client.supabase(),
         keystore,
-        machineId
+        machineId,
+        onWatch: (workspaceId) => {
+          if (workspaceId !== null) this.onWorkspaceRead(workspaceId)
+        }
       })
       this.push = new RemotePush({
         supabase: () => client.supabase(),
@@ -344,9 +352,10 @@ let bridge: RemoteBridge | null = null
 /** main 엔트리가 한 번 호출한다. `onChange` 는 `evt:remote` 방송으로 이어진다. */
 export function initRemote(
   onChange: (status: RemoteStatus) => void,
-  getAppState: () => AppState
+  getAppState: () => AppState,
+  onWorkspaceRead: (workspaceId: string) => void
 ): RemoteBridge {
-  bridge ??= new RemoteBridge(onChange, resolveRemoteConfig(), getAppState)
+  bridge ??= new RemoteBridge(onChange, resolveRemoteConfig(), getAppState, onWorkspaceRead)
   return bridge
 }
 

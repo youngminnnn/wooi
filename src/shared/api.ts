@@ -703,6 +703,8 @@ export interface WooiApi {
   onPermission(cb: (e: PermissionRequest) => void): () => void
   /** 응답받지 못한 채 무효가 된 권한 요청의 requestId — 해당 프롬프트를 화면에서 제거. */
   onPermissionCancel(cb: (requestId: string) => void): () => void
+  /** 폰이 이 워크스페이스를 열어 읽고 있다 — 미확인 표시를 해제한다. */
+  onRemoteRead(cb: (workspaceId: string) => void): () => void
   onScriptOutput(cb: (e: ScriptOutputEvent) => void): () => void
   onScriptExit(cb: (e: ScriptExitEvent) => void): () => void
   /** 컴포저에 붙일 이미지가 도착했다(Preview 스크린샷). 컴포저가 있는 창만 반응한다. */

@@ -19,7 +19,6 @@ import { TerminalManager } from './terminal'
 import { applyNavigationGuards, loadRenderer, rendererWebPreferences } from './windows'
 import { registerIpc } from './ipc'
 import { disposeRemote, getRemoteBridge, initRemote } from './remote'
-import { setPermissionChangeNotifier } from './remote/permissions'
 import { pendingPermissions } from './remote/permissions'
 import type { AppState, PermissionRequest } from '@shared/types'
 import { log } from './logger'
@@ -253,10 +252,12 @@ app.whenReady().then(() => {
   // 원격 브리지는 IPC 등록보다 **먼저** 만들어야 한다 — 핸들러가 getRemoteBridge() 를 부른다.
   // 만드는 것 자체는 아무 자원도 잡지 않는다(설정을 읽을 뿐이다). 실제 연결은 아래에서
   // 사용자가 켜 둔 경우에만 일어난다.
-  setPermissionChangeNotifier(() => mirrorToRemote(IPC.evtState, getStore().getState()))
   initRemote(
     (status) => dispatch(IPC.evtRemote, status),
-    () => getStore().getState()
+    () => getStore().getState(),
+    // 폰이 워크스페이스를 열었다 = 사용자가 그걸 읽었다. 미확인 표시는 렌더러 메모리에만
+    // 있으므로 방송하지 않으면 데스크톱은 영원히 안 읽은 상태로 남는다.
+    (workspaceId) => dispatch(IPC.evtRemoteRead, workspaceId)
   )
   registerIpc({ sessions, scripts, terminals, panes, dispatch, getWindow: () => mainWindow })
   createWindow()

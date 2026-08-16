@@ -40,6 +40,11 @@ export interface RemoteCommandBridgeOptions {
   keystore: RemoteKeystore
   machineId: string
   now?: () => number
+  /**
+   * 폰이 워크스페이스를 열었다(또는 닫아서 null). watch 는 "지금 이 화면을 보고 있다"는
+   * 뜻이므로, 데스크톱의 미확인 표시를 푸는 신호로 그대로 쓸 수 있다.
+   */
+  onWatch?: (workspaceId: string | null) => void
 }
 
 interface WatchLease {
@@ -233,6 +238,7 @@ export class RemoteCommandBridge {
       const workspaceId = args[0] as string | null
       if (workspaceId === null) this.watches.delete(deviceId)
       else this.watches.set(deviceId, { workspaceId, expiresAt: this.now() + REMOTE_WATCH_TTL_MS })
+      this.options.onWatch?.(workspaceId)
       return {
         watching: workspaceId,
         expiresAt: workspaceId === null ? null : this.now() + REMOTE_WATCH_TTL_MS

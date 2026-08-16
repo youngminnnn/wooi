@@ -1422,6 +1422,16 @@ export const useStore = create<UIState>((set, get) => ({
       set({ permissions: get().permissions.filter((p) => p.requestId !== requestId) })
     })
 
+    // 폰에서 그 워크스페이스를 열어 읽었다 — 데스크톱의 미확인 표시도 함께 풀어야 한다.
+    // 미확인은 이 스토어(렌더러 메모리)에만 있어서, 폰이 직접 지울 방법이 없다.
+    window.api.onRemoteRead((workspaceId: string) => {
+      const s = get()
+      if (!s.unread[workspaceId]) return
+      const unread = { ...s.unread }
+      delete unread[workspaceId]
+      set({ unread })
+    })
+
     window.api.onScriptOutput(({ workspaceId, scriptId, chunk }) => {
       const key = scriptKey(workspaceId, scriptId)
       const out = get().scriptOutput

@@ -308,6 +308,7 @@ const api: WooiApi = {
   onSideQuestion: (cb) => subscribe(IPC.evtSideQuestion, cb),
   onPermission: (cb) => subscribe(IPC.evtPermission, cb),
   onPermissionCancel: (cb) => subscribe(IPC.evtPermissionCancel, cb),
+  onRemoteRead: (cb) => subscribe(IPC.evtRemoteRead, cb),
   onScriptOutput: (cb) => subscribe(IPC.evtScriptOutput, cb),
   onScriptExit: (cb) => subscribe(IPC.evtScriptExit, cb),
   onComposerAttach: (cb) => subscribe(IPC.evtComposerAttach, cb),

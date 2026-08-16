@@ -7,14 +7,8 @@ vi.mock('electron', () => ({
 }))
 
 const { validateRemoteCommand } = await import('./allowlist')
-const {
-  PENDING_PERMISSION_LIMIT,
-  PENDING_PERMISSION_MAX_AGE_MS,
-  PendingPermissionRegistry,
-  pendingPermissions,
-  resolveRemotePermission,
-  setPermissionChangeNotifier
-} = await import('./permissions')
+const { PENDING_PERMISSION_LIMIT, PENDING_PERMISSION_MAX_AGE_MS, PendingPermissionRegistry } =
+  await import('./permissions')
 
 let now: number
 let registry: InstanceType<typeof PendingPermissionRegistry>
@@ -83,26 +77,5 @@ describe('PendingPermissionRegistry', () => {
         { pendingPermissionTool: (requestId) => registry.toolFor(requestId) }
       )
     ).toThrow(/AskUserQuestion/)
-  })
-})
-
-describe('응답한 요청의 정리', () => {
-  it('resolveRemotePermission 이 목록에서 지우고 알림을 부른다', () => {
-    // 취소에는 evt:permissionCancel 이 있지만 **응답에는 이벤트가 없다.** 이 경로가 없으면
-    // 답한 뒤에도 요청이 대기 목록에 남아 폰이 영원히 "응답 대기 중"을 보여 준다 —
-    // 실기기에서 정확히 그렇게 멈췄다.
-    const notified: number[] = []
-    setPermissionChangeNotifier(() => notified.push(1))
-    pendingPermissions.clear()
-    pendingPermissions.add({ requestId: 'r1', workspaceId: 'ws', toolName: 'Write', input: {} })
-
-    resolveRemotePermission('r1')
-    expect(pendingPermissions.list()).toHaveLength(0)
-    expect(notified).toHaveLength(1)
-
-    // 대기 중이 아니던 id 는 알림을 만들지 않는다(중복 방송을 하지 않는다).
-    resolveRemotePermission('r1')
-    expect(notified).toHaveLength(1)
-    setPermissionChangeNotifier(null)
   })
 })
