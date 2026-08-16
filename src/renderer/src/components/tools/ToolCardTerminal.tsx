@@ -24,7 +24,7 @@ export function ToolCardTerminal({
       <button
         type="button"
         onClick={toggle}
-        className="block w-full text-left hover:text-neutral-100"
+        className="block w-full break-words text-left hover:text-neutral-100"
       >
         <span className={pending ? 'text-[var(--warning-500)]' : 'text-[var(--accent-400)]'}>
           ⏺

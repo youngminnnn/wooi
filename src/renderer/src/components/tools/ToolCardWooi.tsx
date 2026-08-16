@@ -26,8 +26,14 @@ export function ToolCardWooi({
         ) : (
           <Wrench size={12} className="shrink-0 text-[var(--warning-500)]/80" />
         )}
-        <span className="shrink-0 font-medium text-neutral-300">{name}</span>
-        <span className="truncate text-neutral-500">{pending ? activity : summary}</span>
+        {/* 이름도 줄어들 수 있어야 한다 — MCP 도구는 이름부터 길어서
+            ("developerknowledge search documents (plugin_firebase_firebase)") 줄지 못하게 잡아 두면
+            행이 대화 폭을 넘고, 대화 전체에 가로 스크롤이 생긴다. 요약은 basis 0 으로 남은 자리만
+            차지하므로 이름이 짧을 때의 모습(셰브런은 오른쪽 끝)은 그대로다. */}
+        <span className="min-w-0 truncate font-medium text-neutral-300">{name}</span>
+        <span className="min-w-0 flex-1 truncate text-neutral-500">
+          {pending ? activity : summary}
+        </span>
         {stat && (
           <span className="shrink-0 tabular-nums text-xs">
             <span className="text-[var(--diff-add)]">+{stat.added}</span>{' '}
