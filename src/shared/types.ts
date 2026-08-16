@@ -997,6 +997,14 @@ export interface CodexMcpServer {
   detail: string
   /** config.toml 의 `enabled`. 값이 없으면 켜진 것으로 본다 — codex 기본값이 그렇다. */
   enabled: boolean
+  /** app-server 런타임이 보고한 인증 상태. unknown 은 판정 전/불가이며 로그인이 필요하다는 뜻이 아니다. */
+  authStatus: 'unknown' | 'unsupported' | 'notLoggedIn' | 'bearerToken' | 'oAuth'
+}
+
+export interface McpOauthLoginCompletedEvent {
+  name: string
+  success: boolean
+  error?: string
 }
 
 /** 설정 화면이 "무엇이 주입되는가" 를 그리기 위해 필요한 전부. */
@@ -2626,6 +2634,8 @@ export const IPC = {
   mcpCodexList: 'mcp:codexList',
   /** 그 서버의 `enabled` 를 사용자 파일에 쓰고 codex 에 재적용한다. */
   mcpCodexSetEnabled: 'mcp:codexSetEnabled',
+  mcpCodexOauthLogin: 'mcp:codexOauthLogin',
+  evtMcpCodexOauthLoginCompleted: 'mcp:codexOauthLoginCompleted',
   authGetStatus: 'auth:getStatus',
   /** 앱 내부 PTY 에서 `claude auth login` 을 시작한다(별도 Terminal 창 없이). */
   authClaudeLoginStart: 'auth:claudeLoginStart',

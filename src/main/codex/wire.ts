@@ -264,6 +264,44 @@ export interface GuardianWarningParams {
   message?: string
 }
 
+/**
+ * 승인 auto-review 생명주기. upstream 이 상세 모양을 곧 바꿀 예정이라고 명시했으므로 식별자와
+ * 시각만 고정해 읽고, 나머지는 unknown 으로 둔 뒤 매핑 단계에서 그때 쓸 수 있는 값만 고른다.
+ */
+export interface GuardianApprovalReviewParams {
+  threadId?: ThreadId
+  turnId?: string
+  reviewId?: string
+  targetItemId?: string | null
+  startedAtMs?: number
+  completedAtMs?: number
+  review?: unknown
+  action?: unknown
+  decisionSource?: unknown
+}
+
+export interface McpServerOauthLoginCompletedParams {
+  name?: string
+  success?: boolean
+  error?: string | null
+  threadId?: ThreadId | null
+}
+
+export type McpAuthStatus = 'unknown' | 'unsupported' | 'notLoggedIn' | 'bearerToken' | 'oAuth'
+
+/** 새 상태나 빠진 값은 인증 필요로 오판하지 않고 protocol 의 unknown 으로 낮춘다. */
+export function normalizeMcpAuthStatus(status: string | undefined): McpAuthStatus {
+  switch (status) {
+    case 'unsupported':
+    case 'notLoggedIn':
+    case 'bearerToken':
+    case 'oAuth':
+      return status
+    default:
+      return 'unknown'
+  }
+}
+
 // ── 서버 → 클라이언트 **요청** (반드시 응답해야 진행된다) ───────────────
 
 /** 명령 실행 승인 요청. */
@@ -392,6 +430,7 @@ export const RPC = {
   accountLogout: 'account/logout',
   rateLimitsRead: 'account/rateLimits/read',
   mcpStatusList: 'mcpServerStatus/list',
+  mcpOauthLogin: 'mcpServer/oauth/login',
   mcpReload: 'config/mcpServer/reload',
   configValueWrite: 'config/value/write',
   configRead: 'config/read'
@@ -433,7 +472,10 @@ export const NOTIFY = {
   fileChangePatchUpdated: 'item/fileChange/patchUpdated',
   hookStarted: 'hook/started',
   hookCompleted: 'hook/completed',
-  guardianWarning: 'guardianWarning'
+  guardianWarning: 'guardianWarning',
+  guardianApprovalReviewStarted: 'item/autoApprovalReview/started',
+  guardianApprovalReviewCompleted: 'item/autoApprovalReview/completed',
+  mcpOauthLoginCompleted: 'mcpServer/oauthLogin/completed'
 } as const
 
 /** 서버가 우리에게 보내는 **요청** 메서드(응답 필수). */

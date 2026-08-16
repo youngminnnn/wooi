@@ -32,6 +32,7 @@ import type {
   ImageAttachment,
   McpAction,
   McpInventory,
+  McpOauthLoginCompletedEvent,
   McpServerInfo,
   ModelOption,
   MemoryScope,
@@ -617,6 +618,9 @@ export interface WooiApi {
       name: string,
       enabled: boolean
     ): Promise<{ servers?: CodexMcpServer[]; error?: string }>
+    /** OAuth 흐름을 시작하고 브라우저에서 열 authorization URL 을 돌려준다. */
+    codexOauthLogin(name: string): Promise<{ authorizationUrl?: string; error?: string }>
+    onCodexOauthLoginCompleted(cb: (event: McpOauthLoginCompletedEvent) => void): () => void
   }
 
   auth: {

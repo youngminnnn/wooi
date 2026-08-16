@@ -4,6 +4,7 @@ import {
   Copy,
   ExternalLink,
   FileWarning,
+  LogIn,
   Pencil,
   Plus,
   RefreshCw,
@@ -59,6 +60,9 @@ export default function McpServersPage({
   const [codexBusy, setCodexBusy] = useState<string | null>(null)
   const [externalCommand, setExternalCommand] = useState('')
   const [copied, setCopied] = useState(false)
+  const [oauth, setOauth] = useState<Record<string, { phase: 'waiting' | 'done'; error?: string }>>(
+    {}
+  )
 
   const load = useCallback(
     (): Promise<void> =>
@@ -88,6 +92,26 @@ export default function McpServersPage({
     })
   }, [codexLoggedIn])
 
+  useEffect(
+    () =>
+      window.api.mcp.onCodexOauthLoginCompleted((event) => {
+        setOauth((current) => ({
+          ...current,
+          [event.name]: {
+            phase: 'done',
+            error: event.success ? undefined : event.error || 'Login failed.'
+          }
+        }))
+        if (event.success) {
+          void window.api.mcp.codexServers().then((result) => {
+            if (result.servers) setCodexServers(result.servers)
+            setCodexError(result.error ?? null)
+          })
+        }
+      }),
+    []
+  )
+
   const toggleCodex = (name: string, enabled: boolean): void => {
     setCodexBusy(name)
     void window.api.mcp
@@ -98,6 +122,20 @@ export default function McpServersPage({
         setCodexError(result.error ?? null)
       })
       .finally(() => setCodexBusy(null))
+  }
+
+  const loginCodexMcp = (name: string): void => {
+    setOauth((current) => ({ ...current, [name]: { phase: 'waiting' } }))
+    void window.api.mcp.codexOauthLogin(name).then((result) => {
+      if (result.authorizationUrl) {
+        void window.api.openExternal(result.authorizationUrl)
+        return
+      }
+      setOauth((current) => ({
+        ...current,
+        [name]: { phase: 'done', error: result.error ?? 'Codex did not return a login URL.' }
+      }))
+    })
   }
 
   const disabledInherited = useMemo(() => new Set(mcp.disabledInherited), [mcp.disabledInherited])
@@ -263,7 +301,9 @@ export default function McpServersPage({
               key={server.name}
               server={server}
               busy={codexBusy === server.name}
+              oauth={oauth[server.name]}
               onToggle={(enabled) => toggleCodex(server.name, enabled)}
+              onLogin={() => loginCodexMcp(server.name)}
             />
           ))
         )}
@@ -426,11 +466,15 @@ function InheritedServerRow({
 function CodexServerRow({
   server,
   busy,
-  onToggle
+  oauth,
+  onToggle,
+  onLogin
 }: {
   server: CodexMcpServer
   busy: boolean
+  oauth?: { phase: 'waiting' | 'done'; error?: string }
   onToggle: (enabled: boolean) => void
+  onLogin: () => void
 }): React.JSX.Element {
   return (
     <div className="flex items-center gap-3 px-4 py-3">
@@ -444,7 +488,26 @@ function CodexServerRow({
         <p className="mt-0.5 truncate font-mono text-xs text-neutral-600">
           {server.detail || 'Unrecognized entry — open the file to see it'}
         </p>
+        {server.authStatus === 'unknown' && server.enabled && (
+          <p className="mt-1 text-xs text-neutral-500">Authentication status is not known yet.</p>
+        )}
+        {oauth?.phase === 'waiting' && (
+          <p className="mt-1 text-xs text-[var(--info-400)]">Waiting for browser authorization…</p>
+        )}
+        {oauth?.phase === 'done' && !oauth.error && (
+          <p className="mt-1 text-xs text-[var(--success-400)]">Authorization completed.</p>
+        )}
+        {oauth?.error && <p className="mt-1 text-xs text-[var(--danger-400)]">{oauth.error}</p>}
       </div>
+      {server.enabled && server.authStatus === 'notLoggedIn' && (
+        <button
+          onClick={onLogin}
+          disabled={oauth?.phase === 'waiting'}
+          className="flex shrink-0 items-center gap-1.5 rounded-lg border border-[var(--border)] px-2.5 py-1 text-xs text-neutral-300 hover:bg-[var(--surface-2)] disabled:opacity-50"
+        >
+          <LogIn size={12} /> {oauth?.phase === 'waiting' ? 'Authorizing…' : 'Authorize'}
+        </button>
+      )}
       <Switch
         label={`Enable ${server.name}`}
         checked={server.enabled}
