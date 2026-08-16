@@ -26,7 +26,7 @@ const DEFAULT_MODEL = CLAUDE_DEFAULT_MODEL
  * 디스크 영속 형식의 현재 스키마 버전. 영속 데이터 모양이 바뀔 때마다 1 올리고,
  * MIGRATIONS 에 직전 버전 → 새 버전 변환 함수를 추가한다.
  */
-export const CURRENT_SCHEMA_VERSION = 22
+export const CURRENT_SCHEMA_VERSION = 23
 
 /**
  * v12 이하의 settings 모양. 그 시절엔 에이전트가 Claude 하나뿐이라 모델·effort·fast mode·
@@ -407,6 +407,20 @@ export const MIGRATIONS: Array<(raw: Record<string, unknown>) => Record<string, 
       foldReviewIntoLayer(r)
     )
     return { ...raw, reviews }
+  },
+
+  // v22 → v23: ChatGPT 로그인 Codex 에서 2026-08-31 폐기되는 gpt-5.4 계열 저장값을 비운다.
+  // null 은 특정 후속 모델을 박는 값이 아니라 Codex 카탈로그 기본값을 따르라는 뜻이다 —
+  // gpt-5.6-terra/luna 중 하나를 여기서 추측하지 않고, 당시 카탈로그가 고른 기본값에 맡긴다.
+  (raw) => {
+    const workspaces = ((raw.workspaces as Partial<Workspace>[]) ?? []).map((workspace) => ({
+      ...workspace,
+      model:
+        workspace.agentBackend === 'codex' && workspace.model?.startsWith('gpt-5.4')
+          ? null
+          : workspace.model
+    }))
+    return { ...raw, workspaces }
   }
 ]
 
