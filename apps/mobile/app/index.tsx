@@ -59,6 +59,9 @@ function WorkspaceRow({
   onPress: () => void
 }): React.JSX.Element {
   const needsPermission = workspace.attention === 'permission'
+  // 구형 랩탑은 이 필드를 아예 보내지 않는다(undefined) — 그때는 점을 그리지 않는다.
+  // 모르는 것을 "안 읽음"으로 칠하면 페어링 직후 목록 전체가 파란 점이 된다.
+  const unread = workspace.unread === true
   const limit = rateLimitLabel(workspace, now)
 
   return (
@@ -115,6 +118,12 @@ function WorkspaceRow({
           </Text>
         ) : null}
       </View>
+      {/* 미확인 완료. 데스크톱 사이드바의 파란 점과 같은 자리(줄 오른쪽 끝)·같은 색이다 —
+          왼쪽 상태 아이콘이 "지금 무슨 일이 일어나는가"를 말하고, 이 점은 "내가 아직 안 봤다"를
+          말한다. 둘은 겹칠 수 있으므로(에러로 끝난 턴) 자리를 나눈다. */}
+      {unread ? (
+        <View accessibilityLabel="Unread" style={styles.unreadDot} />
+      ) : null}
     </Pressable>
   )
 }
@@ -244,11 +253,15 @@ export default function WorkspaceListScreen(): React.JSX.Element {
         stickySectionHeadersEnabled
         renderSectionHeader={({ section }) => {
           const running = section.data.filter((item) => item.status === 'running').length
+          // 접힌 리포는 없지만 헤더는 sticky 라, 스크롤로 행이 밀려 나가도 이 숫자는 남는다 —
+          // "이 리포에 안 본 게 몇 개인가"를 목록을 되감지 않고 알 수 있는 유일한 자리다.
+          const unread = section.data.filter((item) => item.unread === true).length
           return (
             <View style={styles.sectionHeader}>
               <Text style={styles.sectionName} numberOfLines={1}>
                 {section.repo.name}
               </Text>
+              {unread > 0 ? <Text style={styles.sectionUnread}>{unread} unread</Text> : null}
               {running > 0 ? <Text style={styles.sectionCount}>{running} running</Text> : null}
             </View>
           )
@@ -331,6 +344,7 @@ const styles = StyleSheet.create({
   },
   sectionName: { color: theme.text, flex: 1, fontSize: 12, fontWeight: '700', letterSpacing: 0.4 },
   sectionCount: { color: theme.accent, fontSize: 11 },
+  sectionUnread: { color: theme.info, fontSize: 11 },
   row: {
     alignItems: 'flex-start',
     borderBottomColor: theme.border,
@@ -349,6 +363,15 @@ const styles = StyleSheet.create({
     paddingLeft: 15
   },
   statusSlot: { alignItems: 'center', marginRight: 11, marginTop: 3, width: 16 },
+  unreadDot: {
+    backgroundColor: theme.infoStrong,
+    borderRadius: 4,
+    flexShrink: 0,
+    height: 8,
+    marginLeft: 10,
+    marginTop: 7,
+    width: 8
+  },
   rowContent: { flex: 1 },
   nameLine: { alignItems: 'center', flexDirection: 'row', gap: 7 },
   stacked: { color: theme.textDim, fontSize: 13 },

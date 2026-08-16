@@ -1173,6 +1173,17 @@ export const useStore = create<UIState>((set, get) => ({
           if (!muted.has(p.workspaceId)) needsAttention.add(p.workspaceId)
       void window.api.app.setBadgeCount(needsAttention.size)
     }
+    // 미확인은 이 스토어(렌더러 메모리)에만 있어서 원격 투영이 볼 수 없다. 폰에도 같은 점을
+    // 그리려면 바뀔 때마다 올려 줘야 한다 — 반대 방향(폰에서 읽음)은 이미 onRemoteRead 로 온다.
+    // 원격이 꺼져 있으면 main 쪽이 곧바로 반환하므로 여기서 따로 게이팅하지 않는다.
+    const pushUnreadToRemote = (state: UIState): void => {
+      void window.api.remote
+        .setUnread(Object.keys(state.unread).filter((id) => state.unread[id]))
+        .catch(() => {
+          // 브리지가 아직 없거나 원격이 꺼져 있다 — 폰이 없으면 알릴 것도 없다.
+        })
+    }
+
     useStore.subscribe((state, prev) => {
       // 알림 설정/음소거(app)나 unread·permissions 가 바뀌면 배지를 다시 계산한다.
       if (
@@ -1182,7 +1193,11 @@ export const useStore = create<UIState>((set, get) => ({
       ) {
         refreshBadge(state)
       }
+      if (state.unread !== prev.unread) pushUnreadToRemote(state)
     })
+    // 시작할 때 한 번 — 렌더러를 새로고침하면 미확인은 비지만 main 은 직전 목록을 그대로
+    // 들고 있다. 여기서 비워 주지 않으면 폰에 존재하지 않는 미확인이 영영 남는다.
+    pushUnreadToRemote(useStore.getState())
 
     window.api.onChat(({ workspaceId, event }: ChatEnvelope) => {
       const { transcripts } = get()

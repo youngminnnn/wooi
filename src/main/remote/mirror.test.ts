@@ -153,6 +153,21 @@ describe('projectState', () => {
     ])
   })
 
+  it('렌더러가 올린 미확인 목록만 unread 로 실린다', () => {
+    const projection = projectState(
+      appState(['idle', 'idle', 'idle']),
+      machine,
+      [],
+      new Set(['ws-2'])
+    )
+    expect(projection.workspaces.map((workspace) => workspace.unread)).toEqual([false, true, false])
+  })
+
+  it('미확인 목록을 주지 않으면 아무것도 미확인이 아니다 — 모르는 것을 칠하지 않는다', () => {
+    const projection = projectState(appState(['idle', 'idle']), machine, [])
+    expect(projection.workspaces.every((workspace) => workspace.unread === false)).toBe(true)
+  })
+
   it('워크스페이스별 권한 attention과 요청 본문을 함께 투영한다', () => {
     const pending = permission('ws-1')
     const projection = projectState(appState(['idle', 'idle']), machine, [pending])

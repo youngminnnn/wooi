@@ -66,6 +66,14 @@ export class RemoteBridge {
   private enabled = false
   private fault: string | null = null
   /**
+   * 지금 미확인인 워크스페이스 id. **렌더러가 소유하고 여기로 올려 준다**(`remote:setUnread`) —
+   * 미확인은 AppState 가 아니라 렌더러 zustand 메모리에 있어서 투영이 직접 볼 수 없다.
+   *
+   * 프로세스 메모리에만 두고 영속하지 않는다. 랩탑을 재시작하면 렌더러의 미확인도 함께
+   * 사라지므로, 여기만 살아남으면 폰에 존재하지 않는 미확인이 남는다.
+   */
+  private unread: ReadonlySet<string> = new Set()
+  /**
    * 이 기능이 열려 있는가. 원격 플래그(공지 파일)와 로컬 override 중 하나라도 참이면 열린다.
    * 기동 시점에는 마지막으로 알던 값에서 시작한다 — 네트워크를 기다리는 동안 UI 가 깜빡이지
    * 않게 하기 위해서다.
@@ -230,7 +238,20 @@ export class RemoteBridge {
   // ── 페어링 ──────────────────────────────────────────────────────────────
 
   publishState(appState: AppState, pendingPermissions: PermissionRequest[]): void {
-    this.mirror?.publish(appState, pendingPermissions)
+    this.mirror?.publish(appState, pendingPermissions, this.unread)
+  }
+
+  /**
+   * 렌더러의 미확인 목록을 갈아 끼우고 곧바로 다시 발행한다.
+   *
+   * 미확인은 AppState 와 무관하게 바뀐다(턴이 끝나거나 사용자가 워크스페이스를 열 때). 여기서
+   * 발행하지 않으면 다음 AppState 방송이 올 때까지 폰의 점이 그대로 남는데, idle 인 랩탑에서는
+   * 그게 몇 분일 수도 있다. 미러가 내용 동일 발행을 걸러 주므로 중복 호출은 공짜다.
+   */
+  setUnread(workspaceIds: readonly string[]): void {
+    this.unread = new Set(workspaceIds)
+    const appState = this.getAppState()
+    if (appState) this.publishState(appState, pendingPermissions.list())
   }
 
   notifyPush(workspaceId: string, workspaceName: string, kind: NotificationEvent): void {
@@ -261,7 +282,7 @@ export class RemoteBridge {
     await this.pairing?.confirm()
     // 새 기기는 직전 발행의 수신자가 아니었다. 중복 제거를 우회해 곧바로 한 번 더 보낸다.
     const current = this.getAppState()
-    if (current) this.mirror?.publishNow(current, pendingPermissions.list())
+    if (current) this.mirror?.publishNow(current, pendingPermissions.list(), this.unread)
     return this.emit()
   }
 

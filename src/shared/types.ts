@@ -3030,7 +3030,15 @@ export const IPC = {
   /** 기기 하나의 접근을 끊는다(릴레이의 revoked_at + 로컬 키 삭제). */
   remoteRevokeDevice: 'remote:revokeDevice',
   /** 모든 원격 데이터를 지운다 — 키스토어와 릴레이 양쪽. */
-  remoteClearData: 'remote:clearData'
+  remoteClearData: 'remote:clearData',
+  /**
+   * 미확인 워크스페이스 id 목록을 main 에 올린다(렌더러 → main, 전량 교체).
+   *
+   * 미확인은 렌더러 메모리에만 있고 AppState 에 없어서, 이 채널이 없으면 원격 투영이
+   * 그것을 볼 수 없다 — 폰은 무엇이 안 읽혔는지 영영 모른다. 반대 방향(`evt:remoteRead`)과
+   * 짝이다.
+   */
+  remoteSetUnread: 'remote:setUnread'
 } as const
 
 // ── IPC 페이로드 타입 ────────────────────────────────────────────────────

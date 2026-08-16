@@ -2582,6 +2582,16 @@ export function registerIpc(ctx: IpcContext): void {
   handle(IPC.remoteRevokeDevice, (_e, deviceId: string) =>
     getRemoteBridge().revokeDevice(String(deviceId))
   )
+  // 렌더러의 미확인 목록 → 원격 투영. 이게 없으면 폰은 무엇이 안 읽혔는지 알 수 없다
+  // (미확인은 AppState 가 아니라 렌더러 메모리에 산다). 반대 방향은 evt:remoteRead 다.
+  handle(IPC.remoteSetUnread, (_e, workspaceIds: unknown) => {
+    getRemoteBridge().setUnread(
+      Array.isArray(workspaceIds)
+        ? workspaceIds.filter((id): id is string => typeof id === 'string')
+        : []
+    )
+  })
+
   handle(IPC.remoteClearData, async () => {
     const status = await getRemoteBridge().clearData()
     store.update((st) => {
