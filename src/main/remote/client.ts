@@ -27,13 +27,16 @@ export interface RemoteConfig {
 }
 
 /**
- * 배포본에 구워 넣을 기본 설정. M2 에서 실제 프로젝트 값으로 채운다.
+ * 배포본에 구워 넣는 설정. `electron.vite.config.ts` 가 빌드 시점에 주입한다 —
+ * `npm run dev` 는 개발용 릴레이를, 릴리즈 빌드는 운영 릴레이를 받는다(변수 이름이 달라
+ * 서로 섞일 수 없다). 자세한 이유는 그 파일의 `bakedRelay` 주석에 있다.
  *
- * 지금 비워 두는 이유: M0 은 로컬 스택(`supabase start`)과 클라우드를 오가며 검증하는데,
- * 그때마다 코드를 고치는 대신 환경변수로 가리키는 편이 낫고, 클라우드 키를 레포에 커밋하는
- * 결정은 실제로 배포를 시작할 때 내리면 된다(한 번 커밋한 키는 히스토리에서 지워지지 않는다).
+ * vitest 는 이 define 을 거치지 않으므로 심볼이 아예 없다 — `typeof` 로 막는다.
  */
-const BAKED_CONFIG: RemoteConfig | null = null
+declare const __WOOI_RELAY__: RemoteConfig | null
+
+const BAKED_CONFIG: RemoteConfig | null =
+  typeof __WOOI_RELAY__ === 'undefined' ? null : __WOOI_RELAY__
 
 /**
  * 쓸 설정을 정한다. 환경변수가 있으면 그것이, 없으면 구워 넣은 값이 이긴다.

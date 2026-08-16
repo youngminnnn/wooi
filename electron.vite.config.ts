@@ -1,12 +1,44 @@
 import { resolve } from 'node:path'
-import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
+import { defineConfig, externalizeDepsPlugin, loadEnv } from 'electron-vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
 const shared = resolve('src/shared')
 
-export default defineConfig({
+/**
+ * 배포본에 구워 넣을 릴레이(Supabase) 설정을 **빌드 시점에** 정한다.
+ *
+ * 개발과 운영이 서로 다른 **변수 이름**을 읽는 것이 이 함수의 핵심이다:
+ *
+ *   npm run dev   → WOOI_RELAY_DEV_*   (.env.local, 개발용 프로젝트)
+ *   npm run build → WOOI_RELAY_PROD_*  (CI 시크릿, 운영 프로젝트)
+ *
+ * 이름이 같았다면 내 셸에 떠 있는 개발용 값이 릴리즈 빌드에 조용히 섞일 수 있다.
+ * 이름이 다르면 그 사고가 문법적으로 불가능하다 — 릴리즈 빌드는 개발용 변수를 보지 못한다.
+ *
+ * 값이 없으면 `null` 이고, 그때 앱은 "이 빌드에는 원격이 설정되지 않았다"고 말한다.
+ * 조용히 잘못된 릴레이에 붙는 것보다 낫다.
+ */
+function bakedRelay(command: 'build' | 'serve'): { url: string; anonKey: string } | null {
+  const prefix = command === 'serve' ? 'WOOI_RELAY_DEV_' : 'WOOI_RELAY_PROD_'
+  const env = loadEnv(command === 'serve' ? 'development' : 'production', process.cwd(), prefix)
+  const url = env[`${prefix}URL`]?.trim()
+  const anonKey = env[`${prefix}ANON_KEY`]?.trim()
+  if (url && anonKey) return { url, anonKey }
+  if (url || anonKey) {
+    throw new Error(`${prefix}URL 과 ${prefix}ANON_KEY 는 함께 설정해야 합니다.`)
+  }
+  if (command === 'build') {
+    console.warn('[wooi] 릴레이 설정 없이 빌드합니다 — 이 빌드에서는 원격 접근이 꺼집니다.')
+  }
+  return null
+}
+
+export default defineConfig(({ command }) => ({
   main: {
+    define: {
+      __WOOI_RELAY__: JSON.stringify(bakedRelay(command))
+    },
     // Keep the Claude Agent SDK (and other deps) external so the SDK can resolve
     // its bundled native CLI binary relative to node_modules at runtime.
     // toolShim 은 Electron 밖에서 순수 Node 프로세스로 실행된다. 패키징된 앱의 app.asar 안에
@@ -61,4 +93,4 @@ export default defineConfig({
       }
     }
   }
-})
+}))
