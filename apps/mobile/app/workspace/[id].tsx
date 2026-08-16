@@ -29,6 +29,7 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router'
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import type { ChatItem, PermissionRequest } from '@shared/types'
 import { workspaceDisplayName } from '@shared/types'
+import { formatToolGroup } from '@shared/toolGroups'
 import { BrandMark } from '../../src/components/BrandMark'
 import { DemoBanner } from '../../src/components/DemoBanner'
 import { PR_COLORS } from '../../src/state/prColors'
@@ -36,6 +37,7 @@ import { isLaptopAway, useRemoteStore } from '../../src/state/store'
 import { agoLabel, untilLabel, useNow } from '../../src/state/useNow'
 import { useDeviceAuthentication } from '../../src/state/useDeviceAuth'
 import { theme } from '../../src/theme'
+import { buildChatRows, type ChatRowModel, type ToolCardModel } from '../../src/chat/rows'
 
 const PAGE_SIZE = 100
 const WATCH_REFRESH_MS = 40_000
@@ -333,32 +335,91 @@ function RichText({
 function Collapsible({
   title,
   text,
+  subtitle,
   icon: Icon,
-  error = false
+  error = false,
+  expandable = true,
+  children
 }: {
   title: string
-  text: string
+  text?: string
+  subtitle?: string
   icon: LucideIcon
   error?: boolean
+  expandable?: boolean
+  children?: React.ReactNode
 }): React.JSX.Element {
   const [open, setOpen] = useState(false)
   const Chevron = open ? ChevronDown : ChevronRight
   const tint = error ? theme.danger : theme.textFaint
-  return (
-    <Pressable style={styles.compactCard} onPress={() => setOpen((value) => !value)}>
+  const head = (
+    <>
       <View style={styles.cardHead}>
         <Icon size={13} color={tint} />
         <Text style={[styles.cardTitle, error && styles.errorText]} numberOfLines={1}>
           {title}
         </Text>
-        <Chevron size={14} color={theme.textFaint} />
+        {expandable ? <Chevron size={14} color={theme.textFaint} /> : null}
       </View>
-      {open ? <RichText text={text} color={error ? theme.danger : theme.textMuted} /> : null}
+      {!open && subtitle ? (
+        <Text style={[styles.cardSubtitle, error && styles.errorText]} numberOfLines={1}>
+          {subtitle}
+        </Text>
+      ) : null}
+    </>
+  )
+  // 펼칠 것이 없으면 셰브런도 탭도 주지 않는다. 눌렀는데 아무 일도 일어나지 않는 카드보다
+  // 한 줄로 끝나는 편이 정직하고, 결과가 도착하면 그때 펼칠 수 있는 카드가 된다.
+  if (!expandable) return <View style={styles.compactCard}>{head}</View>
+  return (
+    <Pressable
+      style={styles.compactCard}
+      onPress={(event) => {
+        event.stopPropagation()
+        setOpen((value) => !value)
+      }}
+    >
+      {head}
+      {open
+        ? children ?? <RichText text={text ?? ''} color={error ? theme.danger : theme.textMuted} />
+        : null}
     </Pressable>
   )
 }
 
-function ChatRow({ item }: { item: ChatItem }): React.JSX.Element {
+function ToolCard({ card }: { card: ToolCardModel }): React.JSX.Element {
+  return (
+    <Collapsible
+      icon={card.use ? Wrench : CornerDownRight}
+      title={card.title}
+      subtitle={card.subtitle}
+      error={card.error}
+      expandable={card.body !== undefined}
+    >
+      {card.body ? (
+        <RichText text={card.body} color={card.error ? theme.danger : theme.textMuted} />
+      ) : null}
+      {card.omittedLines > 0 ? (
+        <Text style={styles.truncated}>Output truncated · {card.omittedLines} lines omitted</Text>
+      ) : null}
+    </Collapsible>
+  )
+}
+
+function ChatRow({ row }: { row: ChatRowModel }): React.JSX.Element | null {
+  if (row.kind === 'tool') return <ToolCard card={row.card} />
+  if (row.kind === 'tool-group') {
+    return (
+      <Collapsible icon={Wrench} title={formatToolGroup(row.group)} subtitle={row.group.latestHint}>
+        <View style={styles.groupBody}>
+          {row.cards.map((card) => (
+            <ToolCard key={card.use?.id ?? card.result?.id} card={card} />
+          ))}
+        </View>
+      </Collapsible>
+    )
+  }
+  const item = row.item
   switch (item.type) {
     case 'user':
       return (
@@ -375,28 +436,12 @@ function ChatRow({ item }: { item: ChatItem }): React.JSX.Element {
         </View>
       )
     case 'thinking':
+      if (!item.text.trim()) return null
       return (
         <Collapsible
           icon={Brain}
           title={item.streaming ? 'Thinking…' : 'Thinking'}
           text={item.text}
-        />
-      )
-    case 'tool_use':
-      return (
-        <Collapsible
-          icon={Wrench}
-          title={`Tool · ${item.name}`}
-          text={JSON.stringify(item.input, null, 2)}
-        />
-      )
-    case 'tool_result':
-      return (
-        <Collapsible
-          icon={CornerDownRight}
-          title={item.isError ? 'Tool error' : 'Tool result'}
-          text={item.text}
-          error={item.isError}
         />
       )
     case 'result':
@@ -496,6 +541,7 @@ export default function WorkspaceScreen(): React.JSX.Element {
   const [sending, setSending] = useState(false)
   const [stopping, setStopping] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const rows = useMemo(() => buildChatRows(items), [items])
   const refreshing = useRef(false)
   const focused = useRef(false)
 
@@ -713,9 +759,9 @@ export default function WorkspaceScreen(): React.JSX.Element {
         {error ? <Text style={styles.errorBanner}>{error}</Text> : null}
         <FlatList
           inverted
-          data={items}
-          keyExtractor={(item) => item.id}
-          renderItem={({ item }) => <ChatRow item={item} />}
+          data={rows}
+          keyExtractor={(row) => row.id}
+          renderItem={({ item: row }) => <ChatRow row={row} />}
           contentContainerStyle={styles.list}
           onEndReached={() => void loadOlder()}
           onEndReachedThreshold={0.3}
@@ -846,6 +892,9 @@ const styles = StyleSheet.create({
   },
   cardHead: { alignItems: 'center', flexDirection: 'row', gap: 8 },
   cardTitle: { color: theme.textDim, flex: 1, fontSize: 12, fontWeight: '600' },
+  cardSubtitle: { color: theme.textFaint, fontSize: 11, marginLeft: 21, marginTop: 4 },
+  groupBody: { marginTop: 4 },
+  truncated: { color: theme.textFaint, fontSize: 10, marginTop: 6 },
   codeScroll: { backgroundColor: theme.bg, borderRadius: 5, marginVertical: 7, padding: 10 },
   code: {
     color: theme.textMuted,
