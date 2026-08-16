@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -9,8 +9,66 @@ import {
   ghMergeBase,
   syncGhMergeBase,
   summarizeBranch,
-  getDiff
+  getDiff,
+  getStatus,
+  fetchRemoteForRepo
 } from './git'
+
+describe('getStatus base 해석', () => {
+  let root: string
+
+  const git = (cwd: string, args: string[]): string =>
+    execFileSync('git', args, { cwd, encoding: 'utf-8' }).trim()
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'wooi-status-'))
+    git(root, ['init', '-q', '-b', 'main'])
+    git(root, ['config', 'user.email', 'test@example.com'])
+    git(root, ['config', 'user.name', 'test'])
+    writeFileSync(join(root, 'base.txt'), 'base\n')
+    git(root, ['add', '-A'])
+    git(root, ['commit', '-qm', 'base'])
+    git(root, ['checkout', '-qb', 'feature'])
+    writeFileSync(join(root, 'feature.txt'), 'feature\n')
+    git(root, ['add', '-A'])
+    git(root, ['commit', '-qm', 'feature'])
+  })
+
+  afterEach(() => rmSync(root, { recursive: true, force: true }))
+
+  it('origin/base 가 있으면 로컬 base 보다 우선하고 ahead 는 고유 커밋을 유지한다', async () => {
+    git(root, ['checkout', '-qb', 'remote-main', 'main'])
+    writeFileSync(join(root, 'remote.txt'), 'remote\n')
+    git(root, ['add', '-A'])
+    git(root, ['commit', '-qm', 'remote'])
+    const remoteTip = git(root, ['rev-parse', 'HEAD'])
+    git(root, ['checkout', '-q', 'feature'])
+    git(root, ['update-ref', 'refs/remotes/origin/main', remoteTip])
+    git(root, ['branch', '-D', 'remote-main'])
+
+    await expect(getStatus(root, 'main')).resolves.toMatchObject({ behind: 1, ahead: 1 })
+  })
+
+  it('origin/base 가 없으면 로컬 base 로 폴백한다', async () => {
+    await expect(getStatus(root, 'main')).resolves.toMatchObject({ behind: 0, ahead: 1 })
+  })
+})
+
+describe('리포 fetch 합류', () => {
+  it('같은 리포의 동시 요청은 진행 중인 fetch 하나를 공유한다', async () => {
+    let finish!: () => void
+    const pending = new Promise<void>((resolve) => {
+      finish = resolve
+    })
+    const fetcher = vi.fn(() => pending)
+
+    const first = fetchRemoteForRepo('/tmp/a', 'repo-join', fetcher)
+    const second = fetchRemoteForRepo('/tmp/b', 'repo-join', fetcher)
+    expect(fetcher).toHaveBeenCalledTimes(1)
+    finish()
+    await Promise.all([first, second])
+  })
+})
 
 describe('sanitizeBranch', () => {
   it('공백을 하이픈으로 바꾼다', () => {
