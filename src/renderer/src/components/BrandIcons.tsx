@@ -58,6 +58,31 @@ export function GithubMark({ size = 18 }: { size?: number }): React.JSX.Element 
 }
 
 /**
+ * 이름을 모르는 백엔드의 마크. 아무 브랜드도 흉내내지 않는 중립 글리프다 —
+ * 모르는 백엔드에 Claude 아이콘을 대신 그리면 "다른 제품이 돌고 있다" 는 거짓말이 된다.
+ */
+function UnknownAgentMark({ size = 18 }: { size?: number }): React.JSX.Element {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-label="Unknown agent">
+      <circle
+        cx="12"
+        cy="12"
+        r="9"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeDasharray="3 2.5"
+      />
+      <path
+        d="M12 16.5h.01M9.8 9.4a2.2 2.2 0 1 1 2.9 2.1c-.5.2-.7.6-.7 1.1v.4"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+    </svg>
+  )
+}
+
+/**
  * 에이전트 백엔드별 마크. 백엔드가 여럿이 되면(예: Codex) 에이전트 행에서 "무엇이 돌고 있나"
  * 뿐 아니라 "무엇으로 돌고 있나"까지 한눈에 구분돼야 하므로, 아이콘을 백엔드에서 파생시킨다.
  *
@@ -71,6 +96,15 @@ const BACKEND_MARKS: Record<AgentBackendId, (props: { size?: number }) => React.
   copilot: CopilotMark
 }
 
+/**
+ * 타입이 막아 주는데도 폴백이 필요한 이유: 이 값은 코드가 아니라 **저장된 데이터**에서 온다.
+ *
+ * Wooi 의 dev userData 는 같은 리포의 모든 워크트리가 공유한다. 그래서 백엔드를 새로 추가하는
+ * 다른 브랜치가 만든 워크스페이스가, 그 백엔드를 모르는 이 브랜치의 store 에 그대로 들어온다.
+ * Record 조회가 undefined 를 돌려주면 React 는 "Element type is invalid" 로 **트리 전체를
+ * 죽여** 앱이 백지가 된다 — 워크스페이스 한 줄의 아이콘 때문에 잃기엔 너무 큰 값이다.
+ * (main 쪽은 이미 같은 이유로 `AGENT_BACKEND_LABELS[id] ?? id` 로 방어하고 있다.)
+ */
 export function AgentBackendMark({
   backend,
   size = 14
@@ -78,8 +112,8 @@ export function AgentBackendMark({
   backend: AgentBackendId
   size?: number
 }): React.JSX.Element {
-  const Mark = BACKEND_MARKS[backend]
-  const label = AGENT_BACKEND_LABELS[backend]
+  const Mark = BACKEND_MARKS[backend] ?? UnknownAgentMark
+  const label = AGENT_BACKEND_LABELS[backend] ?? backend
   return (
     <span title={label} aria-label={label} className="inline-grid place-items-center">
       <Mark size={size} />

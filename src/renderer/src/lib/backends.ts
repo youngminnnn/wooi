@@ -56,6 +56,19 @@ export function useAvailableBackends(): AgentBackendMeta[] {
   return useMemo(() => backends.filter((b) => b.available && b.capabilities.mainAgent), [backends])
 }
 
+/**
+ * PR 리뷰를 돌릴 수 있는 백엔드만(capabilities.review).
+ *
+ * `useAvailableBackends` 와 지금은 같은 집합이지만 **같은 질문이 아니다** — 리뷰는 백엔드마다
+ * 전용 러너가 필요해서(review/run.ts), 워크스페이스를 구동할 수 있다고 리뷰까지 되는 건
+ * 아니다. main 의 IPC 게이트도 같은 capability 로 막으므로 여기서도 같은 것을 봐야 피커와
+ * 게이트가 어긋나지 않는다.
+ */
+export function useReviewBackends(): AgentBackendMeta[] {
+  const backends = useStore((s) => s.backends)
+  return useMemo(() => backends.filter((b) => b.available && b.capabilities.review), [backends])
+}
+
 /** 설치되어 서브에이전트가 될 수 있는 전체 목록. 메인 자격과는 별개의 질문이다. */
 export function useTeammateBackends(): AgentBackendMeta[] {
   const backends = useStore((s) => s.backends)

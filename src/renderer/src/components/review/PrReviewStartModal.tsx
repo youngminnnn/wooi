@@ -4,7 +4,7 @@ import type { AgentBackendId, EffortSetting, ReviewPrCandidate } from '@shared/t
 import { DEFAULT_AGENT_BACKEND } from '@shared/types'
 import Modal, { ghostBtn, inputClass, labelClass, primaryBtn } from '../Modal'
 import { useStore } from '../../store'
-import { useAgentSettings, useAvailableBackends, useBackend, useModels } from '../../lib/backends'
+import { useAgentSettings, useBackend, useModels, useReviewBackends } from '../../lib/backends'
 import { effortLabel, effortOptionsFor } from '../../lib/effort'
 import { modelLabel } from '../../lib/models'
 import { AgentBackendMark } from '../BrandIcons'
@@ -42,7 +42,7 @@ export default function PrReviewStartModal({
 
   // 리뷰도 워크스페이스와 같은 규칙이다 — 시작할 때 고른 에이전트로 **끝까지** 돈다(후속 턴은
   // 그 세션을 resume 하므로). 기본값은 전역 기본 에이전트라 화면은 항상 하나가 선택된 채로 뜬다.
-  const available = useAvailableBackends()
+  const available = useReviewBackends()
   const [agentBackend, setAgentBackend] = useState<AgentBackendId>(defaultBackend)
   // 기본 에이전트를 쓸 수 없으면(CLI 제거 등) 쓸 수 있는 것으로 대체한다.
   const effectiveBackend =

@@ -418,11 +418,10 @@ export function orderVisibleWorkspaces<
  * 이 워크스페이스를 구동하는 AI 코딩 에이전트 백엔드 식별자.
  * - claude: Claude Code (Claude Agent SDK)
  * - codex: OpenAI Codex (`codex app-server` JSON-RPC)
- * - copilot: GitHub Copilot CLI (ACP stdio, teammate-only)
+ * - copilot: GitHub Copilot CLI (ACP stdio)
  *
- * 워크스페이스는 mainAgent=true 인 항목만 생성 시 골라 **그 세션 동안 고정**한다. Copilot 은
- * 같은 닫힌 유니온에 있지만 teammate-only 라 워크스페이스를 구동하지 않는다. 백엔드별 기능 지원
- * 여부(capabilities)·권한 모드·기본 모델 등 메타데이터는 main 의 agent 레지스트리가 보유한다.
+ * 워크스페이스는 mainAgent=true 인 항목만 생성 시 골라 **그 세션 동안 고정**한다. 백엔드별 기능
+ * 지원 여부(capabilities)·권한 모드·기본 모델 등 메타데이터는 main 의 agent 레지스트리가 보유한다.
  */
 export type AgentBackendId = 'claude' | 'codex' | 'copilot'
 
@@ -456,6 +455,15 @@ export const AGENT_BACKEND_LABELS: Record<AgentBackendId, string> = {
 export interface AgentCapabilities {
   /** 워크스페이스의 대화를 직접 구동할 수 있는가. delegate 는 팀 조율, 이 값은 메인 자격이다. */
   mainAgent: boolean
+  /**
+   * 이 백엔드로 PR 리뷰를 돌릴 수 있는가.
+   *
+   * `mainAgent` 와 따로 묻는다 — 리뷰는 워크스페이스 대화가 아니라 **구조화 출력(ReviewArtifact)
+   * 을 돌려주는 일회성 실행**이라, 백엔드마다 전용 러너가 필요하다(review/run.ts 의 분기).
+   * 메인 자격이 있어도 그 러너가 없으면 리뷰는 조용히 다른 제품으로 떨어지는데, 사용자가 고른
+   * 것과 다른 에이전트가 도는 건 실패보다 나쁘다.
+   */
+  review: boolean
   /** /btw 사이드 질문 */
   sideQuestion: boolean
   /** /rewind 파일 체크포인트 되돌리기 */
@@ -3210,6 +3218,14 @@ export const WEEKLY_RATE_LIMIT_LABEL = 'Weekly'
 /** /usage — 세션 비용 + (가능하면) 요금제 사용률 창. */
 export interface UsageInfo {
   totalCostUsd: number
+  /**
+   * 비용을 USD 로 셀 수 없는 백엔드가 대신 넘기는 표시 문자열(예: `0.3 AI Units`).
+   *
+   * GitHub Copilot 은 달러가 아니라 **AI credits** 로 과금하고(레거시 과금 계정은 premium
+   * requests), 그 값을 `totalCostUsd` 에 밀어 넣으면 화면에 `$0.3000` 이라고 적히는 순 오답이
+   * 된다. 있으면 이 문장을 그대로 쓰고, 없으면 예전처럼 `totalCostUsd` 를 달러로 그린다.
+   */
+  costLabel?: string
   linesAdded: number
   linesRemoved: number
   /** 'pro'/'max'/'team'/'enterprise' 또는 API 키 세션이면 null. */

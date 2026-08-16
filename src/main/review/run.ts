@@ -8,6 +8,7 @@ import type {
 import { buildReviewPrompt, reviewOutputSchema, type ReviewPromptMeta } from './prompt'
 import { runClaudeReview } from './runClaude'
 import { runCodexReview } from './runCodex'
+import { runCopilotReview } from './runCopilot'
 
 /**
  * 리뷰 실행의 백엔드 분배기.
@@ -32,7 +33,8 @@ export interface ReviewRunDeps {
   diffs: ReviewLayerDiff[]
   /**
    * 이어받을 에이전트 세션 id. 주면 앞선 리뷰 맥락 위에서 대화가 이어진다.
-   * Claude 는 `resume`, Codex 는 `codex exec resume` 의 thread id 다.
+   * Claude 는 `resume`, Codex 는 `codex exec resume` 의 thread id, Copilot 은 ACP `session/load` 의
+   * session id 다.
    */
   resumeSessionId?: string | null
   /** 주면 이 문장을 그대로 프롬프트로 쓴다(후속 턴). 없으면 최초 리뷰 프롬프트를 만든다. */
@@ -72,6 +74,8 @@ export async function runReview(deps: ReviewRunDeps): Promise<ReviewRunResult> {
   const result =
     deps.backend === 'codex'
       ? await runCodexReview(deps, built.text)
-      : await runClaudeReview(deps, built.text)
+      : deps.backend === 'copilot'
+        ? await runCopilotReview(deps, built.text)
+        : await runClaudeReview(deps, built.text)
   return { ...result, truncatedFiles: built.truncatedFiles }
 }

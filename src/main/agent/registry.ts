@@ -2,6 +2,7 @@ import type { BrowserWindow } from 'electron'
 import type { AgentBackendId } from '@shared/types'
 import { SessionManager } from '../claude/manager'
 import { CodexSessionManager } from '../codex/manager'
+import { CopilotSessionManager } from '../copilot/manager'
 import { detectCodex } from '../codex/executable'
 import { isInstalled } from '../shell'
 import { backendMeta, type AgentBackend, type TurnEndHook } from './backend'
@@ -59,11 +60,7 @@ export async function backendAvailability(
 export function createBackend(id: AgentBackendId, deps: BackendDeps): AgentBackend {
   switch (id) {
     case 'copilot':
-      // teammate-only 백엔드가 여기 도달했다면 호출부의 mainAgent 게이트가 샌 버그다. Claude 로
-      // 조용히 폴백하면 다른 제품이 대화를 이어받으므로 즉시 드러내야 한다.
-      throw new Error(
-        'GitHub Copilot CLI cannot drive a workspace — it is only available as a teammate.'
-      )
+      return new CopilotSessionManager(deps.dispatch, deps.getWindow, deps.onTurnEnd)
     case 'codex':
       return new CodexSessionManager(deps.dispatch, deps.getWindow, deps.onTurnEnd)
     case 'claude':

@@ -13,9 +13,10 @@ import {
 import { refreshAccountUsage, useStore } from '../store'
 import { useNow } from '../lib/useNow'
 import { formatCost, formatCountdown, formatDuration, formatTime } from '../lib/format'
-import { workspaceDisplayName } from '@shared/types'
+import { AGENT_BACKEND_IDS, AGENT_BACKEND_LABELS, workspaceDisplayName } from '@shared/types'
 import type { AgentBackendId, RateLimitSnapshot, UsageInfo, Workspace } from '@shared/types'
-import { ClaudeMark, CodexMark } from './BrandIcons'
+import { AgentBackendMark } from './BrandIcons'
+import { useBackend } from '../lib/backends'
 
 /** 요금제 사용률 재조회 주기. 5시간 창이 눈에 띄게 움직이는 단위가 분이라 1분이면 충분하다. */
 const USAGE_REFRESH_MS = 60_000
@@ -51,14 +52,20 @@ export default function Overview(): React.JSX.Element {
   const anyRunning = active.some((w) => w.status === 'running')
 
   const auth = useStore((s) => s.authStatus)
-  const connectedAgents = (['claude', 'codex'] as const).filter((id) => {
+  // 등록된 백엔드 전체를 훑는다 — 예전처럼 claude·codex 를 손으로 적으면 새 백엔드가 붙어도
+  // Overview 에서만 보이지 않는다(실제로 Copilot 이 그랬다).
+  const connectedAgents = AGENT_BACKEND_IDS.filter((id) => {
     const hasActiveWorkspace = active.some((w) => w.agentBackend === id)
     const hasSnapshot =
       id === 'claude'
         ? !!(app.rateLimitsByAgent?.claude ?? app.rateLimits)
-        : !!app.rateLimitsByAgent?.codex
+        : !!app.rateLimitsByAgent?.[id]
     // 인증 조회는 앱 시작·focus 때 여러 번 겹칠 수 있고 일시 실패도 가능하다. 이미 이 backend를
     // 쓰는 workspace나 account snapshot이 있는데 loggedIn 하나만 보고 패널을 제거하지 않는다.
+    //
+    // Copilot 은 loggedIn 을 알 방법이 없어(`copilot` 에 auth status 하위 명령이 없다) 늘 false 다.
+    // 그래서 실제로 그 백엔드로 도는 워크스페이스가 있을 때 나타난다 — 설치만 보고 띄우면
+    // "연결된 계정" 목록에 쓰지도 않는 에이전트가 섞인다.
     return !!auth?.agents[id]?.loggedIn || hasActiveWorkspace || hasSnapshot
   })
   const codexConnected = connectedAgents.includes('codex')
@@ -302,15 +309,23 @@ function AgentUsagePanel({
   refreshing: boolean
   now: number
 }): React.JSX.Element {
+  const backend = useBackend(agentId)
+  /**
+   * 이 백엔드가 계정 단위 사용량을 알려 줄 수 있는가. 못 하면 조회조차 하지 않는다 —
+   * Copilot 의 `/usage` 는 **세션** 사용량이라 이 패널의 질문에 답하지 못하는데, 그걸 부르면
+   * Overview 를 여는 것만으로 CLI 프로세스가 하나 뜬다. 카탈로그를 아직 못 읽었으면(undefined)
+   * 예전처럼 조회한다 — 목록을 못 읽었다고 있는 기능을 감추는 쪽이 더 나쁘다.
+   */
+  const reportsAccountUsage = backend ? backend.capabilities.rateLimits : true
   const [usage, setUsage] = useState<UsageInfo | null>(null)
   const [loading, setLoading] = useState(agentId === 'claude' && !!targetId)
-  const label = agentId === 'claude' ? 'Claude Code' : 'Codex'
+  const label = AGENT_BACKEND_LABELS[agentId] ?? agentId
   const panelLoading = loading || refreshing
 
   useEffect(() => {
     // Codex 는 상위 Overview 가 rateLimits.refresh()로 갱신한 AppState 스냅샷을 사용한다.
     // 여기서 /usage 를 호출하면 account/rateLimits/read와 account/read가 다시 직렬 실행된다.
-    if (agentId === 'codex') {
+    if (agentId === 'codex' || !reportsAccountUsage) {
       setLoading(false)
       return
     }
@@ -329,7 +344,7 @@ function AgentUsagePanel({
     return () => {
       cancelled = true
     }
-  }, [agentId, targetId, refreshNonce])
+  }, [agentId, targetId, refreshNonce, reportsAccountUsage])
 
   const planApplies = usage ? usage.rateLimitsAvailable : (snapshot?.available ?? null)
   const windows = useMemo<PlanWindow[]>(() => {
@@ -361,13 +376,23 @@ function AgentUsagePanel({
   return (
     <section className="rounded-xl border border-[var(--surface-2)] bg-[var(--bg-2)] p-3.5">
       <div className="flex items-center gap-2 mb-3 text-sm font-medium text-neutral-200">
-        {agentId === 'claude' ? <ClaudeMark size={16} /> : <CodexMark size={16} />}
+        <AgentBackendMark backend={agentId} size={16} />
         {label}
-        <span className="text-[11px] font-normal text-neutral-600">account usage</span>
+        {/* 계정 사용량을 못 읽는 백엔드에 이 부제를 달면 바로 아래 안내문과 서로 어긋난다. */}
+        {reportsAccountUsage && (
+          <span className="text-[11px] font-normal text-neutral-600">account usage</span>
+        )}
         {panelLoading && <Loader2 size={11} className="ml-auto animate-spin text-neutral-500" />}
       </div>
 
-      {planApplies === false ? (
+      {!reportsAccountUsage ? (
+        // "한도가 없다" 가 아니라 "우리가 못 읽는다" 는 뜻이라 문구를 따로 둔다 — 둘을 같은
+        // 문장으로 뭉치면 사용자가 한도를 다 안 쓴 것으로 오해한다.
+        <p className="text-xs text-neutral-500">
+          {label} does not report account usage to Wooi. Check it with{' '}
+          <code className="text-neutral-400">/usage</code> inside a workspace.
+        </p>
+      ) : planApplies === false ? (
         <p className="text-xs text-neutral-500">
           Plan rate limits are not available for this authentication method.
         </p>

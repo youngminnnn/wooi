@@ -3,7 +3,7 @@ import { z } from 'zod'
 import type { AgentToolDeps } from './registry'
 import type { AppSettings, ModelOption, Repo, Workspace } from '@shared/types'
 import { AGENT_BACKEND_IDS } from '@shared/types'
-import { backendMeta } from '../backend'
+import { MAIN_AGENT_BACKEND_IDS, backendMeta } from '../backend'
 import { DEFAULT_SETTINGS } from '../../storeSchema'
 import { AGENT_TOOLS } from './catalog'
 
@@ -115,20 +115,31 @@ describe('create_workspace', () => {
   })
 
   // teammate 전용 백엔드를 메인 자리에 앉히면 그 워크스페이스는 첫 턴에 죽는다(createBackend 가
-  // throw 한다). 등록된 백엔드 전체가 아니라 **메인이 될 수 있는 것만** 후보라는 것을 못 박는다 —
-  // 나중에 teammate 전용 백엔드가 더 붙어도 이 테스트가 먼저 걸린다.
+  // throw 한다). 등록된 백엔드 전체가 아니라 **메인이 될 수 있는 것만** 후보라는 것을 못 박는다.
+  //
+  // 지금은 세 백엔드가 모두 메인이 될 수 있어 아래 루프의 거절 분기가 비어 있다. 그래서 후보
+  // 목록이 `capabilities.mainAgent` 에서 **파생된다**는 것을 따로 단언한다 — teammate 전용이
+  // 다시 생기는 순간 그 백엔드가 자동으로 검사 대상에 들어온다. 거절 경로 자체는 목록에 없는
+  // 값으로 늘 함께 확인한다.
   it('워크스페이스를 구동할 수 없는 백엔드는 고를 수 없다', async () => {
-    const teammateOnly = AGENT_BACKEND_IDS.filter((id) => !backendMeta(id).capabilities.mainAgent)
-    expect(teammateOnly.length).toBeGreaterThan(0)
+    expect(MAIN_AGENT_BACKEND_IDS).toEqual(
+      AGENT_BACKEND_IDS.filter((id) => backendMeta(id).capabilities.mainAgent)
+    )
 
     const spec = AGENT_TOOLS.find((tool) => tool.name === 'create_workspace')
     const schema = z.object(spec!.inputSchema)
-    for (const id of teammateOnly) {
-      // 스키마가 모델에게 아예 보여 주지 않고,
-      expect(schema.safeParse({ agentBackend: id }).success).toBe(false)
+    for (const id of AGENT_BACKEND_IDS) {
+      const canDrive = backendMeta(id).capabilities.mainAgent
+      // 스키마는 메인이 될 수 있는 것만 모델에게 보여 준다.
+      expect(schema.safeParse({ agentBackend: id }).success).toBe(canDrive)
+      if (canDrive) continue
       // 스키마를 우회해 들어와도 도구가 사람이 읽는 오류로 끊는다.
       await expect(create_({ agentBackend: id })).rejects.toThrow(/cannot run a workspace/i)
     }
+    // 후보가 전부 메인이어도 그 거절 경로가 살아 있는지는 확인해 둔다.
+    await expect(create_({ agentBackend: 'not-an-agent' })).rejects.toThrow(
+      /cannot run a workspace/i
+    )
     expect(create).not.toHaveBeenCalled()
   })
 
