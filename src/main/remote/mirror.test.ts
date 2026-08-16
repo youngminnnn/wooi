@@ -20,8 +20,12 @@ const {
   projectPlanUsage,
   projectPr,
   projectRateLimit,
-  projectState
+  projectState,
+  projectStatusLine
 } = await import('./mirror')
+const { rememberCompacting, rememberContextUsage, forgetContextUsage } =
+  await import('../contextUsageCache')
+const { rememberModels } = await import('../modelCatalog')
 
 const machine: RemoteMachine = { id: 'machine-1', name: 'Mac', appVersion: '1.2.3' }
 const sessionKey = generateSessionKey()
@@ -237,6 +241,83 @@ describe('projectPlanUsage', () => {
 
   it('보여 줄 것이 없어도 필드 자체는 빈 배열로 실어 보낸다', () => {
     expect(projectState(appState(), machine, []).planUsage).toEqual([])
+  })
+})
+
+describe('projectStatusLine', () => {
+  afterEach(() => {
+    forgetContextUsage('ws-1')
+  })
+
+  const settings = {
+    agents: { claude: { model: 'claude-sonnet-5', effort: 'high' } }
+  } as unknown as AppState['settings']
+
+  function base(): Parameters<typeof projectStatusLine>[0] {
+    return {
+      id: 'ws-1',
+      agentBackend: 'claude',
+      model: null,
+      lastModel: null,
+      effort: null
+    } as Parameters<typeof projectStatusLine>[0]
+  }
+
+  it('오버라이드 → lastModel → 전역 기본값 순으로 유효 값을 고른다', () => {
+    rememberModels('claude', [
+      { id: 'claude-opus-5[1m]', label: 'Opus 5 (1M context)' },
+      { id: 'claude-sonnet-5', label: 'Sonnet 5 (1M context)' }
+    ])
+
+    expect(projectStatusLine({ ...base(), model: 'claude-opus-5[1m]' }, settings).model).toBe(
+      'Opus 5 (1M context)'
+    )
+    expect(projectStatusLine({ ...base(), lastModel: 'claude-opus-5[1m]' }, settings).model).toBe(
+      'Opus 5 (1M context)'
+    )
+    // 아무 오버라이드도 없으면 그 백엔드의 전역 기본값이 유효 값이다.
+    expect(projectStatusLine(base(), settings).model).toBe('Sonnet 5 (1M context)')
+  })
+
+  it('effort 라벨은 백엔드 서술자에서 뽑고, 지정이 없으면 전역 기본값을 쓴다', () => {
+    const high = backendMeta('claude').efforts.find((e) => e.id === 'high')?.label
+    expect(projectStatusLine(base(), settings).effort).toBe(high)
+    expect(projectStatusLine({ ...base(), effort: 'low' }, settings).effort).toBe(
+      backendMeta('claude').efforts.find((e) => e.id === 'low')?.label
+    )
+  })
+
+  it('첫 턴 전에는 컨텍스트를 null 로 둔다 — 0% 는 "맥락이 비었다"는 다른 말이다', () => {
+    expect(projectStatusLine(base(), settings).context).toBeNull()
+  })
+
+  it('캐시에 적힌 사용량과 압축 진행 상태를 그대로 싣는다', () => {
+    rememberContextUsage('ws-1', { usedTokens: 120, maxTokens: 1000, percentage: 0.12 })
+    rememberCompacting('ws-1', true)
+
+    const line = projectStatusLine(base(), settings)
+    expect(line.context).toEqual({ usedTokens: 120, maxTokens: 1000, percentage: 0.12 })
+    expect(line.compacting).toBe(true)
+  })
+
+  it('윈도 크기를 모르면 게이지를 그릴 수 없으므로 사용량을 싣지 않는다', () => {
+    rememberContextUsage('ws-1', { usedTokens: 120, maxTokens: 0, percentage: 0 })
+    expect(projectStatusLine(base(), settings).context).toBeNull()
+  })
+
+  // 폰이 실제로 읽는 것은 투영 전체다. 함수만 맞고 projectState 가 싣지 않으면 화면에서는
+  // 그 줄이 통째로 사라지는데(옵셔널 필드라 타입은 통과한다), 실기기에서 정확히 그렇게 겪었다.
+  it('projectState 가 워크스페이스마다 statusLine 을 싣는다', () => {
+    const projection = projectState(appState(['idle', 'running']), machine, [])
+    expect(projection.workspaces).toHaveLength(2)
+    for (const workspace of projection.workspaces) {
+      expect(workspace.statusLine).toEqual({
+        model: expect.any(String),
+        effort: expect.any(String),
+        context: null,
+        compacting: false
+      })
+    }
   })
 })
 

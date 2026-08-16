@@ -6,17 +6,23 @@ import type {
   RemotePlanWindow,
   RemotePr,
   RemoteRateLimit,
-  RemoteState
+  RemoteState,
+  RemoteWorkspace
 } from '@shared/remote'
+import { AGENT_BACKEND_IDS, agentSettingsFor } from '@shared/types'
 import type {
   AgentBackendId,
+  AppSettings,
   AppState,
   PermissionMode,
   PermissionRequest,
-  RateLimitSnapshot
+  RateLimitSnapshot,
+  Workspace
 } from '@shared/types'
-import { AGENT_BACKEND_IDS } from '@shared/types'
+import { effortLabel, modelLabel } from '@shared/agentLabels'
 import { backendMeta } from '../agent/backend'
+import { getCachedContextUsage, isCompacting } from '../contextUsageCache'
+import { cachedModels } from '../modelCatalog'
 import { getCachedPrStatus } from '../prStatusCache'
 import { log } from '../logger'
 import type { RemoteKeystore } from './keystore'
@@ -88,6 +94,33 @@ export function projectPermissionModeFooter(
   // 후자는 전부 "에이전트가 스스로 실행한다"는 뜻이라 같은 무게로 보여야 한다.
   const tone = mode === 'plan' || mode === 'readOnly' ? 'readOnly' : 'caution'
   return { ...info.footer, tone }
+}
+
+/**
+ * 컴포저 위 상태줄. 데스크톱 `StatusLine` 과 **같은 규칙**으로 유효 값을 정한다:
+ * 워크스페이스 오버라이드 → (모델은 init 이 확정해 준 lastModel) → 백엔드 전역 기본값.
+ *
+ * 라벨까지 여기서 만드는 이유는 폰이 카탈로그를 갖고 있지 않아서다. 모델 목록은 백엔드에
+ * 물어야 알 수 있는 비동기 값이라 이 투영에서 조회할 수 없고, 대신 렌더러가 이미 시킨
+ * 조회의 답을 캐시에서 읽는다([[main/modelCatalog]]).
+ */
+export function projectStatusLine(
+  workspace: Pick<Workspace, 'id' | 'agentBackend' | 'model' | 'lastModel' | 'effort'>,
+  settings: AppSettings
+): NonNullable<RemoteWorkspace['statusLine']> {
+  const backend = workspace.agentBackend
+  const defaults = agentSettingsFor(settings, backend)
+  const usage = getCachedContextUsage(workspace.id)
+  return {
+    model: modelLabel(
+      cachedModels(backend),
+      workspace.model ?? workspace.lastModel ?? defaults.model
+    ),
+    effort: effortLabel(backendMeta(backend), workspace.effort ?? defaults.effort),
+    // 윈도 크기를 모르면 퍼센트를 그릴 수 없다 — 데스크톱과 같이 '아직 없음'으로 둔다.
+    context: usage && usage.maxTokens > 0 ? usage : null,
+    compacting: isCompacting(workspace.id)
+  }
 }
 
 /**
@@ -206,6 +239,7 @@ export function projectState(
         workspace.agentBackend,
         workspace.permissionMode
       ),
+      statusLine: projectStatusLine(workspace, app.settings),
       pr: projectPr(workspace.id),
       unread: unread.has(workspace.id)
     })),
