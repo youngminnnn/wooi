@@ -16,9 +16,9 @@ import {
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router'
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import type { ChatItem, PermissionRequest } from '@shared/types'
-import { workspaceDisplayName } from '@shared/types'
+import { AGENT_BACKEND_LABELS, workspaceDisplayName } from '@shared/types'
 import { isLaptopAway, useRemoteStore } from '../../src/state/store'
-import { agoLabel, useNow } from '../../src/state/useNow'
+import { agoLabel, untilLabel, useNow } from '../../src/state/useNow'
 import { useDeviceAuthentication } from '../../src/state/useDeviceAuth'
 
 const PAGE_SIZE = 100
@@ -476,6 +476,39 @@ export default function WorkspaceScreen(): React.JSX.Element {
     [workspace]
   )
 
+  const repoName = useRemoteStore(
+    (store) => store.state?.repos.find((repo) => repo.id === workspace?.repoId)?.name ?? null
+  )
+
+  /**
+   * 헤더 한 줄에 담는 것들. 데스크톱 사이드바가 행에 보여 주는 것과 같은 성격이되, 여기서는
+   * "지금 이 워크스페이스가 무엇으로 어떻게 돌고 있나"에 답하는 것만 남긴다 —
+   * 권한 모드는 전송 시 인증 여부까지 가르므로 특히 보여야 한다.
+   */
+  const headerMeta = useMemo(() => {
+    if (workspace === undefined) return status
+    const labels: Record<string, string | undefined> = AGENT_BACKEND_LABELS
+    return [
+      labels[workspace.agentBackend] ?? workspace.agentBackend,
+      workspace.multiAgent ? '+ subagents' : null,
+      workspace.permissionMode,
+      workspace.model,
+      workspace.branch
+    ]
+      .filter((part): part is string => typeof part === 'string' && part.length > 0)
+      .join(' · ')
+  }, [status, workspace])
+
+  const limitLabel = useMemo(() => {
+    const limit = workspace?.rateLimit ?? null
+    if (limit === null) return null
+    const when = limit.at === null ? null : untilLabel(limit.at, now)
+    if (limit.kind === 'resuming') {
+      return when === null ? 'rate limit' : `rate limit · resumes in ${when}`
+    }
+    return when === null ? 'rate limit' : `rate limit · resets in ${when}`
+  }, [now, workspace])
+
   const insets = useSafeAreaInsets()
   // 키보드가 올라오면 그 높이만큼, 아니면 하단 안전영역만큼 띄운다. SafeAreaView 의 bottom
   // edge 와 동시에 쓰면 둘이 더해져 어긋나므로 여기서만 관리한다.
@@ -487,7 +520,14 @@ export default function WorkspaceScreen(): React.JSX.Element {
       <View style={[styles.screen, { paddingBottom: keyboardInset }]}>
         <View style={styles.header}>
           <Pressable onPress={() => router.back()} hitSlop={12}><Text style={styles.back}>‹ Back</Text></Pressable>
-          <View style={styles.headerTitle}><Text style={styles.title} numberOfLines={1}>{title}</Text><Text style={styles.connection}>{status}</Text></View>
+          <View style={styles.headerTitle}>
+            {/* 목록에서 보던 정보를 그대로 가져온다. 워크스페이스에 들어온 순간 어느 리포의
+                무엇을 보고 있는지 모르게 되면, 폰에서는 되돌아가 확인하는 비용이 크다. */}
+            {repoName !== null ? <Text style={styles.headerRepo} numberOfLines={1}>{repoName}</Text> : null}
+            <Text style={styles.title} numberOfLines={1}>{title}</Text>
+            <Text style={styles.headerMeta} numberOfLines={1}>{headerMeta}</Text>
+            {limitLabel !== null ? <Text style={styles.headerLimit} numberOfLines={1}>{limitLabel}</Text> : null}
+          </View>
           {workspace?.status === 'running' ? (
             <Pressable style={styles.stopButton} disabled={stopping} onPress={() => void stop()}>
               <Text style={styles.stopText}>{stopping ? 'Stopping…' : 'Stop'}</Text>
@@ -545,6 +585,9 @@ const styles = StyleSheet.create({
   header: { alignItems: 'center', borderBottomColor: '#202024', borderBottomWidth: StyleSheet.hairlineWidth, flexDirection: 'row', minHeight: 54, paddingHorizontal: 14 },
   back: { color: '#9b8df7', fontSize: 15, width: 68 },
   headerTitle: { alignItems: 'center', flex: 1 },
+  headerRepo: { color: '#777680', fontSize: 10, fontWeight: '700', letterSpacing: 0.8 },
+  headerMeta: { color: '#77767f', fontSize: 11, marginTop: 2 },
+  headerLimit: { color: '#d0a24c', fontSize: 11, marginTop: 2 },
   title: { color: '#ededf0', fontSize: 15, fontWeight: '600', maxWidth: '100%' },
   connection: { color: '#6f6f77', fontSize: 10, marginTop: 2, textTransform: 'capitalize' },
   headerSpacer: { width: 68 },

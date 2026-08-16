@@ -26,3 +26,13 @@ export function agoLabel(timestamp: number, now: number = Date.now()): string {
   if (hours < 24) return `${hours}h ago`
   return `${Math.floor(hours / 24)}d ago`
 }
+
+/** "12m" 처럼 남은 시간을 짧게. 이미 지났으면 'now'. */
+export function untilLabel(timestamp: number, now: number = Date.now()): string {
+  const remaining = timestamp - now
+  if (remaining <= 0) return 'now'
+  const minutes = Math.ceil(remaining / 60_000)
+  if (minutes < 60) return `${minutes}m`
+  const hours = Math.floor(minutes / 60)
+  return hours < 24 ? `${hours}h` : `${Math.floor(hours / 24)}d`
+}

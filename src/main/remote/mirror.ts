@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { deriveDirectionKeys, fromBase64Url, sealJson } from '@shared/crypto'
-import type { RemoteMachine, RemoteState } from '@shared/remote'
+import type { RemoteMachine, RemoteRateLimit, RemoteState } from '@shared/remote'
 import type { AgentBackendId, AppState, PermissionMode, PermissionRequest } from '@shared/types'
 import { log } from '../logger'
 import type { RemoteKeystore } from './keystore'
@@ -26,6 +26,23 @@ export function actsWithoutAsking(backend: AgentBackendId, mode: PermissionMode)
   if (mode === 'acceptEdits') return true
   // 'default' 만 남는다 — 여기서 백엔드가 갈린다.
   return backend === 'codex'
+}
+
+/**
+ * 사용량 제한 상태를 폰이 읽을 모양으로 줄인다.
+ *
+ * 자동 이어가기가 예약돼 있으면 그것이 우선이다 — 사용자가 알아야 할 것은 "언제 다시
+ * 시작하는가"이고, 그게 없을 때에야 "멈춰 있고 내가 다시 눌러야 한다"가 된다.
+ */
+export function projectRateLimit(workspace: {
+  pendingRateLimitResume?: { retryAt: number } | null
+  rateLimited?: { resetsAt?: number | null } | null
+}): RemoteRateLimit | null {
+  const resume = workspace.pendingRateLimitResume
+  if (resume) return { kind: 'resuming', at: resume.retryAt }
+  const paused = workspace.rateLimited
+  if (paused) return { kind: 'paused', at: paused.resetsAt ?? null }
+  return null
 }
 
 export function projectState(
@@ -64,7 +81,11 @@ export function projectState(
         : workspace.status === 'error'
           ? 'error'
           : null,
-      actsWithoutAsking: actsWithoutAsking(workspace.agentBackend, workspace.permissionMode)
+      actsWithoutAsking: actsWithoutAsking(workspace.agentBackend, workspace.permissionMode),
+      agentBackend: workspace.agentBackend,
+      multiAgent: workspace.multiAgent === true,
+      parentWorkspaceId: workspace.parentWorkspaceId,
+      rateLimit: projectRateLimit(workspace)
     })),
     pendingPermissions: pending.map((request) => ({
       requestId: request.requestId,

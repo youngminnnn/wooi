@@ -22,6 +22,17 @@ export const REMOTE_PROTOCOL_VERSION = 1
 /** 지금 사용자의 주의가 필요한 이유. main 이 파생해서 내려 준다. */
 export type RemoteAttention = 'permission' | 'error' | null
 
+/**
+ * 사용량 제한에 걸린 상태. 데스크톱 사이드바가 이걸 보여 주지 않으면 워크스페이스가 그냥
+ * idle 로 보여서, 왜 멈췄는지 알려면 들어가 봐야 한다 — 폰에서는 그 비용이 더 크다.
+ */
+export interface RemoteRateLimit {
+  /** 'resuming' 이면 자동 이어가기가 예약되어 있다. 'paused' 는 사람이 다시 시작해야 한다. */
+  kind: 'paused' | 'resuming'
+  /** 재개(예약) 또는 제한 해제 예상 시각(ms). 모르면 null. */
+  at: number | null
+}
+
 /** 모바일이 보는 워크스페이스 1개. */
 export interface RemoteWorkspace {
   id: string
@@ -42,6 +53,14 @@ export interface RemoteWorkspace {
   prNumber: number | null
   lastActiveAt: number
   attention: RemoteAttention
+  /** 이 워크스페이스를 돌리는 에이전트(types.ts 의 AgentBackendId). */
+  agentBackend: string
+  /** 메인 에이전트 외의 종류도 돌 수 있는가(데스크톱의 사람 아이콘과 같은 의미). */
+  multiAgent: boolean
+  /** 스택된 부모. 목록에서 계층을 들여쓰는 데 쓴다. 뿌리면 null. */
+  parentWorkspaceId: string | null
+  /** 사용량 제한 상태. 걸려 있지 않으면 null. */
+  rateLimit: RemoteRateLimit | null
   /**
    * 이 워크스페이스의 에이전트가 **묻지 않고 실행**하는가.
    *

@@ -11,7 +11,7 @@ vi.mock('electron', () => ({
 
 const { deriveDirectionKeys, fromBase64Url, generateSessionKey, openJson, toBase64Url } =
   await import('@shared/crypto')
-const { MIRROR_DEBOUNCE_MS, StateMirror, actsWithoutAsking, projectState } =
+const { MIRROR_DEBOUNCE_MS, StateMirror, actsWithoutAsking, projectRateLimit, projectState } =
   await import('./mirror')
 
 const machine: RemoteMachine = { id: 'machine-1', name: 'Mac', appVersion: '1.2.3' }
@@ -188,6 +188,18 @@ describe('StateMirror', () => {
     stateMirror.dispose()
     await flush()
     expect(upsert).not.toHaveBeenCalled()
+  })
+
+  it('사용량 제한은 재개 예약을 먼저 말한다', () => {
+    // 사용자가 알아야 할 것은 "언제 다시 시작하는가"다. 그게 없을 때에야 "멈춰 있고 내가
+    // 다시 눌러야 한다"가 된다 — 순서가 뒤집히면 기다리면 되는 상황에 사람을 부른다.
+    expect(
+      projectRateLimit({ pendingRateLimitResume: { retryAt: 42 }, rateLimited: { resetsAt: 7 } })
+    ).toEqual({ kind: 'resuming', at: 42 })
+    expect(projectRateLimit({ rateLimited: { resetsAt: 7 } })).toEqual({ kind: 'paused', at: 7 })
+    // 해제 시각을 모를 수 있다 — 그래도 멈춰 있다는 사실은 전한다.
+    expect(projectRateLimit({ rateLimited: {} })).toEqual({ kind: 'paused', at: null })
+    expect(projectRateLimit({})).toBeNull()
   })
 
   it('묻지 않고 실행하는 모드를 폰이 알 수 있게 싣는다', () => {
