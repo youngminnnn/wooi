@@ -104,14 +104,17 @@ function PermissionCard({
   request: PermissionRequest
   command: NonNullable<ReturnType<typeof useRemoteStore.getState>['command']>
 }): React.JSX.Element {
-  const [responding, setResponding] = useState(false)
+  const [pending, setPending] = useState<'deny' | 'once' | 'session' | null>(null)
+  const responding = pending !== null
   const [responseError, setResponseError] = useState<string | null>(null)
   const authenticate = useDeviceAuthentication()
   const demo = useRemoteStore((store) => store.demo)
 
   const respond = useCallback(
-    async (behavior: 'allow' | 'deny', rememberForSession = false): Promise<void> => {
+    async (choice: 'deny' | 'once' | 'session'): Promise<void> => {
       if (responding) return
+      const behavior = choice === 'deny' ? 'deny' : 'allow'
+      const rememberForSession = choice === 'session'
       setResponseError(null)
       if (!demo && behavior === 'allow' && !(await authenticate('Approve action on your laptop'))) {
         setResponseError('Device authentication was cancelled or unsuccessful. Nothing was sent.')
@@ -123,7 +126,7 @@ function PermissionCard({
           (item) => isPermissionRequest(item) && item.requestId === request.requestId
         )
       if (stillPending !== true) return
-      setResponding(true)
+      setPending(choice)
       const decision =
         behavior === 'deny'
           ? { behavior: 'deny' as const }
@@ -134,7 +137,7 @@ function PermissionCard({
         await command('permission:respond', [request.requestId, decision])
       } catch (respondError) {
         setResponseError(errorMessage(respondError))
-        setResponding(false)
+        setPending(null)
       }
     },
     [authenticate, command, demo, request.requestId, responding]
@@ -169,27 +172,32 @@ function PermissionCard({
           <Text style={styles.permissionRule}>{request.rule}</Text>
         </View>
       ) : null}
+      <Text style={styles.permissionScope}>
+        “Always” applies for the rest of this session only.
+      </Text>
       <View style={styles.permissionActions}>
         <Pressable
-          style={[styles.permissionButton, styles.denyButton, responding && styles.disabled]}
+          style={[styles.permissionButton, responding && styles.disabled]}
           disabled={responding}
           onPress={() => void respond('deny')}
         >
-          <Text style={styles.denyButtonText}>{responding ? 'Sending…' : 'Deny'}</Text>
+          <Text style={styles.denyButtonText}>{pending === 'deny' ? 'Sending…' : 'Deny'}</Text>
         </Pressable>
         <Pressable
-          style={[styles.permissionButton, responding && styles.disabled]}
+          style={[styles.permissionButton, styles.sessionButton, responding && styles.disabled]}
           disabled={responding}
-          onPress={() => void respond('allow')}
+          onPress={() => void respond('session')}
         >
-          <Text style={styles.allowButtonText}>Allow once</Text>
+          <Text style={styles.sessionButtonText}>
+            {pending === 'session' ? 'Sending…' : 'Always'}
+          </Text>
         </Pressable>
         <Pressable
-          style={[styles.permissionButton, responding && styles.disabled]}
+          style={[styles.permissionButton, styles.allowButton, responding && styles.disabled]}
           disabled={responding}
-          onPress={() => void respond('allow', true)}
+          onPress={() => void respond('once')}
         >
-          <Text style={styles.allowButtonText}>Allow for session</Text>
+          <Text style={styles.allowButtonText}>{pending === 'once' ? 'Sending…' : 'Allow'}</Text>
         </Pressable>
       </View>
     </View>
@@ -904,20 +912,23 @@ const styles = StyleSheet.create({
   diffAdded: { backgroundColor: '#14251c' },
   diffRemoved: { backgroundColor: '#2b171a' },
   permissionError: { color: '#ef8d8d', fontSize: 11, lineHeight: 15, marginTop: 8 },
-  permissionActions: { flexDirection: 'row', gap: 8, marginTop: 10 },
+  permissionScope: { color: theme.textFaint, fontSize: 11, lineHeight: 15, marginTop: 10 },
+  permissionActions: { flexDirection: 'row', gap: 8, marginTop: 8 },
   permissionButton: {
     alignItems: 'center',
-    borderColor: theme.textFaint,
-    borderRadius: 6,
+    borderColor: theme.border2,
+    borderRadius: 8,
     borderWidth: 1,
     flex: 1,
     justifyContent: 'center',
     minHeight: 44,
     paddingHorizontal: 5
   },
-  denyButton: { borderColor: '#8b4c54' },
-  denyButtonText: { color: '#ef9a9a', fontSize: 12, fontWeight: '700' },
-  allowButtonText: { color: theme.textMuted, fontSize: 11, fontWeight: '600', textAlign: 'center' },
+  denyButtonText: { color: theme.textMuted, fontSize: 12, fontWeight: '600', textAlign: 'center' },
+  sessionButton: { borderColor: 'rgba(255,185,0,0.35)' },
+  sessionButtonText: { color: theme.warning, fontSize: 12, fontWeight: '600', textAlign: 'center' },
+  allowButton: { backgroundColor: theme.warning, borderColor: theme.warning },
+  allowButtonText: { color: theme.bg, fontSize: 13, fontWeight: '700', textAlign: 'center' },
   ruleBox: {
     backgroundColor: theme.bg3,
     borderRadius: 4,
