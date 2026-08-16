@@ -133,6 +133,28 @@ export async function fetchRemote(repoPath: string): Promise<void> {
   })
 }
 
+const remoteFetchesInFlight = new Map<string, Promise<void>>()
+
+/** 같은 리포의 동시 fetch 를 하나로 합친다. 완료된 fetch 는 다음 폴링 틱이 새로 실행할 수 있게 비운다. */
+export function fetchRemoteForRepo(
+  repoPath: string,
+  cacheKey: string,
+  fetcher: (path: string) => Promise<void> = fetchRemote
+): Promise<void> {
+  const inFlight = remoteFetchesInFlight.get(cacheKey)
+  if (inFlight) return inFlight
+
+  const promise = fetcher(repoPath)
+    .catch(() => {
+      // fetchRemote 이 이미 실패를 삼키지만, 대체 구현이나 미래 변경도 폴링을 깨뜨리지 않게 경계를 지킨다.
+    })
+    .finally(() => {
+      if (remoteFetchesInFlight.get(cacheKey) === promise) remoteFetchesInFlight.delete(cacheKey)
+    })
+  remoteFetchesInFlight.set(cacheKey, promise)
+  return promise
+}
+
 /**
  * base 브랜치의 origin tracking ref(`origin/<base>`)를 우선 사용하고,
  * origin ref 가 없으면(리모트 미설정 등) 로컬 base 브랜치로 폴백한다.
@@ -323,7 +345,7 @@ export async function deleteReviewRefs(repoPath: string, reviewId: string): Prom
   for (const ref of refs.length > 0 ? refs : [ns]) await deleteRef(repoPath, ref)
 }
 
-/** 사이드바 배지용 경량 상태 (브랜치, base 대비 ahead/behind, 변경 파일 수). */
+/** 사이드바 배지용 경량 상태 (브랜치, origin/base 우선 기준의 ahead/behind, 변경 파일 수). */
 export async function getStatus(worktreePath: string, baseBranch: string): Promise<GitStatus> {
   const branch = await git(worktreePath, ['rev-parse', '--abbrev-ref', 'HEAD']).catch(() => '?')
 
@@ -342,12 +364,17 @@ export async function getStatus(worktreePath: string, baseBranch: string): Promi
   let ahead = 0
   let behind = 0
   try {
+    const remoteBase = `origin/${baseBranch.replace(/^origin\//, '')}`
+    // 15초 폴링의 공통 경로에 ref 확인 프로세스를 더하지 않는다. origin ref 로 바로 계산하고,
+    // 리모트가 없는 리포에서만 같은 명령을 로컬 base 로 한 번 더 시도한다.
     const counts = await git(worktreePath, [
       'rev-list',
       '--left-right',
       '--count',
-      `${baseBranch}...HEAD`
-    ])
+      `${remoteBase}...HEAD`
+    ]).catch(() =>
+      git(worktreePath, ['rev-list', '--left-right', '--count', `${baseBranch}...HEAD`])
+    )
     const [b, a] = counts.split(/\s+/).map((n) => parseInt(n, 10))
     behind = Number.isFinite(b) ? b : 0
     ahead = Number.isFinite(a) ? a : 0

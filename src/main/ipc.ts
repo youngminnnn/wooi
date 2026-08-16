@@ -19,6 +19,7 @@ import {
   getDiff,
   getGithubOwner,
   getStatus,
+  fetchRemoteForRepo,
   isGitRepo,
   isWorktreeClean,
   listBranches,
@@ -1230,6 +1231,12 @@ export function registerIpc(ctx: IpcContext): void {
     const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
     if (!ws) return null
     return getStatus(ws.worktreePath, ws.baseBranch).catch(() => null)
+  })
+
+  ipcMain.handle(IPC.gitFetch, async (_e, repoId: string) => {
+    const repo = store.getState().repos.find((r) => r.id === repoId)
+    if (!repo) return
+    await fetchRemoteForRepo(repo.path, repo.id)
   })
 
   ipcMain.handle(IPC.gitDiff, async (_e, workspaceId: string) => {

@@ -12,6 +12,8 @@ import {
   workspaceStackMembers
 } from '@shared/types'
 import type { PrState, PrStatus, Workspace } from '@shared/types'
+import HeaderChip from './HeaderChip'
+import MenuPanel, { menuItemCls } from './MenuPanel'
 
 /**
  * PR 상태별 점 색 + 라벨(Sidebar 의 PR_DOT 와 색 일치). Tailwind v4 는 보간한 클래스명을 스캔하지
@@ -253,11 +255,10 @@ export default function StackPopover({ workspace }: { workspace: Workspace }): R
 
   return (
     <div className="relative" ref={ref}>
-      <button
+      <HeaderChip
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="menu"
         aria-expanded={open}
-        className="flex items-center gap-1.5 text-xs px-2 py-1 rounded-md bg-[var(--surface)] border border-[var(--border)] text-neutral-300 hover:border-[var(--border-strong)]"
         title={
           branchMode
             ? 'Branch stack in this worktree — view PRs & switch branches'
@@ -270,12 +271,9 @@ export default function StackPopover({ workspace }: { workspace: Workspace }): R
           {count}
           {openPrCount > 0 ? ` · ${openPrCount} PR` : ''}
         </span>
-      </button>
+      </HeaderChip>
       {open && (
-        <div
-          role="menu"
-          className="absolute right-0 z-30 mt-1 w-80 overflow-hidden rounded-lg border border-[var(--border-strong)] bg-[var(--surface)] py-1 shadow-xl"
-        >
+        <MenuPanel role="menu" className="absolute right-0 z-30 mt-1 w-80 overflow-hidden">
           <div className="px-3 py-1.5 text-[11px] uppercase tracking-wider text-neutral-500">
             {branchMode ? `Branch stack · ${count} branches` : `Stack · ${count} workspaces`}
             {ghStackNumber != null && (
@@ -301,7 +299,7 @@ export default function StackPopover({ workspace }: { workspace: Workspace }): R
                 ? 'At least two layers of this stack need a pull request to review it as a stack.'
                 : `Review #${stackPrNumbers.join(', #')} as one stack — is the split correct?`
             }
-            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-neutral-200 hover:bg-[var(--surface-2)] disabled:cursor-not-allowed disabled:text-neutral-600"
+            className={menuItemCls + ' disabled:cursor-not-allowed disabled:text-neutral-600'}
           >
             <ScanEye size={13} className="shrink-0 text-[var(--info-400)]" />
             <span className="min-w-0 flex-1">
@@ -427,7 +425,7 @@ export default function StackPopover({ workspace }: { workspace: Workspace }): R
               )
             })}
           </div>
-        </div>
+        </MenuPanel>
       )}
     </div>
   )

@@ -518,6 +518,8 @@ interface UIState {
   refreshGit: (workspaceId: string) => Promise<void>
   /** 진입 여부와 무관하게 모든(비아카이브) 워크스페이스의 git 상태를 한 번에 갱신한다. */
   refreshAllGit: () => Promise<void>
+  /** 활성 리포를 한 번씩 fetch 한 뒤, 그 리포에 속한 워크스페이스 상태를 즉시 갱신한다. */
+  fetchReposAndRefreshGit: () => Promise<void>
   refreshPr: (workspaceId: string) => Promise<void>
   /** PR 상태를 즉시(낙관적) 설정한다. 브랜치 전환 시 캐시된 값으로 헤더를 바로 갱신할 때 쓴다. */
   setPrStatus: (workspaceId: string, status: PrStatus | null) => void
@@ -1000,6 +1002,8 @@ export const useStore = create<UIState>((set, get) => ({
     if (!prPollTimer) {
       prPollTimer = setInterval(() => {
         if (!windowFocused) return
+        // 네트워크 git 작업은 더 느린 PR 틱에 얹고, 15초 로컬 상태 폴링과는 분리한다.
+        void get().fetchReposAndRefreshGit()
         for (const workspace of get().app?.workspaces ?? []) {
           if (!workspace.archived) void get().refreshPr(workspace.id)
         }
@@ -1127,6 +1131,7 @@ export const useStore = create<UIState>((set, get) => ({
       clearSelectedUnread()
       // 자리를 비운 사이 바뀌었을 수 있으니 모든 워크트리 상태를 즉시 한 번 갱신한다.
       void get().refreshAllGit()
+      void get().fetchReposAndRefreshGit()
       void get().pollReviews()
     })
     window.api.onWindowBlur(() => {
@@ -2078,6 +2083,29 @@ export const useStore = create<UIState>((set, get) => ({
       for (const [id, status] of entries) gitStatus[id] = status
       return { gitStatus }
     })
+  },
+
+  fetchReposAndRefreshGit: async () => {
+    const workspaces = get().app?.workspaces.filter((w) => !w.archived) ?? []
+    const repoIds = [...new Set(workspaces.map((w) => w.repoId))]
+    await Promise.all(
+      repoIds.map(async (repoId) => {
+        // main 에서 같은 리포의 동시 요청도 합류한다. 실패는 IPC 양쪽에서 삼켜 다음 틱을 살린다.
+        await window.api.git.fetch(repoId).catch(() => {})
+        const affected = workspaces.filter((w) => w.repoId === repoId)
+        const entries = await Promise.all(
+          affected.map(async (w) => {
+            const status = await window.api.git.status(w.id).catch(() => null)
+            return [w.id, status] as const
+          })
+        )
+        set((s) => {
+          const gitStatus = { ...s.gitStatus }
+          for (const [id, status] of entries) gitStatus[id] = status
+          return { gitStatus }
+        })
+      })
+    )
   },
 
   refreshPr: async (workspaceId) => {

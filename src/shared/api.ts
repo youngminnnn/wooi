@@ -303,6 +303,8 @@ export interface WooiApi {
   git: {
     status(workspaceId: string): Promise<GitStatus | null>
     diff(workspaceId: string): Promise<WorkspaceDiff | null>
+    /** 리포당 합류된 fetch 로 origin tracking ref 를 갱신한다. */
+    fetch(repoId: string): Promise<void>
     /** 최신 base 브랜치를 현재 브랜치로 머지한다(드리프트 해소). 충돌 시 워킹트리에 충돌이 남는다. */
     updateFromBase(workspaceId: string): Promise<UpdateFromBaseResult>
     /** 진행 중인 머지를 취소한다(충돌 포기). */

@@ -2676,6 +2676,8 @@ export const IPC = {
   scriptGetOutput: 'script:getOutput',
   gitStatus: 'git:status',
   gitDiff: 'git:diff',
+  /** 리포의 origin tracking ref 를 갱신한다. 실패는 main 에서 조용히 무시한다. */
+  gitFetch: 'git:fetch',
   /** base 브랜치를 현재 워크스페이스 브랜치로 머지해 드리프트를 해소한다. */
   gitUpdateFromBase: 'git:updateFromBase',
   /** stacked 워크스페이스 브랜치를 최신 base(부모 브랜치) 위로 rebase 하고 리모트에 force-push 한다. */
