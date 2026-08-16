@@ -1,6 +1,7 @@
 import * as acp from '@agentclientprotocol/sdk'
 import type { AcpLaunchSpec, AcpProcess } from './process'
 import { spawnAcpProcess } from './process'
+import { requestExtension, type AcpExtensionResult } from './ext'
 
 /** 승인 요청을 제품별 UI·정책으로 넘기는 콜백. */
 export type AcpPermissionHandler = (
@@ -21,6 +22,15 @@ export interface AcpConnectionOptions {
    * 때는 그것이 곧 대화 내용이다). 아는 쪽이 정한다.
    */
   onUpdate?: (sessionId: string, update: acp.SessionUpdate, meta: { replay: boolean }) => void
+  /**
+   * 표준 ACP 밖의 **역방향 요청** 처리기. 메서드 이름 → 처리 함수.
+   *
+   * 확장 메서드 중에는 알림이 아니라 **요청**으로 오는 것이 있고, 그런 것은 답할 때까지 턴이
+   * 멈춘다(실측: Grok 의 `x.ai/ask_user_question`·`x.ai/exit_plan_mode` 는 도구 승인과 같은
+   * 블로킹 역요청이다). 등록하지 않으면 에이전트는 영영 기다린다 — "가끔 멈추는" 백엔드의
+   * 정체가 대개 이것이라, 표준 승인과 같은 자리에 두고 백엔드가 채우게 한다.
+   */
+  customRequests?: Record<string, (params: unknown) => Promise<unknown>>
   onDisconnect?: (error: unknown | null, stderr: string) => void
   clientName?: string
   /**
@@ -116,6 +126,17 @@ export class AcpConnection {
     )
   }
 
+  /**
+   * 확장 메서드를 부른다. 미지원(`method_not_found`)은 예외가 아니라 값으로 돌아오므로
+   * 호출부가 그 기능만 런타임에 내릴 수 있다([[acp/ext]]).
+   */
+  async ext<Response, Params = unknown>(
+    method: string,
+    params?: Params
+  ): Promise<AcpExtensionResult<Response>> {
+    return requestExtension<Response, Params>(await this.ensure(), method, params)
+  }
+
   async closeSession(sessionId: string): Promise<void> {
     try {
       await (await this.ensure()).request(acp.methods.agent.session.close, { sessionId })
@@ -142,12 +163,21 @@ export class AcpConnection {
       .onRequest(acp.methods.client.session.requestPermission, (ctx) =>
         this.options.requestPermission(ctx.params)
       )
-      .onNotification(acp.methods.client.session.update, (ctx) => {
-        const { sessionId, update } = ctx.params
-        if (this.sessions.has(sessionId)) {
-          this.options.onUpdate?.(sessionId, update, { replay: this.replaying.has(sessionId) })
-        }
-      })
+    // 확장 역요청은 SDK 의 타입 표에 없으므로 파서를 직접 준다. 파싱은 하지 않고 그대로
+    // 넘긴다 — 스키마를 아는 것은 백엔드지 이 계층이 아니다.
+    for (const [method, handler] of Object.entries(this.options.customRequests ?? {})) {
+      app.onRequest<unknown, unknown>(
+        method,
+        (params: unknown) => params,
+        (ctx) => handler(ctx.params)
+      )
+    }
+    app.onNotification(acp.methods.client.session.update, (ctx) => {
+      const { sessionId, update } = ctx.params
+      if (this.sessions.has(sessionId)) {
+        this.options.onUpdate?.(sessionId, update, { replay: this.replaying.has(sessionId) })
+      }
+    })
     const connection = app.connect(handle.stream)
     this.connection = connection
     void connection.closed
