@@ -1,7 +1,6 @@
 import { useCallback, useState, type ReactNode } from 'react'
 import {
   ActivityIndicator,
-  Image,
   Platform,
   Pressable,
   ScrollView,
@@ -13,6 +12,7 @@ import {
 import Constants from 'expo-constants'
 import { CameraView, useCameraPermissions, type BarcodeScanningResult } from 'expo-camera'
 import { SafeAreaView } from 'react-native-safe-area-context'
+import { WooiLogo } from '../src/components/WooiLogo'
 import { claimPairing, type ClaimedPairing } from '../src/relay/pairing'
 import { useRemoteStore } from '../src/state/store'
 import { FixedTheme, useTheme, useThemedStyles } from '../src/state/theme'
@@ -32,8 +32,8 @@ function deviceName(): string {
  * 나눈다 — 위에 정체(마크·이름·한 줄 설명), 가운데에 지금 할 일, 아래에 행동. 가운데
  * 하나만 두고 세로 가운데정렬을 하면 위아래가 크게 비어 화면이 미완성으로 읽힌다.
  *
- * 마크는 **앱 아이콘 그 파일**을 그린다. 별도 로고를 두면 홈 화면의 아이콘과 여기가
- * 조금씩 달라지고, 방금 누른 그 앱이 맞는지 확인해 주는 역할을 못 한다.
+ * 마크는 데스크톱 앱이 화면 안에서 쓰는 W 모노그램이다. 랩탑과 짝을 짓는 화면이라, 여기서
+ * 보이는 마크가 랩탑에서 보던 그 마크여야 "이 앱이 맞다"가 성립한다.
  */
 function PairShell({
   children,
@@ -47,7 +47,7 @@ function PairShell({
     <SafeAreaView style={styles.screen}>
       <View style={styles.shell}>
         <View style={styles.hero}>
-          <Image source={require('../assets/icon.png')} style={styles.mark} />
+          <WooiLogo size={46} />
           <View style={styles.heroText}>
             <Text style={styles.wordmark}>Wooi</Text>
             <Text style={styles.tagline}>Your laptop&apos;s coding sessions, on your phone.</Text>
@@ -419,7 +419,6 @@ const makeStyles = (theme: Theme) =>
     // 마크와 이름을 가로로 눕힌다. 세로로 쌓으면 이름이 제목만큼 커 보여서, 화면에 큰 글씨
     // 두 개가 무엇이 먼저인지 다투게 된다.
     hero: { alignItems: 'center', flexDirection: 'row', gap: 13, paddingTop: 26 },
-    mark: { borderRadius: 13, height: 54, width: 54 },
     heroText: { flex: 1 },
     wordmark: { color: theme.text, fontSize: 18, fontWeight: '600', letterSpacing: -0.2 },
     tagline: { color: theme.textDim, fontSize: 13, lineHeight: 18, marginTop: 2 },
