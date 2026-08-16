@@ -39,3 +39,9 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# Firebase 서비스 계정 키 — 이게 유출되면 누구나 내 앱 이름으로 푸시를 보낼 수 있다.
+# (google-services.*.json 은 공개 식별자뿐이라 커밋한다 — EAS 빌드가 git 아카이브를 쓰기 때문에
+#  무시하면 빌드에 포함되지 않는다.)
+*-firebase-adminsdk-*.json
+google-service-account*.json
