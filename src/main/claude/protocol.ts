@@ -158,6 +158,8 @@ export type HostCommand =
       origin?: SendMessageOptions['origin']
     }
   | { type: 'interrupt'; workspaceId: string }
+  /** 메인이 store/렌더러를 idle 로 직접 확정했다 — 세션의 상태 기억도 맞춘다(noteForcedIdle). */
+  | { type: 'forcedIdle'; workspaceId: string }
   | { type: 'stopTask'; workspaceId: string; taskId: string }
   | { type: 'setPermissionMode'; workspaceId: string; mode: ClaudePermissionMode }
   | { type: 'dispose'; workspaceId: string }

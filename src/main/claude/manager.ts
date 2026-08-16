@@ -843,6 +843,10 @@ export class SessionManager implements AgentBackend {
       if (w) w.status = 'idle'
     })
     this.dispatch(IPC.evtChat, { workspaceId, event: { type: 'status', status: 'idle' } })
+    // 세션에게도 알린다 — 여기서 화면만 idle 로 바꾸고 세션의 기억(busy)을 그대로 두면, 그 세션은
+    // 자기가 아직 running 을 보여 주고 있다고 믿어 다음 턴의 running 을 방출하지 않는다
+    // ([[claude/session]] noteForcedIdle). 세션이 없으면 no-op 이다.
+    this.sendIfHost({ type: 'forcedIdle', workspaceId })
   }
 
   private clearGoalState(workspaceId: string): void {

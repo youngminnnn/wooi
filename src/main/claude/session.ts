@@ -618,6 +618,29 @@ export class ClaudeSession {
     await this.q?.interrupt().catch(() => {})
   }
 
+  /**
+   * 메인이 이 workspace 를 idle 로 **직접 확정했음**을 세션에 알린다(중단 버튼 등).
+   *
+   * busy 는 "화면이 지금 무엇을 보여 주고 있는가" 의 기억이고, syncStatus 는 그 기억과 달라질
+   * 때만 방출한다. 그런데 메인의 forceIdle 은 세션을 거치지 않고 store/렌더러를 idle 로 바꾸므로,
+   * 알려 주지 않으면 기억이 화면과 어긋난 채 남는다. 어긋난 뒤에는 syncStatus 가 "이미 running
+   * 이다" 라고 착각해 다음 턴의 running 을 통째로 삼켜, **사이드바가 영영 idle 로 굳는다.**
+   *
+   * 평소에는 중단 직후 도착하는 result 가 idle 을 방출하며 기억을 맞춰 줘 이 어긋남이 저절로
+   * 풀린다. 하지만 백그라운드 작업(`npm run dev` 같은 백그라운드 Bash·Monitor·워크플로우)이 하나라도
+   * 살아 있으면 syncStatus 의 shouldRun 이 계속 true 라 idle 이 방출되지 않아 영구히 굳는다 —
+   * 그 워크스페이스는 이후 모든 턴이 '진행 중' 표시 없이 돌아간다.
+   *
+   * active 까지 내리는 이유: 중단이 실제로 먹지 않아 턴이 계속 도는 경우, handleMessage 의
+   * 안전망(assistant/stream 산출이 오는데 active 가 false 면 running 을 켠다)이 다시 켜 주게
+   * 하기 위함이다. 여기서 곧바로 running 을 다시 방출하지는 않는다 — 중단은 사용자의 의도이고,
+   * 진짜로 일이 이어지고 있다면 다음 산출이 곧 켠다.
+   */
+  noteForcedIdle(): void {
+    this.active = false
+    this.busy = false
+  }
+
   async stopTask(taskId: string): Promise<void> {
     await this.q?.stopTask(taskId)
   }
