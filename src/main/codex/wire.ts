@@ -432,6 +432,99 @@ export interface SkillMetadata {
   interface?: { shortDescription?: string | null } | null
 }
 
+/**
+ * ── Agent Plugins ──────────────────────────────────────────────────────
+ *
+ * codex 0.146+ 의 `plugin/*`. 스키마상 45개쯤 되는 표면 중 **읽기에 필요한 것만** 옮긴다.
+ *
+ * 이름이 뜻을 다 말해 주지 않는 곳이 둘 있어 실물로 확인해 뒀다(codex-cli 0.146.0):
+ * - `plugin/installed` 는 설치된 것만, `plugin/list` 는 카탈로그 전체다. 후자는 원격 카탈로그까지
+ *   합쳐 2,500개가 넘게 오므로 "설치된 것 보기" 에 쓰면 안 된다.
+ * - `plugin/read` 는 `marketplacePath` 와 `remoteMarketplaceName` 중 **정확히 하나**를 요구한다.
+ *   둘 다 보내면 -32600 으로 거절한다.
+ */
+
+/** 플러그인이 자기를 어떻게 소개하는지. 표시용 메타데이터라 전부 optional 이다. */
+export interface PluginInterface {
+  displayName?: string | null
+  shortDescription?: string | null
+  longDescription?: string | null
+  developerName?: string | null
+  category?: string | null
+  websiteUrl?: string | null
+}
+
+/**
+ * 플러그인이 어디서 왔는가. `type` 으로 갈리지만 판별 유니온으로 두지 않는다 —
+ * 이 파일의 다른 유니온과 같은 이유다(모르는 variant 가 와도 파싱은 성공해야 한다).
+ */
+export interface PluginSource {
+  /** 'local' | 'git' | 'npm' | 'remote' */
+  type?: string
+  /** local: 풀어 둔 경로. git: 리포 안 경로. */
+  path?: string | null
+  /** git */
+  url?: string
+  refName?: string | null
+  /** npm */
+  package?: string
+  version?: string | null
+}
+
+export interface PluginSummary {
+  /** `<name>@<marketplace>`. uninstall 이 받는 것도 이 값이다. */
+  id?: string
+  name?: string
+  enabled?: boolean
+  installed?: boolean
+  source?: PluginSource
+  interface?: PluginInterface | null
+  /** 로컬에 풀린 패키지 버전. 원격 전용 플러그인에는 없고 `version` 만 있다. */
+  localVersion?: string | null
+  version?: string | null
+  /** 'AVAILABLE' | 'DISABLED_BY_ADMIN' (+ 상류가 'ENABLED' 를 보내는 경우가 있다). */
+  availability?: string | null
+  /** 'disabled_by_admin' | 'plan_not_eligible' | 'required_app_unavailable' | 'unknown' */
+  disabledReason?: string | null
+  /** 원격 카탈로그의 플러그인 식별자. 로컬 마켓플레이스 항목에는 없다. */
+  remotePluginId?: string | null
+  keywords?: string[]
+}
+
+export interface PluginMarketplaceEntry {
+  name?: string
+  /** 로컬 파일 경로. **원격 전용 카탈로그에는 없다** — 그때는 이름으로만 지칭한다. */
+  path?: string | null
+  interface?: { displayName?: string | null } | null
+  plugins?: PluginSummary[]
+}
+
+/** `plugin/installed` · `plugin/list` 공용 응답. */
+export interface PluginsResponse {
+  marketplaces?: PluginMarketplaceEntry[]
+  /** 읽지 못한 마켓플레이스. 조용히 빠지면 "왜 안 보이지" 를 화면에서 알 방법이 없다. */
+  marketplaceLoadErrors?: { marketplacePath?: string; message?: string }[]
+}
+
+/** `plugin/read` — 플러그인 하나가 실제로 무엇을 싣고 있는지. */
+export interface PluginDetail {
+  summary?: PluginSummary
+  marketplaceName?: string
+  marketplacePath?: string | null
+  description?: string | null
+  skills?: { name?: string; description?: string; enabled?: boolean }[]
+  /** 이 플러그인이 딸려 오게 하는 MCP 서버 이름들. */
+  mcpServers?: string[]
+  hooks?: { key?: string; eventName?: string }[]
+  apps?: { id?: string; name?: string; description?: string | null }[]
+  scheduledTasks?: { key?: string; name?: string }[] | null
+  shareUrl?: string | null
+}
+
+export interface PluginReadResponse {
+  plugin?: PluginDetail
+}
+
 export interface SkillsListResponse {
   data: Array<{
     cwd?: string
@@ -459,6 +552,9 @@ export const RPC = {
   turnSteer: 'turn/steer',
   turnInterrupt: 'turn/interrupt',
   skillsList: 'skills/list',
+  /** 설치된 Agent Plugins(마켓플레이스별로 묶여 온다). 카탈로그 전체는 `plugin/list` 다. */
+  pluginInstalled: 'plugin/installed',
+  pluginRead: 'plugin/read',
   modelList: 'model/list',
   accountRead: 'account/read',
   accountLoginStart: 'account/login/start',

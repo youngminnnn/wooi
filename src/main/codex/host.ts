@@ -20,15 +20,21 @@ import {
   type ModelListResult,
   type RateLimitsResult,
   type McpServerOauthLoginCompletedParams,
+  type PluginReadResponse,
+  type PluginsResponse,
   normalizeMcpAuthStatus
 } from './wire'
 import type { CodexCommand, CodexConfig, CodexEvent, CodexLoginMethod } from './protocol'
+import { toPluginDetail, toPluginInventory } from './plugins'
 import type {
   AgentAuthStatus,
   ChatEvent,
   ChatItem,
   CommandPanelKind,
   CodexMcpServer,
+  CodexPluginDetail,
+  CodexPluginInventory,
+  CodexPluginRef,
   CommandResult,
   McpAction,
   McpServerInfo,
@@ -482,6 +488,14 @@ async function handle(msg: CodexCommand): Promise<void> {
       await respond(msg.reqId, () => loginMcpServer(msg.serverName))
       break
 
+    case 'pluginList':
+      await respond(msg.reqId, () => listPlugins(msg.cwds))
+      break
+
+    case 'pluginRead':
+      await respond(msg.reqId, () => readPlugin(msg.ref))
+      break
+
     case 'compact':
       await ensure(msg.workspaceId, msg.config).compact()
       break
@@ -857,6 +871,46 @@ async function loginMcpServer(serverName: string): Promise<string> {
   })
   if (!result.authorizationUrl) throw new Error('Codex did not return an authorization URL.')
   return result.authorizationUrl
+}
+
+/**
+ * 설정 화면용 — 이 설치본에 깔린 Agent Plugins.
+ *
+ * `plugin/list` 가 아니라 `plugin/installed` 를 부른다. 이름은 비슷하지만 전자는 원격 카탈로그를
+ * 포함한 **전체 목록**이라 실측에서 2,500개가 넘게 왔다 — 설치된 것을 보여 주는 화면이 그걸
+ * 받으면 느릴 뿐 아니라 틀린다.
+ *
+ * `cwds` 는 리포 안에 든 마켓플레이스(`.agents/plugins/marketplace.json`)를 찾는 데 쓰인다.
+ * 메인이 등록된 리포 경로를 넘겨 준다 — 워크스페이스가 아니라 설치 단위 조회이므로 여기서
+ * 알아낼 방법이 없다.
+ *
+ * tryRequest 인 이유: `plugin/*` 는 codex 0.146 부터다. 그 전 버전에서 -32601 을 던지면 설정
+ * 화면 전체가 오류로 덮이는데, 우리가 알려야 할 것은 "이 버전은 플러그인을 모른다" 하나다.
+ */
+async function listPlugins(cwds: string[]): Promise<CodexPluginInventory> {
+  const client = await rpc()
+  const response = await client.tryRequest<PluginsResponse>(RPC.pluginInstalled, {
+    cwds: cwds.length > 0 ? cwds : null
+  })
+  return toPluginInventory(response)
+}
+
+/**
+ * 플러그인 하나가 무엇을 싣고 있는지. 목록 행을 펼칠 때만 부른다 — 설치된 플러그인마다 미리
+ * 부르면 목록 한 번에 왕복이 수십 번 생긴다.
+ *
+ * `marketplacePath` 와 `remoteMarketplaceName` 중 **정확히 하나**만 실어야 한다(둘 다 보내면
+ * -32600). 로컬 마켓플레이스는 경로를 갖고, 원격 카탈로그는 경로가 없어 이름으로 지칭한다.
+ */
+async function readPlugin(ref: CodexPluginRef): Promise<CodexPluginDetail> {
+  const client = await rpc()
+  const response = await client.tryRequest<PluginReadResponse>(RPC.pluginRead, {
+    pluginName: ref.pluginName,
+    ...(ref.marketplacePath
+      ? { marketplacePath: ref.marketplacePath }
+      : { remoteMarketplaceName: ref.marketplaceName })
+  })
+  return toPluginDetail(response?.plugin)
 }
 
 /** rate limit 창 하나를 UsageInfo 모양으로. 데이터가 없으면 null. */

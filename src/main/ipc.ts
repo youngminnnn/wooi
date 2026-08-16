@@ -122,6 +122,9 @@ import type {
   AppSettings,
   CarryFailure,
   CodexMcpServer,
+  CodexPluginDetail,
+  CodexPluginInventory,
+  CodexPluginRef,
   CarryItem,
   ChatItem,
   CreateFanoutArgs,
@@ -2496,6 +2499,34 @@ export function registerIpc(ctx: IpcContext): void {
     async (_e, serverName: string): Promise<{ authorizationUrl?: string; error?: string }> => {
       try {
         return { authorizationUrl: await ctx.sessions.loginMcpServer('codex', serverName) }
+      } catch (err) {
+        return { error: err instanceof Error ? err.message : String(err) }
+      }
+    }
+  )
+
+  // ── Codex Agent Plugins ────────────────────────────────────────────────
+
+  // 읽기 전용이다. 설치·마켓플레이스 추가는 사용자의 codex 설치본 전체를 바꾸는 바깥 방향 동작이라
+  // 목록을 보는 김에 곁다리로 하면 안 된다 — 이 화면은 "무엇이 깔려 있는가" 까지만 답한다.
+  // cwds 로 등록된 리포 경로를 넘겨 리포 안에 든 마켓플레이스까지 찾게 한다(MCP 승계 목록과 같다).
+  ipcMain.handle(
+    IPC.pluginCodexList,
+    async (): Promise<{ inventory?: CodexPluginInventory; error?: string }> => {
+      try {
+        const cwds = store.getState().repos.map((repo) => repo.path)
+        return { inventory: await ctx.sessions.plugins('codex', cwds) }
+      } catch (err) {
+        return { error: err instanceof Error ? err.message : String(err) }
+      }
+    }
+  )
+
+  ipcMain.handle(
+    IPC.pluginCodexRead,
+    async (_e, ref: CodexPluginRef): Promise<{ detail?: CodexPluginDetail; error?: string }> => {
+      try {
+        return { detail: await ctx.sessions.readPlugin('codex', ref) }
       } catch (err) {
         return { error: err instanceof Error ? err.message : String(err) }
       }

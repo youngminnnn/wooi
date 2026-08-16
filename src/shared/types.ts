@@ -1004,6 +1004,82 @@ export interface CodexMcpServer {
   authStatus: 'unknown' | 'unsupported' | 'notLoggedIn' | 'bearerToken' | 'oAuth'
 }
 
+/**
+ * Codex Agent Plugin 하나(설정 화면 표시용으로 추린 것).
+ *
+ * app-server 의 `PluginSummary` 를 그대로 넘기지 않는다 — 그쪽은 로고 URL·스크린샷·공유 맥락까지
+ * 30개 남짓한 필드가 달려 있고, 대부분 우리가 그리지 않는다. 화면이 읽는 것만 남겨야 codex 버전이
+ * 올라 필드가 바뀌어도 [[codex/plugins]] 한 곳만 고치면 된다.
+ */
+export interface CodexPlugin {
+  /** `<name>@<marketplace>`. 목록의 키이자 uninstall 이 받는 식별자다. */
+  id: string
+  /** 마켓플레이스 안에서의 이름. 스킬 접두사(`supabase:supabase`)가 이 이름이다. */
+  name: string
+  /** 사람이 읽는 이름. 없으면 name 을 쓴다. */
+  displayName: string
+  /** 한 줄 소개(없을 수 있다). */
+  description: string
+  /** 로컬에 풀린 버전 우선, 없으면 카탈로그가 말하는 버전. */
+  version: string | null
+  enabled: boolean
+  /** 'local' | 'git' | 'npm' | 'remote' | 'unknown' */
+  source: string
+  /** 그 출처의 한 줄 표시(경로·git URL·npm 패키지). 원격 카탈로그는 빈 문자열. */
+  sourceDetail: string
+  /** 지금 쓸 수 있는가. false 면 reason 이 이유를 말한다. */
+  available: boolean
+  /** 쓸 수 없는 이유(사람이 읽는 문장). available 이면 null. */
+  unavailableReason: string | null
+}
+
+/** 마켓플레이스 1개와 거기서 온 플러그인들. */
+export interface CodexPluginMarketplace {
+  name: string
+  /** 사람이 읽는 이름. 없으면 name. */
+  displayName: string
+  /** 로컬 파일 경로. 원격 전용 카탈로그는 null 이다(경로가 없다). */
+  path: string | null
+  plugins: CodexPlugin[]
+}
+
+/** 설정 화면이 "이 Codex 에 무엇이 깔려 있는가" 를 그리기 위해 필요한 전부. */
+export interface CodexPluginInventory {
+  /**
+   * 설치된 codex 가 `plugin/*` 를 아는가. 모르면 목록이 비는 것과 구분해야 한다 —
+   * "플러그인이 없다" 와 "이 버전은 플러그인을 모른다" 는 사용자가 할 일이 다르다.
+   */
+  supported: boolean
+  marketplaces: CodexPluginMarketplace[]
+  /** 읽지 못한 마켓플레이스. 조용히 빠지면 왜 안 보이는지 화면에서 알 수 없다. */
+  loadErrors: { path: string; message: string }[]
+}
+
+/** 플러그인 하나가 실제로 싣고 있는 것(`plugin/read`). 목록 행을 펼쳤을 때 채운다. */
+export interface CodexPluginDetail {
+  /** 목록의 한 줄 소개보다 긴 설명. 없으면 빈 문자열. */
+  description: string
+  /** 이 플러그인이 붙여 주는 스킬. 이름은 composer 의 `/이름` 과 같다. */
+  skills: { name: string; description: string; enabled: boolean }[]
+  /** 이 플러그인이 딸려 오게 하는 MCP 서버 이름들. */
+  mcpServers: string[]
+  hooks: { key: string; eventName: string }[]
+  /** ChatGPT 커넥터(앱). 설치 URL 이 있으면 함께 준다. */
+  apps: { id: string; name: string; description: string }[]
+  scheduledTasks: { key: string; name: string }[]
+}
+
+/** 목록의 한 행에서 `plugin/read` 를 부르는 데 필요한 좌표. */
+export interface CodexPluginRef {
+  pluginName: string
+  /**
+   * 둘 중 **정확히 하나**만 실린다. 로컬 마켓플레이스는 경로로, 원격 카탈로그는 이름으로
+   * 지칭하며, 둘 다 보내면 app-server 가 -32600 으로 거절한다(실측).
+   */
+  marketplacePath: string | null
+  marketplaceName: string
+}
+
 export interface McpOauthLoginCompletedEvent {
   name: string
   success: boolean
@@ -2681,6 +2757,10 @@ export const IPC = {
   /** 그 서버의 `enabled` 를 사용자 파일에 쓰고 codex 에 재적용한다. */
   mcpCodexSetEnabled: 'mcp:codexSetEnabled',
   mcpCodexOauthLogin: 'mcp:codexOauthLogin',
+  /** 설정 화면의 Codex 플러그인 목록(설치된 것만, 마켓플레이스별로 묶여 온다). */
+  pluginCodexList: 'plugin:codexList',
+  /** 그 목록의 플러그인 하나가 무엇을 싣고 있는지(행을 펼칠 때). */
+  pluginCodexRead: 'plugin:codexRead',
   evtMcpCodexOauthLoginCompleted: 'mcp:codexOauthLoginCompleted',
   authGetStatus: 'auth:getStatus',
   /** 앱 내부 PTY 에서 `claude auth login` 을 시작한다(별도 Terminal 창 없이). */

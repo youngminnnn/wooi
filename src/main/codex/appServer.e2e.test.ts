@@ -5,7 +5,8 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { agentToolsFor, WOOI_MCP_SERVER_NAME } from '../agent/tools/catalog'
 import { AppServer } from './appServer'
-import { RPC } from './wire'
+import { RPC, type PluginReadResponse, type PluginsResponse } from './wire'
+import { toPluginDetail, toPluginInventory } from './plugins'
 import { turnPolicyFor } from './modes'
 
 /**
@@ -66,6 +67,53 @@ describe.skipIf(!CODEX)('codex app-server (실물)', () => {
     const rpc = await start().rpc()
     const result = await rpc.tryRequest(RPC.accountRead, { refreshToken: false })
     expect(result).toBeDefined()
+  }, 30_000)
+
+  /**
+   * `plugin/*` 는 codex 0.146 에서 들어온 신참이라, 여기서 두 가지를 함께 못 박는다.
+   *
+   * 1. 이 버전에 메서드가 있는가. 없으면 tryRequest 가 undefined 로 낮추고 설정 화면은
+   *    "이 Codex 는 플러그인을 모른다" 로 degrade 한다 — 그 분기가 실제로 도는지는 여기서만 안다.
+   * 2. 응답을 우리 매퍼가 받아 내는가. plugins.ts 의 유닛 테스트는 우리가 적어 둔 payload 만
+   *    보므로, 실물 모양이 달라져도 통과한다. 이 왕복이 그 간극을 메운다.
+   *
+   * 로그인·네트워크가 없어도 로컬 마켓플레이스는 응답하므로 CI 에서도 안전하다. 플러그인이
+   * 하나도 없는 환경이 정상이라 개수는 보지 않는다.
+   */
+  it('plugin/installed 를 지원하고 응답을 인벤토리로 옮길 수 있다', async () => {
+    const rpc = await start().rpc()
+    const response = await rpc.tryRequest<PluginsResponse>(RPC.pluginInstalled, { cwds: null })
+    expect(response, 'plugin/installed unsupported by this codex').toBeDefined()
+
+    const inventory = toPluginInventory(response)
+    expect(inventory.supported).toBe(true)
+    for (const marketplace of inventory.marketplaces) {
+      expect(marketplace.name).not.toBe('')
+      for (const plugin of marketplace.plugins) expect(plugin.name).not.toBe('')
+    }
+  }, 30_000)
+
+  /**
+   * `plugin/read` 는 marketplacePath 와 remoteMarketplaceName 중 **정확히 하나**를 요구한다 —
+   * 둘 다 보내면 -32600 이다. 우리 host 가 그 규칙대로 나눠 보내는지, 나눈 결과가 실제로
+   * 받아들여지는지 확인한다. 설치된 플러그인이 없는 환경에서는 볼 것이 없으므로 건너뛴다.
+   */
+  it('plugin/read 가 마켓플레이스 좌표 하나로 상세를 돌려준다', async () => {
+    const rpc = await start().rpc()
+    const response = await rpc.tryRequest<PluginsResponse>(RPC.pluginInstalled, { cwds: null })
+    const inventory = toPluginInventory(response)
+    const marketplace = inventory.marketplaces.find((entry) => entry.plugins.length > 0)
+    if (!marketplace) return
+
+    const plugin = marketplace.plugins[0]
+    const read = await rpc.tryRequest<PluginReadResponse>(RPC.pluginRead, {
+      pluginName: plugin.name,
+      ...(marketplace.path
+        ? { marketplacePath: marketplace.path }
+        : { remoteMarketplaceName: marketplace.name })
+    })
+    expect(read?.plugin).toBeDefined()
+    expect(() => toPluginDetail(read?.plugin)).not.toThrow()
   }, 30_000)
 
   /**

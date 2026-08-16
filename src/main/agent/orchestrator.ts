@@ -11,6 +11,9 @@ import {
   type ImageAttachment,
   type McpAction,
   type CodexMcpServer,
+  type CodexPluginDetail,
+  type CodexPluginInventory,
+  type CodexPluginRef,
   type McpServerInfo,
   type PermissionDecision,
   type PermissionMode,
@@ -558,6 +561,31 @@ export class AgentOrchestrator {
       throw new Error(`${backend.meta.label} does not manage MCP servers in its own config.`)
     }
     return backend.setMcpServerEnabled(serverName, enabled)
+  }
+
+  /**
+   * 백엔드 설치본에 깔린 플러그인 목록(설정 화면용).
+   *
+   * MCP 목록과 같은 판단으로, 쓸 수 없는 백엔드에는 프로세스를 띄우지 않고 끊는다. 다만 여기서는
+   * 빈 목록이 아니라 supported=false 를 돌려준다 — 화면이 "플러그인이 없다" 와 "이 백엔드는
+   * 플러그인을 모른다" 를 다르게 그려야 하기 때문이다.
+   */
+  async plugins(id: AgentBackendId, cwds: string[]): Promise<CodexPluginInventory> {
+    const unsupported: CodexPluginInventory = { supported: false, marketplaces: [], loadErrors: [] }
+    const { available } = await backendAvailability(id)
+    if (!available) return unsupported
+    const backend = this.get(id)
+    if (!backend.listPlugins) return unsupported
+    return backend.listPlugins(cwds)
+  }
+
+  /** 그 목록의 플러그인 하나가 무엇을 싣고 있는지. 지원하지 않는 백엔드면 에러로 알린다. */
+  readPlugin(id: AgentBackendId, ref: CodexPluginRef): Promise<CodexPluginDetail> {
+    const backend = this.get(id)
+    if (!backend.readPlugin) {
+      throw new Error(`${backend.meta.label} does not expose plugin details.`)
+    }
+    return backend.readPlugin(ref)
   }
 
   /** MCP OAuth 를 지원하는 백엔드에서 authorization URL 을 받는다. */

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Bell,
+  Blocks,
   Bot,
   Check,
   ChevronRight,
@@ -24,6 +25,7 @@ import { useNow } from '../lib/useNow'
 import { inputClass } from './Modal'
 import IntegrationsPanel from './IntegrationsPanel'
 import McpServersPage from './McpServersPage'
+import PluginsPage from './PluginsPage'
 import { PageFrame, SettingGroup, SettingRow, Switch } from './SettingsPrimitives'
 import { permissionModesFor } from '../lib/permission'
 import { effortOptionsFor } from '../lib/effort'
@@ -52,7 +54,14 @@ import type {
 } from '@shared/types'
 
 type Page =
-  'general' | 'agents' | 'notifications' | 'integrations' | 'mcp' | 'repositories' | 'about'
+  | 'general'
+  | 'agents'
+  | 'notifications'
+  | 'integrations'
+  | 'mcp'
+  | 'plugins'
+  | 'repositories'
+  | 'about'
 type SaveState = 'idle' | 'saving' | 'saved' | 'error'
 type NotificationPreset = 'recommended' | 'quiet' | 'everything' | 'custom'
 
@@ -124,6 +133,12 @@ const PAGES: { id: Page; label: string; icon: typeof Settings2; keywords: string
     label: 'MCP servers',
     icon: Plug,
     keywords: 'mcp model context protocol server tool stdio http sse claude.json'
+  },
+  {
+    id: 'plugins',
+    label: 'Plugins',
+    icon: Blocks,
+    keywords: 'plugin marketplace codex agent skill hook extension install'
   },
   {
     id: 'repositories',
@@ -319,6 +334,7 @@ export default function SettingsModal({
               </PageFrame>
             )}
             {page === 'mcp' && <McpServersPage settings={settings} save={save} />}
+            {page === 'plugins' && <PluginsPage />}
             {page === 'repositories' && <RepositoriesPage repos={repos} onClose={onClose} />}
             {page === 'about' && <AboutPage onStartTour={onStartTour} />}
           </main>

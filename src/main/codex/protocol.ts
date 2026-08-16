@@ -2,6 +2,7 @@ import type {
   AgentBackendId,
   ChatEvent,
   ChatItem,
+  CodexPluginRef,
   CommandPanelKind,
   EffortSetting,
   ImageAttachment,
@@ -101,6 +102,12 @@ export type CodexCommand =
   | { type: 'mcpConfigList'; reqId: string }
   | { type: 'mcpSetEnabled'; reqId: string; serverName: string; enabled: boolean }
   | { type: 'mcpOauthLogin'; reqId: string; serverName: string }
+  /**
+   * 설치된 Agent Plugins 목록. `cwds` 는 리포 안에 든 마켓플레이스를 찾는 힌트이고,
+   * 메인이 등록된 리포 경로를 계산해 넘긴다(호스트는 store 를 볼 수 없다).
+   */
+  | { type: 'pluginList'; reqId: string; cwds: string[] }
+  | { type: 'pluginRead'; reqId: string; ref: CodexPluginRef }
   /** /compact — 대화 압축을 시작한다(진행 상황은 일반 턴 알림으로 흐른다). */
   | { type: 'compact'; workspaceId: string; config: CodexConfig }
   | { type: 'review'; workspaceId: string; config: CodexConfig }
