@@ -22,7 +22,8 @@ const plural = (count: number, unit: string): string => `${count} ${unit}${count
 export function formatToolSummary(summary: ToolSummary): string {
   switch (summary.kind) {
     case 'read': {
-      const of = summary.total != null && summary.total !== summary.lines ? ` of ${summary.total}` : ''
+      const of =
+        summary.total != null && summary.total !== summary.lines ? ` of ${summary.total}` : ''
       return `Read ${summary.path} (${plural(summary.lines, 'line')}${of}${summary.truncated ? ', truncated' : ''})`
     }
     case 'write':

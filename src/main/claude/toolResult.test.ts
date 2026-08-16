@@ -32,8 +32,9 @@ describe('summarizeToolResult', () => {
   // 새 파일은 "몇 줄을 썼는가", 덮어쓴 파일은 "무엇이 바뀌었는가" 가 알고 싶은 것이다.
   it('tells writing a new file apart from overwriting one', () => {
     const patch = [{ lines: ['+a', '+b'] }]
-    expect(summarizeToolResult('Write', { type: 'create', filePath: 'a.ts', structuredPatch: patch }))
-      .toEqual({ kind: 'write', path: 'a.ts', lines: 2, created: true })
+    expect(
+      summarizeToolResult('Write', { type: 'create', filePath: 'a.ts', structuredPatch: patch })
+    ).toEqual({ kind: 'write', path: 'a.ts', lines: 2, created: true })
     expect(
       summarizeToolResult('Write', {
         type: 'update',

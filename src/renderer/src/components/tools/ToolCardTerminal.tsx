@@ -26,7 +26,9 @@ export function ToolCardTerminal({
         onClick={toggle}
         className="block w-full text-left hover:text-neutral-100"
       >
-        <span className={pending ? 'text-[var(--warning-500)]' : 'text-[var(--accent-400)]'}>⏺</span>{' '}
+        <span className={pending ? 'text-[var(--warning-500)]' : 'text-[var(--accent-400)]'}>
+          ⏺
+        </span>{' '}
         {name}
         {arg && `(${arg})`}
         {stat && (
