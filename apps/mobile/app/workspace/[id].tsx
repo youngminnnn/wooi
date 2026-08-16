@@ -476,6 +476,7 @@ export default function WorkspaceScreen(): React.JSX.Element {
     [workspace]
   )
 
+  const modeFooter = workspace?.permissionModeFooter ?? null
   const repoName = useRemoteStore(
     (store) => store.state?.repos.find((repo) => repo.id === workspace?.repoId)?.name ?? null
   )
@@ -494,7 +495,6 @@ export default function WorkspaceScreen(): React.JSX.Element {
     return [
       backend === undefined ? null : (labels[backend] ?? backend),
       workspace.multiAgent ? '+ subagents' : null,
-      workspace.permissionMode,
       workspace.model,
       workspace.branch
     ]
@@ -578,6 +578,15 @@ export default function WorkspaceScreen(): React.JSX.Element {
             <Text style={styles.sendText}>{sending ? 'Sending…' : 'Send'}</Text>
           </Pressable>
         </View>
+        {/* 데스크톱과 같은 자리에 둔다 — 무엇을 보내려는 순간 그 모드가 눈에 들어와야 한다.
+            헤더에 있으면 스크롤과 함께 시야에서 사라지고, 정작 필요한 때 보이지 않는다.
+            띄울 것이 없는 모드(Claude 의 'default')에서는 데스크톱처럼 아무것도 띄우지 않는다. */}
+        {modeFooter !== null && modeFooter !== undefined ? (
+          <View style={styles.modeFooter}>
+            <Text style={styles.modeSymbol}>{modeFooter.symbol}</Text>
+            <Text style={styles.modeText}>{modeFooter.text}</Text>
+          </View>
+        ) : null}
       </View>
     </SafeAreaView>
   )
@@ -633,6 +642,9 @@ const styles = StyleSheet.create({
   ruleBox: { backgroundColor: '#19191e', borderRadius: 4, marginTop: 8, paddingHorizontal: 8, paddingVertical: 6 },
   ruleLabel: { color: '#777780', fontSize: 8, fontWeight: '700', letterSpacing: 0.8 },
   permissionRule: { color: '#b0b0b8', fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace' }), fontSize: 10, marginTop: 3 },
+  modeFooter: { alignItems: 'center', flexDirection: 'row', gap: 6, paddingBottom: 8, paddingHorizontal: 14 },
+  modeSymbol: { color: '#9b8df7', fontSize: 11 },
+  modeText: { color: '#77767f', fontSize: 11 },
   composer: { alignItems: 'flex-end', borderTopColor: '#202024', borderTopWidth: StyleSheet.hairlineWidth, flexDirection: 'row', gap: 9, padding: 10 },
   input: { backgroundColor: '#151519', borderColor: '#29292f', borderRadius: 8, borderWidth: 1, color: '#ededf0', flex: 1, fontSize: 14, maxHeight: 120, minHeight: 42, paddingHorizontal: 11, paddingVertical: 10 },
   sendButton: { backgroundColor: '#7465db', borderRadius: 7, justifyContent: 'center', minHeight: 42, paddingHorizontal: 14 },

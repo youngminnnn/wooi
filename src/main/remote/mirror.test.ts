@@ -11,8 +11,14 @@ vi.mock('electron', () => ({
 
 const { deriveDirectionKeys, fromBase64Url, generateSessionKey, openJson, toBase64Url } =
   await import('@shared/crypto')
-const { MIRROR_DEBOUNCE_MS, StateMirror, actsWithoutAsking, projectRateLimit, projectState } =
-  await import('./mirror')
+const {
+  MIRROR_DEBOUNCE_MS,
+  StateMirror,
+  actsWithoutAsking,
+  projectPermissionModeFooter,
+  projectRateLimit,
+  projectState
+} = await import('./mirror')
 
 const machine: RemoteMachine = { id: 'machine-1', name: 'Mac', appVersion: '1.2.3' }
 const sessionKey = generateSessionKey()
@@ -188,6 +194,22 @@ describe('StateMirror', () => {
     stateMirror.dispose()
     await flush()
     expect(upsert).not.toHaveBeenCalled()
+  })
+
+  it('권한 모드 표시는 백엔드의 서술자에서 뽑는다', () => {
+    // 같은 id 가 백엔드마다 다른 뜻이다. Claude 의 'default' 는 매번 묻는 모드라 띄울 것이
+    // 없고, Codex 의 'default' 는 워크스페이스 안에서 자동으로 도는 모드라 그렇게 말해야 한다.
+    expect(projectPermissionModeFooter('claude', 'default')).toBeNull()
+    expect(projectPermissionModeFooter('codex', 'default')).toEqual({
+      symbol: '⏵⏵',
+      text: 'auto mode on'
+    })
+    expect(projectPermissionModeFooter('claude', 'plan')).toEqual({
+      symbol: '⏸',
+      text: 'plan mode on'
+    })
+    // 그 백엔드에 없는 모드는 띄우지 않는다 — 지어내는 것보다 비우는 편이 정직하다.
+    expect(projectPermissionModeFooter('claude', 'fullAccess')).toBeNull()
   })
 
   it('사용량 제한은 재개 예약을 먼저 말한다', () => {

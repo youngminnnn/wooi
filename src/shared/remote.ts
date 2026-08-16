@@ -72,6 +72,15 @@ export interface RemoteWorkspace {
   /** 사용량 제한 상태. 걸려 있지 않으면 null. */
   rateLimit?: RemoteRateLimit | null
   /**
+   * 컴포저 아래에 띄울 권한 모드 표시. **없을 수 있다(null)** — 특별할 것이 없는 모드에서는
+   * 데스크톱도 아무것도 띄우지 않는다(Claude 의 'default').
+   *
+   * 모드 id 를 그대로 보내지 않는 이유는 같은 id 가 백엔드마다 다른 뜻이기 때문이다 —
+   * Codex 의 'default' 는 "auto mode on" 이지만 Claude 의 'default' 는 매번 묻는 모드다.
+   * 라벨을 아는 쪽에서 만들어 보낸다.
+   */
+  permissionModeFooter?: { symbol: string; text: string } | null
+  /**
    * 이 워크스페이스의 에이전트가 **묻지 않고 실행**하는가.
    *
    * 폰은 이 값으로 프롬프트 전송에 기기 인증을 걸지 말지 정한다. 묻는 모드라면 위험한

@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { deriveDirectionKeys, fromBase64Url, sealJson } from '@shared/crypto'
 import type { RemoteMachine, RemoteRateLimit, RemoteState } from '@shared/remote'
 import type { AgentBackendId, AppState, PermissionMode, PermissionRequest } from '@shared/types'
+import { backendMeta } from '../agent/backend'
 import { log } from '../logger'
 import type { RemoteKeystore } from './keystore'
 
@@ -45,6 +46,18 @@ export function projectRateLimit(workspace: {
   return null
 }
 
+/**
+ * 컴포저 아래 모드 표시. 데스크톱과 같은 서술자에서 뽑으므로 두 화면이 갈리지 않는다.
+ * 모르는 모드거나 표시할 것이 없으면 null — 그때 데스크톱도 아무것도 띄우지 않는다.
+ */
+export function projectPermissionModeFooter(
+  backend: AgentBackendId,
+  mode: PermissionMode
+): { symbol: string; text: string } | null {
+  const info = backendMeta(backend).permissionModes.find((item) => item.id === mode)
+  return info?.footer ?? null
+}
+
 export function projectState(
   app: AppState,
   machine: RemoteMachine,
@@ -85,7 +98,11 @@ export function projectState(
       agentBackend: workspace.agentBackend,
       multiAgent: workspace.multiAgent === true,
       parentWorkspaceId: workspace.parentWorkspaceId,
-      rateLimit: projectRateLimit(workspace)
+      rateLimit: projectRateLimit(workspace),
+      permissionModeFooter: projectPermissionModeFooter(
+        workspace.agentBackend,
+        workspace.permissionMode
+      )
     })),
     pendingPermissions: pending.map((request) => ({
       requestId: request.requestId,
