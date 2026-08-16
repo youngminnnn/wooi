@@ -31,6 +31,12 @@
       "env": {
         "APP_VARIANT": "production"
       }
+    },
+    "development-simulator": {
+      "extends": "development",
+      "ios": {
+        "simulator": true
+      }
     }
   },
   "submit": {

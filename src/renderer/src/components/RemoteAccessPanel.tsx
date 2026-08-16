@@ -336,6 +336,7 @@ function WaitingForScan({
   onCancel: () => void
 }): React.JSX.Element {
   const [image, setImage] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
   const now = useNow(1000)
 
   useEffect(() => {
@@ -362,11 +363,31 @@ function WaitingForScan({
           <p className="text-sm text-neutral-300">Scan this with the Wooi app on your phone.</p>
           <p className="text-xs text-neutral-600 leading-relaxed">
             The code expires in {formatSeconds(secondsLeft)}. It carries no keys — a photo of this
-            screen is useless once your phone uses it.
+            screen is useless once your phone uses it. If the phone cannot scan, copy the code and
+            paste it there.
           </p>
-          <button type="button" className={ghostBtn} onClick={onCancel}>
-            Cancel
-          </button>
+          <div className="flex items-center gap-2">
+            <button type="button" className={ghostBtn} onClick={onCancel}>
+              Cancel
+            </button>
+            {/* 카메라가 유일한 경로면 막히는 경우가 있다 — 권한을 거부했거나, 기기에 카메라가
+                없거나, 이 화면을 카메라로 겨눌 수 없는 상황. 폰의 "Paste the code" 가 받는 것이
+                바로 이 문자열이다. 보안 성질은 같다(1회용 코드 + 여섯 자리 확인). */}
+            <button
+              type="button"
+              className={ghostBtn}
+              disabled={!qr}
+              onClick={() => {
+                if (!qr) return
+                void navigator.clipboard.writeText(qr).then(() => {
+                  setCopied(true)
+                  setTimeout(() => setCopied(false), 1800)
+                })
+              }}
+            >
+              {copied ? 'Copied' : 'Copy code'}
+            </button>
+          </div>
         </div>
       </div>
     </div>
