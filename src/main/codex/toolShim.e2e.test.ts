@@ -39,7 +39,7 @@ interface Harness {
 }
 
 /** shim 을 띄우고, 메인 역할을 하는 소켓 스텁을 물린다. */
-function start(reply: { ok: boolean; data?: unknown; error?: string }): Harness {
+function start(reply: { ok: boolean; data?: unknown; error?: string }, external = false): Harness {
   dir = mkdtempSync(join(tmpdir(), 'wooi-shim-'))
   const path = join(dir, 'tools.sock')
 
@@ -57,7 +57,12 @@ function start(reply: { ok: boolean; data?: unknown; error?: string }): Harness 
   socket.listen(path)
 
   shim = spawn(process.execPath, [SHIM], {
-    env: { ...process.env, WOOI_TOOL_SOCKET: path, WOOI_TOOL_WORKSPACE: 'ws-1' },
+    env: {
+      ...process.env,
+      WOOI_TOOL_SOCKET: path,
+      WOOI_TOOL_WORKSPACE: 'ws-1',
+      ...(external ? { WOOI_TOOL_EXTERNAL: '1' } : {})
+    },
     stdio: ['pipe', 'pipe', 'pipe']
   })
 
@@ -95,6 +100,20 @@ describe.skipIf(!existsSync(SHIM))('codex tool shim', () => {
     // 더할 때마다 전송 테스트가 깨질 뿐, 정작 확인하려는 것(빌드가 최신 카탈로그를 실었는가)은
     // 확인되지 않는다. 위임 백엔드 없이 띄웠으므로 shim 이 계산하는 것도 agentToolsFor() 다.
     expect(list.tools.map((t) => t.name)).toEqual(agentToolsFor().map((t) => t.name))
+  })
+
+  it('외부 모드에서는 두 peer 도구만 노출하고 caller kind를 명시한다', async () => {
+    const h = start({ ok: true }, true)
+    h.send({ id: 1, method: 'tools/list', params: {} })
+    const list = (await h.next(1)).result as { tools: Array<{ name: string }> }
+    expect(list.tools.map((t) => t.name).sort()).toEqual([
+      'list_workspace_peers',
+      'send_to_workspace'
+    ])
+
+    h.send({ id: 2, method: 'tools/call', params: { name: 'list_workspace_peers', arguments: {} } })
+    await h.next(2)
+    expect(h.forwarded()).toEqual({ caller: 'external', tool: 'list_workspace_peers', args: {} })
   })
 
   it('스키마에 전송용 인자를 덧붙이지 않는다', async () => {

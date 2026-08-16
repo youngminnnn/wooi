@@ -1484,7 +1484,8 @@ export const DEFAULT_PEER_INBOUND: PeerInboundPolicy = 'accept'
 export interface PendingPeerMessage {
   /** 승인·거절이 지목하는 키. */
   id: string
-  fromWorkspaceId: string
+  /** 앱 밖 세션은 열어 볼 Wooi workspace가 없으므로 null이다. */
+  fromWorkspaceId: string | null
   /** 표시용 발신자 이름(수신 시점 스냅샷). */
   fromName: string
   fromBranch: string
@@ -2619,6 +2620,8 @@ export const IPC = {
   mcpInventory: 'mcp:inventory',
   /** 승계 서버를 고치려면 그 파일을 직접 열어야 한다(우리는 쓰지 않는다). */
   mcpOpenConfig: 'mcp:openConfig',
+  /** 앱 밖 Claude Code에 Wooi peer 도구를 등록하는 현재 실행본용 명령. */
+  mcpExternalSetupCommand: 'mcp:externalSetupCommand',
   /** `~/.codex/config.toml` 의 MCP 서버 목록(app-server 에 질의). */
   mcpCodexList: 'mcp:codexList',
   /** 그 서버의 `enabled` 를 사용자 파일에 쓰고 codex 에 재적용한다. */

@@ -1,5 +1,7 @@
 import { app } from 'electron'
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
+import { toolSocketPath } from './agent/tools/socket'
 
 /**
  * dev 실행과 설치된 앱의 데이터 경로를 분리한다.
@@ -43,4 +45,32 @@ export function wooiHome(): string {
   const override = process.env.WOOI_HOME?.trim()
   if (override) return override
   return join(app.getPath('home'), isDevIsolated() ? 'wooi-dev' : 'wooi')
+}
+
+/** Electron 밖의 Node 프로세스가 실행할 MCP shim 경로. 패키징 때는 asar 밖 파일을 가리킨다. */
+export function toolShimPath(): string {
+  const unpacked = join(
+    process.resourcesPath ?? '',
+    'app.asar.unpacked',
+    'out',
+    'main',
+    'toolShim.js'
+  )
+  if (process.resourcesPath && existsSync(unpacked)) return unpacked
+  return join(import.meta.dirname, 'toolShim.js')
+}
+
+function shellWord(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`
+}
+
+/** 현재 실행본의 dev/설치 경계를 그대로 반영한 외부 Claude Code 등록 명령. */
+export function externalClaudeMcpSetupCommand(): string {
+  return [
+    'claude mcp add wooi',
+    `--env WOOI_TOOL_SOCKET=${shellWord(toolSocketPath(app.getPath('userData')))}`,
+    '--env WOOI_TOOL_EXTERNAL=1',
+    '-- node',
+    shellWord(toolShimPath())
+  ].join(' ')
 }

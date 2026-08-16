@@ -37,6 +37,9 @@ const SOCKET = process.env.WOOI_TOOL_SOCKET ?? ''
  * 그 이름을 알려 주는 지침은 스레드 생성 시점에 굳어 나중에 고칠 수 없다.
  */
 const WORKSPACE = process.env.WOOI_TOOL_WORKSPACE ?? ''
+const EXTERNAL = process.env.WOOI_TOOL_EXTERNAL === '1'
+
+const EXTERNAL_TOOLS = new Set(['send_to_workspace', 'list_workspace_peers'])
 
 const DELEGATE_BACKENDS = (process.env.WOOI_TOOL_DELEGATE ?? '')
   .split(',')
@@ -72,12 +75,16 @@ function inputSchemaOf(shape: z.ZodRawShape): Record<string, unknown> {
 
 function tools(): unknown[] {
   // Codex 는 도구 호출을 직렬화한다 — 설명이 그 사실을 반영해야 한다(catalog.ts).
-  return agentToolsFor(DELEGATE_BACKENDS, true).map((spec) => ({
-    name: spec.name,
-    description: spec.description,
-    inputSchema: inputSchemaOf(spec.inputSchema),
-    ...(spec.annotations ? { annotations: spec.annotations } : {})
-  }))
+  // 목록만 줄여서는 보안 경계가 되지 않아 메인 registry도 같은 subset을 강제한다. 그래도 여기서
+  // 먼저 거르는 이유는 앱 밖 모델이 쓸 수 없는 강한 도구를 발견하거나 호출하게 두지 않기 위해서다.
+  return agentToolsFor(DELEGATE_BACKENDS, true)
+    .filter((spec) => !EXTERNAL || EXTERNAL_TOOLS.has(spec.name))
+    .map((spec) => ({
+      name: spec.name,
+      description: spec.description,
+      inputSchema: inputSchemaOf(spec.inputSchema),
+      ...(spec.annotations ? { annotations: spec.annotations } : {})
+    }))
 }
 
 /** 도구 호출 1건을 메인으로 넘긴다. 연결 1개당 요청 1개(줄 단위 JSON). */
@@ -86,7 +93,15 @@ function callMain(workspaceId: string, tool: string, args: unknown): Promise<unk
     if (!SOCKET) return reject(new Error('Wooi is not reachable (no socket configured).'))
     const socket = connect(SOCKET)
     let buffer = ''
-    socket.on('connect', () => socket.write(JSON.stringify({ workspaceId, tool, args }) + '\n'))
+    socket.on('connect', () =>
+      socket.write(
+        JSON.stringify({
+          ...(EXTERNAL ? { caller: 'external' } : { workspaceId }),
+          tool,
+          args
+        }) + '\n'
+      )
+    )
     socket.on('data', (chunk) => {
       buffer += chunk.toString()
     })

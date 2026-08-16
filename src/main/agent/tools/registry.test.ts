@@ -2,8 +2,10 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import {
   initRegistry,
   registerAgentTool,
+  registerExternalAgentTool,
   resetAgentToolsForTest,
   runAgentTool,
+  runExternalAgentTool,
   type AgentToolDeps
 } from './registry'
 
@@ -62,5 +64,18 @@ describe('registerAgentTool', () => {
   it('같은 이름을 두 번 등록하면 던진다', () => {
     registerAgentTool('demo', vi.fn())
     expect(() => registerAgentTool('demo', vi.fn())).toThrow(/twice/)
+  })
+})
+
+describe('runExternalAgentTool', () => {
+  it('외부 전용으로 등록한 도구만 실행한다', async () => {
+    initRegistry(deps)
+    registerAgentTool('create_workspace', vi.fn().mockResolvedValue(null))
+    registerExternalAgentTool('list_workspace_peers', vi.fn().mockResolvedValue({ peers: [] }))
+
+    await expect(runExternalAgentTool('list_workspace_peers', {})).resolves.toEqual({ peers: [] })
+    await expect(runExternalAgentTool('create_workspace', {})).rejects.toThrow(
+      /not available to external callers/
+    )
   })
 })

@@ -1,8 +1,18 @@
 import { switchToAgentTeam } from './agentTeam'
-import { listWorkspacePeers, sendToWorkspace } from './peer'
+import {
+  listWorkspacePeers,
+  listWorkspacePeersExternal,
+  sendToWorkspace,
+  sendToWorkspaceExternal
+} from './peer'
 import { openPullRequest } from './pullRequest'
 import { checkRelatedWork } from './relatedWork'
-import { initRegistry, registerAgentTool, type AgentToolDeps } from './registry'
+import {
+  initRegistry,
+  registerAgentTool,
+  registerExternalAgentTool,
+  type AgentToolDeps
+} from './registry'
 import { readScriptOutput, runScript, stopScript } from './script'
 import {
   checkStackedWork,
@@ -43,6 +53,8 @@ export function initAgentTools(deps: AgentToolDeps): void {
   registerAgentTool('check_related_work', checkRelatedWork)
   registerAgentTool('list_workspace_peers', listWorkspacePeers)
   registerAgentTool('send_to_workspace', sendToWorkspace)
+  registerExternalAgentTool('list_workspace_peers', listWorkspacePeersExternal)
+  registerExternalAgentTool('send_to_workspace', sendToWorkspaceExternal)
   registerAgentTool('list_issues', listIssues)
   registerAgentTool('create_workspace', createIndependentWorkspace)
   registerAgentTool('archive_workspace', archiveWorkspaceTool)
