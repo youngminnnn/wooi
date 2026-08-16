@@ -225,13 +225,25 @@ export class CopilotSessionManager implements AgentBackend {
   }
 
   /**
-   * 모델 선택지 — **없다**.
+   * 모델 선택지 — **없다**. 문서에 있는 경로를 전부 실측했고 ACP 로는 하나도 닿지 않는다.
    *
-   * ACP v1 `session/new` 에 모델 필드가 없고, `providers/list` 는 "Method not found" 로
-   * 거절된다(실측). `/model <name>` 은 "Switched model to: …" 라고 답하지만 곧바로 `/model` 을
-   * 물으면 여전히 `auto` 다 — 존재하지 않는 이름조차 그대로 받는다. 검증할 수 없는 값을
-   * 피커에 띄우느니 비워 두고, 모델 전환은 Copilot 자신의 `/model` 슬래시 명령에 맡긴다
-   * (그 명령은 자동완성 목록에 그대로 실린다).
+   *  - `session/new` 에 모델 필드가 없다(ACP v1).
+   *  - `providers/list` → "Method not found".
+   *  - 서버 플래그 `--model <id>` → **조용히 무시된다.** 없는 모델 이름을 줘도 서버가 뜨고
+   *    `/model` 은 여전히 선택된 모델이 없다고 답한다(같은 플래그를 비대화형 `copilot -p` 에
+   *    주면 즉시 거절하므로, 파싱이 안 되는 게 아니라 ACP 경로가 안 읽는 것이다).
+   *  - `COPILOT_MODEL` 환경변수 → 위와 똑같이 무시된다.
+   *  - `/model <id>` 슬래시 명령 → "Switched model to: …" 라고 답하지만 곧바로 `/model` 을
+   *    물으면 선택된 모델이 없다. 존재하지 않는 이름조차 그대로 받는다.
+   *
+   * 계정 쪽 제약도 따로 있다 — 이 개발 계정(Copilot Free)은 `auto` 외 모든 모델을 CLI 가
+   * 직접 거절한다(`Model "claude-haiku-4.5" from --model flag is not available.`). 둘은
+   * 독립적인 이유라, 유료 계정이라도 ACP 로는 여전히 못 고른다.
+   *
+   * 검증할 수 없는 값을 피커에 띄우느니 비워 두고, 전환은 Copilot 자신의 `/model` 슬래시
+   * 명령에 맡긴다(그 명령은 자동완성 목록에 그대로 실린다). GitHub 이 모델을 ACP 로 열면
+   * `session/new` 응답의 `configOptions` 에 나타날 자리가 가장 유력하다 — 지금 거기에는
+   * `mode` 와 `allow_all` 둘뿐이다([[copilot/acp]]).
    */
   listModels(): Promise<ModelOption[]> {
     return Promise.resolve([])
