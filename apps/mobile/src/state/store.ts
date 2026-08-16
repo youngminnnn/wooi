@@ -167,7 +167,9 @@ export const useRemoteStore = create<RemoteStore>((set, get) => ({
       status: 'online',
       state: session.state,
       updatedAt: Date.now(),
-      laptopSeenAt: Date.now(),
+      // 데모에는 랩탑이 없다. 시각을 넣어 두면 150초 뒤 "랩탑이 자고 있다" 배너가 떠서
+      // 바로 위의 데모 배너와 정면으로 모순된다. null 은 "모른다"이고, 그게 사실이다.
+      laptopSeenAt: null,
       lastError: null,
       unpairedReason: null,
       refresh: async () => undefined,

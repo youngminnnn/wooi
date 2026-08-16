@@ -58,11 +58,8 @@ export function createDemoSession(now: number = Date.now()): DemoSession {
         effort: 'high',
         attention: 'permission',
         multiAgent: true,
-        permissionModeFooter: {
-          symbol: '⏸',
-          text: 'Asks before running commands',
-          tone: 'readOnly'
-        },
+        // 문구는 랩탑이 백엔드 서술자에서 뽑아 보내는 것과 같은 값이다(src/main/agent/backend.ts).
+        permissionModeFooter: { symbol: '⏸', text: 'plan mode on', tone: 'readOnly' },
         prNumber: 184,
         pr: { number: 184, state: 'ready', label: 'Ready for review' }
       },
@@ -122,11 +119,7 @@ export function createDemoSession(now: number = Date.now()): DemoSession {
         status: 'running',
         model: 'Claude Sonnet 4',
         permissionMode: 'acceptEdits',
-        permissionModeFooter: {
-          symbol: '⚡',
-          text: 'Accepts file edits automatically',
-          tone: 'caution'
-        }
+        permissionModeFooter: { symbol: '⏵⏵', text: 'accept edits on', tone: 'caution' }
       },
       now - 2 * 60_000
     ),
@@ -203,20 +196,71 @@ export function createDemoSession(now: number = Date.now()): DemoSession {
     }
   ]
 
+  /**
+   * 워크스페이스마다 그럴듯한 대화를 채운다.
+   *
+   * 한 줄짜리로 두면 심사자가 열어 본 워크스페이스가 하필 그것일 때 빈 화면을 본다 — 실제로
+   * 그랬다. 어느 것을 열어도 앱이 무엇을 보여 주는 도구인지 읽혀야 한다.
+   */
+  const sampleExchange = (item: RemoteWorkspace, ask: string, reply: string): ChatItem[] => [
+    { id: `${item.id}-user`, type: 'user', text: ask, ts: item.lastActiveAt - 90_000 },
+    {
+      id: `${item.id}-thinking`,
+      type: 'thinking',
+      text: 'Reading the files that this change touches, then planning the edits.',
+      ts: item.lastActiveAt - 75_000
+    },
+    {
+      id: `${item.id}-tool`,
+      type: 'tool_use',
+      toolId: `${item.id}-tool-1`,
+      name: 'Read',
+      input: { file_path: `${item.branch}/README.md` },
+      ts: item.lastActiveAt - 60_000
+    },
+    { id: `${item.id}-assistant`, type: 'assistant', text: reply, ts: item.lastActiveAt - 30_000 }
+  ]
+
+  const SAMPLES: Record<string, [string, string]> = {
+    'relay-reconnect': [
+      'The phone stops receiving updates after the laptop sleeps. Can you look?',
+      'The socket dies during sleep and nothing re-opens it. I added a resume hook that reconnects immediately instead of waiting for the next heartbeat.'
+    ],
+    'remote-banner': [
+      'Split the offline banner so it says whether the phone or the laptop is the one that is away.',
+      'Done. The phone now polls the laptop’s last-seen time separately, so "you are offline" and "your laptop is asleep" are different messages.'
+    ],
+    'usage-recovery': [
+      'What happens to a queued turn when the usage limit resets?',
+      'It resumes on its own. The workspace keeps the queued turn and starts it as soon as the limit clears — the countdown in the sidebar is the scheduled time.'
+    ],
+    'docs-refresh': [
+      'Write the setup section for pairing a phone.',
+      'Drafted it: install, scan the code shown on the laptop, then confirm the six digits match on both screens. I kept the warning about rejecting a mismatch.'
+    ],
+    'release-notes': [
+      'Summarise what changed for the release notes.',
+      'Pulled the merged PRs since the last tag and grouped them: remote access, two crash fixes, and the new usage-limit countdown.'
+    ]
+  }
+
   const transcripts = new Map<string, ChatItem[]>()
   for (const item of workspaces) {
+    const sample = SAMPLES[item.id]
     transcripts.set(
       item.id,
       item.id === 'mobile-checkout'
         ? richTranscript
-        : [
-            {
-              id: `${item.id}-assistant`,
-              type: 'assistant',
-              text: `This is a sample session for ${item.displayName ?? item.name}.`,
-              ts: item.lastActiveAt
-            }
-          ]
+        : sample
+          ? sampleExchange(item, sample[0], sample[1])
+          : [
+              {
+                id: `${item.id}-assistant`,
+                type: 'assistant',
+                text: `This is a sample session for ${item.displayName ?? item.name}.`,
+                ts: item.lastActiveAt
+              }
+            ]
     )
   }
 
