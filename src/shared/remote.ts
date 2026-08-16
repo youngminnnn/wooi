@@ -260,6 +260,14 @@ export interface RemoteDeviceSummary {
 
 /** 설정 패널이 보는 전부. */
 export interface RemoteStatus {
+  /**
+   * 이 기능을 이 설치본에서 보여 줄 것인가.
+   *
+   * 폰 앱이 스토어에 오르기 전에는 데스크톱만 있어 봐야 페어링할 상대가 없다 — 켤 수 있게
+   * 두면 사용자는 QR 만 보고 막힌다. 그래서 원격 공지 파일의 플래그로 잠가 두고, 앱이
+   * 올라가는 순간 그 파일을 고쳐서 연다(데스크톱 재배포 없이).
+   */
+  available: boolean
   /** 릴레이 설정이 존재하는가(빌드에 구워졌거나 환경변수로 주어졌는가). */
   configured: boolean
   /** OS 암호화 저장소를 쓸 수 있는가. false 면 기능 전체가 불가능하다. */

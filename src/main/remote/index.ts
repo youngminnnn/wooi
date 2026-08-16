@@ -1,3 +1,5 @@
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
 import { hostname } from 'node:os'
 import { app, powerMonitor } from 'electron'
 import type { RemoteDeviceSummary, RemoteStatus } from '@shared/remote'
@@ -63,6 +65,12 @@ export class RemoteBridge {
   private resumeListener: (() => void) | null = null
   private enabled = false
   private fault: string | null = null
+  /**
+   * 이 기능이 열려 있는가. 원격 플래그(공지 파일)와 로컬 override 중 하나라도 참이면 열린다.
+   * 기동 시점에는 마지막으로 알던 값에서 시작한다 — 네트워크를 기다리는 동안 UI 가 깜빡이지
+   * 않게 하기 위해서다.
+   */
+  private available = false
 
   constructor(
     onChange: (status: RemoteStatus) => void,
@@ -70,6 +78,8 @@ export class RemoteBridge {
     // 기본값이 null 을 돌려준다 — 테스트가 상태 없이 브리지만 만들 수 있어야 하고,
     // 그때는 초기 스냅샷을 건너뛰는 것이 맞다(가짜 빈 AppState 를 지어내면 폰이 그걸 본다).
     getAppState: () => AppState | null = () => null,
+    /** 마지막으로 알던 가용성. 기동 직후 UI 가 깜빡이지 않게 여기서 시작한다. */
+    initiallyAvailable = false,
     // 폰이 워크스페이스를 열면 데스크톱의 미확인 표시를 푼다. 기본값은 no-op —
     // 테스트가 이 배선까지 준비할 필요는 없다.
     onWorkspaceRead: (workspaceId: string) => void = () => {}
@@ -77,12 +87,25 @@ export class RemoteBridge {
     this.config = config
     this.onChange = onChange
     this.getAppState = getAppState
+    this.available = initiallyAvailable
     this.onWorkspaceRead = onWorkspaceRead
+  }
+
+  /**
+   * 기능 가용성을 갱신한다. 닫히는 방향이면 **이미 켜져 있던 연결도 끊는다** — 잠갔다고
+   * 말해 놓고 계속 붙어 있으면 잠근 것이 아니다.
+   */
+  setAvailable(next: boolean): void {
+    if (next === this.available) return
+    this.available = next
+    if (!next && this.enabled) void this.setEnabled(false)
+    else this.emit()
   }
 
   /** 지금 상태 스냅샷. 렌더러가 언제든 물어볼 수 있다. */
   status(): RemoteStatus {
     return {
+      available: this.available,
       configured: this.config !== null,
       storageAvailable: isRemoteStorageAvailable(),
       enabled: this.enabled,
@@ -101,6 +124,13 @@ export class RemoteBridge {
     if (next === this.enabled) return this.status()
     this.enabled = next
     this.fault = null
+
+    // UI 를 숨기는 것만으로는 부족하다 — IPC 는 렌더러 밖에서도 부를 수 있다.
+    if (next && !this.available) {
+      this.enabled = false
+      this.fault = 'remote access is not available yet'
+      return this.emit()
+    }
 
     if (!next) {
       this.commandBridge?.dispose()
@@ -361,6 +391,26 @@ export class RemoteBridge {
   }
 }
 
+/**
+ * 원격 플래그를 무시하고 이 설치본에서 기능을 여는 로컬 탈출구.
+ *
+ * 플래그가 열리기 전에도 만든 사람은 써야 한다 — 그런데 배포된 앱에는 터미널로 환경변수를
+ * 넘길 방법이 마땅치 않다(`open` 은 환경을 전달하지 않는다). 그래서 파일 하나의 **존재**로
+ * 판단한다:
+ *
+ *   touch "$HOME/Library/Application Support/Wooi/remote-access.enabled"
+ *
+ * 설정 파일에 두지 않는 이유는 스토어가 주기적으로 통째로 덮어쓰기 때문이다 — 앱이 켜져
+ * 있는 동안 고치면 지워진다. 별도 파일은 그 경합이 없다. 내용은 보지 않는다.
+ */
+export function hasLocalRemoteOverride(): boolean {
+  try {
+    return existsSync(join(app.getPath('userData'), 'remote-access.enabled'))
+  } catch {
+    return false
+  }
+}
+
 // ── 싱글턴 ────────────────────────────────────────────────────────────────
 
 let bridge: RemoteBridge | null = null
@@ -369,9 +419,16 @@ let bridge: RemoteBridge | null = null
 export function initRemote(
   onChange: (status: RemoteStatus) => void,
   getAppState: () => AppState,
-  onWorkspaceRead: (workspaceId: string) => void
+  onWorkspaceRead: (workspaceId: string) => void,
+  initiallyAvailable = false
 ): RemoteBridge {
-  bridge ??= new RemoteBridge(onChange, resolveRemoteConfig(), getAppState, onWorkspaceRead)
+  bridge ??= new RemoteBridge(
+    onChange,
+    resolveRemoteConfig(),
+    getAppState,
+    initiallyAvailable,
+    onWorkspaceRead
+  )
   return bridge
 }
 

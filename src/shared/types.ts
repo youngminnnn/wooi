@@ -1181,6 +1181,14 @@ export interface AppSettings {
    * 자리**, 즉 원격을 켜는 순간에 받는다.
    */
   remoteConsentVersion: number | null
+  /**
+   * 원격 접근 기능이 열려 있다고 **마지막으로 확인한** 값. 설정이 아니라 캐시다.
+   *
+   * 플래그는 네트워크로 오므로 기동 직후와 오프라인에서는 알 수 없다. 그때 꺼진 것으로
+   * 치면 이미 쓰던 사용자에게서 기능이 사라졌다 나타났다 한다 — 마지막으로 알던 값을
+   * 그대로 쓰는 편이 옳다.
+   */
+  remoteAccessAvailable: boolean
   /** 원격 접근이 켜져 있을 때 휴대폰 푸시 알림도 보낸다. 별도 옵트인이며 기본은 꺼짐이다. */
   remotePushEnabled: boolean
   /**

@@ -108,6 +108,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   remoteEnabled: false,
   // 동의는 원격을 켜는 순간에 받는다. 기본값은 '아직 안 함'이다.
   remoteConsentVersion: null,
+  // 모르는 상태에서는 닫아 둔다 — 열려 있다고 확인된 뒤에만 보인다.
+  remoteAccessAvailable: false,
   // 푸시는 제3자 전달망을 지나므로 원격 접근과 별도로 명시적으로 켜야 한다.
   remotePushEnabled: false
 }

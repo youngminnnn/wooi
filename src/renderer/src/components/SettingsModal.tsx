@@ -332,13 +332,10 @@ export default function SettingsModal({
                 description="Connect the tools Wooi uses to run agents and work with pull requests."
               >
                 <IntegrationsPanel />
-                {/* 원격 접근도 "외부와 연결"이라는 점에서 같은 성격이라 이 페이지에 둔다. */}
-                <div className="mt-8 border-t border-[var(--border)] pt-6">
-                  <h4 className="mb-3 text-xs font-semibold uppercase tracking-wider text-neutral-500">
-                    Remote access
-                  </h4>
-                  <RemoteAccessPanel settings={settings} save={save} />
-                </div>
+                {/* 원격 접근도 "외부와 연결"이라는 점에서 같은 성격이라 이 페이지에 둔다.
+                    기능이 아직 열리지 않았으면 제목까지 통째로 감춘다 — 패널만 비우면
+                    빈 구분선과 제목이 남아 "여기 뭔가 있는데 안 보인다"로 읽힌다. */}
+                <RemoteAccessSection settings={settings} save={save} />
               </PageFrame>
             )}
             {page === 'mcp' && <McpServersPage settings={settings} save={save} />}
@@ -348,6 +345,35 @@ export default function SettingsModal({
           </main>
         </div>
       </div>
+    </div>
+  )
+}
+
+/**
+ * 원격 접근 구역. 가용성은 main 이 판정해 `evt:remote` 로 방송하므로 여기서 물어본다.
+ * 패널이 스스로 감출 수도 있지만, 그러면 제목과 구분선만 남는다.
+ */
+function RemoteAccessSection({
+  settings,
+  save
+}: {
+  settings: AppSettings
+  save: (patch: Partial<AppSettings>) => void
+}): React.JSX.Element | null {
+  const [available, setAvailable] = useState(false)
+
+  useEffect(() => {
+    void window.api.remote.getStatus().then((status) => setAvailable(status.available))
+    return window.api.onRemote((status) => setAvailable(status.available))
+  }, [])
+
+  if (!available) return null
+  return (
+    <div className="mt-8 border-t border-[var(--border)] pt-6">
+      <h4 className="mb-3 text-xs font-semibold uppercase tracking-wider text-neutral-500">
+        Remote access
+      </h4>
+      <RemoteAccessPanel settings={settings} save={save} />
     </div>
   )
 }

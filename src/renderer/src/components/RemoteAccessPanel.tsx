@@ -46,6 +46,10 @@ export default function RemoteAccessPanel({
     return <p className="text-xs text-neutral-600">Loading…</p>
   }
 
+  // 아직 열리지 않은 기능이다. "설정되지 않음" 같은 안내조차 띄우지 않는다 — 쓸 수 없는
+  // 항목이 설정 화면에 남아 있으면 그 자체가 잘못된 약속이 된다.
+  if (!status.available) return <></>
+
   if (!status.configured) {
     return (
       <p className="text-xs text-neutral-600 leading-relaxed">
