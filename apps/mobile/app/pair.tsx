@@ -30,6 +30,17 @@ export default function PairScreen(): React.JSX.Element {
   const [pasted, setPasted] = useState('')
   const unpairedReason = useRemoteStore((store) => store.unpairedReason)
 
+  const demoButton = (
+    <Pressable
+      accessibilityRole="button"
+      style={styles.demoButton}
+      onPress={() => useRemoteStore.getState().enterDemo()}
+    >
+      <Text style={styles.demoButtonText}>Try the demo</Text>
+      <Text style={styles.demoButtonHint}>Explore Wooi Remote with sample sessions</Text>
+    </Pressable>
+  )
+
   const finish = useCallback(async (pending: ClaimedPairing): Promise<void> => {
     setPhase('verify')
     setClaim(pending)
@@ -112,6 +123,7 @@ export default function PairScreen(): React.JSX.Element {
         <Pressable onPress={rescan}>
           <Text style={styles.link}>Scan a QR code instead</Text>
         </Pressable>
+        {demoButton}
       </View>
     </SafeAreaView>
   )
@@ -180,6 +192,7 @@ export default function PairScreen(): React.JSX.Element {
           <Pressable onPress={() => setPhase('paste')}>
             <Text style={styles.link}>Paste the code instead</Text>
           </Pressable>
+          {demoButton}
         </View>
       </SafeAreaView>
     )
@@ -204,6 +217,7 @@ export default function PairScreen(): React.JSX.Element {
         <Pressable onPress={() => setPhase('paste')} hitSlop={12}>
           <Text style={styles.link}>Can&apos;t scan? Paste the code</Text>
         </Pressable>
+        {demoButton}
       </SafeAreaView>
     </View>
   )
@@ -271,6 +285,19 @@ const styles = StyleSheet.create({
     paddingVertical: 12
   },
   buttonText: { color: '#fff', fontSize: 14, fontWeight: '600' },
+  demoButton: {
+    alignItems: 'center',
+    alignSelf: 'stretch',
+    backgroundColor: 'rgba(20,22,26,0.92)',
+    borderColor: theme.accent,
+    borderRadius: 9,
+    borderWidth: 1,
+    marginTop: 28,
+    paddingHorizontal: 16,
+    paddingVertical: 13
+  },
+  demoButtonText: { color: theme.accent, fontSize: 15, fontWeight: '700' },
+  demoButtonHint: { color: theme.textMuted, fontSize: 11, marginTop: 3 },
   cameraOverlay: { flex: 1, alignItems: 'center', paddingHorizontal: 24, paddingTop: 32 },
   cameraTitle: { color: '#fff', fontSize: 20, fontWeight: '600', marginTop: 10 },
   frame: {

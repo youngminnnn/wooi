@@ -5,6 +5,7 @@ import { useRouter } from 'expo-router'
 import type { RemoteWorkspace } from '@shared/remote'
 import { workspaceDisplayName } from '@shared/types'
 import { BrandMark } from '../src/components/BrandMark'
+import { DemoBanner } from '../src/components/DemoBanner'
 import { PR_COLORS } from '../src/state/prColors'
 import { isLaptopAway, useRemoteStore } from '../src/state/store'
 import { agoLabel, untilLabel, useNow } from '../src/state/useNow'
@@ -126,6 +127,7 @@ function WorkspaceRow({
 export default function WorkspaceListScreen(): React.JSX.Element {
   const router = useRouter()
   const pairing = useRemoteStore((store) => store.pairing)
+  const demo = useRemoteStore((store) => store.demo)
   const status = useRemoteStore((store) => store.status)
   const laptopSeenAt = useRemoteStore((store) => store.laptopSeenAt)
   const now = useNow()
@@ -175,7 +177,7 @@ export default function WorkspaceListScreen(): React.JSX.Element {
   }, [state?.repos, state?.workspaces])
 
   const refresh = useCallback(async (): Promise<void> => {
-    if (pairing === null || refreshState === null) return
+    if ((!demo && pairing === null) || refreshState === null) return
     setRefreshing(true)
     try {
       await refreshState()
@@ -186,7 +188,7 @@ export default function WorkspaceListScreen(): React.JSX.Element {
     } finally {
       setRefreshing(false)
     }
-  }, [pairing, refreshState])
+  }, [demo, pairing, refreshState])
 
   const machineName = state?.machine.name ?? pairing?.machineName ?? 'Laptop'
   return (
@@ -215,6 +217,7 @@ export default function WorkspaceListScreen(): React.JSX.Element {
           <Text style={styles.connectionText}>{status}</Text>
         </View>
       </View>
+      <DemoBanner />
       {/* 폰이 끊긴 것과 랩탑이 자는 것을 섞어 말하지 않는다 — 사용자가 할 수 있는 일이 다르다. */}
       {laptopAway && laptopSeenAt !== null ? (
         <Text style={styles.banner}>

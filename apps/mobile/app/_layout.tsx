@@ -30,6 +30,7 @@ export default function RootLayout(): React.JSX.Element {
   // 알림 id 를 기억하지 않으면 실행할 때마다 같은 워크스페이스로 튕긴다.
   const handledResponses = useRef(new Set<string>())
   const hydrated = useRemoteStore((store) => store.hydrated)
+  const demo = useRemoteStore((store) => store.demo)
   const pairing = useRemoteStore((store) => store.pairing)
   const status = useRemoteStore((store) => store.status)
 
@@ -43,15 +44,17 @@ export default function RootLayout(): React.JSX.Element {
 
   useEffect(() => {
     if (!hydrated) return
-    if (pairing === null) {
+    if (pairing === null && !demo) {
       if (pathname !== '/pair') router.replace('/pair')
       return
     }
-    if (pathname === '/pair') router.replace('/')
-  }, [hydrated, pairing, pathname, router])
+    if ((pairing !== null || demo) && pathname === '/pair') router.replace('/')
+  }, [demo, hydrated, pairing, pathname, router])
 
   useEffect(() => {
-    if (!hydrated || pairing === null) return
+    // 데모는 자격 증명이 없는 별도 실행 모드다. 여기서 먼저 끊어야 Supabase 클라이언트와
+    // SecureStore 기반 인증 저장소가 생성조차 되지 않는다.
+    if (!hydrated || pairing === null || demo) return
     pushRegistered.current = false
     const relay = new RelayClient(pairing, {
       onStatus: useRemoteStore.getState().setStatus,
@@ -80,7 +83,7 @@ export default function RootLayout(): React.JSX.Element {
       relay.disconnect()
       client.current = null
     }
-  }, [hydrated, pairing])
+  }, [demo, hydrated, pairing])
 
   // 토큰 등록은 **온라인이 된 뒤** 한 번. 오프라인에서 시도하면 실패만 하고,
   // 재시도는 다음 온라인 전이가 공짜로 준다.

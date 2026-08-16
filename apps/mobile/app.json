@@ -2,6 +2,12 @@
   "expo": {
     "slug": "wooi-remote",
     "version": "1.0.0",
+    "runtimeVersion": {
+      "policy": "fingerprint"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/089a2017-a0c5-4a44-b95a-73544d87f11f"
+    },
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",

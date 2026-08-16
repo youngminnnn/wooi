@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import type { RemoteState } from '@shared/remote'
 import type { StoredPairing } from '../storage/secure'
 import type { RemoteCommandChannel } from '../relay/client'
+import { createDemoSession } from './demo'
 
 export type ConnectionStatus = 'offline' | 'connecting' | 'online'
 
@@ -21,6 +22,7 @@ export function isLaptopAway(seenAt: number | null, now: number = Date.now()): b
 
 interface RemoteStore {
   hydrated: boolean
+  demo: boolean
   pairing: StoredPairing | null
   status: ConnectionStatus
   state: RemoteState | null
@@ -31,6 +33,8 @@ interface RemoteStore {
   refresh: (() => Promise<void>) | null
   command: ((channel: RemoteCommandChannel, args: unknown[]) => Promise<unknown>) | null
   activityRev: number
+  enterDemo: () => void
+  leaveDemo: () => void
   setHydrated: (hydrated: boolean) => void
   setPairing: (pairing: StoredPairing | null) => void
   setStatus: (status: ConnectionStatus) => void
@@ -46,8 +50,9 @@ interface RemoteStore {
   bumpActivity: () => void
 }
 
-export const useRemoteStore = create<RemoteStore>((set) => ({
+export const useRemoteStore = create<RemoteStore>((set, get) => ({
   hydrated: false,
+  demo: false,
   pairing: null,
   status: 'offline',
   state: null,
@@ -58,6 +63,129 @@ export const useRemoteStore = create<RemoteStore>((set) => ({
   refresh: null,
   command: null,
   activityRev: 0,
+  enterDemo: (): void => {
+    const session = createDemoSession()
+    const command = async (channel: RemoteCommandChannel, args: unknown[]): Promise<unknown> => {
+      if (channel === 'remote:watch' || channel === 'remote:ping') return null
+      if (channel === 'remote:transcript') {
+        const workspaceId = args[0]
+        const query = args[1]
+        if (typeof workspaceId !== 'string') throw new Error('Invalid demo workspace')
+        const items = session.transcripts.get(workspaceId) ?? []
+        const beforeTs =
+          typeof query === 'object' && query !== null && 'beforeTs' in query
+            ? (query as { beforeTs?: unknown }).beforeTs
+            : undefined
+        const limit =
+          typeof query === 'object' && query !== null && 'limit' in query
+            ? (query as { limit?: unknown }).limit
+            : 100
+        return items
+          .filter((item) => typeof beforeTs !== 'number' || item.ts < beforeTs)
+          .sort((left, right) => right.ts - left.ts)
+          .slice(0, typeof limit === 'number' ? limit : 100)
+      }
+      if (channel === 'permission:respond') {
+        const requestId = args[0]
+        set((current) => {
+          if (!current.demo || current.state === null) return current
+          return {
+            state: {
+              ...current.state,
+              rev: current.state.rev + 1,
+              pendingPermissions: current.state.pendingPermissions.filter(
+                (item) =>
+                  typeof item !== 'object' ||
+                  item === null ||
+                  !('requestId' in item) ||
+                  item.requestId !== requestId
+              ),
+              workspaces: current.state.workspaces.map((item) =>
+                item.attention === 'permission' ? { ...item, attention: null } : item
+              )
+            },
+            activityRev: current.activityRev + 1
+          }
+        })
+        return null
+      }
+      const workspaceId = args[0]
+      if (typeof workspaceId !== 'string') throw new Error('Invalid demo workspace')
+      if (channel === 'chat:interrupt') {
+        set((current) => ({
+          state:
+            current.state === null
+              ? null
+              : {
+                  ...current.state,
+                  rev: current.state.rev + 1,
+                  workspaces: current.state.workspaces.map((item) =>
+                    item.id === workspaceId ? { ...item, status: 'idle' } : item
+                  )
+                },
+          activityRev: current.activityRev + 1
+        }))
+        return null
+      }
+      if (channel === 'chat:send') {
+        const prompt = args[1]
+        if (typeof prompt !== 'string') throw new Error('Invalid demo message')
+        const timestamp = Date.now()
+        const items = session.transcripts.get(workspaceId) ?? []
+        items.push(
+          { id: `demo-user-${timestamp}`, type: 'user', text: prompt, ts: timestamp },
+          {
+            id: `demo-assistant-${timestamp}`,
+            type: 'assistant',
+            text: 'Demo reply: this message stayed on your phone and was not sent to a laptop.',
+            ts: timestamp + 1
+          }
+        )
+        session.transcripts.set(workspaceId, items)
+        set((current) => ({
+          state:
+            current.state === null
+              ? null
+              : {
+                  ...current.state,
+                  rev: current.state.rev + 1,
+                  workspaces: current.state.workspaces.map((item) =>
+                    item.id === workspaceId
+                      ? { ...item, lastActiveAt: timestamp, status: 'idle' }
+                      : item
+                  )
+                },
+          activityRev: current.activityRev + 1
+        }))
+        return null
+      }
+      throw new Error(`Unsupported demo command: ${channel}`)
+    }
+    set({
+      demo: true,
+      pairing: null,
+      status: 'online',
+      state: session.state,
+      updatedAt: Date.now(),
+      laptopSeenAt: Date.now(),
+      lastError: null,
+      unpairedReason: null,
+      refresh: async () => undefined,
+      command,
+      activityRev: get().activityRev + 1
+    })
+  },
+  leaveDemo: (): void =>
+    set({
+      demo: false,
+      status: 'offline',
+      state: null,
+      updatedAt: null,
+      laptopSeenAt: null,
+      lastError: null,
+      refresh: null,
+      command: null
+    }),
   setHydrated: (hydrated): void => set({ hydrated }),
   setPairing: (pairing): void => set({ pairing }),
   setStatus: (status): void => set({ status }),

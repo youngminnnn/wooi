@@ -18,6 +18,7 @@
     "expo-router": "~6.0.24",
     "expo-secure-store": "~15.0.8",
     "expo-status-bar": "~3.0.9",
+    "expo-updates": "~29.0.19",
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "react-native": "0.81.5",
@@ -40,6 +41,9 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
+    "update:development": "eas update --channel development",
+    "update:preview": "eas update --channel preview",
+    "update:production": "eas update --channel production",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

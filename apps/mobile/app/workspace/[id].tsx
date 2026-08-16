@@ -18,6 +18,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import type { ChatItem, PermissionRequest } from '@shared/types'
 import { workspaceDisplayName } from '@shared/types'
 import { BrandMark } from '../../src/components/BrandMark'
+import { DemoBanner } from '../../src/components/DemoBanner'
 import { PR_COLORS } from '../../src/state/prColors'
 import { isLaptopAway, useRemoteStore } from '../../src/state/store'
 import { agoLabel, untilLabel, useNow } from '../../src/state/useNow'
@@ -92,11 +93,12 @@ function PermissionCard({
   const [responding, setResponding] = useState(false)
   const [responseError, setResponseError] = useState<string | null>(null)
   const authenticate = useDeviceAuthentication()
+  const demo = useRemoteStore((store) => store.demo)
 
   const respond = useCallback(async (behavior: 'allow' | 'deny', rememberForSession = false): Promise<void> => {
     if (responding) return
     setResponseError(null)
-    if (behavior === 'allow' && !(await authenticate('Approve action on your laptop'))) {
+    if (!demo && behavior === 'allow' && !(await authenticate('Approve action on your laptop'))) {
       setResponseError('Device authentication was cancelled or unsuccessful. Nothing was sent.')
       return
     }
@@ -116,7 +118,7 @@ function PermissionCard({
       setResponseError(errorMessage(respondError))
       setResponding(false)
     }
-  }, [authenticate, command, request.requestId, responding])
+  }, [authenticate, command, demo, request.requestId, responding])
 
   const substance = formatPermissionInput(request)
   return (
@@ -561,6 +563,7 @@ export default function WorkspaceScreen(): React.JSX.Element {
             </Pressable>
           ) : <View style={styles.headerSpacer} />}
         </View>
+        <DemoBanner />
         {/* 두 가지는 다른 문제다: 내 신호가 안 나가는 것과, 받을 상대가 없는 것. */}
         {status === 'offline' ? (
           <Text style={styles.offline}>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isLaptopAway, LAPTOP_STALE_MS } from './store'
+import { isLaptopAway, LAPTOP_STALE_MS, useRemoteStore } from './store'
 import { agoLabel } from './useNow'
 
 /**
@@ -40,5 +40,56 @@ describe('경과 표시', () => {
   it('미래 시각을 음수로 표시하지 않는다', () => {
     // 랩탑과 폰의 시계는 어긋날 수 있다. "-3m ago" 는 버그처럼 보인다.
     expect(agoLabel(now + 60_000, now)).toBe('just now')
+  })
+})
+
+describe('데모 명령', () => {
+  it('릴레이 없이 상태와 트랜스크립트를 바꾼다', async () => {
+    const store = useRemoteStore.getState()
+    store.enterDemo()
+
+    const demo = useRemoteStore.getState()
+    expect(demo.demo).toBe(true)
+    expect(demo.pairing).toBeNull()
+    expect(demo.state?.repos).toHaveLength(2)
+    expect(demo.state?.pendingPermissions).toHaveLength(1)
+    expect(demo.command).not.toBeNull()
+
+    const command = demo.command!
+    const initial = (await command('remote:transcript', [
+      'mobile-checkout',
+      { limit: 100 }
+    ])) as Array<{ type: string }>
+    expect(initial.map((item) => item.type)).toEqual(
+      expect.arrayContaining([
+        'user',
+        'assistant',
+        'thinking',
+        'tool_use',
+        'tool_result',
+        'bash',
+        'result'
+      ])
+    )
+
+    await command('chat:send', ['mobile-checkout', 'Show me the local reply'])
+    const updated = (await command('remote:transcript', [
+      'mobile-checkout',
+      { limit: 100 }
+    ])) as Array<{ text?: string }>
+    expect(updated.some((item) => item.text === 'Show me the local reply')).toBe(true)
+
+    await command('permission:respond', ['demo-permission', { behavior: 'allow' }])
+    expect(useRemoteStore.getState().state?.pendingPermissions).toHaveLength(0)
+
+    await command('chat:interrupt', ['mobile-checkout'])
+    expect(
+      useRemoteStore.getState().state?.workspaces.find((item) => item.id === 'mobile-checkout')
+        ?.status
+    ).toBe('idle')
+
+    useRemoteStore.getState().leaveDemo()
+    expect(useRemoteStore.getState().demo).toBe(false)
+    expect(useRemoteStore.getState().state).toBeNull()
   })
 })

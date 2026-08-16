@@ -58,6 +58,34 @@ eas build --profile development --platform android
 - `app.config.ts` / `app.json` 의 패키지 이름·`scheme`·플러그인 설정
 - `google-services.*.json`
 
+## EAS Update 로 내보낼 수 있는 것
+
+EAS Update 는 이미 설치된 앱의 네이티브 껍데기는 그대로 두고, Metro 가 묶는 JavaScript 와
+스타일, 이미지 자산만 바꾼다. 화면의 동작이나 문구, 레이아웃을 고치는 데는 쓸 수 있지만
+`expo-camera` 같은 네이티브 모듈을 추가·변경할 수는 없다. `app.json`·`app.config.ts` 의
+네이티브 설정, 앱 아이콘, 권한, 패키지 이름도 마찬가지다. 이런 변경은 운영체제가 설치하는
+바이너리에 들어가므로 반드시 새 스토어 빌드를 내야 한다.
+
+빌드는 프로파일과 같은 이름의 `development`, `preview`, `production` 채널만 바라본다. 다른
+단계의 업데이트가 섞이지 않게 하려는 경계다. 업데이트를 내보낼 때는 메시지를 덧붙여
+`EXPO_TOKEN="$(cat ~/.expo-token)" npm run update:preview -- --message "Describe the change"`처럼
+실행한다. 운영 반영 전에는 같은 변경을 preview 채널에서 먼저 확인한다. 토큰은 명령에
+환경 변수로만 넘기고 화면에 출력하지 않는다.
+
+런타임 버전은 `fingerprint` 정책으로 정한다. 네이티브 의존성이나 네이티브 설정이 달라지면
+fingerprint 도 달라져, 그 네이티브 기능이 없는 예전 바이너리가 새 JavaScript 를 받지 않는다.
+대신 네이티브 표면을 바꾼 뒤에는 새 빌드를 설치해야 그 런타임을 대상으로 업데이트할 수 있다.
+
+잘못된 업데이트를 배포했다면 먼저 해당 채널과 런타임에서 데이터 호환성을 확인한 뒤
+`EXPO_TOKEN="$(cat ~/.expo-token)" eas update:rollback`을 실행한다. 이 명령의 대화형 안내에서
+직전의 정상 업데이트를 다시 배포하거나 앱에 내장된 업데이트로 돌아갈 수 있다. 업데이트가
+기기 저장 데이터를 호환되지 않게 바꿨다면 이전 코드도 안전하지 않을 수 있으므로, 그 경우에는
+롤백보다 수정 업데이트가 낫다.
+
+**스토어 심사자가 본 데모 모드는 OTA 업데이트로 절대 바꾸지 않는다.** 심사 뒤에 리뷰어가
+확인한 동작을 바꾸는 것은 App Store 와 Play Store 모두 기만적인 행위로 보기 때문이다. 데모
+모드 변경은 사소한 JavaScript 변경처럼 보여도 반드시 새 스토어 빌드로 다시 심사받는다.
+
 ## 빌드
 
 ```sh
