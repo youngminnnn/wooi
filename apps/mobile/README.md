@@ -86,7 +86,45 @@ fingerprint 도 달라져, 그 네이티브 기능이 없는 예전 바이너리
 확인한 동작을 바꾸는 것은 App Store 와 Play Store 모두 기만적인 행위로 보기 때문이다. 데모
 모드 변경은 사소한 JavaScript 변경처럼 보여도 반드시 새 스토어 빌드로 다시 심사받는다.
 
-## 빌드
+## 빌드는 태그가 만든다
+
+데스크톱과 같은 원칙이다 — 누구의 노트북에서 구웠는지가 아니라 레포의 어느 커밋에서 나왔는지가
+남아야 한다. (빌드 자체는 원래도 로컬이 아니었다. EAS 클라우드에서 굽고, 바뀐 것은 트리거다.)
+
+```sh
+# apps/mobile/app.json 의 expo.version 을 올려 커밋한 뒤
+git tag mobile-v1.1.0 && git push origin mobile-v1.1.0
+```
+
+`mobile-release` 워크플로가 태그와 `app.json` 의 version 이 같은지 먼저 확인하고, 다르면
+굽기 전에 끊는다. 어긋난 채로 나가면 스토어에는 옛 버전이 올라가는데 릴리즈 이름만 새 버전이
+되고, 빌드는 성공으로 끝나 눈치채기 어렵다.
+
+스토어에 내지 않고 확인만 할 때는 Actions 에서 workflow_dispatch 로 프로파일·플랫폼을 골라
+돌린다.
+
+### 버전은 둘로 나뉜다
+
+| | 어디가 갖나 | 이유 |
+| --- | --- | --- |
+| 사람이 보는 버전 (`app.json` 의 `version`) | **레포** | 커밋과 태그로 추적돼야 한다 |
+| 스토어 빌드 번호 (`versionCode` / `buildNumber`) | **EAS** (`appVersionSource: remote`) | 절대 되돌아가면 안 되는 단조 증가 값이라, 커밋으로 관리하면 충돌·되감기가 난다 |
+
+### 자격증명은 처음 한 번 직접 만든다
+
+`--non-interactive` 에서는 EAS 가 Android 키스토어나 iOS 인증서를 **새로 만들지 못하고 그
+자리에서 실패한다.** 그래서 production 프로파일로 처음 굽는 것은 로컬에서 대화형으로 한다:
+
+```sh
+cd apps/mobile
+EXPO_TOKEN="$(cat ~/.expo-token)" npx eas build --profile production --platform all
+```
+
+물어보는 대로 승인하면 EAS 가 만들어 보관하고, 그 뒤로는 CI 가 그것을 쓴다. iOS 는 이때
+Apple 계정으로 로그인해 인증서·프로비저닝 프로파일과 APNs 키를 만든다 — 이걸 건너뛰면
+푸시가 안 되는 앱이 나간다.
+
+## 로컬에서 굽기
 
 ```sh
 npx expo start                                      # Metro (개발)
