@@ -279,29 +279,17 @@ export default function Sidebar({
         </div>
       )}
 
-      <div data-tour="repos" className="flex items-center justify-between px-3 h-10 shrink-0">
-        <span className="min-w-0 truncate text-xs uppercase tracking-wider text-neutral-500 font-semibold">
-          Repositories
-        </span>
-        <button
-          onClick={addRepo}
-          className="h-6 w-6 grid place-items-center rounded-md text-neutral-400 hover:bg-[var(--surface-2)] hover:text-neutral-100"
-          title="Add repository"
-        >
-          <Plus size={15} />
-        </button>
-      </div>
-
       <div data-tour="workspaces" className="flex-1 overflow-y-auto px-2 pb-4">
-        {/* PR 리뷰 세션. 워크스페이스와 나란히 두지 않고 별도 구역으로 뺀 이유는 ⌘1–9 번호가
-            orderVisibleWorkspaces(워크스페이스 전용)로 매겨지기 때문이다 — 리포 블록 사이에
-            끼워 넣으면 "위에서 n번째 = ⌘n" 불변식이 깨진다. 구역을 나누면 그 규칙을 건드리지
-            않으면서 리뷰가 어떤 종류의 작업인지도 더 분명해진다. */}
+        {/* PR 리뷰는 리포의 자식이 아니라 리포지토리와 동급인 작업 개념이므로 별도 구역으로 둔다.
+            또한 ⌘1–9 번호는 orderVisibleWorkspaces(워크스페이스 전용)로 매겨진다 — 리뷰를 리포
+            블록 사이에 끼워 넣으면 "위에서 n번째 = ⌘n" 불변식이 깨지므로 워크스페이스 순서에는
+            포함하지 않는다. */}
         {app.reviews.length > 0 && (
           <div className="mb-3">
-            <div className="flex items-center gap-1.5 px-2 py-1.5">
-              <GitPullRequest size={14} className="text-neutral-500 shrink-0" />
-              <span className="flex-1 truncate text-sm font-medium text-neutral-300">Reviews</span>
+            <div className="flex items-center justify-between px-1 h-10">
+              <span className="min-w-0 truncate text-xs uppercase tracking-wider text-neutral-500 font-semibold">
+                Reviews
+              </span>
               {reviewRunningCount > 0 && (
                 <span
                   className="flex items-center gap-1 text-xs text-[var(--info-400)]/80 shrink-0"
@@ -324,6 +312,22 @@ export default function Sidebar({
             {archivedReviews.length > 0 && <ArchivedReviewsSection reviews={archivedReviews} />}
           </div>
         )}
+
+        <div
+          data-tour="repos"
+          className="sticky top-0 z-10 flex items-center justify-between px-1 h-10 bg-[var(--bg-2)]"
+        >
+          <span className="min-w-0 truncate text-xs uppercase tracking-wider text-neutral-500 font-semibold">
+            Repositories
+          </span>
+          <button
+            onClick={addRepo}
+            className="h-6 w-6 grid place-items-center rounded-md text-neutral-400 hover:bg-[var(--surface-2)] hover:text-neutral-100"
+            title="Add repository"
+          >
+            <Plus size={15} />
+          </button>
+        </div>
 
         {app.repos.length === 0 && (
           <p className="px-3 py-8 text-xs text-neutral-500 text-center leading-relaxed">
@@ -577,6 +581,10 @@ function WorkspaceRow({
   const rateLimited = activeRateLimitPause(workspace.rateLimited, now)
   // 표시 이름: 사용자 override → PR 제목 → worktree 이름. override 가 없으면 PR 제목이 자동 반영된다.
   const displayName = workspaceDisplayName(workspace, pr?.title)
+  const behind = git?.behind ?? 0
+  // 뒤처짐은 신호(메타 줄 ↓N)와 1차 액션(오버레이 restack 버튼·⋯ 메뉴에서의 제외)을 함께
+  // 좌우한다. 셋이 갈리면 신호는 뜨는데 누를 것이 없거나 같은 액션이 두 곳에 생기므로 한 곳에서 판단한다.
+  const isBehind = behind > 0
   // 에이전트 배지와 stack 생성 override 는 같은 사용 가능 목록을 쓴다.
   const availableBackends = useAvailableBackends()
   const showAgent = availableBackends.length > 1
@@ -607,7 +615,7 @@ function WorkspaceRow({
   const openFanoutCompare = useStore((s) => s.openFanoutCompare)
 
   // 행당 액션이 5개까지 늘어나 아이콘을 나열하면 제목 폭을 계속 잠식한다. 그래서 1차 액션
-  // (뒤처진 stacked 워크스페이스의 restack)만 인라인으로 승격하고 나머지는 이 메뉴로 모은다.
+  // (base 보다 뒤처진 워크스페이스의 restack)만 인라인으로 승격하고 나머지는 이 메뉴로 모은다.
   const stack = (agentBackend?: AgentBackendId): void =>
     void requireGithub('Stacked workspaces track their pull requests on GitHub.', () =>
       onStackWorkspace(workspace.repoId, workspace.id, agentBackend)
@@ -658,27 +666,29 @@ function WorkspaceRow({
       onSelect: () => stack(backend.id),
       separatorBefore: index === 0
     })),
-    {
-      key: 'restack',
-      label: restackBusy
-        ? 'Rebasing…'
-        : githubDisconnected
-          ? `Rebase onto ${workspace.baseBranch} — Connect GitHub`
-          : git && git.behind > 0
-            ? `Rebase onto ${workspace.baseBranch} (${git.behind} behind)`
-            : `Rebase onto ${workspace.baseBranch}`,
-      icon: githubDisconnected ? (
-        <GithubMark size={12} />
-      ) : (
-        <RefreshCw size={13} className={restackBusy ? 'animate-spin' : ''} />
-      ),
-      onSelect: () => {
-        if (restackBusy) return
-        void requireGithub('Restacking updates the branch and its pull request.', () =>
-          restack(workspace.id)
-        )
-      }
-    },
+    ...(!isBehind
+      ? [
+          {
+            key: 'restack',
+            label: restackBusy
+              ? 'Rebasing…'
+              : githubDisconnected
+                ? `Rebase onto ${workspace.baseBranch} — Connect GitHub`
+                : `Rebase onto ${workspace.baseBranch}`,
+            icon: githubDisconnected ? (
+              <GithubMark size={12} />
+            ) : (
+              <RefreshCw size={13} className={restackBusy ? 'animate-spin' : ''} />
+            ),
+            onSelect: () => {
+              if (restackBusy) return
+              void requireGithub('Restacking updates the branch and its pull request.', () =>
+                restack(workspace.id)
+              )
+            }
+          }
+        ]
+      : []),
     {
       key: 'mute',
       label: workspace.muted ? 'Unmute notifications' : 'Mute notifications',
@@ -870,10 +880,17 @@ function WorkspaceRow({
             )}
             {!archiving && <GitBranch size={10} className="shrink-0" />}
             {!archiving && <span className="truncate">{workspace.branch}</span>}
-            {/* base 대비 ahead/behind 커밋 수(↑N ↓N)도 여기 있었지만, 변경 파일 수 배지와 같은
-                이유로 걷어냈다 — 행이 좁아 브랜치 이름을 잘라먹으면서까지 보여 줄 만큼 자주
-                행동으로 이어지지 않는다. behind 는 restack 버튼(아래)과 그 툴팁이, 정확한
-                수치는 워크스페이스 헤더가 이미 말해 준다. */}
+            {/* behind 신호를 맡겼던 restack 버튼은 호버 전용이라 평상시에는 뒤처짐을 알 수 없어
+                ↓N 을 되살렸다. ahead 는 행 폭을 잠식하는 데 비해 여기서 행동으로 이어지지 않아
+                의도적으로 되살리지 않는다. */}
+            {isBehind && (
+              <span
+                className="text-[var(--warning-400)]/90 shrink-0 tabular-nums"
+                title={`${behind} commit(s) behind ${workspace.baseBranch}`}
+              >
+                · ↓{behind}
+              </span>
+            )}
             {git && git.conflicted && (
               <span className="text-[var(--danger-fg)] shrink-0" title="Merge conflicts">
                 ⚠
@@ -937,9 +954,9 @@ function WorkspaceRow({
               } 32px)`
             }}
           >
-            {/* base(부모)보다 뒤처진 stacked 워크스페이스만 restack 을 1차 액션으로 승격한다.
+            {/* base 보다 뒤처졌으면 root/stacked 구분 없이 restack 을 1차 액션으로 승격한다.
               (뒤처지지 않았으면 급하지 않으므로 ⋯ 메뉴 안에만 둔다.) */}
-            {workspace.parentWorkspaceId && git && git.behind > 0 && (
+            {isBehind && (
               <button
                 disabled={restackBusy}
                 onClick={(e) => {
@@ -948,11 +965,12 @@ function WorkspaceRow({
                     restack(workspace.id)
                   )
                 }}
-                className="h-5 w-5 grid place-items-center rounded shrink-0 hover:bg-[var(--surface-2)] text-[var(--warning-400)] hover:text-[var(--warning-300)] disabled:opacity-60"
+                className="h-6 w-6 grid place-items-center rounded shrink-0 hover:bg-[var(--surface-2)] text-[var(--warning-400)] hover:text-[var(--warning-300)] disabled:opacity-60"
+                aria-label={`Rebase onto ${workspace.baseBranch}`}
                 title={
                   githubDisconnected
-                    ? `Connect GitHub to restack onto ${workspace.baseBranch} (${git.behind} behind)`
-                    : `Restack onto ${workspace.baseBranch} (${git.behind} behind) — rebase & force-push`
+                    ? `Connect GitHub to restack onto ${workspace.baseBranch} (${behind} behind)`
+                    : `Restack onto ${workspace.baseBranch} (${behind} behind) — rebase & force-push`
                 }
               >
                 <RefreshCw size={12} className={restackBusy ? 'animate-spin' : ''} />
@@ -966,7 +984,7 @@ function WorkspaceRow({
               }}
               aria-haspopup="menu"
               aria-expanded={menuAt !== null}
-              className="h-5 w-5 grid place-items-center rounded text-neutral-500 hover:bg-[var(--surface-2)] hover:text-neutral-200 shrink-0"
+              className="h-6 w-6 grid place-items-center rounded text-neutral-500 hover:bg-[var(--surface-2)] hover:text-neutral-200 shrink-0"
               title="More actions (or right-click the row)"
             >
               <MoreVertical size={14} />
