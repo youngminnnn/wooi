@@ -222,14 +222,21 @@ describe('StateMirror', () => {
     // 같은 id 가 백엔드마다 다른 뜻이다. Claude 의 'default' 는 매번 묻는 모드라 띄울 것이
     // 없고, Codex 의 'default' 는 워크스페이스 안에서 자동으로 도는 모드라 그렇게 말해야 한다.
     expect(projectPermissionModeFooter('claude', 'default')).toBeNull()
+    // 스스로 실행하는 모드는 전부 같은 무게(경고)로 보여야 한다.
     expect(projectPermissionModeFooter('codex', 'default')).toEqual({
       symbol: '⏵⏵',
-      text: 'auto mode on'
+      text: 'auto mode on',
+      tone: 'caution'
     })
+    expect(projectPermissionModeFooter('claude', 'acceptEdits')?.tone).toBe('caution')
+    expect(projectPermissionModeFooter('codex', 'fullAccess')?.tone).toBe('caution')
+    // 읽기 전용 계열은 '멈춤' 색이다 — 경고할 것이 없다.
     expect(projectPermissionModeFooter('claude', 'plan')).toEqual({
       symbol: '⏸',
-      text: 'plan mode on'
+      text: 'plan mode on',
+      tone: 'readOnly'
     })
+    expect(projectPermissionModeFooter('codex', 'readOnly')?.tone).toBe('readOnly')
     // 그 백엔드에 없는 모드는 띄우지 않는다 — 지어내는 것보다 비우는 편이 정직하다.
     expect(projectPermissionModeFooter('claude', 'fullAccess')).toBeNull()
   })

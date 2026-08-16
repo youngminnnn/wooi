@@ -54,9 +54,13 @@ export function projectRateLimit(workspace: {
 export function projectPermissionModeFooter(
   backend: AgentBackendId,
   mode: PermissionMode
-): { symbol: string; text: string } | null {
+): { symbol: string; text: string; tone: 'readOnly' | 'caution' } | null {
   const info = backendMeta(backend).permissionModes.find((item) => item.id === mode)
-  return info?.footer ?? null
+  if (!info?.footer) return null
+  // 데스크톱 컴포저와 같은 두 갈래: 읽기 전용 계열은 '멈춤' 색, 나머지는 경고 색.
+  // 후자는 전부 "에이전트가 스스로 실행한다"는 뜻이라 같은 무게로 보여야 한다.
+  const tone = mode === 'plan' || mode === 'readOnly' ? 'readOnly' : 'caution'
+  return { ...info.footer, tone }
 }
 
 /**

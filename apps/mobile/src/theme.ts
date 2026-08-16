@@ -40,6 +40,8 @@ export const theme = {
   /** --info-400 / --info-500 (blue) */
   info: '#51a2ff',
   infoStrong: '#2b7fff',
+  /** --readonly-400 (cyan) — plan·readOnly 처럼 '멈춤' 계열 강조 */
+  readonly: '#00d3f2',
   /** --success-400, --warning-400, --danger-400 */
   success: '#00d492',
   warning: '#ffb900',

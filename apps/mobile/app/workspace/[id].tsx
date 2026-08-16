@@ -36,6 +36,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+function modeToneColor(tone: 'readOnly' | 'caution'): string {
+  return tone === 'readOnly' ? theme.readonly : theme.warning
+}
+
 function isPermissionRequest(value: unknown): value is PermissionRequest {
   return (
     isRecord(value) &&
@@ -480,6 +484,7 @@ export default function WorkspaceScreen(): React.JSX.Element {
   )
 
   const modeFooter = workspace?.permissionModeFooter ?? null
+
   const repoName = useRemoteStore(
     (store) => store.state?.repos.find((repo) => repo.id === workspace?.repoId)?.name ?? null
   )
@@ -591,8 +596,11 @@ export default function WorkspaceScreen(): React.JSX.Element {
             띄울 것이 없는 모드(Claude 의 'default')에서는 데스크톱처럼 아무것도 띄우지 않는다. */}
         {modeFooter !== null && modeFooter !== undefined ? (
           <View style={styles.modeFooter}>
-            <Text style={styles.modeSymbol}>{modeFooter.symbol}</Text>
-            <Text style={styles.modeText}>{modeFooter.text}</Text>
+            {/* 색은 데스크톱 컴포저와 같은 두 갈래다 — 읽기 전용은 '멈춤' 색, 스스로 실행하는
+                모드는 경고 색. 어느 쪽인지는 랩탑이 정해서 보낸다(모드 의미에 달린 판단이다). */}
+            <Text style={[styles.modeText, { color: modeToneColor(modeFooter.tone) }]}>
+              {modeFooter.symbol} {modeFooter.text}
+            </Text>
           </View>
         ) : null}
       </View>
@@ -653,8 +661,7 @@ const styles = StyleSheet.create({
   ruleLabel: { color: theme.textDim, fontSize: 8, fontWeight: '700', letterSpacing: 0.8 },
   permissionRule: { color: theme.textMuted, fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace' }), fontSize: 10, marginTop: 3 },
   modeFooter: { alignItems: 'center', flexDirection: 'row', gap: 6, paddingBottom: 8, paddingHorizontal: 14 },
-  modeSymbol: { color: theme.accent, fontSize: 11 },
-  modeText: { color: theme.textDim, fontSize: 11 },
+  modeText: { fontSize: 11 },
   composer: { alignItems: 'flex-end', borderTopColor: theme.border, borderTopWidth: StyleSheet.hairlineWidth, flexDirection: 'row', gap: 9, padding: 10 },
   input: { backgroundColor: theme.bg2, borderColor: theme.surface2, borderRadius: 8, borderWidth: 1, color: theme.text, flex: 1, fontSize: 14, maxHeight: 120, minHeight: 42, paddingHorizontal: 11, paddingVertical: 10 },
   sendButton: { backgroundColor: theme.accentStrong, borderRadius: 7, justifyContent: 'center', minHeight: 42, paddingHorizontal: 14 },

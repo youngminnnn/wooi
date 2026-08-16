@@ -88,8 +88,16 @@ export interface RemoteWorkspace {
    * 모드 id 를 그대로 보내지 않는 이유는 같은 id 가 백엔드마다 다른 뜻이기 때문이다 —
    * Codex 의 'default' 는 "auto mode on" 이지만 Claude 의 'default' 는 매번 묻는 모드다.
    * 라벨을 아는 쪽에서 만들어 보낸다.
+   *
+   * `tone` 은 색을 고르기 위한 것이다. 데스크톱과 같은 두 갈래다 — 읽기 전용 계열은
+   * '멈춤' 색, 스스로 실행하는 모드는 경고 색. 이것도 모드의 의미에 달린 판단이라
+   * 랩탑이 정한다.
    */
-  permissionModeFooter?: { symbol: string; text: string } | null
+  permissionModeFooter?: {
+    symbol: string
+    text: string
+    tone: 'readOnly' | 'caution'
+  } | null
   /**
    * 이 워크스페이스 브랜치의 PR 상태. 데스크톱 사이드바가 점 색으로 말하는 것과 같은 값이다.
    *
