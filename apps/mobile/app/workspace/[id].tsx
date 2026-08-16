@@ -13,6 +13,18 @@ import {
   TextInput,
   View
 } from 'react-native'
+import {
+  ArrowRightLeft,
+  Brain,
+  ChevronDown,
+  ChevronRight,
+  CircleDashed,
+  CornerDownRight,
+  ListTodo,
+  Terminal,
+  Wrench,
+  type LucideIcon
+} from 'lucide-react-native'
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router'
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import type { ChatItem, PermissionRequest } from '@shared/types'
@@ -92,14 +104,17 @@ function PermissionCard({
   request: PermissionRequest
   command: NonNullable<ReturnType<typeof useRemoteStore.getState>['command']>
 }): React.JSX.Element {
-  const [responding, setResponding] = useState(false)
+  const [pending, setPending] = useState<'deny' | 'once' | 'session' | null>(null)
+  const responding = pending !== null
   const [responseError, setResponseError] = useState<string | null>(null)
   const authenticate = useDeviceAuthentication()
   const demo = useRemoteStore((store) => store.demo)
 
   const respond = useCallback(
-    async (behavior: 'allow' | 'deny', rememberForSession = false): Promise<void> => {
+    async (choice: 'deny' | 'once' | 'session'): Promise<void> => {
       if (responding) return
+      const behavior = choice === 'deny' ? 'deny' : 'allow'
+      const rememberForSession = choice === 'session'
       setResponseError(null)
       if (!demo && behavior === 'allow' && !(await authenticate('Approve action on your laptop'))) {
         setResponseError('Device authentication was cancelled or unsuccessful. Nothing was sent.')
@@ -111,7 +126,7 @@ function PermissionCard({
           (item) => isPermissionRequest(item) && item.requestId === request.requestId
         )
       if (stillPending !== true) return
-      setResponding(true)
+      setPending(choice)
       const decision =
         behavior === 'deny'
           ? { behavior: 'deny' as const }
@@ -122,7 +137,7 @@ function PermissionCard({
         await command('permission:respond', [request.requestId, decision])
       } catch (respondError) {
         setResponseError(errorMessage(respondError))
-        setResponding(false)
+        setPending(null)
       }
     },
     [authenticate, command, demo, request.requestId, responding]
@@ -157,27 +172,32 @@ function PermissionCard({
           <Text style={styles.permissionRule}>{request.rule}</Text>
         </View>
       ) : null}
+      <Text style={styles.permissionScope}>
+        “Always” applies for the rest of this session only.
+      </Text>
       <View style={styles.permissionActions}>
         <Pressable
-          style={[styles.permissionButton, styles.denyButton, responding && styles.disabled]}
+          style={[styles.permissionButton, responding && styles.disabled]}
           disabled={responding}
           onPress={() => void respond('deny')}
         >
-          <Text style={styles.denyButtonText}>{responding ? 'Sending…' : 'Deny'}</Text>
+          <Text style={styles.denyButtonText}>{pending === 'deny' ? 'Sending…' : 'Deny'}</Text>
         </Pressable>
         <Pressable
-          style={[styles.permissionButton, responding && styles.disabled]}
+          style={[styles.permissionButton, styles.sessionButton, responding && styles.disabled]}
           disabled={responding}
-          onPress={() => void respond('allow')}
+          onPress={() => void respond('session')}
         >
-          <Text style={styles.allowButtonText}>Allow once</Text>
+          <Text style={styles.sessionButtonText}>
+            {pending === 'session' ? 'Sending…' : 'Always'}
+          </Text>
         </Pressable>
         <Pressable
-          style={[styles.permissionButton, responding && styles.disabled]}
+          style={[styles.permissionButton, styles.allowButton, responding && styles.disabled]}
           disabled={responding}
-          onPress={() => void respond('allow', true)}
+          onPress={() => void respond('once')}
         >
-          <Text style={styles.allowButtonText}>Allow for session</Text>
+          <Text style={styles.allowButtonText}>{pending === 'once' ? 'Sending…' : 'Allow'}</Text>
         </Pressable>
       </View>
     </View>
@@ -313,19 +333,27 @@ function RichText({
 function Collapsible({
   title,
   text,
+  icon: Icon,
   error = false
 }: {
   title: string
   text: string
+  icon: LucideIcon
   error?: boolean
 }): React.JSX.Element {
   const [open, setOpen] = useState(false)
+  const Chevron = open ? ChevronDown : ChevronRight
+  const tint = error ? theme.danger : theme.textFaint
   return (
     <Pressable style={styles.compactCard} onPress={() => setOpen((value) => !value)}>
-      <Text style={[styles.cardTitle, error && styles.errorText]}>
-        {open ? '⌄' : '›'} {title}
-      </Text>
-      {open ? <RichText text={text} color={error ? '#ef8d8d' : theme.textMuted} /> : null}
+      <View style={styles.cardHead}>
+        <Icon size={13} color={tint} />
+        <Text style={[styles.cardTitle, error && styles.errorText]} numberOfLines={1}>
+          {title}
+        </Text>
+        <Chevron size={14} color={theme.textFaint} />
+      </View>
+      {open ? <RichText text={text} color={error ? theme.danger : theme.textMuted} /> : null}
     </Pressable>
   )
 }
@@ -347,14 +375,25 @@ function ChatRow({ item }: { item: ChatItem }): React.JSX.Element {
         </View>
       )
     case 'thinking':
-      return <Collapsible title={item.streaming ? 'Thinking…' : 'Thinking'} text={item.text} />
+      return (
+        <Collapsible
+          icon={Brain}
+          title={item.streaming ? 'Thinking…' : 'Thinking'}
+          text={item.text}
+        />
+      )
     case 'tool_use':
       return (
-        <Collapsible title={`Tool · ${item.name}`} text={JSON.stringify(item.input, null, 2)} />
+        <Collapsible
+          icon={Wrench}
+          title={`Tool · ${item.name}`}
+          text={JSON.stringify(item.input, null, 2)}
+        />
       )
     case 'tool_result':
       return (
         <Collapsible
+          icon={CornerDownRight}
           title={item.isError ? 'Tool error' : 'Tool result'}
           text={item.text}
           error={item.isError}
@@ -381,6 +420,7 @@ function ChatRow({ item }: { item: ChatItem }): React.JSX.Element {
     case 'unknown':
       return (
         <Collapsible
+          icon={CircleDashed}
           title={`Unsupported ${item.backend} item`}
           text={`${item.what}${item.hint ? `\n${item.hint}` : ''}`}
         />
@@ -388,6 +428,7 @@ function ChatRow({ item }: { item: ChatItem }): React.JSX.Element {
     case 'bash':
       return (
         <Collapsible
+          icon={Terminal}
           title={`${item.running ? 'Running' : 'Command'} · ${item.command}`}
           text={item.output || 'No output'}
           error={item.exitCode !== null && item.exitCode !== 0}
@@ -396,6 +437,7 @@ function ChatRow({ item }: { item: ChatItem }): React.JSX.Element {
     case 'task':
       return (
         <Collapsible
+          icon={ListTodo}
           title={`${item.name} · ${item.status}`}
           text={item.summary ?? item.description}
           error={item.status === 'failed'}
@@ -404,6 +446,7 @@ function ChatRow({ item }: { item: ChatItem }): React.JSX.Element {
     case 'handoff':
       return (
         <Collapsible
+          icon={ArrowRightLeft}
           title={`Handoff · ${item.childName}`}
           text={item.summary}
           error={item.status === 'blocked'}
@@ -679,7 +722,7 @@ export default function WorkspaceScreen(): React.JSX.Element {
           ListFooterComponent={loadingOlder ? <ActivityIndicator color="#8b7cf6" /> : null}
           ListEmptyComponent={
             loading ? (
-              <ActivityIndicator style={styles.loading} color="#8b7cf6" />
+              <ActivityIndicator style={styles.loading} color={theme.accent} />
             ) : (
               <Text style={styles.empty}>No conversation yet</Text>
             )
@@ -727,14 +770,16 @@ export default function WorkspaceScreen(): React.JSX.Element {
 const styles = StyleSheet.create({
   screen: { backgroundColor: theme.bg, flex: 1 },
   header: {
-    alignItems: 'center',
+    alignItems: 'flex-start',
     borderBottomColor: theme.border,
     borderBottomWidth: StyleSheet.hairlineWidth,
     flexDirection: 'row',
     minHeight: 54,
-    paddingHorizontal: 14
+    paddingBottom: 10,
+    paddingHorizontal: 14,
+    paddingTop: 8
   },
-  back: { color: theme.accent, fontSize: 15, width: 68 },
+  back: { color: theme.accent, fontSize: 15, marginTop: 13, width: 68 },
   headerTitle: { alignItems: 'center', flex: 1 },
   headerRepo: { color: theme.textDim, fontSize: 10, fontWeight: '700', letterSpacing: 0.8 },
   headerMetaLine: { alignItems: 'center', flexDirection: 'row', gap: 5, marginTop: 2 },
@@ -746,13 +791,14 @@ const styles = StyleSheet.create({
   headerSpacer: { width: 68 },
   stopButton: {
     alignItems: 'center',
-    borderColor: '#733b42',
-    borderRadius: 5,
+    borderColor: 'rgba(255,100,103,0.42)',
+    borderRadius: 6,
     borderWidth: 1,
+    marginTop: 9,
     paddingVertical: 6,
     width: 68
   },
-  stopText: { color: '#ef8d8d', fontSize: 12, fontWeight: '600' },
+  stopText: { color: theme.danger, fontSize: 12, fontWeight: '600' },
   offline: {
     backgroundColor: theme.border,
     color: theme.textMuted,
@@ -798,7 +844,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 7
   },
-  cardTitle: { color: theme.textDim, fontSize: 12, fontWeight: '600' },
+  cardHead: { alignItems: 'center', flexDirection: 'row', gap: 8 },
+  cardTitle: { color: theme.textDim, flex: 1, fontSize: 12, fontWeight: '600' },
   codeScroll: { backgroundColor: theme.bg, borderRadius: 5, marginVertical: 7, padding: 10 },
   code: {
     color: theme.textMuted,
@@ -865,20 +912,23 @@ const styles = StyleSheet.create({
   diffAdded: { backgroundColor: '#14251c' },
   diffRemoved: { backgroundColor: '#2b171a' },
   permissionError: { color: '#ef8d8d', fontSize: 11, lineHeight: 15, marginTop: 8 },
-  permissionActions: { flexDirection: 'row', gap: 8, marginTop: 10 },
+  permissionScope: { color: theme.textFaint, fontSize: 11, lineHeight: 15, marginTop: 10 },
+  permissionActions: { flexDirection: 'row', gap: 8, marginTop: 8 },
   permissionButton: {
     alignItems: 'center',
-    borderColor: theme.textFaint,
-    borderRadius: 6,
+    borderColor: theme.border2,
+    borderRadius: 8,
     borderWidth: 1,
     flex: 1,
     justifyContent: 'center',
     minHeight: 44,
     paddingHorizontal: 5
   },
-  denyButton: { borderColor: '#8b4c54' },
-  denyButtonText: { color: '#ef9a9a', fontSize: 12, fontWeight: '700' },
-  allowButtonText: { color: theme.textMuted, fontSize: 11, fontWeight: '600', textAlign: 'center' },
+  denyButtonText: { color: theme.textMuted, fontSize: 12, fontWeight: '600', textAlign: 'center' },
+  sessionButton: { borderColor: 'rgba(255,185,0,0.35)' },
+  sessionButtonText: { color: theme.warning, fontSize: 12, fontWeight: '600', textAlign: 'center' },
+  allowButton: { backgroundColor: theme.warning, borderColor: theme.warning },
+  allowButtonText: { color: theme.bg, fontSize: 13, fontWeight: '700', textAlign: 'center' },
   ruleBox: {
     backgroundColor: theme.bg3,
     borderRadius: 4,

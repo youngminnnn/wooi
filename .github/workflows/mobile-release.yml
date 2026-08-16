@@ -90,7 +90,67 @@ jobs:
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         run: |
+          set -o pipefail
           profile="${{ inputs.profile || 'production' }}"
           platform="${{ inputs.platform || 'all' }}"
           echo "프로파일=$profile 플랫폼=$platform"
-          npx eas build --profile "$profile" --platform "$platform" --non-interactive
+          # 사람이 읽는 진행 출력은 로그에 그대로 두고(--json 을 쓰면 9분간 로그가 침묵한다),
+          # 빌드 id 만 뽑아 쓰려고 사본을 남긴다.
+          npx eas build --profile "$profile" --platform "$platform" --non-interactive \
+            2>&1 | tee /tmp/eas-build.log
+
+      # 방금 구운 것이 **어느 링크인지** Actions 화면에서 바로 집을 수 있게 한다.
+      #
+      # expo.dev 의 빌드 목록에는 옛 빌드가 함께 늘어서고 프로파일 표시가 작다. 폰으로 그
+      # 목록을 열어 고르다 보면 엉뚱한 것을 깔게 된다 — 실제로 운영 APK 대신 옛 development
+      # 빌드(`com.wooi.remote.dev`)를 깐 적이 있다. 패키지가 달라 나란히 깔리는 탓에 잘못
+      # 깔렸다는 사실조차 늦게 드러났다. 링크 하나만 남기면 고를 여지가 없다.
+      #
+      # 빌드가 실패해도 돌린다 — 그 경우 표가 비고, 그것 자체가 신호다.
+      - name: Summary — 설치 링크
+        if: always()
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          set -uo pipefail
+          ids="$(grep -oE 'builds/[0-9a-f-]{36}' /tmp/eas-build.log 2>/dev/null \
+                 | cut -d/ -f2 | sort -u)"
+          if [ -z "$ids" ]; then
+            echo '빌드 id 를 찾지 못했습니다 — 빌드가 시작 전에 실패했을 수 있습니다.' \
+              >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          for id in $ids; do
+            npx eas build:view "$id" --json 2>/dev/null > "/tmp/build-$id.json" || continue
+          done
+          node --input-type=module -e '
+            import { appendFileSync, readFileSync } from "node:fs"
+            const out = (s) => appendFileSync(process.env.GITHUB_STEP_SUMMARY, s + "\n")
+            const ids = process.argv.slice(1)
+            out("## 빌드 결과\n")
+            for (const id of ids) {
+              let b
+              try {
+                b = JSON.parse(readFileSync(`/tmp/build-${id}.json`, "utf8"))
+              } catch {
+                out(`- \`${id}\` — 정보를 가져오지 못했습니다.\n`)
+                continue
+              }
+              const url = b.artifacts?.applicationArchiveUrl
+              out(`### ${b.platform} · ${b.buildProfile} · ${b.status}\n`)
+              out("| | |")
+              out("|---|---|")
+              out(`| 앱 | \`${b.appIdentifier}\` |`)
+              out(`| 버전 | ${b.appVersion} (build ${b.appBuildVersion}) |`)
+              out(`| 채널 | ${b.updateChannel?.name ?? "-"} |`)
+              out(`| 로그 | https://expo.dev/accounts/${b.app?.ownerAccount?.name}/projects/${b.app?.slug}/builds/${id} |`)
+              out("")
+              if (!url) {
+                out("산출물이 없습니다.\n")
+              } else if (url.endsWith(".aab")) {
+                out(`AAB 입니다 — 폰에 직접 깔 수 없고 Play 업로드용입니다.\n\n${url}\n`)
+              } else {
+                out(`**설치 링크** (이 주소를 폰에서 엽니다)\n\n${url}\n`)
+              }
+            }
+          ' $ids
