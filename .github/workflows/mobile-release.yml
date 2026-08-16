@@ -1,0 +1,96 @@
+name: mobile-release
+
+# 모바일 앱 빌드. 데스크톱(build.yml)과 같은 원칙이다 — **태그가 릴리즈를 만든다.**
+# 누구의 노트북에서 무엇을 구웠는지가 아니라, 레포의 어느 커밋에서 나왔는지가 남아야 한다.
+#
+# 빌드 자체는 원래도 로컬이 아니었다(EAS 클라우드에서 굽는다). 여기서 바뀌는 것은 **트리거**다.
+# 태그를 밀면 CI 가 굽고, 실패도 성공도 Actions 에 남는다.
+#
+# 버전 분업은 데스크톱과 같다:
+#   - 사람이 보는 버전(app.json 의 version)은 **레포**가 갖고, 태그가 그것과 일치하는지 검사한다
+#   - 스토어용 빌드 번호(versionCode / buildNumber)는 **EAS** 가 갖는다(appVersionSource: remote)
+#     이 값은 절대 되돌아가면 안 되는 단조 증가 값이라, 커밋으로 관리하면 충돌·되감기가 난다
+run-name: 'mobile: ${{ github.ref_name }}'
+
+on:
+  push:
+    tags: ['mobile-v*']
+  # 스토어에 내지 않고 preview/development 를 구울 때 쓴다.
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: '빌드 프로파일'
+        type: choice
+        default: preview
+        options: [development, preview, production]
+      platform:
+        description: '플랫폼'
+        type: choice
+        default: android
+        options: [android, ios, all]
+
+concurrency:
+  group: mobile-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/mobile
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: apps/mobile/package-lock.json
+
+      # 태그와 app.json 의 version 이 어긋나면, 스토어에는 옛 버전이 올라가는데 릴리즈 이름만
+      # 새 버전이 된다. 빌드는 성공으로 끝나므로 눈치채기 어렵다 — 20분 굽기 전에 끊는다.
+      - name: Preflight — 태그와 app.json version 일치
+        if: startsWith(github.ref, 'refs/tags/mobile-v')
+        run: |
+          set -euo pipefail
+          app="$(node -p "require('./app.json').expo.version")"
+          tag="${GITHUB_REF_NAME#mobile-v}"
+          if [ "$app" != "$tag" ]; then
+            echo "::error::태그($GITHUB_REF_NAME → $tag)와 app.json version($app)이 다릅니다."
+            echo "apps/mobile/app.json 의 expo.version 을 bump 한 커밋에 태그를 다세요."
+            exit 1
+          fi
+          echo "태그/버전 일치 확인됨: $app"
+
+      - name: Preflight — EXPO_TOKEN 있음
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          if [ -z "${EXPO_TOKEN}" ]; then
+            echo "::error::EXPO_TOKEN 시크릿이 없습니다."
+            echo "expo.dev/settings/access-tokens 에서 만들어 Settings → Secrets → Actions 에 등록하세요."
+            exit 1
+          fi
+          echo "EXPO_TOKEN 확인됨."
+
+      - run: npm ci
+
+      # 굽기 전에 잡는다. EAS 빌드는 20분 걸리고, 깨진 번들은 거기서 성공해도 폰에서 죽는다.
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Test
+        run: npm test
+
+      # 자격증명(Android 키스토어 / iOS 인증서·프로파일)은 **미리 있어야 한다.**
+      # `--non-interactive` 에서는 EAS 가 새로 만들지 못하고 그 자리에서 실패한다.
+      # 처음 한 번은 로컬에서 대화형으로 만든다 — apps/mobile/README.md 참고.
+      - name: Build
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          profile="${{ inputs.profile || 'production' }}"
+          platform="${{ inputs.platform || 'all' }}"
+          echo "프로파일=$profile 플랫폼=$platform"
+          npx eas build --profile "$profile" --platform "$platform" --non-interactive

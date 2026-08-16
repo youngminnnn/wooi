@@ -1,9 +1,12 @@
-import { ipcMain, app, dialog, shell, BrowserWindow } from 'electron'
+import { app, dialog, shell, BrowserWindow } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
+import { handle } from './commandRegistry'
 import { getStore } from './store'
+import { getRemoteBridge } from './remote'
+import { rememberPrStatus } from './prStatusCache'
 import { getTranscripts } from './transcripts'
 import { buildHandoffPrompt, estimateHandoffTokens, formatHandoffTokens } from '@shared/handoff'
 import { listDir, readFileInRoot, searchFiles } from './fsbrowse'
@@ -171,34 +174,31 @@ import {
 import type { ScriptRunner } from './scripts'
 import type { TerminalManager } from './terminal'
 
+/** 단방향 이벤트를 모든 창에 방송하는 함수. main 엔트리가 소유한 것 하나를 공유한다. */
+type Dispatch = (channel: string, payload: unknown) => void
+
 interface IpcContext {
   sessions: AgentOrchestrator
   scripts: ScriptRunner
   terminals: TerminalManager
   panes: PaneWindows
+  /**
+   * main 엔트리의 dispatch 를 그대로 받는다. registerIpc 가 자체 dispatch 를 갖고 있으면
+   * 원격 미러가 이쪽 방송을 통째로 놓친다 — 이벤트 출구는 프로세스에 하나여야 한다.
+   */
+  dispatch: Dispatch
   getWindow: () => BrowserWindow | null
 }
 
 export function registerIpc(ctx: IpcContext): void {
   const store = getStore()
+  const { dispatch } = ctx
 
   /** 전체 상태 스냅샷을 모든 창에 방송한다. */
   const broadcastState = (): void => {
     const state = store.getState()
     for (const win of BrowserWindow.getAllWindows()) {
       win.webContents.send(IPC.evtState, state)
-    }
-  }
-
-  /** 단방향 이벤트를 모든 창에 보낸다(파괴된 webContents 송신 예외가 호출부를 끊지 않게 가드). */
-  const dispatch = (channel: string, payload: unknown): void => {
-    for (const win of BrowserWindow.getAllWindows()) {
-      if (win.isDestroyed() || win.webContents.isDestroyed()) continue
-      try {
-        win.webContents.send(channel, payload)
-      } catch (err) {
-        log.error(`dispatch failed on ${channel}`, err)
-      }
     }
   }
 
@@ -304,7 +304,7 @@ export function registerIpc(ctx: IpcContext): void {
 
   // ── 리포 ───────────────────────────────────────────────────────────────
 
-  ipcMain.handle(IPC.repoAdd, async (): Promise<{ repo?: Repo; error?: string }> => {
+  handle(IPC.repoAdd, async (): Promise<{ repo?: Repo; error?: string }> => {
     const win = ctx.getWindow()
     const result = win
       ? await dialog.showOpenDialog(win, { properties: ['openDirectory'] })
@@ -341,7 +341,7 @@ export function registerIpc(ctx: IpcContext): void {
     return { repo }
   })
 
-  ipcMain.handle(
+  handle(
     IPC.repoUpdate,
     async (
       _e,
@@ -405,7 +405,7 @@ export function registerIpc(ctx: IpcContext): void {
    * 구버전(v11 이하)부터 쓰던 리포는 마이그레이션이 carryItems 를 빈 배열로 남겨 둬서
    * 신규 리포와 달리 자동 탐지 혜택을 못 받았다 — 그 구멍을 사용자 동의 한 번으로 메운다.
    */
-  ipcMain.handle(
+  handle(
     IPC.repoAdoptCarry,
     async (
       _e,
@@ -446,7 +446,7 @@ export function registerIpc(ctx: IpcContext): void {
     }
   )
 
-  ipcMain.handle(IPC.repoRemove, async (_e, repoId: string) => {
+  handle(IPC.repoRemove, async (_e, repoId: string) => {
     const repo = repoFor(repoId)
     const workspaces = store.getState().workspaces.filter((w) => w.repoId === repoId)
     for (const ws of workspaces) {
@@ -465,17 +465,14 @@ export function registerIpc(ctx: IpcContext): void {
 
   // 리포·워크스페이스 목록은 저장된 배열 순서가 곧 사이드바 표시 순서라, 재정렬은
   // 별도 order 필드 없이 배열을 다시 엮는 것으로 끝난다(스키마 변경·마이그레이션 불필요).
-  ipcMain.handle(
-    IPC.repoReorder,
-    (_e, repoId: string, targetRepoId: string, position: DropPosition) => {
-      store.update((st) => {
-        st.repos = reorderById(st.repos, repoId, targetRepoId, position)
-      })
-      broadcastState()
-    }
-  )
+  handle(IPC.repoReorder, (_e, repoId: string, targetRepoId: string, position: DropPosition) => {
+    store.update((st) => {
+      st.repos = reorderById(st.repos, repoId, targetRepoId, position)
+    })
+    broadcastState()
+  })
 
-  ipcMain.handle(
+  handle(
     IPC.workspaceReorder,
     (_e, workspaceId: string, targetWorkspaceId: string, position: DropPosition) => {
       const { workspaces } = store.getState()
@@ -499,19 +496,19 @@ export function registerIpc(ctx: IpcContext): void {
     }
   )
 
-  ipcMain.handle(IPC.repoListBranches, async (_e, repoId: string): Promise<string[]> => {
+  handle(IPC.repoListBranches, async (_e, repoId: string): Promise<string[]> => {
     const repo = repoFor(repoId)
     if (!repo) return []
     return listBranches(repo.path).catch(() => [repo.defaultBranch])
   })
 
-  ipcMain.handle(IPC.repoListIssues, async (_e, repoId: string) => {
+  handle(IPC.repoListIssues, async (_e, repoId: string) => {
     const repo = repoFor(repoId)
     if (!repo) return []
     return listOpenIssues(repo.path).catch(() => [])
   })
 
-  ipcMain.handle(IPC.repoGetIssueBody, async (_e, repoId: string, number: number) => {
+  handle(IPC.repoGetIssueBody, async (_e, repoId: string, number: number) => {
     const repo = repoFor(repoId)
     if (!repo) return null
     return getIssueBody(repo.path, number).catch(() => null)
@@ -519,7 +516,7 @@ export function registerIpc(ctx: IpcContext): void {
 
   // ── workspace ────────────────────────────────────────────────────────────
 
-  ipcMain.handle(
+  handle(
     IPC.workspaceCreate,
     async (_e, args: CreateWorkspaceArgs): Promise<CreateWorkspaceResult> =>
       createWorkspace(workspaceDeps, args)
@@ -527,7 +524,7 @@ export function registerIpc(ctx: IpcContext): void {
 
   // 아카이브 절차 자체는 [[workspaces]] 에 있다 — 에이전트 도구도 같은 일을 해야 하기 때문이다.
   // 아카이브 스크립트가 실패했으면 그 결과를 실어 보낸다(렌더러가 토스트로 알린다).
-  ipcMain.handle(IPC.workspaceArchive, async (_e, workspaceId: string): Promise<ArchiveOutcome> =>
+  handle(IPC.workspaceArchive, async (_e, workspaceId: string): Promise<ArchiveOutcome> =>
     archiveWorkspace(archiveDeps, workspaceId)
   )
 
@@ -535,20 +532,17 @@ export function registerIpc(ctx: IpcContext): void {
    * 아카이브 제안을 해제한다. 어떤 병합을 해제했는지 기억해 두지 않으면 다음 재동기화가 같은
    * 병합을 다시 감지해 배너가 계속 뜬다("해제" = 이 워크스페이스는 아직 쓸 일이 있다는 뜻).
    */
-  ipcMain.handle(
-    IPC.workspaceArchiveSuggestDismiss,
-    async (_e, workspaceId: string): Promise<void> => {
-      let changed = false
-      store.update((st) => {
-        const w = st.workspaces.find((x) => x.id === workspaceId)
-        if (!w?.archiveSuggest) return
-        w.archiveSuggestDismissed = w.archiveSuggest.mergedBranch
-        w.archiveSuggest = null
-        changed = true
-      })
-      if (changed) broadcastState()
-    }
-  )
+  handle(IPC.workspaceArchiveSuggestDismiss, async (_e, workspaceId: string): Promise<void> => {
+    let changed = false
+    store.update((st) => {
+      const w = st.workspaces.find((x) => x.id === workspaceId)
+      if (!w?.archiveSuggest) return
+      w.archiveSuggestDismissed = w.archiveSuggest.mergedBranch
+      w.archiveSuggest = null
+      changed = true
+    })
+    if (changed) broadcastState()
+  })
 
   /**
    * 대기 중인 peer 메시지를 전달한다 — 여기가 **턴 비용을 승인하는 자리**다.
@@ -559,7 +553,7 @@ export function registerIpc(ctx: IpcContext): void {
    * 보관해 둔 `text` 를 그대로 보낸다 — 출처 문단은 받은 순간에 이미 씌워져 있고, 지금
    * 다시 만들면 발신 워크스페이스가 사라진 경우 근거가 없다([[types]] PendingPeerMessage).
    */
-  ipcMain.handle(
+  handle(
     IPC.workspacePeerInboxDeliver,
     async (_e, workspaceId: string, messageId: string): Promise<void> => {
       let pendingMessage: PendingPeerMessage | null = null
@@ -583,7 +577,7 @@ export function registerIpc(ctx: IpcContext): void {
   )
 
   /** 대기 중인 peer 메시지를 버린다. 발신 쪽에는 알리지 않는다 — 거절도 사용자의 사정이다. */
-  ipcMain.handle(
+  handle(
     IPC.workspacePeerInboxDismiss,
     async (_e, workspaceId: string, messageId: string): Promise<void> => {
       let changed = false
@@ -601,7 +595,7 @@ export function registerIpc(ctx: IpcContext): void {
    * 수신 정책을 바꾼다. `accept` 로 열면 대기 중이던 것도 함께 흘려보낸다 — 정책을 열어 놓고
    * 이미 와 있던 메시지만 계속 대기 상태로 남기면 사용자가 "왜 안 오지" 를 겪는다.
    */
-  ipcMain.handle(
+  handle(
     IPC.workspaceSetPeerInbound,
     async (_e, workspaceId: string, policy: PeerInboundPolicy): Promise<void> => {
       const release: PendingPeerMessage[] = []
@@ -629,7 +623,7 @@ export function registerIpc(ctx: IpcContext): void {
   )
 
   // 언아카이브: 브랜치로부터 worktree 를 복원한다.
-  ipcMain.handle(
+  handle(
     IPC.workspaceUnarchive,
     async (
       _e,
@@ -679,7 +673,7 @@ export function registerIpc(ctx: IpcContext): void {
   // 영구 삭제: 아카이브와 달리 되돌릴 수 없다 — worktree·대화 기록에 더해 (deleteBranch 면)
   // 브랜치까지 지우고 워크스페이스 레코드 자체를 목록에서 없앤다. 아카이브된 것뿐 아니라
   // 살아 있는 워크스페이스에도 쓰인다(사이드바 메뉴 · ⌥⌘⌫ · 생성 되돌리기).
-  ipcMain.handle(
+  handle(
     IPC.workspaceRemove,
     async (_e, workspaceId: string, deleteBranch: boolean): Promise<ArchiveOutcome> => {
       const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
@@ -713,76 +707,65 @@ export function registerIpc(ctx: IpcContext): void {
   // 일괄 삭제: 한 레포의 아카이브된 워크스페이스를 모두 영구 제거한다.
   // 단건 remove 와 동일한 정리 절차(세션·스크립트·터미널·기록·worktree·브랜치)를 각 항목에
   // 적용하되, 상태 갱신·broadcast 는 마지막에 한 번만 수행한다.
-  ipcMain.handle(
-    IPC.workspaceRemoveArchived,
-    async (_e, repoId: string): Promise<{ count: number }> => {
-      const targets = store.getState().workspaces.filter((w) => w.repoId === repoId && w.archived)
-      const repo = repoFor(repoId)
+  handle(IPC.workspaceRemoveArchived, async (_e, repoId: string): Promise<{ count: number }> => {
+    const targets = store.getState().workspaces.filter((w) => w.repoId === repoId && w.archived)
+    const repo = repoFor(repoId)
 
-      for (const ws of targets) {
-        ctx.sessions.dispose(ws.id)
-        ctx.scripts.disposeWorkspace(ws.id)
-        ctx.terminals.disposeWorkspace(ws.id)
-        getTranscripts().remove(ws.id)
-        // 아카이브된 워크스페이스는 worktree 디렉토리가 이미 제거된 상태일 수 있으나,
-        // removeWorktree 는 누락된 worktree 를 prune 으로 정리하므로 안전하다. 브랜치도 함께 삭제.
-        if (repo) await removeWorktree(repo.path, ws.worktreePath, ws.branch, true)
-      }
-
-      if (targets.length > 0) {
-        const ids = new Set(targets.map((w) => w.id))
-        store.update((st) => {
-          st.workspaces = st.workspaces.filter((w) => !ids.has(w.id))
-        })
-        pruneFanoutGroups(targets.map((w) => w.id))
-        broadcastState()
-      }
-      return { count: targets.length }
+    for (const ws of targets) {
+      ctx.sessions.dispose(ws.id)
+      ctx.scripts.disposeWorkspace(ws.id)
+      ctx.terminals.disposeWorkspace(ws.id)
+      getTranscripts().remove(ws.id)
+      // 아카이브된 워크스페이스는 worktree 디렉토리가 이미 제거된 상태일 수 있으나,
+      // removeWorktree 는 누락된 worktree 를 prune 으로 정리하므로 안전하다. 브랜치도 함께 삭제.
+      if (repo) await removeWorktree(repo.path, ws.worktreePath, ws.branch, true)
     }
-  )
+
+    if (targets.length > 0) {
+      const ids = new Set(targets.map((w) => w.id))
+      store.update((st) => {
+        st.workspaces = st.workspaces.filter((w) => !ids.has(w.id))
+      })
+      pruneFanoutGroups(targets.map((w) => w.id))
+      broadcastState()
+    }
+    return { count: targets.length }
+  })
 
   // ── fan-out (같은 프롬프트를 후보 여럿에게) ─────────────────────────────
 
-  ipcMain.handle(
-    IPC.fanoutCreate,
-    async (_e, args: CreateFanoutArgs): Promise<CreateFanoutResult> =>
-      createFanout(fanoutDeps, args)
+  handle(IPC.fanoutCreate, async (_e, args: CreateFanoutArgs): Promise<CreateFanoutResult> =>
+    createFanout(fanoutDeps, args)
   )
 
   // 형제 아카이브는 되돌릴 수 있지만(브랜치·PR·대화는 남는다) 미커밋 변경은 사라진다.
   // 그래서 확인은 렌더러가 무엇을 잃는지 세어 먼저 받고, 여기서는 다시 묻지 않는다.
-  ipcMain.handle(
+  handle(
     IPC.fanoutAdopt,
     async (_e, groupId: string, workspaceId: string): Promise<AdoptFanoutResult> =>
       adoptFanoutWinner(archiveDeps, groupId, workspaceId)
   )
 
-  ipcMain.handle(IPC.fanoutForget, (_e, groupId: string) => {
+  handle(IPC.fanoutForget, (_e, groupId: string) => {
     forgetFanoutGroup(broadcastState, groupId)
   })
 
-  ipcMain.handle(
-    IPC.workspaceSetPermissionMode,
-    async (_e, workspaceId: string, mode: PermissionMode) => {
-      await ctx.sessions.setPermissionMode(workspaceId, mode)
-      broadcastState()
-    }
-  )
+  handle(IPC.workspaceSetPermissionMode, async (_e, workspaceId: string, mode: PermissionMode) => {
+    await ctx.sessions.setPermissionMode(workspaceId, mode)
+    broadcastState()
+  })
 
-  ipcMain.handle(IPC.workspaceSetModel, (_e, workspaceId: string, model: string | null) => {
+  handle(IPC.workspaceSetModel, (_e, workspaceId: string, model: string | null) => {
     ctx.sessions.setModel(workspaceId, model)
     broadcastState()
   })
 
-  ipcMain.handle(
-    IPC.workspaceSetEffort,
-    (_e, workspaceId: string, effort: EffortSetting | null) => {
-      ctx.sessions.setEffort(workspaceId, effort)
-      broadcastState()
-    }
-  )
+  handle(IPC.workspaceSetEffort, (_e, workspaceId: string, effort: EffortSetting | null) => {
+    ctx.sessions.setEffort(workspaceId, effort)
+    broadcastState()
+  })
 
-  ipcMain.handle(IPC.workspaceSetFastMode, (_e, workspaceId: string, fastMode: boolean | null) => {
+  handle(IPC.workspaceSetFastMode, (_e, workspaceId: string, fastMode: boolean | null) => {
     ctx.sessions.setFastMode(workspaceId, fastMode)
     broadcastState()
   })
@@ -797,7 +780,7 @@ export function registerIpc(ctx: IpcContext): void {
    * (경고를 띄우지 않던 사이에 첫 메시지가 나갔거나) 다른 창에서 이미 대화가 시작됐을 수 있고,
    * 그때 그대로 바꿔 주면 사용자가 비용을 승낙한 적 없는 턴이 돈다.
    */
-  ipcMain.handle(
+  handle(
     IPC.workspaceSetAgentBackend,
     async (
       _e,
@@ -888,7 +871,7 @@ export function registerIpc(ctx: IpcContext): void {
     }
   )
 
-  ipcMain.handle(IPC.workspaceSetMuted, (_e, workspaceId: string, muted: boolean) => {
+  handle(IPC.workspaceSetMuted, (_e, workspaceId: string, muted: boolean) => {
     store.update((st) => {
       const w = st.workspaces.find((x) => x.id === workspaceId)
       if (w) w.muted = muted
@@ -904,7 +887,7 @@ export function registerIpc(ctx: IpcContext): void {
    * — 그래서 다음 전송 직전에 다시 열도록 예약한다([[agent/orchestrator]]). 배지가 약속하는
    * "다음 메시지부터" 가 그대로 참이 되고, 대화 맥락은 resume 으로 이어진다.
    */
-  ipcMain.handle(IPC.workspaceSetMultiAgent, (_e, workspaceId: string, multiAgent: boolean) => {
+  handle(IPC.workspaceSetMultiAgent, (_e, workspaceId: string, multiAgent: boolean) => {
     store.update((st) => {
       const w = st.workspaces.find((x) => x.id === workspaceId)
       if (w) w.multiAgent = multiAgent
@@ -915,7 +898,7 @@ export function registerIpc(ctx: IpcContext): void {
 
   // 표시 이름 수정: 사용자 override(displayName)만 바꾼다. worktree 이름(name)·브랜치는 그대로 둔다.
   // 빈 문자열을 넘기면 override 를 지워 기본 규칙(worktree 이름 → PR 제목)으로 되돌린다.
-  ipcMain.handle(IPC.workspaceRename, (_e, workspaceId: string, name: string) => {
+  handle(IPC.workspaceRename, (_e, workspaceId: string, name: string) => {
     const trimmed = name.trim()
     store.update((st) => {
       const w = st.workspaces.find((x) => x.id === workspaceId)
@@ -924,12 +907,12 @@ export function registerIpc(ctx: IpcContext): void {
     broadcastState()
   })
 
-  ipcMain.handle(IPC.workspaceRevealInFinder, (_e, workspaceId: string) => {
+  handle(IPC.workspaceRevealInFinder, (_e, workspaceId: string) => {
     const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
     if (ws) shell.openPath(ws.worktreePath)
   })
 
-  ipcMain.handle(IPC.workspaceOpenInEditor, (_e, workspaceId: string) => {
+  handle(IPC.workspaceOpenInEditor, (_e, workspaceId: string) => {
     const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
     if (!ws) return
 
@@ -946,7 +929,7 @@ export function registerIpc(ctx: IpcContext): void {
 
   // /memory — worktree 의 CLAUDE.md 를 에디터로 연다. 파일이 없으면 worktree 디렉토리를 열어
   // 사용자가 새로 만들 수 있게 한다(VS Code `code`, 실패 시 Finder 폴백).
-  ipcMain.handle(IPC.workspaceOpenMemory, (_e, workspaceId: string): { error?: string } => {
+  handle(IPC.workspaceOpenMemory, (_e, workspaceId: string): { error?: string } => {
     const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
     if (!ws) return { error: 'Workspace not found.' }
 
@@ -962,7 +945,7 @@ export function registerIpc(ctx: IpcContext): void {
   })
 
   // `#` 단축키 — 대화를 끊지 않고 CLAUDE.md 에 기억 한 줄을 덧붙인다.
-  ipcMain.handle(
+  handle(
     IPC.workspaceAddMemory,
     (
       _e,
@@ -977,34 +960,31 @@ export function registerIpc(ctx: IpcContext): void {
   )
 
   // /add-dir — worktree 밖 디렉토리를 작업 루트로 더한다(세션은 다음 메시지에서 새로 열린다).
-  ipcMain.handle(IPC.workspaceAddDir, (_e, workspaceId: string, dir: string) =>
+  handle(IPC.workspaceAddDir, (_e, workspaceId: string, dir: string) =>
     ctx.sessions.addDirectory(workspaceId, dir)
   )
 
   // ── 채팅 ───────────────────────────────────────────────────────────────
 
-  ipcMain.handle(
-    IPC.chatSend,
-    (_e, workspaceId: string, text: string, images?: ImageAttachment[]) => {
-      ctx.sessions.sendMessage(workspaceId, text, images)
-    }
-  )
+  handle(IPC.chatSend, (_e, workspaceId: string, text: string, images?: ImageAttachment[]) => {
+    ctx.sessions.sendMessage(workspaceId, text, images)
+  })
 
-  ipcMain.handle(IPC.chatInterrupt, (_e, workspaceId: string) => {
+  handle(IPC.chatInterrupt, (_e, workspaceId: string) => {
     return ctx.sessions.interrupt(workspaceId)
   })
 
-  ipcMain.handle(IPC.chatStopTask, (_e, workspaceId: string, taskId: string) => {
+  handle(IPC.chatStopTask, (_e, workspaceId: string, taskId: string) => {
     return ctx.sessions.stopTask(workspaceId, taskId)
   })
 
-  ipcMain.handle(IPC.chatSideQuestion, (_e, workspaceId: string, question: string) => {
+  handle(IPC.chatSideQuestion, (_e, workspaceId: string, question: string) => {
     ctx.sessions.sideQuestion(workspaceId, question)
   })
 
   // /clear — 세션을 정리하고 대화 맥락(sessionId)·트랜스크립트를 비운다(워크스페이스는 유지).
   // 다음 메시지는 빈 맥락의 새 세션으로 시작한다. 렌더러는 호출 후 자기 트랜스크립트를 비운다.
-  ipcMain.handle(IPC.chatClear, (_e, workspaceId: string) => {
+  handle(IPC.chatClear, (_e, workspaceId: string) => {
     ctx.sessions.clearSession(workspaceId)
     getTranscripts().remove(workspaceId)
     // 넘기기로 예약해 둔 대화가 방금 사라졌다 — 예약도 함께 지운다.
@@ -1015,14 +995,14 @@ export function registerIpc(ctx: IpcContext): void {
     broadcastState()
   })
 
-  ipcMain.handle(IPC.chatClearGoal, (_e, workspaceId: string) => {
+  handle(IPC.chatClearGoal, (_e, workspaceId: string) => {
     return ctx.sessions.clearGoal(workspaceId)
   })
 
   // 활성 워크스페이스의 누적 비용만 모아 돌려준다. 대화 기록을 렌더러로 옮기지 않기 위한
   // 통로다 — 화면에 필요한 건 숫자 하나인데, 예전에는 그것 때문에 전체 트랜스크립트가
   // 렌더러 힙에 올라간 채 매 토큰마다 다시 합산됐다.
-  ipcMain.handle(IPC.chatGetCosts, (): Record<string, number> => {
+  handle(IPC.chatGetCosts, (): Record<string, number> => {
     const costs: Record<string, number> = {}
     for (const w of store.getState().workspaces) {
       if (w.archived) continue
@@ -1031,14 +1011,14 @@ export function registerIpc(ctx: IpcContext): void {
     return costs
   })
 
-  ipcMain.handle(IPC.chatGetHistory, (_e, workspaceId: string) => {
+  handle(IPC.chatGetHistory, (_e, workspaceId: string) => {
     return getTranscripts().load(workspaceId)
   })
 
   // 워크스페이스를 가로지르는 대화 검색. 훑는 일은 전부 여기서 끝내고 렌더러에는 스니펫만
   // 넘긴다 — 워크스페이스가 수십 개일 때 원문을 넘기면 검색 한 번에 힙이 수백 MB 로 뛴다.
   // 아카이브된 워크스페이스도 기본 포함이다("그 결정 어디서 했더라" 의 답은 대개 거기 있다).
-  ipcMain.handle(
+  handle(
     IPC.chatSearch,
     (_e, query: string, opts?: { includeArchived?: boolean }): Promise<TranscriptSearchResult> => {
       const includeArchived = opts?.includeArchived ?? true
@@ -1050,16 +1030,24 @@ export function registerIpc(ctx: IpcContext): void {
     }
   )
 
-  ipcMain.handle(IPC.permissionRespond, (_e, requestId: string, decision: PermissionDecision) => {
+  handle(IPC.permissionRespond, (_e, requestId: string, decision: PermissionDecision) => {
     ctx.sessions.respondPermission(requestId, decision)
     // Wooi 도구 승인은 백엔드가 아니라 메인이 띄운다([[agent/tools/permission]]). requestId 는
     // 어디서 나왔는지 구분되지 않으므로 양쪽에 흘리고, 자기 것이 아니면 무시한다.
     resolveToolPermission(requestId, decision)
+    // 답한 요청은 더 이상 대기 중이 아니다 — 그 사실을 **방송**한다.
+    //
+    // 응답에는 전용 이벤트가 없어서 예전에는 원격 목록만 따로 지웠다. 그러면 폰에서 답했을 때
+    // 데스크톱 렌더러는 아무 신호도 못 받아 답한 권한 카드가 화면에 그대로 남는다(실기기 확인).
+    // 데스크톱에서 답할 때는 렌더러가 이미 낙관적으로 카드를 지우므로 이 방송이 무해한 no-op 이고,
+    // 폰에서 답할 때는 이것이 유일한 신호다. dispatch 를 지나면 원격 미러도 같은 tap 에서
+    // 대기 목록을 정리하므로(index.ts 의 mirrorToRemote), 정리 경로가 하나로 합쳐진다.
+    dispatch(IPC.evtPermissionCancel, requestId)
   })
 
   // ── 스크립트 ───────────────────────────────────────────────────────────
 
-  ipcMain.handle(IPC.scriptRun, async (_e, workspaceId: string, scriptId: string) => {
+  handle(IPC.scriptRun, async (_e, workspaceId: string, scriptId: string) => {
     const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
     if (!ws) return
     const repo = repoFor(ws.repoId)
@@ -1098,15 +1086,15 @@ export function registerIpc(ctx: IpcContext): void {
     ctx.scripts.run(workspaceId, scriptId, command, ws.worktreePath, env)
   })
 
-  ipcMain.handle(IPC.scriptStop, (_e, workspaceId: string, scriptId: string) => {
+  handle(IPC.scriptStop, (_e, workspaceId: string, scriptId: string) => {
     ctx.scripts.stop(workspaceId, scriptId)
   })
 
-  ipcMain.handle(IPC.scriptGetStatus, (_e, workspaceId: string) => {
+  handle(IPC.scriptGetStatus, (_e, workspaceId: string) => {
     return ctx.scripts.getStatus(workspaceId)
   })
 
-  ipcMain.handle(IPC.scriptGetOutput, (_e, workspaceId: string, scriptId: string) => {
+  handle(IPC.scriptGetOutput, (_e, workspaceId: string, scriptId: string) => {
     return ctx.scripts.getOutput(workspaceId, scriptId)
   })
 
@@ -1124,20 +1112,20 @@ export function registerIpc(ctx: IpcContext): void {
     return true
   }
 
-  ipcMain.handle(IPC.previewSetUrl, (_e, workspaceId: string, url: string) => {
+  handle(IPC.previewSetUrl, (_e, workspaceId: string, url: string) => {
     rememberPreviewUrl(workspaceId, url)
   })
 
   // "Open in Preview" — 주소를 기억하고 모든 창에 방송한다. 스크립트 패널과 Preview 탭이 서로
   // 다른 창에 떠 있을 수 있어(둘 다 분리 가능) renderer 끼리 직접 이야기할 방법이 없다.
-  ipcMain.handle(IPC.previewOpen, (_e, workspaceId: string, url: string) => {
+  handle(IPC.previewOpen, (_e, workspaceId: string, url: string) => {
     rememberPreviewUrl(workspaceId, url)
     dispatch(IPC.evtPreviewOpen, { workspaceId, url })
   })
 
   // 캡처는 main 이 한다(renderer 에는 webContents 가 없다). 찍은 이미지는 호출자에게 돌려주지
   // 않고 방송한다 — 컴포저는 메인 창에만 있고, 캡처를 누른 창은 분리된 work 창일 수 있다.
-  ipcMain.handle(IPC.previewCapture, async (_e, workspaceId: string, webContentsId: number) => {
+  handle(IPC.previewCapture, async (_e, workspaceId: string, webContentsId: number) => {
     const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
     if (!ws) return { error: 'That workspace is gone.' }
     const { image, error } = await capturePreview(ws.previewUrl ?? '', webContentsId)
@@ -1148,7 +1136,7 @@ export function registerIpc(ctx: IpcContext): void {
 
   // 요소 픽커. 사용자가 고를 때까지(또는 취소·타임아웃까지) 이 핸들러가 매달려 있는다 —
   // 렌더러는 그동안 "고르는 중" 을 보여 주고, 결과는 캡처와 같은 우편함으로 흘러간다.
-  ipcMain.handle(IPC.previewPickElement, async (_e, workspaceId: string, webContentsId: number) => {
+  handle(IPC.previewPickElement, async (_e, workspaceId: string, webContentsId: number) => {
     const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
     if (!ws) return { error: 'That workspace is gone.' }
     const { attachment, error } = await pickPreviewElement(ws.previewUrl ?? '', webContentsId)
@@ -1157,29 +1145,27 @@ export function registerIpc(ctx: IpcContext): void {
     return {}
   })
 
-  ipcMain.handle(IPC.previewCancelPick, (_e, webContentsId: number) => {
+  handle(IPC.previewCancelPick, (_e, webContentsId: number) => {
     cancelPreviewPick(webContentsId)
   })
 
   // 콘솔·네트워크 문제 수집. 목록은 여기서 당겨 가고, 개수만 evtPreviewIssues 로 방송된다
   // — 매 콘솔 줄을 IPC 로 밀면 폭주하는 dev 로그가 메인 힙을 밀어 올린다([[main/previewIssues]]).
-  ipcMain.handle(IPC.previewWatchIssues, (_e, workspaceId: string, webContentsId: number) => {
+  handle(IPC.previewWatchIssues, (_e, workspaceId: string, webContentsId: number) => {
     watchPreviewIssues(workspaceId, webContentsId)
   })
 
-  ipcMain.handle(IPC.previewUnwatchIssues, (_e, webContentsId: number) => {
+  handle(IPC.previewUnwatchIssues, (_e, webContentsId: number) => {
     previewIssues().unwatch(webContentsId)
   })
 
-  ipcMain.handle(IPC.previewListIssues, (_e, workspaceId: string) =>
-    previewIssues().list(workspaceId)
-  )
+  handle(IPC.previewListIssues, (_e, workspaceId: string) => previewIssues().list(workspaceId))
 
-  ipcMain.handle(IPC.previewClearIssues, (_e, workspaceId: string) => {
+  handle(IPC.previewClearIssues, (_e, workspaceId: string) => {
     previewIssues().clear(workspaceId)
   })
 
-  ipcMain.handle(IPC.previewSendIssues, (_e, workspaceId: string, issueIds: string[]) => {
+  handle(IPC.previewSendIssues, (_e, workspaceId: string, issueIds: string[]) => {
     const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
     if (!ws) return { error: 'That workspace is gone.' }
     const wanted = new Set(issueIds)
@@ -1196,27 +1182,27 @@ export function registerIpc(ctx: IpcContext): void {
 
   // ── 분리한 패널 창 ─────────────────────────────────────────────────────
 
-  ipcMain.handle(IPC.paneOpen, (_e, kind: PaneKind, workspaceId: string | null) => {
+  handle(IPC.paneOpen, (_e, kind: PaneKind, workspaceId: string | null) => {
     ctx.panes.open(kind, workspaceId)
   })
 
-  ipcMain.handle(IPC.paneClose, (_e, kind: PaneKind) => {
+  handle(IPC.paneClose, (_e, kind: PaneKind) => {
     ctx.panes.close(kind)
   })
 
-  ipcMain.handle(IPC.paneFocus, (_e, kind: PaneKind) => {
+  handle(IPC.paneFocus, (_e, kind: PaneKind) => {
     ctx.panes.focus(kind)
   })
 
-  ipcMain.handle(IPC.paneGetState, () => ctx.panes.state())
+  handle(IPC.paneGetState, () => ctx.panes.state())
 
-  ipcMain.handle(IPC.paneSetWorkspace, (_e, workspaceId: string | null) => {
+  handle(IPC.paneSetWorkspace, (_e, workspaceId: string | null) => {
     ctx.panes.setWorkspace(workspaceId)
   })
 
   // 분리한 창에는 리포 설정 모달이 없다(설정은 메인 창의 것이다). 요청을 메인 창으로 넘기고
   // 그 창을 앞으로 가져와, 보조 모니터에서 누른 버튼이 아무 일도 안 일어난 것처럼 보이지 않게 한다.
-  ipcMain.handle(IPC.paneOpenRepoSettings, (_e, repoId: string) => {
+  handle(IPC.paneOpenRepoSettings, (_e, repoId: string) => {
     const win = ctx.getWindow()
     if (!win || win.isDestroyed()) return
     if (win.isMinimized()) win.restore()
@@ -1227,41 +1213,38 @@ export function registerIpc(ctx: IpcContext): void {
 
   // ── git ────────────────────────────────────────────────────────────────
 
-  ipcMain.handle(IPC.gitStatus, async (_e, workspaceId: string) => {
+  handle(IPC.gitStatus, async (_e, workspaceId: string) => {
     const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
     if (!ws) return null
     return getStatus(ws.worktreePath, ws.baseBranch).catch(() => null)
   })
 
-  ipcMain.handle(IPC.gitFetch, async (_e, repoId: string) => {
+  handle(IPC.gitFetch, async (_e, repoId: string) => {
     const repo = store.getState().repos.find((r) => r.id === repoId)
     if (!repo) return
     await fetchRemoteForRepo(repo.path, repo.id)
   })
 
-  ipcMain.handle(IPC.gitDiff, async (_e, workspaceId: string) => {
+  handle(IPC.gitDiff, async (_e, workspaceId: string) => {
     const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
     if (!ws || ws.archived) return null
     return getDiff(ws.worktreePath, ws.baseBranch).catch(() => null)
   })
 
   // base 브랜치를 현재 브랜치로 머지해 드리프트를 해소한다(충돌 시 워킹트리에 충돌이 남는다).
-  ipcMain.handle(
-    IPC.gitUpdateFromBase,
-    async (_e, workspaceId: string): Promise<UpdateFromBaseResult> => {
-      const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
-      if (!ws || ws.archived) {
-        return { status: 'error', baseBranch: '', message: 'Workspace not found.' }
-      }
-      return updateFromBase(ws.worktreePath, ws.baseBranch).catch((err) => ({
-        status: 'error' as const,
-        baseBranch: ws.baseBranch,
-        message: err instanceof Error ? err.message : String(err)
-      }))
+  handle(IPC.gitUpdateFromBase, async (_e, workspaceId: string): Promise<UpdateFromBaseResult> => {
+    const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
+    if (!ws || ws.archived) {
+      return { status: 'error', baseBranch: '', message: 'Workspace not found.' }
     }
-  )
+    return updateFromBase(ws.worktreePath, ws.baseBranch).catch((err) => ({
+      status: 'error' as const,
+      baseBranch: ws.baseBranch,
+      message: err instanceof Error ? err.message : String(err)
+    }))
+  })
 
-  ipcMain.handle(IPC.gitAbortMerge, async (_e, workspaceId: string) => {
+  handle(IPC.gitAbortMerge, async (_e, workspaceId: string) => {
     const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
     if (!ws || ws.archived) return
     await abortMerge(ws.worktreePath).catch(() => {})
@@ -1335,7 +1318,7 @@ export function registerIpc(ctx: IpcContext): void {
   }
 
   // stacked 브랜치를 최신 base 위로 rebase·force-push 한다. 모델 B 스택이면 전체를 아래→위로 순차 처리.
-  ipcMain.handle(IPC.workspaceRestack, async (_e, workspaceId: string): Promise<RestackResult> => {
+  handle(IPC.workspaceRestack, async (_e, workspaceId: string): Promise<RestackResult> => {
     const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
     if (!ws || ws.archived) {
       return { status: 'error', baseBranch: '', message: 'Workspace not found.' }
@@ -1373,7 +1356,7 @@ export function registerIpc(ctx: IpcContext): void {
   })
 
   // 모델 B: worktree 내부 스택의 다른 브랜치로 체크아웃 전환한다(clean 워킹트리 필요).
-  ipcMain.handle(
+  handle(
     IPC.workspaceSwitchBranch,
     async (_e, workspaceId: string, branch: string): Promise<{ error?: string }> => {
       const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
@@ -1731,7 +1714,7 @@ export function registerIpc(ctx: IpcContext): void {
     if (after) await syncPrBase(after, after.baseBranch)
   }
 
-  ipcMain.handle(IPC.prStatus, async (_e, workspaceId: string) => {
+  handle(IPC.prStatus, async (_e, workspaceId: string) => {
     const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
     if (!ws || ws.archived) return null
     // 실제 git/PR 상태에서 현재 브랜치·스택을 먼저 재동기화한다(에이전트가 직접 만든 스택도 인식).
@@ -1742,11 +1725,14 @@ export function registerIpc(ctx: IpcContext): void {
     const after = store.getState().workspaces.find((w) => w.id === workspaceId) ?? ws
     const status = await getWorkspacePrStatus(after, after.branch)
     if (status) persistPrNumber(workspaceId, after.branch, status.number)
+    // 원격 미러는 동기라 gh 를 부를 수 없다. 렌더러가 이미 시킨 이 조회의 답을 적어 두면
+    // 추가 비용 없이 폰도 같은 PR 색을 칠할 수 있다.
+    rememberPrStatus(workspaceId, status)
     return status
   })
 
   // 모델 B 스택 조망: 현재 체크아웃되지 않은 브랜치의 PR 상태도 조회한다.
-  ipcMain.handle(IPC.prStatusForBranch, async (_e, workspaceId: string, branch: string) => {
+  handle(IPC.prStatusForBranch, async (_e, workspaceId: string, branch: string) => {
     const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
     if (!ws || ws.archived) return null
     const status = await getPrStatus(ws.worktreePath, branch).catch(() => null)
@@ -1754,7 +1740,7 @@ export function registerIpc(ctx: IpcContext): void {
     return status
   })
 
-  ipcMain.handle(
+  handle(
     IPC.prCreate,
     async (_e, workspaceId: string, branch?: string): Promise<{ error?: string }> => {
       const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
@@ -1916,7 +1902,7 @@ export function registerIpc(ctx: IpcContext): void {
    * 자식 브랜치의 리모트 히스토리를 되쓰는 force-push 까지 나가 버린다.
    * 그래서 병합 후에는 재동기화만 돌려 캐스케이드 계획을 띄우고, 실행은 사용자 승인에 맡긴다.
    */
-  ipcMain.handle(
+  handle(
     IPC.prMerge,
     async (_e, workspaceId: string, method: PrMergeMethod): Promise<{ error?: string }> => {
       const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
@@ -1937,7 +1923,7 @@ export function registerIpc(ctx: IpcContext): void {
    * 외부(gh CLI·GitHub 웹)에서 병합된 부모를 감지해 만들어 둔 계획을 사용자 승인 후 실행한다.
    * 이 경로에서만 force-push 가 나가므로, 승인 없이는 절대 호출되지 않는다.
    */
-  ipcMain.handle(
+  handle(
     IPC.stackSyncApply,
     async (_e, workspaceId: string): Promise<{ error?: string; cascade?: StackCascadeResult }> => {
       const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
@@ -1975,7 +1961,7 @@ export function registerIpc(ctx: IpcContext): void {
    * 계획을 무시한다. 어떤 병합을 무시했는지 기억해 두지 않으면 다음 재동기화가 같은 병합을 다시
    * 감지해 배너가 계속 뜬다("무시" = 이 병합은 내가 알아서 한다는 뜻).
    */
-  ipcMain.handle(IPC.stackSyncDismiss, async (_e, workspaceId: string): Promise<void> => {
+  handle(IPC.stackSyncDismiss, async (_e, workspaceId: string): Promise<void> => {
     store.update((st) => {
       const w = st.workspaces.find((x) => x.id === workspaceId)
       if (w?.stackSync) w.stackSyncDismissed = w.stackSync.mergedBranch
@@ -1988,34 +1974,31 @@ export function registerIpc(ctx: IpcContext): void {
    * 리타겟은 GitHub 쪽 상태만 바꾸고 커밋 히스토리는 건드리지 않는다 — force-push 가 없으므로
    * 캐스케이드와 달리 되돌리기 쉽다. 그래도 남의 PR 을 바꾸는 일이라 사용자 승인 후에만 돈다.
    */
-  ipcMain.handle(
-    IPC.stackBaseRetarget,
-    async (_e, workspaceId: string): Promise<{ error?: string }> => {
-      const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
-      if (!ws || ws.archived) return { error: 'Workspace not found.' }
-      const m = ws.baseMismatch
-      if (!m) return { error: 'Nothing to retarget.' }
-      const res = await retargetPr(ws.worktreePath, m.expectedBase, String(m.prNumber)).catch(
-        (err) => ({ error: err instanceof Error ? err.message : String(err) })
-      )
-      if (res.error) return res
-      store.update((st) => {
-        const w = st.workspaces.find((x) => x.id === workspaceId)
-        if (!w) return
-        w.baseBranch = m.expectedBase
-        w.baseMismatch = null
-      })
-      broadcastState()
-      await syncPrBase(ws, m.expectedBase)
-      return {}
-    }
-  )
+  handle(IPC.stackBaseRetarget, async (_e, workspaceId: string): Promise<{ error?: string }> => {
+    const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
+    if (!ws || ws.archived) return { error: 'Workspace not found.' }
+    const m = ws.baseMismatch
+    if (!m) return { error: 'Nothing to retarget.' }
+    const res = await retargetPr(ws.worktreePath, m.expectedBase, String(m.prNumber)).catch(
+      (err) => ({ error: err instanceof Error ? err.message : String(err) })
+    )
+    if (res.error) return res
+    store.update((st) => {
+      const w = st.workspaces.find((x) => x.id === workspaceId)
+      if (!w) return
+      w.baseBranch = m.expectedBase
+      w.baseMismatch = null
+    })
+    broadcastState()
+    await syncPrBase(ws, m.expectedBase)
+    return {}
+  })
 
   /**
    * 어긋난 base 를 사용자가 의도한 것으로 받아들인다 — 그 base 를 기록상의 base 로 채택하고,
    * 같은 base 로는 다시 묻지 않는다. 부모 링크는 그대로 둔다(사이드바의 스택 묶음은 유지).
    */
-  ipcMain.handle(IPC.stackBaseKeep, async (_e, workspaceId: string): Promise<void> => {
+  handle(IPC.stackBaseKeep, async (_e, workspaceId: string): Promise<void> => {
     const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
     const kept = ws?.baseMismatch?.prBase
     if (!ws || !kept) return
@@ -2032,7 +2015,7 @@ export function registerIpc(ctx: IpcContext): void {
     await syncPrBase(ws, kept)
   })
 
-  ipcMain.handle(IPC.prClose, async (_e, workspaceId: string): Promise<{ error?: string }> => {
+  handle(IPC.prClose, async (_e, workspaceId: string): Promise<{ error?: string }> => {
     const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
     if (!ws || ws.archived) return { error: 'Workspace not found.' }
     return closePr(ws.worktreePath).catch((err) => ({
@@ -2040,7 +2023,7 @@ export function registerIpc(ctx: IpcContext): void {
     }))
   })
 
-  ipcMain.handle(IPC.prReopen, async (_e, workspaceId: string): Promise<{ error?: string }> => {
+  handle(IPC.prReopen, async (_e, workspaceId: string): Promise<{ error?: string }> => {
     const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
     if (!ws || ws.archived) return { error: 'Workspace not found.' }
     return reopenPr(ws.worktreePath).catch((err) => ({
@@ -2048,7 +2031,7 @@ export function registerIpc(ctx: IpcContext): void {
     }))
   })
 
-  ipcMain.handle(IPC.prReady, async (_e, workspaceId: string): Promise<{ error?: string }> => {
+  handle(IPC.prReady, async (_e, workspaceId: string): Promise<{ error?: string }> => {
     const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
     if (!ws || ws.archived) return { error: 'Workspace not found.' }
     return markPrReady(ws.worktreePath).catch((err) => ({
@@ -2057,13 +2040,13 @@ export function registerIpc(ctx: IpcContext): void {
   })
 
   // 편집 모달을 열 때만 제목·본문 원문을 읽는다(상태 폴링에 본문을 싣지 않기 위해).
-  ipcMain.handle(IPC.prEditable, async (_e, workspaceId: string) => {
+  handle(IPC.prEditable, async (_e, workspaceId: string) => {
     const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
     if (!ws || ws.archived) return null
     return getPrEditable(ws.worktreePath).catch(() => null)
   })
 
-  ipcMain.handle(
+  handle(
     IPC.prEdit,
     async (
       _e,
@@ -2084,7 +2067,7 @@ export function registerIpc(ctx: IpcContext): void {
   )
 
   // PR 의 CI 체크. prStatus 와 동일하게 worktree 의 현재 브랜치 PR 을 기준으로 한다.
-  ipcMain.handle(IPC.prChecks, async (_e, workspaceId: string) => {
+  handle(IPC.prChecks, async (_e, workspaceId: string) => {
     const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
     if (!ws || ws.archived) return null
     return getPrChecks(ws.worktreePath).catch(() => null)
@@ -2104,14 +2087,14 @@ export function registerIpc(ctx: IpcContext): void {
     void reviewManager.disposeWorktreesOnQuit()
   })
 
-  ipcMain.handle(IPC.reviewListOpenPrs, async (_e, repoId: string) => {
+  handle(IPC.reviewListOpenPrs, async (_e, repoId: string) => {
     const repo = repoFor(repoId)
     if (!repo) return []
     return listOpenPrsForReview(repo.path).catch(() => [])
   })
 
   // 스택 멤버십은 review/stackResolve 만 읽는다 — 여기서는 그 결과를 넘겨주기만 한다.
-  ipcMain.handle(IPC.reviewResolveStack, async (_e, repoId: string, prNumber: number) => {
+  handle(IPC.reviewResolveStack, async (_e, repoId: string, prNumber: number) => {
     const repo = repoFor(repoId)
     if (!repo) return { prNumbers: [prNumber] }
     // GitHub 스택을 먼저 묻는다 — 워크스페이스 흡수 경로와 같은 우선순위다. 스택이 없는
@@ -2123,7 +2106,7 @@ export function registerIpc(ctx: IpcContext): void {
     return { prNumbers: resolveStackForPr(prNumber, openPrs, ghStack).prNumbers }
   })
 
-  ipcMain.handle(
+  handle(
     IPC.reviewStart,
     async (
       _e,
@@ -2155,41 +2138,39 @@ export function registerIpc(ctx: IpcContext): void {
     }
   )
 
-  ipcMain.handle(IPC.reviewCancel, (_e, reviewId: string) => {
+  handle(IPC.reviewCancel, (_e, reviewId: string) => {
     reviewManager.cancel(reviewId)
   })
 
-  ipcMain.handle(IPC.reviewPost, async (_e, reviewId: string, findingId: string, body: string) =>
+  handle(IPC.reviewPost, async (_e, reviewId: string, findingId: string, body: string) =>
     reviewManager.post(reviewId, findingId, body)
   )
 
-  ipcMain.handle(IPC.reviewDismiss, (_e, reviewId: string, findingId: string) =>
+  handle(IPC.reviewDismiss, (_e, reviewId: string, findingId: string) =>
     reviewManager.dismissFinding(reviewId, findingId)
   )
 
-  ipcMain.handle(IPC.reviewClose, async (_e, reviewId: string) => {
+  handle(IPC.reviewClose, async (_e, reviewId: string) => {
     await reviewManager.remove(reviewId)
   })
 
-  ipcMain.handle(IPC.reviewRemoveArchived, () => reviewManager.removeArchived())
+  handle(IPC.reviewRemoveArchived, () => reviewManager.removeArchived())
 
-  ipcMain.handle(IPC.reviewLoad, (_e, reviewId: string) => reviewManager.loadBundle(reviewId))
+  handle(IPC.reviewLoad, (_e, reviewId: string) => reviewManager.loadBundle(reviewId))
 
-  ipcMain.handle(
+  handle(
     IPC.reviewSetFileViewed,
     (_e, reviewId: string, path: string, viewed: boolean, prNumber?: number) =>
       reviewManager.setFileViewed(reviewId, path, viewed, prNumber)
   )
 
-  ipcMain.handle(IPC.reviewArchive, async (_e, reviewId: string) => {
+  handle(IPC.reviewArchive, async (_e, reviewId: string) => {
     await reviewManager.archive(reviewId)
   })
 
-  ipcMain.handle(IPC.reviewUnarchive, async (_e, reviewId: string) =>
-    reviewManager.unarchive(reviewId)
-  )
+  handle(IPC.reviewUnarchive, async (_e, reviewId: string) => reviewManager.unarchive(reviewId))
 
-  ipcMain.handle(
+  handle(
     IPC.reviewSubmit,
     async (
       _e,
@@ -2198,19 +2179,19 @@ export function registerIpc(ctx: IpcContext): void {
     ) => reviewManager.submitReview(reviewId, entries)
   )
 
-  ipcMain.handle(IPC.reviewPoll, async (_e, reviewId: string) => {
+  handle(IPC.reviewPoll, async (_e, reviewId: string) => {
     await reviewManager.pollActivity(reviewId)
   })
 
-  ipcMain.handle(IPC.reviewMarkSeen, (_e, reviewId: string) => {
+  handle(IPC.reviewMarkSeen, (_e, reviewId: string) => {
     reviewManager.markSeen(reviewId)
   })
 
-  ipcMain.handle(IPC.reviewReply, async (_e, reviewId: string, commentId: number, body: string) =>
+  handle(IPC.reviewReply, async (_e, reviewId: string, commentId: number, body: string) =>
     reviewManager.replyToThread(reviewId, commentId, body)
   )
 
-  ipcMain.handle(IPC.reviewFollowUp, async (_e, reviewId: string, text: string) => {
+  handle(IPC.reviewFollowUp, async (_e, reviewId: string, text: string) => {
     const state = store.getState()
     // 후속 턴은 리뷰를 시작한 그 에이전트로 이어진다 — 세션 id 가 그 백엔드에서만 유효하다.
     const review = state.reviews.find((r) => r.id === reviewId)
@@ -2224,25 +2205,25 @@ export function registerIpc(ctx: IpcContext): void {
     })
   })
 
-  ipcMain.handle(IPC.openExternal, (_e, url: string) => {
+  handle(IPC.openExternal, (_e, url: string) => {
     if (/^https?:\/\//.test(url)) shell.openExternal(url)
   })
 
   // ── 파일 브라우저 (All files 탭) ─────────────────────────────────────────
 
-  ipcMain.handle(IPC.fsList, (_e, workspaceId: string, relPath: string) => {
+  handle(IPC.fsList, (_e, workspaceId: string, relPath: string) => {
     const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
     if (!ws || ws.archived) return []
     return listDir(ws.worktreePath, relPath ?? '').catch(() => [])
   })
 
-  ipcMain.handle(IPC.fsRead, (_e, workspaceId: string, relPath: string) => {
+  handle(IPC.fsRead, (_e, workspaceId: string, relPath: string) => {
     const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
     if (!ws || ws.archived) return null
     return readFileInRoot(ws.worktreePath, relPath).catch(() => null)
   })
 
-  ipcMain.handle(IPC.fsSearch, (_e, workspaceId: string, query: string) => {
+  handle(IPC.fsSearch, (_e, workspaceId: string, query: string) => {
     const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
     if (!ws || ws.archived) return []
     return searchFiles(ws.worktreePath, query ?? '').catch(() => [])
@@ -2251,23 +2232,21 @@ export function registerIpc(ctx: IpcContext): void {
   // ── 에이전트 카탈로그 (렌더러의 선택지 UI 근거) ──────────────────────────
 
   // 백엔드 메타 + 가용성. 렌더러는 이 값으로 권한 모드·effort 선택지와 에이전트 피커를 그린다.
-  ipcMain.handle(IPC.agentListBackends, () => ctx.sessions.listBackends())
+  handle(IPC.agentListBackends, () => ctx.sessions.listBackends())
 
   // 백엔드별 모델 목록. Claude 는 정적, Codex 는 app-server 의 model/list 조회라 비동기·동적이다.
-  ipcMain.handle(IPC.agentListModels, (_e, backendId: AgentBackendId) =>
-    ctx.sessions.listModels(backendId)
-  )
+  handle(IPC.agentListModels, (_e, backendId: AgentBackendId) => ctx.sessions.listModels(backendId))
 
   // ── 슬래시 명령 목록 (입력창 자동완성) ───────────────────────────────────
 
-  ipcMain.handle(IPC.commandsList, (_e, workspaceId: string) => {
+  handle(IPC.commandsList, (_e, workspaceId: string) => {
     const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
     if (!ws) return []
     return ctx.sessions.listCommands(ws.id, ws.worktreePath).catch(() => [])
   })
 
   // 인터랙티브 명령(/mcp·/context·/reload-plugins 등) — 결과 카드용 데이터를 조회한다.
-  ipcMain.handle(
+  handle(
     IPC.commandRun,
     async (
       _e,
@@ -2286,7 +2265,7 @@ export function registerIpc(ctx: IpcContext): void {
   )
 
   // /mcp 패널의 서버별 동작(재연결·활성/비활성) — 적용 후 갱신된 서버 목록을 돌려준다.
-  ipcMain.handle(
+  handle(
     IPC.mcpAction,
     async (
       _e,
@@ -2311,7 +2290,7 @@ export function registerIpc(ctx: IpcContext): void {
    * 대신 실행할 수 있는 것은 [[shared/wooiCommands]] 의 `direct` 목록으로 닫혀 있고, 인자도
    * 그 파서를 통과한 것만 도구에 닿는다. 렌더러가 임의의 도구 이름을 흘려보낼 수 없다.
    */
-  ipcMain.handle(
+  handle(
     IPC.wooiCommandRun,
     async (
       _e,
@@ -2336,7 +2315,7 @@ export function registerIpc(ctx: IpcContext): void {
   )
 
   // /rewind 패널 — 고른 체크포인트(사용자 메시지 UUID)로 추적된 파일을 되돌린다.
-  ipcMain.handle(
+  handle(
     IPC.commandRewindAction,
     async (
       _e,
@@ -2358,24 +2337,21 @@ export function registerIpc(ctx: IpcContext): void {
    * agentId가 있으면 해당 backend만 갱신하고, 호출한 renderer가 방송 유실 없이 반영하도록
    * 최신 AppState를 직접 반환한다.
    */
-  ipcMain.handle(
-    IPC.rateLimitsRefresh,
-    async (_event, agentId?: AgentBackendId): Promise<AppState> => {
-      try {
-        if (agentId) await ctx.sessions.refreshRateLimitsFor(agentId, true)
-        else await ctx.sessions.refreshRateLimits(true)
-      } catch (err) {
-        log.error('rate limits: manual refresh failed:', err)
-      }
-      // 방송은 다른 창을 위한 push 경로로 유지하되, 요청한 renderer에는 최신 상태를 직접
-      // 반환한다. 그래야 초기 구독 전 이벤트 유실이나 동시 갱신 순서와 무관하게 화면이 따라온다.
-      return store.getState()
+  handle(IPC.rateLimitsRefresh, async (_event, agentId?: AgentBackendId): Promise<AppState> => {
+    try {
+      if (agentId) await ctx.sessions.refreshRateLimitsFor(agentId, true)
+      else await ctx.sessions.refreshRateLimits(true)
+    } catch (err) {
+      log.error('rate limits: manual refresh failed:', err)
     }
-  )
+    // 방송은 다른 창을 위한 push 경로로 유지하되, 요청한 renderer에는 최신 상태를 직접
+    // 반환한다. 그래야 초기 구독 전 이벤트 유실이나 동시 갱신 순서와 무관하게 화면이 따라온다.
+    return store.getState()
+  })
 
   // ── 인터랙티브 터미널 (worktree PTY) ─────────────────────────────────────
 
-  ipcMain.handle(
+  handle(
     IPC.terminalStart,
     (_e, workspaceId: string, terminalId: string, cols: number, rows: number) => {
       const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
@@ -2384,63 +2360,59 @@ export function registerIpc(ctx: IpcContext): void {
     }
   )
 
-  ipcMain.handle(IPC.terminalInput, (_e, workspaceId: string, terminalId: string, data: string) => {
+  handle(IPC.terminalInput, (_e, workspaceId: string, terminalId: string, data: string) => {
     ctx.terminals.write(workspaceId, terminalId, data)
   })
 
-  ipcMain.handle(IPC.terminalRunCommand, (_e, workspaceId: string, command: string) => {
+  handle(IPC.terminalRunCommand, (_e, workspaceId: string, command: string) => {
     const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
     if (!ws || ws.archived) return
     ctx.terminals.runCommand(workspaceId, ws.worktreePath, command)
   })
 
-  ipcMain.handle(IPC.terminalExec, (_e, workspaceId: string, command: string) => {
+  handle(IPC.terminalExec, (_e, workspaceId: string, command: string) => {
     const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
     if (!ws || ws.archived) return
     ctx.terminals.execInline(workspaceId, ws.worktreePath, command)
   })
 
-  ipcMain.handle(IPC.terminalKillInline, (_e, workspaceId: string, itemId: string) => {
+  handle(IPC.terminalKillInline, (_e, workspaceId: string, itemId: string) => {
     ctx.terminals.killInline(workspaceId, itemId)
   })
 
-  ipcMain.handle(
+  handle(
     IPC.terminalResize,
     (_e, workspaceId: string, terminalId: string, cols: number, rows: number) => {
       ctx.terminals.resize(workspaceId, terminalId, cols, rows)
     }
   )
 
-  ipcMain.handle(IPC.terminalKill, (_e, workspaceId: string) => {
+  handle(IPC.terminalKill, (_e, workspaceId: string) => {
     ctx.terminals.disposeWorkspace(workspaceId)
   })
 
   // 탭 구성 — 변경은 메인이 소유하고(단일 진실 원천) 결과를 모든 창에 방송한다.
   // 요청한 창에는 방송과 별개로 최신 구성을 곧바로 돌려줘, 왕복 순서와 무관하게 화면이 따라온다.
 
-  ipcMain.handle(IPC.terminalTabs, (_e, workspaceId: string) => ctx.terminals.tabs(workspaceId))
+  handle(IPC.terminalTabs, (_e, workspaceId: string) => ctx.terminals.tabs(workspaceId))
 
-  ipcMain.handle(IPC.terminalTabCreate, (_e, workspaceId: string) =>
-    ctx.terminals.createTab(workspaceId)
-  )
+  handle(IPC.terminalTabCreate, (_e, workspaceId: string) => ctx.terminals.createTab(workspaceId))
 
-  ipcMain.handle(IPC.terminalTabClose, (_e, workspaceId: string, terminalId: string) =>
+  handle(IPC.terminalTabClose, (_e, workspaceId: string, terminalId: string) =>
     ctx.terminals.closeTab(workspaceId, terminalId)
   )
 
-  ipcMain.handle(
-    IPC.terminalTabRename,
-    (_e, workspaceId: string, terminalId: string, title: string) =>
-      ctx.terminals.renameTab(workspaceId, terminalId, title)
+  handle(IPC.terminalTabRename, (_e, workspaceId: string, terminalId: string, title: string) =>
+    ctx.terminals.renameTab(workspaceId, terminalId, title)
   )
 
-  ipcMain.handle(IPC.terminalTabSelect, (_e, workspaceId: string, terminalId: string) =>
+  handle(IPC.terminalTabSelect, (_e, workspaceId: string, terminalId: string) =>
     ctx.terminals.selectTab(workspaceId, terminalId)
   )
 
   // ── Dock 미확인 배지 ─────────────────────────────────────────────────────
 
-  ipcMain.handle(IPC.appSetBadge, (_e, count: number) => {
+  handle(IPC.appSetBadge, (_e, count: number) => {
     // 설치 빌드에서 app.setBadgeCount 는 Dock 배지를 그리지 않는 것으로 확인돼(실험: 같은
     // 시점에 app.dock.setBadge 는 보이고 setBadgeCount 는 안 보임), NSDockTile 라벨을 직접
     // 세팅한다. 0 이면 빈 문자열로 지운다. dock 은 macOS 전용이라 다른 OS 는 no-op.
@@ -2450,9 +2422,9 @@ export function registerIpc(ctx: IpcContext): void {
 
   // ── 설정 ───────────────────────────────────────────────────────────────
 
-  ipcMain.handle(IPC.appGetState, () => store.getState())
+  handle(IPC.appGetState, () => store.getState())
 
-  ipcMain.handle(IPC.settingsUpdate, (_e, patch: Partial<AppSettings>) => {
+  handle(IPC.settingsUpdate, (_e, patch: Partial<AppSettings>) => {
     store.update((st) => Object.assign(st.settings, patch))
     if (patch.autoResumeAfterRateLimit === false) ctx.sessions.cancelAllRateLimitResumes()
     broadcastState()
@@ -2462,11 +2434,11 @@ export function registerIpc(ctx: IpcContext): void {
 
   // 승계 목록(~/.claude.json)은 앱 상태가 아니라 남의 파일이라 방송에 실을 수 없다 — 설정 화면이
   // 열릴 때마다 읽는다. project 항목은 등록된 리포 경로로 걸러야 우리가 실제로 주입하는 것만 남는다.
-  ipcMain.handle(IPC.mcpInventory, () => mcpInventory(store.getState().repos.map((r) => r.path)))
-  ipcMain.handle(IPC.mcpExternalSetupCommand, () => externalClaudeMcpSetupCommand())
+  handle(IPC.mcpInventory, () => mcpInventory(store.getState().repos.map((r) => r.path)))
+  handle(IPC.mcpExternalSetupCommand, () => externalClaudeMcpSetupCommand())
 
   // 승계 항목의 편집 경로는 "그 파일을 여세요" 하나뿐이다(우리는 쓰지 않는다).
-  ipcMain.handle(IPC.mcpOpenConfig, async () => {
+  handle(IPC.mcpOpenConfig, async () => {
     const path = claudeConfigPath()
     // 파일이 없으면 열 것도 없으므로 담긴 디렉터리를 연다 — 사용자가 거기서 새로 만들 수 있다.
     await shell.openPath(existsSync(path) ? path : join(path, '..'))
@@ -2474,19 +2446,16 @@ export function registerIpc(ctx: IpcContext): void {
 
   // Codex 는 자기 설정 파일(~/.codex/config.toml)을 스스로 읽으므로 목록도 app-server 에
   // 물어본다(TOML 파서를 들이지 않는 이유이기도 하다). 설치되지 않았으면 빈 목록으로 끊는다.
-  ipcMain.handle(
-    IPC.mcpCodexList,
-    async (): Promise<{ servers?: CodexMcpServer[]; error?: string }> => {
-      try {
-        return { servers: await ctx.sessions.configuredMcpServers('codex') }
-      } catch (err) {
-        return { error: err instanceof Error ? err.message : String(err) }
-      }
+  handle(IPC.mcpCodexList, async (): Promise<{ servers?: CodexMcpServer[]; error?: string }> => {
+    try {
+      return { servers: await ctx.sessions.configuredMcpServers('codex') }
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : String(err) }
     }
-  )
+  })
 
   // 이 토글만은 사용자 파일에 직접 쓴다 — codex 에는 "우리 쪽에서 빼기" 에 해당하는 경로가 없다.
-  ipcMain.handle(
+  handle(
     IPC.mcpCodexSetEnabled,
     async (
       _e,
@@ -2501,7 +2470,7 @@ export function registerIpc(ctx: IpcContext): void {
     }
   )
 
-  ipcMain.handle(
+  handle(
     IPC.mcpCodexOauthLogin,
     async (_e, serverName: string): Promise<{ authorizationUrl?: string; error?: string }> => {
       try {
@@ -2517,7 +2486,7 @@ export function registerIpc(ctx: IpcContext): void {
   // 읽기 전용이다. 설치·마켓플레이스 추가는 사용자의 codex 설치본 전체를 바꾸는 바깥 방향 동작이라
   // 목록을 보는 김에 곁다리로 하면 안 된다 — 이 화면은 "무엇이 깔려 있는가" 까지만 답한다.
   // cwds 로 등록된 리포 경로를 넘겨 리포 안에 든 마켓플레이스까지 찾게 한다(MCP 승계 목록과 같다).
-  ipcMain.handle(
+  handle(
     IPC.pluginCodexList,
     async (): Promise<{ inventory?: CodexPluginInventory; error?: string }> => {
       try {
@@ -2529,7 +2498,7 @@ export function registerIpc(ctx: IpcContext): void {
     }
   )
 
-  ipcMain.handle(
+  handle(
     IPC.pluginCodexRead,
     async (_e, ref: CodexPluginRef): Promise<{ detail?: CodexPluginDetail; error?: string }> => {
       try {
@@ -2542,17 +2511,17 @@ export function registerIpc(ctx: IpcContext): void {
 
   // ── 외부 연동 인증 ──────────────────────────────────────────────────────
 
-  ipcMain.handle(IPC.authGetStatus, () => getAuthStatus())
+  handle(IPC.authGetStatus, () => getAuthStatus())
   // 별도 Terminal 창 없이 앱 내부 PTY 에서 로그인하고, 진행 상황은 evtClaudeLogin 으로 흘려보낸다.
   // 로그인이 성공하면(= 계정이 바뀔 수 있으면) 세션 프로세스를 재활용한다 — 옛 자격증명을 들고
   // 있는 CLI 를 남기지 않으면서 대화 맥락(sessionId)은 유지해, 다음 메시지가 새 계정으로 같은
   // 대화를 이어간다(터미널에서 CLI 를 재시작하고 `claude --resume` 하는 것과 같은 결과).
-  ipcMain.handle(IPC.authClaudeLoginStart, () =>
+  handle(IPC.authClaudeLoginStart, () =>
     claudeLoginStart(dispatch, () => ctx.sessions.recycleAll())
   )
-  ipcMain.handle(IPC.authClaudeLoginSubmitCode, (_e, code: string) => claudeLoginSubmitCode(code))
-  ipcMain.handle(IPC.authClaudeLoginCancel, () => claudeLoginCancel())
-  ipcMain.handle(IPC.authClaudeLogout, async () => {
+  handle(IPC.authClaudeLoginSubmitCode, (_e, code: string) => claudeLoginSubmitCode(code))
+  handle(IPC.authClaudeLoginCancel, () => claudeLoginCancel())
+  handle(IPC.authClaudeLogout, async () => {
     // 로그아웃 완료까지 await 해야, 렌더러의 invoke Promise 가 그 시점에 resolve 된다.
     // 그래야 UI 의 로딩 표시가 실제 소요 시간만큼 유지되고, 이어지는 refreshAuth()가
     // 로그아웃이 반영된 상태를 읽는다(await 없이 반환하면 로딩이 곧장 사라진다).
@@ -2564,13 +2533,13 @@ export function registerIpc(ctx: IpcContext): void {
   })
   // Codex 로그인은 PTY 가 필요 없다 — app-server 가 OAuth 콜백 서버까지 호스팅하므로,
   // 우리는 인증 URL 을 기본 브라우저로 열어 주고 완료 알림(evtCodexLogin)만 기다린다.
-  ipcMain.handle(IPC.authCodexLoginStart, async (_e, method: CodexLoginMethod, apiKey?: string) => {
+  handle(IPC.authCodexLoginStart, async (_e, method: CodexLoginMethod, apiKey?: string) => {
     const codex = ctx.sessions.accountFor('codex')
     if (!codex?.loginStart) throw new Error('Codex sign-in is not available.')
     await codex.loginStart(method, apiKey)
   })
-  ipcMain.handle(IPC.authCodexLoginCancel, () => ctx.sessions.accountFor('codex')?.loginCancel?.())
-  ipcMain.handle(IPC.authCodexLogout, async () => {
+  handle(IPC.authCodexLoginCancel, () => ctx.sessions.accountFor('codex')?.loginCancel?.())
+  handle(IPC.authCodexLogout, async () => {
     const codex = ctx.sessions.accountFor('codex')
     if (!codex?.logout) return
     // Claude 와 같은 이유로 완료까지 await 한다 — 이어지는 refreshAuth()가 반영된 상태를 읽도록.
@@ -2578,14 +2547,38 @@ export function registerIpc(ctx: IpcContext): void {
     codex.abortAll()
     broadcastState()
   })
-  ipcMain.handle(
-    IPC.authCodexRateLimits,
-    () => ctx.sessions.accountFor('codex')?.rateLimits?.() ?? null
-  )
+  handle(IPC.authCodexRateLimits, () => ctx.sessions.accountFor('codex')?.rateLimits?.() ?? null)
 
   // GitHub 로그인도 별도 Terminal 창 없이 앱 내부 PTY(디바이스 플로우)로 진행하고,
   // 진행 상황은 evtGithubLogin 으로 흘려보낸다.
-  ipcMain.handle(IPC.authGithubLoginStart, () => githubLoginStart(dispatch))
-  ipcMain.handle(IPC.authGithubLoginCancel, () => githubLoginCancel())
-  ipcMain.handle(IPC.authGithubLogout, () => githubLogout())
+  handle(IPC.authGithubLoginStart, () => githubLoginStart(dispatch))
+  handle(IPC.authGithubLoginCancel, () => githubLoginCancel())
+  handle(IPC.authGithubLogout, () => githubLogout())
+
+  // ── 원격 접근(모바일 컴패니언) ────────────────────────────────────────
+  // 전부 데스크톱 전용이다. allowlist.test.ts 가 이 채널들이 원격에 열리지 않도록 잠근다.
+  handle(IPC.remoteGetStatus, () => getRemoteBridge().status())
+  handle(IPC.remoteSetEnabled, async (_e, enabled: boolean) => {
+    const status = await getRemoteBridge().setEnabled(enabled === true)
+    // 설정에도 남겨 다음 실행에서 그대로 복원한다.
+    store.update((st) => {
+      st.settings.remoteEnabled = status.enabled
+    })
+    broadcastState()
+    return status
+  })
+  handle(IPC.remotePairStart, () => getRemoteBridge().startPairing())
+  handle(IPC.remotePairConfirm, () => getRemoteBridge().confirmPairing())
+  handle(IPC.remotePairCancel, () => getRemoteBridge().cancelPairing())
+  handle(IPC.remoteRevokeDevice, (_e, deviceId: string) =>
+    getRemoteBridge().revokeDevice(String(deviceId))
+  )
+  handle(IPC.remoteClearData, async () => {
+    const status = await getRemoteBridge().clearData()
+    store.update((st) => {
+      st.settings.remoteEnabled = false
+    })
+    broadcastState()
+    return status
+  })
 }

@@ -74,6 +74,32 @@ jobs:
       - name: Test
         run: npm test
 
+  # 모바일은 자체 lockfile 을 가진 독립 프로젝트라 위 verify 잡이 건드리지 않는다.
+  # `npm ci` 로 도는 것이 중요하다 — 이 프로젝트를 --legacy-peer-deps 로 설치해 lockfile 이
+  # package.json 과 어긋난 적이 있고, 관대한 `npm install` 로는 드러나지 않다가 EAS 클라우드
+  # 빌드에서만 터졌다. 여기서 같은 명령으로 돌려 그 회귀를 PR 단계에서 잡는다.
+  mobile:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/mobile
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: apps/mobile/package-lock.json
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Test
+        run: npm test
+
   audit:
     runs-on: ubuntu-latest
     steps:

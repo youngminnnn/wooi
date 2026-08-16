@@ -67,6 +67,27 @@ jobs:
           fi
           echo "서명/공증 시크릿 5종 확인됨."
 
+      # 릴레이 설정이 없으면 electron.vite.config.ts 는 경고만 남기고 **null 을 구워 넣는다**.
+      # 그대로 나가면 원격 접근이 "이 빌드에는 설정되지 않았다" 로 죽어 있는 릴리스가 되고,
+      # 나중에 켜려면 릴리스를 다시 내는 수밖에 없다 — 기능 플래그로 여닫으려던 설계가
+      # 통째로 무의미해진다. 서명 시크릿과 같은 이유로 빌드 전에 먼저 끊는다.
+      - name: Preflight — relay secrets present
+        env:
+          WOOI_RELAY_PROD_URL: ${{ secrets.WOOI_RELAY_PROD_URL }}
+          WOOI_RELAY_PROD_ANON_KEY: ${{ secrets.WOOI_RELAY_PROD_ANON_KEY }}
+        run: |
+          missing=()
+          for name in WOOI_RELAY_PROD_URL WOOI_RELAY_PROD_ANON_KEY; do
+            [ -n "${!name}" ] || missing+=("$name")
+          done
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::릴레이 시크릿 누락: ${missing[*]}"
+            echo "Settings → Secrets and variables → Actions 에서 등록하세요."
+            echo "값은 supabase/README.md 의 운영 프로젝트(wooi-production) 것입니다."
+            exit 1
+          fi
+          echo "릴레이 시크릿 2종 확인됨."
+
       - name: Build signed + notarized dmg + zip
         # Developer ID Application 인증서로 서명하고 Apple 에 공증한다.
         # - CSC_LINK: base64 로 인코딩한 .p12 (Developer ID Application) 인증서
@@ -80,6 +101,10 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # 릴리즈 빌드만 읽는 이름이다. 개발용(WOOI_RELAY_DEV_*)과 이름이 다르기 때문에,
+          # 누군가의 셸에 개발용 값이 떠 있어도 이 빌드에는 섞일 수 없다.
+          WOOI_RELAY_PROD_URL: ${{ secrets.WOOI_RELAY_PROD_URL }}
+          WOOI_RELAY_PROD_ANON_KEY: ${{ secrets.WOOI_RELAY_PROD_ANON_KEY }}
         run: npm run dist
 
       # electron-builder 로그만 믿지 않고 시스템 도구로 재검증한다. 서명 주체·hardened

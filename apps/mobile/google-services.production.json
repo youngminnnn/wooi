@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "382250157901",
+    "project_id": "wooi-production",
+    "storage_bucket": "wooi-production.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:382250157901:android:8e05d1e01eb6a6aef6d904",
+        "android_client_info": {
+          "package_name": "com.wooi.remote"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDak6wKleNF0WBheI43jq9zAEVAZoGQdyw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

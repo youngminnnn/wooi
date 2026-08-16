@@ -823,6 +823,9 @@ export function agentSwitchNeedsHandoff(
  * 약관·개인정보처리방침의 현재 버전. 문서를 사용자 권리에 영향을 주도록 개정하면 1 올린다.
  * settings.acceptedTermsVersion 이 이 값과 다르면 온보딩에서 재동의를 요구한다.
  */
+/** 원격 접근 동의 버전. 데이터 흐름이 실질적으로 바뀌면 올려서 다시 묻는다. */
+export const CURRENT_REMOTE_CONSENT_VERSION = 1
+
 export const CURRENT_TERMS_VERSION = 1
 
 /** UI 색상 테마. 'system' 은 OS 의 다크/라이트 설정을 따른다. */
@@ -1164,6 +1167,32 @@ export interface AppSettings {
    * CURRENT_TERMS_VERSION 과 다르면 온보딩 첫 단계에서 (재)동의를 요구한다.
    */
   acceptedTermsVersion: number | null
+  /**
+   * 모바일 컴패니언의 원격 접근을 허용한다. **기본 꺼짐** — 옵트인이며, 꺼져 있으면
+   * 릴레이 소켓도 타이머도 만들어지지 않아 네트워크 비용이 0이다.
+   *
+   * 이 필드가 없던 버전에서 올라온 사용자도 기본값 병합으로 false 가 되므로
+   * schemaVersion 을 올리지 않는다(showRunningAgents·pickedDefaults 와 같은 이유).
+   */
+  remoteEnabled: boolean
+  /**
+   * 원격 접근 데이터 흐름에 동의한 버전. `null` 이면 아직 동의하지 않았다.
+   *
+   * 앱 전체 약관(`acceptedTermsVersion`)을 올리지 않는 이유는, 이 기능을 절대 켜지 않을
+   * 사용자 전원에게 재동의를 강요하게 되기 때문이다. 동의는 **결정이 실제로 일어나는
+   * 자리**, 즉 원격을 켜는 순간에 받는다.
+   */
+  remoteConsentVersion: number | null
+  /**
+   * 원격 접근 기능이 열려 있다고 **마지막으로 확인한** 값. 설정이 아니라 캐시다.
+   *
+   * 플래그는 네트워크로 오므로 기동 직후와 오프라인에서는 알 수 없다. 그때 꺼진 것으로
+   * 치면 이미 쓰던 사용자에게서 기능이 사라졌다 나타났다 한다 — 마지막으로 알던 값을
+   * 그대로 쓰는 편이 옳다.
+   */
+  remoteAccessAvailable: boolean
+  /** 원격 접근이 켜져 있을 때 휴대폰 푸시 알림도 보낸다. 별도 옵트인이며 기본은 꺼짐이다. */
+  remotePushEnabled: boolean
   /**
    * 별도 창으로 분리한 패널(work/scripts)의 마지막 위치·크기.
    *
@@ -2957,7 +2986,32 @@ export const IPC = {
   /** 자동 업데이트 상태 변화(확인 중/최신/발견/다운로드 진행/준비됨/오류). */
   evtUpdate: 'evt:update',
   /** 원격 공지 목록이 갱신됨(main 이 주기적으로 가져온 결과). */
-  evtNotice: 'evt:notice'
+  evtNotice: 'evt:notice',
+  /** 원격 접근 상태 변화(연결/페어링 진행/기기 목록). 설정 패널만 구독한다. */
+  evtRemote: 'evt:remote',
+  /**
+   * 폰이 워크스페이스를 열어 보고 있다(workspaceId). 데스크톱의 미확인 표시를 해제하는 용도다 —
+   * 미확인은 렌더러 메모리에만 있어서, 폰에서 읽었다는 사실이 이 방송 없이는 전달되지 않는다.
+   */
+  evtRemoteRead: 'evt:remoteRead',
+
+  // 원격 접근(모바일 컴패니언) 관리 — **전부 데스크톱 전용이다.**
+  // 이름이 `remote:` 로 시작하지만 원격에서 호출할 수 있어서는 절대 안 된다
+  // (폰이 스스로 페어링을 시작하거나 다른 기기를 revoke 할 수 있게 된다).
+  // allowlist.test.ts 의 영구 거부 목록이 이걸 잠근다.
+  /** 연결 상태·페어링 진행 상태·페어링된 기기 목록을 한 번에 읽는다. */
+  remoteGetStatus: 'remote:getStatus',
+  /** 원격 접근 마스터 스위치. 끄면 소켓과 타이머가 전부 정리된다. */
+  remoteSetEnabled: 'remote:setEnabled',
+  /** QR 을 띄우고 폰의 claim 을 기다리기 시작한다. */
+  remotePairStart: 'remote:pairStart',
+  /** 사용자가 SAS 6자리를 확인했다 — 여기서 처음으로 세션키가 만들어진다. */
+  remotePairConfirm: 'remote:pairConfirm',
+  remotePairCancel: 'remote:pairCancel',
+  /** 기기 하나의 접근을 끊는다(릴레이의 revoked_at + 로컬 키 삭제). */
+  remoteRevokeDevice: 'remote:revokeDevice',
+  /** 모든 원격 데이터를 지운다 — 키스토어와 릴레이 양쪽. */
+  remoteClearData: 'remote:clearData'
 } as const
 
 // ── IPC 페이로드 타입 ────────────────────────────────────────────────────

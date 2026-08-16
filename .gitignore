@@ -5,3 +5,7 @@ release/
 *.log
 .DS_Store
 .vite/
+
+# 릴레이 설정. 개발용 값은 사람마다 다르고, 운영용 값은 CI 시크릿에서만 온다.
+.env.local
+.env.*.local

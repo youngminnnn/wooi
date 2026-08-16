@@ -6,6 +6,7 @@ import {
   utilityProcess,
   Notification,
   app,
+  powerMonitor,
   type BrowserWindow,
   type UtilityProcess
 } from 'electron'
@@ -25,6 +26,7 @@ import { agentDefaultsFor, canLeadAgentTeam, delegateBackendsFor } from '../agen
 import { claudeMode, type HostCommand, type HostEvent, type SessionConfig } from './protocol'
 import { runAgentTool } from '../agent/tools'
 import { RATE_LIMIT_CONTINUATION, RateLimitResumeCoordinator } from '../rateLimitResume'
+import { notifyRemotePush } from '../remote'
 import type {
   AgentBackendId,
   AgentSettings,
@@ -62,6 +64,7 @@ const RATE_LIMIT_DEBOUNCE_MS = 1500
  * 라이브 Query 위에서 도는 제어 요청이라 비용도 사실상 없다(세션이 없으면 아예 no-op).
  */
 const RATE_LIMIT_POLL_MS = 5 * 60_000
+const REMOTE_PUSH_IDLE_SECONDS = 60
 
 /** `~/src` 처럼 셸에서 익숙한 홈 경로 표기를 받아 준다(셸을 거치지 않으므로 직접 푼다). */
 function expandHome(p: string): string {
@@ -907,13 +910,17 @@ export class SessionManager implements AgentBackend {
     urgent: boolean
   ): void {
     const win = this.getWindow()
-    if (win && win.isFocused()) return
-    if (!Notification.isSupported()) return
-
     const ws = this.getWorkspace(workspaceId)
     if (ws?.muted) return
     const channels = getStore().getState().settings.notifications?.[event]
     if (!channels?.osNotification) return
+
+    const focused = win?.isFocused() === true
+    if (!focused || powerMonitor.getSystemIdleTime() >= REMOTE_PUSH_IDLE_SECONDS) {
+      notifyRemotePush(workspaceId, ws ? workspaceDisplayName(ws) : 'Workspace', event)
+    }
+    if (focused || !Notification.isSupported()) return
+
     const title = ws ? `${urgent ? '⚠️ ' : ''}${workspaceDisplayName(ws)}` : 'Wooi'
     // OS 알림 소리는 이벤트별 sound 채널을 따른다(설정에서 sound 를 끄면 무음 알림).
     const notification = new Notification({ title, body, silent: !channels.sound })

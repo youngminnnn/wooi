@@ -7,8 +7,23 @@ import globals from 'globals'
 
 export default tseslint.config(
   // 린트 대상에서 제외할 산출물/외부 코드.
+  // supabase/.temp 는 `supabase start` 가 컨테이너에 넣을 번들을 떨궈 두는 곳이다 —
+  // 우리 코드가 아니고 minify 되어 있어서 놔두면 린트 에러 수백 개를 만든다.
+  // (flat config 는 dot 디렉토리를 자동으로 무시하지 않는다. supabase/.gitignore 는 git 에만 적용된다.)
   {
-    ignores: ['out', 'dist', 'release', 'build', 'node_modules', 'coverage']
+    ignores: [
+      'out',
+      'dist',
+      'release',
+      'build',
+      'node_modules',
+      'coverage',
+      'supabase/.temp',
+      'supabase/.branches',
+      // 모바일은 독립 Expo 프로젝트다. 루트 설정은 Electron·React DOM 을 전제하므로
+      // RN 코드에 적용하면 오탐만 낸다 — 자체 린트를 붙일 때까지 제외한다.
+      'apps/mobile'
+    ]
   },
 
   js.configs.recommended,
