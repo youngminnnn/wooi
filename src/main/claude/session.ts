@@ -3,6 +3,7 @@ import { query } from '@anthropic-ai/claude-agent-sdk'
 import type {
   McpSdkServerConfigWithInstance,
   Query,
+  SDKActiveGoalMessage,
   SDKMessage,
   SDKUserMessage,
   PermissionResult
@@ -677,6 +678,7 @@ export class ClaudeSession {
 
   /** 입력 큐를 닫아 query 루프를 정상 종료시킨다. */
   dispose(): void {
+    this.deps.emit({ type: 'goal', goal: null })
     this.input.close()
     // 위임 실행은 부모 query 와 수명이 따로다 — 여기서 끊지 않으면 워크스페이스를 닫아도
     // 자식 프로세스가 남아 worktree 를 계속 건드린다.
@@ -833,7 +835,9 @@ export class ClaudeSession {
           log.info(`session: first SDK message received (type=${msg.type})`)
         }
         this.sawAnyMessage = true
-        this.handleMessage(msg)
+        // SDK 의 Query 선언은 SDKMessage 로 좁지만 런타임 readMessages 는 active_goal 도 같은
+        // inputStream 에 넣는다. 설치된 sdk.mjs 의 분기를 근거로 타입 누락만 여기서 보정한다.
+        this.handleMessage(msg as SDKMessage | SDKActiveGoalMessage)
       }
       log.info('session: query stream ended')
       // 예외 없이 스트림이 닫혔는데 아직 처리할 일이 남아 있으면(워치독 abort, CLI 의 조용한 종료)
@@ -1256,7 +1260,21 @@ export class ClaudeSession {
 
   // ── 메시지 → ChatEvent 변환 ────────────────────────────────────────────
 
-  private handleMessage(msg: SDKMessage): void {
+  private handleMessage(msg: SDKMessage | SDKActiveGoalMessage): void {
+    if (msg.type === 'active_goal') {
+      this.deps.emit({
+        type: 'goal',
+        goal: msg.value
+          ? {
+              backend: 'claude',
+              condition: msg.value.condition,
+              iterations: msg.value.iterations,
+              ...(msg.value.last_reason ? { lastReason: msg.value.last_reason } : {})
+            }
+          : null
+      })
+      return
+    }
     const retryMessage =
       msg.type === 'system' &&
       (msg.subtype === 'api_retry' ||

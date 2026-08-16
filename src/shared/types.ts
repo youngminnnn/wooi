@@ -1612,6 +1612,31 @@ export interface ApiRetryState {
   retryDelayMs: number
   errorStatus: number | null
 }
+export type CodexGoalStatus =
+  'active' | 'paused' | 'blocked' | 'usageLimited' | 'budgetLimited' | 'complete'
+
+/**
+ * 지금 세션에 붙어 있는 목표 1건의 표시용 스냅샷.
+ *
+ * RunningAgent 와 마찬가지로 트랜스크립트가 아니라 **휘발성 상태**다. 목표는 대화 내용이 아니라
+ * 백엔드의 실행 제어 상태이고 알림이 갱신 정본이므로, ChatItem 으로 만들면 재시작 뒤 이미 끝난
+ * 목표가 살아난다. 백엔드별 필드는 억지로 맞추지 않고 discriminator 아래 그대로 둔다.
+ */
+export type WorkspaceGoal =
+  | {
+      backend: 'codex'
+      objective: string
+      status: CodexGoalStatus
+      tokenBudget: number | null
+      tokensUsed: number
+      timeUsedSeconds: number
+    }
+  | {
+      backend: 'claude'
+      condition: string
+      iterations: number
+      lastReason?: string
+    }
 
 /** main → renderer 스트리밍 이벤트. renderer 는 이를 트랜스크립트에 반영한다. */
 export type ChatEvent =
@@ -1645,6 +1670,8 @@ export type ChatEvent =
    * 다음 갱신에서 저절로 복구된다. 빈 배열 = 실행 중인 서브에이전트 없음.
    */
   | { type: 'agents'; agents: RunningAgent[] }
+  /** 현재 세션의 목표 전체 스냅샷. null 이면 목표가 없다(REPLACE 시맨틱, 영속 금지). */
+  | { type: 'goal'; goal: WorkspaceGoal | null }
   /**
    * 에이전트가 방금 작업 트리를 건드렸다 — git 상태를 다시 읽으라는 **신호**다.
    *
@@ -2559,6 +2586,7 @@ export const IPC = {
   chatSideQuestion: 'chat:sideQuestion',
   /** /clear — 트랜스크립트를 비우고 세션을 새로 시작한다(워크스페이스는 유지). */
   chatClear: 'chat:clear',
+  chatClearGoal: 'chat:clearGoal',
   /** 워크스페이스를 가로지르는 대화 검색. 결과는 스니펫만 담긴다(원문은 main 에 남는다). */
   chatSearch: 'chat:search',
   permissionRespond: 'permission:respond',

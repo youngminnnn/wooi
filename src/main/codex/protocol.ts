@@ -11,6 +11,7 @@ import type {
   PermissionRequest,
   SendMessageOptions
 } from '@shared/types'
+import type { ThreadGoalStatus } from './wire'
 
 /**
  * main ↔ codex-host(유틸리티 프로세스) 메시지 프로토콜.
@@ -77,6 +78,17 @@ export type CodexCommand =
     }
   | { type: 'interrupt'; workspaceId: string }
   | { type: 'setPermissionMode'; workspaceId: string; mode: PermissionMode }
+  | {
+      type: 'goalSet'
+      reqId: string
+      workspaceId: string
+      config: CodexConfig
+      objective?: string | null
+      status?: ThreadGoalStatus | null
+      tokenBudget?: number | null
+    }
+  | { type: 'goalGet'; reqId: string; workspaceId: string; config: CodexConfig }
+  | { type: 'goalClear'; reqId: string; workspaceId: string; config: CodexConfig }
   | { type: 'dispose'; workspaceId: string }
   | { type: 'disposeAll' }
   | { type: 'permissionResponse'; requestId: string; decision: PermissionDecision }

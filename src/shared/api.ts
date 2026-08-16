@@ -235,6 +235,8 @@ export interface WooiApi {
     sideQuestion(workspaceId: string, question: string): Promise<void>
     /** /clear — 대화 기록을 비우고 세션을 새로 시작한다(맥락 초기화, 워크스페이스는 유지). */
     clear(workspaceId: string): Promise<void>
+    /** 현재 세션의 목표를 지운다. 직접 clear RPC가 있는 백엔드에서만 UI가 노출한다. */
+    clearGoal(workspaceId: string): Promise<void>
     /**
      * 워크스페이스를 가로질러 대화 내용을 검색한다(⇧⌘K). 대소문자를 가리지 않는 부분 문자열
      * 검색이고, main 이 트랜스크립트 파일을 흘려 읽어 **매치 스니펫만** 돌려준다 — 원문은

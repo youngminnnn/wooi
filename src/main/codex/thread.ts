@@ -12,7 +12,14 @@ import type {
   SendMessageOptions
 } from '@shared/types'
 import type { RpcClient } from './jsonrpc'
-import { NOTIFY, RPC, type FileUpdateChange, type ThreadResult } from './wire'
+import {
+  NOTIFY,
+  RPC,
+  type FileUpdateChange,
+  type ThreadGoal,
+  type ThreadGoalStatus,
+  type ThreadResult
+} from './wire'
 import { turnPolicyFor } from './modes'
 import { WOOI_MCP_SERVER_NAME } from '../agent/tools/catalog'
 import type { AgentBackendId } from '@shared/types'
@@ -248,10 +255,46 @@ export class CodexThread {
       const forkedId = result?.thread?.id
       if (!forkedId) throw new Error('Codex did not return a forked thread id')
       this.adoptThread(forkedId)
+      await this.refreshGoal(rpc, forkedId)
       this.notice('Forked this conversation into a new Codex thread.')
     } catch (err) {
       this.fail(err)
     }
+  }
+
+  async setGoal(args: {
+    objective?: string | null
+    status?: ThreadGoalStatus | null
+    tokenBudget?: number | null
+  }): Promise<ThreadGoal> {
+    const rpc = await this.deps.rpc()
+    const threadId = await this.ensureThread(rpc)
+    const result = await rpc.request<{ goal?: ThreadGoal }>(RPC.threadGoalSet, {
+      threadId,
+      ...args
+    })
+    if (!result?.goal) throw new Error('Codex did not return the updated goal')
+    this.emitGoal(result.goal)
+    return result.goal
+  }
+
+  async getGoal(): Promise<ThreadGoal | null> {
+    const rpc = await this.deps.rpc()
+    const threadId = await this.ensureThread(rpc)
+    const result = await rpc.request<{ goal?: ThreadGoal | null }>(RPC.threadGoalGet, { threadId })
+    const goal = result?.goal ?? null
+    if (goal) this.emitGoal(goal)
+    else this.deps.emit({ type: 'goal', goal: null })
+    return goal
+  }
+
+  async clearGoal(): Promise<boolean> {
+    const rpc = await this.deps.rpc()
+    const threadId = await this.ensureThread(rpc)
+    const result = await rpc.request<{ cleared?: boolean }>(RPC.threadGoalClear, { threadId })
+    // 알림보다 응답이 먼저 와도 버튼이 즉시 사라져야 한다. 뒤따르는 clear 알림은 멱등이다.
+    this.deps.emit({ type: 'goal', goal: null })
+    return !!result?.cleared
   }
 
   // ── 상태 조회 (/context·/usage·/permissions 카드용) ─────────────────────
@@ -276,6 +319,7 @@ export class CodexThread {
   dispose(): void {
     this.disposed = true
     this.activeTurnId = null
+    this.deps.emit({ type: 'goal', goal: null })
   }
 
   // ── 스레드 열기 ─────────────────────────────────────────────────────
@@ -327,6 +371,7 @@ export class CodexThread {
         })
         const id = result?.thread?.id ?? resume
         this.adoptThread(id)
+        await this.refreshGoal(rpc, id)
         // active 알림이 resume 응답보다 먼저 오면 아직 이 객체가 threadId 를 소유하지 않아 host
         // 라우터가 버린다. 응답의 상태도 함께 읽어 그 순서에서도 running 을 복구한다.
         if (threadStatusType(result?.thread?.status) === 'active') {
@@ -345,6 +390,7 @@ export class CodexThread {
     const id = result?.thread?.id
     if (!id) throw new Error('Codex did not return a thread id')
     this.adoptThread(id)
+    await this.refreshGoal(rpc, id)
     return id
   }
 
@@ -352,6 +398,19 @@ export class CodexThread {
     this.threadId = id
     this.config = { ...this.config, resumeThreadId: id }
     this.deps.onThreadId(id)
+  }
+
+  private async refreshGoal(rpc: RpcClient, threadId: string): Promise<void> {
+    try {
+      const result = await rpc.request<{ goal?: ThreadGoal | null }>(RPC.threadGoalGet, {
+        threadId
+      })
+      if (result?.goal) this.emitGoal(result.goal)
+      else this.deps.emit({ type: 'goal', goal: null })
+    } catch (err) {
+      // 목표 API가 없는 구버전에서도 대화 자체는 열려야 한다. 명시적 get/set/clear 호출은 그대로 실패한다.
+      log.info(`codex: could not refresh goal for ${threadId}: ${describe(err)}`)
+    }
   }
 
   // ── 알림 수신 ───────────────────────────────────────────────────────
@@ -363,6 +422,15 @@ export class CodexThread {
 
   /** 호스트가 이 스레드 앞으로 라우팅한 알림을 처리한다. */
   handleNotification(method: string, params: unknown): void {
+    if (method === NOTIFY.threadGoalUpdated) {
+      const goal = (params as { goal?: ThreadGoal })?.goal
+      if (goal) this.emitGoal(goal)
+      return
+    }
+    if (method === NOTIFY.threadGoalCleared) {
+      this.deps.emit({ type: 'goal', goal: null })
+      return
+    }
     // 앱 재시작은 저장돼 있던 running 을 idle 로 초기화하지만, Codex app-server 는 resume 한
     // 스레드의 기존 턴을 계속 이어 갈 수 있다. 그 턴의 turn/started 는 재시작 전에 이미 지나가
     // 다시 오지 않으므로, 서버가 알려 주는 active 상태로 사이드바 상태를 복구한다.
@@ -421,6 +489,21 @@ export class CodexThread {
       this.deps.emit(event)
     }
     for (const item of mapped.persist) this.deps.persist(item)
+  }
+
+  private emitGoal(goal: ThreadGoal): void {
+    if (!goal.objective || !goal.status) return
+    this.deps.emit({
+      type: 'goal',
+      goal: {
+        backend: 'codex',
+        objective: goal.objective,
+        status: goal.status,
+        tokenBudget: goal.tokenBudget ?? null,
+        tokensUsed: goal.tokensUsed ?? 0,
+        timeUsedSeconds: goal.timeUsedSeconds ?? 0
+      }
+    })
   }
 
   /**

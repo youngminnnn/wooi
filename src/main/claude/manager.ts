@@ -191,6 +191,10 @@ export class SessionManager implements AgentBackend {
     }
     this.pendingPermissions.clear()
 
+    for (const w of getStore().getState().workspaces) {
+      if (w.agentBackend === CLAUDE_META.id) this.clearGoalState(w.id)
+    }
+
     // 진행 중이던 workspace 는 멈췄으므로 idle 로 되돌리고, 사용자가 원인을 알 수 있게 알린다.
     const running = getStore()
       .getState()
@@ -613,6 +617,7 @@ export class SessionManager implements AgentBackend {
    */
   dispose(workspaceId: string): void {
     this.sendIfHost({ type: 'dispose', workspaceId })
+    this.clearGoalState(workspaceId)
     // 세션이 사라지면 그 세션이 기다리던 권한 요청은 응답받을 수 없으므로 거둔다.
     for (const [requestId, wsId] of this.pendingPermissions) {
       if (wsId !== workspaceId) continue
@@ -628,6 +633,9 @@ export class SessionManager implements AgentBackend {
 
   disposeAll(): void {
     this.sendIfHost({ type: 'disposeAll' })
+    for (const w of getStore().getState().workspaces) {
+      if (w.agentBackend === CLAUDE_META.id) this.clearGoalState(w.id)
+    }
     for (const requestId of this.pendingPermissions.keys()) {
       this.dispatch(IPC.evtPermissionCancel, requestId)
     }
@@ -832,6 +840,10 @@ export class SessionManager implements AgentBackend {
       if (w) w.status = 'idle'
     })
     this.dispatch(IPC.evtChat, { workspaceId, event: { type: 'status', status: 'idle' } })
+  }
+
+  private clearGoalState(workspaceId: string): void {
+    this.dispatch(IPC.evtChat, { workspaceId, event: { type: 'goal', goal: null } })
   }
 
   private emit(workspaceId: string, event: ChatEvent): void {
