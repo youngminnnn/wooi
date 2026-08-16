@@ -2,7 +2,7 @@ import { Platform } from 'react-native'
 import Constants from 'expo-constants'
 import * as Device from 'expo-device'
 import * as Notifications from 'expo-notifications'
-import { theme } from '../theme'
+import { darkTheme } from '../theme'
 
 /**
  * 폰을 푸시 수신자로 등록한다. 토큰은 릴레이의 `devices.expo_push_token` 에 들어가고,
@@ -27,7 +27,10 @@ export async function ensureAndroidChannel(): Promise<void> {
     importance: Notifications.AndroidImportance.HIGH,
     lockscreenVisibility: Notifications.AndroidNotificationVisibility.PRIVATE,
     vibrationPattern: [0, 250, 250, 250],
-    lightColor: theme.accent
+    // 알림 LED 색은 앱 테마를 따르지 않는다 — 앱 밖에서, 대개 화면이 꺼진 채로 켜지는 불이라
+    // 배경이랄 게 없다. app.json 의 expo-notifications `color` 와 같은 브랜드 보라 하나로
+    // 고정한다(두 값이 갈리면 Android 가 어느 쪽을 쓰는지 추적할 수 없게 된다).
+    lightColor: darkTheme.accent
   })
 }
 

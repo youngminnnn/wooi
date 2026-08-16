@@ -8,15 +8,19 @@ import { ChevronLeft } from 'lucide-react-native'
 import { SettingsRow } from '../src/components/settings/SettingsRow'
 import { SettingsSection } from '../src/components/settings/SettingsSection'
 import { UsageRow } from '../src/components/settings/UsageRow'
+import { ThemeRow } from '../src/components/settings/ThemeRow'
 import { isLaptopAway, useRemoteStore } from '../src/state/store'
 import { agoLabel, useNow } from '../src/state/useNow'
 import { unpairThisPhone } from '../src/state/unpair'
-import { theme } from '../src/theme'
+import { useTheme, useThemedStyles } from '../src/state/theme'
+import type { Theme } from '../src/theme'
 
 type NotificationLabel = 'Enabled' | 'Blocked' | 'Not asked yet' | '—'
 
 export default function SettingsScreen(): React.JSX.Element {
   const router = useRouter()
+  const theme = useTheme()
+  const styles = useThemedStyles(makeStyles)
   const demo = useRemoteStore((store) => store.demo)
   const pairing = useRemoteStore((store) => store.pairing)
   const state = useRemoteStore((store) => store.state)
@@ -145,6 +149,10 @@ export default function SettingsScreen(): React.JSX.Element {
           </SettingsSection>
         ))}
 
+        <SettingsSection title="Appearance">
+          <ThemeRow />
+        </SettingsSection>
+
         <SettingsSection title="Notifications">
           <SettingsRow label="Permission" value={notificationPermission} />
           <SettingsRow
@@ -162,19 +170,20 @@ export default function SettingsScreen(): React.JSX.Element {
   )
 }
 
-const styles = StyleSheet.create({
-  screen: { backgroundColor: theme.bg, flex: 1 },
-  header: {
-    alignItems: 'center',
-    borderBottomColor: theme.border,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    flexDirection: 'row',
-    height: 58,
-    paddingHorizontal: 14
-  },
-  back: { alignItems: 'center', borderRadius: 18, height: 36, justifyContent: 'center', width: 36 },
-  pressed: { backgroundColor: theme.surface2 },
-  headerTitle: { color: theme.text, flex: 1, fontSize: 18, fontWeight: '600', textAlign: 'center' },
-  headerSpacer: { width: 36 },
-  content: { gap: 24, paddingBottom: 40, paddingHorizontal: 18, paddingTop: 22 }
-})
+const makeStyles = (theme: Theme) =>
+  StyleSheet.create({
+    screen: { backgroundColor: theme.bg, flex: 1 },
+    header: {
+      alignItems: 'center',
+      borderBottomColor: theme.border,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      flexDirection: 'row',
+      height: 58,
+      paddingHorizontal: 14
+    },
+    back: { alignItems: 'center', borderRadius: 18, height: 36, justifyContent: 'center', width: 36 },
+    pressed: { backgroundColor: theme.pressed },
+    headerTitle: { color: theme.text, flex: 1, fontSize: 18, fontWeight: '600', textAlign: 'center' },
+    headerSpacer: { width: 36 },
+    content: { gap: 24, paddingBottom: 40, paddingHorizontal: 18, paddingTop: 22 }
+  })

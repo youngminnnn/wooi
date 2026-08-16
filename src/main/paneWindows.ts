@@ -3,7 +3,12 @@ import { IPC, PANE_KINDS } from '@shared/types'
 import type { PaneKind, PaneState, WindowBounds } from '@shared/types'
 import { getStore } from './store'
 import { log } from './logger'
-import { applyNavigationGuards, loadRenderer, rendererWebPreferences } from './windows'
+import {
+  applyNavigationGuards,
+  loadRenderer,
+  rendererWebPreferences,
+  windowBackgroundColor
+} from './windows'
 
 type Dispatch = (channel: string, payload: unknown) => void
 
@@ -95,7 +100,7 @@ export class PaneWindows {
       minHeight: MIN_SIZE[kind].height,
       show: false,
       title: TITLE[kind],
-      backgroundColor: '#14161a',
+      backgroundColor: windowBackgroundColor(),
       titleBarStyle: 'hiddenInset',
       trafficLightPosition: { x: 12, y: 12 },
       webPreferences: rendererWebPreferences()

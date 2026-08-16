@@ -1,9 +1,11 @@
 import * as SecureStore from 'expo-secure-store'
 import type { SupportedStorage } from '@supabase/supabase-js'
+import type { ThemePreference } from '../theme'
 
 const PAIRING_KEY = 'wooi.remote.pairing.v1'
 const AUTH_PREFIX = 'wooi.remote.auth.'
 const SEQUENCE_PREFIX = 'wooi.remote.sequence.'
+const THEME_KEY = 'wooi.remote.theme.v1'
 let sequenceQueue: Promise<void> = Promise.resolve()
 
 const OPTIONS: SecureStore.SecureStoreOptions = {
@@ -99,4 +101,18 @@ export const secureAuthStorage: SupportedStorage = {
   removeItem: async (key: string): Promise<void> => {
     await SecureStore.deleteItemAsync(secureKey(key), OPTIONS)
   }
+}
+
+/**
+ * 테마 선호. 보안 값이 아니지만 앱에 이미 있는 저장소가 SecureStore 뿐이라 여기에 둔다
+ * (한 단어짜리 값 하나를 위해 저장소를 하나 더 들이지 않는다). 언페어해도 지우지 않는다 —
+ * 이건 페어링 상태가 아니라 이 **기기**의 취향이고, 다시 붙였다고 리셋될 이유가 없다.
+ */
+export async function loadThemePreference(): Promise<ThemePreference | null> {
+  const stored = await SecureStore.getItemAsync(THEME_KEY, OPTIONS)
+  return stored === 'system' || stored === 'light' || stored === 'dark' ? stored : null
+}
+
+export async function saveThemePreference(preference: ThemePreference): Promise<void> {
+  await SecureStore.setItemAsync(THEME_KEY, preference, OPTIONS)
 }

@@ -42,9 +42,11 @@ export function applyTheme(pref: ThemePreference): void {
   }
 }
 
-/** 첫 페인트 전에 캐시된 선호를 적용한다(설정이 도착하기 전 깜빡임 방지). 기본 다크. */
+/** 첫 페인트 전에 캐시된 선호를 적용한다(설정이 도착하기 전 깜빡임 방지). 기본 system. */
 export function bootstrapTheme(): void {
-  let pref: ThemePreference = 'dark'
+  // storeSchema 의 기본값과 같아야 한다 — 여기만 다르면 새 설치에서 한 테마로 그려졌다가
+  // 설정이 도착하는 순간 다른 테마로 튄다.
+  let pref: ThemePreference = 'system'
   try {
     const cached = localStorage.getItem(CACHE_KEY)
     if (cached === 'light' || cached === 'dark' || cached === 'system') pref = cached

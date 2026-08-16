@@ -1,6 +1,7 @@
 import { Children, Fragment, type ReactNode } from 'react'
 import { StyleSheet, Text, View } from 'react-native'
-import { theme } from '../../theme'
+import { useThemedStyles } from '../../state/theme'
+import type { Theme } from '../../theme'
 
 export function SettingsSection({
   title,
@@ -9,6 +10,7 @@ export function SettingsSection({
   title: string
   children: ReactNode
 }): React.JSX.Element {
+  const styles = useThemedStyles(makeStyles)
   const rows = Children.toArray(children)
   return (
     <View style={styles.section}>
@@ -25,22 +27,23 @@ export function SettingsSection({
   )
 }
 
-const styles = StyleSheet.create({
-  section: { gap: 8 },
-  title: {
-    color: theme.textDim,
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 0.7,
-    paddingHorizontal: 4,
-    textTransform: 'uppercase'
-  },
-  card: {
-    backgroundColor: theme.surface,
-    borderColor: theme.border,
-    borderRadius: 10,
-    borderWidth: StyleSheet.hairlineWidth,
-    overflow: 'hidden'
-  },
-  divider: { backgroundColor: theme.border, height: StyleSheet.hairlineWidth, marginLeft: 16 }
-})
+const makeStyles = (theme: Theme) =>
+  StyleSheet.create({
+    section: { gap: 8 },
+    title: {
+      color: theme.textDim,
+      fontSize: 11,
+      fontWeight: '700',
+      letterSpacing: 0.7,
+      paddingHorizontal: 4,
+      textTransform: 'uppercase'
+    },
+    card: {
+      backgroundColor: theme.surface,
+      borderColor: theme.border,
+      borderRadius: 10,
+      borderWidth: StyleSheet.hairlineWidth,
+      overflow: 'hidden'
+    },
+    divider: { backgroundColor: theme.border, height: StyleSheet.hairlineWidth, marginLeft: 16 }
+  })

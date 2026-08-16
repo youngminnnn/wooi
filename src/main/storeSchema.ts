@@ -83,8 +83,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
     // 모델과 effort는 Codex 카탈로그 기본값을 따르고 fast tier는 기본적으로 끈다.
     codex: { model: null, effort: null, permissionMode: null, fastMode: false, fallbackModels: [] }
   },
-  // 기본 다크 — 기존 사용자도 load 의 기본값 병합으로 다크를 유지한다.
-  theme: 'dark',
+  // 기본은 OS 를 따른다. 이미 쓰던 사람은 영향이 없다 — load 의 병합은 저장된 값이 이기고
+  // (`{...DEFAULT_SETTINGS, ...saved}`), 테마 기능이 나간 뒤로는 이 키가 항상 파일에 있다.
+  // 즉 이 값이 실제로 쓰이는 것은 새 설치와, 테마 키가 없던 시절의 파일뿐이다.
+  theme: 'system',
   soundOnComplete: true,
   notifications: DEFAULT_NOTIFICATION_SETTINGS,
   // 우측 작업 패널은 기본 펼침. 기존 사용자도 load 의 기본값 병합으로 펼침을 유지한다.

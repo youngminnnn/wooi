@@ -1,5 +1,6 @@
-import { BrowserWindow, shell } from 'electron'
+import { BrowserWindow, nativeTheme, shell } from 'electron'
 import { join } from 'node:path'
+import { getStore } from './store'
 
 /**
  * 창(메인·분리한 패널) 공통 배선.
@@ -8,6 +9,19 @@ import { join } from 'node:path'
  * 그래서 로드 방식과 내비게이션 가드도 창마다 따로 쓰지 않고 여기 한곳에 모은다 — 가드가 한
  * 창에만 걸려 있으면 그 창에서만 링크가 앱을 통째로 다른 페이지로 날려 버린다.
  */
+
+/**
+ * 창 chrome 의 바탕색. index.css 의 `--bg` 와 같은 값이어야 한다.
+ *
+ * 이 색은 렌더러가 첫 프레임을 그리기 전과 리사이즈로 드러나는 가장자리에 보인다. 예전에는
+ * 다크 하나로 박아 뒀는데, 기본 테마가 'system' 이 된 뒤로는 라이트를 쓰는 사람 쪽이 오히려
+ * 많아 창 테두리만 검게 남는다.
+ */
+export function windowBackgroundColor(): string {
+  const preference = getStore().getState().settings.theme
+  const dark = preference === 'system' ? nativeTheme.shouldUseDarkColors : preference === 'dark'
+  return dark ? '#14161a' : '#f4f4f5'
+}
 
 /** 모든 창에 같은 preload/샌드박스 설정을 쓴다. */
 export function rendererWebPreferences(): Electron.WebPreferences {

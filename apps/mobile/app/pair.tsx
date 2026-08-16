@@ -15,7 +15,8 @@ import { CameraView, useCameraPermissions, type BarcodeScanningResult } from 'ex
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { claimPairing, type ClaimedPairing } from '../src/relay/pairing'
 import { useRemoteStore } from '../src/state/store'
-import { theme } from '../src/theme'
+import { FixedTheme, useTheme, useThemedStyles } from '../src/state/theme'
+import type { Theme } from '../src/theme'
 
 type Phase = 'scan' | 'paste' | 'claiming' | 'verify' | 'error'
 
@@ -41,6 +42,7 @@ function PairShell({
   children: ReactNode
   footer?: ReactNode
 }): React.JSX.Element {
+  const styles = useThemedStyles(makeStyles)
   return (
     <SafeAreaView style={styles.screen}>
       <View style={styles.shell}>
@@ -67,6 +69,7 @@ function PairShell({
 
 /** 페어링이 어떻게 흘러가는지 세 줄. 첫 화면에서 가장 자주 막히는 곳이 "코드가 어디 있나"다. */
 function Steps(): React.JSX.Element {
+  const styles = useThemedStyles(makeStyles)
   const steps = [
     'Open Wooi on your laptop',
     'Settings → Integrations → Remote access',
@@ -88,6 +91,7 @@ function Steps(): React.JSX.Element {
 
 /** 되돌아온 이유(연결 해제·만료)는 본문에 섞으면 안 읽힌다 — 색과 테두리로 분리한다. */
 function Notice({ text }: { text: string | null }): React.JSX.Element | null {
+  const styles = useThemedStyles(makeStyles)
   if (text === null) return null
   return (
     <View style={styles.notice}>
@@ -105,6 +109,7 @@ function PrimaryButton({
   onPress: () => void
   disabled?: boolean
 }): React.JSX.Element {
+  const styles = useThemedStyles(makeStyles)
   return (
     <Pressable
       accessibilityRole="button"
@@ -122,6 +127,7 @@ function PrimaryButton({
 }
 
 function LinkButton({ label, onPress }: { label: string; onPress: () => void }): React.JSX.Element {
+  const styles = useThemedStyles(makeStyles)
   return (
     <Pressable
       accessibilityRole="button"
@@ -134,20 +140,14 @@ function LinkButton({ label, onPress }: { label: string; onPress: () => void }):
   )
 }
 
-export default function PairScreen(): React.JSX.Element {
-  const [permission, requestPermission] = useCameraPermissions()
-  const [phase, setPhase] = useState<Phase>('scan')
-  const [claim, setClaim] = useState<ClaimedPairing | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [pasted, setPasted] = useState('')
-  const unpairedReason = useRemoteStore((store) => store.unpairedReason)
-
-  /**
-   * 데모는 페어링의 대안이지 경쟁자가 아니다. 주 행동(카메라 허용·페어링)보다 조용하되,
-   * 구분선 아래 자기 자리를 갖는다 — 랩탑이 없는 사람(심사자를 포함해)이 이 화면에서
-   * 막히면 앱은 아무것도 보여주지 못한 채로 끝난다.
-   */
-  const demoButton = (
+/**
+ * 데모는 페어링의 대안이지 경쟁자가 아니다. 주 행동(카메라 허용·페어링)보다 조용하되,
+ * 구분선 아래 자기 자리를 갖는다 — 랩탑이 없는 사람(심사자를 포함해)이 이 화면에서
+ * 막히면 앱은 아무것도 보여주지 못한 채로 끝난다.
+ */
+function DemoOption(): React.JSX.Element {
+  const styles = useThemedStyles(makeStyles)
+  return (
     <View>
       <View style={styles.divider}>
         <View style={styles.rule} />
@@ -164,7 +164,23 @@ export default function PairScreen(): React.JSX.Element {
       </Pressable>
     </View>
   )
+}
 
+export default function PairScreen(): React.JSX.Element {
+  const theme = useTheme()
+  const styles = useThemedStyles(makeStyles)
+  const [permission, requestPermission] = useCameraPermissions()
+  const [phase, setPhase] = useState<Phase>('scan')
+  const [claim, setClaim] = useState<ClaimedPairing | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [pasted, setPasted] = useState('')
+  const unpairedReason = useRemoteStore((store) => store.unpairedReason)
+
+  /**
+   * 데모는 페어링의 대안이지 경쟁자가 아니다. 주 행동(카메라 허용·페어링)보다 조용하되,
+   * 구분선 아래 자기 자리를 갖는다 — 랩탑이 없는 사람(심사자를 포함해)이 이 화면에서
+   * 막히면 앱은 아무것도 보여주지 못한 채로 끝난다.
+   */
   const finish = useCallback(async (pending: ClaimedPairing): Promise<void> => {
     setPhase('verify')
     setClaim(pending)
@@ -252,7 +268,7 @@ export default function PairScreen(): React.JSX.Element {
         footer={
           <>
             <PrimaryButton label="Try again" onPress={rescan} />
-            {demoButton}
+            <DemoOption />
           </>
         }
       >
@@ -275,7 +291,7 @@ export default function PairScreen(): React.JSX.Element {
               onPress={() => pair(pasted)}
             />
             <LinkButton label="Scan a QR code instead" onPress={rescan} />
-            {demoButton}
+            <DemoOption />
           </>
         }
       >
@@ -309,7 +325,7 @@ export default function PairScreen(): React.JSX.Element {
           <>
             <PrimaryButton label="Allow camera" onPress={() => void requestPermission()} />
             <LinkButton label="Paste the code instead" onPress={() => setPhase('paste')} />
-            {demoButton}
+            <DemoOption />
           </>
         }
       >
@@ -324,13 +340,37 @@ export default function PairScreen(): React.JSX.Element {
     )
   }
 
+  // 스캐너는 앱 배경이 아니라 **카메라 영상 위**에 얹힌다. 그 위는 앱 테마와 무관하게 늘
+  // 어두우므로 이 화면만 다크로 고정한다 — 라이트에서 흰 글자가 흰 글자 위에 놓이는 일을
+  // 막고, 귀퉁이 표식과 링크도 영상 위에서 읽히는 밝은 값을 유지한다.
+  return (
+    <FixedTheme name="dark">
+      <Scanner
+        onPaste={() => setPhase('paste')}
+        onScan={scan}
+        unpairedReason={unpairedReason}
+      />
+    </FixedTheme>
+  )
+}
+
+function Scanner({
+  onPaste,
+  onScan,
+  unpairedReason
+}: {
+  onPaste: () => void
+  onScan: (result: BarcodeScanningResult) => void
+  unpairedReason: string | null
+}): React.JSX.Element {
+  const styles = useThemedStyles(makeStyles)
   return (
     <View style={styles.screen}>
       <CameraView
         style={StyleSheet.absoluteFill}
         facing="back"
         barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
-        onBarcodeScanned={scan}
+        onBarcodeScanned={onScan}
       />
       <SafeAreaView style={styles.cameraOverlay}>
         <View style={styles.cameraHeader}>
@@ -348,8 +388,8 @@ export default function PairScreen(): React.JSX.Element {
           </View>
         </View>
         <View style={styles.cameraFooter}>
-          <LinkButton label="Can't scan? Paste the code" onPress={() => setPhase('paste')} />
-          {demoButton}
+          <LinkButton label="Can't scan? Paste the code" onPress={onPaste} />
+          <DemoOption />
         </View>
       </SafeAreaView>
     </View>
@@ -357,6 +397,8 @@ export default function PairScreen(): React.JSX.Element {
 }
 
 function PairLoading({ label }: { label: string }): React.JSX.Element {
+  const theme = useTheme()
+  const styles = useThemedStyles(makeStyles)
   return (
     <SafeAreaView style={styles.screen}>
       <View style={styles.focus}>
@@ -367,169 +409,172 @@ function PairLoading({ label }: { label: string }): React.JSX.Element {
   )
 }
 
-const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: theme.bg },
-  shell: { flex: 1, paddingHorizontal: 24, paddingBottom: 16 },
-  focus: { flex: 1, justifyContent: 'center', paddingHorizontal: 28 },
+const makeStyles = (theme: Theme) =>
+  StyleSheet.create({
+    screen: { flex: 1, backgroundColor: theme.bg },
+    shell: { flex: 1, paddingHorizontal: 24, paddingBottom: 16 },
+    focus: { flex: 1, justifyContent: 'center', paddingHorizontal: 28 },
 
-  // ── 정체 ────────────────────────────────────────────────────────────────
-  // 마크와 이름을 가로로 눕힌다. 세로로 쌓으면 이름이 제목만큼 커 보여서, 화면에 큰 글씨
-  // 두 개가 무엇이 먼저인지 다투게 된다.
-  hero: { alignItems: 'center', flexDirection: 'row', gap: 13, paddingTop: 26 },
-  mark: { borderRadius: 13, height: 54, width: 54 },
-  heroText: { flex: 1 },
-  wordmark: { color: theme.text, fontSize: 18, fontWeight: '600', letterSpacing: -0.2 },
-  tagline: { color: theme.textDim, fontSize: 13, lineHeight: 18, marginTop: 2 },
+    // ── 정체 ────────────────────────────────────────────────────────────────
+    // 마크와 이름을 가로로 눕힌다. 세로로 쌓으면 이름이 제목만큼 커 보여서, 화면에 큰 글씨
+    // 두 개가 무엇이 먼저인지 다투게 된다.
+    hero: { alignItems: 'center', flexDirection: 'row', gap: 13, paddingTop: 26 },
+    mark: { borderRadius: 13, height: 54, width: 54 },
+    heroText: { flex: 1 },
+    wordmark: { color: theme.text, fontSize: 18, fontWeight: '600', letterSpacing: -0.2 },
+    tagline: { color: theme.textDim, fontSize: 13, lineHeight: 18, marginTop: 2 },
 
-  // ── 지금 할 일 ──────────────────────────────────────────────────────────
-  content: { flex: 1 },
-  contentInner: { flexGrow: 1, paddingBottom: 24, paddingTop: 44 },
-  title: { color: theme.text, fontSize: 26, fontWeight: '600', letterSpacing: -0.4 },
-  body: { color: theme.textMuted, fontSize: 15, lineHeight: 22, marginTop: 12 },
-  steps: { gap: 14, marginTop: 28 },
-  step: { alignItems: 'center', flexDirection: 'row', gap: 12 },
-  stepBadge: {
-    alignItems: 'center',
-    borderColor: theme.border2,
-    borderRadius: 11,
-    borderWidth: 1,
-    height: 22,
-    justifyContent: 'center',
-    width: 22
-  },
-  stepNumber: { color: theme.accent, fontSize: 12, fontWeight: '600' },
-  stepText: { color: theme.textDim, flex: 1, fontSize: 14, lineHeight: 19 },
-  input: {
-    backgroundColor: theme.surface,
-    borderColor: theme.border,
-    borderRadius: 10,
-    borderWidth: 1,
-    color: theme.text,
-    fontSize: 13,
-    marginTop: 16,
-    maxHeight: 140,
-    minHeight: 88,
-    padding: 12,
-    textAlignVertical: 'top'
-  },
-  notice: {
-    backgroundColor: 'rgba(255,185,0,0.09)',
-    borderColor: 'rgba(255,185,0,0.32)',
-    borderRadius: 10,
-    borderWidth: 1,
-    marginTop: 14,
-    paddingHorizontal: 12,
-    paddingVertical: 10
-  },
-  noticeText: { color: theme.warning, fontSize: 13, lineHeight: 19 },
-  errorBox: {
-    backgroundColor: 'rgba(255,100,103,0.09)',
-    borderColor: 'rgba(255,100,103,0.32)',
-    borderRadius: 10,
-    borderWidth: 1,
-    marginTop: 14,
-    paddingHorizontal: 12,
-    paddingVertical: 10
-  },
-  errorText: { color: theme.danger, fontSize: 14, lineHeight: 20 },
+    // ── 지금 할 일 ──────────────────────────────────────────────────────────
+    content: { flex: 1 },
+    contentInner: { flexGrow: 1, paddingBottom: 24, paddingTop: 44 },
+    title: { color: theme.text, fontSize: 26, fontWeight: '600', letterSpacing: -0.4 },
+    body: { color: theme.textMuted, fontSize: 15, lineHeight: 22, marginTop: 12 },
+    steps: { gap: 14, marginTop: 28 },
+    step: { alignItems: 'center', flexDirection: 'row', gap: 12 },
+    stepBadge: {
+      alignItems: 'center',
+      borderColor: theme.border2,
+      borderRadius: 11,
+      borderWidth: 1,
+      height: 22,
+      justifyContent: 'center',
+      width: 22
+    },
+    stepNumber: { color: theme.accent, fontSize: 12, fontWeight: '600' },
+    stepText: { color: theme.textDim, flex: 1, fontSize: 14, lineHeight: 19 },
+    input: {
+      backgroundColor: theme.surface,
+      borderColor: theme.border,
+      borderRadius: 10,
+      borderWidth: 1,
+      color: theme.text,
+      fontSize: 13,
+      marginTop: 16,
+      maxHeight: 140,
+      minHeight: 88,
+      padding: 12,
+      textAlignVertical: 'top'
+    },
+    notice: {
+      backgroundColor: theme.warningSurface,
+      borderColor: theme.warningBorder,
+      borderRadius: 10,
+      borderWidth: 1,
+      marginTop: 14,
+      paddingHorizontal: 12,
+      paddingVertical: 10
+    },
+    noticeText: { color: theme.warningFg, fontSize: 13, lineHeight: 19 },
+    errorBox: {
+      backgroundColor: theme.dangerSurface,
+      borderColor: theme.dangerBorder,
+      borderRadius: 10,
+      borderWidth: 1,
+      marginTop: 14,
+      paddingHorizontal: 12,
+      paddingVertical: 10
+    },
+    errorText: { color: theme.dangerFg, fontSize: 14, lineHeight: 20 },
 
-  // ── 행동 ────────────────────────────────────────────────────────────────
-  // 너비를 통일한다. 주 버튼만 좁고 데모만 넓으면 위계가 뒤집혀 보인다.
-  footer: { gap: 4 },
-  primary: {
-    alignItems: 'center',
-    backgroundColor: theme.accentStrong,
-    borderRadius: 12,
-    paddingVertical: 15
-  },
-  primaryDisabled: { opacity: 0.35 },
-  primaryText: { color: '#ffffff', fontSize: 16, fontWeight: '600' },
-  link: { alignItems: 'center', paddingVertical: 12 },
-  linkText: { color: theme.accent, fontSize: 14, fontWeight: '500' },
-  pressed: { opacity: 0.7 },
-  divider: { alignItems: 'center', flexDirection: 'row', gap: 12, marginBottom: 14, marginTop: 6 },
-  rule: { backgroundColor: theme.border, flex: 1, height: StyleSheet.hairlineWidth },
-  dividerLabel: { color: theme.textFaint, fontSize: 12 },
-  demoButton: {
-    alignItems: 'center',
-    backgroundColor: theme.surface,
-    borderColor: theme.border2,
-    borderRadius: 12,
-    borderWidth: 1,
-    paddingVertical: 13
-  },
-  demoButtonText: { color: theme.accent, fontSize: 15, fontWeight: '600' },
-  demoButtonHint: { color: theme.textDim, fontSize: 12, marginTop: 3 },
+    // ── 행동 ────────────────────────────────────────────────────────────────
+    // 너비를 통일한다. 주 버튼만 좁고 데모만 넓으면 위계가 뒤집혀 보인다.
+    footer: { gap: 4 },
+    primary: {
+      alignItems: 'center',
+      backgroundColor: theme.accentStrong,
+      borderRadius: 12,
+      paddingVertical: 15
+    },
+    primaryDisabled: { opacity: 0.35 },
+    primaryText: { color: theme.onAccentStrong, fontSize: 16, fontWeight: '600' },
+    link: { alignItems: 'center', paddingVertical: 12 },
+    linkText: { color: theme.accent, fontSize: 14, fontWeight: '500' },
+    pressed: { opacity: 0.7 },
+    divider: { alignItems: 'center', flexDirection: 'row', gap: 12, marginBottom: 14, marginTop: 6 },
+    rule: { backgroundColor: theme.border, flex: 1, height: StyleSheet.hairlineWidth },
+    dividerLabel: { color: theme.textFaint, fontSize: 12 },
+    demoButton: {
+      alignItems: 'center',
+      backgroundColor: theme.surface,
+      borderColor: theme.border2,
+      borderRadius: 12,
+      borderWidth: 1,
+      paddingVertical: 13
+    },
+    demoButtonText: { color: theme.accent, fontSize: 15, fontWeight: '600' },
+    demoButtonHint: { color: theme.textDim, fontSize: 12, marginTop: 3 },
 
-  // ── 확인(SAS) ───────────────────────────────────────────────────────────
-  eyebrow: { color: theme.accent, fontSize: 11, fontWeight: '700', letterSpacing: 1.8 },
-  machine: { color: theme.textMuted, fontSize: 16, marginTop: 14 },
-  sas: {
-    color: theme.text,
-    fontSize: 48,
-    fontVariant: ['tabular-nums'],
-    fontWeight: '700',
-    letterSpacing: 4,
-    marginVertical: 28
-  },
-  warning: { color: theme.textMuted, fontSize: 15, lineHeight: 23 },
-  waitingRow: { alignItems: 'center', flexDirection: 'row', gap: 10, marginTop: 28 },
-  waiting: { color: theme.textDim, fontSize: 14, marginTop: 14 },
+    // ── 확인(SAS) ───────────────────────────────────────────────────────────
+    eyebrow: { color: theme.accent, fontSize: 11, fontWeight: '700', letterSpacing: 1.8 },
+    machine: { color: theme.textMuted, fontSize: 16, marginTop: 14 },
+    sas: {
+      color: theme.text,
+      fontSize: 48,
+      fontVariant: ['tabular-nums'],
+      fontWeight: '700',
+      letterSpacing: 4,
+      marginVertical: 28
+    },
+    warning: { color: theme.textMuted, fontSize: 15, lineHeight: 23 },
+    waitingRow: { alignItems: 'center', flexDirection: 'row', gap: 10, marginTop: 28 },
+    waiting: { color: theme.textDim, fontSize: 14, marginTop: 14 },
 
-  // ── 스캐너 ──────────────────────────────────────────────────────────────
-  cameraOverlay: { flex: 1, alignItems: 'center', paddingHorizontal: 24 },
-  cameraHeader: { alignItems: 'center', paddingTop: 24 },
-  cameraTitle: { color: '#ffffff', fontSize: 20, fontWeight: '600', textAlign: 'center' },
-  cameraHint: {
-    backgroundColor: 'rgba(11,11,13,0.78)',
-    borderRadius: 8,
-    color: theme.textMuted,
-    fontSize: 13,
-    marginTop: 10,
-    overflow: 'hidden',
-    paddingHorizontal: 12,
-    paddingVertical: 7
-  },
-  frameArea: {
-    alignItems: 'center',
-    alignSelf: 'stretch',
-    flex: 1,
-    justifyContent: 'center'
-  },
-  frame: { aspectRatio: 1, maxWidth: 300, width: '80%' },
-  corner: {
-    borderColor: theme.accent,
-    height: 34,
-    position: 'absolute',
-    width: 34
-  },
-  cornerTopLeft: {
-    borderLeftWidth: 3,
-    borderTopLeftRadius: 14,
-    borderTopWidth: 3,
-    left: 0,
-    top: 0
-  },
-  cornerTopRight: {
-    borderRightWidth: 3,
-    borderTopRightRadius: 14,
-    borderTopWidth: 3,
-    right: 0,
-    top: 0
-  },
-  cornerBottomLeft: {
-    borderBottomLeftRadius: 14,
-    borderBottomWidth: 3,
-    borderLeftWidth: 3,
-    bottom: 0,
-    left: 0
-  },
-  cornerBottomRight: {
-    borderBottomRightRadius: 14,
-    borderBottomWidth: 3,
-    borderRightWidth: 3,
-    bottom: 0,
-    right: 0
-  },
-  cameraFooter: { alignSelf: 'stretch', paddingBottom: 8 }
-})
+    // ── 스캐너 ──────────────────────────────────────────────────────────────
+    cameraOverlay: { flex: 1, alignItems: 'center', paddingHorizontal: 24 },
+    cameraHeader: { alignItems: 'center', paddingTop: 24 },
+    // 영상 위 글자는 테마 토큰이 아니다 — 이 subtree 는 다크로 고정돼 있고, 순백과 검은
+    // 스크림은 어떤 피사체 위에서도 읽히라고 고른 값이다(--text 보다 한 단계 더 밝다).
+    cameraTitle: { color: '#ffffff', fontSize: 20, fontWeight: '600', textAlign: 'center' },
+    cameraHint: {
+      backgroundColor: 'rgba(11,11,13,0.78)',
+      borderRadius: 8,
+      color: theme.textMuted,
+      fontSize: 13,
+      marginTop: 10,
+      overflow: 'hidden',
+      paddingHorizontal: 12,
+      paddingVertical: 7
+    },
+    frameArea: {
+      alignItems: 'center',
+      alignSelf: 'stretch',
+      flex: 1,
+      justifyContent: 'center'
+    },
+    frame: { aspectRatio: 1, maxWidth: 300, width: '80%' },
+    corner: {
+      borderColor: theme.accent,
+      height: 34,
+      position: 'absolute',
+      width: 34
+    },
+    cornerTopLeft: {
+      borderLeftWidth: 3,
+      borderTopLeftRadius: 14,
+      borderTopWidth: 3,
+      left: 0,
+      top: 0
+    },
+    cornerTopRight: {
+      borderRightWidth: 3,
+      borderTopRightRadius: 14,
+      borderTopWidth: 3,
+      right: 0,
+      top: 0
+    },
+    cornerBottomLeft: {
+      borderBottomLeftRadius: 14,
+      borderBottomWidth: 3,
+      borderLeftWidth: 3,
+      bottom: 0,
+      left: 0
+    },
+    cornerBottomRight: {
+      borderBottomRightRadius: 14,
+      borderBottomWidth: 3,
+      borderRightWidth: 3,
+      bottom: 0,
+      right: 0
+    },
+    cameraFooter: { alignSelf: 'stretch', paddingBottom: 8 }
+  })

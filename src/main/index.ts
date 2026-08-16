@@ -16,7 +16,12 @@ import { getTranscripts } from './transcripts'
 import { flushPendingSyncs } from './fsutil'
 import { initHealthLogging } from './health'
 import { TerminalManager } from './terminal'
-import { applyNavigationGuards, loadRenderer, rendererWebPreferences } from './windows'
+import {
+  applyNavigationGuards,
+  loadRenderer,
+  rendererWebPreferences,
+  windowBackgroundColor
+} from './windows'
 import { registerIpc } from './ipc'
 import { disposeRemote, getRemoteBridge, hasLocalRemoteOverride, initRemote } from './remote'
 import { pendingPermissions } from './remote/permissions'
@@ -220,7 +225,7 @@ function createWindow(): void {
     minWidth: 900,
     minHeight: 600,
     show: false,
-    backgroundColor: '#14161a',
+    backgroundColor: windowBackgroundColor(),
     titleBarStyle: 'hiddenInset',
     trafficLightPosition: { x: 14, y: 16 },
     webPreferences: rendererWebPreferences()

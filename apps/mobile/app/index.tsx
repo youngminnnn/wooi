@@ -8,16 +8,11 @@ import { workspaceDisplayName } from '@shared/types'
 import { BrandMark } from '../src/components/BrandMark'
 import { StatusIcon } from '../src/components/StatusIcon'
 import { DemoBanner } from '../src/components/DemoBanner'
-import { PR_COLORS } from '../src/state/prColors'
+import { usePrColors } from '../src/state/prColors'
 import { isLaptopAway, useRemoteStore } from '../src/state/store'
 import { agoLabel, untilLabel, useNow } from '../src/state/useNow'
-import { theme } from '../src/theme'
-
-const STATUS_COLORS: Record<string, string> = {
-  idle: theme.textFaint,
-  running: theme.accent,
-  error: theme.danger
-}
+import { useTheme, useThemedStyles } from '../src/state/theme'
+import type { Theme } from '../src/theme'
 
 function updatedLabel(timestamp: number): string {
   const elapsed = Math.max(0, Date.now() - timestamp)
@@ -58,6 +53,9 @@ function WorkspaceRow({
   now: number
   onPress: () => void
 }): React.JSX.Element {
+  const theme = useTheme()
+  const styles = useThemedStyles(makeStyles)
+  const prColors = usePrColors()
   const needsPermission = workspace.attention === 'permission'
   // 구형 랩탑은 이 필드를 아예 보내지 않는다(undefined) — 그때는 점을 그리지 않는다.
   // 모르는 것을 "안 읽음"으로 칠하면 페어링 직후 목록 전체가 파란 점이 된다.
@@ -106,7 +104,7 @@ function WorkspaceRow({
         </View>
         {workspace.pr !== null && workspace.pr !== undefined ? (
           <Text
-            style={[styles.pr, { color: PR_COLORS[workspace.pr.state] ?? theme.textDim }]}
+            style={[styles.pr, { color: prColors[workspace.pr.state] ?? theme.textDim }]}
             numberOfLines={1}
           >
             #{workspace.pr.number} · {workspace.pr.label}
@@ -130,6 +128,8 @@ function WorkspaceRow({
 
 export default function WorkspaceListScreen(): React.JSX.Element {
   const router = useRouter()
+  const theme = useTheme()
+  const styles = useThemedStyles(makeStyles)
   const pairing = useRemoteStore((store) => store.pairing)
   const demo = useRemoteStore((store) => store.demo)
   const status = useRemoteStore((store) => store.status)
@@ -302,109 +302,110 @@ export default function WorkspaceListScreen(): React.JSX.Element {
   )
 }
 
-const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: theme.bg },
-  header: {
-    alignItems: 'flex-start',
-    borderBottomColor: theme.border,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingBottom: 18,
-    paddingHorizontal: 18,
-    paddingTop: 18
-  },
-  headerMark: { borderRadius: 9, height: 36, marginRight: 11, marginTop: 2, width: 36 },
-  headerText: { flex: 1, minWidth: 0 },
-  title: { color: theme.text, fontSize: 21, fontWeight: '600', letterSpacing: -0.3 },
-  updated: { color: theme.textDim, fontSize: 12, marginTop: 3 },
-  connection: { alignItems: 'center', flexDirection: 'row', flexShrink: 0, gap: 6, marginLeft: 8, marginTop: 5 },
-  connectionDot: { borderRadius: 4, height: 7, width: 7 },
-  connectionText: { color: theme.textDim, fontSize: 11, textTransform: 'capitalize' },
-  settingsButton: {
-    alignItems: 'center',
-    borderRadius: 17,
-    height: 34,
-    justifyContent: 'center',
-    marginLeft: 5,
-    width: 34
-  },
-  settingsPressed: { backgroundColor: theme.surface2 },
-  banner: { backgroundColor: '#2a1719', color: '#e69393', fontSize: 12, padding: 10 },
-  list: { paddingBottom: 24 },
-  sectionHeader: {
-    alignItems: 'center',
-    backgroundColor: theme.bg2,
-    borderBottomColor: theme.border,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    flexDirection: 'row',
-    gap: 8,
-    paddingHorizontal: 18,
-    paddingVertical: 8
-  },
-  sectionName: { color: theme.text, flex: 1, fontSize: 12, fontWeight: '700', letterSpacing: 0.4 },
-  sectionCount: { color: theme.accent, fontSize: 11 },
-  sectionUnread: { color: theme.info, fontSize: 11 },
-  row: {
-    alignItems: 'flex-start',
-    borderBottomColor: theme.border,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    flexDirection: 'row',
-    minHeight: 62,
-    paddingHorizontal: 18,
-    paddingVertical: 12
-  },
-  permissionRow: {
-    backgroundColor: theme.surface,
-    borderBottomColor: theme.border,
-    borderLeftColor: theme.accent,
-    borderLeftWidth: 3,
-    // 테두리는 폭을 더한다. 빼 주지 않으면 이 줄만 3px 밀려 왼쪽 아이콘 열이 어긋난다.
-    paddingLeft: 15
-  },
-  statusSlot: { alignItems: 'center', marginRight: 11, marginTop: 3, width: 16 },
-  unreadDot: {
-    backgroundColor: theme.infoStrong,
-    borderRadius: 4,
-    flexShrink: 0,
-    height: 8,
-    marginLeft: 10,
-    marginTop: 7,
-    width: 8
-  },
-  rowContent: { flex: 1 },
-  nameLine: { alignItems: 'center', flexDirection: 'row', gap: 7 },
-  stacked: { color: theme.textDim, fontSize: 13 },
-  name: {
-    color: theme.text,
-    flexShrink: 1,
-    fontSize: 15.5,
-    fontWeight: '600',
-    letterSpacing: -0.2
-  },
-  muted: { color: theme.textDim, fontSize: 10 },
-  permissionBadge: {
-    backgroundColor: theme.accent,
-    borderRadius: 4,
-    paddingHorizontal: 5,
-    paddingVertical: 1
-  },
-  permissionText: { color: '#12101f', fontSize: 9, fontWeight: '800', letterSpacing: 0.6 },
-  metaLine: { alignItems: 'center', flexDirection: 'row', gap: 6, marginTop: 4 },
-  // 마크와 팀 글리프는 한 덩어리로 읽혀야 한다 — 브랜치와의 간격보다 좁게 붙인다.
-  agentMarks: { alignItems: 'center', flexDirection: 'row', gap: 3 },
-  branch: { color: theme.textDim, flexShrink: 1, fontSize: 12.5 },
-  pr: { fontSize: 11.5, marginTop: 4 },
-  limit: { color: theme.warning, fontSize: 11.5, marginTop: 4 },
-  parent: { color: theme.textFaint, fontSize: 11, marginTop: 2 },
-  emptyList: { flexGrow: 1, justifyContent: 'center' },
-  empty: { alignItems: 'center', paddingHorizontal: 32 },
-  emptyTitle: { color: theme.textMuted, fontSize: 15, fontWeight: '500' },
-  emptyBody: {
-    color: theme.textFaint,
-    fontSize: 13,
-    lineHeight: 19,
-    marginTop: 8,
-    textAlign: 'center'
-  }
-})
+const makeStyles = (theme: Theme) =>
+  StyleSheet.create({
+    screen: { flex: 1, backgroundColor: theme.bg },
+    header: {
+      alignItems: 'flex-start',
+      borderBottomColor: theme.border,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      paddingBottom: 18,
+      paddingHorizontal: 18,
+      paddingTop: 18
+    },
+    headerMark: { borderRadius: 9, height: 36, marginRight: 11, marginTop: 2, width: 36 },
+    headerText: { flex: 1, minWidth: 0 },
+    title: { color: theme.text, fontSize: 21, fontWeight: '600', letterSpacing: -0.3 },
+    updated: { color: theme.textDim, fontSize: 12, marginTop: 3 },
+    connection: { alignItems: 'center', flexDirection: 'row', flexShrink: 0, gap: 6, marginLeft: 8, marginTop: 5 },
+    connectionDot: { borderRadius: 4, height: 7, width: 7 },
+    connectionText: { color: theme.textDim, fontSize: 11, textTransform: 'capitalize' },
+    settingsButton: {
+      alignItems: 'center',
+      borderRadius: 17,
+      height: 34,
+      justifyContent: 'center',
+      marginLeft: 5,
+      width: 34
+    },
+    settingsPressed: { backgroundColor: theme.pressed },
+    banner: { backgroundColor: theme.dangerSurface, color: theme.dangerFg, fontSize: 12, padding: 10 },
+    list: { paddingBottom: 24 },
+    sectionHeader: {
+      alignItems: 'center',
+      backgroundColor: theme.bg2,
+      borderBottomColor: theme.border,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      flexDirection: 'row',
+      gap: 8,
+      paddingHorizontal: 18,
+      paddingVertical: 8
+    },
+    sectionName: { color: theme.text, flex: 1, fontSize: 12, fontWeight: '700', letterSpacing: 0.4 },
+    sectionCount: { color: theme.accent, fontSize: 11 },
+    sectionUnread: { color: theme.info, fontSize: 11 },
+    row: {
+      alignItems: 'flex-start',
+      borderBottomColor: theme.border,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      flexDirection: 'row',
+      minHeight: 62,
+      paddingHorizontal: 18,
+      paddingVertical: 12
+    },
+    permissionRow: {
+      backgroundColor: theme.surface,
+      borderBottomColor: theme.border,
+      borderLeftColor: theme.accent,
+      borderLeftWidth: 3,
+      // 테두리는 폭을 더한다. 빼 주지 않으면 이 줄만 3px 밀려 왼쪽 아이콘 열이 어긋난다.
+      paddingLeft: 15
+    },
+    statusSlot: { alignItems: 'center', marginRight: 11, marginTop: 3, width: 16 },
+    unreadDot: {
+      backgroundColor: theme.infoStrong,
+      borderRadius: 4,
+      flexShrink: 0,
+      height: 8,
+      marginLeft: 10,
+      marginTop: 7,
+      width: 8
+    },
+    rowContent: { flex: 1 },
+    nameLine: { alignItems: 'center', flexDirection: 'row', gap: 7 },
+    stacked: { color: theme.textDim, fontSize: 13 },
+    name: {
+      color: theme.text,
+      flexShrink: 1,
+      fontSize: 15.5,
+      fontWeight: '600',
+      letterSpacing: -0.2
+    },
+    muted: { color: theme.textDim, fontSize: 10 },
+    permissionBadge: {
+      backgroundColor: theme.accent,
+      borderRadius: 4,
+      paddingHorizontal: 5,
+      paddingVertical: 1
+    },
+    permissionText: { color: theme.onAccent, fontSize: 9, fontWeight: '800', letterSpacing: 0.6 },
+    metaLine: { alignItems: 'center', flexDirection: 'row', gap: 6, marginTop: 4 },
+    // 마크와 팀 글리프는 한 덩어리로 읽혀야 한다 — 브랜치와의 간격보다 좁게 붙인다.
+    agentMarks: { alignItems: 'center', flexDirection: 'row', gap: 3 },
+    branch: { color: theme.textDim, flexShrink: 1, fontSize: 12.5 },
+    pr: { fontSize: 11.5, marginTop: 4 },
+    limit: { color: theme.warningFg, fontSize: 11.5, marginTop: 4 },
+    parent: { color: theme.textFaint, fontSize: 11, marginTop: 2 },
+    emptyList: { flexGrow: 1, justifyContent: 'center' },
+    empty: { alignItems: 'center', paddingHorizontal: 32 },
+    emptyTitle: { color: theme.textMuted, fontSize: 15, fontWeight: '500' },
+    emptyBody: {
+      color: theme.textFaint,
+      fontSize: 13,
+      lineHeight: 19,
+      marginTop: 8,
+      textAlign: 'center'
+    }
+  })
