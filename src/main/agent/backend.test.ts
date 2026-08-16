@@ -39,6 +39,12 @@ describe.each(BACKENDS.map((m) => [m.label, m] as const))('%s 메타', (_label, 
     }
   })
 
+  it('입력창 푸터는 실제 권한 모드 이름을 그대로 쓴다', () => {
+    for (const mode of meta.permissionModes) {
+      if (mode.footer) expect(mode.footer.text).toBe(`${mode.label.toLowerCase()} on`)
+    }
+  })
+
   it('shift+tab 순환이 모든 모드를 한 바퀴 돈다', () => {
     const modes = meta.permissionModes
     let current = modes[0].id
@@ -77,7 +83,7 @@ describe('백엔드 간 관계', () => {
 
     expect(mode).toMatchObject({
       label: 'Approve for me',
-      footer: { symbol: '⏵⏵', text: 'auto-review on' }
+      footer: { symbol: '⏵⏵', text: 'approve for me on' }
     })
   })
 

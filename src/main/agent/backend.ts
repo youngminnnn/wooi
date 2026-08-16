@@ -326,7 +326,7 @@ export const CODEX_PERMISSION_MODES: PermissionModeInfo[] = [
     id: 'default',
     label: 'Approve for me',
     description: 'Edit and run inside the workspace — auto-review requests to go beyond it',
-    footer: { symbol: '⏵⏵', text: 'auto-review on' }
+    footer: { symbol: '⏵⏵', text: 'approve for me on' }
   },
   {
     id: 'fullAccess',
