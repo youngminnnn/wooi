@@ -1,5 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Check, Copy, ExternalLink, FileWarning, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react'
+import {
+  Check,
+  Copy,
+  ExternalLink,
+  FileWarning,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Trash2
+} from 'lucide-react'
 import { isValidMcpServerName, mcpSettingsOf } from '@shared/types'
 import type {
   AppSettings,

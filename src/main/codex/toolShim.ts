@@ -80,11 +80,11 @@ function tools(): unknown[] {
   return agentToolsFor(DELEGATE_BACKENDS, true)
     .filter((spec) => !EXTERNAL || EXTERNAL_TOOLS.has(spec.name))
     .map((spec) => ({
-    name: spec.name,
-    description: spec.description,
-    inputSchema: inputSchemaOf(spec.inputSchema),
-    ...(spec.annotations ? { annotations: spec.annotations } : {})
-  }))
+      name: spec.name,
+      description: spec.description,
+      inputSchema: inputSchemaOf(spec.inputSchema),
+      ...(spec.annotations ? { annotations: spec.annotations } : {})
+    }))
 }
 
 /** 도구 호출 1건을 메인으로 넘긴다. 연결 1개당 요청 1개(줄 단위 JSON). */

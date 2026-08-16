@@ -121,10 +121,7 @@ function repoNameOf(repoId: string): string {
  * 무엇보다 이 예외가 없으면 `notify_child` 가 조용히 느려진다 — 지금까지 바로 깨우던 것이
  * 승인 대기로 바뀌면 스택 인계가 사용자를 기다리다 멈춘다.
  */
-export function inboundPolicyFor(
-  target: Workspace,
-  senderWorkspaceId?: string
-): PeerInboundPolicy {
+export function inboundPolicyFor(target: Workspace, senderWorkspaceId?: string): PeerInboundPolicy {
   if (target.peerInbound === 'refuse') return 'refuse'
   // 외부 발신자는 생성자 관계가 없다. 값 비교에만 맡기면 둘 다 undefined/null인 데이터가 생성자
   // 예외로 오인되어 hold를 뚫을 수 있으므로, 실제 발신 workspace가 있을 때만 예외를 검사한다.
@@ -469,7 +466,9 @@ export const listWorkspacePeersExternal = async (): Promise<unknown> => {
             : 'blocked'
     })),
     ...(peers.length > MAX_PEERS ? { truncated: peers.length - MAX_PEERS } : {}),
-    ...(peers.length ? {} : { note: 'No workspace is open right now, so there is nobody to message.' })
+    ...(peers.length
+      ? {}
+      : { note: 'No workspace is open right now, so there is nobody to message.' })
   }
 }
 
@@ -551,7 +550,6 @@ export const sendToWorkspace: AgentToolHandler = async (deps, workspaceId, args)
         'will be if they decline. Do not wait on a reply: tell the user what you sent and carry on.'
   }
 }
-
 
 export async function sendToWorkspaceExternal(
   deps: AgentToolDeps,

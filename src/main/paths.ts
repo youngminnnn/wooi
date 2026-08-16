@@ -49,7 +49,13 @@ export function wooiHome(): string {
 
 /** Electron 밖의 Node 프로세스가 실행할 MCP shim 경로. 패키징 때는 asar 밖 파일을 가리킨다. */
 export function toolShimPath(): string {
-  const unpacked = join(process.resourcesPath ?? '', 'app.asar.unpacked', 'out', 'main', 'toolShim.js')
+  const unpacked = join(
+    process.resourcesPath ?? '',
+    'app.asar.unpacked',
+    'out',
+    'main',
+    'toolShim.js'
+  )
   if (process.resourcesPath && existsSync(unpacked)) return unpacked
   return join(import.meta.dirname, 'toolShim.js')
 }

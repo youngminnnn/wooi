@@ -39,10 +39,7 @@ interface Harness {
 }
 
 /** shim 을 띄우고, 메인 역할을 하는 소켓 스텁을 물린다. */
-function start(
-  reply: { ok: boolean; data?: unknown; error?: string },
-  external = false
-): Harness {
+function start(reply: { ok: boolean; data?: unknown; error?: string }, external = false): Harness {
   dir = mkdtempSync(join(tmpdir(), 'wooi-shim-'))
   const path = join(dir, 'tools.sock')
 

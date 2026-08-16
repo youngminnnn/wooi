@@ -43,7 +43,10 @@ export interface ToolSocketRequest {
  * 핵심이다 — 도구는 에이전트가 도는 중에만 불리므로 정상 호출은 항상 통과하지만, 엉뚱한 id 는
  * 그 워크스페이스가 마침 동시에 돌고 있지 않는 한 걸린다.
  */
-function verifyCaller(workspaceId: string | undefined, caller: 'workspace' | 'external'): Workspace | null {
+function verifyCaller(
+  workspaceId: string | undefined,
+  caller: 'workspace' | 'external'
+): Workspace | null {
   if (caller === 'external') {
     // 소켓의 0600은 다른 OS 사용자를 막을 뿐 같은 사용자 프로세스를 인증하지 않는다. 따라서 이
     // 플래그 자체는 인증 경계가 아니다. 실제 경계는 외부 전용 도구 allowlist와 수신 workspace의

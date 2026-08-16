@@ -162,7 +162,6 @@ export async function runAgentTool(
   return handler(deps, workspaceId, (args ?? {}) as Record<string, unknown>)
 }
 
-
 /** 호출 워크스페이스가 없는 앱 밖 세션의 도구를 실행한다. */
 export async function runExternalAgentTool(tool: string, args: unknown): Promise<unknown> {
   if (!deps) throw new Error('Wooi tools are not ready yet.')

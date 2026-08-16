@@ -114,9 +114,9 @@ describe('list_workspace_peers', () => {
 describe('send_to_workspace', () => {
   it('외부 메시지는 refuse 대상에 전달되지 않는다', async () => {
     state.workspaces.push(ws({ id: 'ws-them', peerInbound: 'refuse' }))
-    await expect(sendExternal({ targetWorkspaceId: 'ws-them', message: 'heads up' })).rejects.toThrow(
-      /not accepting messages/
-    )
+    await expect(
+      sendExternal({ targetWorkspaceId: 'ws-them', message: 'heads up' })
+    ).rejects.toThrow(/not accepting messages/)
     expect(sendMessage).not.toHaveBeenCalled()
   })
 
@@ -135,9 +135,7 @@ describe('send_to_workspace', () => {
   it.each([null, undefined])(
     '외부 메시지는 createdByWorkspaceId=%s여도 생성자 예외로 hold를 뚫지 않는다',
     async (createdByWorkspaceId) => {
-      state.workspaces.push(
-        ws({ id: 'ws-them', peerInbound: 'hold', createdByWorkspaceId })
-      )
+      state.workspaces.push(ws({ id: 'ws-them', peerInbound: 'hold', createdByWorkspaceId }))
       const out = await sendExternal({ targetWorkspaceId: 'ws-them', message: 'heads up' })
       expect(out.delivered).toBe(false)
       expect(sendMessage).not.toHaveBeenCalled()
