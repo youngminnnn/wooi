@@ -330,6 +330,15 @@ export function createDemoSession(now: number = Date.now()): DemoSession {
             { label: '7-day', usedPct: 78, resetsAt: now + 3 * 86_400_000 },
             { label: 'Opus', usedPct: 12, resetsAt: now + 3 * 86_400_000 }
           ]
+        },
+        // 계정이 둘일 때 화면이 어떻게 갈리는지가 데모에서도 보여야 한다 — 창 이름만으로는
+        // ('5-hour' vs 'Weekly') 어느 계정의 한도인지 알 수 없기 때문이다.
+        {
+          agent: 'codex',
+          agentLabel: 'Codex',
+          plan: null,
+          fetchedAt: now - 82 * 60_000,
+          windows: [{ label: 'Weekly', usedPct: 93, resetsAt: now + 2 * 86_400_000 }]
         }
       ],
       pendingPermissions: [permission]

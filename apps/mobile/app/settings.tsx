@@ -5,6 +5,7 @@ import { useFocusEffect, useRouter } from 'expo-router'
 import Constants from 'expo-constants'
 import * as Notifications from 'expo-notifications'
 import { ChevronLeft } from 'lucide-react-native'
+import { BrandMark } from '../src/components/BrandMark'
 import { SettingsRow } from '../src/components/settings/SettingsRow'
 import { SettingsSection } from '../src/components/settings/SettingsSection'
 import { UsageRow } from '../src/components/settings/UsageRow'
@@ -134,10 +135,15 @@ export default function SettingsScreen(): React.JSX.Element {
           </SettingsSection>
         )}
 
+        {/* 계정(에이전트)마다 카드 하나 — 데스크톱 Overview 의 사용량 패널과 같은 나눔이다.
+            제목에 계정 이름을 **항상** 넣고 브랜드 마크를 앞에 붙인다: 창 이름('5-hour',
+            'Weekly')만으로는 어느 계정의 한도인지 알 수 없고, 계정이 하나뿐일 때 이름을 빼면
+            나중에 두 번째 계정이 붙었을 때 같은 화면이 다른 뜻으로 읽힌다. */}
         {planUsage.map((account) => (
           <SettingsSection
             key={account.agent}
-            title={planUsage.length > 1 ? `Plan usage · ${account.agentLabel}` : 'Plan usage'}
+            icon={<BrandMark backend={account.agent} size={14} />}
+            title={`${account.agentLabel} · Plan usage`}
           >
             {account.windows.map((usage) => (
               <UsageRow key={usage.label} now={now} usage={usage} />
