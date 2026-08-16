@@ -7,6 +7,7 @@
  */
 export type ToolSummary =
   | { kind: 'read'; path: string; lines: number; total?: number; truncated?: boolean }
+  | { kind: 'view'; path: string }
   | { kind: 'write'; path: string; lines: number; created: boolean }
   | { kind: 'patch'; path: string; added: number; removed: number }
   | { kind: 'files'; paths: string[] }
@@ -26,6 +27,8 @@ export function formatToolSummary(summary: ToolSummary): string {
         summary.total != null && summary.total !== summary.lines ? ` of ${summary.total}` : ''
       return `Read ${summary.path} (${plural(summary.lines, 'line')}${of}${summary.truncated ? ', truncated' : ''})`
     }
+    case 'view':
+      return `Viewed ${summary.path}`
     case 'write':
       return `Wrote ${plural(summary.lines, 'line')} to ${summary.path}`
     case 'patch':

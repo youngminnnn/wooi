@@ -83,6 +83,28 @@ describe('buildToolGroups', () => {
     ).toBe(0)
   })
 
+  it('Codex MCP·에이전트·이미지 조회는 기존 종류에 연결한다', () => {
+    expect(toolKind('mcp__github__get_file', {})).toBe('mcp')
+    expect(toolKind('spawnAgent', {})).toBe('agent')
+    expect(toolKind('send_input', {})).toBe('agent')
+    expect(toolKind('ViewImage', { path: '/tmp/a.png' })).toBe('read')
+
+    const group = buildToolGroups([
+      use('mcp__github__get_file', {}, '1'),
+      result('1'),
+      use('ViewImage', { path: '/tmp/a.png' }, '2'),
+      result('2')
+    ]).groupByItemId.get('use:1')!
+    expect(formatToolGroup(group)).toBe('Read 1 file, called github 1 time')
+  })
+
+  it('Codex dynamic tool은 의미와 부작용을 모르므로 묶지 않는다', () => {
+    expect(toolKind('apps/lookup', {})).toBe('uncollapsible')
+    expect(
+      buildToolGroups([use('apps/lookup', {}, '1'), use('apps/lookup', {}, '2')]).groupByItemId.size
+    ).toBe(0)
+  })
+
   it('체크리스트가 차지한 항목은 제외하고 그 자리에서 그룹을 끊는다', () => {
     const items = [use('Read', {}, '1'), use('Bash', {}, 'task'), use('Grep', {}, '2')]
     expect(buildToolGroups(items, new Set(['use:task'])).groupByItemId.size).toBe(0)

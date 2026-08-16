@@ -17,9 +17,22 @@ export interface ToolGroup {
 
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'Apply patch'])
 const SEARCH_TOOLS = new Set(['Glob', 'Grep'])
-const READ_TOOLS = new Set(['Read'])
+const READ_TOOLS = new Set(['Read', 'ViewImage'])
 const LIST_TOOLS = new Set(['LS', 'ListDirectory'])
-const AGENT_TOOLS = new Set(['Agent', 'Task'])
+const AGENT_TOOLS = new Set([
+  'Agent',
+  'Task',
+  'spawnAgent',
+  'sendInput',
+  'resumeAgent',
+  'wait',
+  'closeAgent',
+  // 구버전 app-server와 이미 저장된 테스트/대화의 표기.
+  'spawn_agent',
+  'send_input',
+  'resume_agent',
+  'close_agent'
+])
 const MCP_NAME = /^mcp__(.+?)__/
 
 /** 이 도구가 "조회하고 훑는 일" 인가. 묶임의 단일 판정 지점. */
