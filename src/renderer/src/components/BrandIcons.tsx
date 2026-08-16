@@ -52,7 +52,13 @@ export function GithubMark({ size = 18 }: { size?: number }): React.JSX.Element 
  */
 const BACKEND_MARKS: Record<AgentBackendId, (props: { size?: number }) => React.JSX.Element> = {
   claude: ClaudeMark,
-  codex: CodexMark
+  codex: CodexMark,
+  // TODO(piece 3): 정식 Grok 브랜드 마크로 교체한다. 유니온 확장 뒤 웹 타입체크용 임시 자리다.
+  grok: ({ size = 18 }) => (
+    <span style={{ fontSize: size, lineHeight: 1 }} aria-label="Grok Build">
+      G
+    </span>
+  )
 }
 
 export function AgentBackendMark({
