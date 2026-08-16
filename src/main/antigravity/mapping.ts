@@ -213,7 +213,13 @@ function mapTool(step: Step, index: number, state: MapperState, ts: number): Map
   // 영원히 "실행 중" 으로 남고 결과도 남지 않는다.
   const finished = step.state === 'DONE' || step.state === 'ERROR'
 
-  if (isShellTool(name)) return mapShell(info, index, input, state, ts, finished)
+  const errorValue = info?.error
+  const error = objectValue(errorValue)
+  const hasError = errorValue !== undefined && errorValue !== null
+  // 오류로 끝난 명령, 특히 권한이 거부되어 아예 실행되지 않은 명령은 터미널 기록이 아니다. ACTIVE 때
+  // 그린 bash와 같은 step id를 tool_use가 이어받아 upsert로 교체하고, 실제 오류는 tool_result에 둔다.
+  if (isShellTool(name) && !(finished && hasError))
+    return mapShell(info, index, input, state, ts, finished)
 
   const id = stepItemId(state, index)
   const use: ChatItem = {
@@ -227,10 +233,12 @@ function mapTool(step: Step, index: number, state: MapperState, ts: number): Map
   if (!finished) return { events: [{ type: 'item', item: use }], persist: [] }
 
   state.tools.delete(index)
-  const error = objectValue(info?.error)
-  const isError = Boolean(error)
+  const isError = hasError
   const text = isError
-    ? (stringValue(error?.message) ?? safeString(error) ?? 'Failed.')
+    ? (stringValue(error?.message) ??
+      stringValue(errorValue) ??
+      safeString(errorValue) ??
+      'Failed.')
     : (stringValue(info?.output) ?? 'Done.')
   const result: ChatItem = {
     id: `${id}:result`,
@@ -274,17 +282,14 @@ function mapShell(
     stringValue(parameters?.cmd) ??
     ''
   const done = finished
-  const error = objectValue(info?.error)
-  const output = error
-    ? (stringValue(error.message) ?? safeString(error) ?? '')
-    : (stringValue(info?.output) ?? '')
+  const output = stringValue(info?.output) ?? ''
   const item: ChatItem = {
     id: stepItemId(state, index),
     type: 'bash',
     agent: true,
     command,
     output: clampText(output),
-    // 문서화된 출력에 종료 코드가 없으므로 성공처럼 보이는 값을 만들지 않는다.
+    // CLI가 종료 코드를 보고하지 않으므로 명령이 끝나도 값을 지어내지 않는다.
     exitCode: null,
     running: !done,
     ts
@@ -335,6 +340,7 @@ export function mapExitStderr(
     id: `antigravity:stderr:${ts}`,
     type: 'system',
     text: clampText(guidance + text),
+    ...(autoDenied ? { action: 'enableFullAccess' as const } : {}),
     ts
   }
   return itemResult(item)

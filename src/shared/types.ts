@@ -1300,7 +1300,14 @@ export type ChatItem =
       ts: number
     }
   | { id: string; type: 'error'; text: string; ts: number }
-  | { id: string; type: 'system'; text: string; ts: number }
+  | {
+      id: string
+      type: 'system'
+      text: string
+      ts: number
+      /** 메인 프로세스만 확실히 판별할 수 있는 안내에 렌더러 동작을 안전하게 연결한다. */
+      action?: 'enableFullAccess'
+    }
   | {
       id: string
       /** 이 지점 이전의 UI 기록은 모델 컨텍스트에서 압축됐으므로 기본 렌더링에서도 접는다. */

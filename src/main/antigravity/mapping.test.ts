@@ -91,7 +91,7 @@ describe('도구', () => {
     expect(done.persist).toHaveLength(2)
   })
 
-  it('run_command를 CommandLine 명령의 bash 카드로 만든다', () => {
+  it('오류 없이 끝난 run_command를 완료된 bash 카드로 만든다', () => {
     const state = createMapperState('run1')
     map(
       step({
@@ -119,6 +119,7 @@ describe('도구', () => {
       exitCode: null,
       running: false
     })
+    expect(done.persist).toHaveLength(1)
   })
 
   it('tool_info.error를 오류 tool_result로 만든다', () => {
@@ -303,22 +304,29 @@ describe('종료 stderr', () => {
 
   it('중단은 표시하지 않는다', () =>
     expect(mapExitStderr('error', 1, true)).toEqual({ events: [], persist: [] }))
-  it('비정상 종료는 error로 만든다', () =>
-    expect(items(mapExitStderr('boom', 2, false))[0]).toMatchObject({
+  it('비정상 종료는 action 없는 error로 만든다', () => {
+    const item = items(mapExitStderr('boom', 2, false))[0]
+    expect(item).toMatchObject({
       type: 'error',
       text: 'boom'
-    }))
+    })
+    expect(item).not.toHaveProperty('action')
+  })
   it('정상 종료의 빈 stderr는 표시하지 않는다', () =>
     expect(mapExitStderr('  ', 0, false)).toEqual({ events: [], persist: [] }))
-  it('정상 종료 stderr는 system으로 원문을 보존한다', () =>
-    expect(items(mapExitStderr('warning', 0, false))[0]).toMatchObject({
+  it('정상 종료 stderr는 action 없이 system으로 원문을 보존한다', () => {
+    const item = items(mapExitStderr('warning', 0, false))[0]
+    expect(item).toMatchObject({
       type: 'system',
       text: 'warning'
-    }))
+    })
+    expect(item).not.toHaveProperty('action')
+  })
   it('auto-deny에는 Wooi Full access 안내와 CLI 원문을 함께 둔다', () => {
     const item = items(mapExitStderr(denied, 0, false))[0] as Extract<ChatItem, { type: 'system' }>
     expect(item.text).toMatch(/Full access/)
     expect(item.text).toContain(denied)
+    expect(item.action).toBe('enableFullAccess')
   })
 })
 
@@ -384,7 +392,7 @@ describe('실측 — 로그인 전 result', () => {
  * 알 수 없었고 그대로 두면 조용히 깨졌을 자리들이다.
  */
 describe('실측 — 문서에 없는 스텝 모양', () => {
-  it('권한 거부는 state:"ERROR" 로 끝난다 — DONE 만 종료로 보면 카드가 영원히 실행 중이다', () => {
+  it('권한 거부는 ACTIVE bash를 같은 id의 오류 도구로 교체한다', () => {
     const state = createMapperState('run1')
     const active: AntigravityEvent = JSON.parse(
       '{"event":"step_update","step_update":{"conversation_id":"c","step_index":3,"state":"ACTIVE","step_type":"tool","tool_name":"run_command","tool_info":{"name":"run_command","parameters":{"CommandLine":"echo hi-from-agy"}}}}'
@@ -392,10 +400,33 @@ describe('실측 — 문서에 없는 스텝 모양', () => {
     const failed: AntigravityEvent = JSON.parse(
       '{"event":"step_update","step_update":{"conversation_id":"c","step_index":3,"state":"ERROR","step_type":"tool","tool_name":"run_command","duration_seconds":0.13,"tool_info":{"name":"run_command","parameters":{"CommandLine":"echo hi-from-agy"},"error":{"type":"TOOL_ERROR","message":"User denied permission to run command:\\necho hi-from-agy"}}}}'
     )
-    expect(mapEvent(active, state).persist).toEqual([])
-    const out = mapEvent(failed, state).persist[0] as Extract<ChatItem, { type: 'bash' }>
-    expect(out).toMatchObject({ type: 'bash', command: 'echo hi-from-agy', running: false })
-    expect(out.output).toContain('User denied permission')
+    const activeOut = mapEvent(active, state)
+    const activeItem = items(activeOut)[0]
+    expect(activeItem).toMatchObject({ type: 'bash', command: 'echo hi-from-agy', running: true })
+    expect(activeOut.persist).toEqual([])
+
+    const failedOut = mapEvent(failed, state)
+    const failedItems = items(failedOut)
+    expect(failedItems).toEqual([
+      expect.objectContaining({
+        id: activeItem.id,
+        type: 'tool_use',
+        name: 'run_command',
+        input: { CommandLine: 'echo hi-from-agy' }
+      }),
+      expect.objectContaining({
+        type: 'tool_result',
+        toolId: activeItem.id,
+        isError: true,
+        text: expect.stringContaining('User denied permission to run command:')
+      })
+    ])
+    expect(failedItems).not.toContainEqual(expect.objectContaining({ type: 'bash' }))
+    expect(failedOut.persist).toEqual(failedItems)
+
+    // 실제 UI처럼 id 기준 upsert하면 ACTIVE bash는 tool_use로 바뀌고 오류 결과만 옆에 남는다.
+    const finalById = new Map([activeItem, ...failedItems].map((item) => [item.id, item]))
+    expect([...finalById.values()].map((item) => item.type)).toEqual(['tool_use', 'tool_result'])
   })
 
   it('step_type "unknown" 은 정상 값이라 unknown 카드를 만들지 않는다', () => {

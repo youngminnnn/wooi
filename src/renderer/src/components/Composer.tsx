@@ -2338,6 +2338,10 @@ function StatusLine({
     return workspace.agentBackend === 'claude' ? app.rateLimits : undefined
   })
   const backend = useWorkspaceBackend(workspace)
+  // /context 와 상태줄은 모두 최대 컨텍스트 크기를 알아야 한다. 둘의 지원 여부를 함께 묶어 두면
+  // 백엔드에 창 크기 보고가 추가될 때 명령과 미터 중 하나만 빠뜨리는 일을 막을 수 있다. 카탈로그가
+  // 아직 없을 때는 기존 자리표시자를 유지해, 지원 백엔드의 "첫 턴 전" 동작이 로딩에 흔들리지 않는다.
+  const supportsContextUsage = backend?.capabilities.interactiveCommands.includes('context') ?? true
   const models = useModels(workspace.agentBackend)
   const defaults = useAgentSettings(workspace.agentBackend)
   // fast mode 는 Claude Code 전용이라, 지원하지 않는 백엔드에서는 상태줄에서도 감춘다.
@@ -2416,7 +2420,11 @@ function StatusLine({
           <span className="truncate">{fast.text}</span>
         </button>
       )}
-      <ContextStatus usage={usage} compacting={compacting} />
+      <ContextStatus
+        usage={usage}
+        compacting={compacting}
+        supportsContextUsage={supportsContextUsage}
+      />
       <RateLimitStatus backend={workspace.agentBackend} snapshot={rateLimits} />
     </div>
   )
@@ -2728,11 +2736,15 @@ function PickerCard({
 /** 상태줄 우측의 컨텍스트 사용량 표시(막대 + 퍼센트 · 압축 중 · 데이터 없음). */
 function ContextStatus({
   usage,
-  compacting
+  compacting,
+  supportsContextUsage
 }: {
   usage?: { usedTokens: number; maxTokens: number; percentage: number }
   compacting: boolean
-}): React.JSX.Element {
+  supportsContextUsage: boolean
+}): React.JSX.Element | null {
+  if (!supportsContextUsage) return null
+
   if (compacting) {
     return (
       <span className="ml-auto shrink-0 flex items-center gap-1.5 text-[var(--accent-400)]">

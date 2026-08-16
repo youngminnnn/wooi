@@ -28,7 +28,7 @@ import { compactHistoryWindow } from '../lib/compactHistory'
 import { useAvailableBackends } from '../lib/backends'
 import { AgentBackendMark } from './BrandIcons'
 import { AGENT_BACKEND_LABELS, canSwitchAgentBackend } from '@shared/types'
-import type { ChatItem } from '@shared/types'
+import type { ChatItem, PermissionMode } from '@shared/types'
 
 function PeerMessage({
   item,
@@ -405,6 +405,7 @@ export default function MessageList({
                 running={running}
                 resolved={resolved}
                 workspaceId={workspaceId}
+                permissionMode={workspace?.permissionMode}
                 cardByItemId={cardByItemId}
                 latestCardItemId={latestCardItemId}
               />
@@ -431,6 +432,7 @@ function Item({
   running,
   resolved,
   workspaceId,
+  permissionMode,
   cardByItemId,
   latestCardItemId
 }: {
@@ -438,6 +440,7 @@ function Item({
   running: boolean
   resolved: Set<string>
   workspaceId: string
+  permissionMode?: PermissionMode
   /** 이 자리에 할 일 체크리스트를 붙일 항목이면 그 시점의 목록 스냅샷. */
   cardByItemId: Map<string, TaskEntry[]>
   /** 지금이 라이브 상태인 마지막 체크리스트의 항목 id(진행 중 스피너 판별용). */
@@ -497,7 +500,20 @@ function Item({
     case 'error':
       return <ErrorRow text={item.text} />
     case 'system':
-      return <div className="text-xs text-neutral-500 text-center py-1">{item.text}</div>
+      return (
+        <div className="flex flex-col items-center gap-2 py-1 text-center text-xs text-neutral-500">
+          <div className="whitespace-pre-wrap">{item.text}</div>
+          {item.action === 'enableFullAccess' && permissionMode !== 'fullAccess' && (
+            <button
+              type="button"
+              onClick={() => void window.api.workspace.setPermissionMode(workspaceId, 'fullAccess')}
+              className="rounded-md border border-[var(--warning-500)]/50 px-2.5 py-1 text-[var(--warning-400)] hover:border-[var(--warning-400)] hover:text-[var(--warning-300)]"
+            >
+              Switch to Full access
+            </button>
+          )}
+        </div>
+      )
     case 'compaction': {
       const tokens =
         typeof item.preTokens === 'number' && typeof item.postTokens === 'number'
