@@ -223,6 +223,15 @@ export default function App(): React.JSX.Element {
         }
       }
 
+      // ⌃O — 열려 있는 대화의 도구 결과를 한꺼번에 펼치거나 접는다(Claude Code 의 ctrl+o 와 같은 키).
+      // 설정이 아니라 그때그때의 상태라, 지금 보고 있는 워크스페이스에만 걸린다.
+      if (e.code === 'KeyO' && e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
+        if (typing() || !st.selectedWorkspaceId) return
+        e.preventDefault()
+        st.toggleToolVerbose(st.selectedWorkspaceId)
+        return
+      }
+
       if (!e.metaKey) return
 
       // ⌘Z: 가장 최근 워크스페이스 생성 또는 병합 PR 일괄 아카이브를 되돌린다.

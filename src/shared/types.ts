@@ -1099,6 +1099,8 @@ export interface McpInventory {
 }
 
 export interface AppSettings {
+  /** 대화의 도구 로그 외형. 접기·요약 정책은 두 스타일이 공유한다. */
+  toolLogStyle: 'wooi' | 'terminal'
   /**
    * 새 워크스페이스가 기본으로 쓸 에이전트 백엔드. 사용자가 두 에이전트를 모두 보유했을 때만
    * 의미가 있으며, 하나뿐이면 그 하나로 자동 해석된다.
@@ -1401,7 +1403,16 @@ export type ChatItem =
       diff?: string
       ts: number
     }
-  | { id: string; type: 'tool_result'; toolId: string; text: string; isError: boolean; ts: number }
+  | {
+      id: string
+      type: 'tool_result'
+      toolId: string
+      text: string
+      isError: boolean
+      ts: number
+      /** 구조화 출력에서 화면에 필요한 값만 줄인 요약. 옛 기록에는 없으며 text 로 폴백한다. */
+      summary?: import('./toolSummary').ToolSummary
+    }
   | {
       id: string
       type: 'result'
