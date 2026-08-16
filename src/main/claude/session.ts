@@ -11,6 +11,7 @@ import type {
 import { AsyncQueue } from './asyncQueue'
 import { clampText, clampInput } from './clamp'
 import { buildFileChangeDiff, isFileChangeTool } from './editDiff'
+import { summarizeToolResult } from './toolResult'
 import { matchesRule, ruleForRequest, saveAllowRule } from './permissionRules'
 import { resolveClaudeExecutable } from './executable'
 import { sessionTranscriptExists } from './sessionFiles'
@@ -269,6 +270,8 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
  * 사용자가 막히지 않게 한다(retryWithoutResume).
  */
 export class ClaudeSession {
+  /** 결과 메시지에는 id만 오므로 호출 시점의 이름을 짝지어 둔다. 오래 도는 세션에서도 상한을 둔다. */
+  private toolNames = new Map<string, string>()
   private readonly writeIsolation: WriteIsolationGuard
   private input = new AsyncQueue<SDKUserMessage>()
   /**
@@ -1704,15 +1707,27 @@ export class ClaudeSession {
           streaming: false
         })
       } else if (block.type === 'thinking') {
-        this.emitItem({
-          id: `${apiId}:thinking`,
-          type: 'thinking',
-          text: clampText(String(block.thinking ?? '')),
-          ts: Date.now(),
-          streaming: false
-        })
+        // 사고 과정 블록은 대개 본문 없이 signature 만 온다 — 사람이 읽을 요약은 Claude Code 의
+        // showThinkingSummaries 를 켰을 때만 API 가 내려 준다. 그대로 실으면 펼쳐도 빈
+        // "Thinking" 카드만 쌓이므로 내용이 있을 때만 남긴다.
+        //
+        // 스트리밍으로 받아 둔 요약을 빈 값으로 덮어쓰지 않는 효과도 같다 — 이 확정 블록은
+        // thinking_delta 와 같은 id 를 쓰는 upsert 라, 걸러 내지 않으면 쌓은 글이 지워진다.
+        const thinking = clampText(String(block.thinking ?? ''))
+        if (thinking.trim()) {
+          this.emitItem({
+            id: `${apiId}:thinking`,
+            type: 'thinking',
+            text: thinking,
+            ts: Date.now(),
+            streaming: false
+          })
+        }
       } else if (block.type === 'tool_use') {
         const name = String(block.name)
+        const toolId = String(block.id)
+        this.toolNames.set(toolId, name)
+        if (this.toolNames.size > 500) this.toolNames.delete(this.toolNames.keys().next().value!)
         // assistant 메시지는 도구 실행 **전**에 도착하므로, 이 시점의 디스크 내용이 곧 변경 전 상태다.
         // 여기서 diff 를 떠 두지 않으면 나중엔 이미 적용된 뒤라 되살릴 수 없다.
         const diff = isFileChangeTool(name)
@@ -1721,7 +1736,7 @@ export class ClaudeSession {
         this.emitItem({
           id: `${apiId}:tool:${String(block.id)}`,
           type: 'tool_use',
-          toolId: String(block.id),
+          toolId,
           name,
           input: clampInput(block.input ?? {}),
           ...(diff ? { diff: clampText(diff) } : {}),
@@ -1797,12 +1812,16 @@ export class ClaudeSession {
 
     for (const block of content as Block[]) {
       if (block.type === 'tool_result') {
+        const toolId = String(block.tool_use_id)
+        const structured = (msg as SDKUserMessage & { tool_use_result?: unknown }).tool_use_result
+        const summary = summarizeToolResult(this.toolNames.get(toolId) ?? '', structured)
         this.emitItem({
           id: `toolresult:${String(block.tool_use_id)}`,
           type: 'tool_result',
-          toolId: String(block.tool_use_id),
+          toolId,
           text: clampText(normalizeToolResult(block.content)),
           isError: Boolean(block.is_error),
+          ...(summary ? { summary } : {}),
           ts: Date.now()
         })
       }

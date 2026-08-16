@@ -385,6 +385,22 @@ function GeneralPage({
           </div>
         </SettingRow>
         <SettingRow
+          title="Tool log style"
+          description="Both styles use the same summaries and folding policy."
+        >
+          <div className="flex gap-1 rounded-lg bg-[var(--bg-2)] p-1">
+            {(['wooi', 'terminal'] as const).map((style) => (
+              <button
+                key={style}
+                onClick={() => save({ toolLogStyle: style })}
+                className={`rounded-md px-3 py-1 text-xs capitalize ${settings.toolLogStyle === style ? 'bg-[var(--surface-2)] text-neutral-100 shadow-sm' : 'text-neutral-500 hover:text-neutral-300'}`}
+              >
+                {style}
+              </button>
+            ))}
+          </div>
+        </SettingRow>
+        <SettingRow
           title="Work panel on launch"
           description="Used until you manually toggle the files, changes, or terminal panel."
         >

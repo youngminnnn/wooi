@@ -20,9 +20,12 @@ import {
 } from 'lucide-react'
 import { useStore } from '../store'
 import { DiffLine } from './DiffView'
-import { AgentMessage, ErrorRow, ToolUseRow, UserMessage } from './ChatPrimitives'
+import { AgentMessage, ErrorRow, UserMessage } from './ChatPrimitives'
+import { ToolCard } from './tools/ToolCard'
+import { ToolGroupCard } from './tools/ToolGroupCard'
 import { formatTime } from '../lib/format'
 import { buildTaskCards, taskLabel, type TaskEntry } from '../lib/tasks'
+import { buildToolGroups, type ToolGroup } from '../lib/toolGroups'
 import { useTranscriptJump } from '../lib/transcriptJump'
 import { compactHistoryWindow } from '../lib/compactHistory'
 import { useAvailableBackends } from '../lib/backends'
@@ -128,6 +131,8 @@ export default function MessageList({
   const [activeIdx, setActiveIdx] = useState(0)
   const searchInputRef = useRef<HTMLInputElement>(null)
   const jumpTarget = useStore((s) => s.jumpTarget)
+  const toolVerbose = useStore((s) => !!s.toolVerbose[workspaceId])
+  const toolLogStyle = useStore((s) => s.app?.settings.toolLogStyle ?? 'wooi')
 
   const compactWindow = useMemo(() => compactHistoryWindow(items), [items])
   const historyExpanded = expandedBoundaryId === compactWindow.boundary?.id
@@ -151,21 +156,41 @@ export default function MessageList({
 
   // 할 일 도구 호출들을 체크리스트 카드로 묶는다. 카드로 대체된 도구 행·결과는 목록 단계에서
   // 걸러 내, 검색과 스크롤도 실제로 보이는 항목만 대상으로 삼게 한다.
-  const { visibleItems, resolved, cardByItemId, latestCardItemId } = useMemo(() => {
-    const { cardByItemId: cards, hiddenItemIds } = buildTaskCards(renderedItems)
-    const resolvedIds = new Set<string>()
-    for (const it of renderedItems) if (it.type === 'tool_result') resolvedIds.add(it.toolId)
-    return {
-      cardByItemId: cards,
-      resolved: resolvedIds,
-      // 진행 중 스피너는 마지막 카드에만 붙인다 — 앞선 카드들은 이미 지나간 스냅샷이라,
-      // 전부 돌면 어떤 것이 지금 상태인지 알 수 없게 된다.
-      latestCardItemId: cards.size ? Array.from(cards.keys())[cards.size - 1] : undefined,
-      visibleItems: hiddenItemIds.size
-        ? renderedItems.filter((it) => !hiddenItemIds.has(it.id))
-        : renderedItems
-    }
-  }, [renderedItems])
+  const { visibleItems, resolved, results, cardByItemId, latestCardItemId, groupByItemId } =
+    useMemo(() => {
+      const { cardByItemId: cards, hiddenItemIds: taskHiddenIds } = buildTaskCards(renderedItems)
+      // 체크리스트가 가져간 자리는 도구 그룹의 연속 구간에서도 경계다. 대표 카드 항목까지 제외해야
+      // 두 시각화가 같은 원본을 서로 차지하지 않는다.
+      const taskItemIds = new Set([...taskHiddenIds, ...cards.keys()])
+      const { groupByItemId: groups, hiddenItemIds: groupHiddenIds } = buildToolGroups(
+        renderedItems,
+        taskItemIds
+      )
+      const hiddenItemIds = new Set([...taskHiddenIds, ...groupHiddenIds])
+      const resolvedIds = new Set<string>()
+      for (const it of renderedItems) if (it.type === 'tool_result') resolvedIds.add(it.toolId)
+      const resultByToolId = new Map<string, Extract<ChatItem, { type: 'tool_result' }>>()
+      const uses = new Set(
+        renderedItems.filter((it) => it.type === 'tool_use').map((it) => it.toolId)
+      )
+      for (const it of renderedItems)
+        if (it.type === 'tool_result') resultByToolId.set(it.toolId, it)
+      return {
+        cardByItemId: cards,
+        groupByItemId: groups,
+        resolved: resolvedIds,
+        results: resultByToolId,
+        // 진행 중 스피너는 마지막 카드에만 붙인다 — 앞선 카드들은 이미 지나간 스냅샷이라,
+        // 전부 돌면 어떤 것이 지금 상태인지 알 수 없게 된다.
+        latestCardItemId: cards.size ? Array.from(cards.keys())[cards.size - 1] : undefined,
+        visibleItems: hiddenItemIds.size
+          ? renderedItems.filter(
+              (it) =>
+                !hiddenItemIds.has(it.id) && !(it.type === 'tool_result' && uses.has(it.toolId))
+            )
+          : renderedItems.filter((it) => !(it.type === 'tool_result' && uses.has(it.toolId)))
+      }
+    }, [renderedItems])
 
   // ── 대화 내 검색(⌘F) ─────────────────────────────────────────────────────
   const matches = useMemo(() => {
@@ -175,11 +200,22 @@ export default function MessageList({
       .filter((it) => {
         // 체크리스트로 대체된 자리는 도구 이름 대신 화면에 실제로 뜬 항목 제목으로 검색한다.
         const card = cardByItemId.get(it.id)
-        const text = card ? card.map(taskLabel).join('\n') : itemText(it)
+        const group = groupByItemId.get(it.id)
+        const pairedResult = it.type === 'tool_use' ? results.get(it.toolId) : undefined
+        const text = card
+          ? card.map(taskLabel).join('\n')
+          : group
+            ? group.uses
+                .map((use) => {
+                  const result = results.get(use.toolId)
+                  return `${itemText(use)}\n${JSON.stringify(use.input)}${result ? `\n${result.text}` : ''}`
+                })
+                .join('\n')
+            : `${itemText(it)}${pairedResult ? `\n${pairedResult.text}` : ''}`
         return text.toLowerCase().includes(q)
       })
       .map((it) => it.id)
-  }, [visibleItems, cardByItemId, query])
+  }, [visibleItems, cardByItemId, groupByItemId, query, results])
 
   // 검색어가 바뀌면 첫 매치부터 다시 훑는다.
   useEffect(() => setActiveIdx(0), [query])
@@ -406,7 +442,12 @@ export default function MessageList({
                 resolved={resolved}
                 workspaceId={workspaceId}
                 cardByItemId={cardByItemId}
+                groupByItemId={groupByItemId}
                 latestCardItemId={latestCardItemId}
+                result={item.type === 'tool_use' ? results.get(item.toolId) : undefined}
+                results={results}
+                toolVerbose={toolVerbose}
+                toolLogStyle={toolLogStyle}
               />
             </div>
           ))}
@@ -432,7 +473,12 @@ function Item({
   resolved,
   workspaceId,
   cardByItemId,
-  latestCardItemId
+  groupByItemId,
+  latestCardItemId,
+  result,
+  results,
+  toolVerbose,
+  toolLogStyle
 }: {
   item: ChatItem
   running: boolean
@@ -440,14 +486,27 @@ function Item({
   workspaceId: string
   /** 이 자리에 할 일 체크리스트를 붙일 항목이면 그 시점의 목록 스냅샷. */
   cardByItemId: Map<string, TaskEntry[]>
+  /** 이 자리에 연속 조회 도구의 접힌 행을 붙인다. */
+  groupByItemId: Map<string, ToolGroup>
   /** 지금이 라이브 상태인 마지막 체크리스트의 항목 id(진행 중 스피너 판별용). */
   latestCardItemId?: string
+  result?: Extract<ChatItem, { type: 'tool_result' }>
+  results: ReadonlyMap<string, Extract<ChatItem, { type: 'tool_result' }>>
+  toolVerbose: boolean
+  toolLogStyle: 'wooi' | 'terminal'
 }): React.JSX.Element | null {
   const time = formatTime(item.ts)
 
   // 할 일 도구 호출 구간은 원래의 도구 행 대신 체크리스트 카드 한 장으로 대체한다.
   const card = cardByItemId.get(item.id)
   if (card) return <TaskChecklist tasks={card} live={running && item.id === latestCardItemId} />
+
+  const group = groupByItemId.get(item.id)
+  if (group) {
+    return (
+      <ToolGroupCard group={group} results={results} style={toolLogStyle} verbose={toolVerbose} />
+    )
+  }
 
   switch (item.type) {
     case 'user':
@@ -480,15 +539,26 @@ function Item({
         />
       )
     case 'thinking':
-      return <Thinking text={item.text} />
+      // 이미 기록된 대화에는 본문 없는 사고 과정 항목이 잔뜩 남아 있다(요약을 안 받던 시절의
+      // 것들이다). 펼쳐도 아무것도 없는 카드라 자리만 차지하므로 그리지 않는다.
+      return item.text.trim() ? <Thinking text={item.text} /> : null
     case 'tool_use':
       return (
-        <ToolUse
-          name={item.name}
-          input={item.input}
-          diff={item.diff}
+        <ToolCard
+          use={item}
+          result={result}
           pending={running && !resolved.has(item.toolId)}
-        />
+          style={toolLogStyle}
+          verbose={toolVerbose}
+        >
+          {item.diff && (
+            <pre className="ml-4 mt-1 max-h-72 overflow-auto rounded-md bg-[var(--code-bg)] py-1 text-xs font-mono leading-[1.45]">
+              {item.diff.split('\n').map((line, i) => (
+                <DiffLine key={i} line={line} />
+              ))}
+            </pre>
+          )}
+        </ToolCard>
       )
     case 'tool_result':
       return <ToolResult text={item.text} isError={item.isError} />
@@ -854,60 +924,6 @@ function Thinking({ text }: { text: string }): React.JSX.Element {
   )
 }
 
-function ToolUse({
-  name,
-  input,
-  diff,
-  pending
-}: {
-  name: string
-  input: unknown
-  diff?: string
-  pending: boolean
-}): React.JSX.Element {
-  const stat = useMemo(() => (diff ? diffStat(diff) : null), [diff])
-  return (
-    <ToolUseRow
-      name={name}
-      summary={summarizeToolInput(name, input)}
-      pending={pending}
-      trailing={
-        stat && (
-          <span className="shrink-0 tabular-nums text-xs">
-            <span className="text-[var(--diff-add)]">+{stat.added}</span>{' '}
-            <span className="text-[var(--diff-del)]">−{stat.removed}</span>
-          </span>
-        )
-      }
-      details={
-        <pre className="mt-1 ml-4 text-xs bg-[var(--surface)] border border-[var(--border)] rounded-md p-2 overflow-x-auto text-neutral-400">
-          {JSON.stringify(input, null, 2)}
-        </pre>
-      }
-    >
-      {/* 파일 변경은 diff 가 곧 내용이다 — 접지 않고 바로 보여 준다(원시 입력은 셰브런 뒤에 남는다). */}
-      {diff && (
-        <pre className="mt-1 ml-4 max-h-72 overflow-auto rounded-md bg-[var(--code-bg)] py-1 text-xs font-mono leading-[1.45]">
-          {diff.split('\n').map((line, i) => (
-            <DiffLine key={i} line={line} />
-          ))}
-        </pre>
-      )}
-    </ToolUseRow>
-  )
-}
-
-/** 통합 diff 의 추가/삭제 줄 수(파일 헤더 ---/+++ 는 제외). */
-function diffStat(diff: string): { added: number; removed: number } {
-  let added = 0
-  let removed = 0
-  for (const line of diff.split('\n')) {
-    if (line.startsWith('+') && !line.startsWith('+++')) added++
-    else if (line.startsWith('-') && !line.startsWith('---')) removed++
-  }
-  return { added, removed }
-}
-
 function ToolResult({ text, isError }: { text: string; isError: boolean }): React.JSX.Element {
   const [open, setOpen] = useState(false)
   const lines = text.split('\n')
@@ -957,18 +973,6 @@ function ResultFooter({
       {text}
     </div>
   )
-}
-
-function summarizeToolInput(name: string, input: unknown): string {
-  if (!input || typeof input !== 'object') return ''
-  const obj = input as Record<string, unknown>
-  if (name === 'Bash' && typeof obj.command === 'string') return obj.command
-  if (typeof obj.file_path === 'string') return obj.file_path
-  if (typeof obj.path === 'string') return obj.path
-  if (typeof obj.pattern === 'string') return obj.pattern
-  if (typeof obj.url === 'string') return obj.url
-  if (typeof obj.description === 'string') return obj.description
-  return ''
 }
 
 const EMPTY: ChatItem[] = []

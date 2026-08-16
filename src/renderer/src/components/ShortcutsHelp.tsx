@@ -71,6 +71,7 @@ const GROUPS: { title: string; items: { keys: string[]; label: string }[] }[] = 
     title: 'Conversation',
     items: [
       { keys: ['⌘F'], label: 'Search the conversation' },
+      { keys: ['⌃O'], label: 'Expand or collapse all tool results' },
       { keys: ['⇧⌘↓'], label: 'Jump to the latest message' },
       { keys: ['↑', '/', '↓'], label: 'Recall previous messages (in the input box)' },
       { keys: ['⏎'], label: 'Send message — queues it while a turn is running' },

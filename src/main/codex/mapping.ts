@@ -680,7 +680,7 @@ function mapCommandOutput(params: DeltaParams, state: MapperState, ts: number): 
 
 function mapFileChange(item: ThreadItem, id: string, done: boolean, ts: number): Mapped {
   const changes = item.changes ?? []
-  const paths = changes.map((c) => c.path).filter(Boolean)
+  const paths = changes.map((c) => c.path).filter((path): path is string => !!path)
   const use: ChatItem = {
     id,
     type: 'tool_use',
@@ -704,6 +704,9 @@ function mapFileChange(item: ThreadItem, id: string, done: boolean, ts: number):
     toolId: id,
     text: summary,
     isError: failed,
+    // codex 는 줄 단위 증감을 주지 않는다 — 없는 +0/−0 를 지어내느니 바꾼 파일만 밝히고,
+    // 나머지는 접힌 본문을 펼쳐 보게 둔다(파일이 많아도 세 줄에서 잘리지 않게 하는 것이 목적).
+    ...(!failed && paths.length > 0 ? { summary: { kind: 'files' as const, paths } } : {}),
     ts
   }
   return {
@@ -1003,7 +1006,7 @@ export function mapFileChangeApproval(
   params: FileChangeApprovalParams,
   changes: FileUpdateChange[] = []
 ): Omit<PermissionRequest, 'requestId' | 'workspaceId'> {
-  const paths = changes.map((c) => c.path).filter(Boolean) as string[]
+  const paths = changes.map((c) => c.path).filter((path): path is string => !!path) as string[]
   const diff = changes
     .map((c) => c.diff)
     .filter(Boolean)

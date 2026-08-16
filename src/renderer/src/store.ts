@@ -355,6 +355,9 @@ interface UIState {
   sidebarWidth: number
   /** workspace 별 우측 작업 패널 표시 여부. 값이 없으면 설정의 기본값을 따른다. */
   rightPanelOpen: Record<string, boolean>
+  /** 대화 하나만 잠시 전부 펼치는 workspace 별 휘발성 상태. */
+  toolVerbose: Record<string, boolean>
+  toggleToolVerbose: (workspaceId: string) => void
   /** 우하단 터미널이 우측 컬럼 높이에서 차지하는 비율(0~1). 기본 0.5. 가로 분할 드래그로 조절. */
   terminalRatio: number
   /**
@@ -815,6 +818,9 @@ export const useStore = create<UIState>((set, get) => ({
   rightWidth: 460,
   sidebarWidth: readRememberedSidebarWidth(),
   rightPanelOpen: {},
+  toolVerbose: {},
+  toggleToolVerbose: (workspaceId) =>
+    set((s) => ({ toolVerbose: { ...s.toolVerbose, [workspaceId]: !s.toolVerbose[workspaceId] } })),
   terminalRatio: 0.5,
   detachedPanes: { work: false, scripts: false },
   fileViewer: null,
