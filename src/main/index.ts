@@ -25,6 +25,7 @@ import { log } from './logger'
 import { hydrateEnvFromLoginShell } from './env'
 import { initUpdater } from './updater'
 import { initNotice } from './notice'
+import { initFeatures } from './features'
 import { initPreview } from './preview'
 
 let mainWindow: BrowserWindow | null = null
@@ -267,14 +268,14 @@ app.whenReady().then(() => {
   createWindow()
   sessions.prewarm()
   initUpdater(dispatch)
-  initNotice(dispatch, (features) => {
+  initNotice(dispatch)
+  initFeatures((features) => {
     // 로컬 탈출구가 있으면 원격 플래그가 닫혀 있어도 열어 둔다 — 만든 사람은 스토어에
     // 올라가기 전에도 써야 한다.
-    const available = remoteOverride || features.remoteAccess
     getStore().update((state) => {
       state.settings.remoteAccessAvailable = features.remoteAccess
     })
-    getRemoteBridge().setAvailable(available)
+    getRemoteBridge().setAvailable(remoteOverride || features.remoteAccess)
   })
   // 지난 실행에서 켜 두었다면 복원한다. 실패해도 앱 기동을 막지 않는다 — 상태는 설정 패널에 뜬다.
   // 가용성이 닫혀 있으면 setEnabled 가 거절하므로 여기서 따로 막지 않아도 되지만,

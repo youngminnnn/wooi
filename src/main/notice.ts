@@ -1,6 +1,7 @@
 import { app, ipcMain } from 'electron'
 import { IPC, type AppNotice, type NoticeAction, type NoticeLevel } from '@shared/types'
 import { log } from './logger'
+import { fetchRemoteText } from './remoteFile'
 
 /**
  * 원격 공지(앱 상단 배너).
@@ -192,75 +193,21 @@ function sameNotices(a: AppNotice[], b: AppNotice[]): boolean {
   return JSON.stringify(a) === JSON.stringify(b)
 }
 
-/**
- * 원격으로 켜고 끄는 기능 플래그.
- *
- * 공지와 같은 파일에서 온다 — 이미 설치된 모든 버전에 **앱 재배포 없이** 닿는 경로가
- * 이것뿐이기 때문이다. 폰 앱이 스토어에 올라가는 순간 이 값을 뒤집으면, 데스크톱을 다시
- * 릴리즈하지 않고도 기능이 열린다.
- */
-export interface RemoteFeatures {
-  /** 원격 접근(모바일 컴패니언) UI 를 보여 줄 것인가. */
-  remoteAccess: boolean
-}
-
-/**
- * `features.remoteAccess` 를 읽는다. 값이 없거나 boolean 이 아니면 **null** — "모른다" 이고,
- * 그건 "꺼짐" 과 다르다. 부르는 쪽이 마지막으로 알던 값을 유지할 수 있어야, 오프라인이라고
- * 해서 이미 쓰던 기능이 사라지지 않는다.
- */
-export function parseFeatures(body: string): RemoteFeatures | null {
-  try {
-    const doc: unknown = JSON.parse(body)
-    if (typeof doc !== 'object' || doc === null) return null
-    const features = (doc as { features?: unknown }).features
-    if (typeof features !== 'object' || features === null) return null
-    const remoteAccess = (features as { remoteAccess?: unknown }).remoteAccess
-    return typeof remoteAccess === 'boolean' ? { remoteAccess } : null
-  } catch {
-    return null
-  }
-}
-
 async function fetchNotices(): Promise<AppNotice[] | null> {
-  const ctrl = new AbortController()
-  const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS)
-  try {
-    const res = await fetch(NOTICE_URL, { signal: ctrl.signal, cache: 'no-cache' })
-    if (!res.ok) {
-      log.warn(`notice: fetch ${res.status}`)
-      return null
-    }
-    const body = await res.text()
-    if (body.length > MAX_BODY_BYTES) {
-      log.warn('notice: 응답이 너무 큼 — 무시')
-      return null
-    }
-    lastFeatures = parseFeatures(body)
-    return parseNotices(body, Date.now(), app.getVersion())
-  } catch (err) {
-    // 오프라인·DNS 실패·타임아웃은 정상 상황이다. 조용히 지나가고 다음 주기에 다시 시도한다.
-    log.info(`notice: fetch 실패 — ${err instanceof Error ? err.message : String(err)}`)
-    return null
-  } finally {
-    clearTimeout(timer)
-  }
+  const body = await fetchRemoteText(NOTICE_URL, {
+    label: 'notice',
+    timeoutMs: FETCH_TIMEOUT_MS,
+    maxBytes: MAX_BODY_BYTES
+  })
+  return body === null ? null : parseNotices(body, Date.now(), app.getVersion())
 }
 
-/** 마지막으로 받아온 기능 플래그. 못 가져왔으면 null 로 남는다. */
-let lastFeatures: RemoteFeatures | null = null
-
-export function initNotice(
-  dispatch: (channel: string, payload: unknown) => void,
-  onFeatures?: (features: RemoteFeatures) => void
-): void {
+export function initNotice(dispatch: (channel: string, payload: unknown) => void): void {
   // 렌더러가 늦게 떠서 방송을 놓쳐도 되도록, 마지막 목록은 언제든 다시 물어볼 수 있게 한다.
   ipcMain.handle(IPC.noticeGetActive, (): AppNotice[] => active)
 
   const refresh = async (): Promise<AppNotice[]> => {
     const next = await fetchNotices()
-    // 공지가 그대로여도 플래그는 바뀌었을 수 있다 — 둘은 같은 파일에 있을 뿐 별개다.
-    if (lastFeatures) onFeatures?.(lastFeatures)
     // null 은 "못 가져옴"이다. 이미 띄운 공지를 네트워크 문제로 지우지 않는다.
     if (next && !sameNotices(next, active)) {
       active = next

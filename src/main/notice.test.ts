@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { compareVersions, parseFeatures, parseNotices, parseVersion } from './notice'
+import { compareVersions, parseNotices, parseVersion } from './notice'
 
 const NOW = Date.parse('2026-08-02T00:00:00Z')
 const VERSION = '1.2.0'
@@ -140,22 +140,5 @@ describe('parseNotices', () => {
   it('공지가 아무리 많아도 10건까지만 들고 온다', () => {
     const many = Array.from({ length: 30 }, (_, i) => ({ id: `n${i}`, message: 'x' }))
     expect(parseNotices(doc(...many), NOW, VERSION)).toHaveLength(10)
-  })
-})
-
-describe('기능 플래그', () => {
-  it('features.remoteAccess 를 읽는다', () => {
-    expect(parseFeatures('{"features":{"remoteAccess":true}}')).toEqual({ remoteAccess: true })
-    expect(parseFeatures('{"features":{"remoteAccess":false}}')).toEqual({ remoteAccess: false })
-  })
-
-  it('없거나 모양이 다르면 null 이다 — "모른다"와 "꺼짐"은 다르다', () => {
-    // null 을 "꺼짐"으로 읽으면, 파일을 못 가져온 순간 이미 쓰던 사람에게서 기능이 사라진다.
-    expect(parseFeatures('{"notices":[]}')).toBeNull()
-    expect(parseFeatures('{"features":{}}')).toBeNull()
-    expect(parseFeatures('{"features":{"remoteAccess":"yes"}}')).toBeNull()
-    expect(parseFeatures('{"features":null}')).toBeNull()
-    expect(parseFeatures('not json')).toBeNull()
-    expect(parseFeatures('[]')).toBeNull()
   })
 })

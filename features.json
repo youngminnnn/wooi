@@ -1,0 +1,4 @@
+{
+  "$comment": "원격으로 여닫는 기능 플래그. 이 파일을 main 에 커밋하는 즉시, 이미 설치된 모든 버전의 Wooi 가 30분 안에 가져간다. 공지(notice.json)와 파일을 나눈 이유와 각 플래그의 뜻은 docs/feature-flags.md 참고.",
+  "remoteAccess": false
+}

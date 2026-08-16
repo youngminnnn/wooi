@@ -1,5 +1,5 @@
 {
-  "$comment": "앱 상단 배너로 뜨는 원격 공지. 이 파일을 main 에 커밋하는 즉시, 이미 설치된 모든 버전의 Wooi 가 30분 안에 가져간다. 형식은 docs/notices.md 참고. 공지가 없을 땐 notices 를 빈 배열로 둔다. features 는 앱 재배포 없이 기능을 여닫는 스위치다 — 자세한 것은 docs/notices.md 참고.",
+  "$comment": "앱 상단 배너로 뜨는 원격 공지. 이 파일을 main 에 커밋하는 즉시, 이미 설치된 모든 버전의 Wooi 가 30분 안에 가져간다. 형식은 docs/notices.md 참고. 공지가 없을 땐 notices 를 빈 배열로 둔다.",
   "notices": [
     {
       "id": "2026-08-rate-limit-auto-resume",
@@ -13,8 +13,5 @@
       "endsAt": "2026-10-31T23:59:59Z",
       "minVersion": "1.12.0"
     }
-  ],
-  "features": {
-    "remoteAccess": false
-  }
+  ]
 }
