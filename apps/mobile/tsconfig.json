@@ -3,7 +3,12 @@
   "compilerOptions": {
     "strict": true,
     "paths": {
-      "@shared/*": ["../../src/shared/*"]
+      "@shared/*": ["../../src/shared/*"],
+      // 공유 파일(`../../src/shared/*`)이 import 하는 것은 **자기 위치 기준**으로 해석되어
+      // 루트 node_modules 를 본다. 로컬에서는 그게 설치돼 있어 통하지만, 이 프로젝트만
+      // 설치하는 CI 에서는 없다 — 실제로 CI 가 그렇게 깨졌다. 여기서 명시적으로 이 프로젝트의
+      // node_modules 로 보낸다(Metro 의 resolver.nodeModulesPaths 가 같은 일을 한다).
+      "@noble/*": ["./node_modules/@noble/*"]
     }
   },
   // 공유 폴더는 **소스만** 본다. 그쪽 vitest 파일은 node 타입을 요구하는데
