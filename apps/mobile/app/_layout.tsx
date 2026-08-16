@@ -8,6 +8,7 @@ import { openPushPayload } from '../src/notifications/payload'
 import { requestPushToken } from '../src/notifications/register'
 import { useRemoteStore } from '../src/state/store'
 import { loadPairing } from '../src/storage/secure'
+import { theme } from '../src/theme'
 
 // 배너는 내용이 없다(고정 문구). 소리는 울리되 배지는 건드리지 않는다 —
 // 읽음 계산은 폰이 로컬로 하고, 서버가 준 숫자가 아니다.
@@ -128,6 +129,6 @@ export default function RootLayout(): React.JSX.Element {
 }
 
 const styles = StyleSheet.create({
-  loading: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#0b0b0d' },
-  content: { backgroundColor: '#0b0b0d' }
+  loading: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: theme.bg },
+  content: { backgroundColor: theme.bg }
 })

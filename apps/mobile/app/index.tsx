@@ -8,11 +8,12 @@ import { BrandMark } from '../src/components/BrandMark'
 import { PR_COLORS } from '../src/state/prColors'
 import { isLaptopAway, useRemoteStore } from '../src/state/store'
 import { agoLabel, untilLabel, useNow } from '../src/state/useNow'
+import { theme } from '../src/theme'
 
 const STATUS_COLORS: Record<string, string> = {
-  idle: '#676771',
-  running: '#8b7cf6',
-  error: '#e36d6d'
+  idle: theme.textFaint,
+  running: theme.accent,
+  error: theme.danger
 }
 
 /**
@@ -21,9 +22,9 @@ const STATUS_COLORS: Record<string, string> = {
  * 지금 행동할 수 있는 것이 앞이고, PR 은 아무 일도 일어나지 않을 때에야 말한다.
  */
 function dotColor(workspace: RemoteWorkspace, hasLimit: boolean): string {
-  if (workspace.attention === 'permission') return '#8b7cf6'
+  if (workspace.attention === 'permission') return theme.accent
   if (workspace.status === 'running') return STATUS_COLORS.running
-  if (hasLimit) return '#d0a24c'
+  if (hasLimit) return theme.warning
   if (workspace.status === 'error') return STATUS_COLORS.error
   const pr = workspace.pr
   if (pr) return PR_COLORS[pr.state] ?? STATUS_COLORS.idle
@@ -107,7 +108,7 @@ function WorkspaceRow({
           </Text>
         </View>
         {workspace.pr ? (
-          <Text style={[styles.pr, { color: PR_COLORS[workspace.pr.state] ?? '#77767f' }]}>
+          <Text style={[styles.pr, { color: PR_COLORS[workspace.pr.state] ?? theme.textDim }]}>
             #{workspace.pr.number} · {workspace.pr.label}
           </Text>
         ) : null}
@@ -208,7 +209,7 @@ export default function WorkspaceListScreen(): React.JSX.Element {
           <View
             style={[
               styles.connectionDot,
-              { backgroundColor: status === 'online' ? '#6fb38b' : '#676771' }
+              { backgroundColor: status === 'online' ? theme.success : theme.textFaint }
             ]}
           />
           <Text style={styles.connectionText}>{status}</Text>
@@ -276,10 +277,10 @@ export default function WorkspaceListScreen(): React.JSX.Element {
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: '#0b0b0d' },
+  screen: { flex: 1, backgroundColor: theme.bg },
   header: {
     alignItems: 'flex-start',
-    borderBottomColor: '#202024',
+    borderBottomColor: theme.border,
     borderBottomWidth: StyleSheet.hairlineWidth,
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -287,29 +288,29 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     paddingTop: 18
   },
-  eyebrow: { color: '#777680', fontSize: 10, fontWeight: '700', letterSpacing: 1.5 },
-  title: { color: '#ededf0', fontSize: 22, fontWeight: '600', marginTop: 5 },
-  updated: { color: '#6f6f77', fontSize: 12, marginTop: 5 },
+  eyebrow: { color: theme.textDim, fontSize: 10, fontWeight: '700', letterSpacing: 1.5 },
+  title: { color: theme.text, fontSize: 22, fontWeight: '600', marginTop: 5 },
+  updated: { color: theme.textDim, fontSize: 12, marginTop: 5 },
   connection: { alignItems: 'center', flexDirection: 'row', gap: 6, marginTop: 4 },
   connectionDot: { borderRadius: 4, height: 7, width: 7 },
-  connectionText: { color: '#777780', fontSize: 11, textTransform: 'capitalize' },
+  connectionText: { color: theme.textDim, fontSize: 11, textTransform: 'capitalize' },
   banner: { backgroundColor: '#2a1719', color: '#e69393', fontSize: 12, padding: 10 },
   list: { paddingBottom: 24 },
   sectionHeader: {
     alignItems: 'center',
-    backgroundColor: '#0b0b0d',
-    borderBottomColor: '#1d1d21',
+    backgroundColor: theme.bg,
+    borderBottomColor: theme.border,
     borderBottomWidth: StyleSheet.hairlineWidth,
     flexDirection: 'row',
     gap: 8,
     paddingHorizontal: 18,
     paddingVertical: 8
   },
-  sectionName: { color: '#a9a9b3', flex: 1, fontSize: 12, fontWeight: '700', letterSpacing: 0.3 },
-  sectionCount: { color: '#8b7cf6', fontSize: 11 },
+  sectionName: { color: theme.textMuted, flex: 1, fontSize: 12, fontWeight: '700', letterSpacing: 0.3 },
+  sectionCount: { color: theme.accent, fontSize: 11 },
   row: {
     alignItems: 'flex-start',
-    borderBottomColor: '#1d1d21',
+    borderBottomColor: theme.border,
     borderBottomWidth: StyleSheet.hairlineWidth,
     flexDirection: 'row',
     minHeight: 66,
@@ -317,35 +318,35 @@ const styles = StyleSheet.create({
     paddingVertical: 13
   },
   permissionRow: {
-    backgroundColor: '#171426',
-    borderBottomColor: '#51478a',
-    borderLeftColor: '#8b7cf6',
+    backgroundColor: theme.surface2,
+    borderBottomColor: theme.accentStrong,
+    borderLeftColor: theme.accent,
     borderLeftWidth: 3
   },
   dot: { borderRadius: 5, height: 9, marginRight: 12, marginTop: 5, width: 9 },
   permissionDot: { height: 10, width: 10 },
   rowContent: { flex: 1 },
   nameLine: { alignItems: 'center', flexDirection: 'row', gap: 6 },
-  stacked: { color: '#6f6f77', fontSize: 13 },
-  name: { color: '#ededf0', flexShrink: 1, fontSize: 15, fontWeight: '500' },
-  muted: { color: '#6f6f77', fontSize: 10 },
+  stacked: { color: theme.textDim, fontSize: 13 },
+  name: { color: theme.text, flexShrink: 1, fontSize: 15, fontWeight: '500' },
+  muted: { color: theme.textDim, fontSize: 10 },
   permissionBadge: {
-    backgroundColor: '#8b7cf6',
+    backgroundColor: theme.accent,
     borderRadius: 4,
     paddingHorizontal: 5,
     paddingVertical: 1
   },
   permissionText: { color: '#12101f', fontSize: 9, fontWeight: '800', letterSpacing: 0.6 },
   metaLine: { alignItems: 'center', flexDirection: 'row', gap: 5, marginTop: 3 },
-  branch: { color: '#77767f', flexShrink: 1, fontSize: 12 },
+  branch: { color: theme.textDim, flexShrink: 1, fontSize: 12 },
   pr: { fontSize: 11, marginTop: 3 },
-  limit: { color: '#d0a24c', fontSize: 11, marginTop: 3 },
-  parent: { color: '#5f5f68', fontSize: 11, marginTop: 2 },
+  limit: { color: theme.warning, fontSize: 11, marginTop: 3 },
+  parent: { color: theme.textFaint, fontSize: 11, marginTop: 2 },
   emptyList: { flexGrow: 1, justifyContent: 'center' },
   empty: { alignItems: 'center', paddingHorizontal: 32 },
-  emptyTitle: { color: '#9a9aa3', fontSize: 15, fontWeight: '500' },
+  emptyTitle: { color: theme.textMuted, fontSize: 15, fontWeight: '500' },
   emptyBody: {
-    color: '#6a6a73',
+    color: theme.textFaint,
     fontSize: 13,
     lineHeight: 19,
     marginTop: 8,

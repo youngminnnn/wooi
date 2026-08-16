@@ -2,6 +2,7 @@ import { Platform } from 'react-native'
 import Constants from 'expo-constants'
 import * as Device from 'expo-device'
 import * as Notifications from 'expo-notifications'
+import { theme } from '../theme'
 
 /**
  * 폰을 푸시 수신자로 등록한다. 토큰은 릴레이의 `devices.expo_push_token` 에 들어가고,
@@ -26,7 +27,7 @@ export async function ensureAndroidChannel(): Promise<void> {
     importance: Notifications.AndroidImportance.HIGH,
     lockscreenVisibility: Notifications.AndroidNotificationVisibility.PRIVATE,
     vibrationPattern: [0, 250, 250, 250],
-    lightColor: '#8b7cf6'
+    lightColor: theme.accent
   })
 }
 

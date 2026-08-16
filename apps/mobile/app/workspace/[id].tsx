@@ -22,6 +22,7 @@ import { PR_COLORS } from '../../src/state/prColors'
 import { isLaptopAway, useRemoteStore } from '../../src/state/store'
 import { agoLabel, untilLabel, useNow } from '../../src/state/useNow'
 import { useDeviceAuthentication } from '../../src/state/useDeviceAuth'
+import { theme } from '../../src/theme'
 
 const PAGE_SIZE = 100
 const WATCH_REFRESH_MS = 40_000
@@ -245,7 +246,7 @@ function parseTranscript(value: unknown): ChatItem[] {
   return value.filter(isChatItem)
 }
 
-function RichText({ text, color = '#d7d7dc' }: { text: string; color?: string }): React.JSX.Element {
+function RichText({ text, color = theme.text }: { text: string; color?: string }): React.JSX.Element {
   const parts = text.split(/(```[\s\S]*?```)/g).filter(Boolean)
   return (
     <View>
@@ -284,7 +285,7 @@ function Collapsible({
   return (
     <Pressable style={styles.compactCard} onPress={() => setOpen((value) => !value)}>
       <Text style={[styles.cardTitle, error && styles.errorText]}>{open ? '−' : '+'} {title}</Text>
-      {open ? <RichText text={text} color={error ? '#ef8d8d' : '#9b9ba4'} /> : null}
+      {open ? <RichText text={text} color={error ? '#ef8d8d' : theme.textMuted} /> : null}
     </Pressable>
   )
 }
@@ -532,7 +533,7 @@ export default function WorkspaceScreen(): React.JSX.Element {
               <Text style={styles.headerMeta} numberOfLines={1}>{headerMeta}</Text>
             </View>
             {workspace?.pr ? (
-              <Text style={[styles.headerPr, { color: PR_COLORS[workspace.pr.state] ?? '#77767f' }]} numberOfLines={1}>
+              <Text style={[styles.headerPr, { color: PR_COLORS[workspace.pr.state] ?? theme.textDim }]} numberOfLines={1}>
                 #{workspace.pr.number} · {workspace.pr.label}
               </Text>
             ) : null}
@@ -600,63 +601,63 @@ export default function WorkspaceScreen(): React.JSX.Element {
 }
 
 const styles = StyleSheet.create({
-  screen: { backgroundColor: '#0b0b0d', flex: 1 },
-  header: { alignItems: 'center', borderBottomColor: '#202024', borderBottomWidth: StyleSheet.hairlineWidth, flexDirection: 'row', minHeight: 54, paddingHorizontal: 14 },
-  back: { color: '#9b8df7', fontSize: 15, width: 68 },
+  screen: { backgroundColor: theme.bg, flex: 1 },
+  header: { alignItems: 'center', borderBottomColor: theme.border, borderBottomWidth: StyleSheet.hairlineWidth, flexDirection: 'row', minHeight: 54, paddingHorizontal: 14 },
+  back: { color: theme.accent, fontSize: 15, width: 68 },
   headerTitle: { alignItems: 'center', flex: 1 },
-  headerRepo: { color: '#777680', fontSize: 10, fontWeight: '700', letterSpacing: 0.8 },
+  headerRepo: { color: theme.textDim, fontSize: 10, fontWeight: '700', letterSpacing: 0.8 },
   headerMetaLine: { alignItems: 'center', flexDirection: 'row', gap: 5, marginTop: 2 },
-  headerMeta: { color: '#77767f', fontSize: 11 },
+  headerMeta: { color: theme.textDim, fontSize: 11 },
   headerPr: { fontSize: 11, marginTop: 2 },
-  headerLimit: { color: '#d0a24c', fontSize: 11, marginTop: 2 },
-  title: { color: '#ededf0', fontSize: 15, fontWeight: '600', maxWidth: '100%' },
-  connection: { color: '#6f6f77', fontSize: 10, marginTop: 2, textTransform: 'capitalize' },
+  headerLimit: { color: theme.warning, fontSize: 11, marginTop: 2 },
+  title: { color: theme.text, fontSize: 15, fontWeight: '600', maxWidth: '100%' },
+  connection: { color: theme.textDim, fontSize: 10, marginTop: 2, textTransform: 'capitalize' },
   headerSpacer: { width: 68 },
   stopButton: { alignItems: 'center', borderColor: '#733b42', borderRadius: 5, borderWidth: 1, paddingVertical: 6, width: 68 },
   stopText: { color: '#ef8d8d', fontSize: 12, fontWeight: '600' },
-  offline: { backgroundColor: '#202024', color: '#a4a4ad', fontSize: 11, lineHeight: 16, paddingHorizontal: 14, paddingVertical: 7 },
+  offline: { backgroundColor: theme.border, color: theme.textMuted, fontSize: 11, lineHeight: 16, paddingHorizontal: 14, paddingVertical: 7 },
   errorBanner: { backgroundColor: '#2a1719', color: '#ef8d8d', fontSize: 12, lineHeight: 17, paddingHorizontal: 14, paddingVertical: 8 },
   list: { paddingHorizontal: 14, paddingVertical: 12 },
-  message: { borderBottomColor: '#202024', borderBottomWidth: StyleSheet.hairlineWidth, paddingVertical: 14 },
-  userMessage: { backgroundColor: '#121217', borderRadius: 7, marginVertical: 5, paddingHorizontal: 11 },
-  label: { color: '#767680', fontSize: 9, fontWeight: '700', letterSpacing: 1, marginBottom: 6 },
+  message: { borderBottomColor: theme.border, borderBottomWidth: StyleSheet.hairlineWidth, paddingVertical: 14 },
+  userMessage: { backgroundColor: theme.surface, borderRadius: 7, marginVertical: 5, paddingHorizontal: 11 },
+  label: { color: theme.textDim, fontSize: 9, fontWeight: '700', letterSpacing: 1, marginBottom: 6 },
   bodyText: { fontSize: 14, lineHeight: 21 },
-  compactCard: { backgroundColor: '#141417', borderColor: '#27272c', borderRadius: 6, borderWidth: 1, marginVertical: 4, padding: 10 },
-  cardTitle: { color: '#a1a1aa', fontSize: 12, fontWeight: '600' },
-  codeScroll: { backgroundColor: '#08080a', borderRadius: 5, marginVertical: 7, padding: 10 },
-  code: { color: '#c7c7cf', fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace' }), fontSize: 12, lineHeight: 18 },
-  footer: { borderBottomColor: '#202024', borderBottomWidth: StyleSheet.hairlineWidth, color: '#6f6f77', fontSize: 10, paddingVertical: 7, textAlign: 'center' },
+  compactCard: { backgroundColor: theme.bg2, borderColor: theme.surface2, borderRadius: 6, borderWidth: 1, marginVertical: 4, padding: 10 },
+  cardTitle: { color: theme.textMuted, fontSize: 12, fontWeight: '600' },
+  codeScroll: { backgroundColor: theme.bg, borderRadius: 5, marginVertical: 7, padding: 10 },
+  code: { color: theme.textMuted, fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace' }), fontSize: 12, lineHeight: 18 },
+  footer: { borderBottomColor: theme.border, borderBottomWidth: StyleSheet.hairlineWidth, color: theme.textDim, fontSize: 10, paddingVertical: 7, textAlign: 'center' },
   errorText: { color: '#ef8d8d' },
   errorCard: { backgroundColor: '#251719', borderColor: '#5c3036', borderRadius: 6, borderWidth: 1, marginVertical: 4, padding: 10 },
   loading: { paddingVertical: 40 },
-  empty: { color: '#707078', paddingVertical: 40, textAlign: 'center' },
-  permissionCard: { backgroundColor: '#121217', borderColor: '#51478a', borderTopWidth: 2, padding: 12 },
+  empty: { color: theme.textDim, paddingVertical: 40, textAlign: 'center' },
+  permissionCard: { backgroundColor: theme.surface, borderColor: theme.accentStrong, borderTopWidth: 2, padding: 12 },
   permissionHeading: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between' },
-  permissionEyebrow: { color: '#a99df4', fontSize: 10, fontWeight: '800', letterSpacing: 1 },
-  permissionTitle: { color: '#ededf0', fontSize: 15, fontWeight: '600', lineHeight: 20, marginTop: 7 },
-  permissionTool: { color: '#83838d', fontSize: 11, marginTop: 3 },
-  permissionSubstance: { backgroundColor: '#08080a', borderColor: '#29292f', borderRadius: 5, borderWidth: 1, marginTop: 9, maxHeight: 150 },
+  permissionEyebrow: { color: theme.accent, fontSize: 10, fontWeight: '800', letterSpacing: 1 },
+  permissionTitle: { color: theme.text, fontSize: 15, fontWeight: '600', lineHeight: 20, marginTop: 7 },
+  permissionTool: { color: theme.textDim, fontSize: 11, marginTop: 3 },
+  permissionSubstance: { backgroundColor: theme.bg, borderColor: theme.surface2, borderRadius: 5, borderWidth: 1, marginTop: 9, maxHeight: 150 },
   permissionTextScroll: { maxHeight: 145, padding: 9 },
   permissionCodeScroll: { maxHeight: 145, paddingVertical: 7 },
-  permissionCode: { color: '#c7c7cf', fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace' }), fontSize: 11, lineHeight: 17 },
+  permissionCode: { color: theme.textMuted, fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace' }), fontSize: 11, lineHeight: 17 },
   diffLine: { paddingHorizontal: 9 },
   diffAdded: { backgroundColor: '#14251c' },
   diffRemoved: { backgroundColor: '#2b171a' },
   permissionError: { color: '#ef8d8d', fontSize: 11, lineHeight: 15, marginTop: 8 },
   permissionActions: { flexDirection: 'row', gap: 8, marginTop: 10 },
-  permissionButton: { alignItems: 'center', borderColor: '#4a4a53', borderRadius: 6, borderWidth: 1, flex: 1, justifyContent: 'center', minHeight: 44, paddingHorizontal: 5 },
+  permissionButton: { alignItems: 'center', borderColor: theme.textFaint, borderRadius: 6, borderWidth: 1, flex: 1, justifyContent: 'center', minHeight: 44, paddingHorizontal: 5 },
   denyButton: { borderColor: '#8b4c54' },
   denyButtonText: { color: '#ef9a9a', fontSize: 12, fontWeight: '700' },
-  allowButtonText: { color: '#d0d0d7', fontSize: 11, fontWeight: '600', textAlign: 'center' },
-  ruleBox: { backgroundColor: '#19191e', borderRadius: 4, marginTop: 8, paddingHorizontal: 8, paddingVertical: 6 },
-  ruleLabel: { color: '#777780', fontSize: 8, fontWeight: '700', letterSpacing: 0.8 },
-  permissionRule: { color: '#b0b0b8', fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace' }), fontSize: 10, marginTop: 3 },
+  allowButtonText: { color: theme.textMuted, fontSize: 11, fontWeight: '600', textAlign: 'center' },
+  ruleBox: { backgroundColor: theme.bg3, borderRadius: 4, marginTop: 8, paddingHorizontal: 8, paddingVertical: 6 },
+  ruleLabel: { color: theme.textDim, fontSize: 8, fontWeight: '700', letterSpacing: 0.8 },
+  permissionRule: { color: theme.textMuted, fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace' }), fontSize: 10, marginTop: 3 },
   modeFooter: { alignItems: 'center', flexDirection: 'row', gap: 6, paddingBottom: 8, paddingHorizontal: 14 },
-  modeSymbol: { color: '#9b8df7', fontSize: 11 },
-  modeText: { color: '#77767f', fontSize: 11 },
-  composer: { alignItems: 'flex-end', borderTopColor: '#202024', borderTopWidth: StyleSheet.hairlineWidth, flexDirection: 'row', gap: 9, padding: 10 },
-  input: { backgroundColor: '#151519', borderColor: '#29292f', borderRadius: 8, borderWidth: 1, color: '#ededf0', flex: 1, fontSize: 14, maxHeight: 120, minHeight: 42, paddingHorizontal: 11, paddingVertical: 10 },
-  sendButton: { backgroundColor: '#7465db', borderRadius: 7, justifyContent: 'center', minHeight: 42, paddingHorizontal: 14 },
+  modeSymbol: { color: theme.accent, fontSize: 11 },
+  modeText: { color: theme.textDim, fontSize: 11 },
+  composer: { alignItems: 'flex-end', borderTopColor: theme.border, borderTopWidth: StyleSheet.hairlineWidth, flexDirection: 'row', gap: 9, padding: 10 },
+  input: { backgroundColor: theme.bg2, borderColor: theme.surface2, borderRadius: 8, borderWidth: 1, color: theme.text, flex: 1, fontSize: 14, maxHeight: 120, minHeight: 42, paddingHorizontal: 11, paddingVertical: 10 },
+  sendButton: { backgroundColor: theme.accentStrong, borderRadius: 7, justifyContent: 'center', minHeight: 42, paddingHorizontal: 14 },
   sendText: { color: '#ffffff', fontSize: 13, fontWeight: '700' },
   disabled: { opacity: 0.45 }
 })

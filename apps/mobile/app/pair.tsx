@@ -12,6 +12,7 @@ import { CameraView, useCameraPermissions, type BarcodeScanningResult } from 'ex
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { claimPairing, type ClaimedPairing } from '../src/relay/pairing'
 import { useRemoteStore } from '../src/state/store'
+import { theme } from '../src/theme'
 
 type Phase = 'scan' | 'claiming' | 'verify' | 'error'
 
@@ -145,12 +146,12 @@ function PairLoading({ label }: { label: string }): React.JSX.Element {
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: '#0b0b0d' },
+  screen: { flex: 1, backgroundColor: theme.bg },
   center: { flex: 1, justifyContent: 'center', paddingHorizontal: 28 },
-  eyebrow: { color: '#8b7cf6', fontSize: 11, fontWeight: '700', letterSpacing: 1.8 },
-  title: { color: '#f1f1f3', fontSize: 28, fontWeight: '600', marginTop: 10 },
-  body: { color: '#94949c', fontSize: 15, lineHeight: 22, marginTop: 14 },
-  machine: { color: '#94949c', fontSize: 16, marginTop: 14 },
+  eyebrow: { color: theme.accent, fontSize: 11, fontWeight: '700', letterSpacing: 1.8 },
+  title: { color: theme.text, fontSize: 28, fontWeight: '600', marginTop: 10 },
+  body: { color: theme.textMuted, fontSize: 15, lineHeight: 22, marginTop: 14 },
+  machine: { color: theme.textMuted, fontSize: 16, marginTop: 14 },
   sas: {
     color: '#f5f4ff',
     fontSize: 48,
@@ -159,13 +160,13 @@ const styles = StyleSheet.create({
     letterSpacing: 4,
     marginVertical: 28
   },
-  warning: { color: '#d2d1d8', fontSize: 15, lineHeight: 23 },
+  warning: { color: theme.textMuted, fontSize: 15, lineHeight: 23 },
   waitingRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 28 },
-  waiting: { color: '#85858d', fontSize: 14, marginTop: 14 },
+  waiting: { color: theme.textDim, fontSize: 14, marginTop: 14 },
   error: { color: '#ef8585', fontSize: 15, lineHeight: 22, marginTop: 14 },
   button: {
     alignSelf: 'flex-start',
-    backgroundColor: '#7768df',
+    backgroundColor: theme.accentStrong,
     borderRadius: 8,
     marginTop: 26,
     paddingHorizontal: 18,
@@ -175,7 +176,7 @@ const styles = StyleSheet.create({
   cameraOverlay: { flex: 1, alignItems: 'center', paddingHorizontal: 24, paddingTop: 32 },
   cameraTitle: { color: '#fff', fontSize: 20, fontWeight: '600', marginTop: 10 },
   frame: {
-    borderColor: '#a99cff',
+    borderColor: theme.accent,
     borderRadius: 18,
     borderWidth: 2,
     height: 260,
@@ -185,7 +186,7 @@ const styles = StyleSheet.create({
   cameraHint: {
     backgroundColor: 'rgba(11,11,13,0.84)',
     borderRadius: 8,
-    color: '#d0d0d5',
+    color: theme.textMuted,
     fontSize: 13,
     marginTop: 36,
     overflow: 'hidden',

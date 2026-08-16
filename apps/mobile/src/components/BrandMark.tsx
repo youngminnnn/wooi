@@ -1,5 +1,6 @@
 import Svg, { Path } from 'react-native-svg'
 import { CLAUDE_MARK, CODEX_MARK } from '@shared/brandMarks'
+import { theme } from '../theme'
 
 /**
  * 에이전트 백엔드 마크. 데스크톱 사이드바와 **같은 SVG 경로**를 그린다(`@shared/brandMarks`) —
@@ -25,7 +26,7 @@ export function BrandMark({
   if (backend === 'codex') {
     return (
       <Svg width={size} height={size} viewBox={CODEX_MARK.viewBox}>
-        <Path d={CODEX_MARK.path} fill="#b9b9c2" />
+        <Path d={CODEX_MARK.path} fill={theme.textMuted} />
       </Svg>
     )
   }
