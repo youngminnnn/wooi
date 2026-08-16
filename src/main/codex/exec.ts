@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process'
+import { StringDecoder } from 'node:string_decoder'
 import type { EffortSetting } from '@shared/types'
 import { log } from '../logger'
 import { withWooiCodexConfig } from './config'
@@ -56,11 +57,15 @@ export function execCodex(
 
     const out: CodexExecOutcome = { error: null, aborted: false }
     let stderr = ''
+    // 청크별 디코딩은 경계의 한글을 U+FFFD 로 조용히 훼손한다(발견 경위는 antigravity/exec.ts 참고).
+    // StringDecoder 가 미완성 바이트를 다음 청크까지 보류하며, 독립 스트림마다 하나씩 필요하다.
+    const stdoutDecoder = new StringDecoder('utf8')
+    const stderrDecoder = new StringDecoder('utf8')
 
-    child.stdout.on('data', (chunk: Buffer) => reader.push(chunk.toString()))
+    child.stdout.on('data', (chunk: Buffer) => reader.push(stdoutDecoder.write(chunk)))
 
     child.stderr.on('data', (chunk: Buffer) => {
-      stderr += chunk.toString()
+      stderr += stderrDecoder.write(chunk)
     })
 
     child.on('error', (err) => {
@@ -72,6 +77,10 @@ export function execCodex(
     })
 
     child.on('close', (code) => {
+      // 문자 중간에서 끝난 스트림의 꼬리를 버리면 마지막 문자가 조용히 사라지므로 마저 비운다.
+      const stdoutRemainder = stdoutDecoder.end()
+      if (stdoutRemainder) reader.push(stdoutRemainder)
+      stderr += stderrDecoder.end()
       reader.end()
       if (deps.abort.signal.aborted) out.aborted = true
       if (!out.aborted && !out.error && code !== 0) {

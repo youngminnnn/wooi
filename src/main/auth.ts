@@ -5,6 +5,7 @@ import type { AgentAuthStatus, AuthStatus, GithubAuthStatus } from '@shared/type
 import { log } from './logger'
 import { runLoginShell, isInstalled } from './shell'
 import { setGithubConnected } from './github'
+import { getAntigravityAccountStatus } from './antigravity/account'
 
 /**
  * Claude / GitHub CLI 연동 상태를 조회하고 로그인·로그아웃을 트리거한다.
@@ -115,13 +116,18 @@ async function getCodexStatus(): Promise<AgentAuthStatus> {
   }
 }
 
+async function getAntigravityStatus(): Promise<AgentAuthStatus> {
+  return getAntigravityAccountStatus()
+}
+
 export async function getAuthStatus(): Promise<AuthStatus> {
-  const [claude, codex, github] = await Promise.all([
+  const [claude, codex, antigravity, github] = await Promise.all([
     getClaudeStatus(),
     getCodexStatus(),
+    getAntigravityStatus(),
     getGithubStatus()
   ])
-  return { agents: { claude, codex }, github }
+  return { agents: { claude, codex, antigravity }, github }
 }
 
 /**

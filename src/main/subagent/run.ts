@@ -1,5 +1,6 @@
 import type { PermissionResult } from '@anthropic-ai/claude-agent-sdk'
 import type { AgentBackendId, EffortSetting, PermissionMode } from '@shared/types'
+import { runAntigravitySubAgent } from './runAntigravity'
 import { runClaudeSubAgent } from './runClaude'
 import { runCodexSubAgent } from './runCodex'
 
@@ -53,17 +54,17 @@ export interface SubAgentRunDeps {
   abort: AbortController
   onActivity: (activity: SubAgentActivity) => void
   /**
-   * 도구 승인 콜백. **부모 세션의 canUseTool 을 그대로 넘긴다** — 직접 권한 UI 를 호출하지
-   * 않는 것이 요점이다. 그래야 사용자가 저장해 둔 always-allow 규칙, auto 모드, 파일 변경 diff 가
-   * 위임 실행에도 똑같이 적용된다(네이티브 Task 서브에이전트와 같은 경험).
+   * 도구 승인 콜백. 호출부는 부모 세션의 규칙을 재사용하지 않고 위임 전용 권한 카드를 매번 띄운다.
+   * 부모 워크스페이스가 fullAccess 면 즉시 허용하지만, 저장된 always-allow 규칙과 auto 모드
+   * 분류기는 적용하지 않는다.
    *
-   * 주지 않으면 막지 않고 통과시킨다. Codex 경로는 `codex exec` 가 비대화형이라 이 값을 아예
-   * 쓰지 않으며, 그 경로에서는 샌드박스가 유일한 방어선이다.
+   * 주지 않으면 막지 않고 통과시킨다. 비대화형 실행에 승인 채널이 없는 Codex 와 Antigravity
+   * 경로는 이 값을 사용하지 않는다.
    */
   canUseTool?: SubAgentPermission
 }
 
-/** 부모 세션의 canUseTool 과 같은 모양. Claude 경로만 사용한다. */
+/** 위임 실행용 승인 콜백. Claude 경로만 사용하며 Codex 와 Antigravity 는 승인 채널이 없다. */
 export type SubAgentPermission = (
   toolName: string,
   input: Record<string, unknown>,
@@ -73,11 +74,19 @@ export type SubAgentPermission = (
 export interface SubAgentResult {
   /** 서브에이전트의 최종 답변. 이것이 그대로 도구 결과가 된다. */
   text: string
-  /** 이어 붙일 세션 id(Claude 는 session id, Codex 는 thread id). 지금은 진단용. */
+  /** 이어 붙일 세션 id(Claude session, Codex thread, Antigravity conversation). 지금은 진단용. */
   sessionId: string | null
   error: string | null
 }
 
 export function runSubAgent(deps: SubAgentRunDeps): Promise<SubAgentResult> {
-  return deps.backend === 'codex' ? runCodexSubAgent(deps) : runClaudeSubAgent(deps)
+  switch (deps.backend) {
+    case 'codex':
+      return runCodexSubAgent(deps)
+    case 'antigravity':
+      return runAntigravitySubAgent(deps)
+    case 'claude':
+    default:
+      return runClaudeSubAgent(deps)
+  }
 }

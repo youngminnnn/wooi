@@ -10,6 +10,7 @@
  * 스트림만 물려서 돌린다(jsonrpc.test.ts).
  */
 
+import { StringDecoder } from 'node:string_decoder'
 import { log } from '../logger'
 
 /** 이 클라이언트가 물릴 최소한의 스트림 인터페이스(child_process 의 stdio 를 그대로 만족한다). */
@@ -52,6 +53,12 @@ export class RpcClient {
   private pending = new Map<number, Pending>()
   /** 부분 수신된 줄. 청크 경계가 JSON 중간을 자를 수 있으므로 버퍼링한다. */
   private buffer = ''
+  /**
+   * 청크 경계가 문자 바이트 중간을 자를 때 미완성 바이트를 다음 청크까지 보류한다. `buffer` 는 JSON
+   * 줄 경계, 이 필드는 한 문자 안의 바이트 경계를 지키므로 중복이 아니다. 청크별 디코딩은 한글을
+   * U+FFFD 로 바꿔도 JSON 파싱이 성공해 조용히 훼손한다(실제 사례는 antigravity/exec.ts 참고).
+   */
+  private decoder = new StringDecoder('utf8')
   /** -32601 을 한 번 받은 메서드. 다시 호출하지 않고 즉시 미지원 처리한다. */
   private unsupported = new Set<string>()
   private closed = false
@@ -66,7 +73,12 @@ export class RpcClient {
   // ── 수신 ────────────────────────────────────────────────────────────
 
   private onData(chunk: Buffer | string): void {
-    this.buffer += typeof chunk === 'string' ? chunk : chunk.toString('utf8')
+    // Buffer 만 바이트 경계를 복원한다. 이미 디코딩된 string 을 다시 디코더에 넣을 수는 없다.
+    this.consume(typeof chunk === 'string' ? chunk : this.decoder.write(chunk))
+  }
+
+  private consume(chunk: string): void {
+    this.buffer += chunk
 
     // 개행마다 한 메시지. 마지막 조각은 아직 미완성일 수 있으므로 버퍼에 남긴다.
     let idx: number
@@ -221,6 +233,8 @@ export class RpcClient {
   /** 연결 종료 — 대기 중인 요청은 전부 거절한다(영영 매달리지 않도록). */
   close(reason = 'Codex connection closed'): void {
     if (this.closed) return
+    // RpcStreams 에는 stream-end 이벤트가 없으므로 close()가 문자 중간에 남은 바이트까지 비운다.
+    this.consume(this.decoder.end())
     this.closed = true
     for (const { reject, timer } of this.pending.values()) {
       clearTimeout(timer)

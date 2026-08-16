@@ -9,20 +9,30 @@ import { log } from './logger'
  * 같은 PATH·환경을 본다. 인증 상태 조회와 CLI 설치 감지가 공통으로 쓴다.
  */
 export function runLoginShell(
-  command: string
+  command: string,
+  timeoutMs?: number
 ): Promise<{ stdout: string; stderr: string; code: number | null }> {
   return new Promise((resolve) => {
     const shell = process.env.SHELL || '/bin/zsh'
     const proc = spawn(shell, ['-lc', command])
     let stdout = ''
     let stderr = ''
+    const timer = timeoutMs
+      ? setTimeout(() => {
+          proc.kill('SIGTERM')
+        }, timeoutMs)
+      : null
     proc.stdout.on('data', (d: Buffer) => (stdout += d.toString()))
     proc.stderr.on('data', (d: Buffer) => (stderr += d.toString()))
     proc.on('error', (err) => {
+      if (timer) clearTimeout(timer)
       log.error(`shell: failed to spawn login shell (${shell})`, err)
       resolve({ stdout, stderr, code: 1 })
     })
-    proc.on('close', (code) => resolve({ stdout, stderr, code }))
+    proc.on('close', (code) => {
+      if (timer) clearTimeout(timer)
+      resolve({ stdout, stderr, code })
+    })
   })
 }
 

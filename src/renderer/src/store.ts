@@ -58,6 +58,7 @@ import {
 } from './lib/diffComments'
 import { popWorkspaceHistory, pushWorkspaceHistory } from './lib/workspaceHistory'
 import { UNDO_CREATE_WINDOW_MS, undoCreateVerdict, type UndoableCreate } from './lib/undoCreate'
+import { usesAccountUsageSnapshot } from './lib/rateLimit'
 
 export const scriptKey = (workspaceId: string, scriptId: string): string =>
   `${workspaceId}:${scriptId}`
@@ -964,13 +965,27 @@ export const useStore = create<UIState>((set, get) => ({
     if (typeof remembered === 'boolean') rememberRightPanels(rightPanelOpen)
     set({ app, ready: true, runningSince: seededRunningSince, rightPanelOpen })
 
-    // Overview에 들어간 뒤에야 Codex usage 조회를 시작하면 첫 화면에서 RPC 시간만큼 기다리게 된다.
-    // workspace 또는 저장된 스냅샷이 있으면 renderer 초기화와 동시에 미리 갱신한다.
-    const hasCodex =
-      app.workspaces.some((w) => !w.archived && w.agentBackend === 'codex') ||
-      !!app.rateLimitsByAgent?.codex
-    if (hasCodex) {
-      void refreshAccountUsage('codex').then((next) => set({ app: next }))
+    // Overview에 들어간 뒤에야 계정 usage 조회를 시작하면 첫 화면에서 RPC 시간만큼 기다리게 된다.
+    // workspace 또는 저장된 스냅샷이 있는 계정은 renderer 초기화와 동시에 미리 갱신한다.
+    for (const agentId of AGENT_BACKEND_IDS.filter(usesAccountUsageSnapshot)) {
+      const shouldPrefetch =
+        app.workspaces.some((w) => !w.archived && w.agentBackend === agentId) ||
+        !!app.rateLimitsByAgent?.[agentId]
+      if (!shouldPrefetch) continue
+      void refreshAccountUsage(agentId).then((next) =>
+        set((state) => ({
+          app: state.app
+            ? {
+                ...state.app,
+                // 백엔드별 요청이 동시에 끝나도 먼저 반영된 스냅샷을 잃지 않는다.
+                rateLimitsByAgent: {
+                  ...state.app.rateLimitsByAgent,
+                  [agentId]: next.rateLimitsByAgent?.[agentId]
+                }
+              }
+            : next
+        }))
+      )
     }
     void get().refreshAuth()
     void get().refreshAgents()

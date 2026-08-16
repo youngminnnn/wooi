@@ -11,8 +11,9 @@
  *
  * - Claude Code: default → acceptEdits → plan → auto (CLI 의 Shift+Tab 순환과 동일)
  * - Codex: readOnly → default(Auto) → fullAccess → plan (CLI 의 승인/샌드박스 조합)
+ * - Antigravity: plan → default(Edits only) → fullAccess (`agy` 의 실행별 모드 플래그)
  *
- * `default`·`plan` 은 두 백엔드가 의미를 공유하므로 일부러 같은 식별자를 쓴다 — 백엔드를 바꿔도
+ * `default`·`plan` 은 백엔드들이 의미를 공유하므로 일부러 같은 식별자를 쓴다 — 백엔드를 바꿔도
  * 전역 기본값이 자연스럽게 이관되고, 지원하지 않는 값이면 백엔드 기본 모드로 폴백한다.
  */
 export type PermissionMode = 'default' | 'acceptEdits' | 'plan' | 'auto' | 'readOnly' | 'fullAccess'
@@ -418,11 +419,12 @@ export function orderVisibleWorkspaces<
  * 이 워크스페이스를 구동하는 AI 코딩 에이전트 백엔드 식별자.
  * - claude: Claude Code (Claude Agent SDK)
  * - codex: OpenAI Codex (`codex app-server` JSON-RPC)
+ * - antigravity: Antigravity (`agy` CLI, headless `-p` 전용 — 한 턴마다 프로세스 하나)
  *
  * 워크스페이스는 생성 시 하나를 골라 **그 세션 동안 고정**한다. 백엔드별 기능 지원 여부
  * (capabilities)·권한 모드·기본 모델 등 메타데이터는 main 의 agent 레지스트리가 보유한다.
  */
-export type AgentBackendId = 'claude' | 'codex'
+export type AgentBackendId = 'claude' | 'codex' | 'antigravity'
 
 /** `unknown` 항목의 id. 같은 종류를 대화당 한 장으로 합치는 키다(백엔드의 dedupe 기준과 동일). */
 export function unknownItemId(backend: AgentBackendId, what: string): string {
@@ -430,7 +432,7 @@ export function unknownItemId(backend: AgentBackendId, what: string): string {
 }
 
 /** 전체 백엔드 식별자 목록(등록 순서 = UI 표시 순서). */
-export const AGENT_BACKEND_IDS: AgentBackendId[] = ['claude', 'codex']
+export const AGENT_BACKEND_IDS: AgentBackendId[] = ['claude', 'codex', 'antigravity']
 
 /** 백엔드를 지정하지 않은(레거시·신규) 워크스페이스의 기본 백엔드. */
 export const DEFAULT_AGENT_BACKEND: AgentBackendId = 'claude'
@@ -443,7 +445,8 @@ export const DEFAULT_AGENT_BACKEND: AgentBackendId = 'claude'
  */
 export const AGENT_BACKEND_LABELS: Record<AgentBackendId, string> = {
   claude: 'Claude Code',
-  codex: 'Codex'
+  codex: 'Codex',
+  antigravity: 'Antigravity'
 }
 
 /**
@@ -1297,7 +1300,14 @@ export type ChatItem =
       ts: number
     }
   | { id: string; type: 'error'; text: string; ts: number }
-  | { id: string; type: 'system'; text: string; ts: number }
+  | {
+      id: string
+      type: 'system'
+      text: string
+      ts: number
+      /** 메인 프로세스만 확실히 판별할 수 있는 안내에 렌더러 동작을 안전하게 연결한다. */
+      action?: 'enableFullAccess'
+    }
   | {
       id: string
       /** 이 지점 이전의 UI 기록은 모델 컨텍스트에서 압축됐으므로 기본 렌더링에서도 접는다. */

@@ -395,6 +395,91 @@ export const CODEX_META: AgentBackendMeta = {
 }
 
 /**
+ * Antigravity 는 도구별 승인(Claude)이나 OS 샌드박스(Codex)가 아니라 사전 allow-rule 과 실행별
+ * 플래그를 조합한다. 하지만 headless `-p` 에는 승인 채널이 없어 확인이 필요한 도구를 soft-deny 하고
+ * 필요한 규칙만 stderr 에 찍는다(CHANGELOG 1.1.3, 1.1.13 의 issue #794). 규칙은 사용자 홈의
+ * settings.json·projects 설정에만 둘 수 있고 실행별 주입 수단도 없으며(issue #342), path deny 무시와
+ * 우선순위 역전까지 있다(issue #798). 따라서 1.1.12 부터 headless 에 적용되는 `--mode` 세 값과
+ * `--dangerously-skip-permissions`로 실제로 구분되는 세 단계만 노출한다.
+ *
+ * `--mode` 가 받는 값은 accept-edits 와 plan 둘뿐이라(1.1.13 실측 — `--mode default` 은
+ * `unrecognized --mode value` 경고로 떨어진다) acceptEdits 를 따로 둘 자리가 없고, 분류기·샌드박스가
+ * 없어 auto·readOnly 도 정직한 의미를 만들 수 없다. default·plan 은
+ * 백엔드 전환 시 전역 기본값을 이어받도록 공통 식별자를 쓰며 나머지는 normalizePermissionMode 가
+ * 버린다. `--sandbox`와 skip 조합도 탈출 승인을 자동 통과시킨다(issue #36). 네트워크는 막히고
+ * (issue #765), readwrite glob 도 실패하므로(issue #798) "자율적이되 격리된" 모드는 선언하지 않는다.
+ */
+export const ANTIGRAVITY_PERMISSION_MODES: PermissionModeInfo[] = [
+  {
+    id: 'plan',
+    label: 'Plan mode',
+    description: 'Read-only — plan without executing',
+    footer: { symbol: '⏸', text: 'plan mode on' }
+  },
+  {
+    id: 'default',
+    label: 'Edits only',
+    description: 'Edit files in the worktree — shell commands are denied',
+    footer: { symbol: '⏵⏵', text: 'edits only' }
+  },
+  {
+    id: 'fullAccess',
+    label: 'Full access',
+    description: 'No approvals, no sandbox — including network access',
+    footer: { symbol: '⏵⏵', text: 'full access on' }
+  }
+]
+
+/**
+ * `agy --effort`가 받는 범위가 low|medium|high 세 단계뿐이라 그대로 노출한다. Wooi 의 minimal 은
+ * low 로, xhigh·max·ultracode 는 high 로 접는 변환은 실제 매니저를 붙이는 후속 커밋이 담당한다.
+ */
+export const ANTIGRAVITY_EFFORTS: EffortOptionInfo[] = [
+  { id: 'low', label: 'Low', hint: 'Fast, shallow reasoning' },
+  { id: 'medium', label: 'Medium', hint: 'Balanced' },
+  { id: 'high', label: 'High', hint: 'Thorough reasoning' }
+]
+
+/**
+ * Antigravity 의 headless 표면에서 실제로 제공되는 기능만 켠다. 세션 fork 가 없어 /btw 는 맥락을
+ * 잃거나 본 대화를 오염시키고, rewind 는 TUI 전용이며, 실행 중 입력 채널과 fast mode 도 없다.
+ * 로그인 코드는 `/dev/tty`로만 받는다(CHANGELOG 1.1.2). 반면 1.1.11 부터 `/usage`·`/quota`·
+ * `/credits`·`/model`·`/effort`·`/skills`는 턴·쿼터·대화를 만들지 않고 답해 usage/rate limit 조회는
+ * 가능하다. `/context`와 전체 자동완성 목록은 제공하지 않아 컨텍스트 사용량은 비워 둔다.
+ * print mode 자체의 skill/command 확장은 되므로 사용자가 직접 입력한 슬래시 명령은 계속 동작한다.
+ * `--add-dir`는 실행별 플래그라 한 턴 한 프로세스 구조에 잘 맞지만 절대 경로만 된다(issue #598).
+ *
+ * MCP 설정을 실행별로 주입하거나 끄는 수단이 없고(issue #342), `.agents/mcp_config.json` 기록은 사용자
+ * 저장소를 오염시키면서 무시된 전력도 있다(issue #60). 더구나 기본 ask 권한은 headless 에서 MCP
+ * 호출을 soft-deny 해 fullAccess 외에는 Wooi 도구 채널이 죽는다. 아무 일도 안 하는 스위치를 피하려
+ * mcp·delegate 를 함께 끈다. available 은 Codex 와 마찬가지로 런타임 탐지 결과가 덮어쓴다.
+ */
+export const ANTIGRAVITY_META: AgentBackendMeta = {
+  id: 'antigravity',
+  label: 'Antigravity',
+  defaultModel: null,
+  permissionModes: ANTIGRAVITY_PERMISSION_MODES,
+  defaultPermissionMode: 'default',
+  autonomousPermissionMode: null,
+  efforts: ANTIGRAVITY_EFFORTS,
+  capabilities: {
+    sideQuestion: false,
+    rewind: false,
+    mcp: false,
+    effort: true,
+    fastMode: false,
+    interactiveCommands: ['usage'],
+    slashCommands: false,
+    steering: false,
+    inAppLogin: false,
+    rateLimits: true,
+    addDirectory: true,
+    delegate: false
+  },
+  available: false
+}
+
+/**
  * 식별자별 백엔드 메타데이터 카탈로그. 새 백엔드는 여기에 메타를 추가한다.
  *
  * 구현(SessionManager 등)을 아는 registry.ts 가 아니라 **메타만 아는 이 파일**에 둔다 —
@@ -403,7 +488,8 @@ export const CODEX_META: AgentBackendMeta = {
  */
 export const AGENT_BACKENDS: Record<AgentBackendId, AgentBackendMeta> = {
   claude: CLAUDE_META,
-  codex: CODEX_META
+  codex: CODEX_META,
+  antigravity: ANTIGRAVITY_META
 }
 
 /** 알 수 없는/누락 식별자의 폴백 백엔드. */

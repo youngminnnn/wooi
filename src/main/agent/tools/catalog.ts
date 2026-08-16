@@ -604,6 +604,14 @@ export function delegateToolSpecs(
           ? 'Your tool calls run one after another, so several subagents finish in sequence, not' +
             ' at the same time — say so if the user expects them to run together.'
           : 'Several can run at the same time.',
+        ...(backend === 'antigravity'
+          ? [
+              'Antigravity headless mode has no approval channel or sandbox. Under Default it can' +
+                ' edit this worktree but every shell command is automatically denied; under Full' +
+                ' access it runs with permissions skipped and no containment. There is no mode in' +
+                ' between.'
+            ]
+          : []),
         'The subagent works in this same worktree under your permission mode, starts from an',
         'empty context, and reports back exactly once as text — it cannot ask you anything',
         'mid-run, so put everything it needs into the prompt.'
