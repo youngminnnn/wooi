@@ -305,38 +305,28 @@ export const CLAUDE_META: AgentBackendMeta = {
 }
 
 /**
- * Codex 의 권한 모드. Codex 는 Claude 처럼 도구 프롬프트로 막는 게 아니라 **OS 샌드박스**로
- * 강제하므로, 모드가 곧 (sandbox 정책 × 승인 정책) 조합이다 — CLI 의 `/approvals` 선택지와
- * 같은 이름을 쓴다. 실제 app-server 파라미터로의 변환은 codex/modes.ts 가 담당한다.
- *
- * `default`·`plan` 은 Claude 와 식별자를 공유한다(의미도 대응된다) — 백엔드를 오갈 때 전역
- * 기본값이 자연스럽게 이관되게 하려는 의도이며, 지원하지 않는 값은
- * `normalizePermissionMode` 가 이 백엔드의 기본 모드로 떨어뜨린다.
+ * Codex 데스크톱의 `/permissions` 메뉴와 같은 세 모드를 노출한다. Ask for approval과
+ * Approve for me는 같은 workspace 샌드박스를 쓰고, 경계를 넘는 요청을 사용자와
+ * Auto-review 중 누가 검토하는지만 다르다. 실제 app-server 정책 변환은 codex/modes.ts가 담당한다.
  */
 export const CODEX_PERMISSION_MODES: PermissionModeInfo[] = [
   {
-    id: 'readOnly',
-    label: 'Read only',
-    description: 'Read files freely — ask before writing or running anything',
-    footer: { symbol: '⏸', text: 'read only' }
+    id: 'askForApproval',
+    label: 'Ask for approval',
+    description: 'Edit and run inside the workspace — ask before going beyond it',
+    footer: null
   },
   {
     id: 'default',
-    label: 'Auto',
+    label: 'Approve for me',
     description: 'Edit and run inside the workspace — auto-review requests to go beyond it',
-    footer: { symbol: '⏵⏵', text: 'auto mode on' }
+    footer: { symbol: '⏵⏵', text: 'auto-review on' }
   },
   {
     id: 'fullAccess',
     label: 'Full access',
     description: 'No sandbox, no approvals — including network access',
     footer: { symbol: '⏵⏵', text: 'full access on' }
-  },
-  {
-    id: 'plan',
-    label: 'Plan mode',
-    description: 'Read-only — plan without executing',
-    footer: { symbol: '⏸', text: 'plan mode on' }
   }
 ]
 
@@ -365,8 +355,7 @@ export const CODEX_META: AgentBackendMeta = {
   defaultModel: null,
   permissionModes: CODEX_PERMISSION_MODES,
   defaultPermissionMode: 'default',
-  // Codex 는 'default' 가 곧 "Auto" 다(워크스페이스 안에서는 알아서 하고, 밖으로 나갈 때만
-  // 묻는다). 식별자만 Claude 와 같을 뿐 의미는 Claude 의 'auto' 쪽에 대응한다.
+  // Codex 의 'default'는 Approve for me(Auto-review)다.
   autonomousPermissionMode: 'default',
   efforts: CODEX_EFFORTS,
   capabilities: {

@@ -27,7 +27,7 @@ Wooi는 선택한 백엔드가 지원하는 컨트롤만 표시합니다. 따라
 
 | 기능 | Claude Code | Codex |
 | --- | --- | --- |
-| 권한 모드 | Default, Accept edits, Plan, Auto | Read only, Auto, Full access, Plan |
+| 권한 모드 | Default, Accept edits, Plan, Auto | Ask for approval, Approve for me, Full access |
 | Reasoning effort | 지원 모델에서 Ultracode를 포함한 백엔드 모델 목록 | Codex가 제공하는 모델별 목록 |
 | MCP | 지원 | 지원 |
 | 앱 내 로그인 | 지원 | 지원 |

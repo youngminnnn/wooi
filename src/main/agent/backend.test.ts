@@ -72,12 +72,12 @@ describe.each(BACKENDS.map((m) => [m.label, m] as const))('%s 메타', (_label, 
 })
 
 describe('백엔드 간 관계', () => {
-  it('Codex 기본 Auto 모드를 입력창 하단에도 표시한다', () => {
+  it('Codex 기본 Approve for me 모드를 입력창 하단에도 표시한다', () => {
     const mode = CODEX_META.permissionModes.find((item) => item.id === 'default')
 
     expect(mode).toMatchObject({
-      label: 'Auto',
-      footer: { symbol: '⏵⏵', text: 'auto mode on' }
+      label: 'Approve for me',
+      footer: { symbol: '⏵⏵', text: 'auto-review on' }
     })
   })
 

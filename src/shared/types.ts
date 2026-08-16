@@ -10,12 +10,13 @@
  * (라벨·설명·푸터 문구도 거기서 온다). 여기 유니온은 저장·전송되는 식별자의 전체 집합일 뿐이다.
  *
  * - Claude Code: default → acceptEdits → plan → auto (CLI 의 Shift+Tab 순환과 동일)
- * - Codex: readOnly → default(Auto) → fullAccess → plan (CLI 의 승인/샌드박스 조합)
+ * - Codex: askForApproval → default(Approve for me) → fullAccess
  *
- * `default`·`plan` 은 두 백엔드가 의미를 공유하므로 일부러 같은 식별자를 쓴다 — 백엔드를 바꿔도
- * 전역 기본값이 자연스럽게 이관되고, 지원하지 않는 값이면 백엔드 기본 모드로 폴백한다.
+ * `default`는 두 백엔드가 공유하는 저장 식별자지만 표시 이름과 의미는 다르다. `readOnly`는
+ * 이전 Codex 저장값 호환용으로 유니온에만 남아 있고, 현재 Codex에서는 기본 모드로 보정된다.
  */
-export type PermissionMode = 'default' | 'acceptEdits' | 'plan' | 'auto' | 'readOnly' | 'fullAccess'
+export type PermissionMode =
+  'default' | 'acceptEdits' | 'plan' | 'auto' | 'readOnly' | 'askForApproval' | 'fullAccess'
 
 /**
  * reasoning effort(추론 노력) 단계. 모델이 응답에 들이는 사고 깊이를 조절한다

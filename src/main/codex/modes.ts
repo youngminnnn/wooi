@@ -38,10 +38,7 @@ export interface CodexTurnPolicy {
   approvalPolicy: ApprovalPolicy
   /** 승인 요청을 사용자에게 바로 띄울지 Codex의 네이티브 위험 검토에 먼저 맡길지. */
   approvalsReviewer: ApprovalsReviewer
-  /**
-   * 협업 모드 이름. 'plan' 은 Codex 의 Plan 프리셋(읽기 전용 + 계획 수립 지침)을 켠다.
-   * undefined 면 기본 모드.
-   */
+  /** app-server가 지원하는 실험적 협업 모드. 현재 권한 메뉴에서는 설정하지 않는다. */
   collaborationMode?: 'plan'
 }
 
@@ -57,23 +54,17 @@ export function turnPolicyFor(
   worktreePath: string
 ): CodexTurnPolicy {
   switch (normalizePermissionMode(CODEX_META, mode)) {
-    // 읽기만 허용. 쓰기·실행은 매번 승인을 받는다.
-    case 'readOnly':
+    // Ask for approval: workspace 경계 안은 허용하고, 경계를 넘는 요청은 사용자가 검토한다.
+    case 'askForApproval':
       return {
-        sandboxPolicy: { type: 'readOnly' },
-        sandboxMode: 'read-only',
+        sandboxPolicy: {
+          type: 'workspaceWrite',
+          writableRoots: [worktreePath],
+          networkAccess: false
+        },
+        sandboxMode: 'workspace-write',
         approvalPolicy: 'on-request',
         approvalsReviewer: 'user'
-      }
-
-    // Plan 모드 — 읽기 전용은 같고, 협업 모드가 "실행하지 말고 계획하라"는 지침을 얹는다.
-    case 'plan':
-      return {
-        sandboxPolicy: { type: 'readOnly' },
-        sandboxMode: 'read-only',
-        approvalPolicy: 'on-request',
-        approvalsReviewer: 'user',
-        collaborationMode: 'plan'
       }
 
     // 승인·샌드박스 모두 해제. 네트워크까지 열린다.
