@@ -1,4 +1,4 @@
-import { DEFAULT_AGENT_BACKEND } from '@shared/types'
+import { AGENT_BACKEND_IDS, DEFAULT_AGENT_BACKEND } from '@shared/types'
 import type {
   AgentAuthStatus,
   AgentBackendId,
@@ -274,6 +274,7 @@ export const CLAUDE_META: AgentBackendMeta = {
   autonomousPermissionMode: 'auto',
   efforts: CLAUDE_EFFORTS,
   capabilities: {
+    mainAgent: true,
     sideQuestion: true,
     rewind: true,
     mcp: true,
@@ -370,6 +371,7 @@ export const CODEX_META: AgentBackendMeta = {
   autonomousPermissionMode: 'default',
   efforts: CODEX_EFFORTS,
   capabilities: {
+    mainAgent: true,
     sideQuestion: false,
     rewind: false,
     mcp: true,
@@ -395,6 +397,36 @@ export const CODEX_META: AgentBackendMeta = {
 }
 
 /**
+ * Copilot 은 ACP 일회성 위임만 구현한다. 아래 선택지는 워크스페이스 UI 가 읽지 않지만 메타 계약을
+ * 정직하게 채우기 위한 최소값이며, 메인 에이전트 경로로 승격시키는 폴백이 아니다.
+ */
+export const COPILOT_META: AgentBackendMeta = {
+  id: 'copilot',
+  label: 'GitHub Copilot CLI',
+  defaultModel: null,
+  permissionModes: CODEX_PERMISSION_MODES.filter((mode) => mode.id === 'readOnly'),
+  defaultPermissionMode: 'readOnly',
+  autonomousPermissionMode: null,
+  efforts: [],
+  capabilities: {
+    mainAgent: false,
+    sideQuestion: false,
+    rewind: false,
+    mcp: false,
+    effort: false,
+    fastMode: false,
+    interactiveCommands: [],
+    slashCommands: false,
+    steering: false,
+    inAppLogin: false,
+    rateLimits: false,
+    addDirectory: false,
+    delegate: false
+  },
+  available: false
+}
+
+/**
  * 식별자별 백엔드 메타데이터 카탈로그. 새 백엔드는 여기에 메타를 추가한다.
  *
  * 구현(SessionManager 등)을 아는 registry.ts 가 아니라 **메타만 아는 이 파일**에 둔다 —
@@ -403,8 +435,20 @@ export const CODEX_META: AgentBackendMeta = {
  */
 export const AGENT_BACKENDS: Record<AgentBackendId, AgentBackendMeta> = {
   claude: CLAUDE_META,
-  codex: CODEX_META
+  codex: CODEX_META,
+  copilot: COPILOT_META
 }
+
+/**
+ * 워크스페이스를 **구동할 수 있는** 백엔드만(capabilities.mainAgent).
+ *
+ * `AGENT_BACKEND_IDS` 와 갈라 두는 이유: 그 목록에는 teammate 전용 백엔드도 들어 있고, 그것을
+ * 메인 자리에 앉히면 워크스페이스가 첫 턴에 죽는다(createBackend 가 throw 한다). 에이전트를
+ * 고르게 하는 자리는 전부 이 목록을 봐야 한다 — 모델에게 주는 도구 스키마도 포함해서.
+ */
+export const MAIN_AGENT_BACKEND_IDS: AgentBackendId[] = AGENT_BACKEND_IDS.filter(
+  (id) => AGENT_BACKENDS[id].capabilities.mainAgent
+)
 
 /** 알 수 없는/누락 식별자의 폴백 백엔드. */
 export const DEFAULT_BACKEND_ID: AgentBackendId = 'claude'

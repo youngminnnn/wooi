@@ -116,12 +116,18 @@ async function getCodexStatus(): Promise<AgentAuthStatus> {
 }
 
 export async function getAuthStatus(): Promise<AuthStatus> {
-  const [claude, codex, github] = await Promise.all([
+  const [claude, codex, copilotInstalled, github] = await Promise.all([
     getClaudeStatus(),
     getCodexStatus(),
+    isInstalled('copilot'),
     getGithubStatus()
   ])
-  return { agents: { claude, codex }, github }
+  // Overview 의 유일한 소비자는 claude/codex 만 고정해 읽고 Copilot 은 앱 내 로그인이 없다.
+  // loggedIn=false 는 닿지 않는 Record 자리를 정직하게 채우기 위한 값이다.
+  return {
+    agents: { claude, codex, copilot: { installed: copilotInstalled, loggedIn: false } },
+    github
+  }
 }
 
 /**

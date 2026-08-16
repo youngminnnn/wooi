@@ -5,7 +5,7 @@ import {
   type AgentBackendId,
   type EffortSetting
 } from '@shared/types'
-import { AGENT_BACKENDS } from '../backend'
+import { AGENT_BACKENDS, MAIN_AGENT_BACKEND_IDS } from '../backend'
 
 /**
  * 에이전트에게 노출하는 Wooi 도구의 **정의**(이름 · 설명 · 스키마). 실행부는 [[agent/tools]] 에 있다.
@@ -123,12 +123,14 @@ function agentOptionParams(inherits: 'default' | 'parent'): z.ZodRawShape {
     new Set(Object.values(AGENT_BACKENDS).flatMap((meta) => meta.efforts.map((e) => e.id)))
   ) as [EffortSetting, ...EffortSetting[]]
   return {
+    // teammate 전용 백엔드는 여기 오면 안 된다 — 메인 자리에 앉히면 그 워크스페이스는 첫 턴에
+    // 죽는다(registry 의 createBackend 가 throw 한다). 모델에게 고를 수 없는 값을 보여 주지 않는다.
     agentBackend: z
-      .enum(AGENT_BACKEND_IDS as [AgentBackendId, ...AgentBackendId[]])
+      .enum(MAIN_AGENT_BACKEND_IDS as [AgentBackendId, ...AgentBackendId[]])
       .optional()
       .describe(
         `Agent that will run the new workspace. ${fallback} Available ` +
-          `agents: ${AGENT_BACKEND_IDS.map((id) => `${id} (${AGENT_BACKEND_LABELS[id]})`).join(', ')}.`
+          `agents: ${MAIN_AGENT_BACKEND_IDS.map((id) => `${id} (${AGENT_BACKEND_LABELS[id]})`).join(', ')}.`
       ),
     model: z
       .string()
@@ -625,7 +627,12 @@ export function delegateToolSpecs(
       // 지연 로딩(tool search) 뒤에 두지 않는다. 실측에서 모델이 이 도구를 쓰기 전에 ToolSearch
       // 로 먼저 찾아 왔는데, 그건 **이름을 이미 알 때** 통하는 경로다. "codex 한테 시켜줘" 처럼
       // 이름 없이 말한 요청은 검색 단계에서 놓칠 수 있고, 그게 Codex 에서 겪은 "존재를 모른다"
-      // 와 같은 실패다. 비용은 멀티 에이전트 워크스페이스에만 붙는다 — 그 외에는 도구 자체가 없다.
+      // 와 같은 실패다. 백엔드가 셋이 된 지금도 유지한다 — 비용은 팀 워크스페이스에만 붙고
+      // (그 외에는 도구 자체가 없다), 설치된 제품 수만큼만 는다(multiAgent.ts 의 설치 필터).
+      //
+      // Copilot 의 모델·effort 제약은 여기 적지 않는다. 그 백엔드는 설정의 에이전트 목록에
+      // 나오지 않아 사용자가 값을 정할 자리 자체가 없다 — 없는 손잡이의 한계를 매 요청
+      // 시스템 프롬프트에 싣는 것은 안내가 아니라 잡음이다(runAcp.ts 에 근거를 적어 뒀다).
       alwaysLoad: true
     }
   })

@@ -21,6 +21,7 @@ import {
 import type { AgentBackendMeta, ModelOption } from '@shared/types'
 import type { AgentBackend } from './backend'
 import { backendAvailability, createBackend, type Dispatch } from './registry'
+import { markBackendAvailability } from './availability'
 import { AGENT_BACKENDS, backendMeta } from './backend'
 import { log } from '../logger'
 import { flushBufferedPeerMessages, resetAllPeerSessions, resetPeerSession } from './tools/peer'
@@ -188,8 +189,10 @@ export class AgentOrchestrator {
         const meta = backendMeta(id)
         try {
           const { available, reason } = await backendAvailability(id)
+          markBackendAvailability(id, available)
           return { ...meta, available, unavailableReason: available ? undefined : reason }
         } catch (err) {
+          markBackendAvailability(id, false)
           log.error(`agent: availability check failed for ${id}`, err)
           return { ...meta, available: false, unavailableReason: 'Availability check failed' }
         }

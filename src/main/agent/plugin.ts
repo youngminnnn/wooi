@@ -62,6 +62,8 @@ export function writeWooiPlugins(): void {
   const base = wooiPluginDir(false)
   const team = wooiPluginDir(true)
   if (base) writeWooiPlugin(base)
+  // 부팅 때 정적 전체 목록으로 쓰므로 미설치 Copilot 도 /wooi:copilot 자동완성에는 남는다.
+  // 플러그인 생성을 비동기 설치 탐지와 얽지 않는, 현재 알려진 표시상 차이로 받아들인다.
   if (team) writeWooiPlugin(team, AGENT_BACKEND_IDS)
 }
 

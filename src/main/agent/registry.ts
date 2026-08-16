@@ -25,7 +25,8 @@ export interface BackendDeps {
 /** 백엔드별 CLI 실행 파일 이름. 설치 감지의 단일 출처. */
 export const BACKEND_CLI: Record<AgentBackendId, string> = {
   claude: 'claude',
-  codex: 'codex'
+  codex: 'codex',
+  copilot: 'copilot'
 }
 
 /**
@@ -57,6 +58,12 @@ export async function backendAvailability(
  */
 export function createBackend(id: AgentBackendId, deps: BackendDeps): AgentBackend {
   switch (id) {
+    case 'copilot':
+      // teammate-only 백엔드가 여기 도달했다면 호출부의 mainAgent 게이트가 샌 버그다. Claude 로
+      // 조용히 폴백하면 다른 제품이 대화를 이어받으므로 즉시 드러내야 한다.
+      throw new Error(
+        'GitHub Copilot CLI cannot drive a workspace — it is only available as a teammate.'
+      )
     case 'codex':
       return new CodexSessionManager(deps.dispatch, deps.getWindow, deps.onTurnEnd)
     case 'claude':

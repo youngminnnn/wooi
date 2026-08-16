@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { DEFAULT_SETTINGS } from '../storeSchema'
 import { AGENT_BACKEND_IDS, type AppSettings, type Workspace } from '@shared/types'
 import { backendMeta } from './backend'
+import { markBackendAvailability } from './availability'
 import { agentDefaultsFor, delegateBackendsFor } from './multiAgent'
 
 /**
@@ -23,6 +24,15 @@ describe('delegateBackendsFor', () => {
     // 화이트리스트가 아니라 모드다 — 어떤 종류를 쓸지는 대화에서 정해지므로, 미리 고른 목록으로
     // 좁히지 않는다. 메인 백엔드 자신도 빼지 않는다("Claude 서브에이전트 띄워줘"도 유효한 요청).
     expect(delegateBackendsFor(workspace({ multiAgent: true }))).toEqual(AGENT_BACKEND_IDS)
+  })
+
+  it('탐지 뒤 설치되지 않은 백엔드만 도구 목록에서 빠진다', () => {
+    markBackendAvailability('copilot', false)
+    expect(delegateBackendsFor(workspace({ multiAgent: true }))).toEqual(
+      AGENT_BACKEND_IDS.filter((id) => id !== 'copilot')
+    )
+    // 모듈 스냅샷을 쓰는 다른 테스트에 상태가 새지 않게 원래의 fail-open 의미로 되돌린다.
+    markBackendAvailability('copilot', true)
   })
 
   it('모드를 켜지 않은 워크스페이스는 단일 에이전트다', () => {

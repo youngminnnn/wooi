@@ -32,6 +32,8 @@ import { delegateToolName } from './tools/catalog'
 const LAUNCHERS: { backend: AgentBackendId; pattern: RegExp }[] = [
   // `codex exec …` · `codex e …`(별칭) · `codex review …`. 모두 비대화형 실행이다.
   { backend: 'codex', pattern: /(?:^|[\s;&|(])codex\s+(?:exec|e|review)(?:\s|$)/ },
+  // Copilot 의 문서화된 헤드리스 실행만 잡는다. --acp 는 위임이 아니라 서버 탐색이라 제외한다.
+  { backend: 'copilot', pattern: /(?:^|[\s;&|(])copilot\s+(?:.*\s)?(?:-p|--prompt)(?:\s|=|$)/ },
   // `claude -p …` · `claude --print …`. 헤드리스 실행의 표준 형태다.
   { backend: 'claude', pattern: /(?:^|[\s;&|(])claude\s+(?:.*\s)?(?:-p|--print)(?:\s|=|$)/ }
 ]

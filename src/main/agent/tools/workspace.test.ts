@@ -2,6 +2,8 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { z } from 'zod'
 import type { AgentToolDeps } from './registry'
 import type { AppSettings, ModelOption, Repo, Workspace } from '@shared/types'
+import { AGENT_BACKEND_IDS } from '@shared/types'
+import { backendMeta } from '../backend'
 import { DEFAULT_SETTINGS } from '../../storeSchema'
 import { AGENT_TOOLS } from './catalog'
 
@@ -110,6 +112,24 @@ describe('create_workspace', () => {
     const schema = z.object(spec!.inputSchema)
     expect(schema.safeParse({ agentBackend: 'codex' }).success).toBe(true)
     expect(schema.safeParse({ agentBackend: 'unknown' }).success).toBe(false)
+  })
+
+  // teammate 전용 백엔드를 메인 자리에 앉히면 그 워크스페이스는 첫 턴에 죽는다(createBackend 가
+  // throw 한다). 등록된 백엔드 전체가 아니라 **메인이 될 수 있는 것만** 후보라는 것을 못 박는다 —
+  // 나중에 teammate 전용 백엔드가 더 붙어도 이 테스트가 먼저 걸린다.
+  it('워크스페이스를 구동할 수 없는 백엔드는 고를 수 없다', async () => {
+    const teammateOnly = AGENT_BACKEND_IDS.filter((id) => !backendMeta(id).capabilities.mainAgent)
+    expect(teammateOnly.length).toBeGreaterThan(0)
+
+    const spec = AGENT_TOOLS.find((tool) => tool.name === 'create_workspace')
+    const schema = z.object(spec!.inputSchema)
+    for (const id of teammateOnly) {
+      // 스키마가 모델에게 아예 보여 주지 않고,
+      expect(schema.safeParse({ agentBackend: id }).success).toBe(false)
+      // 스키마를 우회해 들어와도 도구가 사람이 읽는 오류로 끊는다.
+      await expect(create_({ agentBackend: id })).rejects.toThrow(/cannot run a workspace/i)
+    }
+    expect(create).not.toHaveBeenCalled()
   })
 
   it('부모를 넘기지 않는다 — 이것이 스택과 갈리는 지점 전부다', async () => {

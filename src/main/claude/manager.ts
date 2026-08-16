@@ -24,6 +24,7 @@ import { CLAUDE_META, CLAUDE_MODELS, type AgentBackend, type TurnEndHook } from 
 import { agentDefaultsFor, canLeadAgentTeam, delegateBackendsFor } from '../agent/multiAgent'
 import { claudeMode, type HostCommand, type HostEvent, type SessionConfig } from './protocol'
 import { runAgentTool } from '../agent/tools'
+import { abortSubAgents } from '../agent/tools/subagent'
 import { RATE_LIMIT_CONTINUATION, RateLimitResumeCoordinator } from '../rateLimitResume'
 import type {
   AgentBackendId,
@@ -494,6 +495,11 @@ export class SessionManager implements AgentBackend {
   async interrupt(workspaceId: string): Promise<void> {
     this.rateLimitResume.cancel(workspaceId, true)
     this.sendIfHost({ type: 'interrupt', workspaceId })
+    // 위임 서브런은 세션이 아니라 **메인에서** 돈다 — 호스트로 보낸 interrupt 로는 끊기지 않으므로
+    // 여기서 끊는다(codex/manager.ts 가 같은 이유로 같은 줄을 갖고 있다). 이 줄이 없으면 사용자가
+    // 멈춘 뒤에도 위임받은 에이전트가 계속 돌며 worktree 를 고친다 — 실측으로 확인했다:
+    // 인터럽트 10초 뒤에도 `copilot --acp` 자식 프로세스가 살아 있었다.
+    abortSubAgents(workspaceId)
     // 세션이 없거나 끊긴 경우에도 사이드바가 '진행 중'에 갇히지 않도록 idle 로 확정한다.
     this.forceIdle(workspaceId)
   }
@@ -592,6 +598,9 @@ export class SessionManager implements AgentBackend {
    */
   dispose(workspaceId: string): void {
     this.sendIfHost({ type: 'dispose', workspaceId })
+    // 위임 서브런은 메인에서 돌므로 dispose 로 끊기지 않는다. 여기서 안 끊으면 워크스페이스를
+    // 닫아도 자식 프로세스가 남아 worktree 를 계속 건드린다(codex/manager.ts 와 같은 이유).
+    abortSubAgents(workspaceId)
     // 세션이 사라지면 그 세션이 기다리던 권한 요청은 응답받을 수 없으므로 거둔다.
     for (const [requestId, wsId] of this.pendingPermissions) {
       if (wsId !== workspaceId) continue

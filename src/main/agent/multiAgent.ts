@@ -7,6 +7,7 @@ import {
   type Workspace
 } from '@shared/types'
 import { backendMeta } from './backend'
+import { backendLooksInstalled } from './availability'
 
 /**
  * 멀티 에이전트 모드의 단일 해석 지점.
@@ -27,8 +28,10 @@ import { backendMeta } from './backend'
  * 메인 백엔드 자신도 뺴지 않는다. "Claude 서브에이전트 두 개 띄워줘" 도 자연스러운 요청이고,
  * 같은 종류일 때 네이티브 서브에이전트를 우선하라는 안내는 도구 설명이 맡는다(claude/delegate.ts).
  *
- * CLI 가 설치돼 있는지는 보지 않는다 — 확인이 비동기라 세션 설정 계산과 결이 맞지 않고, 없는
- * CLI 로 위임하면 서브런이 "The Codex CLI is not available." 라는 분명한 도구 결과로 끊는다.
+ * 렌더러는 이미 available 로 설치된 팀원만 그리는데 main 만 전부 싣던 불일치를 닫는다. 설치하지
+ * 않은 제품의 도구는 순수한 프롬프트 비용이자 잘못된 답을 유도하는 함정이다. 비동기 탐지는 이미
+ * 도는 listBackends 가 채운 동기 스냅샷으로 잇고 첫 탐지 전에는 fail-open 한다. 그 대가로 Codex
+ * 미설치 사용자도 이제 codex_subagent 를 호출 시점 실패로 보지 않고 아예 잃는다.
  */
 export function delegateBackendsFor(ws: Workspace): AgentBackendId[] {
   if (!ws.multiAgent) return []
@@ -36,7 +39,7 @@ export function delegateBackendsFor(ws: Workspace): AgentBackendId[] {
   // 도구를 꽂을 경로가 없는 백엔드)에서는 모드가 켜져 있어도 아무것도 열지 않는다. UI 도 같은
   // capability 로 모드 자체를 제안하지 않는다.
   if (!canLeadAgentTeam(ws)) return []
-  return [...AGENT_BACKEND_IDS]
+  return AGENT_BACKEND_IDS.filter(backendLooksInstalled)
 }
 
 /**

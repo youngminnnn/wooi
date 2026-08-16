@@ -1,6 +1,5 @@
 import type { AgentBackendId, EffortSetting, Workspace } from '@shared/types'
-import { AGENT_BACKEND_IDS } from '@shared/types'
-import { backendMeta, resolveWorkspaceAgentBackend } from '../backend'
+import { MAIN_AGENT_BACKEND_IDS, backendMeta, resolveWorkspaceAgentBackend } from '../backend'
 import { getStore } from '../../store'
 import type { AgentToolDeps } from './registry'
 
@@ -35,8 +34,17 @@ export async function resolveRequestedAgentOptions(
   /** 스택이면 부모 워크스페이스. 에이전트를 생략했을 때 무엇을 물려받는지가 여기서 갈린다. */
   parent: Pick<Workspace, 'agentBackend'> | null
 ): Promise<RequestedAgentOptions> {
+  // 후보는 **메인이 될 수 있는** 백엔드뿐이다. teammate 전용을 여기 앉히면 워크스페이스가 첫
+  // 턴에 죽는데(createBackend 가 throw), 그 사고는 이 파일 맨 위 주석이 말하는 "먼 실패 지점"
+  // 그 자체다. 도구 스키마도 같은 목록으로 좁혀 두었지만(catalog.ts), 스키마를 우회해 들어온
+  // 값도 여기서 걸러 모델이 같은 턴에 고쳐 부를 수 있게 한다.
   const requested = readString(args.agentBackend)
-  const agentBackend = AGENT_BACKEND_IDS.includes(requested as AgentBackendId)
+  if (requested && !MAIN_AGENT_BACKEND_IDS.includes(requested as AgentBackendId)) {
+    throw new Error(
+      `"${requested}" cannot run a workspace. Valid agents: ${MAIN_AGENT_BACKEND_IDS.join(', ')}.`
+    )
+  }
+  const agentBackend = MAIN_AGENT_BACKEND_IDS.includes(requested as AgentBackendId)
     ? (requested as AgentBackendId)
     : undefined
 
