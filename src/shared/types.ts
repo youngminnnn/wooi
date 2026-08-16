@@ -823,6 +823,9 @@ export function agentSwitchNeedsHandoff(
  * 약관·개인정보처리방침의 현재 버전. 문서를 사용자 권리에 영향을 주도록 개정하면 1 올린다.
  * settings.acceptedTermsVersion 이 이 값과 다르면 온보딩에서 재동의를 요구한다.
  */
+/** 원격 접근 동의 버전. 데이터 흐름이 실질적으로 바뀌면 올려서 다시 묻는다. */
+export const CURRENT_REMOTE_CONSENT_VERSION = 1
+
 export const CURRENT_TERMS_VERSION = 1
 
 /** UI 색상 테마. 'system' 은 OS 의 다크/라이트 설정을 따른다. */
@@ -1170,6 +1173,14 @@ export interface AppSettings {
    * schemaVersion 을 올리지 않는다(showRunningAgents·pickedDefaults 와 같은 이유).
    */
   remoteEnabled: boolean
+  /**
+   * 원격 접근 데이터 흐름에 동의한 버전. `null` 이면 아직 동의하지 않았다.
+   *
+   * 앱 전체 약관(`acceptedTermsVersion`)을 올리지 않는 이유는, 이 기능을 절대 켜지 않을
+   * 사용자 전원에게 재동의를 강요하게 되기 때문이다. 동의는 **결정이 실제로 일어나는
+   * 자리**, 즉 원격을 켜는 순간에 받는다.
+   */
+  remoteConsentVersion: number | null
   /** 원격 접근이 켜져 있을 때 휴대폰 푸시 알림도 보낸다. 별도 옵트인이며 기본은 꺼짐이다. */
   remotePushEnabled: boolean
   /**

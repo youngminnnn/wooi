@@ -59,6 +59,12 @@ export function resolveRemoteConfig(env: NodeJS.ProcessEnv = process.env): Remot
 
 // ── 백오프 ────────────────────────────────────────────────────────────────
 
+/**
+ * `machines.name` 에 넣는 값. 이 컬럼은 릴레이에 평문으로 남으므로 사람을 식별할 수 있는
+ * 것을 넣지 않는다. 머신 구분은 UUID 가 한다.
+ */
+const MACHINE_LABEL = 'wooi'
+
 const BASE_DELAY_MS = 1_000
 const MAX_DELAY_MS = 30_000
 
@@ -274,7 +280,12 @@ export class RemoteClient {
     const { error } = await client.from('machines').upsert(
       {
         id: machineId,
-        name: this.options.machineName ?? hostname(),
+        // **호스트네임을 릴레이에 보내지 않는다.** macOS 의 기본 호스트네임은 보통
+        // 사람 이름을 담고 있고(`youngmin-MacBookPro.local`), 이 컬럼은 암호화되지 않아
+        // 릴레이 운영자에게 그대로 보인다. 폰은 이 값을 읽지 않는다 — 기기 이름은 페어링
+        // QR 로 직접 받고, 이후에는 봉인된 상태(RemoteState.machine.name)로 온다.
+        // 그래서 여기에는 식별력 없는 라벨만 남긴다.
+        name: MACHINE_LABEL,
         platform: process.platform,
         app_version: this.options.appVersion,
         last_seen_at: new Date().toISOString()

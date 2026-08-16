@@ -106,6 +106,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   acceptedTermsVersion: null,
   // 원격 접근은 옵트인이다. 꺼져 있으면 릴레이에 아무것도 보내지 않는다.
   remoteEnabled: false,
+  // 동의는 원격을 켜는 순간에 받는다. 기본값은 '아직 안 함'이다.
+  remoteConsentVersion: null,
   // 푸시는 제3자 전달망을 지나므로 원격 접근과 별도로 명시적으로 켜야 한다.
   remotePushEnabled: false
 }

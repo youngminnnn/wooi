@@ -4,7 +4,7 @@ import QRCode from 'qrcode'
 import { useNow } from '../lib/useNow'
 import { ghostBtn, primaryBtn } from './Modal'
 import type { RemoteDeviceSummary, RemoteStatus } from '@shared/remote'
-import type { AppSettings } from '@shared/types'
+import { CURRENT_REMOTE_CONSENT_VERSION, type AppSettings } from '@shared/types'
 
 /**
  * 원격 접근(모바일 컴패니언) 설정 패널.
@@ -25,6 +25,7 @@ export default function RemoteAccessPanel({
   const [status, setStatus] = useState<RemoteStatus | null>(null)
   const [busy, setBusy] = useState(false)
   const [confirmClear, setConfirmClear] = useState(false)
+  const [askingConsent, setAskingConsent] = useState(false)
 
   useEffect(() => {
     void window.api.remote.getStatus().then(setStatus)
@@ -64,6 +65,24 @@ export default function RemoteAccessPanel({
 
   const { pairing, connection } = status
   const pairingActive = pairing.phase !== 'idle' && pairing.phase !== 'done'
+  const consented = settings.remoteConsentVersion === CURRENT_REMOTE_CONSENT_VERSION
+
+  /**
+   * 켜기는 동의를 지난다. 앱 전체 약관을 올리는 대신 여기서 묻는 이유는, 이 기능을 켜지 않을
+   * 사람에게 재동의를 강요하지 않기 위해서다 — 그리고 결정이 실제로 일어나는 자리가 여기다.
+   */
+  const toggleEnabled = (next: boolean): void => {
+    if (!next) {
+      setAskingConsent(false)
+      void run(() => window.api.remote.setEnabled(false))
+      return
+    }
+    if (!consented) {
+      setAskingConsent(true)
+      return
+    }
+    void run(() => window.api.remote.setEnabled(true))
+  }
 
   return (
     <div className="space-y-3">
@@ -72,7 +91,7 @@ export default function RemoteAccessPanel({
           type="checkbox"
           checked={status.enabled}
           disabled={busy}
-          onChange={(e) => void run(() => window.api.remote.setEnabled(e.target.checked))}
+          onChange={(e) => toggleEnabled(e.target.checked)}
           className="accent-blue-600 h-3.5 w-3.5 mt-0.5"
         />
         <span className="text-sm text-neutral-300">
@@ -84,6 +103,18 @@ export default function RemoteAccessPanel({
           </span>
         </span>
       </label>
+
+      {askingConsent && (
+        <ConsentGate
+          busy={busy}
+          onCancel={() => setAskingConsent(false)}
+          onAccept={() => {
+            setAskingConsent(false)
+            save({ remoteConsentVersion: CURRENT_REMOTE_CONSENT_VERSION })
+            void run(() => window.api.remote.setEnabled(true))
+          }}
+        />
+      )}
 
       {status.fault && <Notice tone="danger">{status.fault}</Notice>}
 
@@ -191,6 +222,64 @@ export default function RemoteAccessPanel({
           )}
         </>
       )}
+    </div>
+  )
+}
+
+/**
+ * 원격을 켜기 전에 데이터 흐름을 있는 그대로 보여 준다.
+ *
+ * 짧게 쓰는 것이 목적이다 — 길고 법률 같은 문장은 읽히지 않고 클릭만 훈련시킨다.
+ * 여기서 말하는 것은 세 가지뿐이다: 무엇이 나가는가, 릴레이가 무엇을 볼 수 있는가,
+ * 어떻게 되돌리는가.
+ */
+function ConsentGate({
+  busy,
+  onAccept,
+  onCancel
+}: {
+  busy: boolean
+  onAccept: () => void
+  onCancel: () => void
+}): React.JSX.Element {
+  return (
+    <div className="rounded-md border border-[var(--border)] bg-[var(--bg-raised)] p-3 space-y-2">
+      <p className="text-xs font-semibold text-neutral-300">Before you turn this on</p>
+      <ul className="space-y-1 text-xs text-neutral-500 leading-relaxed list-disc pl-4">
+        <li>
+          Your laptop and phone talk through a relay run by Wooi&apos;s maintainer. Your laptop only
+          makes outbound connections — nothing here becomes reachable from the internet.
+        </li>
+        <li>
+          Messages, code, file paths, and workspace names are encrypted with a key the relay never
+          sees. It carries ciphertext it cannot read.
+        </li>
+        <li>
+          The relay does see metadata: random identifiers, timestamps, message sizes, and your
+          phone&apos;s device name.
+        </li>
+        <li>
+          You can revoke a phone or delete everything from this panel at any time. Turning this off
+          stops all traffic.
+        </li>
+      </ul>
+      <button
+        type="button"
+        className="text-xs text-neutral-500 hover:text-neutral-300 underline underline-offset-2 transition-colors"
+        onClick={() =>
+          void window.api.openExternal('https://github.com/youngminnnn/wooi/blob/main/PRIVACY.md')
+        }
+      >
+        Read the full privacy policy
+      </button>
+      <div className="flex items-center gap-2 pt-1">
+        <button type="button" className={ghostBtn} onClick={onCancel}>
+          Not now
+        </button>
+        <button type="button" className={primaryBtn} disabled={busy} onClick={onAccept}>
+          Enable remote access
+        </button>
+      </div>
     </div>
   )
 }

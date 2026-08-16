@@ -164,11 +164,22 @@ describe('연결', () => {
         table: 'machines',
         row: expect.objectContaining({
           id: 'machine-uuid',
-          name: 'test-laptop',
           app_version: '1.2.3'
         })
       }
     ])
+    await client.dispose()
+  })
+
+  it('호스트네임을 릴레이에 올리지 않는다', async () => {
+    // machines.name 은 암호화되지 않아 릴레이 운영자에게 그대로 보인다. macOS 의 기본
+    // 호스트네임은 보통 사람 이름을 담고 있으므로 여기에 실리면 안 된다.
+    // 폰이 보는 이름은 봉인된 상태(getMachine)로 따로 간다.
+    const client = newClient()
+    await client.connect()
+
+    expect(JSON.stringify(supa.upserts)).not.toContain('test-laptop')
+    expect(client.getMachine().name).toBe('test-laptop')
     await client.dispose()
   })
 
