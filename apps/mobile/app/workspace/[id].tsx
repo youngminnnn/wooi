@@ -13,6 +13,18 @@ import {
   TextInput,
   View
 } from 'react-native'
+import {
+  ArrowRightLeft,
+  Brain,
+  ChevronDown,
+  ChevronRight,
+  CircleDashed,
+  CornerDownRight,
+  ListTodo,
+  Terminal,
+  Wrench,
+  type LucideIcon
+} from 'lucide-react-native'
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router'
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import type { ChatItem, PermissionRequest } from '@shared/types'
@@ -313,19 +325,27 @@ function RichText({
 function Collapsible({
   title,
   text,
+  icon: Icon,
   error = false
 }: {
   title: string
   text: string
+  icon: LucideIcon
   error?: boolean
 }): React.JSX.Element {
   const [open, setOpen] = useState(false)
+  const Chevron = open ? ChevronDown : ChevronRight
+  const tint = error ? theme.danger : theme.textFaint
   return (
     <Pressable style={styles.compactCard} onPress={() => setOpen((value) => !value)}>
-      <Text style={[styles.cardTitle, error && styles.errorText]}>
-        {open ? '⌄' : '›'} {title}
-      </Text>
-      {open ? <RichText text={text} color={error ? '#ef8d8d' : theme.textMuted} /> : null}
+      <View style={styles.cardHead}>
+        <Icon size={13} color={tint} />
+        <Text style={[styles.cardTitle, error && styles.errorText]} numberOfLines={1}>
+          {title}
+        </Text>
+        <Chevron size={14} color={theme.textFaint} />
+      </View>
+      {open ? <RichText text={text} color={error ? theme.danger : theme.textMuted} /> : null}
     </Pressable>
   )
 }
@@ -347,14 +367,25 @@ function ChatRow({ item }: { item: ChatItem }): React.JSX.Element {
         </View>
       )
     case 'thinking':
-      return <Collapsible title={item.streaming ? 'Thinking…' : 'Thinking'} text={item.text} />
+      return (
+        <Collapsible
+          icon={Brain}
+          title={item.streaming ? 'Thinking…' : 'Thinking'}
+          text={item.text}
+        />
+      )
     case 'tool_use':
       return (
-        <Collapsible title={`Tool · ${item.name}`} text={JSON.stringify(item.input, null, 2)} />
+        <Collapsible
+          icon={Wrench}
+          title={`Tool · ${item.name}`}
+          text={JSON.stringify(item.input, null, 2)}
+        />
       )
     case 'tool_result':
       return (
         <Collapsible
+          icon={CornerDownRight}
           title={item.isError ? 'Tool error' : 'Tool result'}
           text={item.text}
           error={item.isError}
@@ -381,6 +412,7 @@ function ChatRow({ item }: { item: ChatItem }): React.JSX.Element {
     case 'unknown':
       return (
         <Collapsible
+          icon={CircleDashed}
           title={`Unsupported ${item.backend} item`}
           text={`${item.what}${item.hint ? `\n${item.hint}` : ''}`}
         />
@@ -388,6 +420,7 @@ function ChatRow({ item }: { item: ChatItem }): React.JSX.Element {
     case 'bash':
       return (
         <Collapsible
+          icon={Terminal}
           title={`${item.running ? 'Running' : 'Command'} · ${item.command}`}
           text={item.output || 'No output'}
           error={item.exitCode !== null && item.exitCode !== 0}
@@ -396,6 +429,7 @@ function ChatRow({ item }: { item: ChatItem }): React.JSX.Element {
     case 'task':
       return (
         <Collapsible
+          icon={ListTodo}
           title={`${item.name} · ${item.status}`}
           text={item.summary ?? item.description}
           error={item.status === 'failed'}
@@ -404,6 +438,7 @@ function ChatRow({ item }: { item: ChatItem }): React.JSX.Element {
     case 'handoff':
       return (
         <Collapsible
+          icon={ArrowRightLeft}
           title={`Handoff · ${item.childName}`}
           text={item.summary}
           error={item.status === 'blocked'}
@@ -679,7 +714,7 @@ export default function WorkspaceScreen(): React.JSX.Element {
           ListFooterComponent={loadingOlder ? <ActivityIndicator color="#8b7cf6" /> : null}
           ListEmptyComponent={
             loading ? (
-              <ActivityIndicator style={styles.loading} color="#8b7cf6" />
+              <ActivityIndicator style={styles.loading} color={theme.accent} />
             ) : (
               <Text style={styles.empty}>No conversation yet</Text>
             )
@@ -727,14 +762,16 @@ export default function WorkspaceScreen(): React.JSX.Element {
 const styles = StyleSheet.create({
   screen: { backgroundColor: theme.bg, flex: 1 },
   header: {
-    alignItems: 'center',
+    alignItems: 'flex-start',
     borderBottomColor: theme.border,
     borderBottomWidth: StyleSheet.hairlineWidth,
     flexDirection: 'row',
     minHeight: 54,
-    paddingHorizontal: 14
+    paddingBottom: 10,
+    paddingHorizontal: 14,
+    paddingTop: 8
   },
-  back: { color: theme.accent, fontSize: 15, width: 68 },
+  back: { color: theme.accent, fontSize: 15, marginTop: 13, width: 68 },
   headerTitle: { alignItems: 'center', flex: 1 },
   headerRepo: { color: theme.textDim, fontSize: 10, fontWeight: '700', letterSpacing: 0.8 },
   headerMetaLine: { alignItems: 'center', flexDirection: 'row', gap: 5, marginTop: 2 },
@@ -746,13 +783,14 @@ const styles = StyleSheet.create({
   headerSpacer: { width: 68 },
   stopButton: {
     alignItems: 'center',
-    borderColor: '#733b42',
-    borderRadius: 5,
+    borderColor: 'rgba(255,100,103,0.42)',
+    borderRadius: 6,
     borderWidth: 1,
+    marginTop: 9,
     paddingVertical: 6,
     width: 68
   },
-  stopText: { color: '#ef8d8d', fontSize: 12, fontWeight: '600' },
+  stopText: { color: theme.danger, fontSize: 12, fontWeight: '600' },
   offline: {
     backgroundColor: theme.border,
     color: theme.textMuted,
@@ -798,7 +836,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 7
   },
-  cardTitle: { color: theme.textDim, fontSize: 12, fontWeight: '600' },
+  cardHead: { alignItems: 'center', flexDirection: 'row', gap: 8 },
+  cardTitle: { color: theme.textDim, flex: 1, fontSize: 12, fontWeight: '600' },
   codeScroll: { backgroundColor: theme.bg, borderRadius: 5, marginVertical: 7, padding: 10 },
   code: {
     color: theme.textMuted,
