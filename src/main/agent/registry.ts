@@ -3,6 +3,8 @@ import type { AgentBackendId } from '@shared/types'
 import { SessionManager } from '../claude/manager'
 import { CodexSessionManager } from '../codex/manager'
 import { detectCodex } from '../codex/executable'
+import { detectGrok } from '../grok/executable'
+import { GrokSessionManager } from '../grok/manager'
 import { isInstalled } from '../shell'
 import { backendMeta, type AgentBackend, type TurnEndHook } from './backend'
 
@@ -25,7 +27,8 @@ export interface BackendDeps {
 /** 백엔드별 CLI 실행 파일 이름. 설치 감지의 단일 출처. */
 export const BACKEND_CLI: Record<AgentBackendId, string> = {
   claude: 'claude',
-  codex: 'codex'
+  codex: 'codex',
+  grok: 'grok'
 }
 
 /**
@@ -44,6 +47,10 @@ export async function backendAvailability(
     const install = await detectCodex()
     return install.usable ? { available: true } : { available: false, reason: install.reason }
   }
+  if (id === 'grok') {
+    const install = await detectGrok()
+    return install.usable ? { available: true } : { available: false, reason: install.reason }
+  }
 
   const cli = BACKEND_CLI[id]
   if (!cli) return { available: false, reason: 'Unknown agent backend' }
@@ -57,6 +64,8 @@ export async function backendAvailability(
  */
 export function createBackend(id: AgentBackendId, deps: BackendDeps): AgentBackend {
   switch (id) {
+    case 'grok':
+      return new GrokSessionManager(deps.dispatch, deps.getWindow, deps.onTurnEnd)
     case 'codex':
       return new CodexSessionManager(deps.dispatch, deps.getWindow, deps.onTurnEnd)
     case 'claude':

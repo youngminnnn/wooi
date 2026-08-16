@@ -23,7 +23,15 @@ describe('delegateShellAttempt', () => {
     ['codex review --base main', 'codex'],
     ['claude -p "리팩터링해 줘"', 'claude'],
     ['claude --print "리팩터링해 줘"', 'claude'],
-    ['claude --model opus -p "일해"', 'claude']
+    ['claude --model opus -p "일해"', 'claude'],
+    ['grok -p "구현해 줘"', 'grok'],
+    ['grok --single "구현해 줘"', 'grok'],
+    ['grok --print="구현해 줘"', 'grok'],
+    ['grok --prompt-json \'{"prompt":"구현해 줘"}\'', 'grok'],
+    ['grok --prompt-file task.md', 'grok'],
+    ['grok agent stdio', 'grok'],
+    ['grok agent serve --port 8080', 'grok'],
+    ['grok agent headless', 'grok']
   ])('%s → %s', (command, backend) => {
     expect(delegateShellAttempt(command)).toBe(backend)
   })
@@ -32,6 +40,8 @@ describe('delegateShellAttempt', () => {
     expect(delegateShellAttempt('cd /tmp && codex exec "일해"')).toBe('codex')
     expect(delegateShellAttempt('npx codex exec "일해"')).toBe('codex')
     expect(delegateShellAttempt('FOO=1 claude -p "일해"')).toBe('claude')
+    expect(delegateShellAttempt('npx grok --print "일해"')).toBe('grok')
+    expect(delegateShellAttempt('env FOO=1 grok agent stdio')).toBe('grok')
   })
 
   // 조사는 막지 않는다. 여기서 막으면 모델은 "이 환경에 codex 가 없다" 로 잘못 배우고,
@@ -43,6 +53,20 @@ describe('delegateShellAttempt', () => {
     }
   )
 
+  it.each([
+    'grok',
+    'grok --help',
+    'grok --version',
+    'grok version',
+    'grok models',
+    'grok login',
+    'grok logout',
+    'grok mcp list',
+    'grok sessions list',
+    'grok update'
+  ])('Grok 대화형·탐색·관리 명령은 그냥 둔다: %s', (command) => {
+    expect(delegateShellAttempt(command)).toBeNull()
+  })
   it.each([
     'git commit -m "codex exec 관련 수정"',
     'echo "claude -p" >> notes.md',

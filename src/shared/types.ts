@@ -419,11 +419,12 @@ export function orderVisibleWorkspaces<
  * 이 워크스페이스를 구동하는 AI 코딩 에이전트 백엔드 식별자.
  * - claude: Claude Code (Claude Agent SDK)
  * - codex: OpenAI Codex (`codex app-server` JSON-RPC)
+ * - grok: Grok Build (`grok agent stdio` ACP)
  *
  * 워크스페이스는 생성 시 하나를 골라 **그 세션 동안 고정**한다. 백엔드별 기능 지원 여부
  * (capabilities)·권한 모드·기본 모델 등 메타데이터는 main 의 agent 레지스트리가 보유한다.
  */
-export type AgentBackendId = 'claude' | 'codex'
+export type AgentBackendId = 'claude' | 'codex' | 'grok'
 
 /** `unknown` 항목의 id. 같은 종류를 대화당 한 장으로 합치는 키다(백엔드의 dedupe 기준과 동일). */
 export function unknownItemId(backend: AgentBackendId, what: string): string {
@@ -431,7 +432,7 @@ export function unknownItemId(backend: AgentBackendId, what: string): string {
 }
 
 /** 전체 백엔드 식별자 목록(등록 순서 = UI 표시 순서). */
-export const AGENT_BACKEND_IDS: AgentBackendId[] = ['claude', 'codex']
+export const AGENT_BACKEND_IDS: AgentBackendId[] = ['claude', 'codex', 'grok']
 
 /** 백엔드를 지정하지 않은(레거시·신규) 워크스페이스의 기본 백엔드. */
 export const DEFAULT_AGENT_BACKEND: AgentBackendId = 'claude'
@@ -444,7 +445,8 @@ export const DEFAULT_AGENT_BACKEND: AgentBackendId = 'claude'
  */
 export const AGENT_BACKEND_LABELS: Record<AgentBackendId, string> = {
   claude: 'Claude Code',
-  codex: 'Codex'
+  codex: 'Codex',
+  grok: 'Grok Build'
 }
 
 /**

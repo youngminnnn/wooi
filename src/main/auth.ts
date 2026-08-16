@@ -116,12 +116,15 @@ async function getCodexStatus(): Promise<AgentAuthStatus> {
 }
 
 export async function getAuthStatus(): Promise<AuthStatus> {
-  const [claude, codex, github] = await Promise.all([
+  const [claude, codex, grokInstalled, github] = await Promise.all([
     getClaudeStatus(),
     getCodexStatus(),
+    isInstalled('grok'),
     getGithubStatus()
   ])
-  return { agents: { claude, codex }, github }
+  // piece 3 의 앱 내 로그인 배관 전에는 설치 여부만 보고 로그인 상태를 추측하지 않는다.
+  const grok: AgentAuthStatus = { installed: grokInstalled, loggedIn: false }
+  return { agents: { claude, codex, grok }, github }
 }
 
 /**

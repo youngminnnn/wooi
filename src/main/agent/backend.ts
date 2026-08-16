@@ -383,6 +383,72 @@ export const CODEX_META: AgentBackendMeta = {
   available: false
 }
 
+/** Grok Build 의 ACP 권한 모드. 세션 생성 메타와 mode id 의 두 축 변환은 [[grok/modes]] 가 맡는다. */
+export const GROK_PERMISSION_MODES: PermissionModeInfo[] = [
+  { id: 'default', label: 'Default', description: 'Ask before tool use', footer: null },
+  {
+    id: 'auto',
+    label: 'Auto',
+    description: 'Automatically approve safe tool use',
+    footer: { symbol: '⏵⏵', text: 'auto mode on' }
+  },
+  {
+    // Grok 의 `_meta.yoloMode`(CLI 의 `--always-approve`). Wooi 에 이미 같은 뜻의 모드가
+    // 있으므로 새로 만들지 않고 `fullAccess` 를 쓴다 — [[grok/modes]].
+    id: 'fullAccess',
+    label: 'Always approve',
+    description: 'Run tools without approval prompts',
+    footer: { symbol: '⏵⏵', text: 'always approve on' }
+  },
+  {
+    id: 'plan',
+    label: 'Plan mode',
+    description: 'Read-only — plan without executing',
+    footer: { symbol: '⏸', text: 'plan mode on' }
+  },
+  {
+    id: 'readOnly',
+    label: 'Ask',
+    description: 'Ask before every non-read-only tool use',
+    footer: { symbol: '⏸', text: 'ask mode on' }
+  }
+]
+
+/** Grok Build 가 지원하는 reasoning effort 단계. 모델 설정 메타로 그대로 전달할 수 있다. */
+export const GROK_EFFORTS: EffortOptionInfo[] = [
+  { id: 'minimal', label: 'Minimal', hint: 'Barely any reasoning, fastest' },
+  { id: 'low', label: 'Low', hint: 'Fast, shallow reasoning' },
+  { id: 'medium', label: 'Medium', hint: 'Balanced reasoning' },
+  { id: 'high', label: 'High', hint: 'Thorough reasoning' },
+  { id: 'xhigh', label: 'Extra high', hint: 'Deepest reasoning' }
+]
+
+/** Grok Build 백엔드 메타. 런타임 구현은 piece 3 의 [[grok/manager]] 가 붙인다. */
+export const GROK_META: AgentBackendMeta = {
+  id: 'grok',
+  label: 'Grok Build',
+  defaultModel: 'grok-build',
+  permissionModes: GROK_PERMISSION_MODES,
+  defaultPermissionMode: 'default',
+  autonomousPermissionMode: 'auto',
+  efforts: GROK_EFFORTS,
+  capabilities: {
+    sideQuestion: true,
+    rewind: true,
+    mcp: true,
+    effort: true,
+    fastMode: false,
+    interactiveCommands: ['context', 'usage', 'mcp'],
+    slashCommands: true,
+    steering: true,
+    inAppLogin: true,
+    rateLimits: true,
+    addDirectory: true,
+    delegate: true
+  },
+  available: false
+}
+
 /**
  * 식별자별 백엔드 메타데이터 카탈로그. 새 백엔드는 여기에 메타를 추가한다.
  *
@@ -392,7 +458,8 @@ export const CODEX_META: AgentBackendMeta = {
  */
 export const AGENT_BACKENDS: Record<AgentBackendId, AgentBackendMeta> = {
   claude: CLAUDE_META,
-  codex: CODEX_META
+  codex: CODEX_META,
+  grok: GROK_META
 }
 
 /** 알 수 없는/누락 식별자의 폴백 백엔드. */
