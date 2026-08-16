@@ -15,6 +15,8 @@ import { useNow } from '../lib/useNow'
 import { formatCost, formatCountdown, formatDuration, formatTime } from '../lib/format'
 import { workspaceDisplayName } from '@shared/types'
 import type { AgentBackendId, RateLimitSnapshot, UsageInfo, Workspace } from '@shared/types'
+import { headlineWindows, normalizeUtilization } from '../lib/rateLimit'
+import type { RateLimitWindow } from '../lib/rateLimit'
 import { ClaudeMark, CodexMark } from './BrandIcons'
 
 /** 요금제 사용률 재조회 주기. 5시간 창이 눈에 띄게 움직이는 단위가 분이라 1분이면 충분하다. */
@@ -332,31 +334,38 @@ function AgentUsagePanel({
   }, [agentId, targetId, refreshNonce])
 
   const planApplies = usage ? usage.rateLimitsAvailable : (snapshot?.available ?? null)
-  const windows = useMemo<PlanWindow[]>(() => {
-    const source =
+  const source = useMemo<RateLimitWindow[]>(
+    () =>
       usage?.rateLimitsAvailable && usage.rateLimits.length > 0
         ? usage.rateLimits
         : snapshot?.available
           ? snapshot.windows
-          : []
-    return source.map((window) => {
-      const used =
-        window.utilization == null ? null : Math.min(100, Math.max(0, window.utilization))
-      const parsed = window.resetsAt ? Date.parse(window.resetsAt) : NaN
-      return {
-        label: window.label,
-        usedPct: used,
-        resetsAt: Number.isNaN(parsed) ? null : parsed
-      }
-    })
-  }, [usage, snapshot])
-  const withValues = windows.filter((window) => window.usedPct != null)
-  const highest = withValues.reduce<PlanWindow | null>(
-    (current, window) =>
-      !current || (window.usedPct ?? 0) > (current.usedPct ?? 0) ? window : current,
-    null
+          : [],
+    [usage, snapshot]
   )
-  const primary = windows[0]
+  const windows = useMemo<PlanWindow[]>(
+    () =>
+      source.map((window) => {
+        const parsed = window.resetsAt ? Date.parse(window.resetsAt) : NaN
+        return {
+          label: window.label,
+          usedPct: normalizeUtilization(window.utilization),
+          resetsAt: Number.isNaN(parsed) ? null : parsed
+        }
+      }),
+    [source]
+  )
+  // 대표 창은 상태줄과 **같은 규칙**으로 고른다(headlineWindows — Claude=5시간, Codex=주간).
+  // 여기서만 "가장 많이 쓴 창"을 고르면 같은 계정을 두고 상태줄은 5시간(4%), Overview 는
+  // 주간(78%) 을 말해 둘 중 하나가 틀린 것처럼 읽힌다. 숫자를 고정한 대가로 다른 창이 한도에
+  // 임박한 걸 놓치지 않도록, 더 뜨거운 창은 hint 에 덧붙인다.
+  const { shown, hotter } = useMemo(() => {
+    const picked = headlineWindows(agentId, source)
+    return {
+      shown: picked.shown ? (windows.find((w) => w.label === picked.shown!.label) ?? null) : null,
+      hotter: picked.hotter
+    }
+  }, [agentId, source, windows])
 
   return (
     <section className="rounded-xl border border-[var(--surface-2)] bg-[var(--bg-2)] p-3.5">
@@ -377,21 +386,26 @@ function AgentUsagePanel({
             <StatTile
               icon={<Gauge size={14} className="text-[var(--warning-400)]" />}
               label="Plan usage"
-              value={highest ? `${Math.round(highest.usedPct ?? 0)}%` : '—'}
-              loading={panelLoading && !highest}
+              value={shown?.usedPct == null ? '—' : `${shown.usedPct}%`}
+              loading={panelLoading && !shown}
               hint={
-                highest ? `Highest window used (${highest.label})` : `Checking ${label} limits…`
+                shown
+                  ? `${shown.label} window used` +
+                    (hotter
+                      ? ` · ${hotter.label} is at ${normalizeUtilization(hotter.utilization)}%`
+                      : '')
+                  : `Checking ${label} limits…`
               }
             />
             <StatTile
               icon={<Timer size={14} className="text-[var(--info-400)]" />}
-              label={primary ? `${primary.label} resets in` : 'Primary limit resets in'}
-              value={primary?.resetsAt == null ? '—' : formatCountdown(primary.resetsAt - now)}
-              loading={panelLoading && primary?.resetsAt == null}
+              label={shown ? `${shown.label} resets in` : 'Primary limit resets in'}
+              value={shown?.resetsAt == null ? '—' : formatCountdown(shown.resetsAt - now)}
+              loading={panelLoading && shown?.resetsAt == null}
               hint={
-                primary?.resetsAt == null
+                shown?.resetsAt == null
                   ? `Checking the ${label} primary usage window…`
-                  : `${primary.label} usage window resets at ${formatTime(primary.resetsAt)}`
+                  : `${shown.label} usage window resets at ${formatTime(shown.resetsAt)}`
               }
             />
           </div>

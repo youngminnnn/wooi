@@ -3,6 +3,7 @@ import { RATE_LIMIT_STALE_AFTER_MS, RATE_LIMIT_WARN_THRESHOLD } from '@shared/ty
 import type { RateLimitSnapshot } from '@shared/types'
 import {
   agoLabel,
+  headlineWindows,
   isStale,
   isWarning,
   normalizeUtilization,
@@ -41,6 +42,33 @@ describe('tightestWindow', () => {
   it('값이 있는 창이 하나도 없으면 null', () => {
     expect(tightestWindow([win('5-hour', null)])).toBeNull()
     expect(tightestWindow([])).toBeNull()
+  })
+})
+
+describe('headlineWindows', () => {
+  it('상태줄과 Overview 가 같은 창을 대표로 쓴다', () => {
+    // 실제로 어긋났던 값: 5시간 4%, 주간 78% 인 계정에서 상태줄은 4%, Overview 는 78% 였다.
+    const windows = [win('5-hour', 4), win('7-day', 78), win('7-day (Fable)', 6)]
+    expect(headlineWindows('claude', windows).shown?.label).toBe('5-hour')
+  })
+
+  it('대표 창보다 뜨거운 창이 경고선을 넘으면 hotter 로 알린다', () => {
+    const { shown, hotter } = headlineWindows('claude', [win('5-hour', 4), win('7-day', 91)])
+    expect(shown?.label).toBe('5-hour')
+    expect(hotter?.label).toBe('7-day')
+  })
+
+  it('다른 창이 경고선 아래면 hotter 는 없다', () => {
+    // 78% 는 임계치(80%) 아래 — 대표 창보다 높다는 이유만으로 경고를 켜지 않는다.
+    expect(headlineWindows('claude', [win('5-hour', 4), win('7-day', 78)]).hotter).toBeNull()
+  })
+
+  it('대표 창이 곧 가장 뜨거운 창이면 hotter 는 없다', () => {
+    expect(headlineWindows('claude', [win('5-hour', 95), win('7-day', 30)]).hotter).toBeNull()
+  })
+
+  it('보여 줄 창이 없으면 둘 다 null', () => {
+    expect(headlineWindows('claude', [])).toEqual({ shown: null, hotter: null })
   })
 })
 
