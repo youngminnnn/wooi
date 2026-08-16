@@ -3,8 +3,9 @@ import { REMOTE_PROTOCOL_VERSION } from '@shared/remote'
 import type { StoredPairing } from '../storage/secure'
 
 /**
- * 푸시 본문은 내용이 없다 — 워크스페이스가 누구인지는 `data` 에 봉인되어 온다.
- * 그래서 Expo·APNs·FCM 을 거쳐 오는 동안 어디에도 평문 이름이 남지 않는다.
+ * 푸시 본문에는 워크스페이스 **이름**만 평문으로 실린다(`"design-tokens" finished`).
+ * 어느 워크스페이스인지 — UUID 와 정규 이름 — 는 여전히 `data` 에 봉인되어 오고,
+ * 탭했을 때 여기서 열려 화면 이동에 쓰인다. 본문의 이름은 표시용일 뿐 신뢰하지 않는다.
  *
  * 랩탑 쪽 계약은 `src/main/remote/push.ts` 와 `supabase/functions/push/index.ts` 에 있다:
  *   data = { m: machineId, k: kind, n: base64url(nonce), p: base64url(ct) }

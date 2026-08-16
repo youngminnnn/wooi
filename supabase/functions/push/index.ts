@@ -1,13 +1,21 @@
 import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2'
 
-const BODIES = {
-  needsInput: 'A workspace needs your permission',
-  completed: 'A workspace finished',
-  error: 'A workspace encountered an error',
-  summary: 'Several workspaces need your attention'
+// 배너 본문의 계약. 랩탑은 `<워크스페이스 이름> <접미사>` 로만 보내고, 여기서 그 형태를
+// 강제한다 — 워크스페이스 이름은 평문 통과를 허용하지만(PRIVACY.md 참고) 프롬프트나
+// 트랜스크립트가 버그로 본문에 실리는 일은 릴레이에서 막는다.
+// 단일 소스는 `src/main/remote/push.ts` 이고, 고칠 때는 양쪽을 같이 고친다.
+const SUFFIXES = {
+  needsInput: 'needs your permission',
+  completed: 'finished',
+  error: 'encountered an error'
 } as const
 
-type PushKind = keyof typeof BODIES
+const SUMMARY_BODY = 'Several workspaces need your attention'
+
+/** 랩탑의 `REMOTE_PUSH_NAME_MAX`. 넘는 이름은 랩탑이 이미 잘라서 보낸다. */
+const NAME_MAX = 48
+
+type PushKind = keyof typeof SUFFIXES | 'summary'
 
 interface PushMessageInput {
   deviceId: string
@@ -44,9 +52,10 @@ Deno.serve(async (req) => {
   const kind = pushKind(raw.kind)
   const dedupeKey = str(raw.dedupeKey, 256)
   const messages = pushMessages(raw.messages)
-  if (!machineId || !kind || !dedupeKey || !messages || raw.body !== BODIES[kind]) {
+  if (!machineId || !kind || !dedupeKey || !messages || !pushBody(raw.body, kind)) {
     return fail(400, 'invalid push')
   }
+  const body = raw.body as string
 
   const asCaller = createClient(env('SUPABASE_URL'), env('SUPABASE_ANON_KEY'), {
     global: { headers: { Authorization: authorization } },
@@ -90,7 +99,7 @@ Deno.serve(async (req) => {
       return {
         to: device.expo_push_token,
         title: 'Wooi',
-        body: BODIES[kind],
+        body,
         data: { m: machineId, k: kind, n: sealed.n, p: sealed.p }
       }
     })
@@ -160,7 +169,30 @@ function pushMessages(value: unknown): PushMessageInput[] | null {
 }
 
 function pushKind(value: unknown): PushKind | null {
-  return typeof value === 'string' && value in BODIES ? (value as PushKind) : null
+  if (typeof value !== 'string') return null
+  return value === 'summary' || Object.hasOwn(SUFFIXES, value) ? (value as PushKind) : null
+}
+
+/**
+ * 본문은 요약이면 고정 문구, 아니면 `<이름> <접미사>` 여야 한다. 이름 자리에는
+ * 제어문자가 올 수 없고 길이도 랩탑과 같은 상한을 받는다.
+ */
+function pushBody(value: unknown, kind: PushKind): boolean {
+  if (typeof value !== 'string') return false
+  if (kind === 'summary') return value === SUMMARY_BODY
+  const suffix = ` ${SUFFIXES[kind]}`
+  if (!value.endsWith(suffix)) return false
+  const name = value.slice(0, -suffix.length)
+  return name.length > 0 && name.length <= NAME_MAX && printable(name)
+}
+
+/** 제어문자는 배너를 깨뜨리거나 지우므로 이름 자리에 올 수 없다. */
+function printable(value: string): boolean {
+  for (const char of value) {
+    const code = char.codePointAt(0) ?? 0
+    if (code < 0x20 || code === 0x7f) return false
+  }
+  return true
 }
 
 function base64url(value: unknown, max: number): string | null {

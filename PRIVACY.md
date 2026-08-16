@@ -113,23 +113,33 @@ text on the relay:
   ciphertext is.
 - **Notification events** — that a notification of a given kind
   (`needsInput`, `completed`, `error`) was sent at a given time, and the opaque
-  workspace UUID it concerned. Not the workspace's name.
+  workspace UUID it concerned. The workspace's name passes through in the
+  banner text (see [Notifications](#notifications)) but is not stored.
 - **Your phone's push token** — the address the push service delivers to.
 - Supabase, as the host, also processes ordinary connection metadata such as IP
   addresses.
 
 Taken together this is enough to see *that* you were working and roughly how
-much, and never *what* you were working on.
+much, and — apart from a workspace name in a notification banner — never
+*what* you were working on.
 
 ### Notifications
 
 When your computer is running something that needs you and you are away from it,
-it can send a notification to your phone. The banner text is a fixed phrase —
-"A workspace needs your permission" — with no names in it. The workspace it
-refers to travels as ciphertext in the notification's data and is decrypted on
-your phone when you tap it. It passes through
-[Expo's push service](https://expo.dev/privacy) and then Apple's or Google's
-push network, none of which can read it.
+it can send a notification to your phone. The banner names the workspace and
+what happened — "design-tokens finished" — so that you can tell from the
+lock screen whether it is worth picking up the phone.
+
+**The workspace's name is the one thing Wooi sends in the clear.** The banner
+text passes through [Expo's push service](https://expo.dev/privacy) and then
+Apple's or Google's push network, and those services can read it, as can the
+relay that hands it to them. Nothing else does: the relay only ever accepts a
+banner of the form `<name> finished`, and the notification's payload — the
+workspace this is really about, and everything the app shows once you open it —
+still travels as ciphertext and is decrypted on your phone.
+
+If you would rather no name left your computer, turn notifications off in
+Settings → Remote. Everything else on your phone keeps working.
 
 ### Where the keys live
 

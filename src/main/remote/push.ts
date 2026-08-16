@@ -7,11 +7,45 @@ import type { RemoteKeystore } from './keystore'
 export type RemotePushKind = NotificationEvent
 type PushKind = RemotePushKind | 'summary'
 
+/**
+ * 배너 문구의 뒷부분. 앞에는 워크스페이스 이름이 붙는다 — `"design-tokens" finished`.
+ *
+ * 이름은 릴레이·Expo·APNs/FCM 을 **평문으로** 지나간다. 나머지(프롬프트·트랜스크립트·
+ * 워크스페이스 UUID)와 달리 이것만 예외인 이유는, 알림을 열기 전에 어느 워크스페이스인지
+ * 아는 값이 그만큼 크기 때문이다. `PRIVACY.md` 의 "Notifications" 절이 이 예외를 밝힌다.
+ *
+ * 접미사를 상수로 못 박아 두는 이유는 Edge Function 이 같은 표를 갖고 본문을
+ * `<이름> <접미사>` 형태로만 검증하기 때문이다 — 버그로 프롬프트나 트랜스크립트가
+ * 본문에 실려도 릴레이에서 걸린다. 고칠 때는 `supabase/functions/push/index.ts` 도 같이.
+ */
+export const REMOTE_PUSH_SUFFIXES: Readonly<Record<RemotePushKind, string>> = {
+  needsInput: 'needs your permission',
+  completed: 'finished',
+  error: 'encountered an error'
+}
+
+/** 이름을 알 수 없거나(요약) 못 쓸 때의 문구. */
 export const REMOTE_PUSH_BODIES: Readonly<Record<PushKind, string>> = {
-  needsInput: 'A workspace needs your permission',
-  completed: 'A workspace finished',
-  error: 'A workspace encountered an error',
+  needsInput: `A workspace ${REMOTE_PUSH_SUFFIXES.needsInput}`,
+  completed: `A workspace ${REMOTE_PUSH_SUFFIXES.completed}`,
+  error: `A workspace ${REMOTE_PUSH_SUFFIXES.error}`,
   summary: 'Several workspaces need your attention'
+}
+
+/** 배너 한 줄에 들어갈 만큼으로 자른다. 잠금화면은 이보다도 일찍 잘린다. */
+export const REMOTE_PUSH_NAME_MAX = 48
+
+/**
+ * 이름을 배너에 실을 수 있는 한 줄로 정리한다. 줄바꿈·제어문자는 배너를 깨뜨리고,
+ * 빈 이름은 `" finished"` 같은 문구가 되므로 고정 문구로 되돌린다.
+ */
+export function remotePushBody(kind: PushKind, workspaceName: string): string {
+  if (kind === 'summary') return REMOTE_PUSH_BODIES.summary
+  const name = workspaceName.replace(/\s+/g, ' ').trim()
+  if (name.length === 0) return REMOTE_PUSH_BODIES[kind]
+  const clipped =
+    name.length > REMOTE_PUSH_NAME_MAX ? `${name.slice(0, REMOTE_PUSH_NAME_MAX - 1)}…` : name
+  return `${clipped} ${REMOTE_PUSH_SUFFIXES[kind]}`
 }
 
 export const REMOTE_PUSH_BURST_MS = 10_000
@@ -170,7 +204,7 @@ export class RemotePush {
         machineId,
         kind,
         dedupeKey,
-        body: REMOTE_PUSH_BODIES[kind],
+        body: remotePushBody(kind, notification.workspaceName),
         messages
       })
     } catch (err) {

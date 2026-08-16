@@ -190,9 +190,9 @@ export default function RemoteAccessPanel({
             <span className="text-sm text-neutral-300">
               Send notifications to paired phones
               <span className="block text-xs text-neutral-600 leading-relaxed">
-                Only when you are away from this laptop. The banner never names a workspace — it
-                says something needs you, and the details are decrypted on your phone when you tap
-                it.
+                Only when you are away from this laptop. The banner names the workspace and what
+                happened — that name is the one thing sent in the clear. Everything else is
+                decrypted on your phone when you tap it.
               </span>
             </span>
           </label>
