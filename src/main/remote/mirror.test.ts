@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import type { AppState, PermissionRequest, Repo, Workspace } from '@shared/types'
+import type { AppState, PermissionMode, PermissionRequest, Repo, Workspace } from '@shared/types'
 import type { RemoteMachine, RemoteState } from '@shared/remote'
 import type { RemoteKeystore } from './keystore'
 
@@ -11,6 +11,7 @@ vi.mock('electron', () => ({
 
 const { deriveDirectionKeys, fromBase64Url, generateSessionKey, openJson, toBase64Url } =
   await import('@shared/crypto')
+const { backendMeta } = await import('../agent/backend')
 const {
   MIRROR_DEBOUNCE_MS,
   StateMirror,
@@ -223,21 +224,26 @@ describe('StateMirror', () => {
     // 같은 id 가 백엔드마다 다른 뜻이다. Claude 의 'default' 는 매번 묻는 모드라 띄울 것이
     // 없고, Codex 의 'default' 는 워크스페이스 안에서 자동으로 도는 모드라 그렇게 말해야 한다.
     expect(projectPermissionModeFooter('claude', 'default')).toBeNull()
-    // 스스로 실행하는 모드는 전부 같은 무게(경고)로 보여야 한다.
+    // **문구는 단언하지 않는다.** 그건 서술자의 것이고 상류에서 종종 바뀐다(Codex 의
+    // 'default' 는 'auto mode on' → 'auto-review on' → 'approve for me on' 으로 바뀌었다).
+    // 여기서 지킬 불변식은 "지어내지 않고 서술자에서 그대로 가져온다" 이므로 서술자와
+    // 대조한다. 문구를 박아 두면 카피가 바뀔 때마다 결함 없이 빨개진다.
+    const footerOf = (backend: 'claude' | 'codex', mode: PermissionMode) =>
+      backendMeta(backend).permissionModes.find((item) => item.id === mode)?.footer ?? null
+
     expect(projectPermissionModeFooter('codex', 'default')).toEqual({
-      symbol: '⏵⏵',
-      text: 'auto-review on',
+      ...footerOf('codex', 'default'),
       tone: 'caution'
     })
-    expect(projectPermissionModeFooter('claude', 'acceptEdits')?.tone).toBe('caution')
-    expect(projectPermissionModeFooter('codex', 'fullAccess')?.tone).toBe('caution')
-    // 읽기 전용 계열은 '멈춤' 색이다 — 경고할 것이 없다.
     expect(projectPermissionModeFooter('claude', 'plan')).toEqual({
-      symbol: '⏸',
-      text: 'plan mode on',
+      ...footerOf('claude', 'plan'),
       tone: 'readOnly'
     })
-    // 그 백엔드에 없는 모드는 띄우지 않는다(readOnly 는 Claude 쪽 값이다).
+    // 스스로 실행하는 모드는 전부 같은 무게(경고)로 보여야 한다 — 이쪽이 진짜 불변식이다.
+    expect(projectPermissionModeFooter('claude', 'acceptEdits')?.tone).toBe('caution')
+    expect(projectPermissionModeFooter('codex', 'fullAccess')?.tone).toBe('caution')
+    // 그 백엔드에 없는 모드는 띄우지 않는다 — 지어내는 것보다 비우는 편이 정직하다.
+    // (Codex 는 모드 구성이 여러 번 바뀌었다. 지금은 plan·readOnly 가 없다.)
     expect(projectPermissionModeFooter('codex', 'readOnly')).toBeNull()
     // 그 백엔드에 없는 모드는 띄우지 않는다 — 지어내는 것보다 비우는 편이 정직하다.
     expect(projectPermissionModeFooter('claude', 'fullAccess')).toBeNull()

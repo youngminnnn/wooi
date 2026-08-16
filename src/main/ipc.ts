@@ -2486,7 +2486,7 @@ export function registerIpc(ctx: IpcContext): void {
   // 읽기 전용이다. 설치·마켓플레이스 추가는 사용자의 codex 설치본 전체를 바꾸는 바깥 방향 동작이라
   // 목록을 보는 김에 곁다리로 하면 안 된다 — 이 화면은 "무엇이 깔려 있는가" 까지만 답한다.
   // cwds 로 등록된 리포 경로를 넘겨 리포 안에 든 마켓플레이스까지 찾게 한다(MCP 승계 목록과 같다).
-  ipcMain.handle(
+  handle(
     IPC.pluginCodexList,
     async (): Promise<{ inventory?: CodexPluginInventory; error?: string }> => {
       try {
@@ -2498,7 +2498,7 @@ export function registerIpc(ctx: IpcContext): void {
     }
   )
 
-  ipcMain.handle(
+  handle(
     IPC.pluginCodexRead,
     async (_e, ref: CodexPluginRef): Promise<{ detail?: CodexPluginDetail; error?: string }> => {
       try {
