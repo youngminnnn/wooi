@@ -76,7 +76,7 @@ function WorkspaceRow({
               잘라먹기만 하고 계층을 읽히게 하지 못한다. */}
           {parentName !== null ? <Text style={styles.stacked}>↳</Text> : null}
           <Text style={styles.name} numberOfLines={1}>
-            {workspaceDisplayName(workspace)}
+            {workspaceDisplayName(workspace, workspace.pr?.title)}
           </Text>
           {workspace.muted ? <Text style={styles.muted}>muted</Text> : null}
           {needsPermission ? (
@@ -126,7 +126,13 @@ export default function WorkspaceListScreen(): React.JSX.Element {
   const [refreshing, setRefreshing] = useState(false)
 
   const nameById = useMemo(
-    () => new Map((state?.workspaces ?? []).map((item) => [item.id, workspaceDisplayName(item)])),
+    () =>
+      new Map(
+        (state?.workspaces ?? []).map((item) => [
+          item.id,
+          workspaceDisplayName(item, item.pr?.title)
+        ])
+      ),
     [state?.workspaces]
   )
 

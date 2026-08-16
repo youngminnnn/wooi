@@ -194,12 +194,16 @@ export function registerIpc(ctx: IpcContext): void {
   const store = getStore()
   const { dispatch } = ctx
 
-  /** 전체 상태 스냅샷을 모든 창에 방송한다. */
+  /**
+   * 전체 상태 스냅샷을 방송한다.
+   *
+   * 반드시 ctx.dispatch 를 거친다 — 창에 직접 보내면 그 방송은 원격 미러를 통째로 우회한다
+   * (미러는 dispatch 출구에만 붙어 있다). 이름 바꾸기·음소거·권한 모드처럼 IPC 핸들러가
+   * 바꾸는 것들이 폰에 영영 반영되지 않던 원인이 이것이었다: 폰은 에이전트 매니저가 따로
+   * dispatch 하는 다음 방송을 만날 때까지 옛 상태를 들고 있었다.
+   */
   const broadcastState = (): void => {
-    const state = store.getState()
-    for (const win of BrowserWindow.getAllWindows()) {
-      win.webContents.send(IPC.evtState, state)
-    }
+    dispatch(IPC.evtState, store.getState())
   }
 
   const stackProgress = (
@@ -1726,8 +1730,13 @@ export function registerIpc(ctx: IpcContext): void {
     const status = await getWorkspacePrStatus(after, after.branch)
     if (status) persistPrNumber(workspaceId, after.branch, status.number)
     // 원격 미러는 동기라 gh 를 부를 수 없다. 렌더러가 이미 시킨 이 조회의 답을 적어 두면
-    // 추가 비용 없이 폰도 같은 PR 색을 칠할 수 있다.
-    rememberPrStatus(workspaceId, status)
+    // 추가 비용 없이 폰도 같은 PR 색과 이름을 쓸 수 있다.
+    //
+    // 값이 바뀌었을 때만 방송한다. 미러는 이 캐시를 방송 시점에 읽으므로, 방송이 없으면
+    // 새 PR 제목·라벨이 다음 무관한 상태 변화까지 폰에 올라가지 않는다 — 제목은 표시
+    // 이름이라 그동안 폰의 워크스페이스 이름이 낡은 채로 남는다. 폴링마다 방송하지
+    // 않으므로 값이 그대로인 동안에는 비용이 없다.
+    if (rememberPrStatus(workspaceId, status)) broadcastState()
     return status
   })
 

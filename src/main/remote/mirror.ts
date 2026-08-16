@@ -79,12 +79,21 @@ export function projectPermissionModeFooter(
 /**
  * PR 상태. 아직 조회된 적이 없으면 `undefined` 를 그대로 흘려보낸다 — 모르는 것을 "없음"으로
  * 단정하지 않기 위해서다(폰은 그동안 PR 색을 칠하지 않고 기다린다).
+ *
+ * 제목은 색·라벨용이 아니라 **표시 이름**이라서 함께 싣는다 — 사용자 지정 이름이 없는
+ * 워크스페이스의 이름은 데스크톱에서 PR 제목이고, 이것을 빼면 같은 워크스페이스가
+ * 랩탑에서는 PR 제목, 폰에서는 worktree 이름으로 갈린다. URL 은 그대로 두고 온다.
  */
 export function projectPr(workspaceId: string): RemotePr | null | undefined {
   const status = getCachedPrStatus(workspaceId)
   if (status === undefined) return undefined
   if (status === null) return null
-  return { number: status.number, state: status.state, label: status.label }
+  return {
+    number: status.number,
+    state: status.state,
+    label: status.label,
+    title: status.title
+  }
 }
 
 export function projectState(

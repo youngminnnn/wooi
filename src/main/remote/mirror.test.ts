@@ -216,8 +216,15 @@ describe('StateMirror', () => {
       label: 'Ready to merge',
       needsBaseUpdate: false
     })
-    // 제목·URL 은 싣지 않는다 — 색과 한 줄 표시에 필요한 것만 릴레이를 지난다.
-    expect(projectPr('ws-open')).toEqual({ number: 12, state: 'approved', label: 'Ready to merge' })
+    // 제목은 싣는다 — 사용자 지정 이름이 없는 워크스페이스의 **표시 이름**이 PR 제목이라,
+    // 빼면 같은 워크스페이스가 랩탑에서는 'Fix login', 폰에서는 worktree 이름으로 갈린다.
+    // URL 은 여전히 두고 온다 — 폰이 열 곳이 없다.
+    expect(projectPr('ws-open')).toEqual({
+      number: 12,
+      state: 'approved',
+      label: 'Ready to merge',
+      title: 'Fix login'
+    })
   })
 
   it('권한 모드 표시는 백엔드의 서술자에서 뽑는다', () => {

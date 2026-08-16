@@ -41,6 +41,14 @@ export interface RemotePr {
   number: number
   state: string
   label: string
+  /**
+   * PR 제목. 워크스페이스에 사용자 지정 이름이 없으면 **이것이 표시 이름이다**
+   * (types.ts 의 workspaceDisplayName 규칙 그대로 — 데스크톱 사이드바가 쓰는 것과 같다).
+   *
+   * 없을 수 있다(undefined) — 이 필드를 싣기 전 랩탑과도 이야기하므로. 그때는 폰이
+   * worktree 이름으로 떨어진다.
+   */
+  title?: string
 }
 
 /** 모바일이 보는 워크스페이스 1개. */

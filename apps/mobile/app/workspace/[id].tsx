@@ -679,8 +679,13 @@ export default function WorkspaceScreen(): React.JSX.Element {
     }
   }, [command, stopping, workspaceId])
 
+  // 이름 규칙은 데스크톱과 같은 함수에서 나온다 — 사용자 지정 이름이 없으면 PR 제목,
+  // 그것도 없으면 worktree 이름. PR 제목은 랩탑이 투영에 실어 보낸다(mirror 의 projectPr).
   const title = useMemo(
-    () => (workspace === undefined ? 'Workspace' : workspaceDisplayName(workspace)),
+    () =>
+      workspace === undefined
+        ? 'Workspace'
+        : workspaceDisplayName(workspace, workspace.pr?.title),
     [workspace]
   )
 
