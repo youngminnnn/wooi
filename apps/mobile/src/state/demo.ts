@@ -59,7 +59,7 @@ export function createDemoSession(now: number = Date.now()): DemoSession {
         attention: 'permission',
         multiAgent: true,
         // 문구는 랩탑이 백엔드 서술자에서 뽑아 보내는 것과 같은 값이다(src/main/agent/backend.ts).
-        permissionModeFooter: { symbol: '⏸', text: 'plan mode on', tone: 'readOnly' },
+        permissionModeFooter: { symbol: '⏵⏵', text: 'accept edits on', tone: 'caution' },
         prNumber: 184,
         pr: { number: 184, state: 'ready', label: 'Ready for review' }
       },
@@ -133,7 +133,8 @@ export function createDemoSession(now: number = Date.now()): DemoSession {
         agentBackend: 'codex',
         model: 'gpt-5.4-mini',
         prNumber: 42,
-        pr: { number: 42, state: 'merged', label: 'Merged' }
+        pr: { number: 42, state: 'merged', label: 'Merged' },
+        permissionModeFooter: { symbol: '⏸', text: 'plan mode on', tone: 'readOnly' }
       },
       now - 45 * 60_000
     )
