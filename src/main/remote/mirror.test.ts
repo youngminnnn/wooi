@@ -97,14 +97,19 @@ function permission(workspaceId: string): PermissionRequest {
   return { requestId: `request-${workspaceId}`, workspaceId, toolName: 'Bash', input: {} }
 }
 
-function mirror(): InstanceType<typeof StateMirror> {
+function mirror(startRev: number | null = 0): InstanceType<typeof StateMirror> {
   const client = {
     from: vi.fn(() => ({ upsert }))
   } as unknown as SupabaseClient
   const keystore = {
     listDevices: () => [device]
   } as unknown as RemoteKeystore
-  return new StateMirror({ supabase: () => client, keystore, machine: () => machine })
+  return new StateMirror({
+    startRev: startRev ?? undefined,
+    supabase: () => client,
+    keystore,
+    machine: () => machine
+  })
 }
 
 async function flush(): Promise<void> {
@@ -184,6 +189,17 @@ describe('StateMirror', () => {
     expect(upsert).not.toHaveBeenCalled()
   })
 
+  it('rev 가 앱 재시작을 넘어 커진다 — 0 부터 다시 세지 않는다', async () => {
+    // 폰은 뒤로 가는 rev 를 "옛날 상태"로 보고 버린다. 카운터가 프로세스마다 0 부터
+    // 시작하면 재시작 이후의 모든 상태가 조용히 버려지고, 새 권한 요청이 폰에 뜨지 않는다.
+    // 실기기에서 정확히 그렇게 멈췄다 — 그래서 기본 시작점은 벽시계다.
+    const before = Date.now()
+    const stateMirror = mirror(null)
+    stateMirror.publish(appState(), [])
+    await flush()
+    expect(rows[0].rev).toBeGreaterThan(before)
+  })
+
   it('폰 방향 키로 게시물을 실제 복호화할 수 있다', async () => {
     const stateMirror = mirror()
     const app = appState()
@@ -246,7 +262,12 @@ describe('다중 기기', () => {
     }
     const client = { from: vi.fn(() => ({ upsert })) } as unknown as SupabaseClient
     const keystore = { listDevices: () => [device, second] } as unknown as RemoteKeystore
-    const m = new StateMirror({ supabase: () => client, keystore, machine: () => machine })
+    const m = new StateMirror({
+      startRev: 0,
+      supabase: () => client,
+      keystore,
+      machine: () => machine
+    })
 
     m.publishNow(appState(), [])
     await vi.waitFor(() => expect(rows.length).toBe(2))

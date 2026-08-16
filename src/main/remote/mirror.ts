@@ -64,6 +64,11 @@ export interface StateMirrorOptions {
   supabase: () => SupabaseClient
   keystore: RemoteKeystore
   machine: () => RemoteMachine
+  /**
+   * 발행 번호의 시작점. 기본값이 벽시계인 것이 중요하다 — 아래 `rev` 주석 참고.
+   * 테스트만 고정값을 준다.
+   */
+  startRev?: number
 }
 
 export class StateMirror {
@@ -71,11 +76,22 @@ export class StateMirror {
   private timer: ReturnType<typeof setTimeout> | null = null
   private pending: { state: RemoteState; json: string } | null = null
   private lastPublishedJson: string | null = null
-  private rev = 0
+  /**
+   * 발행 번호. 폰은 **뒤로 가는 rev 를 오래된 상태로 보고 버린다** — 그래야 두 refresh 가
+   * 뒤바뀐 순서로 도착해도 최신을 덮어쓰지 않는다.
+   *
+   * 그래서 0 부터 세면 안 된다. 랩탑 앱을 재시작할 때마다 카운터가 0 으로 돌아가고, 폰은
+   * 재시작 이후의 모든 상태를 "옛날 것"으로 판단해 조용히 버린다 — 화면은 재시작 직전에서
+   * 멈추고, 새로 뜬 권한 요청이 폰에 영영 나타나지 않는다(실기기에서 정확히 그랬다).
+   *
+   * 벽시계(ms)로 시작하면 프로세스가 바뀌어도 항상 커진다. 컬럼은 bigint 라 자리도 넉넉하다.
+   */
+  private rev: number
   private disposed = false
 
   constructor(options: StateMirrorOptions) {
     this.options = options
+    this.rev = options.startRev ?? Date.now()
   }
 
   publish(app: AppState, pending: PermissionRequest[]): void {
