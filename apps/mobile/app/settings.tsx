@@ -7,31 +7,13 @@ import * as Notifications from 'expo-notifications'
 import { ChevronLeft } from 'lucide-react-native'
 import { SettingsRow } from '../src/components/settings/SettingsRow'
 import { SettingsSection } from '../src/components/settings/SettingsSection'
+import { UsageRow } from '../src/components/settings/UsageRow'
 import { isLaptopAway, useRemoteStore } from '../src/state/store'
 import { agoLabel, useNow } from '../src/state/useNow'
 import { unpairThisPhone } from '../src/state/unpair'
 import { theme } from '../src/theme'
 
 type NotificationLabel = 'Enabled' | 'Blocked' | 'Not asked yet' | '—'
-
-/**
- * 업데이트 정보는 네이티브 모듈이 있어야 읽을 수 있고, 없으면 **import 하는 것만으로** 터진다
- * (`Cannot find native module 'ExpoUpdates'`). 실제로 expo-updates 가 없는 dev client 에서
- * 이 화면이 통째로 뜨지 않았다. 앱 정보 두 줄 때문에 설정 화면을 잃을 이유가 없으므로,
- * 모듈 접근을 감싸고 없으면 값만 비운다.
- */
-function updateInfo(): { channel: string; id: string } {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const Updates = require('expo-updates') as typeof import('expo-updates')
-    return {
-      channel: Updates.channel ?? (Updates.isEmbeddedLaunch ? 'Embedded' : '—'),
-      id: Updates.isEmbeddedLaunch ? 'Embedded' : (Updates.updateId ?? '—')
-    }
-  } catch {
-    return { channel: '—', id: '—' }
-  }
-}
 
 export default function SettingsScreen(): React.JSX.Element {
   const router = useRouter()
@@ -97,6 +79,9 @@ export default function SettingsScreen(): React.JSX.Element {
     )
   }, [router])
 
+  // 보여 줄 것이 없으면(요금제 한도 미적용 계정, 아직 한 번도 조회 못 함, 이 필드를 모르는
+  // 예전 랩탑) 랩탑이 빈 목록을 준다 — 그때는 섹션 자체가 나타나지 않는다.
+  const planUsage = state?.planUsage ?? []
   const away = isLaptopAway(laptopSeenAt, now)
   const connectionStatus = away
     ? `Asleep or offline${laptopSeenAt === null ? '' : ` · ${agoLabel(laptopSeenAt, now)}`}`
@@ -105,7 +90,6 @@ export default function SettingsScreen(): React.JSX.Element {
       : status === 'connecting'
         ? 'Connecting…'
         : 'Phone offline'
-  const update = updateInfo()
 
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
@@ -136,7 +120,6 @@ export default function SettingsScreen(): React.JSX.Element {
               label="Last update"
               value={updatedAt === null ? '—' : agoLabel(updatedAt, now)}
             />
-            <SettingsRow label="This phone" value={Constants.deviceName ?? '—'} />
             <SettingsRow
               destructive
               disabled={unpairing}
@@ -146,6 +129,21 @@ export default function SettingsScreen(): React.JSX.Element {
             />
           </SettingsSection>
         )}
+
+        {planUsage.map((account) => (
+          <SettingsSection
+            key={account.agent}
+            title={planUsage.length > 1 ? `Plan usage · ${account.agentLabel}` : 'Plan usage'}
+          >
+            {account.windows.map((usage) => (
+              <UsageRow key={usage.label} now={now} usage={usage} />
+            ))}
+            {account.plan === null ? null : <SettingsRow label="Plan" value={account.plan} />}
+            {/* 랩탑은 세션이 도는 동안에만 한도를 다시 조회한다 — 폰이 보는 값은 몇 시간 묵었을
+                수 있고, 그걸 말하지 않으면 지금 수치로 읽힌다. */}
+            <SettingsRow label="Checked" value={agoLabel(account.fetchedAt, now)} />
+          </SettingsSection>
+        ))}
 
         <SettingsSection title="Notifications">
           <SettingsRow label="Permission" value={notificationPermission} />
@@ -158,8 +156,6 @@ export default function SettingsScreen(): React.JSX.Element {
 
         <SettingsSection title="About">
           <SettingsRow label="Version" value={Constants.expoConfig?.version ?? '—'} />
-          <SettingsRow label="Update channel" value={update.channel} />
-          <SettingsRow label="Update ID" value={update.id} />
         </SettingsSection>
       </ScrollView>
     </SafeAreaView>

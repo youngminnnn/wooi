@@ -17,6 +17,7 @@ const {
   StateMirror,
   actsWithoutAsking,
   projectPermissionModeFooter,
+  projectPlanUsage,
   projectPr,
   projectRateLimit,
   projectState
@@ -159,6 +160,68 @@ describe('projectState', () => {
     expect(projection.workspaces[0]?.attention).toBe('permission')
     expect(projection.workspaces[1]?.attention).toBeNull()
     expect(projection.pendingPermissions).toEqual([pending])
+  })
+})
+
+describe('projectPlanUsage', () => {
+  const snapshot = (
+    values: Partial<AppState['rateLimits'] & object> = {}
+  ): NonNullable<AppState['rateLimits']> => ({
+    fetchedAt: 1_700_000_000_000,
+    available: true,
+    subscriptionType: 'max',
+    windows: [{ label: '5-hour', utilization: 41.6, resetsAt: '2023-11-14T23:30:00.000Z' }],
+    ...values
+  })
+
+  it('사용률을 0–100 정수로, 리셋 시각을 epoch ms 로 정규화한다', () => {
+    const app = { ...appState(), rateLimitsByAgent: { claude: snapshot() } }
+    expect(projectPlanUsage(app)).toEqual([
+      {
+        agent: 'claude',
+        agentLabel: backendMeta('claude').label,
+        plan: 'max',
+        fetchedAt: 1_700_000_000_000,
+        windows: [
+          { label: '5-hour', usedPct: 42, resetsAt: Date.parse('2023-11-14T23:30:00.000Z') }
+        ]
+      }
+    ])
+  })
+
+  it('요금제 한도가 적용되지 않는 계정은 싣지 않는다', () => {
+    const app = {
+      ...appState(),
+      rateLimitsByAgent: { claude: snapshot({ available: false, subscriptionType: null }) }
+    }
+    expect(projectPlanUsage(app)).toEqual([])
+  })
+
+  it('사용률을 모르는 창은 빼고, 남는 창이 없으면 계정 자체를 빼며, 못 읽는 리셋 시각은 null 로 둔다', () => {
+    const app = {
+      ...appState(),
+      rateLimitsByAgent: {
+        claude: snapshot({
+          windows: [
+            { label: '5-hour', utilization: null, resetsAt: null },
+            { label: 'Weekly', utilization: 12, resetsAt: 'not-a-date' }
+          ]
+        }),
+        codex: snapshot({ windows: [{ label: 'Weekly', utilization: null, resetsAt: null }] })
+      }
+    }
+    const usage = projectPlanUsage(app)
+    expect(usage.map((item) => item.agent)).toEqual(['claude'])
+    expect(usage[0]?.windows).toEqual([{ label: 'Weekly', usedPct: 12, resetsAt: null }])
+  })
+
+  it('백엔드별 필드가 없는 예전 상태에서는 단일 스냅샷을 Claude 것으로 읽는다', () => {
+    const app = { ...appState(), rateLimits: snapshot() }
+    expect(projectPlanUsage(app).map((item) => item.agent)).toEqual(['claude'])
+  })
+
+  it('보여 줄 것이 없어도 필드 자체는 빈 배열로 실어 보낸다', () => {
+    expect(projectState(appState(), machine, []).planUsage).toEqual([])
   })
 })
 
