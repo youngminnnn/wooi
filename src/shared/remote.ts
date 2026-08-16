@@ -177,20 +177,18 @@ export interface RemoteTranscriptQuery {
 
 // ── 전송 한도 ─────────────────────────────────────────────────────────────
 
-/**
- * 릴레이로 내보내는 이벤트 봉투 1개의 평문 상한(바이트).
- *
- * 초과하면 본문만 잘라 내고 `id`/`type`/`ts` 는 보존한다 — 폰이 그 id 를 보고
- * `remote:transcript` 로 원본을 다시 당겨올 수 있어야 하기 때문이다.
- * (main 의 clamp.ts 상한 512KiB/1MiB 는 Electron IPC 기준이라 릴레이에는 두 자릿수 배 크다.)
- */
-export const REMOTE_MAX_EVENT_BYTES = 32 * 1024
-
 /** 원격 `chat:send` 텍스트 상한(바이트). */
 export const REMOTE_MAX_PROMPT_BYTES = 32 * 1024
 
-/** 잘린 본문을 대체하는 표식. 폰이 이걸 보면 "원본 당겨오기" 어포던스를 띄운다. */
-export const REMOTE_TRUNCATED_MARK = '…[truncated — fetch on phone or open on desktop]'
+/**
+ * 잘라 낸 본문 끝에 붙이는 표식.
+ *
+ * **본문을 통째로 대체하지 않는다** — 앞부분을 최대한 남기고 그 뒤에 붙인다. 랩탑이 한 번에
+ * 돌려줄 수 있는 결과는 봉투 하나(`commands.result_ct` 의 DB 제약 256KiB)가 끝이라, 그보다
+ * 큰 아이템은 어차피 폰으로 다 못 온다. 그때 통째로 표식만 보내면 폰에서는 그 메시지를 영영
+ * 볼 수 없지만, 앞 200KiB 를 보내면 거의 다 읽을 수 있다.
+ */
+export const REMOTE_TRUNCATED_MARK = '\n…[truncated — open on desktop to see the rest]'
 
 // ── 명령 봉투 ─────────────────────────────────────────────────────────────
 

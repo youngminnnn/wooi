@@ -12,12 +12,14 @@ const invokeCommand = vi.fn<(channel: string, args: readonly unknown[]) => Promi
 
 vi.mock('electron', () => ({ app: { getPath: () => userData } }))
 vi.mock('../commandRegistry', () => ({ invokeCommand }))
-vi.mock('../transcripts', () => ({ getTranscripts: () => ({ load: () => [] }) }))
+const transcripts = vi.hoisted(() => ({ items: [] as unknown[] }))
+vi.mock('../transcripts', () => ({ getTranscripts: () => ({ load: () => transcripts.items }) }))
 
 const { deriveDirectionKeys, generateSessionKey, openJson, sealJson, toBase64Url } =
   await import('@shared/crypto')
 const { REMOTE_IPC } = await import('@shared/remote')
-const { RemoteCommandBridge, REMOTE_WATCH_TTL_MS, truncateItem } = await import('./bridge')
+const { RemoteCommandBridge, REMOTE_WATCH_TTL_MS, transcriptPage, truncateItem } =
+  await import('./bridge')
 const { fromPgBytea, toPgBytea } = await import('./bytea')
 
 const machineId = 'machine-1'
@@ -341,12 +343,69 @@ describe('RemoteCommandBridge', () => {
   })
 })
 
+describe('트랜스크립트 페이지', () => {
+  const item = (id: string, ts: number, text: string): unknown => ({
+    id,
+    type: 'assistant',
+    text,
+    ts
+  })
+
+  afterEach(() => {
+    transcripts.items = []
+  })
+
+  it('긴 메시지가 섞여도 담긴 것은 온전하다', () => {
+    // 예전에는 예산을 아이템 수로 균등 분배해서, 100개를 달라고 하면 하나에 2.5KiB 밖에
+    // 돌아가지 않았다 — 조금만 긴 답변이 전부 표식 한 줄이 됐다.
+    const long = 'ㄱ'.repeat(20_000)
+    transcripts.items = [item('a', 1, 'short'), item('b', 2, long), item('c', 3, 'short')]
+    const page = transcriptPage('ws-1', { limit: 100 }) as { id: string; text: string }[]
+    expect(page.map((entry) => entry.id)).toEqual(['a', 'b', 'c'])
+    expect(page[1].text).toBe(long)
+  })
+
+  it('예산이 떨어지면 개수를 줄이고 최신 것부터 온전히 보낸다', () => {
+    // 담을 수 없는 것은 자르지 않고 다음 페이지로 미룬다 — 폰이 beforeTs 로 당겨 간다.
+    const big = 'x'.repeat(120_000)
+    transcripts.items = [item('a', 1, big), item('b', 2, big), item('c', 3, big)]
+    const page = transcriptPage('ws-1', { limit: 100 }) as { id: string; text: string }[]
+    expect(page.map((entry) => entry.id)).toEqual(['b', 'c'])
+    expect(page.every((entry) => entry.text === big)).toBe(true)
+    expect(new TextEncoder().encode(JSON.stringify(page)).length).toBeLessThanOrEqual(256 * 1024)
+  })
+
+  it('아이템 하나가 봉투보다 크면 앞부분을 남겨서 보낸다', () => {
+    const huge = 'y'.repeat(400_000)
+    transcripts.items = [item('a', 1, huge)]
+    const page = transcriptPage('ws-1', { limit: 100 }) as { id: string; text: string }[]
+    expect(page).toHaveLength(1)
+    // 통째로 표식이 되면 폰에서는 그 메시지를 영영 못 본다 — 앞부분이 살아 있어야 한다.
+    expect(page[0].text.startsWith('yyyy')).toBe(true)
+    expect(page[0].text.length).toBeGreaterThan(200_000)
+    expect(page[0].text).toContain('truncated')
+    expect(new TextEncoder().encode(JSON.stringify(page)).length).toBeLessThanOrEqual(256 * 1024)
+  })
+
+  it('beforeTs 보다 오래된 것만 돌려준다', () => {
+    transcripts.items = [item('a', 1, 'one'), item('b', 2, 'two'), item('c', 3, 'three')]
+    const page = transcriptPage('ws-1', { beforeTs: 3, limit: 100 }) as { id: string }[]
+    expect(page.map((entry) => entry.id)).toEqual(['a', 'b'])
+  })
+
+  it('더 오래된 것이 없으면 빈 페이지다', () => {
+    transcripts.items = [item('a', 5, 'one')]
+    expect(transcriptPage('ws-1', { beforeTs: 5, limit: 100 })).toEqual([])
+  })
+})
+
 describe('트랜스크립트 잘림', () => {
+  const huge = 'x'.repeat(300_000)
+
   it('큰 아이템의 본문만 바꾸고 타입 필수 필드는 남긴다', () => {
     // id/type/ts 만 남기면 폰의 ChatItem 검증을 통과하지 못해, 큰 메시지 하나가
     // 트랜스크립트 전체를 못 읽게 만든다 — 실기기에서 실제로 그렇게 실패했다.
-    const huge = 'x'.repeat(300_000)
-    const cut = truncateItem({ id: 'a', type: 'assistant', text: huge, ts: 1 }) as {
+    const cut = truncateItem({ id: 'a', type: 'assistant', text: huge, ts: 1 }, 1024) as {
       id: string
       type: string
       ts: number
@@ -355,20 +414,57 @@ describe('트랜스크립트 잘림', () => {
     expect(cut.id).toBe('a')
     expect(cut.type).toBe('assistant')
     expect(cut.ts).toBe(1)
-    expect(typeof cut.text).toBe('string')
     expect(cut.text).not.toBe(huge)
+    expect(cut.text.startsWith('xxxx')).toBe(true)
 
-    const toolResult = truncateItem({
-      id: 'b',
-      type: 'tool_result',
-      toolId: 't',
-      text: huge,
-      isError: false,
-      ts: 2
-    }) as { toolId: string; isError: boolean; text: string }
+    const toolResult = truncateItem(
+      {
+        id: 'b',
+        type: 'tool_result',
+        toolId: 't',
+        text: huge,
+        isError: false,
+        ts: 2
+      },
+      1024
+    ) as { toolId: string; isError: boolean; text: string }
     // 폰은 tool_result 에 toolId·isError 를 요구한다 — 잘라도 남아 있어야 한다.
     expect(toolResult.toolId).toBe('t')
     expect(toolResult.isError).toBe(false)
     expect(toolResult.text).not.toBe(huge)
+  })
+
+  it('예산을 넘지 않으면서 최대한 남긴다', () => {
+    const cut = truncateItem({ id: 'a', type: 'assistant', text: huge, ts: 1 }, 4096)
+    const size = new TextEncoder().encode(JSON.stringify(cut)).length
+    expect(size).toBeLessThanOrEqual(4096)
+    expect(size).toBeGreaterThan(3500)
+  })
+
+  it('tool_use 는 인자의 앞부분을 남긴다', () => {
+    // Write 한 번이 카드 전체를 지우면, 폰에서는 무엇을 쓰려는 것인지조차 볼 수 없다.
+    const cut = truncateItem(
+      {
+        id: 'c',
+        type: 'tool_use',
+        toolId: 't',
+        name: 'Write',
+        input: { file_path: '/tmp/a.txt', content: huge },
+        ts: 3
+      },
+      2048
+    ) as { name: string; input: { file_path: string; content: string } }
+    expect(cut.name).toBe('Write')
+    expect(cut.input.file_path).toBe('/tmp/a.txt')
+    expect(cut.input.content.startsWith('xxxx')).toBe(true)
+    expect(new TextEncoder().encode(JSON.stringify(cut)).length).toBeLessThanOrEqual(2048)
+  })
+
+  it('서러게이트 쌍을 반으로 가르지 않는다', () => {
+    const emoji = '🙂'.repeat(50_000)
+    const cut = truncateItem({ id: 'd', type: 'assistant', text: emoji, ts: 1 }, 4096) as {
+      text: string
+    }
+    expect(cut.text).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/)
   })
 })

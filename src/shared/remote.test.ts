@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { REMOTE_PROTOCOL_VERSION, REMOTE_IPC, REMOTE_MAX_EVENT_BYTES } from './remote'
+import { REMOTE_PROTOCOL_VERSION, REMOTE_IPC, REMOTE_MAX_PROMPT_BYTES } from './remote'
 
 describe('RN 공유 모듈의 무의존 제약', () => {
   /**
@@ -50,9 +50,9 @@ describe('프로토콜 상수', () => {
     }
   })
 
-  it('이벤트 상한이 Realtime 메시지 한도보다 충분히 작다', () => {
-    // Supabase Realtime 의 메시지 상한은 대략 250KB 다. base64(+33%) + AEAD 오버헤드 + 봉투를
-    // 얹고도 여유가 있어야 하고, 여러 아이템이 몰려도 쿼터를 태우지 않아야 한다.
-    expect(REMOTE_MAX_EVENT_BYTES).toBeLessThanOrEqual(64 * 1024)
+  it('프롬프트 상한이 명령 봉투 한도 안에 있다', () => {
+    // commands.payload_ct 의 DB 제약이 64KiB 다(0001_init.sql). 그 절반이면 봉투·인코딩
+    // 오버헤드를 얹어도 남는다 — 넘기면 폰이 보낸 프롬프트가 insert 단계에서 튕긴다.
+    expect(REMOTE_MAX_PROMPT_BYTES).toBeLessThanOrEqual(32 * 1024)
   })
 })
