@@ -300,6 +300,13 @@ function parseTranscript(value: unknown): ChatItem[] {
   return value.filter(isChatItem)
 }
 
+/**
+ * 한 번에 그릴 본문 길이. 랩탑은 봉투에 들어가는 만큼(수십만 자) 보내 주는데, 그걸 그대로
+ * Text 하나에 넣으면 스크롤이 끊긴다. 앞부분만 먼저 그리고 나머지는 눌러서 펼친다 —
+ * 자르는 게 아니라 **미루는 것**이라 내용은 그대로 다 있다.
+ */
+const RENDER_CHARS = 8000
+
 function RichText({
   text,
   color = theme.text
@@ -307,7 +314,14 @@ function RichText({
   text: string
   color?: string
 }): React.JSX.Element {
-  const parts = text.split(/(```[\s\S]*?```)/g).filter(Boolean)
+  const [expanded, setExpanded] = useState(false)
+  const hidden = expanded ? 0 : Math.max(0, text.length - RENDER_CHARS)
+  // 서러게이트 쌍 한가운데서 자르면 이모지가 깨진 글자로 남는다.
+  const cut = /[\uD800-\uDBFF]/.test(text.charAt(RENDER_CHARS - 1))
+    ? RENDER_CHARS - 1
+    : RENDER_CHARS
+  const shown = hidden > 0 ? text.slice(0, cut) : text
+  const parts = shown.split(/(```[\s\S]*?```)/g).filter(Boolean)
   return (
     <View>
       {parts.map((part, index) => {
@@ -328,6 +342,13 @@ function RichText({
           </ScrollView>
         )
       })}
+      {hidden > 0 ? (
+        <Pressable onPress={() => setExpanded(true)}>
+          <Text style={styles.moreButton}>
+            Show the rest ({hidden.toLocaleString()} more characters)
+          </Text>
+        </Pressable>
+      ) : null}
     </View>
   )
 }
@@ -561,7 +582,10 @@ export default function WorkspaceScreen(): React.JSX.Element {
         await command('remote:transcript', [workspaceId, { limit: PAGE_SIZE }])
       )
       mergeItems(page)
-      setHasOlder(page.length === PAGE_SIZE)
+      // **개수로 판단하지 않는다.** 랩탑은 한 봉투에 들어가는 만큼만 담아 보내므로, 큰
+      // 메시지가 섞이면 요청한 100개보다 훨씬 적게 온다 — 그걸 "더 없음"으로 읽으면
+      // 위로 당겨 읽는 길이 막힌다. 빈 페이지가 올 때에만 끝으로 본다.
+      setHasOlder(page.length > 0)
       setError(null)
     } catch (loadError) {
       setError(errorMessage(loadError))
@@ -605,7 +629,7 @@ export default function WorkspaceScreen(): React.JSX.Element {
         await command('remote:transcript', [workspaceId, { beforeTs: oldest, limit: PAGE_SIZE }])
       )
       mergeItems(page)
-      setHasOlder(page.length === PAGE_SIZE)
+      setHasOlder(page.length > 0)
     } catch (loadError) {
       setError(errorMessage(loadError))
     } finally {
@@ -881,6 +905,12 @@ const styles = StyleSheet.create({
     marginBottom: 6
   },
   bodyText: { fontSize: 14, lineHeight: 21 },
+  moreButton: {
+    color: theme.accent,
+    fontSize: 12,
+    fontWeight: '600',
+    paddingVertical: 8
+  },
   compactCard: {
     backgroundColor: theme.bg2,
     borderColor: theme.border,

@@ -5,7 +5,6 @@ import type { RealtimeChannel, SupabaseClient } from '@supabase/supabase-js'
 import { deriveDirectionKeys, fromBase64Url, openJson, sealJson } from '@shared/crypto'
 import {
   REMOTE_IPC,
-  REMOTE_MAX_EVENT_BYTES,
   REMOTE_TRUNCATED_MARK,
   type RemoteCommandPayload,
   type RemoteCommandResult,
@@ -24,6 +23,7 @@ import { pendingPermissions } from './permissions'
 const FRESHNESS_MS = 5 * 60_000
 export const REMOTE_WATCH_TTL_MS = 60_000
 const RESULT_CT_MAX_BYTES = 256 * 1024
+/** AEAD 태그(16B)와 `{"ok":true,"value":…}` 봉투를 빼고 남는 평문 예산. */
 const RESULT_PLAINTEXT_BUDGET = RESULT_CT_MAX_BYTES - 1024
 
 interface CommandRow {
@@ -345,46 +345,133 @@ function parsePayload(value: unknown): RemoteCommandPayload {
   return { channel: value.channel, args: value.args, seq: value.seq, ts: value.ts }
 }
 
-function transcriptPage(workspaceId: string, query: RemoteTranscriptQuery): unknown[] {
+/**
+ * 트랜스크립트 한 페이지.
+ *
+ * 예산을 아이템 수로 **균등 분배하지 않는다.** 예전에는 그랬는데, 폰이 100개를 달라고 하면
+ * 아이템 하나에 2.5KiB 밖에 돌아가지 않아 조금만 긴 답변·도구 결과가 전부 표식 한 줄로
+ * 바뀌었다 — 대화의 알맹이만 골라 지우는 셈이었다.
+ *
+ * 대신 최신 것부터 실제 크기만큼 담고 예산이 떨어지면 거기서 끊는다. 담긴 것은 **전부
+ * 온전하고**, 못 담은 것은 폰이 `beforeTs` 로 다음 페이지를 당겨 가면 된다. 한 번에 오는
+ * 아이템 수는 줄지만 내용이 살아 있는 쪽이 낫다(폰은 이미 위로 당겨 더 읽는다).
+ */
+export function transcriptPage(workspaceId: string, query: RemoteTranscriptQuery): unknown[] {
   const eligible = getTranscripts()
     .load(workspaceId)
     .filter((item) => query.beforeTs === undefined || item.ts < query.beforeTs)
-  const page = eligible.slice(-query.limit)
-  const perItemBudget = Math.max(
-    256,
-    Math.floor(RESULT_PLAINTEXT_BUDGET / Math.max(1, page.length))
-  )
-  return page.map((item) => {
-    if (jsonBytes(item) <= Math.min(REMOTE_MAX_EVENT_BYTES, perItemBudget)) return item
-    // 본문만 표식으로 바꾸고 **타입이 요구하는 필드는 남긴다**. id/type/ts 만 남기면 폰의
-    // ChatItem 검증을 통과하지 못해, 큰 메시지 하나가 트랜스크립트 전체를 읽지 못하게 만든다.
-    return truncateItem(item)
-  })
+  const page: ChatItem[] = []
+  // 배열 구분자(쉼표)와 대괄호까지 감안해 조금 남긴다.
+  let budget = RESULT_PLAINTEXT_BUDGET - 64
+  for (let index = eligible.length - 1; index >= 0 && page.length < query.limit; index--) {
+    const item = eligible[index]
+    const size = jsonBytes(item) + 1
+    if (size <= budget) {
+      page.push(item)
+      budget -= size
+      continue
+    }
+    // 이미 담은 것이 있으면 이 아이템은 **온전한 채로 다음 페이지에 넘긴다.**
+    if (page.length > 0) break
+    // 아이템 하나가 봉투 하나보다 크다. 에이전트 출력은 512KiB 까지 남기므로(claude/clamp.ts)
+    // 실제로 생긴다 — 이때만 자르고, 그래도 앞부분은 최대한 남긴다.
+    page.push(truncateItem(item, budget - 1))
+    break
+  }
+  return page.reverse()
 }
 
 /**
- * 너무 큰 아이템의 **본문만** 잘라 낸다. 폰이 id 를 보고 원본을 다시 당겨올 수 있도록
- * 식별자와 타입별 필수 필드는 그대로 둔다.
+ * 아이템 하나를 `budget` 바이트 안에 들어가게 줄인다.
+ *
+ * 본문 **앞부분을 최대한 남기고** 끝에 표식을 붙인다. 통째로 표식으로 바꾸면 폰에서는 그
+ * 메시지를 영영 못 보지만, 앞 200KiB 를 보내면 사실상 다 읽는다. 식별자와 타입별 필수
+ * 필드는 그대로 둔다 — id/type/ts 만 남기면 폰의 ChatItem 검증을 통과하지 못해, 큰 메시지
+ * 하나가 트랜스크립트 전체를 읽지 못하게 만든다.
  */
-export function truncateItem(item: ChatItem): ChatItem {
-  const mark = REMOTE_TRUNCATED_MARK
+export function truncateItem(item: ChatItem, budget = 0): ChatItem {
   switch (item.type) {
     case 'user':
     case 'assistant':
     case 'thinking':
     case 'error':
     case 'system':
-      return { ...item, text: mark }
-    case 'tool_use':
-      return { ...item, input: { truncated: true } }
     case 'tool_result':
-      return { ...item, text: mark }
+      return fitBody(budget, item.text, (text) => ({ ...item, text }))
     case 'bash':
-      return { ...item, output: mark }
+      return fitBody(budget, item.output, (output) => ({ ...item, output }))
+    case 'tool_use':
+      return fitInput(budget, item)
     default:
       // 나머지 타입은 본문이 크지 않다 — 그대로 둔다(잘라 봐야 얻을 것이 없다).
       return item
   }
+}
+
+/**
+ * 예산에 들어가는 가장 긴 앞부분을 찾는다.
+ *
+ * 길이를 계산하지 않고 **실제로 직렬화해 재면서 이분 탐색한다.** JSON 이스케이프와 UTF-8
+ * 때문에 문자 수와 바이트 수가 비례하지 않아서, 계산으로 맞추려 들면 어림값에 여유를
+ * 두게 되고 그만큼 본문이 덜 간다.
+ */
+function fitBody<T extends ChatItem>(budget: number, body: string, build: (body: string) => T): T {
+  // 그대로 들어가면 표식을 붙이지 않는다 — 안 잘렸는데 잘렸다고 말하지 않기 위해서다.
+  if (jsonBytes(build(body)) <= budget) return build(body)
+  let low = 0
+  let high = body.length
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2)
+    if (jsonBytes(build(head(body, mid) + REMOTE_TRUNCATED_MARK)) <= budget) low = mid
+    else high = mid - 1
+  }
+  return build(low > 0 ? head(body, low) + REMOTE_TRUNCATED_MARK : REMOTE_TRUNCATED_MARK)
+}
+
+/** 서러게이트 쌍을 반으로 가르지 않는 앞부분. 가르면 폰에서 깨진 글자가 남는다. */
+function head(text: string, length: number): string {
+  const code = text.charCodeAt(length - 1)
+  const splits = code >= 0xd800 && code <= 0xdbff
+  return text.slice(0, splits ? length - 1 : length)
+}
+
+/**
+ * tool_use 의 input 을 예산에 맞춘다. 문자열 리프의 앞부분만 남겨서 **어떤 도구를 어떤
+ * 인자로 불렀는지는 보이게 한다** — 큰 파일을 쓰는 Write 한 번이 카드 전체를 지우지 않도록.
+ */
+function fitInput(budget: number, item: Extract<ChatItem, { type: 'tool_use' }>): ChatItem {
+  let low = 0
+  let high = longestLeaf(item.input)
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2)
+    if (jsonBytes({ ...item, input: clampLeaves(item.input, mid) }) <= budget) low = mid
+    else high = mid - 1
+  }
+  const clamped = { ...item, input: clampLeaves(item.input, low) }
+  // 구조 자체가 예산보다 크면(리프를 다 지워도) 더 줄일 방법이 없다 — 그때만 통째로 버린다.
+  return jsonBytes(clamped) <= budget ? clamped : { ...item, input: { truncated: true } }
+}
+
+function longestLeaf(value: unknown, depth = 0): number {
+  if (typeof value === 'string') return value.length
+  if (depth > 6 || value === null || typeof value !== 'object') return 0
+  return Object.values(value as Record<string, unknown>).reduce<number>(
+    (longest, child) => Math.max(longest, longestLeaf(child, depth + 1)),
+    0
+  )
+}
+
+function clampLeaves(value: unknown, max: number, depth = 0): unknown {
+  if (typeof value === 'string') {
+    return value.length <= max ? value : head(value, max) + REMOTE_TRUNCATED_MARK
+  }
+  if (depth > 6 || value === null || typeof value !== 'object') return value
+  if (Array.isArray(value)) return value.map((child) => clampLeaves(child, max, depth + 1))
+  const out: Record<string, unknown> = {}
+  for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+    out[key] = clampLeaves(child, max, depth + 1)
+  }
+  return out
 }
 
 function resultHeader(machineId: string, deviceId: string) {
