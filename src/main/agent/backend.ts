@@ -72,6 +72,8 @@ export interface AgentBackend {
     opts?: SendMessageOptions
   ): void
   interrupt(workspaceId: string): Promise<void>
+  /** 백엔드가 노출한 개별 실행만 중지한다. 현재 Claude SDK task 에만 해당한다. */
+  stopTask?(workspaceId: string, taskId: string): Promise<void>
   setPermissionMode(workspaceId: string, mode: PermissionMode): Promise<void>
   setModel(workspaceId: string, model: string | null): void
   /** 세션 맥락을 비우고 새 세션으로 시작(워크스페이스·worktree 유지). */

@@ -310,7 +310,7 @@ interface UIState {
   /** workspace 가 실행(running) 상태로 진입한 시각(epoch ms). 경과 시간 표시용. */
   runningSince: Record<string, number>
   /**
-   * workspace 별로 지금 살아 있는 서브에이전트 목록(사이드바 "Running agents" 패널).
+   * workspace 별로 지금 살아 있는 서브에이전트·백그라운드 task 목록(사이드바 running 패널).
    * 'agents' 이벤트가 전량을 실어 오므로 병합하지 않고 통째로 교체한다. 영속되지 않는 휘발성
    * 상태이므로, 앱을 다시 띄우면 비어 있는 것이 정상이다(그 시점엔 세션도 죽어 있다).
    */
@@ -1260,8 +1260,8 @@ export const useStore = create<UIState>((set, get) => ({
             return { compacting }
           })
         }
-        // 실행 중이 아닌 workspace 에 살아 있는 서브에이전트가 있을 수는 없다(세션의 syncStatus 는
-        // 서브에이전트가 남아 있으면 running 을 유지한다). 그래서 idle/error 를 보면 목록을 비운다 —
+        // 실행 중이 아닌 workspace 에 살아 있는 task 가 있을 수는 없다(세션의 syncStatus 는
+        // 하나라도 남아 있으면 running 을 유지한다). 그래서 idle/error 를 보면 목록을 비운다 —
         // 호스트가 죽어 종료 알림이 아예 오지 않는 경로에서 스피너가 영구히 남는 것을 막는 안전망.
         if (event.type === 'status' && event.status !== 'running') {
           set((s) => {

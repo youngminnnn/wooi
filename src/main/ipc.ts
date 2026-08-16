@@ -990,6 +990,10 @@ export function registerIpc(ctx: IpcContext): void {
     return ctx.sessions.interrupt(workspaceId)
   })
 
+  ipcMain.handle(IPC.chatStopTask, (_e, workspaceId: string, taskId: string) => {
+    return ctx.sessions.stopTask(workspaceId, taskId)
+  })
+
   ipcMain.handle(IPC.chatSideQuestion, (_e, workspaceId: string, question: string) => {
     ctx.sessions.sideQuestion(workspaceId, question)
   })

@@ -393,6 +393,13 @@ export class AgentOrchestrator {
     return this.backendFor(workspaceId).interrupt(workspaceId)
   }
 
+  stopTask(workspaceId: string, taskId: string): Promise<void> {
+    const backend = this.backendFor(workspaceId)
+    const stopTask = backend.stopTask
+    if (!stopTask) return Promise.resolve()
+    return stopTask.call(backend, workspaceId, taskId)
+  }
+
   setPermissionMode(workspaceId: string, mode: PermissionMode): Promise<void> {
     return this.backendFor(workspaceId).setPermissionMode(workspaceId, mode)
   }

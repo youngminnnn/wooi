@@ -156,6 +156,7 @@ export type HostCommand =
       origin?: SendMessageOptions['origin']
     }
   | { type: 'interrupt'; workspaceId: string }
+  | { type: 'stopTask'; workspaceId: string; taskId: string }
   | { type: 'setPermissionMode'; workspaceId: string; mode: ClaudePermissionMode }
   | { type: 'dispose'; workspaceId: string }
   | { type: 'disposeAll' }

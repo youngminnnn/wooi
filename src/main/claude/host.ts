@@ -144,6 +144,10 @@ async function handle(msg: HostCommand): Promise<void> {
       await sessions.get(msg.workspaceId)?.interrupt()
       break
 
+    case 'stopTask':
+      await sessions.get(msg.workspaceId)?.stopTask(msg.taskId)
+      break
+
     case 'setPermissionMode':
       await sessions.get(msg.workspaceId)?.setPermissionMode(msg.mode)
       break
