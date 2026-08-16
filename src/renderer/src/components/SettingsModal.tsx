@@ -420,7 +420,7 @@ function GeneralPage({
         </SettingRow>
         <SettingRow
           title="Tool log style"
-          description="Both styles use the same summaries and folding policy."
+          description="Applies to Claude and Codex tool cards. Live command cards keep their terminal layout; both styles share the same summaries and folding policy."
         >
           <div className="flex gap-1 rounded-lg bg-[var(--bg-2)] p-1">
             {(['wooi', 'terminal'] as const).map((style) => (

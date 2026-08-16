@@ -91,6 +91,7 @@ export interface ThreadItem {
   /** commandExecution */
   command?: string
   cwd?: string
+  source?: 'agent' | 'userShell' | 'unifiedExecStartup' | 'unifiedExecInteraction'
   aggregatedOutput?: string
   exitCode?: number
   durationMs?: number
@@ -124,6 +125,8 @@ export interface ThreadItem {
   /** imageGeneration */
   revisedPrompt?: string | null
   savedPath?: string
+  /** imageView */
+  path?: string
 }
 
 // ── 알림 (서버 → 클라이언트, 응답 불필요) ───────────────────────────────

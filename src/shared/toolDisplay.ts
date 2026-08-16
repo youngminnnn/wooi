@@ -88,6 +88,7 @@ const ACTIVITY_VERBS: Record<string, string> = {
   MultiEdit: 'Editing',
   NotebookEdit: 'Editing notebook',
   WebFetch: 'Fetching',
+  ViewImage: 'Viewing',
   Bash: 'Running'
 }
 

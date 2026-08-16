@@ -32,6 +32,8 @@ import { useAvailableBackends } from '../lib/backends'
 import { AgentBackendMark } from './BrandIcons'
 import { AGENT_BACKEND_LABELS, canSwitchAgentBackend } from '@shared/types'
 import type { ChatItem } from '@shared/types'
+import { BASH_FOLD, foldBashOutput } from '@shared/bashDisplay'
+import { TOOL_VERBOSE_SHORTCUT } from '@shared/toolDisplay'
 
 function PeerMessage({
   item,
@@ -588,6 +590,7 @@ function Item({
           output={item.output}
           exitCode={item.exitCode}
           running={item.running}
+          verbose={toolVerbose}
           // 사용자의 `!명령` 은 그 인라인 프로세스만 죽이면 되지만, 에이전트가 실행한 명령은
           // 턴의 일부다 — 프로세스만 죽이면 에이전트는 계속 도므로 턴 자체를 중단한다.
           onStop={() =>
@@ -764,6 +767,7 @@ function BashBlock({
   output,
   exitCode,
   running,
+  verbose,
   onStop
 }: {
   command: string
@@ -774,9 +778,16 @@ function BashBlock({
   output: string
   exitCode: number | null
   running: boolean
+  /** 도구 로그 전체 펼치기(⌃O) 상태. */
+  verbose: boolean
   onStop: () => void
 }): React.JSX.Element {
+  const [open, setOpen] = useState(false)
   const failed = !running && exitCode != null && exitCode !== 0
+  const maxLines = agent ? BASH_FOLD.agent : BASH_FOLD.user
+  const folded = foldBashOutput(output, maxLines)
+  const expanded = verbose || open
+  const shown = expanded ? output : folded.text
   return (
     <div className="group/bash rounded-lg border border-[var(--border)] bg-[var(--bg-3)] overflow-hidden font-mono text-xs">
       <div className="flex items-center gap-2 px-2.5 py-1.5 border-b border-[var(--border)] bg-[var(--surface)]">
@@ -818,9 +829,29 @@ function BashBlock({
         </span>
       </div>
       {output && (
-        <pre className="px-2.5 py-2 overflow-x-auto whitespace-pre-wrap text-neutral-400 max-h-96 overflow-y-auto">
-          {output}
-        </pre>
+        <button
+          type="button"
+          className="block w-full text-left"
+          onClick={() => setOpen((value) => !value)}
+        >
+          <pre
+            className={
+              'px-2.5 py-2 overflow-x-auto whitespace-pre-wrap text-neutral-400 ' +
+              (expanded ? 'max-h-96 overflow-y-auto' : 'overflow-hidden')
+            }
+            // 긴 단일 행이 줄바꿈돼도 Codex와 같은 화면 행 예산을 넘지 않는다.
+            style={expanded ? undefined : { maxHeight: `calc(${maxLines} * 1.5em + 1rem)` }}
+          >
+            {shown}
+          </pre>
+          {folded.omitted > 0 && (
+            <span className="block border-t border-[var(--border)] px-2.5 py-1 text-[11px] text-neutral-600 hover:text-neutral-400">
+              {expanded
+                ? 'Collapse output'
+                : `Show full output (${TOOL_VERBOSE_SHORTCUT} to expand)`}
+            </span>
+          )}
+        </button>
       )}
     </div>
   )

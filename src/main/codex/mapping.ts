@@ -20,6 +20,7 @@ import type {
   TurnParams,
   WarningParams
 } from './wire'
+import { codexToolResult } from './toolResult'
 
 /**
  * app-server 알림 → Wooi 의 ChatEvent/ChatItem 변환.
@@ -51,7 +52,7 @@ export interface MapperState {
   /** codex itemId → 지금까지 누적된 명령 출력. */
   output: Map<string, string>
   /** codex itemId → 그 명령 카드의 마지막 스냅샷(출력 외 필드 보존용). */
-  command: Map<string, { command: string; cwd?: string }>
+  command: Map<string, { command: string; cwd?: string; agent: boolean }>
   /** 실행 중 Codex 서브에이전트. subAgentActivity 스냅샷을 sidebar 이벤트로 만든다. */
   agents: Map<string, { taskId: string; agentType: string; description: string; startedAt: number }>
   /** 로컬에 즉시 표시한 사용자 입력. app-server echo 를 중복 표시하지 않기 위한 서명. */
@@ -475,7 +476,8 @@ function mapItem(
       return mapFileChange(item, id, done, ts)
 
     case 'mcpToolCall': {
-      const name = `${item.server ?? 'mcp'}/${item.tool ?? 'tool'}`
+      // Claude 경로와 같은 표준 이름을 쓰면 표시명과 렌더러의 MCP 묶음 정책을 그대로 공유한다.
+      const name = `mcp__${item.server ?? 'mcp'}__${item.tool ?? 'tool'}`
       // 진행 알림에는 이름도 인자도 없다 — 그때 카드를 다시 그릴 수 있도록 여기서 붙잡아 둔다.
       const key = item.id
       if (key) {
@@ -625,7 +627,16 @@ function mapCommandItem(
   ts: number
 ): Mapped {
   const key = item.id ?? id
-  if (item.command) state.command.set(key, { command: item.command, cwd: item.cwd })
+  if (item.command) {
+    const previous = state.command.get(key)
+    state.command.set(key, {
+      command: item.command,
+      cwd: item.cwd ?? previous?.cwd,
+      // 완료 스냅샷이 source를 생략해도 시작 때 확인한 출처를 덮지 않는다. 시작도 못 봤다면
+      // 필드가 없던 app-server의 기존 의미(에이전트 명령)를 보존한다.
+      agent: item.source ? item.source !== 'userShell' : (previous?.agent ?? true)
+    })
+  }
   const meta = state.command.get(key)
 
   // 확정 시엔 서버가 준 전체 출력이 정본이다. 진행 중엔 델타로 쌓아 온 버퍼를 쓴다.
@@ -636,7 +647,7 @@ function mapCommandItem(
   const chat: ChatItem = {
     id,
     type: 'bash',
-    agent: true,
+    ...(meta?.agent === false ? {} : { agent: true as const }),
     command: meta?.command ?? item.command ?? '',
     cwd: meta?.cwd,
     // 대용량 출력이 IPC 직렬화를 터뜨리지 않도록 Claude 경로와 같은 상한을 적용한다.
@@ -664,7 +675,7 @@ function mapCommandOutput(params: DeltaParams, state: MapperState, ts: number): 
   const chat: ChatItem = {
     id: itemId(key, 'command'),
     type: 'bash',
-    agent: true,
+    ...(meta?.agent === false ? {} : { agent: true as const }),
     command: meta?.command ?? '',
     cwd: meta?.cwd,
     output: clampText(next),
@@ -738,13 +749,14 @@ function mapTool(
   if (!done) return { events: [{ type: 'item', item: use }], persist: [] }
 
   const failed = item.status === 'failed'
-  const text = failed ? describeError(item.error) : describeResult(item.result)
+  const output = failed ? { text: describeError(item.error) } : codexToolResult(item)
   const result: ChatItem = {
     id: `${id}:result`,
     type: 'tool_result',
     toolId: id,
-    text: clampText(text),
+    text: clampText(output.text),
     isError: failed,
+    ...(!failed && output.summary ? { summary: output.summary } : {}),
     ts
   }
   return {
@@ -761,12 +773,6 @@ function describeError(error: unknown): string {
   if (typeof error === 'string') return error
   const message = (error as { message?: string }).message
   return message ?? JSON.stringify(error)
-}
-
-function describeResult(result: unknown): string {
-  if (result === undefined || result === null) return 'Done.'
-  if (typeof result === 'string') return result
-  return JSON.stringify(result, null, 2)
 }
 
 // ── MCP 서버 · 훅 ───────────────────────────────────────────────────────

@@ -159,7 +159,15 @@ describe('명령 실행', () => {
 
     const done = map(
       NOTIFY.itemCompleted,
-      { item: { id: 'c1', type: 'commandExecution', status: 'completed', exitCode: 0 } },
+      {
+        item: {
+          id: 'c1',
+          type: 'commandExecution',
+          command: 'git status',
+          status: 'completed',
+          exitCode: 0
+        }
+      },
       state
     )
     expect(items(done)[0]).toMatchObject({ running: false, exitCode: 0, output: 'PASS a.test' })
@@ -184,6 +192,40 @@ describe('명령 실행', () => {
       state
     )
     expect(items(done)[0]).toMatchObject({ output: 'full output' })
+  })
+
+  it('사용자 shell 출처는 agent 카드로 오인하지 않는다', () => {
+    const state = createMapperState()
+    const started = map(
+      NOTIFY.itemStarted,
+      {
+        item: {
+          id: 'c1',
+          type: 'commandExecution',
+          source: 'userShell',
+          command: 'git status'
+        }
+      },
+      state
+    )
+    expect(items(started)[0]).not.toHaveProperty('agent')
+
+    const mid = map(NOTIFY.commandOutputDelta, { itemId: 'c1', delta: 'clean' }, state)
+    expect(items(mid)[0]).not.toHaveProperty('agent')
+
+    const done = map(
+      NOTIFY.itemCompleted,
+      { item: { id: 'c1', type: 'commandExecution', status: 'completed', exitCode: 0 } },
+      state
+    )
+    expect(items(done)[0]).not.toHaveProperty('agent')
+  })
+
+  it('출처 필드가 없는 옛 app-server 결과는 에이전트 명령으로 유지한다', () => {
+    const r = map(NOTIFY.itemCompleted, {
+      item: { id: 'c1', type: 'commandExecution', command: 'pwd', status: 'completed' }
+    })
+    expect(items(r)[0]).toMatchObject({ type: 'bash', agent: true })
   })
 
   it('완료 후 버퍼를 비워 메모리가 새지 않게 한다', () => {
@@ -250,6 +292,30 @@ describe('최신 Codex 활동 아이템', () => {
     })
     expect(items(r)[0]).toMatchObject({ type: 'tool_use', name: 'apps/lookup' })
     expect(r.persist).toHaveLength(2)
+  })
+
+  it('MCP 호출은 Claude와 같은 이름 규약과 구조화 텍스트를 쓴다', () => {
+    const r = map(NOTIFY.itemCompleted, {
+      item: {
+        id: 'm1',
+        type: 'mcpToolCall',
+        server: 'github',
+        tool: 'get_file',
+        arguments: { path: 'README.md' },
+        status: 'completed',
+        result: { content: [{ type: 'text', text: 'contents' }] }
+      }
+    })
+    const [use, result] = items(r)
+    expect(use).toMatchObject({ type: 'tool_use', name: 'mcp__github__get_file' })
+    expect(result).toMatchObject({ type: 'tool_result', text: 'contents' })
+  })
+
+  it('이미지 조회는 경로만 작은 요약으로 싣는다', () => {
+    const r = map(NOTIFY.itemCompleted, {
+      item: { id: 'i1', type: 'imageView', path: '/tmp/a.png' }
+    })
+    expect(items(r)[1]).toMatchObject({ summary: { kind: 'view', path: '/tmp/a.png' } })
   })
 
   it('subAgentActivity를 실행 중 에이전트 스냅샷으로 옮긴다', () => {
@@ -776,7 +842,7 @@ describe('MCP 호출 진행 메시지', () => {
     withStartedCall(state)
     const r = map(NOTIFY.mcpToolProgress, { itemId: 'i1', message: 'Fetching page 3…' }, state)
     const item = items(r)[0] as Extract<ChatItem, { type: 'tool_use' }>
-    expect(item.name).toBe('github/search')
+    expect(item.name).toBe('mcp__github__search')
     expect(item.input).toMatchObject({ q: 'wooi', progress: 'Fetching page 3…' })
     // 진행 스냅샷은 화면에만 — 확정 아이템이 뒤이어 트랜스크립트에 남는다.
     expect(r.persist).toEqual([])
