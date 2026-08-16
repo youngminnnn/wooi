@@ -37,6 +37,27 @@
 파일이 없으면 config 가 경고만 하고 넘어간다. 푸시와 무관한 작업(페어링·트랜스크립트)까지
 막을 이유가 없기 때문이다 — 대신 그 빌드는 알림을 받지 못한다.
 
+## 네이티브 모듈을 더하면 dev build 를 다시 만들어야 한다
+
+JS 는 Metro 가 즉시 갈아 끼우지만 **네이티브 코드는 앱 안에 구워져 있다.** 그래서
+`expo install` 로 네이티브 모듈이 하나 늘어나는 순간, 폰에 깔린 dev client 는 그 모듈을
+모르는 채로 새 JS 를 받게 되고 그 모듈을 import 하는 화면에서 죽는다.
+
+증상이 헷갈린다 — Metro 도 정상이고 번들도 잘 내려가는데 앱만 에러 화면을 띄운다. 실제로
+`react-native-svg` 를 더했을 때 정확히 그랬다(설치본 10:58, 모듈 추가 12:52).
+
+`node_modules/<모듈>/android` 나 `ios` 가 있으면 네이티브다. 그럴 땐:
+
+```sh
+eas build --profile development --platform android
+```
+
+같은 이유로 다음도 JS 리로드로는 반영되지 않는다 — 전부 다시 빌드해야 한다:
+
+- 앱 아이콘·스플래시 등 `assets/` 의 네이티브 리소스
+- `app.config.ts` / `app.json` 의 패키지 이름·`scheme`·플러그인 설정
+- `google-services.*.json`
+
 ## 빌드
 
 ```sh
