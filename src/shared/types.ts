@@ -997,6 +997,14 @@ export interface CodexMcpServer {
   detail: string
   /** config.toml 의 `enabled`. 값이 없으면 켜진 것으로 본다 — codex 기본값이 그렇다. */
   enabled: boolean
+  /** app-server 런타임이 보고한 인증 상태. unknown 은 판정 전/불가이며 로그인이 필요하다는 뜻이 아니다. */
+  authStatus: 'unknown' | 'unsupported' | 'notLoggedIn' | 'bearerToken' | 'oAuth'
+}
+
+export interface McpOauthLoginCompletedEvent {
+  name: string
+  success: boolean
+  error?: string
 }
 
 /** 설정 화면이 "무엇이 주입되는가" 를 그리기 위해 필요한 전부. */
@@ -1484,7 +1492,8 @@ export const DEFAULT_PEER_INBOUND: PeerInboundPolicy = 'accept'
 export interface PendingPeerMessage {
   /** 승인·거절이 지목하는 키. */
   id: string
-  fromWorkspaceId: string
+  /** 앱 밖 세션은 열어 볼 Wooi workspace가 없으므로 null이다. */
+  fromWorkspaceId: string | null
   /** 표시용 발신자 이름(수신 시점 스냅샷). */
   fromName: string
   fromBranch: string
@@ -2624,10 +2633,14 @@ export const IPC = {
   mcpInventory: 'mcp:inventory',
   /** 승계 서버를 고치려면 그 파일을 직접 열어야 한다(우리는 쓰지 않는다). */
   mcpOpenConfig: 'mcp:openConfig',
+  /** 앱 밖 Claude Code에 Wooi peer 도구를 등록하는 현재 실행본용 명령. */
+  mcpExternalSetupCommand: 'mcp:externalSetupCommand',
   /** `~/.codex/config.toml` 의 MCP 서버 목록(app-server 에 질의). */
   mcpCodexList: 'mcp:codexList',
   /** 그 서버의 `enabled` 를 사용자 파일에 쓰고 codex 에 재적용한다. */
   mcpCodexSetEnabled: 'mcp:codexSetEnabled',
+  mcpCodexOauthLogin: 'mcp:codexOauthLogin',
+  evtMcpCodexOauthLoginCompleted: 'mcp:codexOauthLoginCompleted',
   authGetStatus: 'auth:getStatus',
   /** 앱 내부 PTY 에서 `claude auth login` 을 시작한다(별도 Terminal 창 없이). */
   authClaudeLoginStart: 'auth:claudeLoginStart',

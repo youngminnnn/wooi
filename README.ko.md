@@ -92,6 +92,10 @@ Wooi 는 스스로 업데이트합니다: 실행 시 GitHub Releases 를 확인�
   `~/wooi/workspaces/<repo>/<branch>` 에 생성됩니다.
 - 각 workspace 는 **독립적·병렬**로 실행됩니다. 한 workspace 에서 에이전트가 돌아가는 동안
   다른 workspace 를 열어 계속 작업할 수 있습니다.
+- Claude Code 세션에서는 직접 파일을 바꾸는 `Edit`, `Write`, `NotebookEdit` 도구가 다른
+  workspace 또는 연결된 리포의 메인 checkout 을 수정하지 못하게 막습니다. 이는 파일시스템
+  샌드박스가 아닌 도구 수준의 가드라 셸 명령은 포함하지 않으며, `/add-dir` 로 명시적으로 허용한
+  디렉터리는 계속 쓸 수 있습니다.
 - **Setup / Dev / Archive 스크립트** — 리포 단위로 지정합니다(`npm install`, `npm run dev` 등).
   setup 은 workspace 생성 시 자동 실행(옵션), dev 는 스크립트 패널에서 실행/중지하며,
   archive 는 workspace 를 아카이브할 때 1회 실행됩니다.

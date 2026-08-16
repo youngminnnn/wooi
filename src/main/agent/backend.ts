@@ -114,6 +114,8 @@ export interface AgentBackend {
   listConfiguredMcpServers?(): Promise<CodexMcpServer[]>
   /** 그 목록의 서버 하나를 켜고 끈다. 백엔드의 설정 파일에 기록된다. */
   setMcpServerEnabled?(serverName: string, enabled: boolean): Promise<CodexMcpServer[]>
+  /** 설정 화면에서 백엔드 고유 MCP OAuth 를 시작한다. 지원 백엔드에만 존재한다. */
+  loginMcpServer?(serverName: string): Promise<string>
   /** /rewind — 체크포인트로 파일 되돌리기(capabilities.rewind). */
   rewindAction(workspaceId: string, userMessageId: string): Promise<RewindActionResult>
   /** reasoning effort / ultracode 오버라이드(capabilities.effort). */

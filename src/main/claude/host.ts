@@ -66,6 +66,7 @@ function ensure(workspaceId: string, config: SessionConfig): ClaudeSession {
   const session = new ClaudeSession({
     cwd: config.cwd,
     repoPath: config.repoPath,
+    writeIsolationRoots: config.writeIsolationRoots,
     mcpSettings: config.mcpSettings,
     model: config.model,
     effort: config.effort,

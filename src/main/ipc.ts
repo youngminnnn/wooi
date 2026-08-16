@@ -101,6 +101,7 @@ import { runAgentTool } from './agent/tools'
 import { parseWooiCommandArgs, WOOI_COMMANDS } from '@shared/wooiCommands'
 import { appendMemory } from './claude/memory'
 import { claudeConfigPath, mcpInventory } from './claude/mcp'
+import { externalClaudeMcpSetupCommand } from './paths'
 import {
   archiveWorkspace,
   carryIntoNewWorktree,
@@ -2448,6 +2449,7 @@ export function registerIpc(ctx: IpcContext): void {
   // 승계 목록(~/.claude.json)은 앱 상태가 아니라 남의 파일이라 방송에 실을 수 없다 — 설정 화면이
   // 열릴 때마다 읽는다. project 항목은 등록된 리포 경로로 걸러야 우리가 실제로 주입하는 것만 남는다.
   ipcMain.handle(IPC.mcpInventory, () => mcpInventory(store.getState().repos.map((r) => r.path)))
+  ipcMain.handle(IPC.mcpExternalSetupCommand, () => externalClaudeMcpSetupCommand())
 
   // 승계 항목의 편집 경로는 "그 파일을 여세요" 하나뿐이다(우리는 쓰지 않는다).
   ipcMain.handle(IPC.mcpOpenConfig, async () => {
@@ -2479,6 +2481,17 @@ export function registerIpc(ctx: IpcContext): void {
     ): Promise<{ servers?: CodexMcpServer[]; error?: string }> => {
       try {
         return { servers: await ctx.sessions.setMcpServerEnabled('codex', serverName, enabled) }
+      } catch (err) {
+        return { error: err instanceof Error ? err.message : String(err) }
+      }
+    }
+  )
+
+  ipcMain.handle(
+    IPC.mcpCodexOauthLogin,
+    async (_e, serverName: string): Promise<{ authorizationUrl?: string; error?: string }> => {
+      try {
+        return { authorizationUrl: await ctx.sessions.loginMcpServer('codex', serverName) }
       } catch (err) {
         return { error: err instanceof Error ? err.message : String(err) }
       }

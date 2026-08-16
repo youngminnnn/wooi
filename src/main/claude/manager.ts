@@ -317,11 +317,22 @@ export class SessionManager implements AgentBackend {
 
   /** store 에서 세션 생성에 필요한 설정을 계산한다(예전 ensure() 의 역할). */
   private configFor(ws: Workspace): SessionConfig {
-    const settings = getStore().getState().settings
+    const state = getStore().getState()
+    const settings = state.settings
     const defaults = this.defaults()
+    const allowedRoots = [ws.worktreePath, ...(ws.additionalDirs ?? [])]
+    const isGranted = (path: string): boolean => allowedRoots.includes(path)
     return {
       cwd: ws.worktreePath,
       repoPath: this.getRepoPath(ws.repoId),
+      writeIsolationRoots: [
+        ...state.workspaces
+          .filter((other) => !isGranted(other.worktreePath))
+          .map((other) => ({ path: other.worktreePath, owner: `workspace "${other.name}"` })),
+        ...state.repos
+          .filter((repo) => !isGranted(repo.path))
+          .map((repo) => ({ path: repo.path, owner: `repository "${repo.name}" main checkout` }))
+      ],
       model: ws.model ?? defaults.model,
       effort: ws.effort ?? defaults.effort,
       fastMode: ws.fastMode ?? defaults.fastMode,

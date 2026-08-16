@@ -102,6 +102,13 @@ export type AgentToolHandler = (
 
 const handlers = new Map<string, AgentToolHandler>()
 
+export type ExternalAgentToolHandler = (
+  deps: AgentToolDeps,
+  args: Record<string, unknown>
+) => Promise<unknown>
+
+const externalHandlers = new Map<string, ExternalAgentToolHandler>()
+
 let deps: AgentToolDeps | null = null
 
 /**
@@ -118,6 +125,17 @@ export function initRegistry(injected: AgentToolDeps): void {
 export function registerAgentTool(name: string, handler: AgentToolHandler): void {
   if (handlers.has(name)) throw new Error(`agent tool registered twice: ${name}`)
   handlers.set(name, handler)
+}
+
+/**
+ * 앱 밖 세션에 열어 줄 실행부를 따로 붙인다.
+ *
+ * shim 의 tools/list 필터만으로는 부족하다 — 같은 사용자 프로세스는 0600 소켓에 직접 요청을
+ * 만들 수 있다. 따라서 광고 목록과 무관하게 메인도 이 작은 테이블에 등록된 능력만 실행한다.
+ */
+export function registerExternalAgentTool(name: string, handler: ExternalAgentToolHandler): void {
+  if (externalHandlers.has(name)) throw new Error(`external agent tool registered twice: ${name}`)
+  externalHandlers.set(name, handler)
 }
 
 /**
@@ -144,8 +162,21 @@ export async function runAgentTool(
   return handler(deps, workspaceId, (args ?? {}) as Record<string, unknown>)
 }
 
+/** 호출 워크스페이스가 없는 앱 밖 세션의 도구를 실행한다. */
+export async function runExternalAgentTool(tool: string, args: unknown): Promise<unknown> {
+  if (!deps) throw new Error('Wooi tools are not ready yet.')
+  const handler = externalHandlers.get(tool)
+  if (typeof handler !== 'function') {
+    throw new Error(`Wooi tool ${tool} is not available to external callers.`)
+  }
+
+  log.info(`agent tool: ${tool} (external caller)`)
+  return handler(deps, (args ?? {}) as Record<string, unknown>)
+}
+
 /** 테스트 전용 — 등록 상태를 비운다. */
 export function resetAgentToolsForTest(): void {
   handlers.clear()
+  externalHandlers.clear()
   deps = null
 }

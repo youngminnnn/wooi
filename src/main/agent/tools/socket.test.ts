@@ -13,10 +13,11 @@ import type { Workspace } from '@shared/types'
 
 const state = vi.hoisted(() => ({ workspaces: [] as Partial<Workspace>[] }))
 const run = vi.hoisted(() => vi.fn())
+const runExternal = vi.hoisted(() => vi.fn())
 const approve = vi.hoisted(() => vi.fn())
 
 vi.mock('../../store', () => ({ getStore: () => ({ getState: () => state }) }))
-vi.mock('./registry', () => ({ runAgentTool: run }))
+vi.mock('./registry', () => ({ runAgentTool: run, runExternalAgentTool: runExternal }))
 // 승인 규칙 자체는 permission.test 가 다룬다. 여기서는 소켓이 **실행 전에 반드시 거친다**는
 // 것만 본다 — 그 순서가 어긋나면 카드가 뜨기도 전에 브랜치가 생긴다.
 vi.mock('./permission', () => ({ ensureToolApproved: approve }))
@@ -26,6 +27,7 @@ let dir: string
 beforeEach(async () => {
   vi.clearAllMocks()
   run.mockResolvedValue({ ok: true })
+  runExternal.mockResolvedValue({ ok: true })
   approve.mockResolvedValue(undefined)
   dir = mkdtempSync(join(tmpdir(), 'wooi-sock-'))
   const { startToolSocket } = await import('./socket')
@@ -84,6 +86,28 @@ describe('도구 소켓', () => {
 
     expect(res.ok).toBe(false)
     expect(res.error).toMatch(/not running a turn/)
+    expect(run).not.toHaveBeenCalled()
+  })
+
+  it('외부 호출자는 workspace 없이 통과한다', async () => {
+    state.workspaces = []
+
+    const res = await call({ caller: 'external', tool: 'list_workspace_peers', args: {} })
+
+    expect(res).toEqual({ ok: true, data: { ok: true } })
+    expect(runExternal).toHaveBeenCalledWith('list_workspace_peers', {})
+    expect(approve).not.toHaveBeenCalled()
+  })
+
+  it('외부 호출자가 shim을 우회해 허용되지 않은 도구를 보내도 거절한다', async () => {
+    runExternal.mockRejectedValue(
+      new Error('Wooi tool create_workspace is not available to external callers.')
+    )
+
+    const res = await call({ caller: 'external', tool: 'create_workspace', args: {} })
+
+    expect(res.ok).toBe(false)
+    expect(res.error).toMatch(/not available to external callers/)
     expect(run).not.toHaveBeenCalled()
   })
 
