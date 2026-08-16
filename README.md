@@ -98,6 +98,10 @@ can also check manually in **Settings → About**.
   created under `~/wooi/workspaces/<repo>/<branch>`.
 - Each workspace runs **independently and in parallel** — while an agent works in one
   workspace, you can open another and keep going.
+- For Claude Code sessions, Wooi blocks the direct `Edit`, `Write`, and `NotebookEdit`
+  tools from changing another known workspace or a connected repository's main checkout.
+  This is a tool-level guard, not a filesystem sandbox: shell commands are not covered,
+  while directories explicitly granted with `/add-dir` remain writable.
 - **Setup / Dev / Archive scripts** — configured per repo (`npm install`, `npm run dev`,
   etc.). Setup runs automatically when a workspace is created (optional), Dev is
   started/stopped from the script panel, and Archive runs once when a workspace is
