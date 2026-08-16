@@ -16,8 +16,25 @@ import type { PrStatus } from '@shared/types'
  */
 const cache = new Map<string, PrStatus | null>()
 
-export function rememberPrStatus(workspaceId: string, status: PrStatus | null): void {
+/**
+ * 조회 결과를 적어 둔다. 폰이 보는 값이 바뀌었으면 `true` — 부르는 쪽이 그때 상태를
+ * 방송해 미러가 새 스냅샷을 올리게 한다.
+ *
+ * 비교는 **투영되는 필드만** 본다(mirror.ts 의 projectPr). url·needsBaseUpdate 는 폰에
+ * 가지 않으므로 그것만 달라진 것으로 방송하면 아무것도 바꾸지 못하는 방송이 된다.
+ * 제목이 비교에 들어 있는 것이 중요하다 — 사용자 지정 이름이 없는 워크스페이스에서는
+ * PR 제목이 곧 표시 이름이라, 제목만 바뀌어도 폰의 이름이 낡는다.
+ */
+export function rememberPrStatus(workspaceId: string, status: PrStatus | null): boolean {
+  const known = cache.has(workspaceId)
+  const previous = cache.get(workspaceId) ?? null
   cache.set(workspaceId, status)
+  return !known || !sameProjection(previous, status)
+}
+
+function sameProjection(a: PrStatus | null, b: PrStatus | null): boolean {
+  if (a === null || b === null) return a === b
+  return a.number === b.number && a.state === b.state && a.label === b.label && a.title === b.title
 }
 
 export function getCachedPrStatus(workspaceId: string): PrStatus | null | undefined {
