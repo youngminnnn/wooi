@@ -73,7 +73,9 @@ describe('Codex model catalog reconciliation', () => {
 
     expect(state.value?.workspaces[0].model).toBeNull()
     expect(dispatch).toHaveBeenCalledOnce()
-    expect(info).toHaveBeenCalledWith(expect.stringContaining('gpt-retired for workspace codex-old'))
+    expect(info).toHaveBeenCalledWith(
+      expect.stringContaining('gpt-retired for workspace codex-old')
+    )
   })
 
   it('카탈로그에 남은 Codex workspace 모델은 유지한다', async () => {
