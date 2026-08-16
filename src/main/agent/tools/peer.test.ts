@@ -61,7 +61,20 @@ async function list(): Promise<Record<string, unknown>> {
   return listWorkspacePeers(deps, 'ws-me', {}) as Promise<Record<string, unknown>>
 }
 
+async function sendExternal(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const { sendToWorkspaceExternal } = await import('./peer')
+  return sendToWorkspaceExternal(deps, args) as Promise<Record<string, unknown>>
+}
+
 describe('list_workspace_peers', () => {
+  it('외부 호출자에게는 자기 자신이 없으므로 열린 workspace를 모두 보여 준다', async () => {
+    state.workspaces.push(ws({ id: 'ws-other', archived: true }))
+    const { listWorkspacePeersExternal } = await import('./peer')
+    const out = (await listWorkspacePeersExternal()) as Record<string, unknown>
+    expect((out.peers as Array<Record<string, unknown>>).map((p) => p.workspaceId)).toEqual([
+      'ws-me'
+    ])
+  })
   it('리포를 가로질러 보되, 같은 리포를 먼저 놓는다', async () => {
     state.workspaces.push(
       ws({ id: 'ws-far', repoId: 'repo-2', branch: 'fix/far', lastActiveAt: 99 }),
@@ -99,6 +112,48 @@ describe('list_workspace_peers', () => {
 })
 
 describe('send_to_workspace', () => {
+  it('외부 메시지는 refuse 대상에 전달되지 않는다', async () => {
+    state.workspaces.push(ws({ id: 'ws-them', peerInbound: 'refuse' }))
+    await expect(sendExternal({ targetWorkspaceId: 'ws-them', message: 'heads up' })).rejects.toThrow(
+      /not accepting messages/
+    )
+    expect(sendMessage).not.toHaveBeenCalled()
+  })
+
+  it('외부 메시지는 hold 대상에서 승인 대기하며 모델에 닿지 않는다', async () => {
+    state.workspaces.push(ws({ id: 'ws-them', peerInbound: 'hold' }))
+    const out = await sendExternal({ targetWorkspaceId: 'ws-them', message: 'heads up' })
+    expect(out.delivered).toBe(false)
+    expect(sendMessage).not.toHaveBeenCalled()
+    expect(state.workspaces.find((w) => w.id === 'ws-them')?.peerInbox).toHaveLength(1)
+    expect(state.workspaces.find((w) => w.id === 'ws-them')?.peerInbox?.[0]).toMatchObject({
+      fromWorkspaceId: null,
+      fromName: 'Outside Claude Code session'
+    })
+  })
+
+  it.each([null, undefined])(
+    '외부 메시지는 createdByWorkspaceId=%s여도 생성자 예외로 hold를 뚫지 않는다',
+    async (createdByWorkspaceId) => {
+      state.workspaces.push(
+        ws({ id: 'ws-them', peerInbound: 'hold', createdByWorkspaceId })
+      )
+      const out = await sendExternal({ targetWorkspaceId: 'ws-them', message: 'heads up' })
+      expect(out.delivered).toBe(false)
+      expect(sendMessage).not.toHaveBeenCalled()
+    }
+  )
+
+  it('외부 메시지는 accept 대상에 바깥 세션 출처 전문과 함께 전달된다', async () => {
+    state.workspaces.push(ws({ id: 'ws-them', peerInbound: 'accept' }))
+    const out = await sendExternal({ targetWorkspaceId: 'ws-them', message: 'heads up' })
+    expect(out.delivered).toBe(true)
+    expect(sendMessage).toHaveBeenCalledWith(
+      'ws-them',
+      expect.stringContaining('From an outside Claude Code session, not the user'),
+      expect.anything()
+    )
+  })
   it('정책이 없으면 큐를 거치지 않고 바로 전달한다', async () => {
     state.workspaces.push(ws({ id: 'ws-them', branch: 'feat/them' }))
 

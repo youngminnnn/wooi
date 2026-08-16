@@ -1,8 +1,6 @@
 import { app, BrowserWindow, session } from 'electron'
-import { existsSync } from 'node:fs'
-import { join } from 'node:path'
 import { IPC } from '@shared/types'
-import { applyDevPaths, isDevIsolated, wooiHome } from './paths'
+import { applyDevPaths, isDevIsolated, toolShimPath, wooiHome } from './paths'
 import { AgentOrchestrator } from './agent/orchestrator'
 import { initAgentTools } from './agent/tools'
 import { writeWooiPlugins } from './agent/plugin'
@@ -67,27 +65,6 @@ function dispatch(channel: string, payload: unknown): void {
   }
 }
 
-/**
- * codex 가 spawn 할 Wooi 도구 shim 의 절대 경로([[codex/toolShim]]).
- *
- * 패키징 빌드에서는 **app.asar 밖의 경로**를 써야 한다. 이 파일을 실행하는 것은 우리가 아니라
- * `codex app-server` 이고, 그쪽은 Electron 의 asar 지원을 받지 않는 남의 프로세스다 — asar
- * 내부 경로를 넘기면 파일을 못 찾는다(같은 함정을 네이티브 바이너리에서 겪었다:
- * [[claude/executable]]). electron-builder 가 asarUnpack 으로 실제 파일을 풀어 두므로 그 경로를 쓴다.
- * dev·소스 실행에서는 asar 자체가 없어 out/main 옆의 파일이 그대로 맞다.
- */
-function resolveToolShim(): string {
-  const unpacked = join(
-    process.resourcesPath ?? '',
-    'app.asar.unpacked',
-    'out',
-    'main',
-    'toolShim.js'
-  )
-  if (process.resourcesPath && existsSync(unpacked)) return unpacked
-  return join(import.meta.dirname, 'toolShim.js')
-}
-
 const sessions = new AgentOrchestrator(dispatch, () => mainWindow)
 // Codex 의 로그인 상태는 app-server 만 정확히 안다(자격증명이 OS 키체인에 있을 수 있다).
 // auth 계층이 에이전트 구현에 의존하지 않도록, 조회 함수만 주입해 준다.
@@ -118,7 +95,7 @@ const scripts = new ScriptRunner(dispatch, (workspaceId, scriptId, code) => {
 // 맥락마다 달라(번들 out/main, 소스 src/main/codex) 조용히 등록이 빠질 수 있다. 경로를 아는 건
 // 자기 옆에 산출물이 놓이는 메인뿐이다.
 process.env.WOOI_TOOL_SOCKET = startToolSocket(app.getPath('userData'))
-process.env.WOOI_TOOL_SHIM = resolveToolShim()
+process.env.WOOI_TOOL_SHIM = toolShimPath()
 
 // 소켓으로 들어온 도구 호출은 기존 권한 카드를 그대로 탄다([[agent/tools/permission]]) —
 // Codex 의 app-server 는 MCP 도구에 대해 승인을 물어보지 않기 때문이다.

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ExternalLink, FileWarning, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react'
+import { Check, Copy, ExternalLink, FileWarning, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react'
 import { isValidMcpServerName, mcpSettingsOf } from '@shared/types'
 import type {
   AppSettings,
@@ -48,6 +48,8 @@ export default function McpServersPage({
   const [codexServers, setCodexServers] = useState<CodexMcpServer[] | null>(null)
   const [codexError, setCodexError] = useState<string | null>(null)
   const [codexBusy, setCodexBusy] = useState<string | null>(null)
+  const [externalCommand, setExternalCommand] = useState('')
+  const [copied, setCopied] = useState(false)
 
   const load = useCallback(
     (): Promise<void> =>
@@ -61,6 +63,7 @@ export default function McpServersPage({
   // 사용자가 파일을 고치고 돌아왔을 때를 위해 수동 새로고침을 둔다.
   useEffect(() => {
     void load()
+    void window.api.mcp.externalSetupCommand().then(setExternalCommand)
   }, [load])
 
   const refresh = (): void => {
@@ -127,6 +130,33 @@ export default function McpServersPage({
       title="MCP servers"
       description="Model Context Protocol servers give agents extra tools. Wooi injects these into every workspace session — changes take effect the next time a session starts."
     >
+      <SettingGroup title="Claude Code outside Wooi">
+        <div className="space-y-2 px-4 py-3">
+          <p className="text-xs leading-relaxed text-neutral-500">
+            Paste this into a terminal to let an outside Claude Code session list and message open
+            Wooi workspaces. Each workspace’s inbound message policy still applies.
+          </p>
+          <div className="flex items-center gap-2">
+            <code className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap rounded-md bg-[var(--surface-2)] px-3 py-2 text-xs text-neutral-300">
+              {externalCommand || 'Preparing command…'}
+            </code>
+            <button
+              disabled={!externalCommand}
+              onClick={() => {
+                void navigator.clipboard.writeText(externalCommand).then(() => {
+                  setCopied(true)
+                  window.setTimeout(() => setCopied(false), 1500)
+                })
+              }}
+              className="flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-[var(--border)] px-2.5 text-xs text-neutral-300 hover:bg-[var(--surface-2)] disabled:opacity-50"
+            >
+              {copied ? <Check size={12} /> : <Copy size={12} />}
+              {copied ? 'Copied' : 'Copy'}
+            </button>
+          </div>
+        </div>
+      </SettingGroup>
+
       <SettingGroup
         title="Wooi-managed"
         action={

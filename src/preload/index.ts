@@ -254,6 +254,7 @@ const api: WooiApi = {
   mcp: {
     inventory: () => ipcRenderer.invoke(IPC.mcpInventory),
     openConfig: () => ipcRenderer.invoke(IPC.mcpOpenConfig),
+    externalSetupCommand: () => ipcRenderer.invoke(IPC.mcpExternalSetupCommand),
     codexServers: () => ipcRenderer.invoke(IPC.mcpCodexList),
     setCodexServerEnabled: (name, enabled) =>
       ipcRenderer.invoke(IPC.mcpCodexSetEnabled, name, enabled)
