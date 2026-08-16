@@ -1,9 +1,5 @@
 import { AppState, type AppStateStatus } from 'react-native'
-import {
-  createClient,
-  type RealtimeChannel,
-  type SupabaseClient
-} from '@supabase/supabase-js'
+import { createClient, type RealtimeChannel, type SupabaseClient } from '@supabase/supabase-js'
 import { deriveDirectionKeys, fromBase64Url, openJson, sealJson } from '@shared/crypto'
 import {
   REMOTE_PROTOCOL_VERSION,
@@ -11,11 +7,7 @@ import {
   type RemoteCommandResult,
   type RemoteState
 } from '@shared/remote'
-import {
-  nextCommandSequence,
-  secureAuthStorage,
-  type StoredPairing
-} from '../storage/secure'
+import { nextCommandSequence, secureAuthStorage, type StoredPairing } from '../storage/secure'
 import { decodePostgresBytea, encodePostgresBytea } from './bytea'
 import type { ConnectionStatus } from '../state/store'
 
@@ -63,6 +55,8 @@ export interface RelayClientHandlers {
   onStatus: (status: ConnectionStatus) => void
   /** 랩탑이 마지막으로 heartbeat 를 찍은 시각(ms). 행이 없으면 null. */
   onLaptopSeen: (seenAt: number | null) => void
+  /** 랩탑이 이 기기를 끊었다. 저장된 페어링을 버려야 한다. */
+  onRevoked: () => void
   onState: (state: RemoteState | null) => void
   onUpdatedAt: (updatedAt: number | null) => void
   onError: (message: string | null) => void
@@ -370,8 +364,30 @@ export class RelayClient {
     this.livenessTimer = null
   }
 
+  /**
+   * 이 기기가 아직 끊기지 않았는지 확인한다.
+   *
+   * `devices_self_read` 정책이 `revoked_at is null` 을 요구하므로, 랩탑이 끊는 순간 폰은
+   * **자기 행조차 보지 못한다**. 즉 "조회는 성공했는데 행이 없다" 가 곧 끊겼다는 뜻이다.
+   *
+   * 오류(네트워크·토큰)일 때는 아무것도 하지 않는다 — 잠깐 끊긴 것으로 페어링을 버리면
+   * 지하철에 들어갔다 나올 때마다 다시 QR 을 찍어야 한다. **확정적인 답일 때만** 버린다.
+   */
+  private async checkStillPaired(): Promise<boolean> {
+    const response = await this.client
+      .from('devices')
+      .select('id')
+      .eq('id', this.pairing.deviceId)
+      .maybeSingle()
+    if (response.error) return true
+    if (response.data !== null) return true
+    this.handlers.onRevoked()
+    return false
+  }
+
   /** 실패해도 조용히 넘긴다 — 생존 표시가 없다고 화면이 죽을 이유는 없다. */
   private async pollLiveness(): Promise<void> {
+    if (!(await this.checkStillPaired())) return
     const response = await this.client
       .from('machines')
       .select('last_seen_at')

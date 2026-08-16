@@ -27,6 +27,7 @@ interface RemoteStore {
   updatedAt: number | null
   laptopSeenAt: number | null
   lastError: string | null
+  unpairedReason: string | null
   refresh: (() => Promise<void>) | null
   command: ((channel: RemoteCommandChannel, args: unknown[]) => Promise<unknown>) | null
   activityRev: number
@@ -37,6 +38,7 @@ interface RemoteStore {
   setUpdatedAt: (updatedAt: number | null) => void
   setLaptopSeenAt: (laptopSeenAt: number | null) => void
   setLastError: (lastError: string | null) => void
+  setUnpairedReason: (unpairedReason: string | null) => void
   setRefresh: (refresh: (() => Promise<void>) | null) => void
   setCommand: (
     command: ((channel: RemoteCommandChannel, args: unknown[]) => Promise<unknown>) | null
@@ -52,6 +54,7 @@ export const useRemoteStore = create<RemoteStore>((set) => ({
   updatedAt: null,
   laptopSeenAt: null,
   lastError: null,
+  unpairedReason: null,
   refresh: null,
   command: null,
   activityRev: 0,
@@ -60,11 +63,14 @@ export const useRemoteStore = create<RemoteStore>((set) => ({
   setStatus: (status): void => set({ status }),
   setState: (state): void =>
     set((current) =>
-      current.state !== null && state !== null && state.rev < current.state.rev ? current : { state }
+      current.state !== null && state !== null && state.rev < current.state.rev
+        ? current
+        : { state }
     ),
   setUpdatedAt: (updatedAt): void => set({ updatedAt }),
   setLaptopSeenAt: (laptopSeenAt): void => set({ laptopSeenAt }),
   setLastError: (lastError): void => set({ lastError }),
+  setUnpairedReason: (unpairedReason): void => set({ unpairedReason }),
   setRefresh: (refresh): void => set({ refresh }),
   setCommand: (command): void => set({ command }),
   bumpActivity: (): void => set((current) => ({ activityRev: current.activityRev + 1 }))

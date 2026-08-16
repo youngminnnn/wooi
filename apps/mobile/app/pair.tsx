@@ -28,12 +28,14 @@ export default function PairScreen(): React.JSX.Element {
   const [claim, setClaim] = useState<ClaimedPairing | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [pasted, setPasted] = useState('')
+  const unpairedReason = useRemoteStore((store) => store.unpairedReason)
 
   const finish = useCallback(async (pending: ClaimedPairing): Promise<void> => {
     setPhase('verify')
     setClaim(pending)
     try {
       const pairing = await pending.finish()
+      useRemoteStore.getState().setUnpairedReason(null)
       useRemoteStore.getState().setPairing(pairing)
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Pairing failed')
@@ -85,6 +87,7 @@ export default function PairScreen(): React.JSX.Element {
       <View style={styles.center}>
         <Text style={styles.eyebrow}>WOOI REMOTE</Text>
         <Text style={styles.title}>Paste the pairing code</Text>
+        {unpairedReason !== null ? <Text style={styles.notice}>{unpairedReason}</Text> : null}
         <Text style={styles.body}>
           On your laptop, open Settings → Integrations → Remote access → Pair a phone, then copy the
           pairing code shown under the QR.
@@ -113,30 +116,10 @@ export default function PairScreen(): React.JSX.Element {
     </SafeAreaView>
   )
 
-  if (!permission) return <PairLoading label="Checking camera access…" />
-
-  if (!permission.granted) {
-    return (
-      <SafeAreaView style={styles.screen}>
-        <View style={styles.center}>
-          <Text style={styles.eyebrow}>WOOI REMOTE</Text>
-          <Text style={styles.title}>Pair this phone</Text>
-          <Text style={styles.body}>
-            Camera access is needed to scan the one-time pairing code shown by Wooi on your laptop.
-          </Text>
-          <Pressable style={styles.button} onPress={() => void requestPermission()}>
-            <Text style={styles.buttonText}>Allow camera</Text>
-          </Pressable>
-          <Pressable onPress={() => setPhase('paste')}>
-            <Text style={styles.link}>Paste the code instead</Text>
-          </Pressable>
-        </View>
-      </SafeAreaView>
-    )
-  }
-
-  if (phase === 'paste') return pasteScreen
-
+  // 화면 선택은 **phase 가 먼저**다. 카메라 권한은 스캔 경로에만 필요한데, 그 검사가 앞에
+  // 있으면 권한이 없는 동안 phase 가 무엇이든 권한 안내 화면이 그려진다. 그래서 붙여넣기로
+  // 페어링했을 때 **여섯 자리 확인 화면이 통째로 건너뛰어졌다** — 사용자는 대조할 숫자를 보지
+  // 못한 채 랩탑에서 승인 버튼만 누르게 되고, 페어링의 유일한 인증 단계가 사라진다.
   if (phase === 'claiming') return <PairLoading label="Claiming one-time code…" />
 
   if (phase === 'verify' && claim !== null) {
@@ -176,6 +159,32 @@ export default function PairScreen(): React.JSX.Element {
     )
   }
 
+  if (phase === 'paste') return pasteScreen
+
+  // 여기부터는 스캔 경로다 — 이 아래에서만 카메라가 필요하다.
+  if (!permission) return <PairLoading label="Checking camera access…" />
+
+  if (!permission.granted) {
+    return (
+      <SafeAreaView style={styles.screen}>
+        <View style={styles.center}>
+          <Text style={styles.eyebrow}>WOOI REMOTE</Text>
+          <Text style={styles.title}>Pair this phone</Text>
+          {unpairedReason !== null ? <Text style={styles.notice}>{unpairedReason}</Text> : null}
+          <Text style={styles.body}>
+            Camera access is needed to scan the one-time pairing code shown by Wooi on your laptop.
+          </Text>
+          <Pressable style={styles.button} onPress={() => void requestPermission()}>
+            <Text style={styles.buttonText}>Allow camera</Text>
+          </Pressable>
+          <Pressable onPress={() => setPhase('paste')}>
+            <Text style={styles.link}>Paste the code instead</Text>
+          </Pressable>
+        </View>
+      </SafeAreaView>
+    )
+  }
+
   return (
     <View style={styles.screen}>
       <CameraView
@@ -187,6 +196,7 @@ export default function PairScreen(): React.JSX.Element {
       <SafeAreaView style={styles.cameraOverlay}>
         <Text style={styles.eyebrow}>WOOI REMOTE</Text>
         <Text style={styles.cameraTitle}>Scan the code on your laptop</Text>
+        {unpairedReason !== null ? <Text style={styles.notice}>{unpairedReason}</Text> : null}
         <View style={styles.frame} />
         <Text style={styles.cameraHint}>
           The code is single-use and expires after five minutes.
@@ -227,6 +237,13 @@ const styles = StyleSheet.create({
   },
   buttonDisabled: { opacity: 0.4 },
   link: { color: theme.accent, fontSize: 13, marginTop: 16 },
+  notice: {
+    color: theme.warning,
+    fontSize: 13,
+    lineHeight: 19,
+    marginTop: 12,
+    textAlign: 'center'
+  },
   screen: { flex: 1, backgroundColor: theme.bg },
   center: { flex: 1, justifyContent: 'center', paddingHorizontal: 28 },
   eyebrow: { color: theme.accent, fontSize: 11, fontWeight: '700', letterSpacing: 1.8 },

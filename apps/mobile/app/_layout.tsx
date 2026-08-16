@@ -7,7 +7,7 @@ import { RelayClient } from '../src/relay/client'
 import { openPushPayload } from '../src/notifications/payload'
 import { requestPushToken } from '../src/notifications/register'
 import { useRemoteStore } from '../src/state/store'
-import { loadPairing } from '../src/storage/secure'
+import { clearPairing, loadPairing } from '../src/storage/secure'
 import { theme } from '../src/theme'
 
 // 배너는 내용이 없다(고정 문구). 소리는 울리되 배지는 건드리지 않는다 —
@@ -58,6 +58,15 @@ export default function RootLayout(): React.JSX.Element {
       onState: useRemoteStore.getState().setState,
       onUpdatedAt: useRemoteStore.getState().setUpdatedAt,
       onLaptopSeen: useRemoteStore.getState().setLaptopSeenAt,
+      // 랩탑이 끊었다면 저장된 키를 붙들고 있을 이유가 없다 — 그 키로는 아무것도 열리지
+      // 않는다. 지우고 페어링 화면으로 돌려보내되, 왜 돌아왔는지는 말해 준다.
+      onRevoked: () => {
+        void clearPairing().finally(() => {
+          const store = useRemoteStore.getState()
+          store.setUnpairedReason('Your laptop disconnected this phone. Pair again to reconnect.')
+          store.setPairing(null)
+        })
+      },
       onError: useRemoteStore.getState().setLastError,
       onActivity: useRemoteStore.getState().bumpActivity
     })

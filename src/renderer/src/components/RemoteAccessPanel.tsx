@@ -64,7 +64,14 @@ export default function RemoteAccessPanel({
   }
 
   const { pairing, connection } = status
-  const pairingActive = pairing.phase !== 'idle' && pairing.phase !== 'done'
+  /**
+   * 페어링이 **지금 진행 중**인가. 여기서 'error' 를 빼는 것이 중요하다 — 코드는 5분이면
+   * 만료되고 그때 phase 가 'error' 가 되는데, 이걸 진행 중으로 치면 다시 시작할 버튼이
+   * 사라져 사용자가 원격 접근 자체를 껐다 켜야 한다(실제로 그렇게 막혔다).
+   * 실패는 진행이 아니라 **끝난 상태**이고, 끝났으면 다시 시작할 수 있어야 한다.
+   */
+  const pairingActive =
+    pairing.phase !== 'idle' && pairing.phase !== 'done' && pairing.phase !== 'error'
   const consented = settings.remoteConsentVersion === CURRENT_REMOTE_CONSENT_VERSION
 
   /**
@@ -158,7 +165,11 @@ export default function RemoteAccessPanel({
               disabled={busy || connection.status !== 'online'}
               onClick={() => void run(() => window.api.remote.pairStart())}
             >
-              {pairing.phase === 'done' ? 'Pair another phone' : 'Pair a phone'}
+              {pairing.phase === 'error'
+                ? 'Try again'
+                : pairing.phase === 'done'
+                  ? 'Pair another phone'
+                  : 'Pair a phone'}
             </button>
           )}
 
