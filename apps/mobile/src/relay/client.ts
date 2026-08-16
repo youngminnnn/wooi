@@ -30,6 +30,7 @@ export type RemoteCommandChannel =
   | 'remote:transcript'
   | 'remote:watch'
   | 'remote:ping'
+  | 'remote:unpairSelf'
   | 'chat:send'
   | 'chat:interrupt'
   | 'permission:respond'
@@ -44,6 +45,8 @@ export class RemoteCommandTimeoutError extends Error {
 const COMMAND_TIMEOUT_MS = 20_000
 const COMMAND_POLL_MS = 750
 const COMMAND_CT_MAX_BYTES = 64 * 1024
+const UNPAIR_CONFIRM_MS = 8_000
+const UNPAIR_POLL_MS = 1_000
 
 /**
  * 랩탑 생존 확인 주기. 브로드캐스트에 얹을 수 없다 — 랩탑이 죽으면 브로드캐스트도 멈추므로,
@@ -98,6 +101,7 @@ export class RelayClient {
   private appStateSubscription: { remove: () => void } | null = null
   private reconnectAttempt = 0
   private stopped = false
+  private unpairing = false
   private currentStatus: ConnectionStatus = 'offline'
 
   get status(): ConnectionStatus {
@@ -209,6 +213,41 @@ export class RelayClient {
   }
 
   async command(channel: RemoteCommandChannel, args: unknown[]): Promise<unknown> {
+    const id = await this.enqueue(channel, args)
+    return this.pollCommand(id)
+  }
+
+  async unpairSelf(): Promise<'revoked' | 'queued'> {
+    this.unpairing = true
+    // 자가 해제와 생존 확인이 같은 행의 소실을 보면, 사용자가 직접 끊었는데 랩탑이 끊었다는
+    // 잘못된 안내가 뜬다. 이 작업이 끝날 때까지 기존 감시자를 멈추고 그 콜백을 봉인한다.
+    this.stopLiveness()
+    let outcome: 'revoked' | 'queued' = 'queued'
+    try {
+      await this.savePushToken(null).catch(() => undefined)
+      await this.enqueue('remote:unpairSelf', [])
+      const deadline = Date.now() + UNPAIR_CONFIRM_MS
+      while (Date.now() < deadline) {
+        const response = await this.client
+          .from('devices')
+          .select('id')
+          .eq('id', this.pairing.deviceId)
+          .maybeSingle()
+        if (!response.error && response.data === null) {
+          outcome = 'revoked'
+          break
+        }
+        await wait(UNPAIR_POLL_MS)
+      }
+    } catch {
+      outcome = 'queued'
+    } finally {
+      await this.client.auth.signOut({ scope: 'local' }).catch(() => undefined)
+    }
+    return outcome
+  }
+
+  private async enqueue(channel: RemoteCommandChannel, args: unknown[]): Promise<string> {
     const seq = await nextCommandSequence(this.pairing.deviceId)
     const payload: RemoteCommandPayload = { channel, args, seq, ts: Date.now() }
     const header = {
@@ -234,7 +273,7 @@ export class RelayClient {
     if (inserted.error || !isCommandResultRow(inserted.data)) {
       throw new Error('Could not queue the command. Check your relay connection and try again.')
     }
-    return this.pollCommand(inserted.data.id)
+    return inserted.data.id
   }
 
   /**
@@ -353,6 +392,7 @@ export class RelayClient {
   }
 
   private startLiveness(): void {
+    if (this.unpairing) return
     this.stopLiveness()
     this.livenessTimer = setInterval(() => {
       void this.pollLiveness()
@@ -381,7 +421,7 @@ export class RelayClient {
       .maybeSingle()
     if (response.error) return true
     if (response.data !== null) return true
-    this.handlers.onRevoked()
+    if (!this.unpairing) this.handlers.onRevoked()
     return false
   }
 

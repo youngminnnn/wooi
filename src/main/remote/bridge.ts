@@ -45,6 +45,8 @@ export interface RemoteCommandBridgeOptions {
    * 뜻이므로, 데스크톱의 미확인 표시를 푸는 신호로 그대로 쓸 수 있다.
    */
   onWatch?: (workspaceId: string | null) => void
+  /** 다른 기기를 끊을 수 없도록 기기 id 는 복호화한 페이로드가 아니라 명령 행에서만 가져온다. */
+  onUnpairSelf?: (deviceId: string) => Promise<void>
 }
 
 interface WatchLease {
@@ -246,6 +248,11 @@ export class RemoteCommandBridge {
     }
     if (channel === REMOTE_IPC.transcript) {
       return transcriptPage(args[0] as string, args[1] as RemoteTranscriptQuery)
+    }
+    if (channel === REMOTE_IPC.unpairSelf) {
+      this.watches.delete(deviceId)
+      await this.options.onUnpairSelf?.(deviceId)
+      return { unpaired: true }
     }
     return await invokeCommand(channel, args)
   }

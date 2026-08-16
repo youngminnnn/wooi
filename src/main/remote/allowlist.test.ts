@@ -294,3 +294,11 @@ describe('remote:watch / remote:ping 검증', () => {
     expect(() => v(REMOTE_IPC.ping, ['x'])).toThrow(/expected 0 args/)
   })
 })
+
+describe('remote:unpairSelf 검증', () => {
+  it('인자 없는 자기 해제만 허용한다', () => {
+    expect(REMOTE_COMMANDS.has(REMOTE_IPC.unpairSelf)).toBe(true)
+    expect(v(REMOTE_IPC.unpairSelf, [])).toEqual([])
+    expect(() => v(REMOTE_IPC.unpairSelf, ['other-device'])).toThrow(/expected 0 args/)
+  })
+})

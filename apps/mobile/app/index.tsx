@@ -2,6 +2,7 @@ import { useCallback, useMemo, useState } from 'react'
 import { Image, Pressable, RefreshControl, SectionList, StyleSheet, Text, View } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
+import { Settings } from 'lucide-react-native'
 import type { RemoteWorkspace } from '@shared/remote'
 import { workspaceDisplayName } from '@shared/types'
 import { BrandMark } from '../src/components/BrandMark'
@@ -204,6 +205,15 @@ export default function WorkspaceListScreen(): React.JSX.Element {
           />
           <Text style={styles.connectionText}>{status}</Text>
         </View>
+        <Pressable
+          accessibilityLabel="Settings"
+          accessibilityRole="button"
+          hitSlop={10}
+          onPress={() => router.push('/settings')}
+          style={({ pressed }) => [styles.settingsButton, pressed && styles.settingsPressed]}
+        >
+          <Settings color={theme.textMuted} size={19} strokeWidth={1.8} />
+        </Pressable>
       </View>
       <DemoBanner />
       {/* 폰이 끊긴 것과 랩탑이 자는 것을 섞어 말하지 않는다 — 사용자가 할 수 있는 일이 다르다. */}
@@ -278,12 +288,21 @@ const styles = StyleSheet.create({
     paddingTop: 18
   },
   headerMark: { borderRadius: 9, height: 36, marginRight: 11, marginTop: 2, width: 36 },
-  headerText: { flex: 1 },
+  headerText: { flex: 1, minWidth: 0 },
   title: { color: theme.text, fontSize: 21, fontWeight: '600', letterSpacing: -0.3 },
   updated: { color: theme.textDim, fontSize: 12, marginTop: 3 },
-  connection: { alignItems: 'center', flexDirection: 'row', gap: 6, marginLeft: 10, marginTop: 5 },
+  connection: { alignItems: 'center', flexDirection: 'row', flexShrink: 0, gap: 6, marginLeft: 8, marginTop: 5 },
   connectionDot: { borderRadius: 4, height: 7, width: 7 },
   connectionText: { color: theme.textDim, fontSize: 11, textTransform: 'capitalize' },
+  settingsButton: {
+    alignItems: 'center',
+    borderRadius: 17,
+    height: 34,
+    justifyContent: 'center',
+    marginLeft: 5,
+    width: 34
+  },
+  settingsPressed: { backgroundColor: theme.surface2 },
   banner: { backgroundColor: '#2a1719', color: '#e69393', fontSize: 12, padding: 10 },
   list: { paddingBottom: 24 },
   sectionHeader: {
