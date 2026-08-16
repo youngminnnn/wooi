@@ -408,6 +408,24 @@ export interface RateLimitsResult {
   } | null
 }
 
+export interface SkillMetadata {
+  name?: string
+  description?: string
+  enabled?: boolean
+  path?: string
+  scope?: 'user' | 'repo' | 'system' | 'admin'
+  shortDescription?: string | null
+  interface?: { shortDescription?: string | null } | null
+}
+
+export interface SkillsListResponse {
+  data: Array<{
+    cwd?: string
+    skills: SkillMetadata[]
+    errors: Array<{ message?: string; path?: string }>
+  }>
+}
+
 // ── 메서드 이름 상수 ────────────────────────────────────────────────────
 // 오타는 런타임에야 드러나므로(그것도 조용히) 한 곳에 모아 둔다.
 
@@ -423,6 +441,7 @@ export const RPC = {
   turnStart: 'turn/start',
   turnSteer: 'turn/steer',
   turnInterrupt: 'turn/interrupt',
+  skillsList: 'skills/list',
   modelList: 'model/list',
   accountRead: 'account/read',
   accountLoginStart: 'account/login/start',
@@ -441,6 +460,7 @@ export const NOTIFY = {
   threadStarted: 'thread/started',
   threadStatusChanged: 'thread/status/changed',
   turnStarted: 'turn/started',
+  skillsChanged: 'skills/changed',
   // 실패한 턴도 turn/completed 로 온다(status:'failed'). `turn/failed` 알림은 존재하지 않는다.
   turnCompleted: 'turn/completed',
   turnPlanUpdated: 'turn/plan/updated',

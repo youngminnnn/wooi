@@ -161,6 +161,37 @@ describe('턴 추적', () => {
   })
 })
 
+describe('skill 호출', () => {
+  it('슬래시 텍스트 대신 SkillUserInput 과 뒤 인자를 turn/start 에 싣는다', async () => {
+    const rpc = {
+      supports: vi.fn(() => true),
+      request: vi.fn(async (method: string) => {
+        if (method === RPC.threadStart) return { thread: { id: 'thr1' } }
+        if (method === RPC.turnStart) return { turn: { id: 'turn1' } }
+        return {}
+      })
+    } as unknown as RpcClient
+    const { thread } = makeThread()
+    ;(thread as unknown as { deps: { rpc: () => Promise<RpcClient> } }).deps.rpc = async () => rpc
+
+    await thread.send('/review-code src', undefined, undefined, {
+      name: 'review-code',
+      path: '/skills/review-code/SKILL.md',
+      prompt: 'src'
+    })
+
+    expect(rpc.request).toHaveBeenCalledWith(
+      RPC.turnStart,
+      expect.objectContaining({
+        input: [
+          { type: 'skill', name: 'review-code', path: '/skills/review-code/SKILL.md' },
+          { type: 'text', text: 'src' }
+        ]
+      })
+    )
+  })
+})
+
 describe('알 수 없는 입력', () => {
   it('같은 종류는 unknown 아이템을 한 번만 방출하고 저장한다', () => {
     const { thread, events, persisted } = makeThread()
