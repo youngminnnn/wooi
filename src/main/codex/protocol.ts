@@ -86,6 +86,7 @@ export type CodexCommand =
   // 설정 화면용 — 워크스페이스와 무관한 계정/설치 단위 조회라 workspaceId 를 싣지 않는다.
   | { type: 'mcpConfigList'; reqId: string }
   | { type: 'mcpSetEnabled'; reqId: string; serverName: string; enabled: boolean }
+  | { type: 'mcpOauthLogin'; reqId: string; serverName: string }
   /** /compact — 대화 압축을 시작한다(진행 상황은 일반 턴 알림으로 흐른다). */
   | { type: 'compact'; workspaceId: string; config: CodexConfig }
   | { type: 'review'; workspaceId: string; config: CodexConfig }
@@ -119,6 +120,7 @@ export type CodexEvent =
   | { type: 'login'; update: CodexLoginEvent }
   /** 계정 상태가 바뀌었다(app-server 의 account/updated). auth 상태를 다시 읽으라는 신호. */
   | { type: 'accountChanged' }
+  | { type: 'mcpOauthLoginCompleted'; name: string; success: boolean; error?: string }
   | { type: 'response'; reqId: string; ok: true; data: unknown }
   | { type: 'response'; reqId: string; ok: false; error: string }
 

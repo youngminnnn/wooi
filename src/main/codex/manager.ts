@@ -229,6 +229,13 @@ export class CodexSessionManager implements AgentBackend {
         this.recycleAll()
         this.dispatch(IPC.evtAuthChanged, undefined)
         break
+      case 'mcpOauthLoginCompleted':
+        this.dispatch(IPC.evtMcpCodexOauthLoginCompleted, {
+          name: msg.name,
+          success: msg.success,
+          error: msg.error
+        })
+        break
       case 'response': {
         const pending = this.pendingRequests.get(msg.reqId)
         if (pending) {
@@ -677,6 +684,11 @@ export class CodexSessionManager implements AgentBackend {
       serverName,
       enabled
     }))
+  }
+
+  /** Codex 가 호스팅하는 OAuth 콜백 흐름을 시작하고 브라우저용 URL 을 돌려준다. */
+  loginMcpServer(serverName: string): Promise<string> {
+    return this.request<string>((reqId) => ({ type: 'mcpOauthLogin', reqId, serverName }))
   }
 
   rewindAction(): Promise<RewindActionResult> {

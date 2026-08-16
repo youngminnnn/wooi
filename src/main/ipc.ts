@@ -2483,6 +2483,17 @@ export function registerIpc(ctx: IpcContext): void {
     }
   )
 
+  ipcMain.handle(
+    IPC.mcpCodexOauthLogin,
+    async (_e, serverName: string): Promise<{ authorizationUrl?: string; error?: string }> => {
+      try {
+        return { authorizationUrl: await ctx.sessions.loginMcpServer('codex', serverName) }
+      } catch (err) {
+        return { error: err instanceof Error ? err.message : String(err) }
+      }
+    }
+  )
+
   // ── 외부 연동 인증 ──────────────────────────────────────────────────────
 
   ipcMain.handle(IPC.authGetStatus, () => getAuthStatus())

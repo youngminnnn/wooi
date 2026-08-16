@@ -547,6 +547,15 @@ export class AgentOrchestrator {
     return backend.setMcpServerEnabled(serverName, enabled)
   }
 
+  /** MCP OAuth 를 지원하는 백엔드에서 authorization URL 을 받는다. */
+  loginMcpServer(id: AgentBackendId, serverName: string): Promise<string> {
+    const backend = this.get(id)
+    if (!backend.loginMcpServer) {
+      throw new Error(`${backend.meta.label} does not support MCP OAuth login.`)
+    }
+    return backend.loginMcpServer(serverName)
+  }
+
   mcpAction(workspaceId: string, serverName: string, action: McpAction): Promise<McpServerInfo[]> {
     const backend = this.backendFor(workspaceId)
     if (!backend.meta.capabilities.mcp) {

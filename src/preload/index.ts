@@ -257,7 +257,9 @@ const api: WooiApi = {
     externalSetupCommand: () => ipcRenderer.invoke(IPC.mcpExternalSetupCommand),
     codexServers: () => ipcRenderer.invoke(IPC.mcpCodexList),
     setCodexServerEnabled: (name, enabled) =>
-      ipcRenderer.invoke(IPC.mcpCodexSetEnabled, name, enabled)
+      ipcRenderer.invoke(IPC.mcpCodexSetEnabled, name, enabled),
+    codexOauthLogin: (name) => ipcRenderer.invoke(IPC.mcpCodexOauthLogin, name),
+    onCodexOauthLoginCompleted: (cb) => subscribe(IPC.evtMcpCodexOauthLoginCompleted, cb)
   },
 
   auth: {
