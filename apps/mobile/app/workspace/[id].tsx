@@ -22,6 +22,7 @@ import {
   CornerDownRight,
   ListTodo,
   Terminal,
+  Users,
   Wrench,
   type LucideIcon
 } from 'lucide-react-native'
@@ -702,13 +703,11 @@ export default function WorkspaceScreen(): React.JSX.Element {
    */
   const headerMeta = useMemo(() => {
     if (workspace === undefined) return status
-    // 에이전트는 이제 마크로 보여 준다(데스크톱과 같은 그림) — 여기서는 글자를 빼고
+    // 에이전트도 팀 여부도 이제 마크로 보여 준다(데스크톱과 같은 그림) — 여기서는 글자를 빼고
     // 마크가 답하지 못하는 것만 남긴다.
     // 폰 헤더는 한 줄이다. 모델 이름까지 넣으면 브랜치가 잘리는데, 지금 어느 브랜치를 보고
     // 있는지가 어느 모델인지보다 훨씬 자주 필요하다.
-    return [workspace.multiAgent ? '+ subagents' : null, workspace.branch]
-      .filter((part): part is string => typeof part === 'string' && part.length > 0)
-      .join(' · ')
+    return workspace.branch
   }, [status, workspace])
 
   const limitLabel = useMemo(() => {
@@ -747,6 +746,12 @@ export default function WorkspaceScreen(): React.JSX.Element {
             </Text>
             <View style={styles.headerMetaLine}>
               <BrandMark backend={workspace?.agentBackend} size={10} />
+              {/* 팀이면 마크 옆에 사람 아이콘 하나 — 목록 행·데스크톱 사이드바와 같은 표기다. */}
+              {workspace?.multiAgent ? (
+                <View accessible accessibilityLabel="Agent team">
+                  <Users size={11} color={theme.accent} />
+                </View>
+              ) : null}
               <Text style={styles.headerMeta} numberOfLines={1}>
                 {headerMeta}
               </Text>
