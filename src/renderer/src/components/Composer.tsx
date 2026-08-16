@@ -55,13 +55,12 @@ import { buildHandoffPrompt, estimateHandoffTokens, formatHandoffTokens } from '
 import { useNow } from '../lib/useNow'
 import {
   agoLabel,
+  headlineWindows,
   isStale,
   isWarning,
   normalizeUtilization,
   resetLabel,
-  shouldShowRateLimits,
-  statusWindow,
-  tightestWindow
+  shouldShowRateLimits
 } from '../lib/rateLimit'
 import { formatBytes } from '../lib/format'
 import { appendMention, findMention, mentionToken, mentionWithRange } from '../lib/mention'
@@ -2835,17 +2834,17 @@ function RateLimitStatus({
   }, [open])
 
   // 대표 창은 backend 마다 고정(Claude=5시간, Codex=주간). 사용률 순위로 바뀌지 않는다.
-  const shown = useMemo(() => statusWindow(backend, snapshot?.windows ?? []), [backend, snapshot])
-  // 경고색 판단에만 쓰는 "가장 많이 소진된 창" — 표시 숫자와 다를 수 있다.
-  const tightest = useMemo(() => tightestWindow(snapshot?.windows ?? []), [snapshot])
+  // 경고색 판단에 쓰는 hotter 는 "표시 창보다 뜨거운 창" — Overview 와 같은 규칙을 공유한다.
+  const { shown, hotter } = useMemo(
+    () => headlineWindows(backend, snapshot?.windows ?? []),
+    [backend, snapshot]
+  )
 
   if (!shouldShowRateLimits(snapshot) || !snapshot || !shown) return null
 
   const pct = normalizeUtilization(shown.utilization) ?? 0
-  const hottestPct = normalizeUtilization(tightest?.utilization ?? null)
+  const hottestPct = normalizeUtilization(hotter?.utilization ?? null)
   // 다른 창이 더 뜨거우면 그쪽으로도 경고를 켠다(숫자는 고정된 창을 유지한 채 색만 알린다).
-  const hotter =
-    tightest && tightest.label !== shown.label && isWarning(hottestPct) ? tightest : null
   const warn = isWarning(pct) || !!hotter
   const stale = isStale(snapshot, now)
 

@@ -46,6 +46,29 @@ export function statusWindow(
   return preferred ?? tightestWindow(usable)
 }
 
+/**
+ * 화면 하나가 요약해서 보여 줄 창 한 쌍 — 숫자로 쓸 대표 창(shown)과, 그것보다 더 뜨거워서
+ * 경고로 덧붙여야 하는 창(hotter).
+ *
+ * 상태줄과 Overview 가 각자 대표 창을 고르면 같은 계정을 두고 5시간 4% 와 주간 78% 가 동시에
+ * 보여 둘 중 하나가 틀린 값처럼 읽힌다. 고르는 규칙을 여기 하나로 두는 이유다.
+ */
+export function headlineWindows(
+  backend: AgentBackendId,
+  windows: RateLimitWindow[]
+): { shown: RateLimitWindow | null; hotter: RateLimitWindow | null } {
+  const shown = statusWindow(backend, windows)
+  const hottest = tightestWindow(windows)
+  const hotter =
+    shown &&
+    hottest &&
+    hottest.label !== shown.label &&
+    isWarning(normalizeUtilization(hottest.utilization))
+      ? hottest
+      : null
+  return { shown, hotter }
+}
+
 /** 'Weekly'·'2-week' 처럼 주 단위 창인지(Codex 의 durationLabel 이 만드는 이름 기준). */
 function isWeeklyLabel(label: string): boolean {
   return label === WEEKLY_RATE_LIMIT_LABEL || /\bweeks?\b/i.test(label)
