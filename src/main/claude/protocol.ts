@@ -80,6 +80,8 @@ export interface SessionConfig {
   /** 다른 Wooi workspace 및 연결된 메인 checkout. 직접 파일 쓰기 도구의 경계를 세우는 스냅샷이다. */
   writeIsolationRoots: Array<{ path: string; owner: string }>
   model: string | null
+  /** 과부하·일시 불가용 모델 폴백. 계정 rate limit 재개와는 별개의 SDK 라우팅이다. */
+  fallbackModels: string[]
   /** reasoning effort 선택값(ultracode 포함). null 이면 지정하지 않는다(모델 기본 동작). */
   effort: EffortSetting | null
   /** fast mode(`/fast`) 사용 여부. true 면 settings 레이어로 fastMode 를 켜서 query 를 연다. */

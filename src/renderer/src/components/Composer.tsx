@@ -2331,6 +2331,7 @@ function StatusLine({
 }): React.JSX.Element {
   const usage = useStore((s) => s.contextUsage[workspace.id])
   const compacting = useStore((s) => s.compacting[workspace.id] ?? false)
+  const fallbackModel = useStore((s) => s.activeFallbackModels[workspace.id])
   // 레이트리밋은 계정 단위 전역 값이라 workspace.id 로 색인하지 않는다(contextUsage 와 다른 점).
   const rateLimits = useStore((s) => {
     const app = s.app!
@@ -2388,6 +2389,14 @@ function StatusLine({
         <Cpu size={11} className="shrink-0 text-neutral-600" />
         <span className="truncate">{modelText}</span>
       </button>
+      {fallbackModel && (
+        <span
+          className="shrink-0 text-amber-400"
+          title={`Primary model unavailable — using fallback ${modelLabel(models, fallbackModel)}`}
+        >
+          Fallback: {modelLabel(models, fallbackModel)}
+        </span>
+      )}
       <button
         onClick={() => onPick('effort')}
         className="flex items-center gap-1 min-w-0 shrink hover:text-neutral-300 transition-colors"
