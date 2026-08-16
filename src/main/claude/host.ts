@@ -145,6 +145,10 @@ async function handle(msg: HostCommand): Promise<void> {
       await sessions.get(msg.workspaceId)?.interrupt()
       break
 
+    case 'forcedIdle':
+      sessions.get(msg.workspaceId)?.noteForcedIdle()
+      break
+
     case 'stopTask':
       await sessions.get(msg.workspaceId)?.stopTask(msg.taskId)
       break

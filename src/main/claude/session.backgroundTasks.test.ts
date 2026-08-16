@@ -69,6 +69,22 @@ function latestAgents(events: ChatEvent[]): RunningAgent[] {
   return [...events].reverse().find((event) => event.type === 'agents')?.agents ?? []
 }
 
+function statuses(events: ChatEvent[]): string[] {
+  return events.flatMap((event) => (event.type === 'status' ? [event.status] : []))
+}
+
+const RESULT = {
+  type: 'result',
+  subtype: 'success',
+  uuid: 'result',
+  session_id: 'session',
+  num_turns: 1,
+  duration_ms: 1,
+  total_cost_usd: 0,
+  result: 'done',
+  usage: { input_tokens: 0, output_tokens: 0 }
+}
+
 describe('ClaudeSession background tasks', () => {
   beforeEach(() => vi.clearAllMocks())
 
@@ -166,6 +182,34 @@ describe('ClaudeSession background tasks', () => {
     await tick()
     expect(latestAgents(events)).toEqual([])
     expect(events).toContainEqual({ type: 'status', status: 'idle' })
+    session.dispose()
+  })
+
+  /**
+   * 회귀: 중단 버튼처럼 메인이 화면을 직접 idle 로 돌린 뒤, 살아 있는 백그라운드 작업 때문에
+   * 세션이 idle 을 방출하지 않으면 세션의 기억(busy)과 화면이 어긋난 채 굳는다. 그 상태에서
+   * 다음 턴의 running 까지 삼켜지면 그 워크스페이스는 영영 '진행 중' 표시 없이 돌아간다.
+   */
+  it('강제 idle 뒤에도 다음 턴은 running 을 다시 방출한다', async () => {
+    const { session, events } = await start()
+    // 백그라운드 작업(예: npm run dev)이 살아 있으면 턴이 끝나도 idle 로 가지 않는다(설계).
+    query.out.push(
+      system('background_tasks_changed', {
+        tasks: [{ task_id: 'dev', task_type: 'local_bash', description: 'npm run dev' }]
+      })
+    )
+    await tick()
+    query.out.push({ ...RESULT })
+    await tick()
+    expect(statuses(events)).toEqual(['running'])
+
+    // 사용자가 중단을 눌렀다 — 메인이 store/렌더러를 idle 로 확정하고 세션에도 알린다.
+    session.noteForcedIdle()
+    const seen = events.length
+
+    session.send('이어서')
+    await tick()
+    expect(statuses(events.slice(seen))).toContain('running')
     session.dispose()
   })
 })
