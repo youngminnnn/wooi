@@ -32,7 +32,7 @@ function googleServices(file: string): string | undefined {
 
 export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
-  name: isDevelopment ? 'Wooi Remote (dev)' : 'Wooi Remote',
+  name: isDevelopment ? 'Wooi (dev)' : 'Wooi',
   slug: config.slug ?? 'wooi-remote',
   scheme: isDevelopment ? 'wooi-remote-dev' : 'wooi-remote',
   ios: {

@@ -64,10 +64,10 @@ export function parsePairingQr(raw: string): PairingQr {
   try {
     value = JSON.parse(raw)
   } catch {
-    throw new PairingError('invalid-qr', 'This is not a Wooi Remote pairing code')
+    throw new PairingError('invalid-qr', 'This is not a Wooi pairing code')
   }
   if (typeof value !== 'object' || value === null) {
-    throw new PairingError('invalid-qr', 'This is not a Wooi Remote pairing code')
+    throw new PairingError('invalid-qr', 'This is not a Wooi pairing code')
   }
   const item = value as Record<string, unknown>
   if (
@@ -79,7 +79,7 @@ export function parsePairingQr(raw: string): PairingQr {
     !requiredString(item.mpk) ||
     !requiredString(item.code)
   ) {
-    throw new PairingError('invalid-qr', 'This is not a compatible Wooi Remote pairing code')
+    throw new PairingError('invalid-qr', 'This is not a compatible Wooi pairing code')
   }
   try {
     const url = new URL(item.url)

@@ -1,4 +1,4 @@
-# Wooi Remote (Expo)
+# Wooi 모바일 (Expo)
 
 랩탑의 Wooi 세션을 폰에서 보고 조종하는 컴패니언 앱. 코드와 실행은 계속 랩탑에 남는다 —
 이 앱은 원격 제어기다.
@@ -7,8 +7,8 @@
 
 | | 패키지 / 번들 | scheme | 표시 이름 | Firebase 프로젝트 |
 | --- | --- | --- | --- | --- |
-| development | `com.wooi.remote.dev` | `wooi-remote-dev` | Wooi Remote (dev) | `wooi-development` |
-| production | `com.wooi.remote` | `wooi-remote` | Wooi Remote | `wooi-production` |
+| development | `com.wooi.remote.dev` | `wooi-remote-dev` | Wooi (dev) | `wooi-development` |
+| production | `com.wooi.remote` | `wooi-remote` | Wooi | `wooi-production` |
 
 `app.config.ts` 가 `APP_VARIANT` 로 고른다(기본값 `development`). EAS 프로파일이 그 값을
 넘긴다 — `eas.json` 의 `build.<profile>.env` 참고.

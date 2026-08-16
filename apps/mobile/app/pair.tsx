@@ -37,7 +37,7 @@ export default function PairScreen(): React.JSX.Element {
       onPress={() => useRemoteStore.getState().enterDemo()}
     >
       <Text style={styles.demoButtonText}>Try the demo</Text>
-      <Text style={styles.demoButtonHint}>Explore Wooi Remote with sample sessions</Text>
+      <Text style={styles.demoButtonHint}>Explore Wooi with sample sessions</Text>
     </Pressable>
   )
 
@@ -96,7 +96,7 @@ export default function PairScreen(): React.JSX.Element {
   const pasteScreen = (
     <SafeAreaView style={styles.screen}>
       <View style={styles.center}>
-        <Text style={styles.eyebrow}>WOOI REMOTE</Text>
+        <Text style={styles.eyebrow}>WOOI</Text>
         <Text style={styles.title}>Paste the pairing code</Text>
         {unpairedReason !== null ? <Text style={styles.notice}>{unpairedReason}</Text> : null}
         <Text style={styles.body}>
@@ -180,7 +180,7 @@ export default function PairScreen(): React.JSX.Element {
     return (
       <SafeAreaView style={styles.screen}>
         <View style={styles.center}>
-          <Text style={styles.eyebrow}>WOOI REMOTE</Text>
+          <Text style={styles.eyebrow}>WOOI</Text>
           <Text style={styles.title}>Pair this phone</Text>
           {unpairedReason !== null ? <Text style={styles.notice}>{unpairedReason}</Text> : null}
           <Text style={styles.body}>
@@ -207,7 +207,7 @@ export default function PairScreen(): React.JSX.Element {
         onBarcodeScanned={scan}
       />
       <SafeAreaView style={styles.cameraOverlay}>
-        <Text style={styles.eyebrow}>WOOI REMOTE</Text>
+        <Text style={styles.eyebrow}>WOOI</Text>
         <Text style={styles.cameraTitle}>Scan the code on your laptop</Text>
         {unpairedReason !== null ? <Text style={styles.notice}>{unpairedReason}</Text> : null}
         <View style={styles.frame} />

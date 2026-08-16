@@ -195,7 +195,7 @@ export default function WorkspaceListScreen(): React.JSX.Element {
     <SafeAreaView style={styles.screen} edges={['top']}>
       <View style={styles.header}>
         <View>
-          <Text style={styles.eyebrow}>WOOI REMOTE</Text>
+          <Text style={styles.eyebrow}>WOOI</Text>
           <Text style={styles.title}>{machineName}</Text>
           <Text style={styles.updated}>
             {state === null
