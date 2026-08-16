@@ -55,6 +55,18 @@ const BACKEND_MARKS: Record<AgentBackendId, (props: { size?: number }) => React.
   codex: CodexMark
 }
 
+/**
+ * 모르는 백엔드용 대체 마크. 속이 빈 원 — 무언가가 돌고 있다는 것만 말하고 어느 제품인지는
+ * 주장하지 않는다.
+ */
+function UnknownMark({ size = 18 }: { size?: number }): React.JSX.Element {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <circle cx="8" cy="8" r="5.5" stroke="currentColor" strokeWidth="1.5" opacity="0.6" />
+    </svg>
+  )
+}
+
 export function AgentBackendMark({
   backend,
   size = 14
@@ -62,8 +74,12 @@ export function AgentBackendMark({
   backend: AgentBackendId
   size?: number
 }): React.JSX.Element {
-  const Mark = BACKEND_MARKS[backend]
-  const label = AGENT_BACKEND_LABELS[backend]
+  // 위 맵의 exhaustive 보장은 **컴파일 시점**의 것이다. 여기 들어오는 값은 디스크에서 읽은
+  // 워크스페이스의 것이고, dev 스토어는 워크트리끼리 공유된다 — 다른 브랜치가 추가한 백엔드
+  // (예: 'copilot')가 그대로 흘러들어온다. 그때 조회 결과는 undefined 이고, React 는
+  // <undefined /> 를 그리려다 **트리 전체를 죽인다**. 아이콘 하나 때문에 앱이 열리지 않는다.
+  const Mark = (BACKEND_MARKS as Partial<typeof BACKEND_MARKS>)[backend] ?? UnknownMark
+  const label = AGENT_BACKEND_LABELS[backend] ?? backend
   return (
     <span title={label} aria-label={label} className="inline-grid place-items-center">
       <Mark size={size} />
