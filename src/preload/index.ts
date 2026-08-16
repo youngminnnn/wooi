@@ -264,6 +264,11 @@ const api: WooiApi = {
     onCodexOauthLoginCompleted: (cb) => subscribe(IPC.evtMcpCodexOauthLoginCompleted, cb)
   },
 
+  plugins: {
+    codexPlugins: () => ipcRenderer.invoke(IPC.pluginCodexList),
+    codexPluginDetail: (ref) => ipcRenderer.invoke(IPC.pluginCodexRead, ref)
+  },
+
   auth: {
     getStatus: () => ipcRenderer.invoke(IPC.authGetStatus),
     claudeLoginStart: () => ipcRenderer.invoke(IPC.authClaudeLoginStart),

@@ -40,6 +40,9 @@ import type {
   EffortSetting,
   ImageAttachment,
   CodexMcpServer,
+  CodexPluginDetail,
+  CodexPluginInventory,
+  CodexPluginRef,
   McpAction,
   McpServerInfo,
   ModelOption,
@@ -793,6 +796,16 @@ export class CodexSessionManager implements AgentBackend {
   /** Codex 가 호스팅하는 OAuth 콜백 흐름을 시작하고 브라우저용 URL 을 돌려준다. */
   loginMcpServer(serverName: string): Promise<string> {
     return this.request<string>((reqId) => ({ type: 'mcpOauthLogin', reqId, serverName }))
+  }
+
+  /** 설정 화면용 — 이 설치본에 깔린 Agent Plugins(워크스페이스와 무관). */
+  listPlugins(cwds: string[]): Promise<CodexPluginInventory> {
+    return this.request<CodexPluginInventory>((reqId) => ({ type: 'pluginList', reqId, cwds }))
+  }
+
+  /** 그중 하나가 무엇을 싣고 있는지. 목록 행을 펼칠 때만 부른다. */
+  readPlugin(ref: CodexPluginRef): Promise<CodexPluginDetail> {
+    return this.request<CodexPluginDetail>((reqId) => ({ type: 'pluginRead', reqId, ref }))
   }
 
   rewindAction(): Promise<RewindActionResult> {

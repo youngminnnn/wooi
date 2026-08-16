@@ -17,6 +17,9 @@ import type {
   CodexLoginEvent,
   CodexLoginMethod,
   CodexMcpServer,
+  CodexPluginDetail,
+  CodexPluginInventory,
+  CodexPluginRef,
   CommandPanelKind,
   CommandResult,
   ComposerAttachEvent,
@@ -624,6 +627,20 @@ export interface WooiApi {
     /** OAuth 흐름을 시작하고 브라우저에서 열 authorization URL 을 돌려준다. */
     codexOauthLogin(name: string): Promise<{ authorizationUrl?: string; error?: string }>
     onCodexOauthLoginCompleted(cb: (event: McpOauthLoginCompletedEvent) => void): () => void
+  }
+
+  /**
+   * Codex Agent Plugins 설정 화면용. **읽기 전용이다** — 설치·삭제·마켓플레이스 추가는 사용자의
+   * codex 설치본 전체를 바꾸므로 목록 화면에 곁다리로 달지 않는다.
+   */
+  plugins: {
+    /**
+     * 이 Codex 설치본에 깔린 플러그인(마켓플레이스별). MCP 목록과 마찬가지로 호출하면
+     * app-server 가 뜨므로, 렌더러는 Codex 로그인 상태일 때만 부른다.
+     */
+    codexPlugins(): Promise<{ inventory?: CodexPluginInventory; error?: string }>
+    /** 그중 하나가 싣고 있는 스킬·MCP 서버·훅. 행을 펼칠 때만 부른다. */
+    codexPluginDetail(ref: CodexPluginRef): Promise<{ detail?: CodexPluginDetail; error?: string }>
   }
 
   auth: {

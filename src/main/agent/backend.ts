@@ -11,6 +11,9 @@ import type {
   EffortSetting,
   ImageAttachment,
   CodexMcpServer,
+  CodexPluginDetail,
+  CodexPluginInventory,
+  CodexPluginRef,
   McpAction,
   McpServerInfo,
   ModelOption,
@@ -118,6 +121,18 @@ export interface AgentBackend {
   setMcpServerEnabled?(serverName: string, enabled: boolean): Promise<CodexMcpServer[]>
   /** 설정 화면에서 백엔드 고유 MCP OAuth 를 시작한다. 지원 백엔드에만 존재한다. */
   loginMcpServer?(serverName: string): Promise<string>
+  /**
+   * 설정 화면용 — 이 백엔드 설치본에 깔린 **플러그인** 목록.
+   *
+   * MCP 목록과 같은 이유로 워크스페이스와 무관한 설치 단위 조회다. `cwds` 는 리포 안에 든
+   * 마켓플레이스를 찾는 힌트일 뿐이고, 결과는 그 리포에만 걸리는 목록이 아니다.
+   *
+   * 자기 플러그인을 열거하는 API 가 없는 백엔드에는 이 메서드가 아예 없다 — Claude 쪽은 Wooi 가
+   * `/wooi:*` 플러그인을 **써 넣기만** 하고(agent/plugin.ts) 사용자 플러그인을 읽는 경로가 없다.
+   */
+  listPlugins?(cwds: string[]): Promise<CodexPluginInventory>
+  /** 그중 하나가 무엇을 싣고 있는지(스킬·MCP 서버·훅). 목록 행을 펼칠 때만 부른다. */
+  readPlugin?(ref: CodexPluginRef): Promise<CodexPluginDetail>
   /** /rewind — 체크포인트로 파일 되돌리기(capabilities.rewind). */
   rewindAction(workspaceId: string, userMessageId: string): Promise<RewindActionResult>
   /** reasoning effort / ultracode 오버라이드(capabilities.effort). */
