@@ -1,6 +1,7 @@
 import { app, ipcMain } from 'electron'
 import { IPC, type AppNotice, type NoticeAction, type NoticeLevel } from '@shared/types'
 import { log } from './logger'
+import { fetchRemoteText } from './remoteFile'
 
 /**
  * 원격 공지(앱 상단 배너).
@@ -193,27 +194,12 @@ function sameNotices(a: AppNotice[], b: AppNotice[]): boolean {
 }
 
 async function fetchNotices(): Promise<AppNotice[] | null> {
-  const ctrl = new AbortController()
-  const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS)
-  try {
-    const res = await fetch(NOTICE_URL, { signal: ctrl.signal, cache: 'no-cache' })
-    if (!res.ok) {
-      log.warn(`notice: fetch ${res.status}`)
-      return null
-    }
-    const body = await res.text()
-    if (body.length > MAX_BODY_BYTES) {
-      log.warn('notice: 응답이 너무 큼 — 무시')
-      return null
-    }
-    return parseNotices(body, Date.now(), app.getVersion())
-  } catch (err) {
-    // 오프라인·DNS 실패·타임아웃은 정상 상황이다. 조용히 지나가고 다음 주기에 다시 시도한다.
-    log.info(`notice: fetch 실패 — ${err instanceof Error ? err.message : String(err)}`)
-    return null
-  } finally {
-    clearTimeout(timer)
-  }
+  const body = await fetchRemoteText(NOTICE_URL, {
+    label: 'notice',
+    timeoutMs: FETCH_TIMEOUT_MS,
+    maxBytes: MAX_BODY_BYTES
+  })
+  return body === null ? null : parseNotices(body, Date.now(), app.getVersion())
 }
 
 export function initNotice(dispatch: (channel: string, payload: unknown) => void): void {

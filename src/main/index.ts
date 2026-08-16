@@ -18,10 +18,14 @@ import { initHealthLogging } from './health'
 import { TerminalManager } from './terminal'
 import { applyNavigationGuards, loadRenderer, rendererWebPreferences } from './windows'
 import { registerIpc } from './ipc'
+import { disposeRemote, getRemoteBridge, hasLocalRemoteOverride, initRemote } from './remote'
+import { pendingPermissions } from './remote/permissions'
+import type { AppState, PermissionRequest } from '@shared/types'
 import { log } from './logger'
 import { hydrateEnvFromLoginShell } from './env'
 import { initUpdater } from './updater'
 import { initNotice } from './notice'
+import { initFeatures } from './features'
 import { initPreview } from './preview'
 
 let mainWindow: BrowserWindow | null = null
@@ -62,6 +66,32 @@ function dispatch(channel: string, payload: unknown): void {
     } catch (err) {
       log.error(`dispatch failed on ${channel}`, err)
     }
+  }
+  mirrorToRemote(channel, payload)
+}
+
+/**
+ * 렌더러로 나가는 방송을 원격에도 흘린다.
+ *
+ * 렌더러 방송 **뒤에** 부르고 통째로 try/catch 로 감싼다 — 원격은 부가 기능이고,
+ * 여기서 던지면 데스크톱 UI 가 갱신을 잃는다. 원격이 꺼져 있으면 publishState 가
+ * 즉시 반환하므로 이 경로의 비용은 함수 호출 하나다.
+ *
+ */
+function mirrorToRemote(channel: string, payload: unknown): void {
+  try {
+    if (channel === IPC.evtPermission) {
+      pendingPermissions.add(payload as PermissionRequest)
+    } else if (channel === IPC.evtPermissionCancel) {
+      pendingPermissions.remove(payload as string)
+    } else if (channel !== IPC.evtState) {
+      return
+    }
+
+    const appState = channel === IPC.evtState ? (payload as AppState) : getStore().getState()
+    getRemoteBridge().publishState(appState, pendingPermissions.list())
+  } catch {
+    // 브리지가 아직 초기화되지 않았거나(기동 초기) 원격이 꺼져 있다 — 정상이다.
   }
 }
 
@@ -220,11 +250,41 @@ app.whenReady().then(() => {
   // Preview 게스트의 울타리는 창보다 먼저 세운다 — will-attach-webview 를 놓치면 그 webview 는
   // 우리가 강제하려던 설정 없이 붙는다([[preview]]).
   initPreview(dispatch)
-  registerIpc({ sessions, scripts, terminals, panes, getWindow: () => mainWindow })
+  // 원격 브리지는 IPC 등록보다 **먼저** 만들어야 한다 — 핸들러가 getRemoteBridge() 를 부른다.
+  // 만드는 것 자체는 아무 자원도 잡지 않는다(설정을 읽을 뿐이다). 실제 연결은 아래에서
+  // 사용자가 켜 둔 경우에만 일어난다.
+  // 마지막으로 알던 가용성에서 시작한다 — 플래그는 네트워크로 오므로 기동 직후에는 알 수
+  // 없는데, 그때 꺼진 것으로 치면 이미 쓰던 사용자에게서 기능이 깜빡인다.
+  const remoteOverride = hasLocalRemoteOverride()
+  initRemote(
+    (status) => dispatch(IPC.evtRemote, status),
+    () => getStore().getState(),
+    // 폰이 워크스페이스를 열었다 = 사용자가 그걸 읽었다. 미확인 표시는 렌더러 메모리에만
+    // 있으므로 방송하지 않으면 데스크톱은 영원히 안 읽은 상태로 남는다.
+    (workspaceId) => dispatch(IPC.evtRemoteRead, workspaceId),
+    remoteOverride || getStore().getState().settings.remoteAccessAvailable
+  )
+  registerIpc({ sessions, scripts, terminals, panes, dispatch, getWindow: () => mainWindow })
   createWindow()
   sessions.prewarm()
   initUpdater(dispatch)
   initNotice(dispatch)
+  initFeatures((features) => {
+    // 로컬 탈출구가 있으면 원격 플래그가 닫혀 있어도 열어 둔다 — 만든 사람은 스토어에
+    // 올라가기 전에도 써야 한다.
+    getStore().update((state) => {
+      state.settings.remoteAccessAvailable = features.remoteAccess
+    })
+    getRemoteBridge().setAvailable(remoteOverride || features.remoteAccess)
+  })
+  // 지난 실행에서 켜 두었다면 복원한다. 실패해도 앱 기동을 막지 않는다 — 상태는 설정 패널에 뜬다.
+  // 가용성이 닫혀 있으면 setEnabled 가 거절하므로 여기서 따로 막지 않아도 되지만,
+  // 쓸데없는 실패 상태를 만들지 않도록 조건에 함께 둔다.
+  if (getStore().getState().settings.remoteEnabled && getRemoteBridge().status().available) {
+    void getRemoteBridge()
+      .setEnabled(true)
+      .catch((err) => log.error('원격 자동 연결 실패', err))
+  }
   initHealthLogging(() => sessions.liveSessionCount())
   if (isDevIsolated()) {
     log.info(`dev 격리: userData=${app.getPath('userData')} worktreeRoot=${wooiHome()}`)
@@ -243,6 +303,7 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => {
+  void disposeRemote()
   sessions.disposeAll()
   scripts.disposeAll()
   terminals.disposeAll()

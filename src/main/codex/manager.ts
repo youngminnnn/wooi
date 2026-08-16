@@ -4,6 +4,7 @@ import {
   utilityProcess,
   Notification,
   app,
+  powerMonitor,
   type BrowserWindow,
   type UtilityProcess
 } from 'electron'
@@ -20,6 +21,7 @@ import { durationLabel } from './rateLimits'
 import { CodexSkillsCache, mergeSkillCommands } from './skills'
 import type { SkillsListResponse } from './wire'
 import { RATE_LIMIT_CONTINUATION, RateLimitResumeCoordinator } from '../rateLimitResume'
+import { notifyRemotePush } from '../remote'
 import {
   expandWooiCommand,
   matchWooiCommand,
@@ -56,6 +58,8 @@ import type {
   SlashCommandInfo,
   Workspace
 } from '@shared/types'
+
+const REMOTE_PUSH_IDLE_SECONDS = 60
 
 type Dispatch = (channel: string, payload: unknown) => void
 
@@ -905,13 +909,17 @@ export class CodexSessionManager implements AgentBackend {
     urgent: boolean
   ): void {
     const win = this.getWindow()
-    if (win && win.isFocused()) return
-    if (!Notification.isSupported()) return
-
     const ws = this.getWorkspace(workspaceId)
     if (ws?.muted) return
     const channels = getStore().getState().settings.notifications?.[event]
     if (!channels?.osNotification) return
+
+    const focused = win?.isFocused() === true
+    if (!focused || powerMonitor.getSystemIdleTime() >= REMOTE_PUSH_IDLE_SECONDS) {
+      notifyRemotePush(workspaceId, ws ? workspaceDisplayName(ws) : 'Workspace', event)
+    }
+    if (focused || !Notification.isSupported()) return
+
     const title = ws ? `${urgent ? '⚠️ ' : ''}${workspaceDisplayName(ws)}` : 'Wooi'
     const notification = new Notification({ title, body, silent: !channels.sound })
     notification.on('click', () => {

@@ -37,9 +37,10 @@ Wooi's built-in tools, and every review lands on the diff instead of in a transc
   permissions, effort, fast mode, rate limits, and MCP servers. Switch between Claude
   Code and Codex mid-conversation without losing context. See
   [agent backends](docs/agent-backends.md).
-- 🔒 **Quiet where it counts** — no telemetry or servers of its own. Settings and
-  transcripts stay local; updates wait for active work, carry files follow new
-  worktrees, and sessions survive restarts.
+- 🔒 **Quiet where it counts** — no telemetry. Settings and transcripts stay local;
+  updates wait for active work, carry files follow new worktrees, and sessions survive
+  restarts. Remote access is opt-in and end-to-end encrypted — the relay it goes through
+  cannot read your messages, code, or workspace names.
 
 Wondering how this lines up with other tools? See the
 [comparison page](https://youngminnnn.github.io/wooi/alternatives.html), where every
@@ -360,7 +361,11 @@ A tabbed panel on top plus an interactive terminal below (resizable split):
 
 ## Privacy / Data
 
-- Wooi has no servers of its own and **collects no analytics/telemetry**.
+- Wooi **collects no analytics/telemetry**.
+- Remote access — letting a paired phone watch and control your sessions — is
+  **off by default**. When you turn it on, traffic goes through a relay the
+  maintainer operates, end-to-end encrypted: the relay sees ciphertext and
+  metadata, never your messages, code, or workspace names.
 - Prompts and code are sent to the provider for the agent you select: **Anthropic**
   through the Claude Agent SDK, or **OpenAI** through the Codex CLI. When you use the
   PR features, metadata is sent to **GitHub** via the `gh` CLI.

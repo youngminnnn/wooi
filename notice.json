@@ -5,7 +5,10 @@
       "id": "2026-08-rate-limit-auto-resume",
       "level": "info",
       "message": "Wooi can now continue Claude and Codex tasks automatically after account usage limits reset.",
-      "action": { "type": "enableAutoResumeAfterRateLimit", "label": "Enable" },
+      "action": {
+        "type": "enableAutoResumeAfterRateLimit",
+        "label": "Enable"
+      },
       "startsAt": "2026-08-10T00:00:00Z",
       "endsAt": "2026-10-31T23:59:59Z",
       "minVersion": "1.12.0"
