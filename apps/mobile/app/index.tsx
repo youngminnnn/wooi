@@ -1,11 +1,12 @@
 import { useCallback, useMemo, useState } from 'react'
-import { Image, Pressable, RefreshControl, SectionList, StyleSheet, Text, View } from 'react-native'
+import { Pressable, RefreshControl, SectionList, StyleSheet, Text, View } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import { Settings, Users } from 'lucide-react-native'
 import type { RemoteWorkspace } from '@shared/remote'
 import { workspaceDisplayName } from '@shared/types'
 import { BrandMark } from '../src/components/BrandMark'
+import { WooiLogo } from '../src/components/WooiLogo'
 import { StatusIcon } from '../src/components/StatusIcon'
 import { DemoBanner } from '../src/components/DemoBanner'
 import { usePrColors } from '../src/state/prColors'
@@ -204,7 +205,9 @@ export default function WorkspaceListScreen(): React.JSX.Element {
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
       <View style={styles.header}>
-        <Image source={require('../assets/icon.png')} style={styles.headerMark} />
+        <View style={styles.headerMark}>
+          <WooiLogo size={30} />
+        </View>
         <View style={styles.headerText}>
           <Text style={styles.title} numberOfLines={1}>
             {machineName}
@@ -315,7 +318,7 @@ const makeStyles = (theme: Theme) =>
       paddingHorizontal: 18,
       paddingTop: 18
     },
-    headerMark: { borderRadius: 9, height: 36, marginRight: 11, marginTop: 2, width: 36 },
+    headerMark: { marginRight: 10, marginTop: 3 },
     headerText: { flex: 1, minWidth: 0 },
     title: { color: theme.text, fontSize: 21, fontWeight: '600', letterSpacing: -0.3 },
     updated: { color: theme.textDim, fontSize: 12, marginTop: 3 },

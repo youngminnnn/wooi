@@ -42,6 +42,8 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
+    "sim:ios": "expo start --dev-client --offline --ios",
+    "sim:ios:go": "expo start --go --offline --ios",
     "update:development": "eas update --channel development",
     "update:preview": "eas update --channel preview",
     "update:production": "eas update --channel production",

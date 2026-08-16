@@ -138,6 +138,39 @@ EXPO_TOKEN="$(cat ~/.expo-token)" npx eas build --profile production --platform 
 Apple 계정으로 로그인해 인증서·프로비저닝 프로파일과 APNs 키를 만든다 — 이걸 건너뛰면
 푸시가 안 되는 앱이 나간다.
 
+## 시뮬레이터에서 화면 확인하기
+
+화면을 눈으로 보고 싶을 때. iOS 시뮬레이터에 dev build 가 이미 깔려 있으면 한 줄이면 된다.
+
+```sh
+npm run sim:ios         # expo start --dev-client --offline --ios
+npm run sim:ios:go      # dev build 가 없을 때 — Expo Go 로 띄운다
+```
+
+dev client 는 Metro 주소만 바라보므로, **다른 워크트리가 구운 dev build 라도 이 워크트리의
+JS 를 그대로 받는다.** 네이티브 의존성을 건드리지 않은 변경이라면 다시 구울 필요가 없다.
+
+`--offline` 이 붙어 있는 이유: 이 프로젝트는 `owner` 와 EAS Update 가 설정돼 있어서, 온라인
+모드에서는 매니페스트에 서명하려고 Expo 계정 로그인을 요구한다(비대화형 자리에서는 그대로
+죽는다). 화면만 보는 데 계정이 필요할 이유가 없다.
+
+몇 가지 걸리는 것:
+
+- **포트.** 워크트리마다 워크스페이스가 따로 있어서 다른 워크트리의 Metro 가 이미 8081 을
+  쓰고 있는 일이 흔하다. CLI 가 다른 포트를 쓸지 물어보지만, 되묻지 못하는 자리에서는 그대로
+  죽으므로 `npm run sim:ios -- --port 8083` 처럼 직접 지정한다.
+- **Expo Go 로 띄우면 중간 페이지가 뜬다** — dev build 가 함께 깔려 있으면 CLI 가 둘 중
+  무엇으로 열지 브라우저로 물어본다. 거기서 Expo Go 를 고르면 된다.
+- 랩탑과 페어링돼 있지 않아도 첫 화면의 **Try the demo** 로 샘플 워크스페이스를 볼 수 있다.
+
+시뮬레이터로 확인할 수 **없는** 것:
+
+- **안드로이드 상태바 알림 아이콘**(`assets/notification-icon.png`). 빌드 시점에 drawable 로
+  구워지는 네이티브 리소스라 OTA 로도, iOS 로도 확인되지 않는다. Android SDK 를 깔고
+  `npx expo run:android` 로 굽거나 dev build 를 받아야 한다. iOS 알림은 이 파일과 무관하게
+  앱 아이콘을 쓴다.
+- **푸시 알림 전반** — Expo Go 에서는 SDK 53 부터 빠졌다(앱을 켜면 그 경고가 뜬다).
+
 ## 로컬에서 굽기
 
 ```sh

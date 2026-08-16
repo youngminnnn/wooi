@@ -1,0 +1,31 @@
+<!--
+  안드로이드 상태바 알림 아이콘의 원본.
+
+  모양은 `src/shared/brandMarks.ts` 의 `WOOI_MARK` 와 같은 W 모노그램이다 — 알림을 열기 전에
+  보이는 유일한 브랜드 표시라, 앱 안에서 쓰는 마크와 달라지면 어느 앱의 알림인지 흐려진다.
+  좌표를 고칠 일이 생기면 그 상수와 이 파일을 함께 고치고 PNG 를 다시 뽑는다:
+
+    rsvg-convert -w 1024 -h 1024 notification-icon.svg -o notification-icon.png
+
+  **흰색 단색 + 투명 배경이어야 한다.** 안드로이드는 이 그림의 색을 버리고 알파 채널만 실루엣으로
+  써서 `app.json` 의 `color`(#a684ff)로 칠한다. 배경을 깔면 색칠된 사각형만 나오고, 그라데이션을
+  넣어도 사라진다 — 앱 아이콘(한글 "우이")을 여기에 그대로 쓸 수 없는 이유이기도 하다.
+
+  expo-notifications 는 이 파일을 24·36·48·72·96px 로 줄여 넣는다(mdpi~xxxhdpi). 가장 작은
+  24px 에서도 읽혀야 하므로 획을 더 얇게 만들지 않는다.
+-->
+<svg width="1024" height="1024" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- 브랜치 선 -->
+  <path
+    d="M4.8 8.3 L10.8 25.3 L16 13.3 L21.2 25.3 L27.2 8.3"
+    fill="none"
+    stroke="#ffffff"
+    stroke-width="3.6"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+  <!-- 커밋 노드 -->
+  <circle cx="4.8" cy="8.3" r="3.3" fill="#ffffff" />
+  <circle cx="16" cy="13.3" r="3.3" fill="#ffffff" />
+  <circle cx="27.2" cy="8.3" r="3.3" fill="#ffffff" />
+</svg>
