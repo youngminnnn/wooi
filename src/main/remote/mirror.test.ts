@@ -11,7 +11,8 @@ vi.mock('electron', () => ({
 
 const { deriveDirectionKeys, fromBase64Url, generateSessionKey, openJson, toBase64Url } =
   await import('@shared/crypto')
-const { MIRROR_DEBOUNCE_MS, StateMirror, projectState } = await import('./mirror')
+const { MIRROR_DEBOUNCE_MS, StateMirror, actsWithoutAsking, projectState } =
+  await import('./mirror')
 
 const machine: RemoteMachine = { id: 'machine-1', name: 'Mac', appVersion: '1.2.3' }
 const sessionKey = generateSessionKey()
@@ -187,6 +188,19 @@ describe('StateMirror', () => {
     stateMirror.dispose()
     await flush()
     expect(upsert).not.toHaveBeenCalled()
+  })
+
+  it('묻지 않고 실행하는 모드를 폰이 알 수 있게 싣는다', () => {
+    // 모드 이름은 백엔드마다 뜻이 다르다. 폰은 백엔드를 모르므로 여기서 판단해 보내야 한다.
+    expect(actsWithoutAsking('claude', 'default')).toBe(false)
+    expect(actsWithoutAsking('codex', 'default')).toBe(true)
+    // 읽기 전용은 실행 자체가 없다.
+    expect(actsWithoutAsking('claude', 'plan')).toBe(false)
+    expect(actsWithoutAsking('codex', 'readOnly')).toBe(false)
+    // 편집이 그대로 적용되거나, 승인이 자동이거나, 아예 없다.
+    expect(actsWithoutAsking('claude', 'acceptEdits')).toBe(true)
+    expect(actsWithoutAsking('claude', 'auto')).toBe(true)
+    expect(actsWithoutAsking('codex', 'fullAccess')).toBe(true)
   })
 
   it('rev 가 앱 재시작을 넘어 커진다 — 0 부터 다시 세지 않는다', async () => {

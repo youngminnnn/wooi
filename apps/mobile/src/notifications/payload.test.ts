@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { deriveDirectionKeys, fromBase64Url, sealJson, toBase64Url } from '@shared/crypto'
+import {
+  deriveDirectionKeys,
+  fromBase64Url,
+  sealJson,
+  toBase64Url,
+  type RemoteMessageKind
+} from '@shared/crypto'
 import { REMOTE_PROTOCOL_VERSION } from '@shared/remote'
 import { openPushPayload } from './payload'
 import type { StoredPairing } from '../storage/secure'
@@ -27,7 +33,7 @@ const pairing: StoredPairing = {
 /** 랩탑의 `RemotePush.send` 와 같은 헤더·키·구조로 봉인한다. */
 function sealAsLaptop(
   payload: unknown,
-  overrides: { machineId?: string; deviceId?: string; kind?: string } = {}
+  overrides: { machineId?: string; deviceId?: string; kind?: RemoteMessageKind } = {}
 ): { n: string; p: string } {
   const header = {
     v: REMOTE_PROTOCOL_VERSION,

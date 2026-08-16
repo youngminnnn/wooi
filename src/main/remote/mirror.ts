@@ -1,11 +1,32 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { deriveDirectionKeys, fromBase64Url, sealJson } from '@shared/crypto'
 import type { RemoteMachine, RemoteState } from '@shared/remote'
-import type { AppState, PermissionRequest } from '@shared/types'
+import type { AgentBackendId, AppState, PermissionMode, PermissionRequest } from '@shared/types'
 import { log } from '../logger'
 import type { RemoteKeystore } from './keystore'
 
 export const MIRROR_DEBOUNCE_MS = 400
+
+/**
+ * 이 조합에서 에이전트가 **묻지 않고 실행**하는가.
+ *
+ * 모드 이름은 백엔드마다 뜻이 다르다. Claude 의 'default' 는 도구를 쓸 때마다 묻지만,
+ * Codex 의 'default' 는 워크스페이스 안에서는 묻지 않고 편집·실행한다. 폰은 백엔드를
+ * 모르므로 이 판단은 여기서 해서 투영에 실어 보낸다.
+ *
+ * 새 모드를 추가할 때 여기 빠뜨리면 **묻는 것으로 취급된다** — 그쪽이 안전한 실패가
+ * 아니므로(마찰이 아니라 방어가 사라진다) 모드를 늘릴 때 이 함수를 같이 본다.
+ */
+export function actsWithoutAsking(backend: AgentBackendId, mode: PermissionMode): boolean {
+  // 읽기 전용은 애초에 아무것도 실행하지 못한다.
+  if (mode === 'plan' || mode === 'readOnly') return false
+  // 분류기가 대신 승인하거나(auto), 승인 자체가 없다(fullAccess).
+  if (mode === 'auto' || mode === 'fullAccess') return true
+  // 파일 편집이 프롬프트 없이 그대로 적용된다.
+  if (mode === 'acceptEdits') return true
+  // 'default' 만 남는다 — 여기서 백엔드가 갈린다.
+  return backend === 'codex'
+}
 
 export function projectState(
   app: AppState,
@@ -42,7 +63,8 @@ export function projectState(
         ? 'permission'
         : workspace.status === 'error'
           ? 'error'
-          : null
+          : null,
+      actsWithoutAsking: actsWithoutAsking(workspace.agentBackend, workspace.permissionMode)
     })),
     pendingPermissions: pending.map((request) => ({
       requestId: request.requestId,

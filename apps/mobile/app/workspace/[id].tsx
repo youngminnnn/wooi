@@ -15,11 +15,11 @@ import {
 } from 'react-native'
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router'
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
-import * as LocalAuthentication from 'expo-local-authentication'
 import type { ChatItem, PermissionRequest } from '@shared/types'
 import { workspaceDisplayName } from '@shared/types'
 import { isLaptopAway, useRemoteStore } from '../../src/state/store'
 import { agoLabel, useNow } from '../../src/state/useNow'
+import { useDeviceAuthentication } from '../../src/state/useDeviceAuth'
 
 const PAGE_SIZE = 100
 const WATCH_REFRESH_MS = 40_000
@@ -84,44 +84,15 @@ function PermissionCard({
 }): React.JSX.Element {
   const [responding, setResponding] = useState(false)
   const [responseError, setResponseError] = useState<string | null>(null)
-  const warnedAuthenticationUnavailable = useRef(false)
-
-  useEffect(() => {
-    setResponding(false)
-    setResponseError(null)
-  }, [request.requestId])
-
-  const authenticateAllow = useCallback(async (): Promise<boolean> => {
-    const result = await LocalAuthentication.authenticateAsync({
-      promptMessage: 'Approve action on your laptop',
-      cancelLabel: 'Cancel',
-      disableDeviceFallback: false,
-      biometricsSecurityLevel: 'strong'
-    })
-    if (result.success) return true
-    if (
-      result.error === 'not_available' ||
-      result.error === 'not_enrolled' ||
-      result.error === 'passcode_not_set'
-    ) {
-      // 휴대폰에는 세션 키와 갱신 토큰이 있어, 잠금 해제된 도난 기기에서 임의 명령을 승인하지 못하게 하는 유일한 방어선이다.
-      if (!warnedAuthenticationUnavailable.current) {
-        warnedAuthenticationUnavailable.current = true
-        Alert.alert(
-          'Device authentication unavailable',
-          'This device cannot verify biometrics or a passcode. The approval will proceed without authentication.'
-        )
-      }
-      return true
-    }
-    setResponseError('Device authentication was cancelled or unsuccessful. Nothing was sent.')
-    return false
-  }, [])
+  const authenticate = useDeviceAuthentication()
 
   const respond = useCallback(async (behavior: 'allow' | 'deny', rememberForSession = false): Promise<void> => {
     if (responding) return
     setResponseError(null)
-    if (behavior === 'allow' && !(await authenticateAllow())) return
+    if (behavior === 'allow' && !(await authenticate('Approve action on your laptop'))) {
+      setResponseError('Device authentication was cancelled or unsuccessful. Nothing was sent.')
+      return
+    }
     const stillPending = useRemoteStore.getState().state?.pendingPermissions.some(
       (item) => isPermissionRequest(item) && item.requestId === request.requestId
     )
@@ -138,7 +109,7 @@ function PermissionCard({
       setResponseError(errorMessage(respondError))
       setResponding(false)
     }
-  }, [authenticateAllow, command, request.requestId, responding])
+  }, [authenticate, command, request.requestId, responding])
 
   const substance = formatPermissionInput(request)
   return (
@@ -369,6 +340,7 @@ export default function WorkspaceScreen(): React.JSX.Element {
   const workspace = useRemoteStore((store) =>
     store.state?.workspaces.find((item) => item.id === workspaceId)
   )
+  const authenticate = useDeviceAuthentication()
   const laptopSeenAt = useRemoteStore((store) => store.laptopSeenAt)
   const now = useNow()
   const laptopAway = isLaptopAway(laptopSeenAt, now)
@@ -464,6 +436,15 @@ export default function WorkspaceScreen(): React.JSX.Element {
       setError('Message is too large. Keep it under 32 KiB.')
       return
     }
+    // 에이전트가 묻지 않고 실행하는 모드에서는 프롬프트 하나가 곧 임의 실행이므로 여기서
+    // 막는다. 묻는 모드라면 위험한 일이 전부 권한 프롬프트에 걸리고 그건 이미 인증으로
+    // 막혀 있으니, 여기서 또 묻는 것은 마찰만 늘리고 아무것도 더 지키지 못한다.
+    if (workspace?.actsWithoutAsking === true) {
+      if (!(await authenticate('Send this to your laptop'))) {
+        setError('Device authentication was cancelled or unsuccessful. Nothing was sent.')
+        return
+      }
+    }
     setSending(true)
     setError(null)
     try {
@@ -475,7 +456,7 @@ export default function WorkspaceScreen(): React.JSX.Element {
     } finally {
       setSending(false)
     }
-  }, [command, loadLatest, sending, text, workspaceId])
+  }, [authenticate, command, loadLatest, sending, text, workspace, workspaceId])
 
   const stop = useCallback(async (): Promise<void> => {
     if (command === null || workspaceId === undefined || stopping) return

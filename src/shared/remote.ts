@@ -42,6 +42,18 @@ export interface RemoteWorkspace {
   prNumber: number | null
   lastActiveAt: number
   attention: RemoteAttention
+  /**
+   * 이 워크스페이스의 에이전트가 **묻지 않고 실행**하는가.
+   *
+   * 폰은 이 값으로 프롬프트 전송에 기기 인증을 걸지 말지 정한다. 묻는 모드라면 위험한
+   * 일은 전부 권한 프롬프트에 걸리고 그건 이미 인증으로 막혀 있으므로, 전송까지 막으면
+   * 아무것도 더 얻지 못하면서 마찰만 늘어난다.
+   *
+   * 판단을 랩탑이 하는 이유는 **모드 이름이 백엔드마다 다른 뜻이기 때문**이다 — Codex 의
+   * 'default' 는 워크스페이스 안에서 묻지 않고 실행하지만, Claude 의 'default' 는 매번
+   * 묻는다. 폰은 백엔드를 모르므로 이름만으로는 옳게 판단할 수 없다.
+   */
+  actsWithoutAsking: boolean
 }
 
 /** 모바일이 보는 리포 1개(이름만 — 경로·스크립트·아바타는 보내지 않는다). */
