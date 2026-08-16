@@ -29,7 +29,7 @@ vary by workspace.
 
 | Capability | Claude Code | Codex |
 | --- | --- | --- |
-| Permission modes | Default, Accept edits, Plan, Auto | Read only, Auto, Full access, Plan |
+| Permission modes | Default, Accept edits, Plan, Auto | Ask for approval, Approve for me, Full access |
 | Reasoning effort | Backend model list, including Ultracode where supported | Model-specific list from Codex |
 | MCP | Supported | Supported |
 | In-app sign-in | Supported | Supported |

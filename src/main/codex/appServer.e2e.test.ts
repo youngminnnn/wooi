@@ -78,7 +78,7 @@ describe.skipIf(!CODEX)('codex app-server (실물)', () => {
   describe('우리가 보내는 파라미터', () => {
     it('thread/start 가 모든 권한 모드의 파라미터를 받아들인다', async () => {
       const rpc = await start().rpc()
-      for (const mode of ['readOnly', 'default', 'fullAccess', 'plan'] as const) {
+      for (const mode of ['askForApproval', 'default', 'fullAccess'] as const) {
         const policy = turnPolicyFor(mode, process.cwd())
         const result = await rpc.request<{ thread?: { id?: string } }>(RPC.threadStart, {
           cwd: process.cwd(),
@@ -97,7 +97,7 @@ describe.skipIf(!CODEX)('codex app-server (실물)', () => {
         cwd: process.cwd(),
         sandbox: 'read-only'
       })
-      const policy = turnPolicyFor('readOnly', process.cwd())
+      const policy = turnPolicyFor('askForApproval', process.cwd())
       const turn = await rpc.request<{ turn?: { id?: string } }>(RPC.turnStart, {
         threadId: thread?.thread?.id,
         input: [{ type: 'text', text: 'ping' }],
