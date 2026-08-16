@@ -39,7 +39,9 @@ function updatedLabel(timestamp: number): string {
  * 한다. 폰에서는 그 왕복이 데스크톱보다 훨씬 비싸다.
  */
 function rateLimitLabel(workspace: RemoteWorkspace, now: number): string | null {
-  const limit = workspace.rateLimit
+  // 오래된 랩탑은 이 필드를 아예 보내지 않는다(undefined). null 만 걸러내면 그 경우가 그대로
+  // 통과해 `limit.kind` 에서 죽는다 — 실제로 그렇게 죽었다.
+  const limit = workspace.rateLimit ?? null
   if (limit === null) return null
   if (limit.kind === 'resuming') {
     return limit.at === null ? 'rate limit' : `rate limit · resumes in ${untilLabel(limit.at, now)}`
@@ -64,7 +66,9 @@ function WorkspaceRow({
   const limit = rateLimitLabel(workspace, now)
   // 한 줄에 다 넣지 않고 우선순위대로 자른다. 폰 폭에서는 브랜치 이름만으로도 줄이 찬다.
   const meta = [
-    showAgent ? agentLabel(workspace.agentBackend) : null,
+    showAgent && workspace.agentBackend !== undefined
+      ? agentLabel(workspace.agentBackend)
+      : null,
     workspace.multiAgent ? '+ subagents' : null,
     workspace.branch
   ].filter((part): part is string => part !== null)
@@ -232,7 +236,7 @@ export default function WorkspaceListScreen(): React.JSX.Element {
           <WorkspaceRow
             workspace={item}
             parentName={
-              item.parentWorkspaceId === null
+              item.parentWorkspaceId == null
                 ? null
                 : (nameById.get(item.parentWorkspaceId) ?? null)
             }

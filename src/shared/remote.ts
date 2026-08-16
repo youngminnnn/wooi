@@ -53,14 +53,24 @@ export interface RemoteWorkspace {
   prNumber: number | null
   lastActiveAt: number
   attention: RemoteAttention
+  // ── 프로토콜 v1 이후에 더한 필드들 ──────────────────────────────────────
+  //
+  // **전부 옵셔널이어야 한다.** 폰은 자기보다 오래된 랩탑과 이야기할 수 있다 — 폰 쪽 코드는
+  // Metro 나 스토어로 즉시 갱신되지만 랩탑은 사람이 재시작해야 하고, 배포된 뒤에는 두 쪽이
+  // 아예 독립적으로 업데이트된다. 필수로 선언하면 타입은 통과하지만 런타임에는 undefined 가
+  // 와서 화면이 죽는다(실제로 `rateLimit.kind` 에서 그렇게 죽었다).
+  //
+  // 옵셔널로 두면 **컴파일러가 모든 사용처에서 부재를 처리하도록 강제한다** — 주석으로
+  // 부탁하는 것과 달리 빠뜨릴 수가 없다.
+
   /** 이 워크스페이스를 돌리는 에이전트(types.ts 의 AgentBackendId). */
-  agentBackend: string
+  agentBackend?: string
   /** 메인 에이전트 외의 종류도 돌 수 있는가(데스크톱의 사람 아이콘과 같은 의미). */
-  multiAgent: boolean
+  multiAgent?: boolean
   /** 스택된 부모. 목록에서 계층을 들여쓰는 데 쓴다. 뿌리면 null. */
-  parentWorkspaceId: string | null
+  parentWorkspaceId?: string | null
   /** 사용량 제한 상태. 걸려 있지 않으면 null. */
-  rateLimit: RemoteRateLimit | null
+  rateLimit?: RemoteRateLimit | null
   /**
    * 이 워크스페이스의 에이전트가 **묻지 않고 실행**하는가.
    *
@@ -72,7 +82,7 @@ export interface RemoteWorkspace {
    * 'default' 는 워크스페이스 안에서 묻지 않고 실행하지만, Claude 의 'default' 는 매번
    * 묻는다. 폰은 백엔드를 모르므로 이름만으로는 옳게 판단할 수 없다.
    */
-  actsWithoutAsking: boolean
+  actsWithoutAsking?: boolean
 }
 
 /** 모바일이 보는 리포 1개(이름만 — 경로·스크립트·아바타는 보내지 않는다). */

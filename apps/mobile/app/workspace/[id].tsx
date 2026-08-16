@@ -487,9 +487,12 @@ export default function WorkspaceScreen(): React.JSX.Element {
    */
   const headerMeta = useMemo(() => {
     if (workspace === undefined) return status
+    // 오래된 랩탑은 이 필드를 보내지 않고, 더 새 랩탑은 이 앱이 모르는 값을 보낸다.
+    // 둘 다 화면이 죽을 이유가 아니다.
     const labels: Record<string, string | undefined> = AGENT_BACKEND_LABELS
+    const backend = workspace.agentBackend
     return [
-      labels[workspace.agentBackend] ?? workspace.agentBackend,
+      backend === undefined ? null : (labels[backend] ?? backend),
       workspace.multiAgent ? '+ subagents' : null,
       workspace.permissionMode,
       workspace.model,
