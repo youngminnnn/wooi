@@ -17,6 +17,7 @@ import { log } from '../logger'
 import {
   IPC,
   agentSettingsFor,
+  isQuestionPermission,
   nativePeerInbound,
   peerSessionName,
   workspaceDisplayName
@@ -27,7 +28,7 @@ import { claudeMode, type HostCommand, type HostEvent, type SessionConfig } from
 import { runAgentTool } from '../agent/tools'
 import { RATE_LIMIT_CONTINUATION, RateLimitResumeCoordinator } from '../rateLimitResume'
 import { notifyRemotePush } from '../remote'
-import { shouldSendRemotePush } from '../remote/push'
+import { shouldSendRemotePush, type RemotePushKind } from '../remote/push'
 import type {
   AgentBackendId,
   AgentSettings,
@@ -707,11 +708,17 @@ export class SessionManager implements AgentBackend {
   private onPermissionRequest(request: PermissionRequest): void {
     this.pendingPermissions.set(request.requestId, request.workspaceId)
     // 백그라운드 세션이 권한 대기로 멈춘 것을 놓치지 않도록 비활성 창에서는 알린다.
+    // 질문은 승인과 다른 말로 알린다 — 답을 고르는 일과 허락하는 일은 사용자가 할 행동이
+    // 다르고, 폰도 선택지 카드와 Allow/Deny 카드로 갈라 그린다.
+    const question = isQuestionPermission(request)
     this.notify(
       request.workspaceId,
       'needsInput',
-      `Needs permission: ${request.displayName ?? request.toolName}`,
-      false
+      question
+        ? 'Has a question for you'
+        : `Needs permission: ${request.displayName ?? request.toolName}`,
+      false,
+      question ? 'question' : 'needsInput'
     )
     this.dispatch(IPC.evtPermission, request)
   }
@@ -911,7 +918,12 @@ export class SessionManager implements AgentBackend {
     workspaceId: string,
     event: NotificationEvent,
     body: string,
-    urgent: boolean
+    urgent: boolean,
+    /**
+     * 폰 배너의 종류. 기본은 설정 이벤트와 같지만 갈릴 수 있다 — 질문은 설정에서는
+     * 'needsInput' 채널을 따르면서도 배너에서는 승인과 다른 말을 해야 한다(remote/push.ts).
+     */
+    pushKind: RemotePushKind = event
   ): void {
     const win = this.getWindow()
     const ws = this.getWorkspace(workspaceId)
@@ -929,7 +941,7 @@ export class SessionManager implements AgentBackend {
         always: getStore().getState().settings.remotePushWhileActive === true
       })
     ) {
-      notifyRemotePush(workspaceId, ws ? workspaceDisplayName(ws) : 'Workspace', event)
+      notifyRemotePush(workspaceId, ws ? workspaceDisplayName(ws) : 'Workspace', pushKind)
     }
     if (focused || !Notification.isSupported()) return
 

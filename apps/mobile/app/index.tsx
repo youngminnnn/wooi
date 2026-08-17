@@ -8,6 +8,7 @@ import { workspaceDisplayName } from '@shared/types'
 import { BrandMark } from '../src/components/BrandMark'
 import { WooiLogo } from '../src/components/WooiLogo'
 import { StatusIcon } from '../src/components/StatusIcon'
+import { questionWorkspaceIds } from '../src/chat/questions'
 import { DemoBanner } from '../src/components/DemoBanner'
 import { usePrColors } from '../src/state/prColors'
 import { isLaptopAway, useRemoteStore } from '../src/state/store'
@@ -45,12 +46,15 @@ function WorkspaceRow({
   workspace,
   parentName,
   showAgent,
+  awaitingQuestion,
   now,
   onPress
 }: {
   workspace: RemoteWorkspace
   parentName: string | null
   showAgent: boolean
+  /** 대기 중인 것이 승인이 아니라 **질문**(AskUserQuestion)인가. */
+  awaitingQuestion: boolean
   now: number
   onPress: () => void
 }): React.JSX.Element {
@@ -66,7 +70,11 @@ function WorkspaceRow({
   return (
     <Pressable style={[styles.row, needsPermission && styles.permissionRow]} onPress={onPress}>
       <View style={styles.statusSlot}>
-        <StatusIcon workspace={workspace} hasLimit={limit !== null} />
+        <StatusIcon
+          workspace={workspace}
+          hasLimit={limit !== null}
+          awaitingQuestion={awaitingQuestion}
+        />
       </View>
       <View style={styles.rowContent}>
         <View style={styles.nameLine}>
@@ -77,9 +85,14 @@ function WorkspaceRow({
             {workspaceDisplayName(workspace, workspace.pr?.title)}
           </Text>
           {workspace.muted ? <Text style={styles.muted}>muted</Text> : null}
+          {/* 기다리는 것이 승인인지 답인지는 사용자가 할 일이 다르다 — 상세 화면이 이미
+              Allow/Deny 카드와 선택지 카드로 갈라 그리므로(QuestionCard), 목록도 같은 말을
+              써야 열기 전에 무엇을 해야 하는지 안다. 라벨은 그 카드의 눈썹과 같은 단어다. */}
           {needsPermission ? (
             <View style={styles.permissionBadge}>
-              <Text style={styles.permissionText}>PERMISSION</Text>
+              <Text style={styles.permissionText}>
+                {awaitingQuestion ? 'QUESTION' : 'PERMISSION'}
+              </Text>
             </View>
           ) : null}
         </View>
@@ -152,6 +165,15 @@ export default function WorkspaceListScreen(): React.JSX.Element {
         ])
       ),
     [state?.workspaces]
+  )
+
+  /**
+   * 답을 기다리는(질문) 워크스페이스들. 목록은 대기 중인 요청 본문을 그리지 않으므로 종류를
+   * 여기서 한 번만 가려 두고 행에 넘긴다 — 행마다 다시 훑으면 목록 길이 × 요청 수가 된다.
+   */
+  const questionIds = useMemo(
+    () => questionWorkspaceIds(state?.pendingPermissions),
+    [state?.pendingPermissions]
   )
 
   /**
@@ -276,6 +298,7 @@ export default function WorkspaceListScreen(): React.JSX.Element {
               item.parentWorkspaceId == null ? null : (nameById.get(item.parentWorkspaceId) ?? null)
             }
             showAgent={showAgent}
+            awaitingQuestion={questionIds.has(item.id)}
             now={now}
             onPress={() => router.push(`/workspace/${item.id}`)}
           />

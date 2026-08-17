@@ -3,6 +3,7 @@ import type { RemoteState } from '@shared/remote'
 import type { StoredPairing } from '../storage/secure'
 import type { RemoteCommandChannel } from '../relay/client'
 import { createDemoSession } from './demo'
+import { isPermissionRequest } from '../chat/questions'
 import type { UnpairOutcome } from './unpair'
 
 export type ConnectionStatus = 'offline' | 'connecting' | 'online'
@@ -101,19 +102,21 @@ export const useRemoteStore = create<RemoteStore>((set, get) => ({
         const requestId = args[0]
         set((current) => {
           if (!current.demo || current.state === null) return current
+          const answered = current.state.pendingPermissions.find(
+            (item) => isPermissionRequest(item) && item.requestId === requestId
+          )
+          // 답한 요청의 워크스페이스만 내린다. 대기가 둘 이상일 수 있으므로(승인 하나,
+          // 질문 하나) 'permission' 을 전부 지우면 손대지 않은 쪽의 배지까지 사라진다.
+          const answeredWorkspaceId = isPermissionRequest(answered) ? answered.workspaceId : null
           return {
             state: {
               ...current.state,
               rev: current.state.rev + 1,
               pendingPermissions: current.state.pendingPermissions.filter(
-                (item) =>
-                  typeof item !== 'object' ||
-                  item === null ||
-                  !('requestId' in item) ||
-                  item.requestId !== requestId
+                (item) => !isPermissionRequest(item) || item.requestId !== requestId
               ),
               workspaces: current.state.workspaces.map((item) =>
-                item.attention === 'permission' ? { ...item, attention: null } : item
+                item.id === answeredWorkspaceId ? { ...item, attention: null } : item
               )
             },
             activityRev: current.activityRev + 1

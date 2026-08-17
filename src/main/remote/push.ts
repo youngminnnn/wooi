@@ -4,7 +4,12 @@ import type { NotificationEvent } from '@shared/types'
 import { log } from '../logger'
 import type { RemoteKeystore } from './keystore'
 
-export type RemotePushKind = NotificationEvent
+/**
+ * 배너의 종류. 알림 **설정**의 이벤트(NotificationEvent)와 다르다 — 질문도 설정에서는
+ * 'needsInput' 채널을 따르지만(사용자가 끄고 켜는 단위는 "입력이 필요함" 하나다), 배너에서는
+ * 승인과 다른 말을 해야 한다. 폰은 승인은 Allow/Deny 로, 질문은 선택지로 답하기 때문이다.
+ */
+export type RemotePushKind = NotificationEvent | 'question'
 type PushKind = RemotePushKind | 'summary'
 
 /**
@@ -17,9 +22,14 @@ type PushKind = RemotePushKind | 'summary'
  * 접미사를 상수로 못 박아 두는 이유는 Edge Function 이 같은 표를 갖고 본문을
  * `<이름> <접미사>` 형태로만 검증하기 때문이다 — 버그로 프롬프트나 트랜스크립트가
  * 본문에 실려도 릴레이에서 걸린다. 고칠 때는 `supabase/functions/push/index.ts` 도 같이.
+ *
+ * **종류를 더할 때는 릴레이를 먼저 배포한다.** 모르는 kind 는 400 으로 거절되므로, 함수가
+ * 아직 옛 표를 들고 있으면 배너 문구가 어긋나는 정도가 아니라 알림이 통째로 사라진다.
+ * 두 표가 갈리지 않는지는 push.test.ts 가 지킨다.
  */
 export const REMOTE_PUSH_SUFFIXES: Readonly<Record<RemotePushKind, string>> = {
   needsInput: 'needs your permission',
+  question: 'needs your answer',
   completed: 'finished',
   error: 'encountered an error'
 }
@@ -27,6 +37,7 @@ export const REMOTE_PUSH_SUFFIXES: Readonly<Record<RemotePushKind, string>> = {
 /** 이름을 알 수 없거나(요약) 못 쓸 때의 문구. */
 export const REMOTE_PUSH_BODIES: Readonly<Record<PushKind, string>> = {
   needsInput: `A workspace ${REMOTE_PUSH_SUFFIXES.needsInput}`,
+  question: `A workspace ${REMOTE_PUSH_SUFFIXES.question}`,
   completed: `A workspace ${REMOTE_PUSH_SUFFIXES.completed}`,
   error: `A workspace ${REMOTE_PUSH_SUFFIXES.error}`,
   summary: 'Several workspaces need your attention'

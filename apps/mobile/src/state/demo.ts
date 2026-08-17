@@ -2,6 +2,7 @@ import type { RemoteState, RemoteWorkspace } from '@shared/remote'
 import type { ChatItem, PermissionRequest, PrChecks } from '@shared/types'
 
 export const DEMO_PERMISSION_ID = 'demo-permission'
+export const DEMO_QUESTION_ID = 'demo-question'
 
 interface DemoSession {
   state: RemoteState
@@ -57,6 +58,31 @@ export function createDemoSession(now: number = Date.now()): DemoSession {
     kind: 'command',
     input: { command: ['npm', 'test', '--', '--runInBand'] },
     rule: 'Bash(npm test:*)'
+  }
+  /**
+   * 답을 기다리는 요청. 데모에 승인만 있으면 **폰이 질문을 어떻게 그리는지**(선택지 카드,
+   * 목록의 QUESTION 배지·말풍선)가 페어링하기 전에는 아예 보이지 않는다. 승인과 나란히 둬야
+   * 둘이 다른 일이라는 것도 한 화면에서 읽힌다.
+   */
+  const question: PermissionRequest = {
+    requestId: DEMO_QUESTION_ID,
+    workspaceId: 'docs-refresh',
+    toolName: 'AskUserQuestion',
+    kind: 'question',
+    title: 'How should the pairing section open?',
+    displayName: 'Answer',
+    input: {
+      questions: [
+        {
+          question: 'How should the pairing section open?',
+          header: 'Opening',
+          options: [
+            { label: 'Start with the QR code', description: 'Show the screenshot first' },
+            { label: 'Start with what pairing is', description: 'Explain the link, then the steps' }
+          ]
+        }
+      ]
+    }
   }
   const workspaces = [
     workspace(
@@ -168,11 +194,14 @@ export function createDemoSession(now: number = Date.now()): DemoSession {
         model: 'Claude Sonnet 4',
         permissionMode: 'acceptEdits',
         permissionModeFooter: { symbol: '⏵⏵', text: 'accept edits on', tone: 'caution' },
+        // 답을 기다리는 쪽. 목록에서 승인(mobile-checkout)과 나란히 놓여 배지·아이콘이
+        // 어떻게 갈리는지 보인다.
+        attention: 'permission',
         statusLine: {
           model: 'Sonnet 5 (1M context)',
           effort: 'Model default',
           context: { usedTokens: 640_000, maxTokens: 1_000_000, percentage: 0.64 },
-          compacting: true
+          compacting: false
         }
       },
       now - 2 * 60_000
@@ -378,7 +407,7 @@ export function createDemoSession(now: number = Date.now()): DemoSession {
           windows: [{ label: 'Weekly', usedPct: 93, resetsAt: now + 2 * 86_400_000 }]
         }
       ],
-      pendingPermissions: [permission]
+      pendingPermissions: [permission, question]
     },
     transcripts,
     // 세 가지 결이 다 보여야 PR 화면을 눈으로 확인할 수 있다 — 돌고 있는 것, 깨진 것,

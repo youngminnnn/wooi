@@ -12,7 +12,13 @@ import { getStore } from '../store'
 import { codexMcpServerEnv } from '../mcpSettings'
 import { getTranscripts } from '../transcripts'
 import { log } from '../logger'
-import { IPC, agentSettingsFor, normalizePermissionMode, workspaceDisplayName } from '@shared/types'
+import {
+  IPC,
+  agentSettingsFor,
+  isQuestionPermission,
+  normalizePermissionMode,
+  workspaceDisplayName
+} from '@shared/types'
 import { CODEX_META, type AgentBackend, type TurnEndHook } from '../agent/backend'
 import { canLeadAgentTeam, delegateBackendsFor } from '../agent/multiAgent'
 import { delegateThreadInstructions, soloThreadInstructions } from '../subagent/catalog'
@@ -22,7 +28,7 @@ import { CodexSkillsCache, mergeSkillCommands } from './skills'
 import type { SkillsListResponse } from './wire'
 import { RATE_LIMIT_CONTINUATION, RateLimitResumeCoordinator } from '../rateLimitResume'
 import { notifyRemotePush } from '../remote'
-import { shouldSendRemotePush } from '../remote/push'
+import { shouldSendRemotePush, type RemotePushKind } from '../remote/push'
 import {
   expandWooiCommand,
   matchWooiCommand,
@@ -849,11 +855,16 @@ export class CodexSessionManager implements AgentBackend {
 
   private onPermissionRequest(request: PermissionRequest): void {
     this.pendingPermissions.set(request.requestId, request.workspaceId)
+    // 질문은 승인과 다른 말로 알린다 — claude/manager 의 같은 자리와 같은 규칙이다.
+    const question = isQuestionPermission(request)
     this.notify(
       request.workspaceId,
       'needsInput',
-      `Needs permission: ${request.displayName ?? request.toolName}`,
-      false
+      question
+        ? 'Has a question for you'
+        : `Needs permission: ${request.displayName ?? request.toolName}`,
+      false,
+      question ? 'question' : 'needsInput'
     )
     this.dispatch(IPC.evtPermission, request)
   }
@@ -905,7 +916,12 @@ export class CodexSessionManager implements AgentBackend {
     workspaceId: string,
     event: NotificationEvent,
     body: string,
-    urgent: boolean
+    urgent: boolean,
+    /**
+     * 폰 배너의 종류. 기본은 설정 이벤트와 같지만 갈릴 수 있다 — 질문은 설정에서는
+     * 'needsInput' 채널을 따르면서도 배너에서는 승인과 다른 말을 해야 한다(remote/push.ts).
+     */
+    pushKind: RemotePushKind = event
   ): void {
     const win = this.getWindow()
     const ws = this.getWorkspace(workspaceId)
@@ -923,7 +939,7 @@ export class CodexSessionManager implements AgentBackend {
         always: getStore().getState().settings.remotePushWhileActive === true
       })
     ) {
-      notifyRemotePush(workspaceId, ws ? workspaceDisplayName(ws) : 'Workspace', event)
+      notifyRemotePush(workspaceId, ws ? workspaceDisplayName(ws) : 'Workspace', pushKind)
     }
     if (focused || !Notification.isSupported()) return
 

@@ -13,6 +13,7 @@ const {
   REMOTE_PUSH_BODIES,
   REMOTE_PUSH_IDLE_SECONDS,
   REMOTE_PUSH_NAME_MAX,
+  REMOTE_PUSH_SUFFIXES,
   RemotePush,
   shouldSendRemotePush
 } = await import('./push')
@@ -77,6 +78,14 @@ describe('RemotePush', () => {
     await remotePush().notify({ ...notification, kind: 'error' })
     expect(call.mock.calls[0]?.[0].body).toBe('design-tokens needs your permission')
     expect(call.mock.calls[1]?.[0].body).toBe('design-tokens encountered an error')
+  })
+
+  // 승인과 질문은 사용자가 할 행동이 다르다 — 폰은 Allow/Deny 카드와 선택지 카드로 갈라
+  // 그리는데 배너가 둘 다 "권한" 이라고 부르면, 잠금화면만 보고는 무엇을 해야 하는지 모른다.
+  it('질문은 승인과 다른 문구로 알린다', async () => {
+    await remotePush().notify({ ...notification, kind: 'question' })
+    expect(call.mock.calls[0]?.[0].body).toBe('design-tokens needs your answer')
+    expect(call.mock.calls[0]?.[0].kind).toBe('question')
   })
 
   it('긴 이름은 배너 한 줄에 맞게 자른다', async () => {
@@ -177,5 +186,27 @@ describe('shouldSendRemotePush', () => {
 
   it('always 면 쓰고 있는 중에도 보낸다', () => {
     expect(shouldSendRemotePush({ ...using, always: true })).toBe(true)
+  })
+})
+
+/**
+ * 배너 문구표는 랩탑과 릴레이 양쪽에 있다 — Edge Function 이 본문을 `<이름> <접미사>` 로만
+ * 통과시키기 때문이다. 갈리면 증상이 "그 종류의 알림만 오지 않는다"(400) 뿐이라 눈으로는
+ * 잡히지 않으므로, 두 표가 같은지는 여기서 못 박는다.
+ */
+describe('릴레이와의 문구 계약', () => {
+  it('Edge Function 의 접미사 표와 글자 하나까지 같다', async () => {
+    const { readFileSync } = await import('node:fs')
+    const { fileURLToPath } = await import('node:url')
+    const path = fileURLToPath(
+      new URL('../../../supabase/functions/push/index.ts', import.meta.url)
+    )
+    const source = readFileSync(path, 'utf8')
+    const table = source.match(/const SUFFIXES = \{([\s\S]*?)\} as const/)?.[1] ?? ''
+    const relay = Object.fromEntries(
+      [...table.matchAll(/(\w+): '([^']*)'/g)].map((match) => [match[1], match[2]])
+    )
+    expect(relay).toEqual(REMOTE_PUSH_SUFFIXES)
+    expect(source).toContain(REMOTE_PUSH_BODIES.summary)
   })
 })
