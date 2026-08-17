@@ -190,12 +190,32 @@ export default function RemoteAccessPanel({
             <span className="text-sm text-neutral-300">
               Send notifications to paired phones
               <span className="block text-xs text-neutral-600 leading-relaxed">
-                Only when you are away from this computer. The banner names the workspace and what
-                happened — that name is the one thing sent in the clear. Everything else is
-                decrypted on your phone when you tap it.
+                The banner names the workspace and what happened — that name is the one thing sent
+                in the clear. Everything else is decrypted on your phone when you tap it.
               </span>
             </span>
           </label>
+
+          {/* 언제 보낼지는 켤지 말지와 다른 질문이다. 기본은 "자리를 비웠을 때만" 이라
+              눈앞의 창이 이미 알려 준 일로 주머니가 울리지 않는다. */}
+          {settings.remotePushEnabled && (
+            <div className="pl-6 flex flex-col gap-1.5">
+              <PushWhenOption
+                checked={!settings.remotePushWhileActive}
+                disabled={busy}
+                onSelect={() => save({ remotePushWhileActive: false })}
+                label="Only when I am away from this computer"
+                hint="Silent while a Wooi window is in front of you and you are typing."
+              />
+              <PushWhenOption
+                checked={settings.remotePushWhileActive}
+                disabled={busy}
+                onSelect={() => save({ remotePushWhileActive: true })}
+                label="Always, even while I am using Wooi"
+                hint="Your phone rings for every notification, desktop or not."
+              />
+            </div>
+          )}
 
           <DeviceList
             devices={status.devices}
@@ -520,4 +540,37 @@ function formatSeconds(total: number): string {
   const minutes = Math.floor(total / 60)
   const seconds = total % 60
   return minutes > 0 ? `${minutes}m ${String(seconds).padStart(2, '0')}s` : `${seconds}s`
+}
+
+interface PushWhenOptionProps {
+  checked: boolean
+  disabled: boolean
+  onSelect: () => void
+  label: string
+  hint: string
+}
+
+function PushWhenOption({
+  checked,
+  disabled,
+  onSelect,
+  label,
+  hint
+}: PushWhenOptionProps): React.JSX.Element {
+  return (
+    <label className="flex items-start gap-2.5 cursor-pointer">
+      <input
+        type="radio"
+        name="remote-push-when"
+        checked={checked}
+        disabled={disabled}
+        onChange={onSelect}
+        className="accent-blue-600 h-3.5 w-3.5 mt-0.5"
+      />
+      <span className="text-sm text-neutral-300">
+        {label}
+        <span className="block text-xs text-neutral-600 leading-relaxed">{hint}</span>
+      </span>
+    </label>
+  )
 }

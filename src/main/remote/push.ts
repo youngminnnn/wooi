@@ -222,3 +222,30 @@ export class RemotePush {
 function errorText(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
+
+/**
+ * 이 시간(초) 이상 아무 입력이 없으면, 창이 앞에 있어도 자리를 비운 것으로 본다.
+ * 랩탑을 열어 둔 채 나간 경우가 "쓰고 있는 중"으로 오인되면 폰이 영영 울리지 않는다.
+ */
+export const REMOTE_PUSH_IDLE_SECONDS = 60
+
+export interface RemotePushActivity {
+  /** Wooi 창(메인·분리 패널 아무거나) 이 지금 포커스를 갖고 있는가. */
+  appFocused: boolean
+  /** 마지막 입력 이후 흐른 초. `powerMonitor.getSystemIdleTime()` 값. */
+  idleSeconds: number
+  /** 데스크톱을 쓰는 중에도 항상 보내라는 설정(`remotePushWhileActive`). */
+  always: boolean
+}
+
+/**
+ * 폰을 깨울지 말지. 기본은 **데스크톱을 쓰는 중이면 보내지 않는다** — 눈앞의 창이 이미
+ * 같은 사실을 보여 주는데 주머니까지 울리면 알림이 두 번 온 것으로만 느껴진다.
+ *
+ * "쓰는 중" 은 창이 앞에 있고 사람이 실제로 입력하고 있을 때로 좁게 잡는다. 둘 중 하나라도
+ * 아니면(다른 앱을 보고 있거나, 창은 떠 있지만 자리를 비웠거나) 폰이 유일한 통로다.
+ */
+export function shouldSendRemotePush(activity: RemotePushActivity): boolean {
+  if (activity.always) return true
+  return !activity.appFocused || activity.idleSeconds >= REMOTE_PUSH_IDLE_SECONDS
+}

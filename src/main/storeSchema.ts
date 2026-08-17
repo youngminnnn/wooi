@@ -114,7 +114,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   // 모르는 상태에서는 닫아 둔다 — 열려 있다고 확인된 뒤에만 보인다.
   remoteAccessAvailable: false,
   // 푸시는 제3자 전달망을 지나므로 원격 접근과 별도로 명시적으로 켜야 한다.
-  remotePushEnabled: false
+  remotePushEnabled: false,
+  // 데스크톱을 쓰는 동안은 폰을 깨우지 않는 편이 기본이다. 항상 받고 싶으면 설정에서 켠다.
+  remotePushWhileActive: false
 }
 
 export const EMPTY_STATE: AppState = {

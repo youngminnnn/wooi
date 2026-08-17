@@ -9,7 +9,13 @@ vi.mock('electron', () => ({
 
 const { deriveDirectionKeys, fromBase64Url, generateSessionKey, openJson, toBase64Url } =
   await import('@shared/crypto')
-const { REMOTE_PUSH_BODIES, REMOTE_PUSH_NAME_MAX, RemotePush } = await import('./push')
+const {
+  REMOTE_PUSH_BODIES,
+  REMOTE_PUSH_IDLE_SECONDS,
+  REMOTE_PUSH_NAME_MAX,
+  RemotePush,
+  shouldSendRemotePush
+} = await import('./push')
 
 const machineId = 'machine-1'
 const sessionKey = generateSessionKey()
@@ -147,5 +153,29 @@ describe('RemotePush', () => {
     enabled = false
     await remotePush().notify(notification)
     expect(call).not.toHaveBeenCalled()
+  })
+})
+
+describe('shouldSendRemotePush', () => {
+  const away = { appFocused: false, idleSeconds: 0, always: false }
+  const using = { appFocused: true, idleSeconds: 0, always: false }
+
+  it('데스크톱을 쓰고 있으면 보내지 않는다', () => {
+    expect(shouldSendRemotePush(using)).toBe(false)
+  })
+
+  it('다른 앱을 보고 있으면 보낸다', () => {
+    expect(shouldSendRemotePush(away)).toBe(true)
+  })
+
+  it('창이 앞에 있어도 자리를 비웠으면 보낸다', () => {
+    expect(shouldSendRemotePush({ ...using, idleSeconds: REMOTE_PUSH_IDLE_SECONDS })).toBe(true)
+    expect(shouldSendRemotePush({ ...using, idleSeconds: REMOTE_PUSH_IDLE_SECONDS - 1 })).toBe(
+      false
+    )
+  })
+
+  it('always 면 쓰고 있는 중에도 보낸다', () => {
+    expect(shouldSendRemotePush({ ...using, always: true })).toBe(true)
   })
 })
