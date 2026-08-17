@@ -29,6 +29,15 @@ describe('tool display policy', () => {
     )
   })
 
+  // CLI 는 스킬도 평범한 도구 한 줄로 그린다 — `Skill(wiki-ingest:wiki-ingest)`.
+  // 이름은 userFacingName 이 그대로 "Skill", 괄호 안은 renderToolUseMessage 가 고른 스킬 이름이다.
+  it('renders a skill call the way the CLI does', () => {
+    expect(toolDisplayName('Skill')).toBe('Skill')
+    expect(toolUseSummary('Skill', { skill: 'wiki-ingest:wiki-ingest' })).toBe(
+      'wiki-ingest:wiki-ingest'
+    )
+  })
+
   it('leaves names it does not recognise alone', () => {
     expect(toolDisplayName('Bash')).toBe('Bash')
     expect(toolDisplayName('Glob')).toBe('Search')

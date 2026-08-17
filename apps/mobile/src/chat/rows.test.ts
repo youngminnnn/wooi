@@ -23,6 +23,14 @@ describe('buildChatRows', () => {
     expect(rows[1]).toMatchObject({ kind: 'tool-group', group: { uses: [{ toolId: '1' }, { toolId: '2' }], latestHint: 'needle' } })
   })
 
+  // 스킬은 "여기서부터 이 절차로 일한다" 는 전환점이라 옆 조회 호출과 묶이면 안 된다.
+  // 랩탑과 같은 판정(@shared/toolGroups)을 쓰므로 여기서 깨지면 양쪽이 같이 깨진 것이다.
+  it('스킬 호출은 한 줄로 세우고 옆 조회와 묶지 않는다', () => {
+    const rows = buildChatRows([result('2'), use('2'), result('1', 'Launching skill: wooi-run'), use('1', 'Skill', { skill: 'wooi-run' })])
+    expect(rows.map((row) => row.kind)).toEqual(['tool', 'tool'])
+    expect(rows[1]).toMatchObject({ kind: 'tool', card: { title: 'Skill · wooi-run' } })
+  })
+
   it('빈 thinking만 버린다', () => {
     const rows = buildChatRows([{ id: 'empty', type: 'thinking', text: ' \n ', ts: 2 }, { id: 'kept', type: 'thinking', text: 'reasoning', ts: 1 }])
     expect(rows.map((row) => row.id)).toEqual(['kept'])

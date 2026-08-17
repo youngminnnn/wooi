@@ -20,6 +20,21 @@ const result = (toolId: string): ChatItem => ({
 })
 const text = (id: string): ChatItem => ({ id, type: 'assistant', text: 'between', ts: 0 })
 
+describe('toolKind', () => {
+  // 스킬은 "여기서부터 이 절차로 일한다" 는 전환점이다. 도구 한 줄로 그리더라도
+  // "called 3 tools" 안으로 접히면 방향이 바뀐 지점이 화면에서 사라진다.
+  it('스킬 호출은 다른 도구와 묶지 않는다', () => {
+    expect(toolKind('Skill', { skill: 'wiki-ingest:wiki-ingest' })).toBe('uncollapsible')
+    expect(
+      buildToolGroups([
+        use('Read', { file_path: 'a.ts' }, '1'),
+        use('Skill', { skill: 'wiki-ingest:wiki-ingest' }, '2'),
+        use('Read', { file_path: 'b.ts' }, '3')
+      ]).groupByItemId.size
+    ).toBe(0)
+  })
+})
+
 describe('buildToolGroups', () => {
   it('연속 호출이 하나뿐이면 묶지 않는다', () => {
     expect(buildToolGroups([use('Read', { file_path: 'a.ts' }, '1')]).groupByItemId.size).toBe(0)

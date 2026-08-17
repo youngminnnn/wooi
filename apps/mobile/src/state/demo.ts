@@ -196,6 +196,24 @@ export function createDemoSession(now: number = Date.now()): DemoSession {
       text: 'I need to trace the connection state, then exercise both the list and detail screens.',
       ts: now - 68_000
     },
+    // 스킬 호출도 평범한 도구 한 줄이다(Claude Code CLI 와 같다). 데모에 하나 끼워 두면
+    // 페어링 없이도 시뮬레이터에서 그 줄이 어떻게 그려지는지 눈으로 볼 수 있다.
+    {
+      id: 'demo-skill-use',
+      type: 'tool_use',
+      toolId: 'tool-demo-skill',
+      name: 'Skill',
+      input: { skill: 'wooi-run' },
+      ts: now - 64_000
+    },
+    {
+      id: 'demo-skill-result',
+      type: 'tool_result',
+      toolId: 'tool-demo-skill',
+      text: 'Launching skill: wooi-run',
+      isError: false,
+      ts: now - 62_000
+    },
     {
       id: 'demo-tool-use',
       type: 'tool_use',
