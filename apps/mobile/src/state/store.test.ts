@@ -53,7 +53,8 @@ describe('데모 명령', () => {
     expect(demo.demo).toBe(true)
     expect(demo.pairing).toBeNull()
     expect(demo.state?.repos).toHaveLength(2)
-    expect(demo.state?.pendingPermissions).toHaveLength(1)
+    // 승인 하나와 질문 하나 — 데모에서도 둘이 어떻게 다르게 그려지는지 보여야 한다.
+    expect(demo.state?.pendingPermissions).toHaveLength(2)
     expect(demo.command).not.toBeNull()
 
     const command = demo.command!
@@ -81,7 +82,16 @@ describe('데모 명령', () => {
     expect(updated.some((item) => item.text === 'Show me the local reply')).toBe(true)
 
     await command('permission:respond', ['demo-permission', { behavior: 'allow' }])
-    expect(useRemoteStore.getState().state?.pendingPermissions).toHaveLength(0)
+    const afterAllow = useRemoteStore.getState().state
+    expect(afterAllow?.pendingPermissions).toHaveLength(1)
+    // 답한 요청의 워크스페이스만 내린다. 하나에 답했다고 다른 워크스페이스의 배지까지
+    // 사라지면, 목록만 보고는 아직 기다리는 것이 있다는 사실을 알 수 없다.
+    expect(
+      afterAllow?.workspaces.find((item) => item.id === 'mobile-checkout')?.attention
+    ).toBeNull()
+    expect(afterAllow?.workspaces.find((item) => item.id === 'docs-refresh')?.attention).toBe(
+      'permission'
+    )
 
     await command('chat:interrupt', ['mobile-checkout'])
     expect(
