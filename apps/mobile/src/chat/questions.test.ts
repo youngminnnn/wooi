@@ -7,7 +7,8 @@ import {
   applyToggle,
   buildAnswers,
   isQuestionRequest,
-  parseQuestions
+  parseQuestions,
+  questionWorkspaceIds
 } from './questions'
 
 const request = (over: Partial<PermissionRequest> = {}): PermissionRequest => ({
@@ -45,6 +46,23 @@ describe('isQuestionRequest', () => {
     expect(isQuestionRequest(request({ input: { questions: 'nope' } }))).toBe(false)
     expect(isQuestionRequest(request({ input: {} }))).toBe(false)
     expect(isQuestionRequest(request({ input: { questions: [{ options: [] }] } }))).toBe(false)
+  })
+})
+
+describe('questionWorkspaceIds', () => {
+  it('질문을 기다리는 워크스페이스만 모은다', () => {
+    const ids = questionWorkspaceIds([
+      request(),
+      request({ requestId: 'r2', workspaceId: 'w2', toolName: 'Bash', input: { command: 'ls' } })
+    ])
+    expect([...ids]).toEqual(['w1'])
+  })
+
+  // 와이어에서는 `unknown[]` 라(shared/remote) 모양을 믿을 수 없다. 구형 랩탑이 필드를 아예
+  // 보내지 않는 경우(undefined)까지 여기서 흡수한다 — 목록이 죽으면 안 되는 자리다.
+  it('읽을 수 없는 항목과 빈 목록을 흡수한다', () => {
+    expect(questionWorkspaceIds(undefined).size).toBe(0)
+    expect(questionWorkspaceIds([null, 'nope', { requestId: 'r1' }]).size).toBe(0)
   })
 })
 

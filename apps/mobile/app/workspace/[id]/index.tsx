@@ -45,7 +45,7 @@ import { useDeviceAuthentication } from '../../../src/state/useDeviceAuth'
 import { useTheme, useThemedStyles } from '../../../src/state/theme'
 import type { Theme } from '../../../src/theme'
 import { buildChatRows, type ChatRowModel, type ToolCardModel } from '../../../src/chat/rows'
-import { isQuestionRequest } from '../../../src/chat/questions'
+import { isPermissionRequest, isQuestionRequest } from '../../../src/chat/questions'
 
 const PAGE_SIZE = 100
 const WATCH_REFRESH_MS = 40_000
@@ -57,16 +57,6 @@ function errorMessage(error: unknown): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function isPermissionRequest(value: unknown): value is PermissionRequest {
-  return (
-    isRecord(value) &&
-    typeof value.requestId === 'string' &&
-    typeof value.workspaceId === 'string' &&
-    typeof value.toolName === 'string' &&
-    isRecord(value.input)
-  )
 }
 
 function formatPermissionInput(request: PermissionRequest): string {

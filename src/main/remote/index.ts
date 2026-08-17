@@ -21,9 +21,9 @@ import {
 import { PairingManager, type PairingState } from './pairing'
 import { StateMirror } from './mirror'
 import { RemoteCommandBridge } from './bridge'
-import type { AppState, NotificationEvent, PermissionRequest } from '@shared/types'
+import type { AppState, PermissionRequest } from '@shared/types'
 import { pendingPermissions } from './permissions'
-import { RemotePush, type RemotePushRequest } from './push'
+import { RemotePush, type RemotePushKind, type RemotePushRequest } from './push'
 
 /**
  * 원격 접근 기능의 파사드. main 의 나머지 부분은 이 파일만 안다.
@@ -254,7 +254,7 @@ export class RemoteBridge {
     if (appState) this.publishState(appState, pendingPermissions.list())
   }
 
-  notifyPush(workspaceId: string, workspaceName: string, kind: NotificationEvent): void {
+  notifyPush(workspaceId: string, workspaceName: string, kind: RemotePushKind): void {
     void this.push?.notify({ workspaceId, workspaceName, kind })
   }
 
@@ -465,7 +465,7 @@ export function getRemoteBridge(): RemoteBridge {
 export function notifyRemotePush(
   workspaceId: string,
   workspaceName: string,
-  kind: NotificationEvent
+  kind: RemotePushKind
 ): void {
   bridge?.notifyPush(workspaceId, workspaceName, kind)
 }

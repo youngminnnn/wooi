@@ -1859,6 +1859,18 @@ export interface PermissionRequest {
   options?: PermissionOption[]
 }
 
+/**
+ * 이 요청이 "행위 승인" 이 아니라 **사용자에게 답을 묻는** 것인가.
+ *
+ * `kind === 'question'` 이 아니라 도구 이름으로 가른다 — codex 의 McpElicitation 도 kind 는
+ * 'question' 이지만 그것은 Allow/Deny 로 답하는 요청이다. 반대로 codex 의
+ * `tool/requestUserInput` 은 Claude 의 AskUserQuestion 과 같은 이름으로 매핑되어 들어온다
+ * (`codex/mapping.ts`). 화면(ChatView·QuestionPrompt)과 폰이 쓰는 갈림과 같은 규칙이다.
+ */
+export function isQuestionPermission(request: Pick<PermissionRequest, 'toolName'>): boolean {
+  return request.toolName === 'AskUserQuestion'
+}
+
 /** 승인 프롬프트가 그리는 버튼 1개. `id` 는 백엔드가 해석하는 불투명 값이다. */
 export interface PermissionOption {
   id: string

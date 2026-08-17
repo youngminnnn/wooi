@@ -4,8 +4,10 @@ import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2'
 // 강제한다 — 워크스페이스 이름은 평문 통과를 허용하지만(PRIVACY.md 참고) 프롬프트나
 // 트랜스크립트가 버그로 본문에 실리는 일은 릴레이에서 막는다.
 // 단일 소스는 `src/main/remote/push.ts` 이고, 고칠 때는 양쪽을 같이 고친다.
+// 종류를 더할 때는 **이쪽을 먼저 배포한다** — 모르는 kind 는 400 이라 알림이 통째로 사라진다.
 const SUFFIXES = {
   needsInput: 'needs your permission',
+  question: 'needs your answer',
   completed: 'finished',
   error: 'encountered an error'
 } as const

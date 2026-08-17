@@ -42,6 +42,20 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
+ * 릴레이를 건너온 값이 권한 요청 모양인지. `pendingPermissions` 는 와이어에서 `unknown[]` 라
+ * (shared/remote), 읽기 전에 반드시 이 문을 지나야 한다.
+ */
+export function isPermissionRequest(value: unknown): value is PermissionRequest {
+  return (
+    isRecord(value) &&
+    typeof value.requestId === 'string' &&
+    typeof value.workspaceId === 'string' &&
+    typeof value.toolName === 'string' &&
+    isRecord(value.input)
+  )
+}
+
+/**
  * 도구 입력에서 질문 목록을 꺼낸다. 릴레이를 건너온 값이라 모양을 믿지 않는다 —
  * 읽을 수 없는 항목은 버리고, 하나도 남지 않으면 빈 배열이다(호출자는 일반 승인 카드로 되돌린다).
  */
@@ -85,6 +99,22 @@ export function parseQuestions(input: Record<string, unknown>): Question[] {
  */
 export function isQuestionRequest(request: PermissionRequest): boolean {
   return request.toolName === 'AskUserQuestion' && parseQuestions(request.input).length > 0
+}
+
+/**
+ * 지금 **질문**을 기다리고 있는 워크스페이스 id 들. 목록이 "PERMISSION" 대신 "QUESTION" 으로
+ * 부르기 위한 것이다 — 승인을 기다리는 것과 답을 기다리는 것은 사용자가 할 일이 다르고,
+ * 상세 화면은 이미 갈라 그리는데(QuestionCard) 목록만 전부 권한이라고 부르면 어긋난다.
+ *
+ * 판단은 상세 화면과 **같은 함수**(isQuestionRequest)로 한다. 목록이 따로 규칙을 지으면
+ * 두 화면이 갈라진다 — 목록은 QUESTION 인데 열면 Allow/Deny, 같은 종류의 어긋남이다.
+ */
+export function questionWorkspaceIds(pending: readonly unknown[] | undefined): Set<string> {
+  const ids = new Set<string>()
+  for (const item of pending ?? []) {
+    if (isPermissionRequest(item) && isQuestionRequest(item)) ids.add(item.workspaceId)
+  }
+  return ids
 }
 
 /** 옵션 하나를 켜고 끈다. 단일 선택이면 켜기만 하고 기존 선택을 대체한다(라디오와 같다). */
