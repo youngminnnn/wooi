@@ -142,7 +142,7 @@ export const useRemoteStore = create<RemoteStore>((set, get) => ({
           {
             id: `demo-assistant-${timestamp}`,
             type: 'assistant',
-            text: 'Demo reply: this message stayed on your phone and was not sent to a laptop.',
+            text: 'Demo reply: this message stayed on your phone and was not sent to a computer.',
             ts: timestamp + 1
           }
         )

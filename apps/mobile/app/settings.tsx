@@ -65,7 +65,7 @@ export default function SettingsScreen(): React.JSX.Element {
   const confirmUnpair = useCallback((): void => {
     Alert.alert(
       'Unpair this phone?',
-      'This phone will stop receiving sessions and notifications. To reconnect, get a new pairing code from your laptop.',
+      'This phone will stop receiving sessions and notifications. To reconnect, get a new pairing code from your computer.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -119,7 +119,7 @@ export default function SettingsScreen(): React.JSX.Element {
           </SettingsSection>
         ) : (
           <SettingsSection title="Connection">
-            <SettingsRow label="Laptop" value={state?.machine.name ?? pairing?.machineName ?? '—'} />
+            <SettingsRow label="Computer" value={state?.machine.name ?? pairing?.machineName ?? '—'} />
             <SettingsRow label="Status" value={connectionStatus} />
             <SettingsRow
               label="Last update"

@@ -15,7 +15,7 @@ export function DemoBanner(): React.JSX.Element | null {
     <View style={styles.banner}>
       <View style={styles.copy}>
         <Text style={styles.title}>DEMO MODE</Text>
-        <Text style={styles.body}>Sample data only — nothing is connected to a real laptop.</Text>
+        <Text style={styles.body}>Sample data only — nothing is connected to a real computer.</Text>
       </View>
       <Pressable
         accessibilityRole="button"

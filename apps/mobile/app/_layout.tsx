@@ -105,7 +105,7 @@ function RootShell(): React.JSX.Element {
           () => {
             useRemoteStore
               .getState()
-              .unpaired('Your laptop disconnected this phone. Pair again to reconnect.')
+              .unpaired('Your computer disconnected this phone. Pair again to reconnect.')
           }
         )
       },

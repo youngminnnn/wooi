@@ -50,7 +50,12 @@ function PairShell({
           <WooiLogo size={46} />
           <View style={styles.heroText}>
             <Text style={styles.wordmark}>Wooi</Text>
-            <Text style={styles.tagline}>Your laptop&apos;s coding sessions, on your phone.</Text>
+            {/* 이 앱이 단독 제품이 아니라 Mac 앱 Wooi 의 원격이라는 것을 여기서 못 박는다.
+                아래 단계 설명은 "컴퓨터에서 Wooi 를 연다"로 시작하는데, 스토어에서 이것만 받아
+                처음 켠 사람에게는 그 전제가 없다 — 무엇을 먼저 깔아야 하는지부터 모른다. */}
+            <Text style={styles.tagline}>
+              Remote for Wooi on your Mac — your coding sessions, on your phone.
+            </Text>
           </View>
         </View>
         <ScrollView
@@ -71,7 +76,7 @@ function PairShell({
 function Steps(): React.JSX.Element {
   const styles = useThemedStyles(makeStyles)
   const steps = [
-    'Open Wooi on your laptop',
+    'Open Wooi on your computer',
     'Settings → Integrations → Remote access',
     'Scan the code, then check the six digits match'
   ]
@@ -250,12 +255,12 @@ export default function PairScreen(): React.JSX.Element {
             {claim.sas.slice(0, 3)} {claim.sas.slice(3)}
           </Text>
           <Text style={styles.warning}>
-            Continue only if your laptop shows exactly these six digits. If they differ, reject the
-            request on your laptop — someone else may have claimed the code.
+            Continue only if your computer shows exactly these six digits. If they differ, reject the
+            request on your computer — someone else may have claimed the code.
           </Text>
           <View style={styles.waitingRow}>
             <ActivityIndicator color={theme.accent} size="small" />
-            <Text style={styles.waiting}>Waiting for confirmation on your laptop…</Text>
+            <Text style={styles.waiting}>Waiting for confirmation on your computer…</Text>
           </View>
         </View>
       </SafeAreaView>
@@ -298,7 +303,7 @@ export default function PairScreen(): React.JSX.Element {
         <Text style={styles.title}>Paste the pairing code</Text>
         <Notice text={unpairedReason} />
         <Text style={styles.body}>
-          On your laptop, open Settings → Integrations → Remote access → Pair a phone, then copy the
+          On your computer, open Settings → Integrations → Remote access → Pair a phone, then copy the
           code shown under the QR.
         </Text>
         <TextInput
@@ -332,7 +337,7 @@ export default function PairScreen(): React.JSX.Element {
         <Text style={styles.title}>Pair this phone</Text>
         <Notice text={unpairedReason} />
         <Text style={styles.body}>
-          Wooi shows a one-time code on your laptop. Scan it to set up an end-to-end encrypted link
+          Wooi shows a one-time code on your computer. Scan it to set up an end-to-end encrypted link
           — the relay in between never sees your sessions.
         </Text>
         <Steps />
@@ -374,7 +379,7 @@ function Scanner({
       />
       <SafeAreaView style={styles.cameraOverlay}>
         <View style={styles.cameraHeader}>
-          <Text style={styles.cameraTitle}>Scan the code on your laptop</Text>
+          <Text style={styles.cameraTitle}>Scan the code on your computer</Text>
           <Text style={styles.cameraHint}>Single-use, expires after five minutes.</Text>
           {unpairedReason !== null ? <Notice text={unpairedReason} /> : null}
         </View>

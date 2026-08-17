@@ -285,12 +285,12 @@ export function createDemoSession(now: number = Date.now()): DemoSession {
 
   const SAMPLES: Record<string, [string, string]> = {
     'relay-reconnect': [
-      'The phone stops receiving updates after the laptop sleeps. Can you look?',
+      'The phone stops receiving updates after the computer sleeps. Can you look?',
       'The socket dies during sleep and nothing re-opens it. I added a resume hook that reconnects immediately instead of waiting for the next heartbeat.'
     ],
     'remote-banner': [
-      'Split the offline banner so it says whether the phone or the laptop is the one that is away.',
-      'Done. The phone now polls the laptop’s last-seen time separately, so "you are offline" and "your laptop is asleep" are different messages.'
+      'Split the offline banner so it says whether the phone or the computer is the one that is away.',
+      'Done. The phone now polls the computer’s last-seen time separately, so "you are offline" and "your computer is asleep" are different messages.'
     ],
     'usage-recovery': [
       'What happens to a queued turn when the usage limit resets?',
@@ -298,7 +298,7 @@ export function createDemoSession(now: number = Date.now()): DemoSession {
     ],
     'docs-refresh': [
       'Write the setup section for pairing a phone.',
-      'Drafted it: install, scan the code shown on the laptop, then confirm the six digits match on both screens. I kept the warning about rejecting a mismatch.'
+      'Drafted it: install, scan the code shown on the computer, then confirm the six digits match on both screens. I kept the warning about rejecting a mismatch.'
     ],
     'release-notes': [
       'Summarise what changed for the release notes.',

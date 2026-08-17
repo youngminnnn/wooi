@@ -37,7 +37,7 @@ export type RemoteCommandChannel =
 
 export class RemoteCommandTimeoutError extends Error {
   constructor() {
-    super('The laptop has not responded yet. The command is still queued and may run later.')
+    super('The computer has not responded yet. The command is still queued and may run later.')
     this.name = 'RemoteCommandTimeoutError'
   }
 }
@@ -181,14 +181,14 @@ export class RelayClient {
       // maybeSingle() 이 여러 행을 보고 실패하고, 남의 키로 봉인된 암호문을 잡을 수도 있다.
       .eq('device_id', this.pairing.deviceId)
       .maybeSingle()
-    if (response.error) throw new Error('Could not load laptop state')
+    if (response.error) throw new Error('Could not load computer state')
     if (response.data === null) {
       this.handlers.onState(null)
       this.handlers.onUpdatedAt(null)
       return
     }
     if (!isMachineStateRow(response.data) || response.data.machine_id !== this.pairing.machineId) {
-      throw new Error('The relay returned an invalid laptop state')
+      throw new Error('The relay returned an invalid computer state')
     }
     const state = openJson(
       this.keys.laptopToPhone,
@@ -204,7 +204,7 @@ export class RelayClient {
       }
     )
     if (!isRemoteState(state) || state.rev !== response.data.rev) {
-      throw new Error('The laptop state could not be verified')
+      throw new Error('The computer state could not be verified')
     }
     this.handlers.onState(state)
     const updatedAt = Date.parse(response.data.updated_at)
@@ -363,7 +363,7 @@ export class RelayClient {
 
   private openCommandResult(row: CommandResultRow): unknown {
     if (row.result_nonce === null || row.result_ct === null) {
-      throw new Error('The laptop rejected the command without a readable result')
+      throw new Error('The computer rejected the command without a readable result')
     }
     const opened = openJson(
       this.keys.laptopToPhone,
@@ -378,7 +378,7 @@ export class RelayClient {
         ct: decodePostgresBytea(row.result_ct)
       }
     )
-    if (!isRemoteCommandResult(opened)) throw new Error('The laptop returned an invalid result')
+    if (!isRemoteCommandResult(opened)) throw new Error('The computer returned an invalid result')
     if (!opened.ok) throw new Error(opened.error)
     return opened.value
   }

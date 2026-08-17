@@ -32,7 +32,7 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "Allow Wooi to scan the pairing code shown on your laptop",
+          "cameraPermission": "Allow Wooi to scan the pairing code shown on your computer",
           "recordAudioAndroid": false
         }
       ],
