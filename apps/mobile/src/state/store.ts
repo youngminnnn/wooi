@@ -90,6 +90,13 @@ export const useRemoteStore = create<RemoteStore>((set, get) => ({
           .sort((left, right) => right.ts - left.ts)
           .slice(0, typeof limit === 'number' ? limit : 100)
       }
+      if (channel === 'pr:checks') {
+        // 랩탑이 없는 데모에서도 PR 화면이 진짜와 같은 모양으로 열려야 한다. 목록에 없으면
+        // null — 랩탑의 핸들러도 PR 이 없으면 그렇게 답한다.
+        const workspaceId = args[0]
+        if (typeof workspaceId !== 'string') throw new Error('Invalid demo workspace')
+        return session.checks.get(workspaceId) ?? null
+      }
       if (channel === 'permission:respond') {
         const requestId = args[0]
         set((current) => {

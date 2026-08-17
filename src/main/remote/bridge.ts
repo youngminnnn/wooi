@@ -4,6 +4,7 @@ import { app } from 'electron'
 import type { RealtimeChannel, SupabaseClient } from '@supabase/supabase-js'
 import { deriveDirectionKeys, fromBase64Url, openJson, sealJson } from '@shared/crypto'
 import {
+  REMOTE_COMMAND_FAILED,
   REMOTE_IPC,
   REMOTE_TRUNCATED_MARK,
   type RemoteCommandPayload,
@@ -205,12 +206,7 @@ export class RemoteCommandBridge {
       this.audit(row.device_id, payload.channel, workspaceId, 'accepted', 'done')
     } catch (err) {
       log.error('원격 명령 처리 실패', payload.channel, errorText(err))
-      await this.finish(
-        row,
-        keys.laptopToPhone,
-        failure('The command could not be completed.'),
-        'error'
-      )
+      await this.finish(row, keys.laptopToPhone, failure(REMOTE_COMMAND_FAILED), 'error')
       this.audit(
         row.device_id,
         payload.channel,

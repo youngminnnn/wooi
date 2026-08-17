@@ -28,6 +28,7 @@ interface CommandResultRow {
 
 export type RemoteCommandChannel =
   | 'remote:transcript'
+  | 'pr:checks'
   | 'remote:watch'
   | 'remote:ping'
   | 'remote:unpairSelf'

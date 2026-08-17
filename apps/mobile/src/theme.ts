@@ -202,12 +202,18 @@ export const themes: Record<ThemeName, Theme> = {
  * 쓰지만 폰은 같은 색으로 `#123 · Ready to merge` 를 11.5px 글자로도 적기 때문이다 — 점에는
  * 충분한 3:1 이 그 크기의 글자에는 못 미친다. 중립색 둘(draft·closed)도 같은 이유로 내렸다.
  * 다크 값은 데스크톱 그대로다(어두운 면에서는 400 이 이미 6:1 을 넘는다).
+ *
+ * **PrState 의 값을 하나도 빠뜨리면 안 된다.** 빠진 상태는 색을 못 찾아 흐린 회색으로 떨어지고,
+ * 그러면 폰에서만 그 PR 이 아무 일도 없는 것처럼 보인다 — ci_pending·ci_failed 가 실제로
+ * 그랬다. 계열은 데스크톱과 같다(둘 다 warning/danger).
  */
 export const prColors: Record<ThemeName, Record<string, string>> = {
   dark: {
     draft: '#9a9aa3',
     review_required: '#ffb900',
     changes_requested: '#ff8904',
+    ci_pending: '#ffb900',
+    ci_failed: '#ff6467',
     approved: '#00d492',
     conflict: '#ff6467',
     open: '#a684ff',
@@ -218,6 +224,8 @@ export const prColors: Record<ThemeName, Record<string, string>> = {
     draft: '#63636d',
     review_required: '#973c00',
     changes_requested: '#ca3500',
+    ci_pending: '#973c00',
+    ci_failed: '#c10007',
     approved: '#007a55',
     conflict: '#c10007',
     open: '#7008e7',
