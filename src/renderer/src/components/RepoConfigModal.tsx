@@ -60,6 +60,17 @@ export default function RepoConfigModal({
     return checked.ok ? null : checked.reason
   })
   const hasCarryError = carryErrors.some(Boolean)
+  // 형태가 맞는 경로라도 리포 루트에 원본이 없으면 전달은 **영원히** 일어나지 않는다. 오류는
+  // 아니라서 저장은 막지 않지만(파일을 나중에 만들 수도 있다) 그 사실은 지금 보여 줘야 한다 —
+  // 이걸 알리지 않아, .env.local 을 워크트리 안에서만 만들어 온 사용자가 "등록해 뒀는데 아무것도
+  // 안 온다"를 겪었다. 존재 확인은 파일시스템을 볼 수 있는 main 만 할 수 있어 IPC 로 물어본다.
+  const [missingPaths, setMissingPaths] = useState<string[]>([])
+  const carryWarnings = carryItems.map((item, i) => {
+    const path = item.path.trim()
+    // 형태 오류가 이미 떠 있는 행에 경고를 겹쳐 놓지 않는다 — 고칠 것은 하나다.
+    if (!path || carryErrors[i] || !missingPaths.includes(path)) return null
+    return 'Not in the repo root, so nothing is carried. Create it in the main checkout.'
+  })
   const runNames = runScripts.map((script) => normalizeRunName(script.name))
   const runErrors = runScripts.map((script, index) => {
     if (!runNames[index]) return 'Enter a name.'
@@ -81,6 +92,30 @@ export default function RepoConfigModal({
   useEffect(() => {
     if (!repo) onClose()
   }, [repo, onClose])
+
+  // 입력할 때마다 왕복하지 않도록 조금 늦춰서 묻는다. 경로 목록이 바뀔 때만 다시 확인하면
+  // 되므로 문자열 하나로 접어 의존성으로 쓴다(배열을 그대로 쓰면 매 렌더 새 참조가 된다).
+  const carryPathsKey = carryItems
+    .map((i) => i.path.trim())
+    .filter(Boolean)
+    .join('\n')
+  useEffect(() => {
+    const paths = carryPathsKey.split('\n').filter(Boolean)
+    let cancelled = false
+    const timer = setTimeout(() => {
+      if (paths.length === 0) {
+        setMissingPaths([])
+        return
+      }
+      void window.api.repo.missingCarryPaths(repoId, paths).then((missing) => {
+        if (!cancelled) setMissingPaths(missing)
+      })
+    }, 300)
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
+  }, [repoId, carryPathsKey])
 
   // '+ Add path' 로 만든 빈 행에 포커스를 옮기기 위한 것들. 버튼에 포커스가 남으면 이어서 친
   // 글자가 아무 입력창에도 들어가지 않아 "입력이 안 된다"로 보인다(행은 늘었는데 타이핑만 무반응).
@@ -389,7 +424,8 @@ export default function RepoConfigModal({
             New worktrees only contain git-tracked files, so ignored ones (
             <span className="font-mono">CLAUDE.local.md</span>,{' '}
             <span className="font-mono">.env</span>, …) are missing unless listed here. Paths are
-            relative to the repo root and are skipped if they don&rsquo;t exist.
+            relative to the repo root — every workspace is filled from that main checkout, so a file
+            that only exists inside a workspace is never carried.
           </p>
 
           <div className="mt-4 space-y-1.5">
@@ -443,6 +479,11 @@ export default function RepoConfigModal({
                 </div>
                 {carryErrors[i] && (
                   <p className="mt-1 text-xs text-[var(--danger-400)]">{carryErrors[i]}</p>
+                )}
+                {carryWarnings[i] && (
+                  <p className="mt-1 text-xs text-[var(--warning-400,#d9a441)]">
+                    {carryWarnings[i]}
+                  </p>
                 )}
               </div>
             ))}

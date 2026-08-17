@@ -80,6 +80,9 @@ export const createIndependentWorkspace: AgentToolHandler = async (deps, workspa
   // 전달 실패는 생성을 막지 않지만 조용히 넘기면 안 된다 — 새 워크스페이스의 에이전트가
   // 프로젝트 지침(CLAUDE.local.md 등)을 못 읽은 채 다르게 동작한다.
   const carryFailures = (result.carryFailures ?? []).map((f) => `${f.path}: ${f.reason}`)
+  // 원본이 없어 건너뛴 항목은 실패가 아니지만, 이 경로에는 사용자에게 띄울 토스트가 없다
+  // (도구 결과가 곧 유일한 출구다). 등록해 둔 파일이 아무 일도 하지 않았다는 사실은 전한다.
+  const carryMissing = result.carryMissing ?? []
 
   return {
     workspaceId: newId,
@@ -96,7 +99,14 @@ export const createIndependentWorkspace: AgentToolHandler = async (deps, workspa
       : {
           note: 'No task was handed over, so the new workspace is idle until someone prompts it.'
         }),
-    ...(carryFailures.length ? { carryFailures } : {})
+    ...(carryFailures.length ? { carryFailures } : {}),
+    ...(carryMissing.length
+      ? {
+          carryMissing:
+            `Listed in this repo's workspace files but missing from the main checkout, ` +
+            `so nothing was carried: ${carryMissing.join(', ')}.`
+        }
+      : {})
   }
 }
 

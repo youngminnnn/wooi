@@ -2,7 +2,6 @@ import { randomUUID } from 'node:crypto'
 import { SETUP_SCRIPT_ID, agentSettingsFor, normalizePermissionMode } from '@shared/types'
 import type {
   ArchiveScriptFailure,
-  CarryFailure,
   CreateWorkspaceArgs,
   CreateWorkspaceResult,
   Repo,
@@ -13,7 +12,8 @@ import {
   applyCarryExcludes,
   carryIntoWorktree,
   detectCarryItems,
-  isAgentContextPath
+  isAgentContextPath,
+  type CarryReport
 } from './carry'
 import { addWorktree, removeWorktree, resolveUniqueWorktree, syncGhMergeBase } from './git'
 import { getPrStatus } from './github'
@@ -145,25 +145,33 @@ export async function syncPrBase(
  * 반드시 **셋업 스크립트 실행 전에** 끝나야 한다 — 셋업이 `.env` 를 읽거나, 심링크된
  * `node_modules` 를 보고 설치를 건너뛸 수 있어야 하기 때문. 전달이 실패해도 워크스페이스
  * 생성 자체는 성공시키고, 실패 목록만 돌려 호출 측이 사용자에게 알리게 한다.
+ *
+ * 실패(failures)와 **원본 없음**(missing)은 구분해 돌려준다. 후자는 오류가 아니지만 —
+ * 등록해 둔 항목이 아무 일도 하지 않았다는 뜻이라 — 렌더러가 리포·경로당 한 번은 알린다.
  */
-export async function carryIntoNewWorktree(
-  repo: Repo,
-  worktreePath: string
-): Promise<CarryFailure[]> {
-  if (repo.carryItems.length === 0) return []
+export async function carryIntoNewWorktree(repo: Repo, worktreePath: string): Promise<CarryReport> {
+  if (repo.carryItems.length === 0) return { failures: [], missing: [] }
   try {
-    const { carried, failures } = carryIntoWorktree(repo.path, worktreePath, repo.carryItems)
+    const { carried, missing, failures } = carryIntoWorktree(
+      repo.path,
+      worktreePath,
+      repo.carryItems
+    )
     await applyCarryExcludes(worktreePath, carried)
     for (const f of failures) log.warn(`worktree 전달 실패: ${f.path} — ${f.reason}`)
-    return failures
+    if (missing.length > 0) log.info(`worktree 전달 건너뜀(원본 없음): ${missing.join(', ')}`)
+    return { failures, missing }
   } catch (err) {
     // 전달 단계 전체가 터져도 워크스페이스는 살린다(요구사항: 생성은 성공해야 한다).
     log.error('worktree 전달 단계 실패', err)
-    return repo.carryItems.map((i) => ({
-      path: i.path,
-      reason: err instanceof Error ? err.message : String(err),
-      agentContext: isAgentContextPath(i.path)
-    }))
+    return {
+      failures: repo.carryItems.map((i) => ({
+        path: i.path,
+        reason: err instanceof Error ? err.message : String(err),
+        agentContext: isAgentContextPath(i.path)
+      })),
+      missing: []
+    }
   }
 }
 
@@ -228,7 +236,10 @@ export async function createWorkspace(
   await syncPrBase({ repoId: repo.id, worktreePath, branch }, baseBranch)
 
   // 셋업 스크립트보다 먼저 — 셋업이 전달된 .env·node_modules 를 볼 수 있어야 한다.
-  const carryFailures = await carryIntoNewWorktree(repo, worktreePath)
+  const { failures: carryFailures, missing: carryMissing } = await carryIntoNewWorktree(
+    repo,
+    worktreePath
+  )
 
   const settings = store.getState().settings
   // 워크스페이스가 쓸 에이전트는 여기서 정해져 세션 내내 고정된다. 호출자가 지정하지 않은
@@ -316,12 +327,14 @@ export async function createWorkspace(
 
   // name·branch 를 함께 반환해 호출 측이 별도 getState 왕복 없이 토스트를 만들 수 있게 한다.
   // carryFailures 는 렌더러가 별도 토스트로 알린다 — 특히 에이전트 컨텍스트 파일이 빠지면
-  // 에러 없이 에이전트만 다르게 동작하므로 조용히 넘기면 안 된다.
+  // 에러 없이 에이전트만 다르게 동작하므로 조용히 넘기면 안 된다. carryMissing 도 같은 이유로
+  // 실어 보낸다: 등록해 둔 항목이 원본 없이 계속 건너뛰이는 상태 역시 조용한 오작동이다.
   return {
     workspaceId: id,
     name: rawName,
     branch,
     carryFailures,
+    carryMissing,
     carrySuggestions: carrySuggestionsFor(repo)
   }
 }

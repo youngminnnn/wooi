@@ -80,15 +80,43 @@ export { validateCarryPath, type CarryPathResult } from '@shared/carryPath'
 export interface CarryOutcome {
   /** 실제로 전달된 경로들 — gitignore 보정(info/exclude)에 쓴다. */
   carried: string[]
+  /**
+   * 메인 체크아웃에 원본이 없어 건너뛴 경로들. **실패가 아니다** — 전달을 막지도, 워크스페이스
+   * 생성을 막지도 않는다. 그런데도 따로 세는 이유: 등록해 둔 항목이 한 번도 발동하지 않는 상태를
+   * 알려 주는 신호가 어디에도 없었기 때문이다. gitignore 된 파일을 워크트리 안에서만 만들어 온
+   * 사용자는 원본(리포 루트)이 영영 비어 있는 줄 모른 채 "등록했는데 아무것도 안 온다"만 겪는다.
+   */
+  missing: string[]
   failures: CarryFailure[]
 }
+
+/**
+ * 등록된 경로들 중 리포 루트에 **원본이 없는** 것만 돌려준다(설정 모달의 인라인 경고용).
+ *
+ * 경로 형태가 잘못된 것은 여기서 걸러 낸다 — 그건 validateCarryPath 가 이미 오류로 띄운다.
+ */
+export function missingCarryPaths(repoPath: string, paths: string[]): string[] {
+  const missing: string[] = []
+  for (const raw of paths) {
+    const checked = validateCarryPath(raw)
+    if (!checked.ok) continue
+    if (!existsSync(join(repoPath, checked.path))) missing.push(raw)
+  }
+  return missing
+}
+
+/**
+ * 새 worktree 전달 결과 중 **사용자에게 알릴 것들만** 추린 형태.
+ * 실제로 전달된 경로(carried)는 gitignore 보정에만 쓰이므로 여기서는 뺀다.
+ */
+export type CarryReport = Pick<CarryOutcome, 'failures' | 'missing'>
 
 /**
  * 전달 목록을 worktree 로 옮긴다. **셋업 스크립트 실행 전에** 끝나야 한다 —
  * 셋업이 `.env` 를 읽거나, 심링크된 `node_modules` 를 보고 설치를 건너뛸 수 있어야 하기 때문.
  *
  * 개별 항목 실패는 워크스페이스 생성을 막지 않는다(요구사항 3). 원본에 파일이 없으면
- * 실패가 아니라 정상적인 "해당 없음" 이므로 조용히 건너뛴다(요구사항 2).
+ * 실패가 아니라 "해당 없음" 이므로 건너뛰되(요구사항 2), 그 경로는 missing 으로 돌려준다.
  */
 export function carryIntoWorktree(
   repoPath: string,
@@ -96,6 +124,7 @@ export function carryIntoWorktree(
   items: CarryItem[]
 ): CarryOutcome {
   const carried: string[] = []
+  const missing: string[] = []
   const failures: CarryFailure[] = []
 
   for (const item of items) {
@@ -112,9 +141,13 @@ export function carryIntoWorktree(
     const src = join(repoPath, rel)
     const dest = join(worktreePath, rel)
 
-    // 원본이 없으면 조용히 건너뛴다 — 리포마다 있는 파일이 다르고, 없다고 해서
-    // 워크스페이스 생성을 실패시킬 이유가 없다.
-    if (!existsSync(src)) continue
+    // 원본이 없으면 건너뛴다 — 리포마다 있는 파일이 다르고, 없다고 해서 워크스페이스 생성을
+    // 실패시킬 이유가 없다. 다만 실패와 구분해 기록은 남긴다(missing) — 호출 측이 이 항목이
+    // 아무 일도 하지 않았다는 사실을 한 번쯤 알릴 수 있어야 한다.
+    if (!existsSync(src)) {
+      missing.push(rel)
+      continue
+    }
 
     // worktree 에 이미 있으면(= git 이 추적하는 파일) 덮어쓰지 않는다.
     // 커밋된 내용을 메인 체크아웃의 로컬 상태로 조용히 갈아치우는 건 예상 밖의 동작이다.
@@ -140,7 +173,7 @@ export function carryIntoWorktree(
     }
   }
 
-  return { carried, failures }
+  return { carried, missing, failures }
 }
 
 /** existsSync 는 끊어진 심링크에 false 를 주므로, 링크 자체의 존재는 lstat 으로 따로 본다. */

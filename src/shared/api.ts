@@ -106,6 +106,15 @@ export interface WooiApi {
       repoId: string,
       workspaceId?: string
     ): Promise<{ error?: string; added: string[]; carryFailures?: CarryFailure[] }>
+    /**
+     * 전달 목록에 적힌 경로 중 **리포 루트에 실제로 없는 것**을 돌려준다(입력 순서·표기 그대로).
+     *
+     * 설정 모달이 저장 전에 "이 경로는 아무것도 전달하지 않는다" 를 그 자리에서 보여 주기 위한
+     * 것이다 — 경로 형태만 맞으면 저장은 되지만, 원본이 없으면 전달은 영원히 일어나지 않는다.
+     * 존재 확인은 main 만 할 수 있어 IPC 로 뺀다. 형태가 잘못된 경로는 여기서 제외된다
+     * (그건 validateCarryPath 가 이미 오류로 띄운다).
+     */
+    missingCarryPaths(repoId: string, paths: string[]): Promise<string[]>
     remove(repoId: string): Promise<void>
     /**
      * 사이드바에서 리포를 끌어 놓아 표시 순서를 바꾼다. 저장된 배열 순서가 곧 표시 순서다.
@@ -132,6 +141,7 @@ export interface WooiApi {
     unarchive(workspaceId: string): Promise<{
       error?: string
       carryFailures?: CarryFailure[]
+      carryMissing?: string[]
       carrySuggestions?: string[]
     }>
     /** stacked 워크스페이스를 최신 base(부모 브랜치) 위로 rebase 하고 리모트에 force-push 한다. */

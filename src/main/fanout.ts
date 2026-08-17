@@ -93,6 +93,7 @@ export async function createFanout(
   const workspaceIds: string[] = []
   const failures: string[] = []
   const carryFailures: CarryFailure[] = []
+  const carryMissing = new Set<string>()
   let carrySuggestions: string[] | undefined
 
   // **순차로** 만든다. 같은 리포에 `git worktree add` 를 동시에 던지면 인덱스 락을 다투다가
@@ -113,6 +114,8 @@ export async function createFanout(
     }
     workspaceIds.push(result.workspaceId)
     if (result.carryFailures?.length) carryFailures.push(...result.carryFailures)
+    // "원본 없음" 은 리포 단위 사실이라 후보마다 똑같이 온다 — 합집합으로 접어 한 번만 알린다.
+    for (const path of result.carryMissing ?? []) carryMissing.add(path)
     // 전달 후보 제안은 리포 단위 사실이라 한 번만 실어 보낸다(후보마다 같은 값이 온다).
     if (!carrySuggestions && result.carrySuggestions?.length)
       carrySuggestions = result.carrySuggestions
@@ -150,6 +153,7 @@ export async function createFanout(
     workspaceIds,
     ...(failures.length ? { failures } : {}),
     ...(carryFailures.length ? { carryFailures } : {}),
+    ...(carryMissing.size ? { carryMissing: [...carryMissing] } : {}),
     ...(carrySuggestions ? { carrySuggestions } : {})
   }
 }

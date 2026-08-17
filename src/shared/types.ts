@@ -1294,6 +1294,8 @@ export interface CreateFanoutResult {
   /** 일부 후보만 실패했을 때 그 사유들. 나머지 후보는 정상적으로 만들어졌다. */
   failures?: string[]
   carryFailures?: CarryFailure[]
+  /** 후보들에 공통인 "원본 없음" 경로들([[types]] CreateWorkspaceResult carryMissing). */
+  carryMissing?: string[]
   carrySuggestions?: string[]
 }
 
@@ -2655,6 +2657,11 @@ export const IPC = {
   repoUpdate: 'repo:update',
   /** 전달 목록이 빈 리포에 탐지된 후보(.env·CLAUDE.local.md …)를 한 번에 등록한다. */
   repoAdoptCarry: 'repo:adoptCarry',
+  /**
+   * 전달 목록의 경로 중 리포 루트에 실제로 없는 것을 골라낸다(설정 모달의 인라인 경고).
+   * 파일 존재 확인은 main 만 할 수 있어 IPC 가 필요하다.
+   */
+  repoMissingCarryPaths: 'repo:missingCarryPaths',
   /** 사이드바 드래그 앤 드롭으로 리포 표시 순서를 바꾼다. */
   repoReorder: 'repo:reorder',
   repoListBranches: 'repo:listBranches',
@@ -3198,6 +3205,15 @@ export interface CreateWorkspaceResult {
   error?: string
   /** worktree 전달에 실패한 항목들. 생성 자체는 성공했지만 사용자에게 알려야 한다. */
   carryFailures?: CarryFailure[]
+  /**
+   * 전달 목록에 등록돼 있지만 **메인 체크아웃에 원본이 없어** 아무것도 전달되지 않은 경로들.
+   *
+   * 실패가 아니라서 오래 조용히 넘겨 왔는데, 그 침묵이 곧 버그였다 — gitignore 된 파일을
+   * 워크트리 안에서만 만들어 온 사용자는 원본(리포 루트)이 비어 있다는 걸 알 길이 없어,
+   * "등록해 뒀는데 새 워크스페이스에 아무것도 안 온다" 를 영영 겪는다. 렌더러가 리포·경로당
+   * 한 번만 알려 잔소리가 되지 않게 한다.
+   */
+  carryMissing?: string[]
   /**
    * 리포의 전달 목록이 **비어 있을 때만** 채워지는, 지금 리포에 실제로 존재하는 후보 경로들.
    * 이 경우 새 worktree 는 `.env`·`CLAUDE.local.md` 없이 만들어졌다는 뜻이므로 렌더러가

@@ -38,6 +38,16 @@ export const repoSettingsSeenFlag = (repoId: string): string => `repoSettingsSee
 export const carrySuggestShownFlag = (repoId: string): string => `carrySuggestShown.${repoId}`
 
 /**
+ * 이 리포의 이 경로에 대해 "등록돼 있는데 메인 체크아웃에 원본이 없다" 를 이미 알렸는지.
+ *
+ * 경로 단위로 기억하는 이유: 워크스페이스를 만들 때마다 반복하면 잔소리가 되지만, 한 번만 알리고
+ * 마는 것도 곤란하다 — 원본이 생겼다가 다시 사라지면 그건 다시 알려야 할 새 사실이다. 그래서
+ * 정상적으로 전달된 경로의 플래그는 그때 지워, 같은 침묵이 다시 시작되면 다시 한 번 알린다.
+ */
+export const carryMissingShownFlag = (repoId: string, path: string): string =>
+  `carryMissingShown.${repoId}.${path}`
+
+/**
  * ⌘↑/⌘↓ 힌트가 제 역할을 끝냈는지. 사용자가 직접 닫았거나, 실제로 단축키를 써서
  * 이미 알고 있음이 증명된 경우 true — 어느 쪽이든 다시는 띄우지 않는다.
  */

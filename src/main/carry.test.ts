@@ -10,6 +10,7 @@ import {
   agentContextItems,
   detectCarryItems,
   carryIntoWorktree,
+  missingCarryPaths,
   applyCarryExcludes
 } from './carry'
 
@@ -186,11 +187,29 @@ describe('carryIntoWorktree', () => {
     expect(readFileSync(join(wt, '.claude/settings.local.json'), 'utf-8')).toBe('{"a":1}')
   })
 
-  it('원본이 없으면 조용히 건너뛴다 — 실패가 아니다', () => {
+  it('원본이 없으면 건너뛰되 실패가 아니라 missing 으로 보고한다', () => {
     const out = carryIntoWorktree(repo, wt, [{ path: 'nope.md', mode: 'copy' }])
     expect(out.failures).toEqual([])
     expect(out.carried).toEqual([])
+    // 이 신호가 없던 시절, 등록해 둔 항목이 한 번도 발동하지 않는데도 알 방법이 없었다.
+    expect(out.missing).toEqual(['nope.md'])
     expect(existsSync(join(wt, 'nope.md'))).toBe(false)
+  })
+
+  it('원본 없음은 나머지 전달을 막지 않는다', () => {
+    const out = carryIntoWorktree(repo, wt, [
+      { path: '.env.local', mode: 'copy' },
+      { path: '.env', mode: 'copy' }
+    ])
+    expect(out.carried).toEqual(['.env'])
+    expect(out.missing).toEqual(['.env.local'])
+    expect(out.failures).toEqual([])
+  })
+
+  it('worktree 에 이미 있어 건너뛴 것은 missing 이 아니다', () => {
+    // README.md 는 git 이 추적하므로 worktree 에 이미 있다 — 원본은 멀쩡히 존재한다.
+    const out = carryIntoWorktree(repo, wt, [{ path: 'README.md', mode: 'copy' }])
+    expect(out.missing).toEqual([])
   })
 
   it('worktree 에 이미 있는 파일은 덮어쓰지 않는다', () => {
@@ -217,6 +236,16 @@ describe('carryIntoWorktree', () => {
     ])
     expect(out.failures.find((f) => f.path === '../CLAUDE.local.md')?.agentContext).toBe(true)
     expect(out.failures.find((f) => f.path === '../.env')?.agentContext).toBe(false)
+  })
+})
+
+describe('missingCarryPaths', () => {
+  it('리포 루트에 없는 경로만 입력 표기 그대로 돌려준다', () => {
+    expect(missingCarryPaths(repo, ['.env', '.env.local', './MEMORY.md'])).toEqual(['.env.local'])
+  })
+
+  it('형태가 잘못된 경로는 여기서 다루지 않는다(validateCarryPath 의 몫)', () => {
+    expect(missingCarryPaths(repo, ['../escape', '/etc/passwd'])).toEqual([])
   })
 })
 

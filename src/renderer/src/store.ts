@@ -43,7 +43,7 @@ import {
 } from '@shared/types'
 import { fileDiffHash, isFileViewed, viewedKey } from '@shared/reviewViewed'
 import { playNotification } from './lib/sound'
-import { carrySuggestShownFlag, readUiFlag, setUiFlag } from './lib/uiFlags'
+import { carryMissingShownFlag, carrySuggestShownFlag, readUiFlag, setUiFlag } from './lib/uiFlags'
 import { openRepoSettings } from './lib/repoSettings'
 import {
   bodyOf,
@@ -612,6 +612,11 @@ interface UIState {
   /** worktree 전달 실패를 사용자에게 알린다. 에이전트 컨텍스트 실패는 error 로 구분해 띄운다. */
   reportCarryFailures: (failures?: CarryFailure[]) => void
   /**
+   * 전달 목록에 등록돼 있는데 메인 체크아웃에 원본이 없어 아무것도 전달되지 않은 경로를 알린다.
+   * 리포·경로당 한 번만 뜬다(uiFlags 에 기억). 원본이 생겨 전달되기 시작하면 기억을 지운다.
+   */
+  reportCarryMissing: (repoId: string, missing?: string[]) => void
+  /**
    * 아카이브 스크립트 실패를 알린다. 아카이브·삭제는 실패해도 그대로 완료되므로,
    * 이 토스트가 없으면 정리되지 않은 컨테이너·프로세스가 조용히 남는다.
    */
@@ -937,6 +942,9 @@ export const useStore = create<UIState>((set, get) => ({
       else {
         restored++
         get().reportCarryFailures(res.carryFailures)
+        // 언아카이브도 worktree 를 새로 만들므로 전달이 다시 일어난다 — 원본 없음도 같이 본다.
+        const repoId = get().app?.workspaces.find((w) => w.id === id)?.repoId
+        if (repoId) get().reportCarryMissing(repoId, res.carryMissing)
       }
     }
     if (errors.length) {
@@ -1588,6 +1596,7 @@ export const useStore = create<UIState>((set, get) => ({
       branch?: string
       error?: string
       carryFailures?: CarryFailure[]
+      carryMissing?: string[]
       carrySuggestions?: string[]
     }
     try {
@@ -1611,6 +1620,7 @@ export const useStore = create<UIState>((set, get) => ({
         get().pushToast('success', `Created workspace “${res.name}” on ${res.branch} — ⌘Z to undo`)
       }
       get().reportCarryFailures(res.carryFailures)
+      get().reportCarryMissing(repoId, res.carryMissing)
       get().suggestCarry(repoId, res.workspaceId, res.carrySuggestions)
       return res.workspaceId
     }
@@ -1653,6 +1663,7 @@ export const useStore = create<UIState>((set, get) => ({
       )
     }
     get().reportCarryFailures(res.carryFailures)
+    get().reportCarryMissing(repoId, res.carryMissing)
     if (res.workspaceIds?.length)
       get().suggestCarry(repoId, res.workspaceIds[0], res.carrySuggestions)
     if (res.groupId) get().openFanoutCompare(res.groupId)
@@ -1860,6 +1871,32 @@ export const useStore = create<UIState>((set, get) => ({
           .join('\n')}`
       )
     }
+  },
+
+  // 등록해 둔 항목의 원본이 메인 체크아웃에 없으면 전달은 조용히 건너뛰어진다. 그 침묵 자체가
+  // 버그였다 — .env 처럼 gitignore 된 파일을 워크트리 안에서만 만들어 온 사용자는 원본이 리포
+  // 루트에 있어야 한다는 걸 알 길이 없어, "등록해 뒀는데 아무것도 안 온다"를 영영 겪는다.
+  // 그렇다고 워크스페이스를 만들 때마다 띄우면 잔소리가 되므로 리포·경로당 한 번만 알린다.
+  reportCarryMissing: (repoId, missing) => {
+    const repo = get().app?.repos.find((r) => r.id === repoId)
+    if (!repo) return
+    const missingNow = new Set(missing ?? [])
+    // 원본이 생겨 정상 전달되기 시작한 경로는 기억을 지운다 — 나중에 다시 사라지면 그건 다시
+    // 알려야 할 새 사실이다(한 번 알리고 영원히 침묵하는 것도 같은 종류의 버그다).
+    for (const item of repo.carryItems) {
+      if (!missingNow.has(item.path)) setUiFlag(carryMissingShownFlag(repoId, item.path), false)
+    }
+    const fresh = [...missingNow].filter((p) => !readUiFlag(carryMissingShownFlag(repoId, p)))
+    if (fresh.length === 0) return
+    for (const p of fresh) setUiFlag(carryMissingShownFlag(repoId, p), true)
+
+    get().pushToast(
+      'info',
+      `Nothing was carried for ${fresh.join(', ')} — no such file in ${repo.path}. ` +
+        `New worktrees are filled from the main checkout only, so a copy you made inside a ` +
+        `workspace never counts as the source. Create it there and every new workspace gets one.`,
+      [{ label: 'Repo settings', run: () => openRepoSettings(repoId) }]
+    )
   },
 
   // 아카이브 스크립트(`docker compose down` 등)는 worktree 를 지우기 전에 딸린 것들을 정리하는
