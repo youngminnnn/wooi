@@ -123,7 +123,7 @@ function PermissionCard({
       const behavior = choice === 'deny' ? 'deny' : 'allow'
       const rememberForSession = choice === 'session'
       setResponseError(null)
-      if (!demo && behavior === 'allow' && !(await authenticate('Approve action on your laptop'))) {
+      if (!demo && behavior === 'allow' && !(await authenticate('Approve action on your computer'))) {
         setResponseError('Device authentication was cancelled or unsuccessful. Nothing was sent.')
         return
       }
@@ -301,7 +301,7 @@ function parseTranscript(value: unknown): ChatItem[] {
   // 배열이 아니면 프로토콜이 어긋난 것이라 던진다. 하지만 **아이템 하나가 이상하다고
   // 페이지 전체를 버리지는 않는다** — 랩탑이 큰 본문을 잘라 보내거나 우리가 모르는 타입이
   // 하나 섞였을 때, 나머지 대화까지 못 읽게 되는 편이 훨씬 나쁘다.
-  if (!Array.isArray(value)) throw new Error('The laptop returned an invalid transcript')
+  if (!Array.isArray(value)) throw new Error('The computer returned an invalid transcript')
   return value.filter(isChatItem)
 }
 
@@ -543,7 +543,7 @@ function ChatRow({ row }: { row: ChatRowModel }): React.JSX.Element | null {
       // 것을 사용자가 알 방법이 없으므로, 자리만이라도 남긴다 — 데스크톱의 'unknown' 카드가
       // 같은 이유로 존재한다.
       return (
-        <Text style={styles.footer}>Unsupported item — open this workspace on your laptop</Text>
+        <Text style={styles.footer}>Unsupported item — open this workspace on your computer</Text>
       )
   }
 }
@@ -665,7 +665,7 @@ export default function WorkspaceScreen(): React.JSX.Element {
     // 막는다. 묻는 모드라면 위험한 일이 전부 권한 프롬프트에 걸리고 그건 이미 인증으로
     // 막혀 있으니, 여기서 또 묻는 것은 마찰만 늘리고 아무것도 더 지키지 못한다.
     if (workspace?.actsWithoutAsking === true) {
-      if (!(await authenticate('Send this to your laptop'))) {
+      if (!(await authenticate('Send this to your computer'))) {
         setError('Device authentication was cancelled or unsuccessful. Nothing was sent.')
         return
       }

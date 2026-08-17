@@ -201,7 +201,7 @@ export default function WorkspaceListScreen(): React.JSX.Element {
     }
   }, [demo, pairing, refreshState])
 
-  const machineName = state?.machine.name ?? pairing?.machineName ?? 'Laptop'
+  const machineName = state?.machine.name ?? pairing?.machineName ?? 'Computer'
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
       <View style={styles.header}>
@@ -216,7 +216,7 @@ export default function WorkspaceListScreen(): React.JSX.Element {
             {state === null
               ? status === 'connecting'
                 ? 'Connecting…'
-                : 'Waiting for your laptop…'
+                : 'Waiting for your computer…'
               : updatedAt === null
                 ? 'Updated recently'
                 : updatedLabel(updatedAt)}
@@ -291,11 +291,11 @@ export default function WorkspaceListScreen(): React.JSX.Element {
         ListEmptyComponent={
           <View style={styles.empty}>
             <Text style={styles.emptyTitle}>
-              {state === null ? 'Waiting for your laptop…' : 'No active workspaces'}
+              {state === null ? 'Waiting for your computer…' : 'No active workspaces'}
             </Text>
             <Text style={styles.emptyBody}>
               {state === null
-                ? 'Keep Wooi open on your paired laptop. State will appear here automatically.'
+                ? 'Keep Wooi open on your paired computer. State will appear here automatically.'
                 : 'Workspaces opened in Wooi will appear here.'}
             </Text>
           </View>

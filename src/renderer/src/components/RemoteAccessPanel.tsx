@@ -190,7 +190,7 @@ export default function RemoteAccessPanel({
             <span className="text-sm text-neutral-300">
               Send notifications to paired phones
               <span className="block text-xs text-neutral-600 leading-relaxed">
-                Only when you are away from this laptop. The banner names the workspace and what
+                Only when you are away from this computer. The banner names the workspace and what
                 happened — that name is the one thing sent in the clear. Everything else is
                 decrypted on your phone when you tap it.
               </span>
@@ -262,8 +262,8 @@ function ConsentGate({
       <p className="text-xs font-semibold text-neutral-300">Before you turn this on</p>
       <ul className="space-y-1 text-xs text-neutral-500 leading-relaxed list-disc pl-4">
         <li>
-          Your laptop and phone talk through a relay run by Wooi&apos;s maintainer. Your laptop only
-          makes outbound connections — nothing here becomes reachable from the internet.
+          Your computer and phone talk through a relay run by Wooi&apos;s maintainer. Your computer
+          only makes outbound connections — nothing here becomes reachable from the internet.
         </li>
         <li>
           Messages, code, file paths, and workspace names are encrypted with a key the relay never

@@ -206,7 +206,7 @@ export async function claimPairing(rawQr: string, deviceName: string): Promise<C
           continue
         }
         if (response.status === 404) {
-          throw new PairingError('expired', 'Pairing expired. Start again on your laptop.')
+          throw new PairingError('expired', 'Pairing expired. Start again on your computer.')
         }
         if (!response.ok) {
           throw new PairingError('network', 'The relay could not finish pairing')
@@ -251,7 +251,7 @@ export async function claimPairing(rawQr: string, deviceName: string): Promise<C
         await savePairing(pairing)
         return pairing
       }
-      throw new PairingError('expired', 'Pairing expired. Start again on your laptop.')
+      throw new PairingError('expired', 'Pairing expired. Start again on your computer.')
     }
   }
 }
