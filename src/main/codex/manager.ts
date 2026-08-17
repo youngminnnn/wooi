@@ -5,7 +5,7 @@ import {
   Notification,
   app,
   powerMonitor,
-  type BrowserWindow,
+  BrowserWindow,
   type UtilityProcess
 } from 'electron'
 import { getStore } from '../store'
@@ -22,6 +22,7 @@ import { CodexSkillsCache, mergeSkillCommands } from './skills'
 import type { SkillsListResponse } from './wire'
 import { RATE_LIMIT_CONTINUATION, RateLimitResumeCoordinator } from '../rateLimitResume'
 import { notifyRemotePush } from '../remote'
+import { shouldSendRemotePush } from '../remote/push'
 import {
   expandWooiCommand,
   matchWooiCommand,
@@ -58,8 +59,6 @@ import type {
   SlashCommandInfo,
   Workspace
 } from '@shared/types'
-
-const REMOTE_PUSH_IDLE_SECONDS = 60
 
 type Dispatch = (channel: string, payload: unknown) => void
 
@@ -915,7 +914,15 @@ export class CodexSessionManager implements AgentBackend {
     if (!channels?.osNotification) return
 
     const focused = win?.isFocused() === true
-    if (!focused || powerMonitor.getSystemIdleTime() >= REMOTE_PUSH_IDLE_SECONDS) {
+    // 폰 푸시는 데스크톱을 쓰고 있지 않을 때만 보낸다(설정으로 항상 보내게 할 수 있다).
+    // 포커스는 메인 창이 아니라 Wooi 창 전체로 본다 — 분리한 패널도 데스크톱을 쓰는 중이다.
+    if (
+      shouldSendRemotePush({
+        appFocused: BrowserWindow.getFocusedWindow() !== null,
+        idleSeconds: powerMonitor.getSystemIdleTime(),
+        always: getStore().getState().settings.remotePushWhileActive === true
+      })
+    ) {
       notifyRemotePush(workspaceId, ws ? workspaceDisplayName(ws) : 'Workspace', event)
     }
     if (focused || !Notification.isSupported()) return

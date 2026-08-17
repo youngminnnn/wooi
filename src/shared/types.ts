@@ -1194,6 +1194,13 @@ export interface AppSettings {
   /** 원격 접근이 켜져 있을 때 휴대폰 푸시 알림도 보낸다. 별도 옵트인이며 기본은 꺼짐이다. */
   remotePushEnabled: boolean
   /**
+   * 데스크톱 앱을 쓰고 있는 동안에도 폰으로 푸시를 보낸다. 기본은 꺼짐 — 눈앞의 창이 이미
+   * 알려 준 일로 주머니까지 울릴 이유가 없다. 랩탑과 폰을 오가며 쓰는 사람은 켜면 된다.
+   *
+   * 판정은 `shouldSendRemotePush` 한 곳에 있다(`src/main/remote/push.ts`).
+   */
+  remotePushWhileActive: boolean
+  /**
    * 별도 창으로 분리한 패널(work/scripts)의 마지막 위치·크기.
    *
    * 설정 화면에서 고르는 값이 아니라 창을 닫을 때 기록되는 자리 기억이다 — 듀얼 모니터에서
