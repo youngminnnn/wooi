@@ -291,7 +291,10 @@ describe('RemoteCommandBridge', () => {
 
   it('손상된 암호문은 오류 결과로 끝낸다', async () => {
     const row = addCommand({ channel: REMOTE_IPC.ping, args: [], seq: 1, ts: now })
-    row.payload_ct = `${row.payload_ct.slice(0, -2)}00`
+    // 마지막 바이트를 **뒤집는다**. `00` 으로 덮어쓰면 원래 값이 0x00 일 때 암호문이 그대로라
+    // Poly1305 가 통과하고 상태가 done 으로 끝난다 — 256번에 한 번 깨지는 테스트가 된다.
+    const flipped = Number.parseInt(row.payload_ct.slice(-2), 16) ^ 0xff
+    row.payload_ct = `${row.payload_ct.slice(0, -2)}${flipped.toString(16).padStart(2, '0')}`
     start()
     await settle()
     expect(row.status).toBe('error')
