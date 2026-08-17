@@ -313,7 +313,7 @@ export default function PairScreen(): React.JSX.Element {
           autoCapitalize="none"
           autoCorrect={false}
           multiline
-          placeholder="wooi://pair?…"
+          placeholder="Code copied from your computer"
           placeholderTextColor={theme.textFaint}
         />
       </PairShell>
