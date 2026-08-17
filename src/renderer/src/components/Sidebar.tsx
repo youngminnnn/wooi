@@ -1347,6 +1347,7 @@ function ArchivedRow({ workspace }: { workspace: Workspace }): React.JSX.Element
   const pushToast = useStore((s) => s.pushToast)
   const deleteWorkspaceNow = useStore((s) => s.deleteWorkspaceNow)
   const reportCarryFailures = useStore((s) => s.reportCarryFailures)
+  const reportCarryMissing = useStore((s) => s.reportCarryMissing)
   const suggestCarry = useStore((s) => s.suggestCarry)
 
   const unarchive = async (): Promise<void> => {
@@ -1357,6 +1358,7 @@ function ArchivedRow({ workspace }: { workspace: Workspace }): React.JSX.Element
       // 언아카이브도 worktree 를 새로 만들므로 전달이 다시 일어난다 — 실패는 동일하게 알리고,
       // 전달 목록이 빈 리포라면 생성 경로와 똑같이 한 번 제안한다.
       reportCarryFailures(res.carryFailures)
+      reportCarryMissing(workspace.repoId, res.carryMissing)
       suggestCarry(workspace.repoId, workspace.id, res.carrySuggestions)
     }
   }

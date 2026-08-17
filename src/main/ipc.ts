@@ -32,7 +32,13 @@ import {
   restackOnto,
   updateFromBase
 } from './git'
-import { applyCarryExcludes, carryIntoWorktree, detectCarryItems, validateCarryPath } from './carry'
+import {
+  applyCarryExcludes,
+  carryIntoWorktree,
+  detectCarryItems,
+  missingCarryPaths,
+  validateCarryPath
+} from './carry'
 import { getWorkspacePrStatus, invalidateWorkspacePr } from './prCache'
 import {
   buildStackFromGhStack,
@@ -451,6 +457,19 @@ export function registerIpc(ctx: IpcContext): void {
     }
   )
 
+  /**
+   * 설정 모달이 "이 경로는 리포 루트에 없다" 를 저장 전에 보여 주기 위한 존재 확인.
+   * 렌더러는 파일시스템을 볼 수 없어 여기로 물어 온다(경로 형태 검증은 renderer 가 이미 한다).
+   */
+  handle(
+    IPC.repoMissingCarryPaths,
+    async (_e, repoId: string, paths: string[]): Promise<string[]> => {
+      const repo = repoFor(repoId)
+      if (!repo) return []
+      return missingCarryPaths(repo.path, paths)
+    }
+  )
+
   handle(IPC.repoRemove, async (_e, repoId: string) => {
     const repo = repoFor(repoId)
     const workspaces = store.getState().workspaces.filter((w) => w.repoId === repoId)
@@ -636,6 +655,7 @@ export function registerIpc(ctx: IpcContext): void {
     ): Promise<{
       error?: string
       carryFailures?: CarryFailure[]
+      carryMissing?: string[]
       carrySuggestions?: string[]
     }> => {
       const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
@@ -653,7 +673,10 @@ export function registerIpc(ctx: IpcContext): void {
       await syncPrBase(ws, ws.baseBranch)
       // 언아카이브도 worktree 를 새로 만드는 경로다 — 전달을 빠뜨리면 복원된 워크스페이스만
       // 지침 파일 없이 동작하게 된다.
-      const carryFailures = await carryIntoNewWorktree(repo, ws.worktreePath)
+      const { failures: carryFailures, missing: carryMissing } = await carryIntoNewWorktree(
+        repo,
+        ws.worktreePath
+      )
       // worktree 가 복원됐으니 PR 조회가 다시 가능하다. 보존했던 표시 이름이 현재 PR 제목과
       // 같다면(= 아카이브 시 자동 스냅샷한 값) override 를 지워 기본 규칙을 되살린다.
       // 사용자가 직접 지정한 이름은 PR 제목과 다르므로 그대로 유지된다.
@@ -671,7 +694,7 @@ export function registerIpc(ctx: IpcContext): void {
         if (w) w.archived = false
       })
       broadcastState()
-      return { carryFailures, carrySuggestions: carrySuggestionsFor(repo) }
+      return { carryFailures, carryMissing, carrySuggestions: carrySuggestionsFor(repo) }
     }
   )
 
