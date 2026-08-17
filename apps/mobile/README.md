@@ -138,6 +138,47 @@ EXPO_TOKEN="$(cat ~/.expo-token)" npx eas build --profile production --platform 
 Apple 계정으로 로그인해 인증서·프로비저닝 프로파일과 APNs 키를 만든다 — 이걸 건너뛰면
 푸시가 안 되는 앱이 나간다.
 
+## 수출 규정 — iOS 는 답을 정해 두고 제출한다
+
+TestFlight 는 이 답이 없으면 **테스터에게 빌드를 내려보내지 않는다**("Missing Compliance").
+심사 거절이 아니라 답하지 않은 질문이라, 빌드는 성공한 채로 아무에게도 안 간다.
+
+이 앱은 릴레이를 종단 간 암호화한다(`src/shared/crypto.ts`) — 그 코드를 폰이 그대로 번들한다:
+
+| 알고리즘 | 키 길이 | 표준 |
+| --- | --- | --- |
+| XChaCha20-Poly1305 | 256비트 (nonce 192비트) | RFC 8439 + IRTF CFRG XChaCha 초안 |
+| X25519 ECDH | 255비트 곡선 | RFC 7748 |
+| HKDF-SHA256 | 256비트 | RFC 5869 / FIPS 180-4 |
+
+전부 **공개된 표준**이고, 전부 **Apple OS 밖**(`@noble/*`, 순수 JS)에서 돈다. 이 둘이 답을
+결정한다 — 자체 알고리즘이 아니므로 CCATS 는 필요 없고, OS 암호로 한정되지 않으므로
+"운영체제 내 암호" 면제는 못 받는다.
+
+App Store Connect 문답의 답:
+
+| 질문 | 답 |
+| --- | --- |
+| 앱이 암호화를 쓰는가 | **예** |
+| Category 5 Part 2 면제(OS 내 암호·HTTPS 한정·미국/캐나다 전용 등)에 해당하는가 | **아니오** |
+| 독자적이거나 국제 표준이 아닌 알고리즘을 구현하는가 | **아니오** |
+| OS 암호 대신 또는 그에 더해 표준 알고리즘을 구현하는가 | **예** |
+
+그래서 `app.json` 의 `ios.infoPlist.ITSAppUsesNonExemptEncryption` 이 **`true`** 다. `false` 로
+두면 매 업로드의 문답은 사라지지만 사실과 다른 신고가 된다. 네이티브 설정이라 **EAS Update
+로는 못 넣는다** — 새 빌드부터 적용된다.
+
+남는 의무는 둘뿐이다:
+
+- **연례 self-classification 보고** — 그 해에 수출한 항목을 CSV 로 다음 해 **2월 1일까지**
+  `crypt@bis.doc.gov` 와 `enc@nsa.gov` 에 메일. ECCN 은 `5D992.c`(mass market).
+- **프랑스 암호 신고서** — 프랑스 App Store 에 낼 때만. App Store Connect 에 업로드한다.
+
+레포가 공개(Apache-2.0)이고 알고리즘이 전부 표준이라, EAR §742.15(b) 의 "공개된 암호
+소스코드와 그것을 컴파일한 목적코드는 EAR 대상이 아니다" 를 근거로 삼는 길도 있다. 2021년
+3월 규칙 개정으로 그 경로의 BIS 이메일 통지 의무도 없어졌다. 다만 App Store Connect 문답에는
+이 사유를 고를 칸이 없어서, 제출은 위 표대로 하고 이건 근거로만 남긴다.
+
 ## 시뮬레이터에서 화면 확인하기
 
 화면을 눈으로 보고 싶을 때. iOS 시뮬레이터에 dev build 가 이미 깔려 있으면 한 줄이면 된다.
