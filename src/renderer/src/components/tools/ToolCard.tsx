@@ -4,7 +4,6 @@ import type { ChatItem } from '@shared/types'
 import { ToolResultBody } from './ToolResultBody'
 import { ToolCardWooi } from './ToolCardWooi'
 import { ToolCardTerminal } from './ToolCardTerminal'
-import { SkillCard } from './SkillCard'
 
 /**
  * 도구 호출 한 건 — 호출과 그 결과를 **한 덩어리로** 그린다.
@@ -33,10 +32,6 @@ export function ToolCard({
 }): React.JSX.Element {
   const [open, setOpen] = useState(false)
   const stat = useMemo(() => (use.diff ? diffStat(use.diff) : null), [use.diff])
-
-  // 스킬은 도구를 하나 쓴 것이 아니라 "이 절차로 일한다" 는 선언이다. 도구 로그에 섞어 접어 두면
-  // 대화의 방향이 바뀐 지점이 보이지 않으므로 전용 블록으로 세운다.
-  if (use.name === 'Skill') return <SkillCard name={toolUseSummary(use.name, use.input)} />
 
   const props = {
     name: toolDisplayName(use.name),
