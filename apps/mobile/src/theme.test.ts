@@ -1,5 +1,24 @@
 import { describe, expect, it } from 'vitest'
+import type { PrState } from '@shared/types'
 import { darkTheme, lightTheme, prColors, type Theme, type ThemeName } from './theme'
+
+/**
+ * 데스크톱이 정의한 PR 상태 전부. 유니언은 런타임에 없으므로 손으로 적되, 배열이 아니라
+ * `Record<PrState, true>` 의 키로 적는다 — 상류에 상태가 하나 늘면 **여기서 타입 오류가 난다**
+ * (배열로 두면 하나 빠져도 조용히 통과한다).
+ */
+const PR_STATES = Object.keys({
+  draft: true,
+  review_required: true,
+  changes_requested: true,
+  ci_pending: true,
+  ci_failed: true,
+  approved: true,
+  conflict: true,
+  open: true,
+  merged: true,
+  closed: true
+} satisfies Record<PrState, true>) as PrState[]
 
 /**
  * 라이트 테마가 깨지는 방식은 대체로 하나다 — "어두운 면 위의 밝은 글자"를 전제로 고른 값을
@@ -96,5 +115,16 @@ describe.each([
    */
   it.each(Object.keys(prColors[name]))('pr color %s is legible on the list', (state) => {
     expect(contrast(prColors[name][state], theme.bg)).toBeGreaterThanOrEqual(4)
+  })
+
+  /**
+   * 빠진 상태는 타입으로 잡히지 않는다(`Record<string, string>` 이고, 색은 런타임 조회다) —
+   * 조회에 실패하면 조용히 흐린 회색이 되어 **폰에서만** 그 PR 이 잠잠해 보인다. 실제로
+   * ci_pending·ci_failed 가 그렇게 빠져 있었으므로, 값 집합 자체를 대조한다.
+   */
+  it('PrState 를 하나도 빠뜨리지 않는다', () => {
+    for (const state of PR_STATES) {
+      expect(prColors[name][state], state).toBeDefined()
+    }
   })
 })

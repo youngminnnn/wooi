@@ -201,6 +201,11 @@ export const REMOTE_COMMANDS: ReadonlyMap<string, RemoteCommandSpec> = new Map<
   [IPC.appGetState, { validate: validateNoArgs, mutating: false }],
   [IPC.chatGetHistory, { validate: validateWorkspaceIdOnly, mutating: false }],
   [REMOTE_IPC.transcript, { validate: validateTranscript, mutating: false }],
+  // PR 의 CI 체크 롤업(데스크톱 Check 탭과 같은 데이터). 인자는 workspaceId 하나뿐이고
+  // 돌려주는 것은 체크 이름·상태·GitHub 주소가 전부다 — 파일 내용도 diff 도 셸 출력도 실리지
+  // 않는다. `gh pr view` 를 부르므로 폰이 부르는 만큼 랩탑이 GitHub 를 때린다 — 그래서 폰은
+  // 이걸 폴링하지 않고 사용자가 PR 화면을 열거나 새로고침할 때만 부른다.
+  [IPC.prChecks, { validate: validateWorkspaceIdOnly, mutating: false }],
   [REMOTE_IPC.watch, { validate: validateWatch, mutating: false }],
   [REMOTE_IPC.ping, { validate: validateNoArgs, mutating: false }],
 

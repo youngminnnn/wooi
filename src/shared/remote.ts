@@ -49,6 +49,21 @@ export interface RemotePr {
    * worktree 이름으로 떨어진다.
    */
   title?: string
+  /**
+   * PR 페이지 주소. 폰의 PR 화면이 "Open on GitHub" 로 여는 곳이다.
+   *
+   * 체크 조회(`pr:checks`)도 같은 주소를 돌려주지만 거기에 기대지 않는다 — 그 조회는 랩탑이
+   * 깨어 있어야 성공하는데, 폰으로 PR 을 확인하는 순간은 대개 랩탑이 자고 있을 때다. 미러된
+   * 상태에 실어 두면 그때도 브라우저로 넘어갈 수 있다(워크스페이스당 짧은 문자열 하나다).
+   */
+  url?: string
+  /**
+   * base 브랜치가 앞서 있어 업데이트가 필요한가(GitHub 의 `mergeStateStatus === 'BEHIND'`).
+   *
+   * 상태 라벨과 겹치지 않는 정보다 — 'Ready to merge' 인데도 머지가 막혀 있는 이유가 이것이고,
+   * 그걸 모르면 폰에서 보고 다 됐다고 판단하게 된다.
+   */
+  needsBaseUpdate?: boolean
 }
 
 /** 모바일이 보는 워크스페이스 1개. */
@@ -290,6 +305,18 @@ export interface RemoteCommandPayload {
 
 /** 랩탑 → 폰 명령 결과의 평문. */
 export type RemoteCommandResult = { ok: true; value: unknown } | { ok: false; error: string }
+
+/**
+ * 랩탑에서 명령이 실패했을 때 폰이 받는 문구.
+ *
+ * **사유를 뭉개는 것은 의도된 것이다** — 실패 이유에는 경로·핸들러 내부 사정이 섞이고, 그걸
+ * 폰으로 흘리면 캡처된 화면 하나에 랩탑 내부가 드러난다.
+ *
+ * 그래서 여기 상수로 둔다. 폰은 이 값과 대조해 "랩탑이 이 명령을 못 한 것"과 "전송 자체가
+ * 실패한 것"을 구분해 다르게 안내할 수 있어야 하는데, 문구를 각자 적어 두면 한쪽만 고쳐졌을
+ * 때 그 구분이 조용히 사라진다(실제로 그럴 뻔했다).
+ */
+export const REMOTE_COMMAND_FAILED = 'The command could not be completed.'
 
 // ── 데스크톱 설정 패널과의 계약 ───────────────────────────────────────────
 // main 이 `evt:remote` 로 내려보내는 상태. **비밀은 하나도 들어 있지 않다.**

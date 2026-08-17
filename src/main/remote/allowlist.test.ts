@@ -154,6 +154,19 @@ describe('원격 허용목록의 형태', () => {
     }
   })
 
+  /**
+   * PR 체크는 **읽기 전용으로만** 열려 있다. 같은 `pr:` 네임스페이스의 나머지(생성·머지·
+   * 닫기·ready)는 위 forbidden 목록이 계속 막는다 — 폰에서 PR 을 머지할 수 있으면 잠금 해제된
+   * 폰 하나로 main 에 코드를 넣을 수 있게 된다.
+   */
+  it('PR 체크는 workspaceId 하나만 받는 읽기 명령이다', () => {
+    expect(v(IPC.prChecks, ['ws1'])).toEqual(['ws1'])
+    expect(isMutatingRemoteCommand(IPC.prChecks)).toBe(false)
+    expect(() => v(IPC.prChecks, [])).toThrow(/expected 1 args/)
+    expect(() => v(IPC.prChecks, ['ws1', 'extra'])).toThrow(/expected 1 args/)
+    expect(() => v(IPC.prChecks, [42])).toThrow(/workspaceId/)
+  })
+
   it('미등록 채널은 기본 거부다', () => {
     expect(() => v('git:diff', ['ws1'])).toThrow(/not remotely invocable/)
     expect(() => v('totally:made-up', [])).toThrow(/not remotely invocable/)

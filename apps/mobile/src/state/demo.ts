@@ -1,12 +1,24 @@
 import type { RemoteState, RemoteWorkspace } from '@shared/remote'
-import type { ChatItem, PermissionRequest } from '@shared/types'
+import type { ChatItem, PermissionRequest, PrChecks } from '@shared/types'
 
 export const DEMO_PERMISSION_ID = 'demo-permission'
 
 interface DemoSession {
   state: RemoteState
   transcripts: Map<string, ChatItem[]>
+  /**
+   * PR 화면이 랩탑에 물어서 받는 것과 같은 모양(`pr:checks` 의 응답). 데모에는 랩탑이 없으니
+   * 여기 미리 놓아 두고, 없는 워크스페이스는 "PR 없음"으로 답한다.
+   */
+  checks: Map<string, PrChecks>
 }
+
+/**
+ * 데모 PR 주소는 **열리지 않는 스킴**이다. 데모 데이터의 PR 은 실재하지 않아서 진짜 주소를
+ * 넣으면 눌렀을 때 404 로 나가고, 그건 데모가 하는 거짓말 중 유일하게 앱 밖으로 새는 것이다.
+ * 폰은 https 만 여므로(app/workspace/[id]/pr.tsx) 이 값은 자연히 버튼을 숨긴다.
+ */
+const DEMO_PR_URL = 'demo://pull'
 
 function workspace(
   values: Partial<RemoteWorkspace> & Pick<RemoteWorkspace, 'id' | 'repoId' | 'name' | 'branch'>,
@@ -69,7 +81,14 @@ export function createDemoSession(now: number = Date.now()): DemoSession {
         // 문구는 랩탑이 백엔드 서술자에서 뽑아 보내는 것과 같은 값이다(src/main/agent/backend.ts).
         permissionModeFooter: { symbol: '⏵⏵', text: 'accept edits on', tone: 'caution' },
         prNumber: 184,
-        pr: { number: 184, state: 'ready', label: 'Ready for review' }
+        // 데스크톱의 PrState 값이어야 한다 — 그 밖의 값은 색을 못 찾아 회색으로 떨어진다.
+        pr: {
+          number: 184,
+          state: 'review_required',
+          label: 'Review required',
+          url: `${DEMO_PR_URL}/184`,
+          needsBaseUpdate: true
+        }
       },
       now - 25_000
     ),
@@ -92,7 +111,7 @@ export function createDemoSession(now: number = Date.now()): DemoSession {
         parentWorkspaceId: 'mobile-checkout',
         muted: true,
         prNumber: 185,
-        pr: { number: 185, state: 'draft', label: 'Draft' }
+        pr: { number: 185, state: 'draft', label: 'Draft', url: `${DEMO_PR_URL}/185` }
       },
       now - 4 * 60_000
     ),
@@ -170,7 +189,7 @@ export function createDemoSession(now: number = Date.now()): DemoSession {
         agentBackend: 'codex',
         model: 'gpt-5.4-mini',
         prNumber: 42,
-        pr: { number: 42, state: 'merged', label: 'Merged' },
+        pr: { number: 42, state: 'merged', label: 'Merged', url: `${DEMO_PR_URL}/42` },
         permissionModeFooter: { symbol: '⏸', text: 'plan mode on', tone: 'readOnly' },
         statusLine: {
           model: 'GPT-5.4 mini',
@@ -361,6 +380,39 @@ export function createDemoSession(now: number = Date.now()): DemoSession {
       ],
       pendingPermissions: [permission]
     },
-    transcripts
+    transcripts,
+    // 세 가지 결이 다 보여야 PR 화면을 눈으로 확인할 수 있다 — 돌고 있는 것, 깨진 것,
+    // 다 끝난 것. 체크가 하나도 없는 PR(remote-banner)은 목록에서 일부러 빼 둔다.
+    checks: new Map<string, PrChecks>([
+      [
+        'mobile-checkout',
+        {
+          prNumber: 184,
+          prUrl: `${DEMO_PR_URL}/184`,
+          checks: [
+            { name: 'typecheck', state: 'success' },
+            { name: 'unit', state: 'success' },
+            { name: 'e2e (ios)', state: 'pending' },
+            { name: 'lint', state: 'failure' },
+            { name: 'notarize', state: 'skipped' }
+          ]
+        }
+      ],
+      [
+        'remote-banner',
+        { prNumber: 185, prUrl: `${DEMO_PR_URL}/185`, checks: [] }
+      ],
+      [
+        'release-notes',
+        {
+          prNumber: 42,
+          prUrl: `${DEMO_PR_URL}/42`,
+          checks: [
+            { name: 'typecheck', state: 'success' },
+            { name: 'unit', state: 'success' }
+          ]
+        }
+      ]
+    ])
   }
 }

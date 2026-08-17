@@ -377,12 +377,14 @@ describe('StateMirror', () => {
     })
     // 제목은 싣는다 — 사용자 지정 이름이 없는 워크스페이스의 **표시 이름**이 PR 제목이라,
     // 빼면 같은 워크스페이스가 랩탑에서는 'Fix login', 폰에서는 worktree 이름으로 갈린다.
-    // URL 은 여전히 두고 온다 — 폰이 열 곳이 없다.
+    // URL 도 싣는다 — 폰의 PR 화면이 랩탑이 자는 동안에도 브라우저로 넘어갈 수 있어야 한다.
     expect(projectPr('ws-open')).toEqual({
       number: 12,
       state: 'approved',
       label: 'Ready to merge',
-      title: 'Fix login'
+      title: 'Fix login',
+      url: 'https://example/pr/12',
+      needsBaseUpdate: false
     })
   })
 

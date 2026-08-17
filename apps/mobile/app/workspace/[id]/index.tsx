@@ -31,21 +31,21 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import type { ChatItem, PermissionRequest } from '@shared/types'
 import { workspaceDisplayName } from '@shared/types'
 import { formatToolGroup } from '@shared/toolGroups'
-import { BrandMark } from '../../src/components/BrandMark'
-import { DemoBanner } from '../../src/components/DemoBanner'
-import { QuestionCard } from '../../src/components/QuestionCard'
+import { BrandMark } from '../../../src/components/BrandMark'
+import { DemoBanner } from '../../../src/components/DemoBanner'
+import { QuestionCard } from '../../../src/components/QuestionCard'
 import {
   PermissionModeFooter,
   WorkspaceStatusBar
-} from '../../src/components/WorkspaceStatusBar'
-import { usePrColors } from '../../src/state/prColors'
-import { isLaptopAway, useRemoteStore } from '../../src/state/store'
-import { agoLabel, untilLabel, useNow } from '../../src/state/useNow'
-import { useDeviceAuthentication } from '../../src/state/useDeviceAuth'
-import { useTheme, useThemedStyles } from '../../src/state/theme'
-import type { Theme } from '../../src/theme'
-import { buildChatRows, type ChatRowModel, type ToolCardModel } from '../../src/chat/rows'
-import { isQuestionRequest } from '../../src/chat/questions'
+} from '../../../src/components/WorkspaceStatusBar'
+import { usePrColors } from '../../../src/state/prColors'
+import { isLaptopAway, useRemoteStore } from '../../../src/state/store'
+import { agoLabel, untilLabel, useNow } from '../../../src/state/useNow'
+import { useDeviceAuthentication } from '../../../src/state/useDeviceAuth'
+import { useTheme, useThemedStyles } from '../../../src/state/theme'
+import type { Theme } from '../../../src/theme'
+import { buildChatRows, type ChatRowModel, type ToolCardModel } from '../../../src/chat/rows'
+import { isQuestionRequest } from '../../../src/chat/questions'
 
 const PAGE_SIZE = 100
 const WATCH_REFRESH_MS = 40_000
@@ -775,13 +775,30 @@ export default function WorkspaceScreen(): React.JSX.Element {
                 {headerMeta}
               </Text>
             </View>
+            {/* PR 줄은 화면으로 가는 문이다 — 라벨 한 줄은 무엇이 막고 있는지 말하지 못하고,
+                그걸 확인하러 랩탑으로 돌아가는 비용이 폰에서는 크다. 이미 PR 을 말하고 있는
+                줄에 붙이므로 새 어포던스를 하나 더 만들지 않는다. */}
             {workspace?.pr ? (
-              <Text
-                style={[styles.headerPr, { color: prColors[workspace.pr.state] ?? theme.textDim }]}
-                numberOfLines={1}
+              <Pressable
+                accessibilityHint="Shows CI checks for this pull request"
+                accessibilityLabel={`Pull request #${workspace.pr.number}, ${workspace.pr.label}`}
+                accessibilityRole="button"
+                hitSlop={8}
+                onPress={() => router.push(`/workspace/${workspaceId}/pr`)}
+                style={({ pressed }) => [styles.headerPrRow, pressed && styles.headerPrPressed]}
               >
-                #{workspace.pr.number} · {workspace.pr.label}
-              </Text>
+                <Text
+                  style={[styles.headerPr, { color: prColors[workspace.pr.state] ?? theme.textDim }]}
+                  numberOfLines={1}
+                >
+                  #{workspace.pr.number} · {workspace.pr.label}
+                </Text>
+                <ChevronRight
+                  color={prColors[workspace.pr.state] ?? theme.textDim}
+                  size={12}
+                  strokeWidth={2.2}
+                />
+              </Pressable>
             ) : null}
             {limitLabel !== null ? (
               <Text style={styles.headerLimit} numberOfLines={1}>
@@ -896,7 +913,9 @@ const makeStyles = (theme: Theme) =>
     headerRepo: { color: theme.textDim, fontSize: 10, fontWeight: '700', letterSpacing: 0.8 },
     headerMetaLine: { alignItems: 'center', flexDirection: 'row', gap: 5, marginTop: 2 },
     headerMeta: { color: theme.textDim, fontSize: 11 },
+    headerPrRow: { alignItems: 'center', flexDirection: 'row', gap: 2 },
     headerPr: { fontSize: 11, marginTop: 2 },
+    headerPrPressed: { opacity: 0.55 },
     headerLimit: { color: theme.warningFg, fontSize: 11, marginTop: 2 },
     title: { color: theme.text, fontSize: 15, fontWeight: '600', maxWidth: '100%' },
     connection: { color: theme.textDim, fontSize: 10, marginTop: 2, textTransform: 'capitalize' },

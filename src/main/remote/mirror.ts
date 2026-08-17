@@ -129,7 +129,11 @@ export function projectStatusLine(
  *
  * 제목은 색·라벨용이 아니라 **표시 이름**이라서 함께 싣는다 — 사용자 지정 이름이 없는
  * 워크스페이스의 이름은 데스크톱에서 PR 제목이고, 이것을 빼면 같은 워크스페이스가
- * 랩탑에서는 PR 제목, 폰에서는 worktree 이름으로 갈린다. URL 은 그대로 두고 온다.
+ * 랩탑에서는 PR 제목, 폰에서는 worktree 이름으로 갈린다.
+ *
+ * URL 도 싣는다. 폰의 PR 화면이 여는 주소인데, 체크 조회(`pr:checks`)가 주는 것에 기댈 수
+ * 없다 — 그 조회는 랩탑이 깨어 있어야 성공하고, 폰으로 PR 을 확인하는 순간은 대개 랩탑이
+ * 자고 있을 때다.
  */
 export function projectPr(workspaceId: string): RemotePr | null | undefined {
   const status = getCachedPrStatus(workspaceId)
@@ -139,7 +143,9 @@ export function projectPr(workspaceId: string): RemotePr | null | undefined {
     number: status.number,
     state: status.state,
     label: status.label,
-    title: status.title
+    title: status.title,
+    url: status.url,
+    needsBaseUpdate: status.needsBaseUpdate
   }
 }
 
