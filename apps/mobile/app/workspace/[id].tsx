@@ -33,6 +33,7 @@ import { workspaceDisplayName } from '@shared/types'
 import { formatToolGroup } from '@shared/toolGroups'
 import { BrandMark } from '../../src/components/BrandMark'
 import { DemoBanner } from '../../src/components/DemoBanner'
+import { QuestionCard } from '../../src/components/QuestionCard'
 import {
   PermissionModeFooter,
   WorkspaceStatusBar
@@ -44,6 +45,7 @@ import { useDeviceAuthentication } from '../../src/state/useDeviceAuth'
 import { useTheme, useThemedStyles } from '../../src/state/theme'
 import type { Theme } from '../../src/theme'
 import { buildChatRows, type ChatRowModel, type ToolCardModel } from '../../src/chat/rows'
+import { isQuestionRequest } from '../../src/chat/questions'
 
 const PAGE_SIZE = 100
 const WATCH_REFRESH_MS = 40_000
@@ -825,8 +827,19 @@ export default function WorkspaceScreen(): React.JSX.Element {
             )
           }
         />
+        {/* 답을 받아야 하는 질문(AskUserQuestion)은 Allow/Deny 가 아니라 선택지 UI 로 분기한다 —
+            데스크톱 ChatView 와 같은 갈림이다. 승인해 봐야 답이 비면 모델은 그냥 진행한다. */}
         {permission !== undefined && command !== null ? (
-          <PermissionCard key={permission.requestId} request={permission} command={command} />
+          isQuestionRequest(permission) ? (
+            <QuestionCard
+              key={permission.requestId}
+              request={permission}
+              command={command}
+              actsWithoutAsking={workspace?.actsWithoutAsking === true}
+            />
+          ) : (
+            <PermissionCard key={permission.requestId} request={permission} command={command} />
+          )
         ) : null}
         {/* 데스크톱과 같은 순서다 — 상태줄은 입력창 위, 권한 모드는 입력창 아래.
             무엇을 보내려는 순간에 "어떤 모델로, 얼마나 생각하며, 얼마나 남은 맥락으로,
