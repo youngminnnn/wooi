@@ -38,8 +38,16 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "Allow Wooi to scan the pairing code shown on your computer",
+          "cameraPermission": "Allow Wooi to use the camera to scan the pairing code on your computer, and to take photos you attach to a message",
           "recordAudioAndroid": false
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow Wooi to read photos you pick so it can attach them to a message",
+          "cameraPermission": "Allow Wooi to use the camera to scan the pairing code on your computer, and to take photos you attach to a message",
+          "microphonePermission": false
         }
       ],
       "expo-secure-store",

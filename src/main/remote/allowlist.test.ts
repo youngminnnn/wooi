@@ -1,6 +1,12 @@
 import { describe, it, expect } from 'vitest'
 import { IPC } from '@shared/types'
-import { REMOTE_IPC, REMOTE_MAX_PROMPT_BYTES } from '@shared/remote'
+import {
+  REMOTE_IPC,
+  REMOTE_MAX_ATTACHMENTS,
+  REMOTE_MAX_PROMPT_BYTES,
+  REMOTE_UPLOAD_CHUNK_BYTES,
+  REMOTE_UPLOAD_MAX_CHUNKS
+} from '@shared/remote'
 import {
   REMOTE_COMMANDS,
   isMutatingRemoteCommand,
@@ -184,10 +190,11 @@ describe('chat:send 검증', () => {
     expect(v(IPC.chatSend, ['ws1', 'hello'])).toEqual(['ws1', 'hello'])
   })
 
-  it('이미지 첨부를 거부한다', () => {
+  it('base64 본문을 인라인으로 실으려는 시도를 거부한다', () => {
+    // 본문은 remote:upload 로만 올라온다. 여기서 받으면 64KiB 명령 예산이 통째로 날아간다.
     expect(() =>
       v(IPC.chatSend, ['ws1', 'hi', [{ name: 'a.png', mediaType: 'image/png', dataBase64: 'x' }]])
-    ).toThrow(/expected 2 args/)
+    ).toThrow(/uploadId/)
   })
 
   it('빈 문자열과 공백만 있는 프롬프트를 거부한다', () => {
@@ -316,5 +323,86 @@ describe('remote:unpairSelf 검증', () => {
     expect(REMOTE_COMMANDS.has(REMOTE_IPC.unpairSelf)).toBe(true)
     expect(v(REMOTE_IPC.unpairSelf, [])).toEqual([])
     expect(() => v(REMOTE_IPC.unpairSelf, ['other-device'])).toThrow(/expected 0 args/)
+  })
+})
+
+describe('첨부 검증', () => {
+  const image = { uploadId: 'upload-0001', name: 'shot.png', mediaType: 'image/png' }
+  const doc = { uploadId: 'upload-0002', name: 'notes.md', mediaType: 'text/markdown' }
+
+  it('이미지와 문서를 통과시킨다', () => {
+    expect(v(IPC.chatSend, ['ws1', 'look', [image, doc]])).toEqual(['ws1', 'look', [image, doc]])
+  })
+
+  it('첨부만 있으면 빈 본문을 허용한다 — 데스크톱 컴포저와 같은 규칙이다', () => {
+    expect(v(IPC.chatSend, ['ws1', '', [image]])).toEqual(['ws1', '', [image]])
+  })
+
+  it('빈 첨부 배열은 첨부가 없는 것과 같다', () => {
+    expect(v(IPC.chatSend, ['ws1', 'hi', []])).toEqual(['ws1', 'hi'])
+    expect(() => v(IPC.chatSend, ['ws1', '  ', []])).toThrow(/must not be blank/)
+  })
+
+  it('허용하지 않는 파일 종류를 거부한다', () => {
+    const bad = { uploadId: 'upload-0003', name: 'payload.sh', mediaType: 'text/plain' }
+    expect(() => v(IPC.chatSend, ['ws1', 'hi', [bad]])).toThrow(/not an accepted attachment/)
+    const noExt = { uploadId: 'upload-0004', name: 'README', mediaType: 'text/plain' }
+    expect(() => v(IPC.chatSend, ['ws1', 'hi', [noExt]])).toThrow(/not an accepted attachment/)
+  })
+
+  it('확장자가 없어도 이미지 미디어 타입이면 받는다', () => {
+    const pasted = { uploadId: 'upload-0005', name: 'photo', mediaType: 'image/jpeg' }
+    expect(v(IPC.chatSend, ['ws1', 'hi', [pasted]])).toEqual(['ws1', 'hi', [pasted]])
+  })
+
+  it('uploadId 를 불투명한 id 로만 받는다 — 경로가 새어 들어오지 않게', () => {
+    for (const uploadId of ['../../etc/passwd', 'short', 'has space', 'a'.repeat(65)]) {
+      expect(() => v(IPC.chatSend, ['ws1', 'hi', [{ ...image, uploadId }]])).toThrow(/uploadId/)
+    }
+  })
+
+  it('첨부 개수 상한을 지킨다', () => {
+    const many = Array.from({ length: REMOTE_MAX_ATTACHMENTS + 1 }, (_, index) => ({
+      ...image,
+      uploadId: `upload-${String(index).padStart(4, '0')}`
+    }))
+    expect(() => v(IPC.chatSend, ['ws1', 'hi', many])).toThrow(/too many attachments/)
+  })
+
+  it('같은 uploadId 를 두 번 가리키지 못한다 — 두 번째는 이미 소비된 뒤다', () => {
+    expect(() => v(IPC.chatSend, ['ws1', 'hi', [image, { ...image, name: 'other.png' }]])).toThrow(
+      /must not repeat an uploadId/
+    )
+  })
+})
+
+describe('remote:upload 검증', () => {
+  const chunk = 'QUJDRA=='
+
+  it('정상 조각을 통과시킨다', () => {
+    expect(v(REMOTE_IPC.upload, ['upload-0001', 0, 2, chunk])).toEqual(['upload-0001', 0, 2, chunk])
+  })
+
+  it('index 가 total 을 벗어나면 거부한다', () => {
+    expect(() => v(REMOTE_IPC.upload, ['upload-0001', 2, 2, chunk])).toThrow(/less than total/)
+    expect(() => v(REMOTE_IPC.upload, ['upload-0001', -1, 2, chunk])).toThrow(/non-negative/)
+  })
+
+  it('조각 수 상한을 지킨다 — 첨부 크기 상한에서 파생된다', () => {
+    expect(() =>
+      v(REMOTE_IPC.upload, ['upload-0001', 0, REMOTE_UPLOAD_MAX_CHUNKS + 1, chunk])
+    ).toThrow(/total must be an integer/)
+  })
+
+  it('base64 가 아닌 본문을 거부한다', () => {
+    expect(() => v(REMOTE_IPC.upload, ['upload-0001', 0, 1, 'not base64!'])).toThrow(
+      /must be base64/
+    )
+    expect(() => v(REMOTE_IPC.upload, ['upload-0001', 0, 1, ''])).toThrow(/non-empty/)
+  })
+
+  it('조각 하나가 청크 상한보다 크면 거부한다', () => {
+    const tooBig = 'A'.repeat(Math.ceil(REMOTE_UPLOAD_CHUNK_BYTES / 3) * 4 + 4)
+    expect(() => v(REMOTE_IPC.upload, ['upload-0001', 0, 1, tooBig])).toThrow(/too large/)
   })
 })
