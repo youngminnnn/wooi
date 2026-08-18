@@ -11,6 +11,7 @@ import { StatusIcon } from '../src/components/StatusIcon'
 import { questionWorkspaceIds } from '../src/chat/questions'
 import { DemoBanner } from '../src/components/DemoBanner'
 import { usePrColors } from '../src/state/prColors'
+import { workspaceSections } from '../src/state/sections'
 import { isLaptopAway, useRemoteStore } from '../src/state/store'
 import { agoLabel, untilLabel, useNow } from '../src/state/useNow'
 import { useTheme, useThemedStyles } from '../src/state/theme'
@@ -185,29 +186,8 @@ export default function WorkspaceListScreen(): React.JSX.Element {
     [state?.workspaces]
   )
 
-  /**
-   * 리포별로 묶는다. 순서는 랩탑이 보낸 그대로 — 데스크톱에서 사용자가 끌어 정한 순서이므로
-   * 폰이 다시 정렬하면 두 화면의 멘탈 모델이 갈린다.
-   *
-   * 아카이브된 워크스페이스는 뺀다. 데스크톱은 접힌 구역에 따로 두고, 폰에서 할 일은
-   * "지금 돌아가는 것"을 보는 쪽에 훨씬 가깝다.
-   */
-  const sections = useMemo(() => {
-    const workspaces = (state?.workspaces ?? []).filter((item) => !item.archived)
-    return (state?.repos ?? [])
-      .map((repo) => ({
-        repo,
-        data: workspaces
-          .filter((item) => item.repoId === repo.id)
-          .sort((left, right) => {
-            const permission =
-              Number(right.attention === 'permission') - Number(left.attention === 'permission')
-            const attention = Number(right.attention !== null) - Number(left.attention !== null)
-            return permission || attention || right.lastActiveAt - left.lastActiveAt
-          })
-      }))
-      .filter((section) => section.data.length > 0)
-  }, [state?.repos, state?.workspaces])
+  /** 리포별 구역. 순서 규칙은 데스크톱 사이드바와 공유한다(workspaceSections 참고). */
+  const sections = useMemo(() => workspaceSections(state), [state])
 
   const refresh = useCallback(async (): Promise<void> => {
     if ((!demo && pairing === null) || refreshState === null) return
