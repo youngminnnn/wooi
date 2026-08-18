@@ -212,4 +212,58 @@ describe('ClaudeSession background tasks', () => {
     expect(statuses(events.slice(seen))).toContain('running')
     session.dispose()
   })
+
+  /**
+   * 회귀: 서브에이전트의 종료 엣지(task_updated/task_notification)를 놓쳐도 턴이 끝나면 idle 로
+   * 간다. 엣지로 상태를 판단하던 시절에는 그 유실 하나가 워크스페이스를 영영 '진행 중' 에 가뒀다 —
+   * result 가 와도 agentTasks 가 비지 않아 shouldRun 이 계속 true 였다.
+   */
+  it('서브에이전트 종료 알림을 놓쳐도 턴이 끝나면 idle 로 간다', async () => {
+    const { session, events } = await start()
+    query.out.push(
+      system('task_started', {
+        task_id: 'agent',
+        task_type: 'agent',
+        subagent_type: 'Explore',
+        description: 'Explore code'
+      })
+    )
+    await tick()
+    // 종료 엣지 없이 턴만 끝난다.
+    query.out.push({ ...RESULT })
+    await tick()
+
+    expect(statuses(events)).toEqual(['running', 'idle'])
+    session.dispose()
+  })
+
+  /**
+   * 회귀: 백그라운드 작업 목록은 CLI 프로세스 단위다. 프로세스를 갈아 끼우고도(재시도) 앞
+   * 프로세스의 목록을 들고 있으면 그것을 지워 줄 이벤트가 영영 오지 않아, 그 워크스페이스는
+   * 이후 모든 턴이 끝나도 idle 로 돌아오지 못한다.
+   */
+  it('프로세스를 다시 띄우면 앞 프로세스의 백그라운드 목록을 버린다', async () => {
+    const { session, events } = await start()
+    query.out.push(
+      system('background_tasks_changed', {
+        tasks: [{ task_id: 'dev', task_type: 'local_bash', description: 'npm run dev' }]
+      })
+    )
+    await tick()
+    expect(latestAgents(events).map((task) => task.taskId)).toEqual(['dev'])
+
+    // 산출 없이 스트림이 닫힌다 — 세션은 같은 메시지를 새 프로세스에서 한 번 더 돌린다.
+    const first = query
+    query.out.close()
+    await tick()
+    expect(query).not.toBe(first)
+
+    // 새 프로세스의 턴이 끝났다. 앞 프로세스의 'dev' 는 여기 없으므로 idle 이어야 한다.
+    query.out.push({ ...RESULT })
+    await tick()
+
+    expect(latestAgents(events)).toEqual([])
+    expect(statuses(events).at(-1)).toBe('idle')
+    session.dispose()
+  })
 })

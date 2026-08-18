@@ -284,6 +284,23 @@ describe('send_to_workspace', () => {
     expect(options.origin.messages).toHaveLength(2)
   })
 
+  /**
+   * 회귀: 턴 종료 훅은 true 를 "다음 턴이 곧 시작한다" 로 읽고 idle 방송을 건너뛴다
+   * ([[agent/orchestrator]] handleTurnEnd). 전달이 실패했는데도 true 를 돌리면 시작되지 않을
+   * 턴을 기다리며 사이드바가 영영 '진행 중' 에 갇힌다.
+   */
+  it('전달이 실패하면 턴 종료를 가져갔다고 하지 않는다', async () => {
+    state.workspaces.push(ws({ id: 'ws-them', status: 'running' }))
+    const { flushBufferedPeerMessages } = await import('./peer')
+
+    await send({ targetWorkspaceId: 'ws-them', message: 'buffered' })
+    sendMessage.mockImplementationOnce(() => {
+      throw new Error('host is gone')
+    })
+
+    expect(flushBufferedPeerMessages('ws-them')).toBe(false)
+  })
+
   it('idle 대상은 버퍼를 거치지 않고 즉시 전달한다', async () => {
     state.workspaces.push(ws({ id: 'ws-them', status: 'idle' }))
 
