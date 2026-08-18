@@ -1,0 +1,58 @@
+<!--
+  Play 스토어 피처 그래픽 (1024×500). Play 에만 있는 자산이다 — App Store 에는 대응물이 없다.
+
+  제약:
+    - 정확히 1024×500. 리사이즈가 아니라 이 크기로 렌더한다.
+    - 알파 채널 금지(24비트 PNG 또는 JPEG). `build.sh` 가 렌더 후 알파를 떨어뜨린다.
+    - 목록·검색 결과에서 좌우가 잘리는 자리가 있고, 미리보기 영상을 등록하면 가운데에 재생
+      버튼이 얹힌다. 그래서 글자는 바깥 10% 와 정가운데를 피해 왼쪽 블록에 모아 둔다.
+
+  구도는 `docs/og.svg` 와 같은 계열이다 — 같은 배경 그라데이션, 같은 `우`(파랑)/`이`(보라)
+  마크. 스토어에서 보는 인상이 랜딩 페이지와 어긋나지 않아야 한다.
+-->
+<svg width="1024" height="500" viewBox="0 0 1024 500" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b0e15"/>
+      <stop offset="1" stop-color="#141a28"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.19" cy="0.5" r="0.62">
+      <stop offset="0" stop-color="#3a4a8f" stop-opacity="0.5"/>
+      <stop offset="1" stop-color="#3a4a8f" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="title" x1="0" y1="0" x2="1" y2="0.4">
+      <stop offset="0" stop-color="#6d8bfa"/>
+      <stop offset="1" stop-color="#c6a6f3"/>
+    </linearGradient>
+    <!-- 마크 그라데이션은 1024 글리프 좌표계 기준이다. 그룹에 transform 을 걸어도
+         userSpaceOnUse 좌표는 그룹 안쪽 좌표계로 해석되므로 값을 그대로 둔다. -->
+    <linearGradient id="u" gradientUnits="userSpaceOnUse" x1="180" y1="240" x2="540" y2="780">
+      <stop offset="0" stop-color="#8fc0ff"/>
+      <stop offset="1" stop-color="#5b8cff"/>
+    </linearGradient>
+    <linearGradient id="i" gradientUnits="userSpaceOnUse" x1="500" y1="240" x2="870" y2="800">
+      <stop offset="0" stop-color="#a78bfa"/>
+      <stop offset="1" stop-color="#c9adff"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1024" height="500" fill="url(#bg)"/>
+  <rect width="1024" height="500" fill="url(#glow)"/>
+
+  <!-- 마크. 글리프 바운딩 박스는 1024 좌표계에서 x 153–871, y 235–803 이다.
+       scale 0.30 → 215×170 이 되고, 왼쪽 100px·세로 가운데에 놓인다. -->
+  <g transform="translate(54.1,94.3) scale(0.30)" fill="none" stroke-width="58" stroke-linecap="round">
+    <circle cx="322" cy="366" r="102" stroke="url(#u)"/>
+    <path d="M182 584 H 462" stroke="url(#u)"/>
+    <path d="M322 584 V 754" stroke="url(#u)"/>
+    <circle cx="650" cy="562" r="102" stroke="url(#i)"/>
+    <path d="M842 350 V 774" stroke="url(#i)"/>
+  </g>
+
+  <g font-family="'Helvetica Neue',Arial,sans-serif">
+    <!-- 기대치를 먼저 맞춘다: 이 앱은 단독으로 쓰는 앱이 아니라 맥의 Wooi 를 조종하는 짝이다. -->
+    <text x="380" y="180" font-size="19" font-weight="700" letter-spacing="2.6" fill="#79839a">COMPANION FOR WOOI ON MAC</text>
+    <text x="380" y="278" font-size="92" font-weight="800" letter-spacing="-1.5" fill="url(#title)">Wooi</text>
+    <text x="380" y="328" font-size="31" font-weight="500" fill="#c2cadb">Approve, reply, and watch — live.</text>
+  </g>
+</svg>
