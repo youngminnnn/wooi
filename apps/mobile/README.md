@@ -327,11 +327,43 @@ JS 를 그대로 받는다.** 네이티브 의존성을 건드리지 않은 변�
   앱 아이콘을 쓴다.
 - **푸시 알림 전반** — Expo Go 에서는 SDK 53 부터 빠졌다(앱을 켜면 그 경고가 뜬다).
 
-## 로컬에서 굽기
+## 빌드는 러너에서 직접 굽는다 — EAS 클라우드가 아니라
+
+CI 는 `eas build --local` 을 쓴다. EAS 클라우드 빌드는 무료 플랜이 **플랫폼당 월 15회**뿐이라,
+스토어 준비처럼 검증 빌드를 여러 번 굽는 시기에 금방 바닥난다. 실제로 v1.0.0 을 준비하다
+할당량이 떨어져 확인용 빌드조차 못 굽는 일이 있었다.
+
+프레임워크는 그대로 Expo 다. 바뀐 것은 **어느 기계가 Gradle/Xcode 를 돌리느냐**뿐이고,
+EAS 의 나머지는 계속 쓴다:
+
+| 계속 EAS 가 하는 일 | 왜 |
+| --- | --- |
+| 자격증명 보관 | `--local` 에서도 키스토어를 서버에서 받아 온다 — `EXPO_TOKEN` 만 있으면 되고, 레포에도 시크릿에도 키를 두지 않는다 |
+| `versionCode` / `buildNumber` | `appVersionSource: remote`. 되감기면 안 되는 단조 증가 값이라 커밋으로 관리하면 충돌이 난다 |
+| 제출 | `eas submit` |
+| OTA | `eas update` |
+
+로컬 빌드가 EAS 캐시를 못 쓰므로(`Local builds do not support restoring cache`) 워크플로가
+`~/.gradle` 을 직접 캐시한다.
+
+제출은 `--latest` 가 아니라 **`--path`** 로 한다. 로컬 빌드는 EAS 에 빌드 레코드를 남기지
+않으므로 "가장 최근 빌드" 라는 말이 성립하지 않는다.
+
+### 내 기계에서 굽기
+
+```sh
+export JAVA_HOME="/opt/homebrew/opt/openjdk@21"
+export ANDROID_HOME="/opt/homebrew/share/android-commandlinetools"
+export EAS_LOCAL_BUILD_ARTIFACTS_DIR=/tmp/eas-local-out
+
+EXPO_TOKEN="$(cat ~/.expo-token)" \
+  npx eas build --profile preview --platform android --local --non-interactive
+```
+
+Android SDK 세팅은 [스토어 자산 README](./store/android/README.md#에뮬레이터) 와 같다.
 
 ```sh
 npx expo start                                      # Metro (개발)
-eas build --profile development --platform android  # dev client 포함 APK
 ```
 
 USB 로 물린 폰에서 Metro 가 안 잡히면 `adb reverse tcp:8081 tcp:8081` — 네트워크·VPN·IP
