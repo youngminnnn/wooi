@@ -1,0 +1,55 @@
+<!--
+  Play 스토어 등록정보용 아이콘 (512×512).
+
+  런처에 깔리는 적응형 아이콘(assets/android-icon-*.png)과 **다른 파일**이다. 둘을 하나로
+  합칠 수 없는 이유:
+
+    - 적응형 아이콘은 108dp 캔버스에 그려 놓고 런처가 가운데 72dp 만 보여 준다. 그래서 원본에
+      바깥 여백이 크게 들어가 있다. 그 파일을 그대로 스토어에 올리면 마크가 자잘하게 보인다.
+    - 스토어 아이콘은 잘리지 않는다. 대신 Play 가 **모서리를 30% 반경으로 직접 둥글게** 깎고
+      그림자를 얹는다(2026-03-31 부터 30% 로 고정). 그래서 여기서 모서리를 미리 둥글게 만들면
+      두 번 깎여 안쪽에 투명한 이가 빠진다.
+
+  결론: 여기는 `docs/icon.svg` 와 같은 꽉 찬 구도를 쓰되, macOS squircle 용 `rx` 와 가장자리
+  하이라이트만 뺀 **정사각형 풀블리드**다. 핵심 요소는 15% 안쪽 여백 안에 있어 30% 모서리
+  마스크에 걸리지 않는다.
+-->
+<svg width="512" height="512" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- 배경: 위쪽이 살짝 밝은 차콜 → 아래쪽 거의 검정 -->
+    <linearGradient id="bg" x1="0.1" y1="0" x2="0.9" y2="1">
+      <stop offset="0" stop-color="#20242e" />
+      <stop offset="0.55" stop-color="#13161c" />
+      <stop offset="1" stop-color="#0a0b0d" />
+    </linearGradient>
+    <!-- `우` — 파랑. gradientUnits 은 반드시 userSpaceOnUse. 기본값인 objectBoundingBox 는
+         폭이나 높이가 0 인 도형을 렌더링하지 않아 ㅜ 의 가로획과 ㅣ 의 세로획이 사라진다. -->
+    <linearGradient id="u" gradientUnits="userSpaceOnUse" x1="180" y1="240" x2="540" y2="780">
+      <stop offset="0" stop-color="#8fc0ff" />
+      <stop offset="1" stop-color="#5b8cff" />
+    </linearGradient>
+    <!-- `이` — 보라 -->
+    <linearGradient id="i" gradientUnits="userSpaceOnUse" x1="500" y1="240" x2="870" y2="800">
+      <stop offset="0" stop-color="#a78bfa" />
+      <stop offset="1" stop-color="#c9adff" />
+    </linearGradient>
+    <!-- 글자 뒤 부드러운 광원 -->
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#7c9bff" stop-opacity="0.35" />
+      <stop offset="1" stop-color="#7c9bff" stop-opacity="0" />
+    </radialGradient>
+  </defs>
+
+  <!-- 풀블리드 정사각형 — 모서리 반경 없음 (Play 가 직접 깎는다) -->
+  <rect width="1024" height="1024" fill="url(#bg)" />
+  <rect x="140" y="140" width="744" height="744" rx="260" fill="url(#glow)" />
+
+  <!-- 우 -->
+  <circle cx="322" cy="366" r="102" fill="none" stroke="url(#u)" stroke-width="58" />
+  <path d="M182 584 H 462" fill="none" stroke="url(#u)" stroke-width="58" stroke-linecap="round" />
+  <path d="M322 584 V 754" fill="none" stroke="url(#u)" stroke-width="58" stroke-linecap="round" />
+
+  <!-- 이 -->
+  <circle cx="650" cy="562" r="102" fill="none" stroke="url(#i)" stroke-width="58" />
+  <path d="M842 350 V 774" fill="none" stroke="url(#i)" stroke-width="58" stroke-linecap="round" />
+</svg>
