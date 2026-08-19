@@ -31,16 +31,32 @@ describe('PR 상태 캐시', () => {
       true
     )
 
-    // 투영되지 않는 필드는 방송할 이유가 없다.
+    // 같은 값을 다시 받은 것으로는 방송하지 않는다.
     expect(rememberPrStatus('ws', status({ state: 'approved', label: 'Ready to merge' }))).toBe(
       false
     )
+
+    // 폰의 PR 화면이 여는 주소다 — 투영에 실리므로 바뀌면 알려야 한다.
     expect(
       rememberPrStatus(
         'ws',
         status({ state: 'approved', label: 'Ready to merge', url: 'https://example/pr/7?x=1' })
       )
-    ).toBe(false)
+    ).toBe(true)
+
+    // 회귀: 폰의 "Update branch" 표시가 이 값 하나로 갈린다. 예전에는 비교에서 빠져 있어
+    // base 가 뒤처져도 무관한 다른 변화가 생길 때까지 낡은 채로 남았다.
+    expect(
+      rememberPrStatus(
+        'ws',
+        status({
+          state: 'approved',
+          label: 'Ready to merge',
+          url: 'https://example/pr/7?x=1',
+          needsBaseUpdate: true
+        })
+      )
+    ).toBe(true)
 
     expect(rememberPrStatus('ws', null)).toBe(true)
     expect(getCachedPrStatus('ws')).toBeNull()

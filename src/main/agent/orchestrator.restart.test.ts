@@ -27,7 +27,26 @@ type Hook = (workspaceId: string, status: 'idle' | 'error') => boolean
 /** 오케스트레이터가 백엔드에 심어 둔 턴 종료 훅. 백엔드 대신 여기서 당긴다. */
 const deps = vi.hoisted(() => ({ onTurnEnd: undefined as Hook | undefined }))
 
-vi.mock('../store', () => ({ getStore: () => ({ getState: () => state }) }))
+vi.mock('../store', () => ({
+  getStore: () => ({ getState: () => state, update: (fn: (st: typeof state) => void) => fn(state) })
+}))
+
+/**
+ * 이 턴을 기다리던 peer 묶음이 세션 교체 사이에 어떻게 다뤄지는지만 본다 — 묶음을 실제로 쌓는
+ * 것은 [[agent/tools/peer]] 의 몫이고, 여기서 확인할 것은 **순서**다: dispose 보다 먼저 꺼내고,
+ * 새 세션이 열린 뒤에 넣는다.
+ */
+const peer = vi.hoisted(() => {
+  const handoff = { deliver: vi.fn(), park: vi.fn() }
+  return { handoff, buffered: false }
+})
+vi.mock('./tools/peer', () => ({
+  detachBufferedPeerMessages: vi.fn(() => (peer.buffered ? peer.handoff : null)),
+  flushBufferedPeerMessages: vi.fn(() => false),
+  forgetPeerSessionRules: vi.fn(),
+  resetPeerSession: vi.fn(),
+  resetAllPeerSessions: vi.fn()
+}))
 vi.mock('./registry', () => ({
   createBackend: (_id: string, d: { onTurnEnd: Hook }) => {
     deps.onTurnEnd = d.onTurnEnd
@@ -71,6 +90,7 @@ function endTurn(id = 'ws-1', status: 'idle' | 'error' = 'idle'): boolean {
 beforeEach(() => {
   vi.clearAllMocks()
   deps.onTurnEnd = undefined
+  peer.buffered = false
   state.workspaces = [{ ...workspace }]
 })
 
@@ -193,6 +213,38 @@ describe('resumeAfterTurn', () => {
     expect(backend.sendMessage).not.toHaveBeenCalled()
     // 예약이 남아 있었다면 한참 뒤 다른 턴이 끝날 때 뜬금없이 되살아난다.
     expect(endTurn('ws-1', 'idle')).toBe(false)
+  })
+
+  /**
+   * 회귀: 이 턴이 끝나기를 기다리던 peer 묶음은 dispose 가 승인 대기로 되돌려 버렸다. 발신자는
+   * 이미 "현재 턴이 끝나면 전달된다" 는 답을 받아 간 뒤라, 사용자가 카드를 승인하지 않으면
+   * 그 메시지는 영영 모델에 닿지 않았다 — 곧바로 새 턴이 열리는 자리인데도.
+   */
+  it('대기 중이던 peer 묶음을 새 세션으로 넘긴다', async () => {
+    peer.buffered = true
+    const agents = await orchestrator()
+    agents.resumeAfterTurn('ws-1', prompt)
+
+    expect(endTurn()).toBe(true)
+    expect(peer.handoff.deliver).toHaveBeenCalledTimes(1)
+    expect(peer.handoff.park).not.toHaveBeenCalled()
+    // 새 세션이 열린 뒤여야 한다 — 앞이면 끊길 옛 세션이 그것을 받는다.
+    expect(backend.sendMessage.mock.invocationCallOrder[0]).toBeLessThan(
+      peer.handoff.deliver.mock.invocationCallOrder[0]
+    )
+  })
+
+  it('이어 보내지 못하면 그 묶음은 승인 대기로 되돌린다 — 조용히 사라지지 않게', async () => {
+    peer.buffered = true
+    const agents = await orchestrator()
+    backend.sendMessage.mockImplementationOnce(() => {
+      throw new Error('host is gone')
+    })
+    agents.resumeAfterTurn('ws-1', prompt)
+
+    expect(endTurn()).toBe(false)
+    expect(peer.handoff.park).toHaveBeenCalledTimes(1)
+    expect(peer.handoff.deliver).not.toHaveBeenCalled()
   })
 
   it('보내지 못하면 턴 종료를 넘겨준다 — 사이드바가 진행 중에 갇히지 않게', async () => {

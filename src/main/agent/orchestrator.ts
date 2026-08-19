@@ -27,7 +27,13 @@ import { backendAvailability, createBackend, type Dispatch } from './registry'
 import { AGENT_BACKENDS, backendMeta } from './backend'
 import { log } from '../logger'
 import { rememberModels } from '../modelCatalog'
-import { flushBufferedPeerMessages, resetAllPeerSessions, resetPeerSession } from './tools/peer'
+import {
+  detachBufferedPeerMessages,
+  flushBufferedPeerMessages,
+  forgetPeerSessionRules,
+  resetAllPeerSessions,
+  resetPeerSession
+} from './tools/peer'
 
 /**
  * 여러 에이전트 백엔드를 소유하고, 워크스페이스가 지정한 백엔드(workspace.agentBackend)로 호출을
@@ -302,7 +308,10 @@ export class AgentOrchestrator {
     if (status === 'error') {
       // 오류 뒤 백엔드가 같은 프로세스를 재사용할지 새 세션을 만들지 확정할 수 없다. 보안 규칙이
       // 빠진 표식만 보내는 것보다 다음 건에 전문을 한 번 더 싣는 쪽으로 기울인다.
-      resetPeerSession(workspaceId, '오류로 끝난 턴')
+      //
+      // 전문 기억만 버린다 — 세션은 아직 살아 있으므로 대기 중인 묶음까지 승인 대기로 되돌리면
+      // 곧 유휴가 되어 받을 수 있는 메시지를 사람 손에 떠넘기게 된다(버퍼는 자기 타이머가 비운다).
+      forgetPeerSessionRules(workspaceId)
     }
     const resume = this.pendingResume.get(workspaceId)
     if (!resume) {
@@ -317,6 +326,11 @@ export class AgentOrchestrator {
     // 무엇보다 사용자가 멈춘 것을 화면에서 봐야 한다. 재시작 예약은 남으므로 다음 메시지가 연다.
     if (status !== 'idle') return false
 
+    // 이 턴을 기다리던 peer 묶음은 dispose **전에** 꺼낸다. 그대로 두면 dispose 가 승인 대기로
+    // 되돌리는데([[agent/tools/peer]] resetPeerSession), 이 경로는 몇 밀리초 뒤 새 세션으로
+    // 다음 턴을 여는 자리라 되돌릴 이유가 없다 — 발신자는 이미 delivered 를 받아 갔고,
+    // "현재 턴이 끝나면 전달된다" 고 통보까지 해 둔 상태다.
+    const peerHandoff = detachBufferedPeerMessages(workspaceId)
     // 여기서는 끊어도 된다 — 턴이 이미 끝나 결과를 기다리는 도구 호출이 없다. 이게 예약을 "다음
     // 전송 직전" 이 아니라 지금 풀 수 있는 이유다(restartBeforeNextMessage 주석 참고).
     this.dispose(workspaceId)
@@ -327,10 +341,15 @@ export class AgentOrchestrator {
       this.backendFor(workspaceId).sendMessage(workspaceId, resume, undefined, { silent: true })
     } catch (err) {
       log.error(`orchestrator: 턴 종료 뒤 자동 이어가기 실패 (${workspaceId})`, err)
+      // 이어갈 턴이 없으니 peer 묶음도 넣을 자리가 없다 — 사라지지 않게 승인 대기로 되돌린다.
+      peerHandoff?.park('자동 이어가기 실패')
       // 못 보냈으면 턴은 그냥 끝난 것이다. false 를 돌려 백엔드가 idle 을 방송하게 둔다 —
       // 여기서 true 를 돌리면 사이드바가 영영 '진행 중' 에 갇힌다.
       return false
     }
+    // 새 세션이 열린 뒤에 넣는다 — 그래야 옛 세션과 함께 사라지지 않고, 전문도 새 세션 기준으로
+    // 다시 실린다(dispose 가 전문 기억을 비웠다).
+    peerHandoff?.deliver()
     return true
   }
 

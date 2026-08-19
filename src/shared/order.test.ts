@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { orderVisibleWorkspaces, reorderById } from './types'
+import { orderVisibleWorkspaces, reorderById, workspaceStackMembers } from './types'
 
 type W = {
   id: string
@@ -71,5 +71,29 @@ describe('orderVisibleWorkspaces', () => {
     const workspaces = [ws('a', 'r1'), ws('b', 'r2')]
     const movedRepos = reorderById(repos, 'r2', 'r1', 'before')
     expect(ids(orderVisibleWorkspaces(movedRepos, workspaces))).toEqual(['b', 'a'])
+  })
+})
+
+describe('workspaceStackMembers', () => {
+  it('뿌리부터 DFS 로 모은다', () => {
+    const workspaces = [ws('child', 'r1', 'root'), ws('root', 'r1'), ws('grand', 'r1', 'child')]
+    expect(ids(workspaceStackMembers(workspaces, 'child'))).toEqual(['root', 'child', 'grand'])
+  })
+
+  /**
+   * 정상적인 생성 경로에서는 부모 고리가 생기지 않지만, 이 함수는 이미 위로 올라가는 루프에
+   * 순환 가드를 들고 있다 — 그 전제가 아래로 내려올 때만 빠져 있으면 손상된 상태 파일 하나가
+   * 스택 팝오버를 여는 순간 앱을 통째로 죽인다(무한 재귀).
+   */
+  it('부모 고리가 있어도 무한 재귀하지 않는다', () => {
+    const workspaces = [ws('a', 'r1', 'b'), ws('b', 'r1', 'a')]
+    const members = ids(workspaceStackMembers(workspaces, 'a'))
+    expect(members).toHaveLength(2)
+    expect([...members].sort()).toEqual(['a', 'b'])
+  })
+
+  it('자기 자신을 부모로 가리켜도 한 번만 담는다', () => {
+    const workspaces = [ws('a', 'r1', 'a')]
+    expect(ids(workspaceStackMembers(workspaces, 'a'))).toEqual(['a'])
   })
 })
