@@ -189,9 +189,10 @@ stack them in dependency order, and pass results along the chain.
   agent plans to touch, and tells it to check with you before editing those paths. Paths
   only — **diffs are never shared between workspaces**.
 - **Fan out or stack up** — `create_workspace` starts an independent workspace off the
-  default branch; `create_stacked_workspace` starts a child off the committed tip of the
-  current branch, so its PR targets the current branch. Either can be handed a first
-  message that starts the new agent's turn immediately.
+  default branch — in this repo, or in any other repo you've added to Wooi
+  (`list_repositories` lists them); `create_stacked_workspace` starts a child off the
+  committed tip of the current branch, so its PR targets the current branch. Either can be
+  handed a first message that starts the new agent's turn immediately.
 - **Talk along the chain** — `report_to_parent` records a result for the workspace this
   one was stacked on (it doesn't interrupt the parent), `check_stacked_work` lists the
   children with their branch, PR, and latest report, and `notify_child` sends an update

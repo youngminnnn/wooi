@@ -66,7 +66,7 @@ function words(raw: string): string[] {
 }
 
 /**
- * 커맨드 목록. 도구 12개에 하나씩 대응한다.
+ * 커맨드 목록. 도구마다 하나씩 대응한다(wooiCommands.test 가 그 대응을 강제한다).
  *
  * 이름을 도구 이름 그대로(`/wooi:check_stacked_work`) 쓰지 않는 이유는 순전히 손가락이다 —
  * 접두사가 이미 출처를 말해 주므로 뒤는 짧을수록 좋다. 대응은 `tool` 필드에 적혀 있고,
@@ -106,6 +106,9 @@ export const WOOI_COMMANDS: WooiCommandSpec[] = [
       '',
       'If the user named an agent, a model, or a reasoning effort for it, pass those as',
       '`agentBackend`, `model` and `effort` — otherwise leave them out and let Wooi pick.',
+      '',
+      'If the user named another repository, pass it as `repo` and write the task for that',
+      'codebase — nothing you know about this one holds there.',
       '',
       'What the new workspace should do: $ARGUMENTS'
     ].join('\n')
@@ -184,6 +187,14 @@ export const WOOI_COMMANDS: WooiCommandSpec[] = [
       '',
       'What they need to know: $ARGUMENTS'
     ].join('\n')
+  },
+  {
+    name: 'repos',
+    tool: 'list_repositories',
+    mode: 'direct',
+    description: 'List the repositories a workspace can be created in',
+    prompt:
+      'Call `mcp__wooi__list_repositories` and list the repositories the user has added to Wooi.'
   },
   {
     name: 'peers',
@@ -337,6 +348,7 @@ export function parseWooiCommandArgs(name: string, raw: string): WooiCommandArgs
   switch (name) {
     case 'children':
     case 'peers':
+    case 'repos':
       return { args: {} }
 
     case 'related': {

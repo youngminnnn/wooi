@@ -16,7 +16,7 @@ Tools normally appear to the agent as `mcp__wooi__<tool-name>`. Most tool defini
 are loaded on demand, so a tool may not be visible in the model's initial context even
 though it is available through tool search.
 
-The 15 core tools are available in every workspace. `claude_subagent` and
+The 16 core tools are available in every workspace. `claude_subagent` and
 `codex_subagent` are added only when multi-agent mode is enabled and the corresponding
 backend is available for delegation.
 
@@ -30,6 +30,9 @@ backend is available for delegation.
 - `send_to_workspace` is the exception, and it moves the boundary instead of removing it:
   any open workspace can be addressed, in any repository, but the **receiving** workspace
   decides whether the message is delivered. See [Peer messages](#peer-messages).
+- `create_workspace` is the one tool that creates something outside the caller's
+  repository. Its `repo` input can only name a repository the user has already added to
+  Wooi, and the approval card says which one it is.
 - Read-only tools run without an approval prompt. State-changing tools follow the
   workspace's permission mode and normally show an approval card before running. Full
   Access runs them without approval.
@@ -50,11 +53,39 @@ Creates an independent workspace from the repository's default branch.
 | Input | Type | Required | Description |
 | --- | --- | --- | --- |
 | `name` | string | No | Branch name. If omitted, Wooi generates one. |
+| `repo` | string | No | Repository to create it in, by the name Wooi shows in the sidebar, or by its full checkout path. If omitted, the caller's own repository. |
 | `task` | string | No | First message for the new workspace. Providing it starts a turn immediately. |
 
 The new workspace does not have a stack parent, does not report back to the caller, and
 does not appear in `check_stacked_work`. Uncommitted changes in the caller do not affect
 creation because the new branch starts from the remote default branch.
+
+`repo` is the one place a tool reaches outside the caller's repository to create
+something. Names come from `list_repositories`. Only repositories the user has added to
+Wooi can be named; an unknown name is rejected with the registered names listed, and an
+ambiguous one (two repositories sharing a folder name) is rejected with their paths. The
+branch forks from that repository's own default branch, the approval card names it, and
+the handoff message tells the new workspace which repository it is in so it does not
+trust paths from the caller's.
+
+### `list_repositories`
+
+Lists the repositories the user has added to Wooi. Takes no input and runs without an
+approval prompt.
+
+| Field | Description |
+| --- | --- |
+| `name` | What to pass as `create_workspace`'s `repo`. |
+| `path` | Checkout path, and the disambiguator when two repositories share a name. |
+| `defaultBranch` | The branch a new workspace there would fork from. |
+| `current` | Present only on the repository this workspace lives in. |
+| `openWorkspaces` | How many non-archived workspaces exist in it. |
+| `ambiguousName` | Present only when another repository shares the name, so `path` must be used. |
+
+This is the only way an agent learns about a repository that has no workspace open —
+`list_workspace_peers` reports the repository of open workspaces only. Listing changes
+nothing; starting work in one of them is a separate `create_workspace` call that shows an
+approval card.
 
 ### `create_stacked_workspace`
 
@@ -342,6 +373,7 @@ with your own commands: `/wooi:pr`, `/wooi:children`, and so on. The catalog is
 | `/wooi:notify <what changed>` | `notify_child` | agent |
 | `/wooi:send <what changed>` | `send_to_workspace` | agent |
 | `/wooi:team [what to delegate]` | `switch_to_agent_team` | agent |
+| `/wooi:repos` | `list_repositories` | direct |
 | `/wooi:peers` | `list_workspace_peers` | direct |
 | `/wooi:children` | `check_stacked_work` | direct |
 | `/wooi:related [paths…]` | `check_related_work` | direct |

@@ -14,6 +14,7 @@ import { backendMeta } from '../backend'
 import { isReadOnlyToolName } from './catalog'
 import { resolvePrBase } from './pullRequest'
 import { scriptCommandFor } from './script'
+import { lookupTargetRepo } from './target'
 
 /**
  * 소켓으로 들어온 Wooi 도구 호출에 사용자 승인을 받는다.
@@ -203,9 +204,29 @@ function repoOf(workspace: Workspace): Repo | undefined {
     .repos.find((r) => r.id === workspace.repoId)
 }
 
-/** 독립 워크스페이스가 갈라질 브랜치. 핸들러와 같은 근거를 본다(workspaces.ts createWorkspace). */
-function defaultBranchFor(workspace: Workspace): string {
-  return repoOf(workspace)?.defaultBranch ?? 'the default branch'
+/**
+ * 독립 워크스페이스가 **어느 리포의 어느 브랜치에서** 갈라지는가. 핸들러와 같은 근거를 본다
+ * ([[agent/tools/target]] lookupTargetRepo) — 카드가 따로 계산하면 사용자가 승인한 문장과 실제로
+ * 만들어지는 리포가 갈라진다.
+ *
+ * 리포 이름은 **다른 리포일 때만** 적는다. 거의 모든 호출이 자기 리포이고, 매번 이름을 적으면
+ * 정작 밖으로 나가는 호출이 눈에 띄지 않는다 — 이 카드에서 사용자가 잡아야 할 것이 그것이다.
+ *
+ * 못 찾아도 카드는 떠야 한다(핸들러가 어차피 거절한다). 그때는 모델이 적은 이름을 그대로 보여
+ * 준다 — 사용자가 오타를 알아보는 자리도 여기다.
+ */
+function creationTargetPhrases(
+  workspace: Workspace,
+  args: Record<string, unknown>
+): { where: string; baseBranch: string } {
+  const requested = typeof args.repo === 'string' ? args.repo.trim() : ''
+  const { repo } = lookupTargetRepo(workspace, requested)
+  if (!repo) {
+    const where = requested ? ` in \`${requested}\`` : ''
+    return { where, baseBranch: 'the default branch' }
+  }
+  if (repo.id === workspace.repoId) return { where: '', baseBranch: repo.defaultBranch }
+  return { where: ` in the \`${repo.name}\` repository`, baseBranch: repo.defaultBranch }
 }
 
 /**
@@ -242,11 +263,13 @@ function titleFor(tool: string, args: unknown, workspace: Workspace): string {
   }
   if (tool === 'create_workspace') {
     const name = typeof a.name === 'string' && a.name.trim() ? ` on \`${a.name.trim()}\`` : ''
-    // 스택과 달리 "무엇 위에 쌓이는지" 가 없으므로, 사용자가 판단할 거리는 어디서 갈라지는가다.
+    // 스택과 달리 "무엇 위에 쌓이는지" 가 없으므로, 사용자가 판단할 거리는 어느 리포의 어디서
+    // 갈라지는가다 — 이 도구는 다른 리포에도 만들 수 있다.
+    const { where, baseBranch } = creationTargetPhrases(workspace, a)
     return (
-      `The agent wants to create a new workspace${name} branching off ` +
-      `\`${defaultBranchFor(workspace)}\` — this makes a branch, a worktree, and runs the ` +
-      `repository's setup script.${agentChoicePhrase(a)}`
+      `The agent wants to create a new workspace${name}${where} branching off ` +
+      `\`${baseBranch}\` — this makes a branch, a worktree, and runs the repository's setup ` +
+      `script.${agentChoicePhrase(a)}`
     )
   }
   if (tool === 'archive_workspace') {
