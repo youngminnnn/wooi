@@ -7,6 +7,7 @@ import type {
   ReviewArtifact,
   ReviewBundle,
   ReviewEvent,
+  ReviewFailure,
   ReviewFinding,
   ReviewLayer,
   ReviewLayerDiff,
@@ -31,11 +32,12 @@ import {
 import { reviewRefFor } from '../git'
 import { log } from '../logger'
 import { getStore } from '../store'
+import { RATE_LIMIT_ERROR, rateLimitResetAt } from '../rateLimitText'
 import { detectNewActivity, detectOutdatedComments } from './activity'
 import { parseReviewDiff, resolveStackAnchor } from './diff'
 import { getReviewBundles } from './store'
 import { runReview } from './run'
-import { buildFollowUpPrompt, type ReviewPromptLayer } from './prompt'
+import { buildFollowUpPrompt, buildResumePrompt, type ReviewPromptLayer } from './prompt'
 import { MAX_STACK_LAYERS } from './stackResolve'
 import { disposeReviewWorktree, prepareReviewWorktree, type ReviewWorktreeKey } from './worktree'
 
@@ -114,6 +116,32 @@ export class ReviewManager {
     )
   }
 
+  /**
+   * 앱을 켤 때 한 번 — 지난 실행에서 돌던 채로 끝난 리뷰를 정리한다.
+   *
+   * 실행 중이라는 사실은 프로세스와 함께 사라지는데(running 맵) 상태는 디스크에 남는다. 그래서
+   * 리뷰 도중에 앱을 닫으면 다음 실행에서 **영원히 "Reviewing…"** 인 리뷰가 남았다 — 도는 것은
+   * 없으니 끝나지도 않고, Stop 은 붙잡을 핸들이 없어 아무 일도 하지 않았다.
+   * 멈춘 것으로 표시해 두면 사용자가 이어서 다시 돌릴 수 있다.
+   */
+  restore(): void {
+    const stuck = getStore()
+      .getState()
+      .reviews.filter((r) => r.status === 'running' || r.status === 'preparing')
+    if (!stuck.length) return
+    for (const r of stuck) {
+      this.patch(r.id, (rec) => {
+        rec.status = 'cancelled'
+        rec.lastError = {
+          message: 'Wooi closed while this review was running.',
+          rateLimited: false,
+          resetsAt: null
+        }
+      })
+    }
+    log.info(`review: marked ${stuck.length} interrupted review(s) as stopped`)
+  }
+
   // ── 시작 ────────────────────────────────────────────────────────────────
 
   async start(args: StartReviewArgs): Promise<{ reviewId: string } | { error: string }> {
@@ -177,7 +205,8 @@ export class ReviewManager {
       updatedAt: now,
       agentSessionId: null,
       postedComments: [],
-      unread: false
+      unread: false,
+      lastError: null
     }
     getStore().update((st) => {
       st.reviews.push(session)
@@ -185,25 +214,79 @@ export class ReviewManager {
     this.broadcastState()
 
     // 나머지는 백그라운드로 — 워크트리 준비와 에이전트 실행은 수 분이 걸릴 수 있다.
-    void this.run(reviewId, repo.path, args).catch((err) => {
-      log.error('review: pipeline failed', err)
-      this.fail(reviewId, String(err))
-    })
+    this.launch(reviewId, repo.path)
 
     return { reviewId }
   }
 
-  private async run(reviewId: string, repoPath: string, args: StartReviewArgs): Promise<void> {
+  /**
+   * 실패하거나 중단된 리뷰를 이어서 다시 돌린다.
+   *
+   * 사용량 제한이 이 기능의 존재 이유다 — 제한은 리뷰의 결론과 아무 상관이 없는데도 세션을
+   * 통째로 버리게 만들었다. 다시 시작하면 워크트리를 새로 만들고, 같은 diff 를 또 태우고,
+   * 앞서 읽은 것을 처음부터 다시 읽는다.
+   *
+   * **이어받을 에이전트 세션이 있으면 그 대화를 잇고**(끊긴 턴을 마저 끝내게 한다), 없으면
+   * (에이전트가 result 를 내기도 전에 죽었거나, 워크트리·diff 단계에서 실패한 경우) 같은
+   * 프롬프트로 처음부터 다시 돌린다. 어느 쪽이든 세션의 정체성·게시 기록·"봤음" 표시는 그대로다.
+   */
+  async resume(reviewId: string): Promise<{ error?: string }> {
+    const session = this.record(reviewId)
+    if (!session) return { error: 'Review session not found.' }
+    if (
+      this.running.has(reviewId) ||
+      session.status === 'running' ||
+      session.status === 'preparing'
+    )
+      return { error: 'This review is already running.' }
+    const repoPath = this.repoPathFor(session)
+    if (!repoPath) return { error: 'Repository not found.' }
+
+    // 아카이브된 채로 이어 가면 워크트리는 살아나는데 목록에서는 여전히 보관함에 있어, 도는 것을
+    // 볼 방법이 없다. 되살리는 것까지가 "이어서 돌린다" 의 일부다.
+    this.patch(reviewId, (r) => {
+      r.archived = false
+      r.lastError = null
+    })
+    this.launch(reviewId, repoPath, { resume: true })
+    return {}
+  }
+
+  /** 파이프라인을 백그라운드로 띄운다. 실패는 레코드에 남겨 화면이 이어서 돌릴 수 있게 한다. */
+  private launch(reviewId: string, repoPath: string, opts: { resume?: boolean } = {}): void {
+    void this.run(reviewId, repoPath, opts).catch((err) => {
+      log.error('review: pipeline failed', err)
+      this.fail(reviewId, String(err))
+    })
+  }
+
+  /**
+   * 리뷰 한 번의 실행. **처음 돌리는 것과 이어서 돌리는 것이 같은 경로**다 — 다른 것은 프롬프트
+   * (새 리뷰냐, 끊긴 턴을 마저 끝내라는 지시냐)뿐이고, 나머지(워크트리·diff·결과 반영)는 같다.
+   */
+  private async run(
+    reviewId: string,
+    repoPath: string,
+    opts: { resume?: boolean } = {}
+  ): Promise<void> {
     const session = this.record(reviewId)
     if (!session) return
+    // 이어서 돌릴 때만 앞선 대화를 잇는다. 세션 id 가 없으면(에이전트가 result 도 못 내고 죽었다면)
+    // 이어받을 것이 없으므로 처음부터 다시 돌린다.
+    const resumeSessionId = opts.resume ? session.agentSessionId : null
 
     const abort = new AbortController()
     this.running.set(reviewId, abort)
+    // 이어서 돌릴 때는 상태가 error/cancelled 에서 시작하므로 여기서 되돌려 놔야 화면이
+    // "다시 도는 중" 으로 바뀐다(처음 돌 때는 start 가 이미 preparing 으로 만들어 둔다).
+    if (session.status !== 'preparing') this.setStatus(reviewId, 'preparing')
     try {
       const prepared = await prepareReviewWorktree(this.keyFor(session, repoPath))
       if ('error' in prepared) return this.fail(reviewId, prepared.error)
       if (abort.signal.aborted) return
 
+      // 이어서 돌 때도 diff 를 다시 받는다 — 멈춰 있는 동안 새 커밋이 올라왔을 수 있고,
+      // 그러면 앵커가 옛 줄을 가리킨다.
       const diffs = await this.fetchDiffs(reviewId, repoPath, session.layers)
       if ('error' in diffs) return this.fail(reviewId, diffs.error)
       if (abort.signal.aborted) return
@@ -213,9 +296,18 @@ export class ReviewManager {
         backend: session.agentBackend,
         cwd: prepared.path,
         repoPath,
-        model: args.model,
-        effort: args.effort,
-        userPrompt: args.prompt,
+        model: session.model,
+        effort: session.effort,
+        userPrompt: session.prompt,
+        ...(resumeSessionId
+          ? {
+              resumeSessionId,
+              promptOverride: buildResumePrompt(
+                session.prompt,
+                this.recentContext(session, getReviewBundles().load(reviewId).activity)
+              )
+            }
+          : {}),
         meta: { layers: promptLayers(session) },
         diffs: diffs.diffs,
         abort,
@@ -223,15 +315,16 @@ export class ReviewManager {
       })
 
       if (abort.signal.aborted) return this.setStatus(reviewId, 'cancelled')
-      if (result.error) return this.fail(reviewId, result.error)
 
-      // 후속 턴을 같은 맥락으로 이어 붙이려면 세션 id 를 남겨야 한다.
+      // **세션 id 는 실패해도 남긴다.** 실패한 턴에도 그때까지의 맥락은 그대로 살아 있어서,
+      // 이걸 버리면 사용량 제한 한 번에 리뷰를 처음부터 다시 돌리는 수밖에 없어진다.
       if (result.sessionId) {
         const sessionId = result.sessionId
         this.patch(reviewId, (r) => {
           r.agentSessionId = sessionId
         })
       }
+      if (result.error) return this.fail(reviewId, result.error)
 
       // 구조화 출력이 없으면 원문이라도 살려서 총평 하나로 보여준다. 리뷰를 통째로 잃는 것보다 낫다.
       const artifact: ReviewArtifact = result.artifact ?? {
@@ -248,12 +341,27 @@ export class ReviewManager {
       for (const f of findings) bundles.upsertFinding(reviewId, f)
 
       this.patch(reviewId, (r) => {
-        r.summary = artifact.summary
-        r.truncatedFiles = result.truncatedFiles
+        // 이어서 돈 턴이 총평을 비워 냈다면 앞서 받아 둔 총평을 지우지 않는다 — 끊긴 것이
+        // 후속 질문이었다면 이 턴의 일은 답변이지 총평 교체가 아니다.
+        if (artifact.summary || !resumeSessionId) r.summary = artifact.summary
+        // 프롬프트를 새로 짓지 않은 턴(resume)은 예산 보고가 0 이라, 그대로 쓰면 앞선 경고가 사라진다.
+        if (!resumeSessionId) r.truncatedFiles = result.truncatedFiles
         for (const l of r.layers) {
-          l.summary = artifact.layers.find((x) => x.prNumber === l.prNumber)?.summary ?? ''
+          const summary = artifact.layers.find((x) => x.prNumber === l.prNumber)?.summary ?? ''
+          if (summary || !resumeSessionId) l.summary = summary
         }
+        r.lastError = null
       })
+      // 끊긴 것이 후속 질문이었다면 그 답이 여기 온다 — 타임라인에 남겨야 사용자가 읽는다.
+      if (resumeSessionId && artifact.reply.trim()) {
+        this.addActivity(reviewId, {
+          id: randomUUID(),
+          kind: 'turn',
+          role: 'agent',
+          text: artifact.reply.trim(),
+          ts: Date.now()
+        })
+      }
       this.emit(reviewId, { type: 'findings', findings })
       this.setStatus(reviewId, 'done')
     } finally {
@@ -327,12 +435,16 @@ export class ReviewManager {
 
   // ── 수명 관리 ───────────────────────────────────────────────────────────
 
-  /** 실행 중인 리뷰를 중단한다. 결과·워크트리는 그대로 둔다. */
+  /**
+   * 실행 중인 리뷰를 중단한다. 결과·워크트리는 그대로 둔다.
+   *
+   * 붙잡을 핸들이 없어도 상태는 내린다 — 핸들과 상태가 어긋난 리뷰(지난 실행에서 넘어온 것 등)에
+   * Stop 이 아무 일도 하지 않으면 사용자는 그 리뷰를 영영 손댈 수 없다.
+   */
   cancel(reviewId: string): void {
-    const abort = this.running.get(reviewId)
-    if (!abort) return
-    abort.abort()
-    this.setStatus(reviewId, 'cancelled')
+    this.running.get(reviewId)?.abort()
+    const status = this.record(reviewId)?.status
+    if (status === 'running' || status === 'preparing') this.setStatus(reviewId, 'cancelled')
   }
 
   /**
@@ -864,16 +976,17 @@ export class ReviewManager {
         this.setStatus(reviewId, 'cancelled')
         return {}
       }
-      if (result.error) {
-        this.fail(reviewId, result.error)
-        return { error: result.error }
-      }
 
+      // 실패한 턴의 세션 id 도 남긴다 — 이 질문을 이어서 다시 돌리려면 그 맥락이 있어야 한다.
       if (result.sessionId) {
         const sessionId = result.sessionId
         this.patch(reviewId, (r) => {
           r.agentSessionId = sessionId
         })
+      }
+      if (result.error) {
+        this.fail(reviewId, result.error)
+        return { error: result.error }
       }
 
       const answer = result.artifact?.reply?.trim() || result.rawText.trim()
@@ -908,6 +1021,9 @@ export class ReviewManager {
         this.emit(reviewId, { type: 'findings', findings: extra })
       }
 
+      this.patch(reviewId, (r) => {
+        r.lastError = null
+      })
       this.setStatus(reviewId, 'done')
       return {}
     } finally {
@@ -964,7 +1080,23 @@ export class ReviewManager {
     this.emit(reviewId, { type: 'status', status })
   }
 
+  /**
+   * 실행이 실패했다. 이유를 **레코드에 남기고** 상태를 error 로 내린다.
+   *
+   * 남기는 이유는 이어서 돌릴 수 있기 때문이다 — 사용자는 "왜 멈췄나"(사용량 제한이면 언제
+   * 풀리나)를 보고 다시 누를지 정한다. 이벤트로만 흘리면 그 판단 근거가 앱을 껐다 켜는 순간
+   * 사라진다.
+   */
   private fail(reviewId: string, message: string): void {
+    const rateLimited = RATE_LIMIT_ERROR.test(message)
+    const failure: ReviewFailure = {
+      message,
+      rateLimited,
+      resetsAt: rateLimited ? rateLimitResetAt(message, Date.now()) : null
+    }
+    this.patch(reviewId, (r) => {
+      r.lastError = failure
+    })
     this.emit(reviewId, { type: 'error', message })
     this.setStatus(reviewId, 'error')
   }

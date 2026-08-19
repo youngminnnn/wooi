@@ -152,6 +152,7 @@ const api: WooiApi = {
       ipcRenderer.invoke(IPC.reviewResolveStack, repoId, prNumber),
     start: (args) => ipcRenderer.invoke(IPC.reviewStart, args),
     cancel: (reviewId) => ipcRenderer.invoke(IPC.reviewCancel, reviewId),
+    resume: (reviewId) => ipcRenderer.invoke(IPC.reviewResume, reviewId),
     post: (reviewId, findingId, body) =>
       ipcRenderer.invoke(IPC.reviewPost, reviewId, findingId, body),
     dismiss: (reviewId, findingId) => ipcRenderer.invoke(IPC.reviewDismiss, reviewId, findingId),

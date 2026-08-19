@@ -2490,6 +2490,23 @@ export interface ReviewSession {
   postedComments: PostedComment[]
   /** 아직 확인하지 않은 새 활동(답글·커밋)이 있는지 — 사이드바 점. */
   unread: boolean
+  /**
+   * 마지막으로 실패한 이유. 성공하거나 다시 시작하면 지운다.
+   *
+   * **레코드가 들고 있어야 한다** — 렌더러의 `view.error` 는 그 실행 동안만 살아서, 앱을 껐다
+   * 켜면 "Failed" 라는 상태만 남고 왜 실패했는지도, 이어서 무엇을 하면 되는지도 사라진다.
+   * (옛 레코드에는 이 필드가 없다 — 읽는 쪽이 `?? null` 로 받는다.)
+   */
+  lastError: ReviewFailure | null
+}
+
+/** 리뷰가 멈춘 이유 1건. 사용량 제한은 "언제 다시 눌러야 하는가" 가 곧 처방이라 따로 들고 있다. */
+export interface ReviewFailure {
+  message: string
+  /** 사용량 제한으로 멈췄는가. 화면이 "실패" 대신 "제한에 걸려 멈춤" 으로 말을 바꾼다. */
+  rateLimited: boolean
+  /** 제한이 풀리는 시각(epoch ms). 오류 문구가 알려 줬을 때만 채워진다. */
+  resetsAt: number | null
 }
 
 /**
@@ -2805,6 +2822,8 @@ export const IPC = {
   reviewStart: 'review:start',
   /** 실행 중인 리뷰를 중단한다. */
   reviewCancel: 'review:cancel',
+  /** 실패·중단된 리뷰를 이어서 다시 돌린다. */
+  reviewResume: 'review:resume',
   /** 지적 1건을 실제 PR 에 코멘트로 게시한다(편집된 본문을 그대로 받는다). */
   reviewPost: 'review:post',
   /** 안 달기로 한 지적을 목록에서 버린다. */

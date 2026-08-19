@@ -209,6 +209,31 @@ the overall assessment actually changed. Write in the same language the user use
 }
 
 /**
+ * 이어서 다시 돌릴 때의 프롬프트.
+ *
+ * 후속 턴과 같은 이유로 diff 를 다시 싣지 않는다 — resume 로 끊긴 대화를 그대로 이어받으므로
+ * 모델은 이미 PR 도, 자기가 어디까지 봤는지도 알고 있다. 여기서 할 일은 "그 턴이 결과를 내기
+ * 전에 끊겼다" 를 알리고 **이미 한 일을 다시 하지 말라**고 못 박는 것뿐이다.
+ */
+export function buildResumePrompt(userPrompt: string, context: string[]): string {
+  const ctx = context.length
+    ? `\n\n## What happened while you were stopped\n\n${context.join('\n\n')}\n`
+    : ''
+  return `Your previous turn was interrupted before it returned a result — it hit an error or a usage
+limit, not a decision to stop. Pick up where you left off and finish that turn.
+
+Do not redo work you already completed; re-read only what you had not gotten to. The review you
+were asked for was:
+
+${userPrompt.trim()}${ctx}
+
+---
+
+Return the finished review in the required JSON schema, exactly as if that turn had completed.
+Write in the same language the user used.`
+}
+
+/**
  * diff 를 프롬프트에 싣는 총예산. 레이어 수가 아니라 **모델의 컨텍스트**가 희소 자원이므로
  * 스택이라고 늘리지 않는다.
  */

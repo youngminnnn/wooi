@@ -8,14 +8,15 @@ import {
   Layers,
   Loader2,
   MessageSquarePlus,
+  Play,
   Square,
   TriangleAlert,
   X
 } from 'lucide-react'
-import type { ReviewVerdict } from '@shared/types'
+import type { ReviewSession, ReviewVerdict } from '@shared/types'
 import { isStackReview, stackHead } from '@shared/types'
 import { viewedFilePaths, viewedKey } from '@shared/reviewViewed'
-import { useStore } from '../../store'
+import { REVIEW_BUSY_LABEL, useStore } from '../../store'
 import {
   countByFile,
   fileKey,
@@ -31,6 +32,8 @@ import ReviewActivityPanel from './ReviewActivityPanel'
 import ReviewOverviewPanel from './ReviewOverviewPanel'
 import ReviewProgressPane from './ReviewProgressPane'
 import ReviewSubmitModal from './ReviewSubmitModal'
+import { formatCountdown, formatTime } from '../../lib/format'
+import { useNow } from '../../lib/useNow'
 
 /**
  * PR 리뷰 화면. 사이드바 옆 본문 영역을 차지한다(대화창과 같은 자리).
@@ -49,6 +52,9 @@ export default function PrReviewScreen({ reviewId }: { reviewId: string }): Reac
   const toggleAllFindings = useStore((s) => s.toggleAllFindings)
   const setReviewTab = useStore((s) => s.setReviewTab)
   const toggleFileViewed = useStore((s) => s.toggleFileViewed)
+  // 아카이브·삭제가 도는 동안 헤더 버튼을 잠근다 — 두 번 눌러 봐야 두 번째는 이미 사라진
+  // 리뷰를 향한다.
+  const busy = useStore((s) => s.busyReviews[reviewId])
   const [submitOpen, setSubmitOpen] = useState(false)
   /** 지금 지목한 코멘트. diff 가 여기로 스크롤하고 그 카드에 테두리를 준다. */
   const [focusedId, setFocusedId] = useState<string | null>(null)
@@ -225,31 +231,37 @@ export default function PrReviewScreen({ reviewId }: { reviewId: string }): Reac
         >
           <ExternalLink size={15} />
         </button>
-        {/* 워크스페이스와 같은 어휘·같은 단축키 — 결과는 남기고 워크트리만 정리한다. */}
+        {/* 워크스페이스와 같은 어휘·같은 단축키 — 결과는 남기고 워크트리만 정리한다.
+            정리가 도는 동안은 스피너로 바꿔 잠근다(워크트리·ref 를 지우는 데 몇 초가 걸린다). */}
         <button
           onClick={() => void requestArchiveReview(reviewId)}
-          title="Archive review (⇧⌘⌫) — keeps the findings, removes the worktree"
+          disabled={!!busy}
+          title={
+            busy
+              ? REVIEW_BUSY_LABEL[busy]
+              : 'Archive review (⇧⌘⌫) — keeps the findings, removes the worktree'
+          }
           aria-label="Archive review"
-          className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-neutral-400 hover:bg-[var(--surface-2)] hover:text-neutral-100 active:scale-90"
+          className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-neutral-400 hover:bg-[var(--surface-2)] hover:text-neutral-100 active:scale-90 disabled:cursor-not-allowed disabled:hover:bg-transparent"
         >
-          <Archive size={15} />
+          {busy === 'archiving' ? (
+            <Loader2 size={14} className="animate-spin" />
+          ) : (
+            <Archive size={15} />
+          )}
         </button>
         <button
           onClick={() => void requestCloseReview(reviewId)}
-          title="Close review (removes the review worktree)"
+          disabled={!!busy}
+          title={busy ? REVIEW_BUSY_LABEL[busy] : 'Close review (removes the review worktree)'}
           aria-label="Close review"
-          className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-neutral-400 hover:bg-[var(--surface-2)] hover:text-neutral-100 active:scale-90"
+          className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-neutral-400 hover:bg-[var(--surface-2)] hover:text-neutral-100 active:scale-90 disabled:cursor-not-allowed disabled:hover:bg-transparent"
         >
-          <X size={15} />
+          {busy === 'deleting' ? <Loader2 size={14} className="animate-spin" /> : <X size={15} />}
         </button>
       </header>
 
-      {view.error && (
-        <div className="flex items-start gap-2 border-b border-[var(--border)] bg-[var(--danger-500)]/10 px-3 py-2 text-xs text-[var(--danger-300)]">
-          <TriangleAlert size={13} className="mt-0.5 shrink-0" />
-          <span className="break-words">{view.error}</span>
-        </div>
-      )}
+      <StoppedBanner session={session} liveError={view.error} />
 
       <div className="flex min-h-0 flex-1">
         {/* 좌: 변경 파일 */}
@@ -462,6 +474,73 @@ function layerTitle(
   const at = session.layers.findIndex((l) => l.prNumber === n)
   const layer = session.layers[at]
   return layer ? `Layer ${at + 1} of ${session.layers.length} — ${layer.prTitle}` : `#${n}`
+}
+
+/**
+ * 리뷰가 멈춰 있을 때의 안내 줄 — 왜 멈췄는지와, 이어서 돌리는 버튼.
+ *
+ * 멈춤은 **끝이 아니다**. 사용량 제한이든 일시적 오류든 리뷰의 결론과는 상관없는 사고라,
+ * 여기서 이어 갈 길을 주지 않으면 사용자는 리뷰를 지우고 처음부터 다시 돌리는 수밖에 없다
+ * (워크트리를 다시 만들고, 같은 diff 를 또 태우고, 읽은 것을 다시 읽는다).
+ *
+ * 이유는 레코드(lastError)에서 읽는다 — 이번 실행에만 있는 view.error 로는 앱을 껐다 켜면
+ * "Failed" 만 남는다. 옛 레코드에는 그 필드가 없어 그때만 view.error 로 떨어진다.
+ */
+function StoppedBanner({
+  session,
+  liveError
+}: {
+  session: ReviewSession
+  /** 이번 실행 중에 흘러온 오류 문구. 레코드에 남은 이유가 있으면 그쪽이 이긴다. */
+  liveError: string | null
+}): React.JSX.Element | null {
+  const resumeReview = useStore((s) => s.resumeReview)
+  const failure = session.lastError ?? null
+  const stopped = session.status === 'error' || session.status === 'cancelled'
+  // 카운트다운은 제한이 풀릴 때까지만 흐르면 된다.
+  const now = useNow(30_000, !!failure?.resetsAt)
+  if (!stopped && !liveError) return null
+
+  const waiting = failure?.resetsAt && failure.resetsAt > now ? failure.resetsAt : null
+  const reason = failure?.rateLimited
+    ? `Stopped at your usage limit.${
+        waiting
+          ? ` Resumes cleanly in ${formatCountdown(waiting - now)} (${formatTime(waiting)}).`
+          : ''
+      }`
+    : (failure?.message ?? liveError ?? 'The review stopped before it finished.')
+
+  // 사용자가 직접 멈춘 것은 사고가 아니다 — 같은 줄을 쓰되 빨강으로 겁주지 않는다.
+  const byHand = session.status === 'cancelled' && !failure
+  return (
+    <div
+      className={
+        'flex items-start gap-2 border-b border-[var(--border)] px-3 py-2 text-xs ' +
+        (byHand
+          ? 'bg-[var(--surface)] text-neutral-400'
+          : 'bg-[var(--danger-500)]/10 text-[var(--danger-300)]')
+      }
+    >
+      <TriangleAlert size={13} className="mt-0.5 shrink-0" />
+      <span className="min-w-0 flex-1 break-words">
+        {byHand ? 'You stopped this review.' : reason}
+      </span>
+      {stopped && (
+        <button
+          onClick={() => void resumeReview(session.id)}
+          title={
+            session.agentSessionId
+              ? 'Continue the same agent session where it stopped'
+              : 'Run this review again from the start (nothing was kept from the stopped run)'
+          }
+          className="flex shrink-0 items-center gap-1 rounded-md border border-[var(--border-2)] bg-[var(--surface)] px-2 py-0.5 text-neutral-200 hover:bg-[var(--surface-2)] active:scale-95"
+        >
+          <Play size={11} />
+          Resume
+        </button>
+      )}
+    </div>
+  )
 }
 
 /** 글을 쓰는 중인가. 수식키 없는 단축키(n/p)가 입력을 가로채지 않도록. */

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildReviewPrompt, crossLayerFiles, reviewOutputSchema } from './prompt'
+import { buildResumePrompt, buildReviewPrompt, crossLayerFiles, reviewOutputSchema } from './prompt'
 import type { ReviewPromptLayer } from './prompt'
 import { parseReviewDiff } from './diff'
 import type { ReviewLayerDiff } from '@shared/types'
@@ -217,5 +217,28 @@ describe('reviewOutputSchema', () => {
   it('reply 는 어느 쪽에서도 필수가 아니다(최초 리뷰에는 답할 것이 없다)', () => {
     expect(reviewOutputSchema(1).required).not.toContain('reply')
     expect(reviewOutputSchema(3).required).not.toContain('reply')
+  })
+})
+
+describe('buildResumePrompt', () => {
+  /**
+   * 이어서 돌리는 프롬프트의 일은 두 가지뿐이다 — 끊긴 것이지 그만둔 것이 아님을 알리고,
+   * 원래 무엇을 부탁받았는지 되짚어 주는 것.
+   */
+  it('끊긴 턴을 마저 끝내라고 지시하고 최초 프롬프트를 그대로 싣는다', () => {
+    const text = buildResumePrompt('Look for race conditions.', [])
+
+    expect(text).toContain('interrupted')
+    expect(text).toContain('Look for race conditions.')
+    expect(text).toContain('Do not redo work you already completed')
+    // diff 를 다시 싣지 않는다 — resume 로 앞선 대화를 그대로 이어받는다.
+    expect(text).not.toContain('diff --git')
+  })
+
+  it('멈춰 있는 동안 벌어진 일이 있으면 함께 알린다', () => {
+    const text = buildResumePrompt('Review this.', ['@someone replied on a.ts:12:\nfixed'])
+
+    expect(text).toContain('What happened while you were stopped')
+    expect(text).toContain('@someone replied')
   })
 })

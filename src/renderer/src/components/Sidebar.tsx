@@ -29,7 +29,7 @@ import {
   X,
   Hourglass
 } from 'lucide-react'
-import { useStore } from '../store'
+import { REVIEW_BUSY_LABEL, useStore } from '../store'
 import RowActionsMenu, { type RowAction } from './RowActionsMenu'
 import { useAvailableBackends } from '../lib/backends'
 import { useMultiAgent } from '../lib/multiAgent'
@@ -1065,6 +1065,9 @@ function ReviewRow({
   const openReview = useStore((s) => s.openReview)
   const requestCloseReview = useStore((s) => s.requestCloseReview)
   const requestArchiveReview = useStore((s) => s.requestArchiveReview)
+  // 아카이브·삭제는 워크트리와 ref 를 지우느라 초 단위로 걸린다. 그동안 레코드는 그대로 방송되어
+  // 행이 멀쩡히 남아 있으므로, 표시가 없으면 눌리지 않은 줄 알고 다시 누른다(워크스페이스와 같은 처방).
+  const busy = useStore((s) => s.busyReviews[session.id])
   // 워크스페이스 행과 같은 규칙 — 에이전트가 하나뿐이면 정보가 아니라 잡음이다.
   const showAgent = useAvailableBackends().length > 1
 
@@ -1092,7 +1095,15 @@ function ReviewRow({
           : 'hover:bg-[var(--surface)] focus-within:bg-[var(--surface)]')
       }
     >
-      <ReviewStatusDot status={session.status} />
+      {busy ? (
+        <Loader2
+          size={12}
+          className="shrink-0 animate-spin text-neutral-400"
+          aria-label={REVIEW_BUSY_LABEL[busy]}
+        />
+      ) : (
+        <ReviewStatusDot status={session.status} />
+      )}
       <div className="flex-1 min-w-0">
         <div
           className={'truncate text-sm ' + (active ? 'text-neutral-100' : 'text-neutral-300')}
@@ -1101,7 +1112,8 @@ function ReviewRow({
           {prTitle}
         </div>
         <div className="flex items-center gap-1 text-xs text-neutral-500 truncate">
-          {showAgent && (
+          {busy && <span className="shrink-0 text-neutral-400">{REVIEW_BUSY_LABEL[busy]}</span>}
+          {!busy && showAgent && (
             <span className="shrink-0 text-neutral-500">
               <AgentBackendMark backend={session.agentBackend} size={10} />
             </span>
@@ -1136,8 +1148,11 @@ function ReviewRow({
             e.stopPropagation()
             void requestArchiveReview(id)
           }}
-          className="h-5 w-5 grid place-items-center rounded text-neutral-500 hover:bg-[var(--surface-2)] hover:text-neutral-200 shrink-0"
-          title="Archive (keeps the findings, removes the worktree)"
+          disabled={!!busy}
+          className="h-5 w-5 grid place-items-center rounded text-neutral-500 hover:bg-[var(--surface-2)] hover:text-neutral-200 shrink-0 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+          title={
+            busy ? REVIEW_BUSY_LABEL[busy] : 'Archive (keeps the findings, removes the worktree)'
+          }
         >
           <Archive size={12} />
         </button>
@@ -1146,8 +1161,9 @@ function ReviewRow({
             e.stopPropagation()
             void requestCloseReview(id)
           }}
-          className="h-5 w-5 grid place-items-center rounded text-neutral-500 hover:bg-[var(--danger-500)]/15 hover:text-[var(--danger-400)] shrink-0"
-          title="Delete review permanently"
+          disabled={!!busy}
+          className="h-5 w-5 grid place-items-center rounded text-neutral-500 hover:bg-[var(--danger-500)]/15 hover:text-[var(--danger-400)] shrink-0 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+          title={busy ? REVIEW_BUSY_LABEL[busy] : 'Delete review permanently'}
         >
           <Trash2 size={12} />
         </button>
@@ -1217,23 +1233,30 @@ function ArchivedReviewsSection({ reviews }: { reviews: ReviewSession[] }): Reac
 function ArchivedReviewRow({ session }: { session: ReviewSession }): React.JSX.Element {
   const unarchiveReview = useStore((s) => s.unarchiveReview)
   const requestCloseReview = useStore((s) => s.requestCloseReview)
+  // 되살리기는 워크트리를 다시 만들고 필요하면 원격에서 커밋까지 받아 온다 — 리뷰 정리 동작 중
+  // 가장 오래 걸리는 쪽이라, 여기야말로 도는 티가 나야 한다.
+  const busy = useStore((s) => s.busyReviews[session.id])
 
   return (
     <div className="group/arcrev flex items-center gap-2 pl-6 pr-1.5 py-1 rounded-md hover:bg-[var(--surface)]">
+      {busy && <Loader2 size={11} className="shrink-0 animate-spin text-neutral-400" />}
       <span className="flex-1 truncate text-xs text-neutral-500" title={reviewTitle(session).title}>
         #{reviewTitle(session).number} {reviewTitle(session).title}
       </span>
+      {busy && <span className="shrink-0 text-xs text-neutral-400">{REVIEW_BUSY_LABEL[busy]}</span>}
       <button
         onClick={() => void unarchiveReview(session.id)}
-        className="opacity-0 group-hover/arcrev:opacity-100 h-5 w-5 grid place-items-center rounded text-neutral-500 hover:bg-[var(--surface-2)] hover:text-neutral-200"
-        title="Unarchive (recreate the review worktree)"
+        disabled={!!busy}
+        className="opacity-0 group-hover/arcrev:opacity-100 h-5 w-5 grid place-items-center rounded text-neutral-500 hover:bg-[var(--surface-2)] hover:text-neutral-200 disabled:cursor-not-allowed disabled:opacity-40"
+        title={busy ? REVIEW_BUSY_LABEL[busy] : 'Unarchive (recreate the review worktree)'}
       >
         <ArchiveRestore size={12} />
       </button>
       <button
         onClick={() => void requestCloseReview(session.id)}
-        className="opacity-0 group-hover/arcrev:opacity-100 h-5 w-5 grid place-items-center rounded text-neutral-500 hover:bg-[var(--danger-500)]/15 hover:text-[var(--danger-400)]"
-        title="Delete permanently"
+        disabled={!!busy}
+        className="opacity-0 group-hover/arcrev:opacity-100 h-5 w-5 grid place-items-center rounded text-neutral-500 hover:bg-[var(--danger-500)]/15 hover:text-[var(--danger-400)] disabled:cursor-not-allowed disabled:opacity-40"
+        title={busy ? REVIEW_BUSY_LABEL[busy] : 'Delete permanently'}
       >
         <Trash2 size={12} />
       </button>
