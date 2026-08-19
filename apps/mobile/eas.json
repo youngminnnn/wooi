@@ -47,6 +47,10 @@
       "ios": {
         "ascAppId": "6802201873",
         "bundleIdentifier": "com.wooi.remote"
+      },
+      "android": {
+        "track": "internal",
+        "releaseStatus": "completed"
       }
     }
   }
