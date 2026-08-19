@@ -60,7 +60,8 @@ function session(postedComments: PostedComment[] = []): ReviewSession {
     updatedAt: 0,
     agentSessionId: null,
     postedComments,
-    unread: false
+    unread: false,
+    lastError: null
   }
 }
 

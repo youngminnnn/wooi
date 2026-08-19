@@ -258,6 +258,15 @@ function rememberRightPanels(openByWorkspace: Record<string, boolean>): void {
   }
 }
 
+/** 리뷰 행이 기다리는 중인 정리 작업. 화면은 이 값으로 스피너 옆 문구를 고른다. */
+export type ReviewBusyKind = 'archiving' | 'unarchiving' | 'deleting'
+
+export const REVIEW_BUSY_LABEL: Record<ReviewBusyKind, string> = {
+  archiving: 'Archiving…',
+  unarchiving: 'Restoring…',
+  deleting: 'Deleting…'
+}
+
 interface UIState {
   ready: boolean
   app: AppState | null
@@ -659,6 +668,14 @@ interface UIState {
   unarchiveReview: (reviewId: string) => Promise<void>
   /** 실행 중인 리뷰를 중단한다. */
   cancelReview: (reviewId: string) => Promise<void>
+  /** 실패·중단된 리뷰를 이어서 다시 돌린다. */
+  resumeReview: (reviewId: string) => Promise<void>
+  /**
+   * 아카이브·되살리기·삭제 IPC 가 끝나기를 기다리는 리뷰. 셋 다 워크트리와 ref 를 만지느라
+   * 초 단위로 걸리는데(되살리기는 원격 fetch 까지 한다), 그동안 아무 표시가 없으면 사용자는
+   * 눌린 줄도 모르고 다시 누른다. 워크스페이스의 archivingWorkspaces 와 같은 어휘다.
+   */
+  busyReviews: Record<string, ReviewBusyKind>
   toggleFinding: (reviewId: string, findingId: string) => void
   /** 아직 게시하지 않은 항목 전체를 선택/해제한다. */
   toggleAllFindings: (reviewId: string, on: boolean) => void
@@ -844,6 +861,7 @@ export const useStore = create<UIState>((set, get) => ({
   activeFanoutGroupId: null,
   adoptingFanoutWorkspaceId: null,
   reviewViews: {},
+  busyReviews: {},
 
   archiveWorkspace: async (workspaceId) => {
     if (get().archivingWorkspaces[workspaceId]) return {}
@@ -1425,7 +1443,9 @@ export const useStore = create<UIState>((set, get) => ({
       patchReview(set, get, reviewId, (v) => {
         switch (event.type) {
           case 'status':
-            return {}
+            // 다시 돌기 시작했으면 지난 실패 문구를 걷는다 — 그대로 두면 성공한 뒤에도 옛
+            // 오류가 화면에 붙어 있다(이 값은 이 실행 동안만 사는 사본이다).
+            return event.status === 'preparing' || event.status === 'running' ? { error: null } : {}
           case 'diff':
             return { diffs: event.diffs }
           case 'progress':
@@ -2631,7 +2651,9 @@ export const useStore = create<UIState>((set, get) => ({
     const next = { ...reviewViews }
     delete next[reviewId]
     set({ reviewViews: next, activeReviewId: activeReviewId === reviewId ? null : activeReviewId })
-    await window.api.review.close(reviewId)
+    // 레코드는 main 이 지운 뒤 방송으로 사라진다 — 그때까지 사이드바 행은 그대로 남으므로,
+    // 지우는 중이라는 표시가 없으면 눌러도 아무 일 없는 것처럼 보인다.
+    await withReviewBusy(set, reviewId, 'deleting', () => window.api.review.close(reviewId))
   },
 
   requestArchiveReview: async (reviewId) => {
@@ -2648,13 +2670,16 @@ export const useStore = create<UIState>((set, get) => ({
   },
 
   archiveReview: async (reviewId) => {
-    await window.api.review.archive(reviewId)
+    await withReviewBusy(set, reviewId, 'archiving', () => window.api.review.archive(reviewId))
     // 아카이브한 리뷰를 열어 두고 있었다면 화면에서 빠져나온다(워크트리가 사라졌다).
     if (get().activeReviewId === reviewId) set({ activeReviewId: null })
   },
 
   unarchiveReview: async (reviewId) => {
-    const res = await window.api.review.unarchive(reviewId)
+    // 되살리기는 워크트리를 다시 만든다 — 원격에서 커밋을 받아야 할 수도 있어 가장 오래 걸린다.
+    const res = await withReviewBusy(set, reviewId, 'unarchiving', () =>
+      window.api.review.unarchive(reviewId)
+    )
     if (res.error) {
       get().pushToast('error', res.error)
       return
@@ -2664,6 +2689,16 @@ export const useStore = create<UIState>((set, get) => ({
 
   cancelReview: async (reviewId) => {
     await window.api.review.cancel(reviewId)
+  },
+
+  resumeReview: async (reviewId) => {
+    const res = await window.api.review.resume(reviewId)
+    if (res.error) {
+      get().pushToast('error', res.error)
+      return
+    }
+    // 아카이브된 리뷰를 이어서 돌리면 되살아난다 — 도는 것을 볼 수 있게 화면도 그리로 옮긴다.
+    get().openReview(reviewId)
   },
 
   toggleFinding: (reviewId, findingId) =>
@@ -2837,6 +2872,30 @@ function withViewed(
 }
 
 /** 리뷰 세션 1개를 불변 갱신한다. 세션이 없으면(이미 닫힘) 아무것도 하지 않는다. */
+/**
+ * 리뷰 1건을 "지금 정리하는 중" 으로 잠가 두고 IPC 를 돌린다.
+ *
+ * 세 동작(아카이브·되살리기·삭제)이 같은 모양의 기다림이라 한 곳에 모은다. 실패해도 표시는
+ * 반드시 걷어야 하므로 finally 로 지운다.
+ */
+async function withReviewBusy<T>(
+  set: (fn: (s: UIState) => Partial<UIState>) => void,
+  reviewId: string,
+  kind: ReviewBusyKind,
+  run: () => Promise<T>
+): Promise<T> {
+  set((s) => ({ busyReviews: { ...s.busyReviews, [reviewId]: kind } }))
+  try {
+    return await run()
+  } finally {
+    set((s) => {
+      const next = { ...s.busyReviews }
+      delete next[reviewId]
+      return { busyReviews: next }
+    })
+  }
+}
+
 function patchReview(
   set: (partial: Partial<UIState>) => void,
   get: () => UIState,

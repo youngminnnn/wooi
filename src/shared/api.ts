@@ -382,6 +382,11 @@ export interface WooiApi {
     /** 실행 중인 리뷰를 중단한다. */
     cancel(reviewId: string): Promise<void>
     /**
+     * 실패하거나 중단된 리뷰를 이어서 다시 돌린다. 이어받을 에이전트 세션이 있으면 그 대화를
+     * 이어 끊긴 턴을 마저 끝내고, 없으면 같은 프롬프트로 처음부터 다시 돌린다.
+     */
+    resume(reviewId: string): Promise<{ error?: string }>
+    /**
      * 지적 1건을 실제 PR 에 게시한다. body 는 사용자가 인라인 편집한 최종 본문이다.
      * 앵커가 있으면 해당 줄의 인라인 코멘트로, 없으면 PR 일반 코멘트로 간다.
      */

@@ -2119,6 +2119,10 @@ export function registerIpc(ctx: IpcContext): void {
     broadcastState
   )
 
+  // 지난 실행에서 돌던 채로 끝난 리뷰를 멈춤으로 내려 둔다 — 그러지 않으면 영원히 "Reviewing…"
+  // 인 채로 남아 이어서 돌릴 수도, 멈출 수도 없다.
+  reviewManager.restore()
+
   // 앱을 닫을 때는 **워크트리만** 정리한다. 리뷰 레코드·ref·사이드카를 지우면 다음 실행에
   // 리뷰가 통째로 사라져 영속화가 무의미해진다(ref 를 남겨야 오프라인에서도 복원된다).
   app.on('before-quit', () => {
@@ -2179,6 +2183,8 @@ export function registerIpc(ctx: IpcContext): void {
   handle(IPC.reviewCancel, (_e, reviewId: string) => {
     reviewManager.cancel(reviewId)
   })
+
+  handle(IPC.reviewResume, async (_e, reviewId: string) => reviewManager.resume(reviewId))
 
   handle(IPC.reviewPost, async (_e, reviewId: string, findingId: string, body: string) =>
     reviewManager.post(reviewId, findingId, body)
