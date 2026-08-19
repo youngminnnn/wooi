@@ -214,6 +214,22 @@ describe('check_related_work 의 겹침', () => {
     expect(listChangedPaths).not.toHaveBeenCalledWith('/tmp/ws-me', 'main')
   })
 
+  /**
+   * 회귀: 비교 대상은 git 이 주는 리포 루트 기준 경로인데, 모델은 방금 편집한 파일을 절대경로나
+   * `./` 를 붙여 넘기는 일이 잦다. 그대로 대조하면 한 건도 겹치지 않고, 이 도구는 그때 조용히
+   * "겹치는 것 없음" 이라고 답한다 — 겹침을 못 찾는 것이 곧 실패인 도구라 가장 나쁜 침묵이다.
+   */
+  it('절대경로나 ./ 를 붙여 줘도 겹침을 찾아낸다', async () => {
+    pathsBy({ '/tmp/ws-me': [], '/tmp/ws-sib': ['src/router.ts', 'src/api.ts'] })
+
+    const result = (await check({
+      paths: ['/tmp/ws-me/src/router.ts', './src/api.ts']
+    })) as { overlaps: Array<Record<string, unknown>>; comparedPaths: number }
+
+    expect(result.comparedPaths).toBe(2)
+    expect(result.overlaps[0]).toMatchObject({ paths: ['src/router.ts', 'src/api.ts'] })
+  })
+
   it('running 여부를 함께 준다 — 목록이 곧 낡는다는 신호다', async () => {
     const result = (await check()) as { workspaces: Array<Record<string, unknown>> }
     expect(result.workspaces[0].running).toBe(true)

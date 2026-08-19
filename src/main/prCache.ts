@@ -43,17 +43,28 @@ function isFresh(entry: Entry, branch: string, now: number): boolean {
 }
 
 // 동시에 도는 개별 폴백 수를 제한하기 위한 아주 작은 세마포어.
+//
+// 자리는 **넘겨준다** — 놓는 쪽이 active 를 줄이지 않고 대기자를 깨운다. 예전에는 대기자가
+// 깨어난 뒤에 스스로 active++ 했는데, 그러면 "자리를 줄인 순간 ~ 대기자가 깨어나기 전" 이라는
+// 창이 열린다. 그 사이에 도착한 호출은 줄어든 active 를 보고 그냥 통과하므로, 깨어난 대기자와
+// 합쳐 상한 + 1 이 동시에 돈다(마이크로태스크 단위로 재현된다).
+//
+// 지금은 유일한 호출부가 withSlot 앞에서 findOpenPrStatus 를 await 하는 덕에 그 창을 지나쳐
+// 도착해 실제로 새지는 않았다 — 즉 **호출부의 우연에 기대고 있었다.** 상한을 두는 이유가 전체
+// 훑기에서 로그인 셸이 한꺼번에 뜨는 것을 막기 위한 것이라, 그 보장은 여기서 지는 편이 맞다.
 let active = 0
 const queue: (() => void)[] = []
 
 async function withSlot<T>(run: () => Promise<T>): Promise<T> {
-  if (active >= FALLBACK_CONCURRENCY) await new Promise<void>((r) => queue.push(r))
-  active++
+  if (active < FALLBACK_CONCURRENCY) active++
+  else await new Promise<void>((resolve) => queue.push(resolve))
   try {
     return await run()
   } finally {
-    active--
-    queue.shift()?.()
+    const next = queue.shift()
+    // 대기자가 있으면 내 자리를 그대로 물려준다(active 는 그대로).
+    if (next) next()
+    else active--
   }
 }
 

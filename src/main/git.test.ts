@@ -237,6 +237,26 @@ describe('getDiff (Changes 패널)', () => {
     expect(diff.baseBranch).toBe('origin/main')
     expect(diff.files.map((file) => file.path)).toEqual(['mine.txt'])
   })
+
+  /**
+   * 회귀: 증감은 접두사로 셌는데 `+++`/`---` 는 헤더로 보고 건너뛰었다. 그래서 본문이 `+`·`-`
+   * 로 시작하는 파일(diff·패치를 커밋하는 경우가 대표적)은 추가된 줄이 통째로 빠져 숫자가
+   * 실제와 어긋났다. 헤더는 `@@` 앞에만 오므로 위치로 가른다.
+   */
+  it('본문이 +++/--- 로 시작하는 줄도 빠짐없이 센다', async () => {
+    git(repo, ['checkout', '-qb', 'feat/patch'])
+    // 패치 파일 하나를 통째로 새로 넣는다 — 4줄 모두 추가로 잡혀야 한다.
+    writeFileSync(join(repo, 'fix.patch'), '--- a/x\n+++ b/x\n-old line\n+new line\n')
+    git(repo, ['add', '-A'])
+    git(repo, ['commit', '-qm', 'add patch file'])
+
+    const diff = await getDiff(repo, 'main')
+    const file = diff.files.find((f) => f.path === 'fix.patch')
+
+    expect(file).toBeDefined()
+    expect(file?.additions).toBe(4)
+    expect(file?.deletions).toBe(0)
+  })
 })
 
 // 스택 인계문에 실리는 요약이다. 자식이 물려받은 코드를 알아내려고 첫 턴을 태우지 않게 하는

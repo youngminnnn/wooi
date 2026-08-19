@@ -56,7 +56,11 @@ const {
   postIssueComment,
   submitPrReview,
   listOpenIssues,
-  getIssueBody
+  getIssueBody,
+  retargetPr,
+  remoteRefExists,
+  restoreRemoteRef,
+  deleteRemoteRef
 } = await import('./github')
 
 /** 연결 확인(probe)은 `command -v gh … && gh auth status` 한 줄이다. */
@@ -687,6 +691,50 @@ describe('PR 리뷰 제출', () => {
     const res = await submitPrReview('/tmp/repo', 0, 'approve', '')
     expect(res.error).toBeTruthy()
     expect(ghCalls()).toEqual([])
+  })
+})
+
+/**
+ * 브랜치 이름은 우리가 정하는 값이 아니다 — 워크트리의 실제 HEAD 와 GitHub 의 ref 이름이
+ * 그대로 들어오고, git 은 거기에 `'` 와 `;` 를 허용한다. 이 명령들은 **메인 프로세스의
+ * 로그인 셸**에서 도는 데다 PR 상태 폴링만으로 발동하므로, 인용이 뚫리면 에이전트의 권한
+ * 카드와 샌드박스를 통째로 우회한다. 그래서 "감쌌다"가 아니라 "탈출까지 했다"를 확인한다.
+ */
+describe('셸 인용', () => {
+  // 정당한 브랜치 이름이면서 그냥 감싸기만 하면 `id` 가 별도 명령으로 실행되는 모양.
+  const evil = "x';id;'y"
+  /** 감싸기가 실제로 닫혔는지 — 인용 밖에 명령 구분자가 남으면 안 된다. */
+  const injected = (command: string): boolean => /';\s*id\s*;'/.test(command.replace(/'\\''/g, ''))
+
+  beforeEach(() => {
+    setGithubConnected(true)
+    reply = () => ({ code: 0, stdout: '' })
+  })
+
+  it('PR 조회의 브랜치 이름을 탈출시킨다', async () => {
+    await getPrStatus('/tmp/wt', evil)
+    const [command] = ghCalls()
+    expect(command).toContain(`'x'\\''`)
+    expect(injected(command)).toBe(false)
+  })
+
+  it('retarget 의 selector·base 를 탈출시킨다', async () => {
+    await retargetPr('/tmp/wt', evil, evil)
+    const [command] = ghCalls()
+    expect(injected(command)).toBe(false)
+  })
+
+  it('원격 ref 조작의 브랜치 이름을 탈출시킨다', async () => {
+    await remoteRefExists('/tmp/wt', evil)
+    await restoreRemoteRef('/tmp/wt', evil, 'deadbeef')
+    await deleteRemoteRef('/tmp/wt', evil)
+    for (const command of ghCalls()) expect(injected(command)).toBe(false)
+  })
+
+  it('PR 생성 화면의 base·head 를 탈출시킨다', async () => {
+    await createPrWeb('/tmp/wt', { base: evil, head: evil })
+    const [command] = ghCalls()
+    expect(injected(command)).toBe(false)
   })
 })
 

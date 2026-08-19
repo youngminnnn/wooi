@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process'
-import { readdir, readFile, stat } from 'node:fs/promises'
+import { readdir, readFile, realpath, stat } from 'node:fs/promises'
 import { join, resolve, relative, isAbsolute, sep, basename } from 'node:path'
 import { promisify } from 'node:util'
 import type { DirEntry, FileContent, FileHit } from '@shared/types'
@@ -10,8 +10,8 @@ const exec = promisify(execFile)
 const READ_MAX_BYTES = 1024 * 1024
 
 /**
- * relPath 가 root 안으로 해석되는지 검증하고 절대 경로를 돌려준다.
- * 심볼릭 링크/`..` 로 worktree 밖을 읽지 못하게 막는다(읽기 전용 뷰어라도 격리 유지).
+ * relPath 가 root 안으로 해석되는지 **경로 문자열로만** 검증하고 절대 경로를 돌려준다.
+ * `..` 는 막지만 심볼릭 링크는 따라가지 않는다 — 실제 격리는 realPathInRoot 가 지킨다.
  */
 function resolveInRoot(root: string, relPath: string): string | null {
   const abs = resolve(root, relPath)
@@ -21,18 +21,45 @@ function resolveInRoot(root: string, relPath: string): string | null {
 }
 
 /**
+ * 심볼릭 링크까지 따라간 **뒤에도** root 안인지 확인한다. 밖으로 나가면 null.
+ *
+ * `resolve()` 는 경로 문자열만 정규화하므로 `..` 밖에 못 막는다. worktree 안의 링크 하나가
+ * `/etc` 나 다른 워크스페이스를 가리키면 그대로 열렸다 — 읽기 전용 뷰어라도 격리는 격리다.
+ * 워크트리 안의 파일은 에이전트가 만든 것이기도 해서, 링크를 심는 쪽과 읽는 쪽이 다른 사람일
+ * 필요도 없다.
+ *
+ * root 도 함께 realpath 한다 — macOS 의 `/tmp` → `/private/tmp` 처럼 root 자체가 링크 뒤에
+ * 있으면, 안쪽 경로만 풀었을 때 멀쩡한 파일이 전부 "밖" 으로 판정된다.
+ */
+async function realPathInRoot(root: string, relPath: string): Promise<string | null> {
+  const abs = resolveInRoot(root, relPath)
+  if (!abs) return null
+  try {
+    const [realRoot, real] = await Promise.all([realpath(root), realpath(abs)])
+    const rel = relative(realRoot, real)
+    // 빈 문자열은 root 자신이다(허용).
+    if (rel && (rel.startsWith('..') || isAbsolute(rel))) return null
+    return abs
+  } catch {
+    // 없는 경로·끊어진 링크·권한 — 어느 쪽이든 보여 줄 것이 없다.
+    return null
+  }
+}
+
+/**
  * worktree 내 한 디렉토리의 항목을 나열한다(All files 탭의 lazy 트리용).
  * 디렉토리 먼저, 그다음 파일을 이름순으로. `.git` 은 노이즈라 숨긴다.
  */
 export async function listDir(root: string, relPath: string): Promise<DirEntry[]> {
-  const abs = resolveInRoot(root, relPath)
+  const abs = await realPathInRoot(root, relPath)
   if (!abs) return []
 
   const dirents = await readdir(abs, { withFileTypes: true }).catch(() => [])
   const entries: DirEntry[] = []
   for (const d of dirents) {
     if (d.name === '.git') continue
-    // 심볼릭 링크는 디렉토리/파일 어느 쪽인지 따로 확인한다(루프·외부 탈출은 읽기 시 막힌다).
+    // 심볼릭 링크는 디렉토리/파일 어느 쪽인지 따로 확인한다. 밖을 가리키는 링크라도 목록에는
+    // 그대로 두고(있는 것을 감추지 않는다), 열거나 읽으려 하면 realPathInRoot 가 막는다.
     let isDir = d.isDirectory()
     if (d.isSymbolicLink()) {
       isDir = await stat(join(abs, d.name))
@@ -52,7 +79,7 @@ export async function listDir(root: string, relPath: string): Promise<DirEntry[]
 
 /** worktree 내 한 파일을 읽어 표시용 텍스트로 돌려준다(바이너리·과대 파일은 본문 없이 표시). */
 export async function readFileInRoot(root: string, relPath: string): Promise<FileContent | null> {
-  const abs = resolveInRoot(root, relPath)
+  const abs = await realPathInRoot(root, relPath)
   if (!abs) return null
 
   try {
