@@ -10,6 +10,10 @@ package-lock.json
 # codex 가 생성한 프로토콜 스냅샷. 우리 손을 타지 않아야 대조에 의미가 있으므로 뱉은 그대로 둔다.
 docs/codex-protocol/*.schemas.json
 
+# PRIVACY.md 에서 생성한다(scripts/build-privacy-page.mjs). prettier 가 손대면 생성기의
+# --check 와 어긋나 "고칠 수 없는 실패" 가 된다 — 뱉은 그대로 둔다.
+docs/privacy.html
+
 # 모바일은 독립 프로젝트다 — 자체 도구 체인을 쓴다.
 apps/mobile
 
