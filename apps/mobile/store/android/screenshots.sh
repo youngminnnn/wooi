@@ -85,7 +85,7 @@ print(f'{dw:.2f} {dh:.2f} {($CANVAS_W - dw) / 2:.2f} {($CANVAS_H - dh) / 2:.2f}'
     } >"$tmp/frame.svg"
 
     rsvg-convert -w "$CANVAS_W" -h "$CANVAS_H" "$tmp/frame.svg" -o "$tmp/frame.png"
-    python3 src/png-recode.py "$tmp/frame.png" "$out" rgb
+    python3 ../shared/png-recode.py "$tmp/frame.png" "$out" rgb
     printf '  %-34s %sx%s → %sx%s\n' "$out" "$w" "$h" "$CANVAS_W" "$CANVAS_H"
   done
 
