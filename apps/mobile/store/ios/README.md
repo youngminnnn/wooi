@@ -16,8 +16,8 @@ brew install librsvg   # rsvg-convert
 | 파일 | 규격 | 상태 |
 | --- | --- | --- |
 | `icon-1024.png` | 1024×1024, **24비트 PNG(알파 없음)**, 모서리 각짐 | ✅ `../shared/icon.svg` 에서 생성 |
-| `screenshots/iphone-6.9/*.png` | **1320×2868**, 최소 1장·최대 10장 | 🚧 1장 — 아래 "데모 모드로 못 들어가는 이유" |
-| `screenshots/ipad-13/*.png` | **2064×2752**, 최소 1장 | 🚧 1장 — 제출 최소치는 만족 |
+| `screenshots/iphone-6.9/*.png` | **1320×2868**, 최소 1장·최대 10장 | ✅ 5장 — 시뮬레이터에서 촬영 |
+| `screenshots/ipad-13/*.png` | **2064×2752**, 최소 1장 | ✅ 3장 — `supportsTablet: true` 라 필수 |
 | 앱 미리보기 영상 | 15~30초 | ⬜ 선택 |
 
 Play 에 있는 **피처 그래픽은 App Store 에 없다.** 그 자리를 대신하는 게 스크린샷 첫 장이라,
@@ -97,26 +97,37 @@ iPad 를 지원하지 않기로 정한다면 `supportsTablet` 을 `false` 로 �
 
 데모 데이터가 바뀌면 그림도 바뀐다. 앱 UI 나 `demo.ts` 를 건드렸다면 여기 그림도 같이 봐야 한다.
 
-### 데모 모드로 못 들어가는 이유 — 탭을 보낼 수 없다
+### 시뮬레이터에는 탭 API 가 없다 — 앱이 스스로 돌게 한다
 
-`enterDemo()` 는 `app/pair.tsx` 의 버튼 `onPress` 로만 불린다. 라우트도 아니고 저장되지도 않는
-**메모리 상태**라(`src/state/store.ts` 의 `demo: false`), 딥링크로는 켤 수 없다. `_layout.tsx` 가
-`pairing === null && !demo` 이면 무조건 `/pair` 로 되돌리기 때문에 `/workspace/<id>` 를 직접
-열어도 소용없다.
+`enterDemo()` 는 `app/pair.tsx` 버튼의 `onPress` 로만 불린다. 라우트도 아니고 저장되지도 않는
+**메모리 상태**라(`src/state/store.ts` 의 `demo: false`) 밖에서 켤 수 없다. 그런데 시뮬레이터를
+밖에서 조작하는 길이 전부 막혀 있다:
 
-그리고 시뮬레이터에는 탭 API 가 없다:
+| 방법 | 막히는 지점 |
+| --- | --- |
+| `xcrun simctl` | `screenshot`·`openurl`·`launch`·`terminate` 뿐. 탭 API 자체가 없다 |
+| `osascript` 좌표 클릭 | macOS 보조 접근 권한이 필요하고, **디스플레이가 잠들면 창이 AX 에 0개**로 보여 좌표를 못 잡는다 |
+| `simctl openurl` 딥링크 | iOS 가 "'Wooi'에서 열겠습니까?" 확인 창을 띄우는데, 그걸 닫는 것도 탭이다. 콜드 스타트도 마찬가지 |
 
-- `xcrun simctl` 에는 `screenshot`·`openurl`·`launch`·`terminate` 뿐이다
-- `osascript` 로 창을 클릭하려면 **macOS 보조 접근(Accessibility) 권한**이 필요하다.
-  없으면 `System Events에 오류 발생: ... 보조 접근이 허용되지 않습니다. (-25211)`
+그래서 **버리는 브랜치에 임시 코드를 얹어 앱이 스스로 화면을 돌게 했다.** 15초마다 다음 화면으로
+넘어가며 무한 반복하고, 밖에서는 `simctl io screenshot` 만 주기적으로 찍어 원하는 장면을 고른다
+— 이건 헤드리스라 맥 화면이 잠겨 있어도 된다.
 
-그래서 페어링 화면(`05-pair`)만 탭 없이 찍힌다. 나머지 4장은 셋 중 하나가 필요하다:
+```ts
+const STORE_SHOT_ROUTES = ['/', '/workspace/mobile-checkout',
+                           '/workspace/docs-refresh', '/workspace/mobile-checkout/pr']
+const STORE_SHOT_DWELL_MS = 15_000
+```
 
-1. **보조 접근 권한을 켠다** — 시스템 설정 ▸ 개인정보 보호 및 보안 ▸ 손쉬운 사용에서 셸을
-   돌리는 앱을 허용한다. 한 번 켜면 그 뒤로는 그냥 된다. 권장.
-2. 임시 코드로 `enterDemo()` 를 자동 호출하고 다시 굽는다 — 시뮬레이터 빌드가 클라우드라
-   한 번에 15분씩 든다. 그리고 임시 코드가 커밋에 새어 들어간 전례가 있다.
-3. 실기기에서 찍는다 — 손으로 누르면 그만이다.
+데모 워크스페이스 id 는 `src/state/demo.ts` 에 하드코딩이라 고정이다. 같은 브랜치에서
+`DemoBanner` 도 숨긴다 — Play 쪽 그림에 배너가 없어서 구도를 맞추려는 것이고, 배너는 헤더 바로
+아래 고정이라 스크롤로는 가려지지 않는다.
+
+**임시 코드는 산출 브랜치에 절대 넣지 않는다.** 되돌리는 것을 잊으면 그대로 새어 나가고, 실제로
+그런 전례가 있다. 별도 브랜치에 담아 찍고 나서 브랜치째 버리면 되돌릴 것 자체가 없다.
+
+찍히는 것을 고를 때는 `sips -Z 24` 로 축소해 서로 거리를 재면 같은 화면끼리 묶인다. 회전 순서와
+묶음 순서가 같으므로 어느 묶음이 어느 화면인지는 한 장만 눈으로 확인하면 정해진다.
 
 **심사자가 보는 것도 이 데모 모드다.** App Store Connect 의 "심사 정보 ▸ 메모" 에 데모 모드
 진입 방법을 반드시 적어야 한다. 랩탑 페어링이 필요한 앱이라 심사자가 로그인할 방법이 달리 없다.
