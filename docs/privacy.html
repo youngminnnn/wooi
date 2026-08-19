@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Privacy Policy | Wooi</title>
+    <meta
+      name="description"
+      content="What data Wooi handles, where it goes, and what the relay between your computer and your phone can and cannot see."
+    />
+    <link rel="canonical" href="https://youngminnnn.github.io/wooi/privacy.html" />
+    <meta property="og:type" content="article" />
+    <meta property="og:title" content="Privacy Policy | Wooi" />
+    <meta property="og:url" content="https://youngminnnn.github.io/wooi/privacy.html" />
+    <meta property="og:image" content="https://youngminnnn.github.io/wooi/og.png" />
+    <meta name="theme-color" content="#0a0b0d" />
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
+    <style>
+      :root {
+        --bg: #0a0b0d;
+        --bg-soft: #13161c;
+        --border: #262c37;
+        --text: #e8ecf3;
+        --text-dim: #a3adbe;
+        --blue: #74acff;
+        --purple: #b08bfa;
+        --sans:
+          -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Pretendard', 'Apple SD Gothic Neo',
+          Roboto, 'Helvetica Neue', Arial, sans-serif;
+        --mono: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family: var(--sans);
+        font-size: 17px;
+        line-height: 1.75;
+        -webkit-font-smoothing: antialiased;
+      }
+      .wrap { max-width: 760px; margin: 0 auto; padding: 56px 24px 96px; }
+      header { border-bottom: 1px solid var(--border); padding-bottom: 28px; margin-bottom: 40px; }
+      .home { color: var(--text-dim); text-decoration: none; font-size: 15px; }
+      .home:hover { color: var(--text); }
+      h1 {
+        font-size: 40px;
+        line-height: 1.2;
+        margin: 20px 0 0;
+        background: linear-gradient(120deg, #74acff 0%, #b08bfa 100%);
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+      }
+      h2 { font-size: 26px; margin: 48px 0 12px; line-height: 1.3; }
+      h3 { font-size: 20px; margin: 32px 0 8px; color: var(--text); }
+      p { color: var(--text-dim); margin: 14px 0; }
+      ul { color: var(--text-dim); padding-left: 22px; }
+      li { margin: 8px 0; }
+      strong { color: var(--text); font-weight: 650; }
+      a { color: var(--blue); text-decoration: none; border-bottom: 1px solid rgba(116, 172, 255, 0.3); }
+      a:hover { border-bottom-color: var(--blue); }
+      code {
+        font-family: var(--mono);
+        font-size: 0.88em;
+        background: var(--bg-soft);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 1px 6px;
+        color: var(--purple);
+      }
+      footer { margin-top: 72px; padding-top: 24px; border-top: 1px solid var(--border); color: var(--text-dim); font-size: 14px; }
+      @media (max-width: 560px) { .wrap { padding: 36px 18px 64px; } h1 { font-size: 32px; } }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <header>
+        <a class="home" href="./">&larr; Wooi</a>
+        <h1>Privacy Policy</h1>
+      </header>
+      <p>&lt;!-- DRAFT — 이 문서는 기술적 사실에 기반한 초안이며 법적 자문이 아니다. 배포 전 관할·책임 조항 등은 법무 검토를 거쳐야 한다. --&gt;</p>
+      <p>_Last updated: 2026-08-16 · Version 1_</p>
+      <p>Wooi is a local macOS desktop application that orchestrates parallel AI coding agents — <a href="https://claude.com/claude-code">Claude Code</a> and <a href="https://developers.openai.com/codex">OpenAI Codex</a> — over isolated git worktrees. This policy explains what data the app handles and where it goes.</p>
+      <h2 id="summary">Summary</h2>
+      <p>Wooi does not collect analytics or telemetry, and it does not transmit your code or conversations to the developer. Your code and conversations leave your machine only when sent to the third‑party services you connect (Anthropic or OpenAI, and optionally GitHub) to make the app function.</p>
+      <p>One optional feature is different, and it is described in full below: <strong>remote access</strong> lets a phone you have paired watch and control your sessions. It is off by default. When you turn it on, traffic passes through a relay server operated by the developer — but it is end‑to‑end encrypted, so the relay carries ciphertext it cannot read.</p>
+      <h2 id="what-data-is-processed-and-where-it-goes">What data is processed, and where it goes</h2>
+      <ul>
+        <li><strong>Prompts, code, and file contents</strong> — When you send a message or an agent reads or edits files, that content is sent to the provider for the workspace's selected agent: <strong>Anthropic</strong> through the Claude Agent SDK, or <strong>OpenAI</strong> through the Codex CLI. Processing is governed by the provider's privacy policy and the terms of your Claude, ChatGPT, or OpenAI API account: <a href="https://www.anthropic.com/legal/privacy">Anthropic Privacy Policy</a> · <a href="https://openai.com/policies/privacy-policy/">OpenAI Privacy Policy</a>. When you review a pull request, the same applies to its diff and to the files the agent reads in the review worktree.</li>
+        <li><strong>Repository metadata and pull requests</strong> — If you use the GitHub features, Wooi invokes the GitHub CLI (<code>gh</code>) on your machine, which communicates with <strong>GitHub</strong> under <a href="https://docs.github.com/site-policy/privacy-policies/github-general-privacy-statement">GitHub's Privacy Statement</a>. This includes review comments and verdicts you choose to post.</li>
+        <li><strong>Authentication</strong> — Wooi uses credentials managed by your installed Claude Code, Codex, and GitHub CLIs. Claude and Codex can be connected through an in-app browser flow; Codex also accepts an OpenAI API key. Wooi passes credentials to the relevant CLI and does <strong>not</strong> include them in conversation transcripts.</li>
+      </ul>
+      <h2 id="what-is-stored-locally">What is stored locally</h2>
+      <p>The following are stored only on your machine, under the app's user‑data directory (<code>~/Library/Application Support/Wooi/</code>):</p>
+      <ul>
+        <li>App settings (connected repositories, workspaces, preferences) — <code>wooi.json</code></li>
+        <li>Conversation transcripts — <code>transcripts/*.jsonl</code></li>
+        <li>PR review sessions (diff, findings, activity) — <code>reviews/*.jsonl</code></li>
+        <li>Diagnostic logs (errors and CLI detection) — <code>logs/main.log</code></li>
+        <li>Remote access keys and paired devices — <code>remote.json</code>, sealed with macOS Keychain (<code>safeStorage</code>). If the Keychain is unavailable, remote access refuses to run rather than storing keys in plain text.</li>
+        <li>A record of what your phone did — <code>logs/remote.log</code> (device, channel, workspace, outcome), so you can answer &quot;what did my phone do?&quot;</li>
+      </ul>
+      <p>Git worktrees for your workspaces are created under <code>~/wooi/workspaces/</code>, outside the user‑data directory so you can browse them directly.</p>
+      <p>These files are not uploaded anywhere by Wooi. You can delete a workspace from within the app, or remove the user‑data and <code>~/wooi/workspaces/</code> directories to erase all local data.</p>
+      <h2 id="remote-access-optional-off-by-default">Remote access (optional, off by default)</h2>
+      <p>Remote access lets a phone you have paired see your workspaces, read conversations, answer permission prompts, and send follow‑up messages. Your code and the agents keep running on your computer; the phone is only a control surface. The feature is off until you turn it on, and while it is off the app makes no connection to the relay at all.</p>
+      <p>Turning it on asks for your consent separately from these terms, because it is the one feature that sends anything to a server the developer runs.</p>
+      <h3 id="the-relay">The relay</h3>
+      <p>Your computer and your phone reach each other through a relay hosted on <a href="https://supabase.com/privacy">Supabase</a> and operated by the developer of Wooi. Your computer only makes outbound connections to it — nothing on your machine is made reachable from the internet.</p>
+      <h3 id="what-is-encrypted">What is encrypted</h3>
+      <p>Everything with substance. When you pair, your computer and phone agree on a key that neither the relay nor the developer ever sees, and every payload is sealed with it (XChaCha20‑Poly1305). That covers:</p>
+      <ul>
+        <li>messages, prompts, and agent output</li>
+        <li>code, diffs, and file paths</li>
+        <li>workspace and branch names</li>
+        <li>permission requests and your answers to them</li>
+      </ul>
+      <h3 id="what-the-relay-operator-can-see">What the relay operator can see</h3>
+      <p>Encryption hides content, not the fact that traffic happened. Stored in plain text on the relay:</p>
+      <ul>
+        <li><strong>Identifiers</strong> — a random UUID for your computer and one for each paired phone, plus the anonymous account IDs they authenticate with. These are generated by Wooi and are not linked to your name or email.</li>
+        <li><strong>Your phone's name and platform</strong> — for example <code>SM‑F741N</code> / <code>android</code>, so the app can show you which device you are approving during pairing and which devices are paired. Your <strong>computer's</strong> name is not sent; it is delivered to your phone inside the encrypted channel instead.</li>
+        <li><strong>Timing and size</strong> — when your computer was last connected, when commands and state snapshots were written, how many there were and how many bytes each ciphertext is.</li>
+        <li><strong>Notification events</strong> — that a notification of a given kind (<code>needsInput</code>, <code>completed</code>, <code>error</code>) was sent at a given time, and the opaque workspace UUID it concerned. The workspace's name passes through in the banner text (see <a href="https://github.com/youngminnnn/wooi/blob/main/#notifications">Notifications</a>) but is not stored.</li>
+        <li><strong>Your phone's push token</strong> — the address the push service delivers to.</li>
+        <li>Supabase, as the host, also processes ordinary connection metadata such as IP addresses.</li>
+      </ul>
+      <p>Taken together this is enough to see *that* you were working and roughly how much, and — apart from a workspace name in a notification banner — never *what* you were working on.</p>
+      <h3 id="notifications">Notifications</h3>
+      <p>When your computer is running something that needs you and you are away from it, it can send a notification to your phone. The banner names the workspace and what happened — &quot;design-tokens finished&quot; — so that you can tell from the lock screen whether it is worth picking up the phone.</p>
+      <p><strong>The workspace's name is the one thing Wooi sends in the clear.</strong> The banner text passes through <a href="https://expo.dev/privacy">Expo's push service</a> and then Apple's or Google's push network, and those services can read it, as can the relay that hands it to them. Nothing else does: the relay only ever accepts a banner of the form <code>&lt;name&gt; finished</code>, and the notification's payload — the workspace this is really about, and everything the app shows once you open it — still travels as ciphertext and is decrypted on your phone.</p>
+      <p>If you would rather no name left your computer, turn notifications off in Settings → Remote. Everything else on your phone keeps working.</p>
+      <h3 id="where-the-keys-live">Where the keys live</h3>
+      <ul>
+        <li>On your computer: <code>remote.json</code>, sealed with the macOS Keychain.</li>
+        <li>On your phone: the iOS Keychain / Android Keystore, through <code>expo-secure-store</code>, and only readable while the device is unlocked.</li>
+      </ul>
+      <h3 id="turning-it-off-and-deleting-your-data">Turning it off and deleting your data</h3>
+      <ul>
+        <li><strong>Revoke a device</strong> removes that phone's access immediately — the relay stops serving it, not just the app's interface.</li>
+        <li><strong>Delete all remote data</strong> removes your computer's record from the relay along with every paired device, queued command, and state snapshot, and erases the local keys. Every phone would have to pair again.</li>
+        <li>Data also expires on its own: pairing codes after 5 minutes, commands after 6 hours, notification records after 2 days, and a computer that has not connected for 180 days is removed entirely.</li>
+      </ul>
+      <h2 id="telemetry">Telemetry</h2>
+      <p>Wooi does not include analytics, crash reporting, or telemetry at this time. If this changes, this policy will be updated and consent will be requested.</p>
+      <h2 id="changes-to-this-policy">Changes to this policy</h2>
+      <p>When this policy is updated in a way that affects how your data is handled, the version number above is incremented and you will be asked to review and accept the updated terms before continuing to use the app.</p>
+      <p>The remote access section was added without incrementing the version, because the feature is off by default and cannot send anything until you enable it — and enabling it asks for your consent at that moment, where the decision is actually being made. Users who never turn it on are unaffected, and re‑prompting everyone for a feature they are not using would train people to click through consent screens.</p>
+      <h2 id="contact">Contact</h2>
+      <p>Questions about this policy can be sent to &lt;youngmin3306@gmail.com&gt;.</p>
+      <footer>
+        This page is generated from
+        <a href="https://github.com/youngminnnn/wooi/blob/main/PRIVACY.md">PRIVACY.md</a>
+        in the Wooi repository. That file is the source of truth.
+      </footer>
+    </div>
+  </body>
+</html>

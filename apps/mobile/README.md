@@ -138,6 +138,44 @@ EXPO_TOKEN="$(cat ~/.expo-token)" npx eas build --profile production --platform 
 Apple 계정으로 로그인해 인증서·프로비저닝 프로파일과 APNs 키를 만든다 — 이걸 건너뛰면
 푸시가 안 되는 앱이 나간다.
 
+## 쓰지도 않는 권한은 막는다 — `blockedPermissions`
+
+스토어 등록정보에는 앱이 **선언한** 권한이 그대로 나열된다. 랩탑을 조종하는 원격 앱에
+"마이크" 가 붙어 있으면 설치 직전에 사용자가 멈칫한다. 그런데 우리가 선언한 적 없는 권한이
+매니페스트 병합으로 딸려 온다:
+
+| 권한 | 어디서 오나 |
+| --- | --- |
+| `RECORD_AUDIO` | `expo-camera` 의 라이브러리 매니페스트 |
+| `READ/WRITE_EXTERNAL_STORAGE` | `expo-file-system` 의 라이브러리 매니페스트 |
+| `SYSTEM_ALERT_WINDOW` | 출처 미확정 — 로컬 `node_modules` 에서는 `react-native` 의 **debug** 매니페스트만 나오는데 릴리즈 빌드에도 들어 있다 |
+
+**`app.json` 의 `expo-camera` 플러그인 옵션 `recordAudioAndroid: false` 로는 못 막는다.**
+그 옵션은 *앱* 매니페스트에 한 줄 더할지만 정하고(`withCamera.js` 의
+`recordAudioAndroid && 'android.permission.RECORD_AUDIO'`), `expo-camera` 자신의
+`android/src/main/AndroidManifest.xml` 이 이미 선언하고 있어서 병합 단계에서 올라온다.
+같은 이유로 `permissions` 목록에 `CAMERA` 만 적어 두는 것도 병합을 막지 못한다 —
+그 필드는 **더하는** 쪽이지 **빼는** 쪽이 아니다.
+
+빼려면 `android.blockedPermissions` 를 쓴다. 병합된 매니페스트에 `tools:node="remove"` 를
+넣어 준다.
+
+막아도 되는 근거:
+
+- 카메라는 페어링 QR 스캔에만 쓴다(`app/pair.tsx` 의 `CameraView` + `BarcodeScanningResult`).
+  녹화 경로가 없으므로 `RECORD_AUDIO` 는 쓸 일이 없다.
+- `expo-file-system` 은 앱 코드에서 쓰지 않고 직접 의존성도 아니다(`expo` 가 끌고 온다).
+  Expo 내부가 쓰는 건 앱 전용 저장소라 API 29+ 에서는 이 권한이 애초에 무의미하다.
+- 플로팅 창 기능이 없으므로 `SYSTEM_ALERT_WINDOW` 도 쓸 일이 없다.
+
+**고친 뒤에는 반드시 빌드해서 병합 결과를 확인한다.** 소스는 `app.json` 이지만 최종 권한
+목록을 정하는 건 Gradle 의 매니페스트 병합이라, 설정만 보고 판단하면 안 된다:
+
+```sh
+sdkmanager "build-tools;36.0.0"
+aapt2 dump permissions <내려받은>.apk | grep uses-permission
+```
+
 ## 수출 규정 — iOS 는 답을 정해 두고 제출한다
 
 TestFlight 는 이 답이 없으면 **테스터에게 빌드를 내려보내지 않는다**("Missing Compliance").
@@ -205,7 +243,8 @@ Store Connect 에서 위 표대로 한 번 답하면 풀린다. 선언의 내용
 ```json
 "submit": {
   "production": {
-    "ios": { "ascAppId": "6802201873", "bundleIdentifier": "com.wooi.remote" }
+    "ios": { "ascAppId": "6802201873", "bundleIdentifier": "com.wooi.remote" },
+    "android": { "track": "internal", "releaseStatus": "completed" }
   }
 }
 ```
@@ -224,6 +263,36 @@ Store Connect 에서 위 표대로 한 번 답하면 풀린다. 선언의 내용
 소스코드와 그것을 컴파일한 목적코드는 EAR 대상이 아니다" 를 근거로 삼는 길도 있다. 2021년
 3월 규칙 개정으로 그 경로의 BIS 이메일 통지 의무도 없어졌다. 다만 App Store Connect 문답에는
 이 사유를 고를 칸이 없어서, 제출은 위 표대로 하고 이건 근거로만 남긴다.
+
+## Play 제출 — 첫 한 번은 손으로 올려야 한다
+
+Google Play Developer API 는 **신규 앱의 첫 AAB 를 받지 않는다.** 패키지 이름이 콘솔에 이미
+등록돼 있어야 API 가 열리므로, 첫 빌드는 Play Console 에서 사람이 업로드한다. 그다음부터
+`eas submit` 이 붙는다.
+
+그래서 CI 의 제출 단계는 **기본이 꺼져 있다.** 준비되기 전에 돌면 태그를 밀 때마다 릴리즈가
+빨갛게 실패하기 때문이다. 저장소 변수로 잠가 뒀다:
+
+```
+Settings → Secrets and variables → Actions → Variables
+MOBILE_AUTO_SUBMIT = true
+```
+
+켜기 전에 할 일:
+
+1. Play Console 에 앱을 만들고 **AAB 를 한 번 수동 업로드** (`mobile-release.yml` 의 요약에
+   뜨는 링크에서 받는다)
+2. Google Cloud 에서 서비스 계정을 만들고, Play Console 에서 **"출시 관리자"** 권한을 준다
+3. `eas credentials --platform android` 로 그 키를 **EAS 에 올린다**
+
+3번을 EAS 보관으로 하는 이유는 `serviceAccountKeyPath` 를 쓰면 키 파일이 레포에 있어야
+하기 때문이다. 스토어에 무엇이든 올릴 수 있는 자격증명을 커밋할 이유가 없다.
+
+어느 트랙으로 가는지는 `eas.json` 이 정한다 — 지금은 `internal` 이다. 비공개 테스트나
+프로덕션으로 **올리는 건 콘솔에서 사람이 한다.** 자동으로 프로덕션까지 가면, 태그 하나가
+전 사용자에게 도달하는 데 사람의 확인이 한 번도 끼지 않는다.
+
+스토어 등록정보에 넣을 문구와 데이터 보안 답변은 [`store/android/listing.md`](./store/android/listing.md).
 
 ## 시뮬레이터에서 화면 확인하기
 
