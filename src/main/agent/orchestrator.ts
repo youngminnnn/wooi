@@ -302,7 +302,7 @@ export class AgentOrchestrator {
     if (status === 'error') {
       // 오류 뒤 백엔드가 같은 프로세스를 재사용할지 새 세션을 만들지 확정할 수 없다. 보안 규칙이
       // 빠진 표식만 보내는 것보다 다음 건에 전문을 한 번 더 싣는 쪽으로 기울인다.
-      resetPeerSession(workspaceId)
+      resetPeerSession(workspaceId, '오류로 끝난 턴')
     }
     const resume = this.pendingResume.get(workspaceId)
     if (!resume) {
@@ -427,7 +427,7 @@ export class AgentOrchestrator {
   clearSession(workspaceId: string): void {
     // 맥락을 비운 대화에 옛 턴의 이어가기를 밀어 넣지 않는다 — 이어갈 대화가 이미 없다.
     this.cancelResume(workspaceId)
-    resetPeerSession(workspaceId)
+    resetPeerSession(workspaceId, '대화 비움(/clear)')
     this.backendFor(workspaceId).clearSession(workspaceId)
   }
 
@@ -451,7 +451,7 @@ export class AgentOrchestrator {
     // 세션이 사라졌으면 이어갈 턴도 사라진 것이다. (자동 이어가기 자신이 부르는 dispose 는
     // 이미 예약을 꺼내 간 뒤라 여기서 지울 것이 없다 — [[handleTurnEnd]])
     this.cancelResume(workspaceId)
-    resetPeerSession(workspaceId)
+    resetPeerSession(workspaceId, '세션 폐기')
     this.backendFor(workspaceId).dispose(workspaceId)
   }
 
@@ -459,7 +459,7 @@ export class AgentOrchestrator {
     this.lastUsedAt.clear()
     this.pendingRestart.clear()
     this.pendingResume.clear()
-    resetAllPeerSessions()
+    resetAllPeerSessions('모든 세션 폐기')
     for (const backend of this.backends.values()) backend.disposeAll()
   }
 
@@ -467,7 +467,7 @@ export class AgentOrchestrator {
     this.lastUsedAt.clear()
     this.pendingRestart.clear()
     this.pendingResume.clear()
-    resetAllPeerSessions()
+    resetAllPeerSessions('모든 세션 중단')
     for (const backend of this.backends.values()) backend.abortAll()
   }
 
@@ -477,7 +477,7 @@ export class AgentOrchestrator {
     this.lastUsedAt.clear()
     this.pendingRestart.clear()
     this.pendingResume.clear()
-    resetAllPeerSessions()
+    resetAllPeerSessions('세션 프로세스 재활용')
     for (const backend of this.backends.values()) backend.recycleAll()
   }
 

@@ -66,7 +66,7 @@ const recentSends = new Map<string, number>()
 const PEER_BATCH_MAX_WAIT_MS = 30_000
 
 interface BufferedPeerDelivery {
-  deps: Pick<AgentToolDeps, 'sendMessage'>
+  deps: Pick<AgentToolDeps, 'sendMessage' | 'broadcastState'>
   messages: PeerDelivery[]
   timer: ReturnType<typeof setTimeout>
 }
@@ -75,6 +75,8 @@ interface PeerDelivery {
   part: PeerMessagePart
   /** 단건이 세션의 첫 peer 메시지일 때 쓸, 도구별 전문 포함 문자열. */
   fullText: string
+  /** 배달되지 못한 묶음을 대기 카드로 되돌릴 때 필요하다. 앱 밖 세션은 null. */
+  fromWorkspaceId: string | null
 }
 
 /** 전문은 세션 맥락에 한 번만 필요하고, 버퍼도 프로세스보다 오래 살 이유가 없어 둘 다 메모리다. */
@@ -240,11 +242,68 @@ function sendPeerDelivery(
   deps.sendMessage(workspaceId, text, options)
 }
 
-function flushBuffered(workspaceId: string): boolean {
+/**
+ * 배달하지 못한 묶음을 **버리지 않고** 대상의 대기 카드로 되돌린다.
+ *
+ * 버퍼는 "곧 열릴 턴" 을 전제로 한 임시 자리다. 그 턴이 오지 않을 이유(오류로 끝난 턴·세션
+ * 폐기·앱 종료)가 생기면 안에 있던 것이 통째로 사라졌는데, 발신자는 이미 delivered 로 답을
+ * 받은 뒤라 재전달도 통지도 없었다 — 남는 것은 "보냈는데 저쪽엔 아무것도 없다" 하나뿐이다.
+ * 대기열은 이미 있는 자리이고([[PendingPeerMessage]]), 카드로 남기면 사용자가 그때 전달할 수
+ * 있을 뿐 아니라 **유실이 눈에 보인다.**
+ */
+function parkUndelivered(
+  deps: Pick<AgentToolDeps, 'broadcastState'>,
+  workspaceId: string,
+  deliveries: PeerDelivery[],
+  reason: string
+): void {
+  if (!deliveries.length) return
+  const at = Date.now()
+  const pending: PendingPeerMessage[] = deliveries.map(({ part, fullText, fromWorkspaceId }) => ({
+    id: randomUUID(),
+    fromWorkspaceId,
+    fromName: part.fromName,
+    fromBranch: part.fromBranch,
+    fromRepoName: part.fromRepoName,
+    crossRepo: part.crossRepo,
+    message: part.message,
+    route: part.route,
+    text: fullText,
+    undelivered: true,
+    at
+  }))
+
+  let parked = false
+  getStore().update((st) => {
+    const to = st.workspaces.find((w) => w.id === workspaceId)
+    if (!to) return
+    to.peerInbox = [...(to.peerInbox ?? []), ...pending].slice(-MAX_PEER_INBOX)
+    parked = true
+  })
+  // 워크스페이스가 사라진 뒤라면 되돌릴 자리도 없다. 그래도 조용히 지나가지는 않는다 —
+  // 이 로그가 없으면 다음 신고 때도 "보냈는데 안 왔다" 에서 한 발짝도 못 나간다.
+  if (!parked) {
+    log.error(
+      `peer: 미배달 ${pending.length}건을 되돌릴 워크스페이스가 없다 (${workspaceId}, ${reason})`
+    )
+    return
+  }
+  log.info(`peer: 미배달 ${pending.length}건을 승인 대기로 되돌렸다 (${workspaceId}, ${reason})`)
+  deps.broadcastState()
+}
+
+/** 대기 중인 묶음을 꺼내며 타이머를 끈다. 꺼낸 쪽이 전달이든 되돌림이든 책임진다. */
+function takeBuffered(workspaceId: string): BufferedPeerDelivery | undefined {
   const buffered = bufferedPeerDeliveries.get(workspaceId)
-  if (!buffered) return false
+  if (!buffered) return undefined
   bufferedPeerDeliveries.delete(workspaceId)
   clearTimeout(buffered.timer)
+  return buffered
+}
+
+function flushBuffered(workspaceId: string): boolean {
+  const buffered = takeBuffered(workspaceId)
+  if (!buffered) return false
   try {
     sendPeerDelivery(buffered.deps, workspaceId, buffered.messages)
   } catch (err) {
@@ -252,8 +311,10 @@ function flushBuffered(workspaceId: string): boolean {
     // 읽고 idle 방송을 통째로 건너뛰므로([[agent/orchestrator]] handleTurnEnd), 여기서 true 를
     // 돌리면 시작되지도 않을 턴을 기다리며 사이드바가 영영 '진행 중' 에 갇힌다.
     log.error(`peer: 턴 종료 뒤 대기 중이던 메시지 전달 실패 (${workspaceId})`, err)
+    parkUndelivered(buffered.deps, workspaceId, buffered.messages, '전달 실패')
     return false
   }
+  log.info(`peer: 대기 중이던 ${buffered.messages.length}건 전달 (${workspaceId})`)
   return true
 }
 
@@ -262,23 +323,27 @@ export function flushBufferedPeerMessages(workspaceId: string): boolean {
   return flushBuffered(workspaceId)
 }
 
-/** 세션이 사라지면 전문 기억과 아직 모델이 보지 못한 묶음을 함께 버린다. */
-export function resetPeerSession(workspaceId: string): void {
+/**
+ * 세션이 사라지면 전문 기억을 버린다. 아직 모델이 보지 못한 묶음은 **버리지 않고** 승인 대기로
+ * 되돌린다 — 세션이 사라진 것은 발신자의 잘못이 아니고, 그쪽은 이미 delivered 를 받아 갔다.
+ */
+export function resetPeerSession(workspaceId: string, reason = '세션 재시작'): void {
   sessionsWithPeerRules.delete(workspaceId)
-  const buffered = bufferedPeerDeliveries.get(workspaceId)
-  if (buffered) clearTimeout(buffered.timer)
-  bufferedPeerDeliveries.delete(workspaceId)
+  const buffered = takeBuffered(workspaceId)
+  if (buffered) parkUndelivered(buffered.deps, workspaceId, buffered.messages, reason)
 }
 
 /** 호스트·계정 단위 정리는 대상 id 목록이 없어도 모든 메모리 상태를 확실히 끊어야 한다. */
-export function resetAllPeerSessions(): void {
+export function resetAllPeerSessions(reason = '전체 세션 정리'): void {
   sessionsWithPeerRules.clear()
-  for (const buffered of bufferedPeerDeliveries.values()) clearTimeout(buffered.timer)
-  bufferedPeerDeliveries.clear()
+  for (const workspaceId of [...bufferedPeerDeliveries.keys()]) {
+    const buffered = takeBuffered(workspaceId)
+    if (buffered) parkUndelivered(buffered.deps, workspaceId, buffered.messages, reason)
+  }
 }
 
 function bufferPeerDelivery(
-  deps: Pick<AgentToolDeps, 'sendMessage'>,
+  deps: Pick<AgentToolDeps, 'sendMessage' | 'broadcastState'>,
   workspaceId: string,
   delivery: PeerDelivery
 ): void {
@@ -289,6 +354,17 @@ function bufferPeerDelivery(
   }
   const timer = setTimeout(() => flushBuffered(workspaceId), PEER_BATCH_MAX_WAIT_MS)
   bufferedPeerDeliveries.set(workspaceId, { deps, messages: [delivery], timer })
+}
+
+/**
+ * 배달 1건이 어떻게 끝났는지 로그에 남긴다.
+ *
+ * 지금까지 남는 것은 `agent tool: send_to_workspace` 한 줄뿐이라, "보냈는데 저쪽엔 아무것도
+ * 없다" 는 신고가 오면 즉시 전달·버퍼·승인 대기·중복 폐기 중 무엇이었는지 가릴 방법이 없었다.
+ * 남의 기기에서 난 일을 사후에 판정하려면 결과가 로그에 있어야 한다.
+ */
+function logDelivery(from: string, target: Workspace, outcome: string): void {
+  log.info(`peer: ${from} → ${workspaceDisplayName(target)} — ${outcome}`)
 }
 
 /**
@@ -306,7 +382,9 @@ export function deliverOrHold(
   route: PeerMessagePart['route'] = 'peer'
 ): { delivered: boolean; buffered: boolean; policy: PeerInboundPolicy } {
   const policy = inboundPolicyFor(target, from.id)
+  const label = workspaceDisplayName(from)
   if (policy === 'refuse') {
+    logDelivery(label, target, '거절(refuse)')
     throw new Error(
       `${workspaceDisplayName(target)} is not accepting messages from other workspaces. ` +
         'Tell the user what you wanted to send there instead.'
@@ -314,10 +392,16 @@ export function deliverOrHold(
   }
 
   if (policy === 'accept') {
-    const delivery = { part: partOf(from, target, rawMessage, route), fullText: text }
-    if (target.status === 'running') bufferPeerDelivery(deps, target.id, delivery)
+    const delivery = {
+      part: partOf(from, target, rawMessage, route),
+      fullText: text,
+      fromWorkspaceId: from.id
+    }
+    const buffered = target.status === 'running'
+    if (buffered) bufferPeerDelivery(deps, target.id, delivery)
     else sendPeerDelivery(deps, target.id, [delivery])
-    return { delivered: true, buffered: target.status === 'running', policy }
+    logDelivery(label, target, buffered ? '턴 종료까지 대기(running)' : '즉시 전달')
+    return { delivered: true, buffered, policy }
   }
 
   const pending: PendingPeerMessage = {
@@ -342,6 +426,7 @@ export function deliverOrHold(
     // 카드가 계속 보이고, 발신자는 아래 결과 문장으로 대기 중임을 안다.
     to.peerInbox = inbox.slice(-MAX_PEER_INBOX)
   })
+  logDelivery(label, target, '승인 대기(hold) — 배달되지 않았다')
   deps.broadcastState()
   return { delivered: false, buffered: false, policy }
 }
@@ -354,6 +439,7 @@ function deliverOrHoldExternal(
 ): { delivered: boolean; buffered: boolean; policy: PeerInboundPolicy } {
   const policy = inboundPolicyFor(target, undefined)
   if (policy === 'refuse') {
+    logDelivery('outside session', target, '거절(refuse)')
     throw new Error(
       `${workspaceDisplayName(target)} is not accepting messages from outside sessions. ` +
         'Tell the user what you wanted to send there instead.'
@@ -369,10 +455,12 @@ function deliverOrHoldExternal(
     route: 'peer'
   }
   if (policy === 'accept') {
-    const delivery = { part, fullText: text }
-    if (target.status === 'running') bufferPeerDelivery(deps, target.id, delivery)
+    const delivery = { part, fullText: text, fromWorkspaceId: null }
+    const buffered = target.status === 'running'
+    if (buffered) bufferPeerDelivery(deps, target.id, delivery)
     else sendPeerDelivery(deps, target.id, [delivery])
-    return { delivered: true, buffered: target.status === 'running', policy }
+    logDelivery('outside session', target, buffered ? '턴 종료까지 대기(running)' : '즉시 전달')
+    return { delivered: true, buffered, policy }
   }
 
   const pending: PendingPeerMessage = {
@@ -387,6 +475,7 @@ function deliverOrHoldExternal(
     if (!to) return
     to.peerInbox = [...(to.peerInbox ?? []), pending].slice(-MAX_PEER_INBOX)
   })
+  logDelivery('outside session', target, '승인 대기(hold) — 배달되지 않았다')
   deps.broadcastState()
   return { delivered: false, buffered: false, policy }
 }
@@ -405,7 +494,9 @@ export function deliverApprovedPeerMessage(
     message: pending.message,
     route: pending.route ?? 'peer'
   }
-  sendPeerDelivery(deps, workspaceId, [{ part, fullText: pending.text }])
+  sendPeerDelivery(deps, workspaceId, [
+    { part, fullText: pending.text, fromWorkspaceId: pending.fromWorkspaceId }
+  ])
 }
 
 /** 리포 안을 먼저, 그 안에서는 최근 활동 순. 잘려 나가는 쪽이 항상 덜 관련된 쪽이어야 한다. */
@@ -522,12 +613,14 @@ export const sendToWorkspace: AgentToolHandler = async (deps, workspaceId, args)
   pruneRecentSends(now)
   const key = duplicateKey(workspaceId, targetId, message)
   if (recentSends.has(key)) {
+    logDelivery(workspaceDisplayName(from), target, '중복으로 폐기(60초 창)')
     return {
+      status: 'not-delivered-duplicate',
       delivered: false,
       duplicate: true,
       note:
-        `${workspaceDisplayName(target)} already got this exact message moments ago, so Wooi ` +
-        'dropped the repeat. Say something new or move on.'
+        `NOT DELIVERED. ${workspaceDisplayName(target)} already got this exact message moments ` +
+        'ago, so Wooi dropped the repeat. Say something new or move on.'
     }
   }
   const crossRepo = from.repoId !== target.repoId
@@ -540,9 +633,19 @@ export const sendToWorkspace: AgentToolHandler = async (deps, workspaceId, args)
     peerMessageText(message, from, crossRepo),
     message
   )
-  recentSends.set(key, now)
+  // **대상에 닿은 전송만** 지문을 남긴다. 승인 대기로 잡힌 것까지 남기면 60초 안의 재시도가
+  // "저쪽이 이미 받았다" 는 거짓 답을 듣는다 — 정작 대상은 아무것도 받지 못한 채이고, 발신
+  // 모델은 그 거짓말을 성공으로 요약해 사용자에게 보고한다(압축 뒤에는 특히 그렇다).
+  if (delivered) recentSends.set(key, now)
 
   return {
+    // 이 한 줄이 압축을 견뎌야 한다. 아래 note 는 요약에서 가장 먼저 잘려 나가는 부분이고,
+    // 그렇게 잘린 자리에서 모델은 실패한 전송을 "보냈다" 로 보고해 왔다.
+    status: delivered
+      ? buffered
+        ? 'delivered-when-current-turn-ends'
+        : 'delivered'
+      : 'NOT-DELIVERED-waiting-for-user-approval',
     sentTo: {
       workspaceId: target.id,
       name: workspaceDisplayName(target),
@@ -555,8 +658,9 @@ export const sendToWorkspace: AgentToolHandler = async (deps, workspaceId, args)
         ? 'That workspace is mid-turn. Wooi will deliver this with any other waiting messages ' +
           'when the current turn ends.'
         : 'That workspace was idle, so this starts a turn there right away.'
-      : 'Wooi is holding this for the user to approve — it is not delivered yet, and it never ' +
-        'will be if they decline. Do not wait on a reply: tell the user what you sent and carry on.'
+      : 'NOT DELIVERED. Wooi is holding this for the user to approve, and it never will be ' +
+        'delivered if they decline. Retrying will not change that — do not wait on a reply, ' +
+        'tell the user what you wanted to send and carry on.'
   }
 }
 
@@ -582,7 +686,13 @@ export async function sendToWorkspaceExternal(
   pruneRecentSends(now)
   const key = duplicateKey('external', targetId, message)
   if (recentSends.has(key)) {
-    return { delivered: false, duplicate: true, note: 'Wooi dropped the repeated message.' }
+    logDelivery('outside session', target, '중복으로 폐기(60초 창)')
+    return {
+      status: 'not-delivered-duplicate',
+      delivered: false,
+      duplicate: true,
+      note: 'NOT DELIVERED. Wooi dropped this as a repeat of a message delivered moments ago.'
+    }
   }
   const { delivered, buffered } = deliverOrHoldExternal(
     deps,
@@ -590,8 +700,14 @@ export async function sendToWorkspaceExternal(
     externalPeerMessageText(message),
     message
   )
-  recentSends.set(key, now)
+  // 앱 안 경로와 같은 이유로 실제로 닿은 전송만 남긴다(sendToWorkspace 의 주석 참고).
+  if (delivered) recentSends.set(key, now)
   return {
+    status: delivered
+      ? buffered
+        ? 'delivered-when-current-turn-ends'
+        : 'delivered'
+      : 'NOT-DELIVERED-waiting-for-user-approval',
     sentTo: {
       workspaceId: target.id,
       name: workspaceDisplayName(target),
@@ -603,6 +719,7 @@ export async function sendToWorkspaceExternal(
       ? buffered
         ? 'That workspace is mid-turn. Wooi will deliver this when the current turn ends.'
         : 'That workspace was idle, so this starts a turn there right away.'
-      : 'Wooi is holding this for the user to approve — it has not reached the model.'
+      : 'NOT DELIVERED. Wooi is holding this for the user to approve — it has not reached the ' +
+        'model, and retrying will not change that.'
   }
 }

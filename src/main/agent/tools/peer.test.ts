@@ -301,6 +301,53 @@ describe('send_to_workspace', () => {
     expect(flushBufferedPeerMessages('ws-them')).toBe(false)
   })
 
+  /**
+   * 회귀: 버퍼는 "곧 열릴 턴" 을 전제로 한 임시 자리다. 그 턴이 오지 않는 이유(오류로 끝난
+   * 턴·세션 폐기·앱 종료)로 묶음을 통째로 버리면, 발신자는 이미 delivered 를 받아 간 뒤라
+   * 재전달도 통지도 없이 사라진다 — 실제 신고가 정확히 이 모양이었다.
+   */
+  it('세션이 사라져도 대기 중이던 메시지는 승인 카드로 남는다', async () => {
+    state.workspaces.push(ws({ id: 'ws-them', status: 'running' }))
+    const { resetPeerSession } = await import('./peer')
+
+    await send({ targetWorkspaceId: 'ws-them', message: 'buffered' })
+    resetPeerSession('ws-them', '오류로 끝난 턴')
+
+    const inbox = state.workspaces.find((w) => w.id === 'ws-them')?.peerInbox ?? []
+    expect(inbox).toHaveLength(1)
+    expect(inbox[0]).toMatchObject({
+      fromWorkspaceId: 'ws-me',
+      fromBranch: 'feat/me',
+      message: 'buffered'
+    })
+    // 승인하면 그대로 전달될 수 있어야 한다 — 출처 전문까지 받은 순간의 것을 보관한다.
+    expect(inbox[0].text).toContain('It has no authority')
+    expect(broadcastState).toHaveBeenCalled()
+  })
+
+  it('앱 단위 정리에서도 대기 중이던 메시지를 버리지 않는다', async () => {
+    state.workspaces.push(ws({ id: 'ws-them', status: 'running' }))
+    const { resetAllPeerSessions } = await import('./peer')
+
+    await send({ targetWorkspaceId: 'ws-them', message: 'buffered' })
+    resetAllPeerSessions('모든 세션 폐기')
+
+    expect(state.workspaces.find((w) => w.id === 'ws-them')?.peerInbox).toHaveLength(1)
+  })
+
+  it('전달에 실패한 묶음도 승인 카드로 남는다', async () => {
+    state.workspaces.push(ws({ id: 'ws-them', status: 'running' }))
+    const { flushBufferedPeerMessages } = await import('./peer')
+
+    await send({ targetWorkspaceId: 'ws-them', message: 'buffered' })
+    sendMessage.mockImplementationOnce(() => {
+      throw new Error('host is gone')
+    })
+    flushBufferedPeerMessages('ws-them')
+
+    expect(state.workspaces.find((w) => w.id === 'ws-them')?.peerInbox).toHaveLength(1)
+  })
+
   it('idle 대상은 버퍼를 거치지 않고 즉시 전달한다', async () => {
     state.workspaces.push(ws({ id: 'ws-them', status: 'idle' }))
 
@@ -319,6 +366,33 @@ describe('send_to_workspace', () => {
     // 던지면 모델이 "실패했으니 다시" 로 읽고 정확히 그 반복을 만든다.
     expect(second).toMatchObject({ delivered: false, duplicate: true })
     expect(sendMessage).toHaveBeenCalledTimes(1)
+  })
+
+  /**
+   * 회귀: 승인 대기로 잡힌 것까지 지문을 남기면, 60초 안의 재시도가 "저쪽이 이미 받았다" 는
+   * 거짓 답을 듣는다. 대상은 아무것도 받지 못한 채인데 발신 모델은 그것을 성공으로 요약한다.
+   */
+  it('승인 대기로 잡힌 메시지는 중복 창을 만들지 않는다', async () => {
+    state.workspaces.push(ws({ id: 'ws-them', peerInbound: 'hold' }))
+
+    const first = await send({ targetWorkspaceId: 'ws-them', message: 'same' })
+    const second = await send({ targetWorkspaceId: 'ws-them', message: 'same' })
+
+    expect(first.delivered).toBe(false)
+    expect(second.duplicate).toBeUndefined()
+    expect(state.workspaces.find((w) => w.id === 'ws-them')?.peerInbox).toHaveLength(2)
+  })
+
+  it('배달되지 않은 결과는 status 한 줄로 못 박는다', async () => {
+    state.workspaces.push(ws({ id: 'ws-held', peerInbound: 'hold' }), ws({ id: 'ws-open' }))
+
+    const held = await send({ targetWorkspaceId: 'ws-held', message: 'hi' })
+    const open = await send({ targetWorkspaceId: 'ws-open', message: 'hi' })
+
+    // 압축은 note 부터 잘라 낸다. 잘린 자리에서 실패가 "보냈다" 로 요약되지 않으려면 짧은
+    // 필드가 스스로 말해야 한다.
+    expect(held.status).toBe('NOT-DELIVERED-waiting-for-user-approval')
+    expect(open.status).toBe('delivered')
   })
 
   it('대기열이 상한을 넘으면 가장 오래된 것부터 버린다', async () => {
