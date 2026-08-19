@@ -164,9 +164,55 @@ App Store Connect 문답의 답:
 | 독자적이거나 국제 표준이 아닌 알고리즘을 구현하는가 | **아니오** |
 | OS 암호 대신 또는 그에 더해 표준 알고리즘을 구현하는가 | **예** |
 
-그래서 `app.json` 의 `ios.infoPlist.ITSAppUsesNonExemptEncryption` 이 **`true`** 다. `false` 로
-두면 매 업로드의 문답은 사라지지만 사실과 다른 신고가 된다. 네이티브 설정이라 **EAS Update
-로는 못 넣는다** — 새 빌드부터 적용된다.
+### 이 답은 App Store Connect 에 적는다 — Info.plist 가 아니라
+
+**`ITSAppUsesNonExemptEncryption` 을 `app.json` 에 넣지 않는다.** 넣고 싶은 유혹이 크다 —
+매 업로드의 문답이 사라지기 때문이다. 하지만 그 키는 혼자 다니지 않는다.
+
+`true` 는 "나는 수출규정 문서와 그 코드를 갖고 있다"는 신호다. Apple 은 짝이 되는
+`ITSEncryptionExportComplianceCode` 를 찾고, 없으면 업로드가 성공한 **뒤에** 처리 단계에서
+죽는다:
+
+```
+ITMS-90592: Invalid Export Compliance Code. The export compliance key value []
+in the app's Info.plist doesn't match the key value of the app's export
+compliance documentation.
+```
+
+`[]` 가 "비어 있음"이다. 그 코드는 지어낼 수 없다 — 프랑스 암호 신고서를 App Store Connect 에
+올려 **심사를 통과해야** Apple 이 발급한다. 그리고 우리 분류에서 그 신고서는 **프랑스 App Store
+에 배포할 때만** 필요하다. 배포하지도 않을 문서를 심사받으려고 릴리즈를 세울 이유가 없다.
+
+`false` 로 두는 길도 있지만 그건 사실과 다른 신고다.
+
+그래서 키를 **아예 두지 않는다.** 그러면 업로드된 빌드에 "Missing Compliance" 가 붙고, App
+Store Connect 에서 위 표대로 한 번 답하면 풀린다. 선언의 내용은 똑같고, 적는 곳만 다르다.
+
+실패가 늦게 온다는 점이 이 함정의 핵심이다. `eas submit` 은 "성공"이라 답하고 끝나며(전송이
+끝났다는 뜻이다), 거부는 몇 분 뒤 메일로 온다. 그 사이 TestFlight 는 그냥 비어 있어서 "아직
+처리 중"과 구분되지 않는다. 2026-08-19 에 0.3.0 build 2 가 이렇게 날아갔다.
+
+### 제출 대상은 `eas.json` 이 정한다 — 셸 변수가 아니라
+
+`eas submit` 은 **로컬 app config 를 읽어** 어느 App Store Connect 앱에 올릴지 고른다.
+`app.config.ts` 의 `APP_VARIANT` 기본값이 `development` 이라, 변수를 빠뜨리면 조용히
+`com.wooi.remote.dev` 를 겨냥한다. 빌드 id 를 정확히 줘도 소용없다 — **빌드는 운영인데 대상만
+개발**이 된다. 2026-08-19 에 실제로 이렇게 됐고, EAS 는 "Wooi (dev)" 앱 레코드를 새로 만들어
+버렸다(App Store Connect 에 빈 앱이 하나 더 생겼다).
+
+그래서 대상을 `eas.json` 의 submit 프로파일에 못 박았다:
+
+```json
+"submit": {
+  "production": {
+    "ios": { "ascAppId": "6802201873", "bundleIdentifier": "com.wooi.remote" }
+  }
+}
+```
+
+이러면 `APP_VARIANT` 를 잊어도 `--profile production` 이 항상 같은 곳으로 간다. 릴레이 환경을
+`WOOI_RELAY_DEV_*` / `WOOI_RELAY_PROD_*` 로 갈라 둔 것과 같은 이유다 — 셸에 떠 있는 값이
+릴리즈 경로에 섞이는 사고를 문법적으로 불가능하게 만든다.
 
 남는 의무는 둘뿐이다:
 
