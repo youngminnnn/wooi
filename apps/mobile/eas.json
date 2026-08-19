@@ -43,6 +43,11 @@
     }
   },
   "submit": {
-    "production": {}
+    "production": {
+      "ios": {
+        "ascAppId": "6802201873",
+        "bundleIdentifier": "com.wooi.remote"
+      }
+    }
   }
 }

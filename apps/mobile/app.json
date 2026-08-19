@@ -1,7 +1,7 @@
 {
   "expo": {
     "slug": "wooi-remote",
-    "version": "0.3.0",
+    "version": "0.3.1",
     "runtimeVersion": {
       "policy": "fingerprint"
     },
@@ -12,10 +12,7 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "supportsTablet": true,
-      "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": true
-      }
+      "supportsTablet": true
     },
     "android": {
       "adaptiveIcon": {
