@@ -243,7 +243,8 @@ Store Connect 에서 위 표대로 한 번 답하면 풀린다. 선언의 내용
 ```json
 "submit": {
   "production": {
-    "ios": { "ascAppId": "6802201873", "bundleIdentifier": "com.wooi.remote" }
+    "ios": { "ascAppId": "6802201873", "bundleIdentifier": "com.wooi.remote" },
+    "android": { "track": "internal", "releaseStatus": "completed" }
   }
 }
 ```
@@ -262,6 +263,36 @@ Store Connect 에서 위 표대로 한 번 답하면 풀린다. 선언의 내용
 소스코드와 그것을 컴파일한 목적코드는 EAR 대상이 아니다" 를 근거로 삼는 길도 있다. 2021년
 3월 규칙 개정으로 그 경로의 BIS 이메일 통지 의무도 없어졌다. 다만 App Store Connect 문답에는
 이 사유를 고를 칸이 없어서, 제출은 위 표대로 하고 이건 근거로만 남긴다.
+
+## Play 제출 — 첫 한 번은 손으로 올려야 한다
+
+Google Play Developer API 는 **신규 앱의 첫 AAB 를 받지 않는다.** 패키지 이름이 콘솔에 이미
+등록돼 있어야 API 가 열리므로, 첫 빌드는 Play Console 에서 사람이 업로드한다. 그다음부터
+`eas submit` 이 붙는다.
+
+그래서 CI 의 제출 단계는 **기본이 꺼져 있다.** 준비되기 전에 돌면 태그를 밀 때마다 릴리즈가
+빨갛게 실패하기 때문이다. 저장소 변수로 잠가 뒀다:
+
+```
+Settings → Secrets and variables → Actions → Variables
+MOBILE_AUTO_SUBMIT = true
+```
+
+켜기 전에 할 일:
+
+1. Play Console 에 앱을 만들고 **AAB 를 한 번 수동 업로드** (`mobile-release.yml` 의 요약에
+   뜨는 링크에서 받는다)
+2. Google Cloud 에서 서비스 계정을 만들고, Play Console 에서 **"출시 관리자"** 권한을 준다
+3. `eas credentials --platform android` 로 그 키를 **EAS 에 올린다**
+
+3번을 EAS 보관으로 하는 이유는 `serviceAccountKeyPath` 를 쓰면 키 파일이 레포에 있어야
+하기 때문이다. 스토어에 무엇이든 올릴 수 있는 자격증명을 커밋할 이유가 없다.
+
+어느 트랙으로 가는지는 `eas.json` 이 정한다 — 지금은 `internal` 이다. 비공개 테스트나
+프로덕션으로 **올리는 건 콘솔에서 사람이 한다.** 자동으로 프로덕션까지 가면, 태그 하나가
+전 사용자에게 도달하는 데 사람의 확인이 한 번도 끼지 않는다.
+
+스토어 등록정보에 넣을 문구와 데이터 보안 답변은 [`store/android/listing.md`](./store/android/listing.md).
 
 ## 시뮬레이터에서 화면 확인하기
 

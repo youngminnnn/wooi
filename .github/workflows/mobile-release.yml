@@ -99,6 +99,32 @@ jobs:
           npx eas build --profile "$profile" --platform "$platform" --non-interactive \
             2>&1 | tee /tmp/eas-build.log
 
+      # 스토어 제출. 구운 것을 사람이 다시 내려받아 올리는 단계를 없앤다.
+      #
+      # **기본은 꺼져 있다.** Play 는 신규 앱의 **첫 AAB 를 API 로 못 받는다** — 콘솔에서 한 번
+      # 손으로 올려 패키지 이름을 등록해야 그다음부터 API 가 열린다. 준비되기 전에 이 단계가
+      # 돌면 태그를 밀 때마다 릴리즈가 빨갛게 실패한다. 그래서 저장소 변수로 잠가 둔다:
+      #
+      #   Settings → Secrets and variables → Actions → Variables
+      #   MOBILE_AUTO_SUBMIT = true
+      #
+      # 켜기 전에 준비할 것:
+      #   1. Play Console 에 앱을 만들고 AAB 를 한 번 수동 업로드
+      #   2. Google Cloud 서비스 계정 → Play Console 에서 "출시 관리자" 권한 부여
+      #   3. `eas credentials --platform android` 로 그 키를 EAS 에 올린다
+      #      (레포에 키 파일을 두지 않으려고 serviceAccountKeyPath 대신 EAS 보관을 쓴다)
+      #
+      # 어느 트랙으로 가는지는 `eas.json` 의 submit 프로파일이 정한다 — 지금은 internal 이고,
+      # 비공개 테스트나 프로덕션으로 올리는 건 콘솔에서 사람이 한다.
+      - name: Submit — 스토어 제출
+        if: startsWith(github.ref, 'refs/tags/mobile-v') && vars.MOBILE_AUTO_SUBMIT == 'true'
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          set -o pipefail
+          platform="${{ inputs.platform || 'all' }}"
+          npx eas submit --profile production --platform "$platform" --latest --non-interactive
+
       # 방금 구운 것이 **어느 링크인지** Actions 화면에서 바로 집을 수 있게 한다.
       #
       # expo.dev 의 빌드 목록에는 옛 빌드가 함께 늘어서고 프로파일 표시가 작다. 폰으로 그
