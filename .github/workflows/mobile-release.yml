@@ -152,8 +152,19 @@ jobs:
             ls -la "$dir" || true
             exit 1
           fi
-          echo "path=$file" >> "$GITHUB_OUTPUT"
           version="$(node -p "require('./app.json').expo.version")"
+          # eas build --local 은 산출물을 `build-<타임스탬프>.apk` 로 뱉는다. 내려받아 폰에
+          # 넣거나 콘솔에 올릴 때 그 이름으로는 무엇인지, 어느 버전인지 알 수 없다.
+          #
+          # 이름은 **앱 이름을 그대로 따라간다** — 여기에 "Wooi" 를 적어 두면 app.config.ts 와
+          # 두 벌이 되고, dev 빌드까지 운영과 같은 이름으로 나온다. 프로파일이 고르는
+          # APP_VARIANT 를 그대로 먹여 해석시키면 development 는 "Wooi (dev)" 가 된다.
+          variant="$(node -p "require('./eas.json').build['$PROFILE'].env?.APP_VARIANT ?? 'development'")"
+          appname="$(APP_VARIANT="$variant" npx expo config --json |
+            node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).name")"
+          named="$(dirname "$file")/$appname-$version.${file##*.}"
+          mv "$file" "$named"
+          echo "path=$named" >> "$GITHUB_OUTPUT"
           # 아티팩트 이름에는 `/` 를 못 쓴다 — 브랜치에서 돌리면 ref_name 이 `ci/foo` 라 죽는다.
           echo "name=$version-${{ github.run_number }}" >> "$GITHUB_OUTPUT"
           {
@@ -162,9 +173,9 @@ jobs:
             echo "| | |"
             echo "|---|---|"
             echo "| 버전 | $version |"
-            echo "| 파일 | \`$(basename "$file")\` ($(du -h "$file" | cut -f1)) |"
+            echo "| 파일 | \`$(basename "$named")\` ($(du -h "$named" | cut -f1)) |"
             echo
-            case "$file" in
+            case "$named" in
               *.aab) echo 'AAB 입니다 — 폰에 직접 깔 수 없고 Play 업로드용입니다.' ;;
               *) echo '아래 artifacts 에서 내려받아 폰에 설치할 수 있습니다.' ;;
             esac
@@ -244,8 +255,19 @@ jobs:
             ls -la "$dir" || true
             exit 1
           fi
-          echo "path=$file" >> "$GITHUB_OUTPUT"
           version="$(node -p "require('./app.json').expo.version")"
+          # eas build --local 은 산출물을 `build-<타임스탬프>.apk` 로 뱉는다. 내려받아 폰에
+          # 넣거나 콘솔에 올릴 때 그 이름으로는 무엇인지, 어느 버전인지 알 수 없다.
+          #
+          # 이름은 **앱 이름을 그대로 따라간다** — 여기에 "Wooi" 를 적어 두면 app.config.ts 와
+          # 두 벌이 되고, dev 빌드까지 운영과 같은 이름으로 나온다. 프로파일이 고르는
+          # APP_VARIANT 를 그대로 먹여 해석시키면 development 는 "Wooi (dev)" 가 된다.
+          variant="$(node -p "require('./eas.json').build['$PROFILE'].env?.APP_VARIANT ?? 'development'")"
+          appname="$(APP_VARIANT="$variant" npx expo config --json |
+            node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).name")"
+          named="$(dirname "$file")/$appname-$version.${file##*.}"
+          mv "$file" "$named"
+          echo "path=$named" >> "$GITHUB_OUTPUT"
           # 아티팩트 이름에는 `/` 를 못 쓴다 — 브랜치에서 돌리면 ref_name 이 `ci/foo` 라 죽는다.
           echo "name=$version-${{ github.run_number }}" >> "$GITHUB_OUTPUT"
           {
@@ -254,7 +276,7 @@ jobs:
             echo "| | |"
             echo "|---|---|"
             echo "| 버전 | $version |"
-            echo "| 파일 | \`$(basename "$file")\` ($(du -h "$file" | cut -f1)) |"
+            echo "| 파일 | \`$(basename "$named")\` ($(du -h "$named" | cut -f1)) |"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v4
