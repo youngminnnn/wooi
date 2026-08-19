@@ -718,6 +718,18 @@ export class ClaudeSession {
     let retrying = false
     // 새 프로세스에서 턴을 다시 시작한다 — 산출/오류 기록을 초기화한다.
     this.beginTurn()
+    // 살아 있는 작업 목록은 **프로세스 단위**다(run() 한 번 = CLI 프로세스 하나). SDK 는 시작할 때
+    // background_tasks_changed 를 방출하지 않고 membership 이 바뀔 때만 전량을 다시 주므로, 앞
+    // 프로세스에서 보던 목록을 그대로 들고 들어오면 그 항목들은 지워 줄 이벤트가 영영 오지 않는다.
+    // 그러면 syncStatus 의 shouldRun 이 계속 true 라 **그 워크스페이스는 턴이 끝나도 idle 로
+    // 돌아오지 못한다** — 사이드바가 '진행 중' 에 갇힌 채 남은 세션을 보낸다. 프로세스를 갈아
+    // 끼우는 재시도(handleQueryDeath)가 정확히 이 경로다. 여기서 비우면 새 프로세스의 첫 membership
+    // 변화가 목록을 다시 채운다.
+    this.workflowTasks.clear()
+    this.clearAgents()
+    // 이미 갇힌 뒤라면(busy=true 인데 도는 것이 없다) 여기서 idle 을 방출해 화면을 되돌린다.
+    // 사용자 전송으로 들어온 경우는 markActive 가 먼저 돌아 active=true 라 아무것도 방출하지 않는다.
+    this.syncStatus()
     // sawAnyMessage 는 **이 query 한 개**의 상태다(run() 한 번 = query 한 개). 여기서 리셋하지
     // 않으면 첫 query 가 메시지를 받은 뒤로 영원히 true 로 남아, 이어지는 재시도 query 는
     // (1) 워치독이 즉시 return 해 스톨 보호를 못 받고(무한 로딩),
@@ -1122,17 +1134,20 @@ export class ClaudeSession {
    * 반환하고 백그라운드로 도므로, 메인 턴이 result 로 끝나 idle 로 가더라도 워크플로우가 계속
    * 돌 수 있다 — 이때 사이드바가 idle 로 보이지 않도록 워크플로우 활동을 상태에 반영한다.
    *
-   * 백그라운드로 돌려진 서브에이전트(Ctrl+B)도 같은 이유로 포함한다. 포그라운드 서브에이전트는
-   * 애초에 부모 턴을 붙잡고 있어 this.active 가 true 이므로 이 항이 상태를 바꾸지 않는다.
-   * 이 불변식 덕분에 "idle 이면 살아 있는 서브에이전트가 없다"가 성립해, 렌더러는 idle 을 보면
+   * 백그라운드로 돌려진 서브에이전트(Ctrl+B)도 같은 이유로 포함한다. 다만 그 근거는
+   * agentTasks(task_started/task_notification 의 **엣지**)가 아니라 backgroundTasks(SDK 가
+   * membership 이 바뀔 때마다 전량으로 주는 **레벨** 신호)다 — 백그라운드로 돌리는 것 자체가
+   * membership 변화라 살아 있는 백그라운드 서브에이전트는 반드시 레벨에 들어 있고, 레벨은 매번
+   * 전량 교체라 종료 엣지 하나를 놓쳐도 스스로 바로잡힌다. 엣지로 상태를 판단하면 그 한 번의
+   * 유실이 워크스페이스를 영영 '진행 중' 에 가둔다(SDK 가 레벨 신호를 따로 두는 이유이기도 하다).
+   * 포그라운드 서브에이전트는 애초에 부모 턴을 붙잡고 있어 this.active 가 true 이므로 여기서 셀
+   * 필요가 없다 — agentTasks 는 사이드바 패널에 무엇을 그릴지에만 쓴다.
+   *
+   * 그래서 "idle 이면 살아 있는 서브에이전트가 없다"는 그대로 성립하고, 렌더러는 idle 을 보면
    * 목록을 안심하고 비울 수 있다(호스트가 죽어 종료 알림이 아예 오지 않는 경우의 안전망).
    */
   private syncStatus(): void {
-    const shouldRun =
-      this.active ||
-      this.workflowTasks.size > 0 ||
-      this.agentTasks.size > 0 ||
-      this.backgroundTasks.size > 0
+    const shouldRun = this.active || this.workflowTasks.size > 0 || this.backgroundTasks.size > 0
     if (shouldRun === this.busy) return
     this.busy = shouldRun
     this.deps.emit({ type: 'status', status: shouldRun ? 'running' : 'idle' })
@@ -1461,9 +1476,9 @@ export class ClaudeSession {
           description: msg.description || msg.subagent_type,
           startedAt: Date.now()
         })
+        // 상태(running/idle)는 여기서 건드리지 않는다 — 포그라운드 서브에이전트는 부모 턴이 이미
+        // running 이고, 백그라운드로 돌려진 것은 SDK 의 레벨 신호가 켠다([[syncStatus]]).
         this.emitAgents()
-        // 백그라운드로 돌려진 서브에이전트는 메인 턴이 끝난 뒤에도 계속 도므로 running 을 유지한다.
-        this.syncStatus()
       }
       return
     }
@@ -1517,8 +1532,8 @@ export class ClaudeSession {
       const st = p.status
       const terminal = !!st && st !== 'running' && st !== 'pending' && st !== 'paused'
       if (terminal) this.agentTasks.delete(msg.task_id)
+      // 목록만 갱신한다 — 상태는 레벨 신호가 정한다([[syncStatus]]).
       this.emitAgents()
-      if (terminal) this.syncStatus()
       return
     }
     const state = this.workflowTasks.get(msg.task_id)

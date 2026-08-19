@@ -7,6 +7,7 @@ import type {
   SendMessageOptions,
   Workspace
 } from '@shared/types'
+import { log } from '../../logger'
 import { getStore } from '../../store'
 import type { AgentToolDeps, AgentToolHandler } from './registry'
 import { callerWorkspace } from './target'
@@ -244,7 +245,15 @@ function flushBuffered(workspaceId: string): boolean {
   if (!buffered) return false
   bufferedPeerDeliveries.delete(workspaceId)
   clearTimeout(buffered.timer)
-  sendPeerDelivery(buffered.deps, workspaceId, buffered.messages)
+  try {
+    sendPeerDelivery(buffered.deps, workspaceId, buffered.messages)
+  } catch (err) {
+    // 못 보냈으면 **보냈다고 말하지 않는다.** 턴 종료 훅은 true 를 "다음 턴이 곧 시작한다" 로
+    // 읽고 idle 방송을 통째로 건너뛰므로([[agent/orchestrator]] handleTurnEnd), 여기서 true 를
+    // 돌리면 시작되지도 않을 턴을 기다리며 사이드바가 영영 '진행 중' 에 갇힌다.
+    log.error(`peer: 턴 종료 뒤 대기 중이던 메시지 전달 실패 (${workspaceId})`, err)
+    return false
+  }
   return true
 }
 
