@@ -72,7 +72,11 @@ export default function PeerInboxBanner({
             {pending.message}
           </div>
           <div className="mt-1 text-neutral-500">
-            Delivering starts a turn here, so Wooi held it for you. The agent has not seen it.
+            {/* 정책으로 잡힌 것과 전달에 실패한 것은 사용자가 할 판단이 다르다. 뒤쪽은
+                "저쪽은 보냈다는데 여긴 왜 없나" 의 답이므로 그 사실을 그대로 말한다. */}
+            {pending.undelivered
+              ? 'Wooi could not deliver this — the session here went away before it arrived. The agent has not seen it.'
+              : 'Delivering starts a turn here, so Wooi held it for you. The agent has not seen it.'}
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
