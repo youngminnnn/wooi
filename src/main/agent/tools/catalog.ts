@@ -458,6 +458,24 @@ export const AGENT_TOOLS: AgentToolSpec[] = [
     annotations: { title: 'List open issues', readOnlyHint: true }
   },
   {
+    name: 'list_repositories',
+    description: [
+      'List the repositories the user has added to Wooi — name, checkout path, default branch,',
+      'and how many workspaces are open in each. The one this workspace lives in is marked',
+      '`current`.',
+      '',
+      'This is where `create_workspace`’s `repo` values come from, so call it before starting work',
+      'in another codebase: `list_workspace_peers` only reveals repositories that already have a',
+      'workspace open, and a repository with no work in flight is exactly the one you would',
+      'otherwise not know exists.',
+      '',
+      'It only lists them: nothing is opened, cloned or changed. Starting work in one of them is a',
+      'separate `create_workspace` call that the user approves.'
+    ].join(' '),
+    inputSchema: {},
+    annotations: { title: 'List repositories', readOnlyHint: true }
+  },
+  {
     name: 'create_workspace',
     description: [
       'Create a new Wooi workspace: a fresh git worktree on a new branch off the repository’s',
@@ -469,7 +487,12 @@ export const AGENT_TOOLS: AgentToolSpec[] = [
       '',
       'Uncommitted changes here do not matter — the new branch forks from the remote, not from',
       'this worktree. It starts with an empty conversation and does not steal the user’s screen,',
-      'so tell the user it is ready and what it is for.'
+      'so tell the user it is ready and what it is for.',
+      '',
+      'It does not have to be this repository: `repo` puts the new workspace in any other',
+      'repository the user has added to Wooi, which is how you hand over work that belongs in a',
+      'different codebase instead of asking the user to go and start it themselves. Call',
+      '`list_repositories` for the names you can pass.'
     ].join(' '),
     inputSchema: {
       name: z
@@ -478,6 +501,15 @@ export const AGENT_TOOLS: AgentToolSpec[] = [
         .describe(
           'Branch name for the new workspace, following the repository’s branch naming convention ' +
             '(e.g. "feat/inline-login"). Omit to let Wooi generate one.'
+        ),
+      repo: z
+        .string()
+        .optional()
+        .describe(
+          'Which repository to create it in, named exactly as `list_repositories` reports it. ' +
+            'Omit for this workspace’s own repository, which is almost always what you want. ' +
+            'Only repositories the user has already added to Wooi can be named; if two share a ' +
+            'name, pass the full checkout path instead.'
         ),
       ...agentOptionParams('default'),
       task: z
@@ -492,7 +524,9 @@ export const AGENT_TOOLS: AgentToolSpec[] = [
             'symbols involved (as `path:line` where you know them), the commands you ran and what ' +
             'they reported, and the approaches you ruled out and why. Write down only what you ' +
             'are sure of — a wrong path costs more than a missing one.\n\n' +
-            'Omit this parameter entirely only if the user will drive that workspace themselves.'
+            'Omit this parameter entirely only if the user will drive that workspace themselves.\n\n' +
+            'If `repo` sends it to a different repository, nothing you know about this one holds ' +
+            'there — say which repository each path and command belongs to.'
         )
     },
     annotations: { title: 'Create a workspace', readOnlyHint: false }

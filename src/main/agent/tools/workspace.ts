@@ -1,10 +1,11 @@
 import { workspaceDisplayName } from '@shared/types'
+import type { Repo } from '@shared/types'
 import { isWorktreeClean } from '../../git'
 import { getStore } from '../../store'
 import { archiveWorkspace, createWorkspace } from '../../workspaces'
 import { resolveRequestedAgentOptions } from './agentOptions'
 import type { AgentToolHandler } from './registry'
-import { callerWorkspace, resolveTargetWorkspace } from './target'
+import { callerWorkspace, resolveTargetRepo, resolveTargetWorkspace } from './target'
 
 /**
  * 스택에 얽히지 않는 워크스페이스 조작 — 독립 생성과 아카이브.
@@ -16,6 +17,10 @@ import { callerWorkspace, resolveTargetWorkspace } from './target'
  *
  * 스택을 별도 도구로 남긴 이유도 같다. 기존 도구에 불린 플래그를 붙이면 이름이 거짓말을 하고,
  * 무엇보다 위의 clean 전제가 플래그 값에 따라 켜졌다 꺼졌다 하게 된다.
+ *
+ * 리포 목록(list_repositories)도 여기 있다. 조회 도구지만 존재 이유가 생성 하나뿐이라서다 —
+ * create_workspace 의 `repo` 에 무엇을 적을 수 있는지 알려 주는 것이 전부고, 그 답을 만드는
+ * 규칙(이름·경로·중복)은 [[agent/tools/target]] 의 해석과 짝을 이뤄야 한다.
  */
 
 /**
@@ -30,7 +35,7 @@ import { callerWorkspace, resolveTargetWorkspace } from './target'
  * 실패하는 도구를 알려 주는 것은 안내가 아니라 함정이고, 모델은 그 실패를 자기 잘못으로 읽고
  * 되풀이한다. 독립 워크스페이스에서 결과가 돌아갈 곳은 사용자뿐이므로 그렇게 적는다.
  */
-function startMessage(task: string, baseBranch: string): string {
+function startMessage(task: string, baseBranch: string, otherRepo: Repo | null): string {
   return [
     task,
     '',
@@ -38,6 +43,16 @@ function startMessage(task: string, baseBranch: string): string {
     `This workspace was created by Wooi as a fresh branch off \`${baseBranch}\`, so its pull ` +
       'request targets that branch. It is deliberately independent: it does not build on the ' +
       'workspace that started you, and it must not wait for one.',
+    // 다른 리포에 만들어졌으면 그 사실이 첫 줄에 있어야 한다. 인계문을 쓴 모델은 자기 리포를
+    // 보며 썼으므로 위의 task 에 적힌 경로가 여기에는 없을 수 있고, 그 어긋남은 에러가 아니라
+    // "왜 파일이 없지" 로 시작하는 몇 턴이 된다.
+    ...(otherRepo
+      ? [
+          `It is in the \`${otherRepo.name}\` repository — not the one the workspace that asked ` +
+            'for it works in. Nothing from that checkout is here, so check any path in the task ' +
+            'above against this repository before trusting it.'
+        ]
+      : []),
     'Nothing crosses between workspaces on its own, and there is no workspace for you to report ' +
       'back to — when you finish or get stuck, say so to the user.'
   ].join('\n')
@@ -45,10 +60,12 @@ function startMessage(task: string, baseBranch: string): string {
 
 export const createIndependentWorkspace: AgentToolHandler = async (deps, workspaceId, args) => {
   const ws = callerWorkspace(workspaceId)
-  const repo = getStore()
-    .getState()
-    .repos.find((r) => r.id === ws.repoId)
-  if (!repo) throw new Error('This workspace’s repository is no longer registered with Wooi.')
+  // 리포는 **여기가 기본이되 여기로 고정은 아니다**([[agent/tools/target]] lookupTargetRepo).
+  // 스택과 갈리는 두 번째 지점이다 — 스택은 부모 브랜치 위에 쌓이므로 같은 리포일 수밖에 없지만,
+  // 독립 워크스페이스는 `origin/<default>` 에서 갈라질 뿐이라 어느 리포든 성립한다. 사용자가
+  // Wooi 에 등록해 둔 리포라는 것이 경계이고, 어느 리포인지는 승인 카드에 적힌다.
+  const repo = resolveTargetRepo(ws, args.repo)
+  const otherRepo = repo.id === ws.repoId ? null : repo
 
   // clean 검사를 **하지 않는다**. 새 브랜치는 이 워크트리가 아니라 `origin/<default>` 에서
   // 갈라지므로, 여기 미커밋 변경이 있든 없든 새 워크스페이스는 정확히 같은 것을 받는다.
@@ -58,7 +75,7 @@ export const createIndependentWorkspace: AgentToolHandler = async (deps, workspa
   // 워크스페이스의 첫 턴에서 터진다([[agent/tools/agentOptions]]). 부모는 없다(독립이다).
   const agentOptions = await resolveRequestedAgentOptions(deps, args, null)
   const result = await createWorkspace(deps, {
-    repoId: ws.repoId,
+    repoId: repo.id,
     // parentWorkspaceId 를 넘기지 않는 것이 이 도구의 전부다 — createWorkspace 는 그러면
     // repo.defaultBranch 에서 갈라진다. 능력은 이미 있었고 노출만 안 돼 있었다.
     //
@@ -75,7 +92,7 @@ export const createIndependentWorkspace: AgentToolHandler = async (deps, workspa
   // 작업을 넘기면 새 워크스페이스는 **즉시 돌기 시작한다**. 사용자는 방금 이 도구 호출을
   // 승인하면서 그 작업 문장까지 카드에서 봤으므로, 여기서 다시 묻지 않는다.
   const task = typeof args.task === 'string' ? args.task.trim() : ''
-  if (task) deps.sendMessage(newId, startMessage(task, repo.defaultBranch))
+  if (task) deps.sendMessage(newId, startMessage(task, repo.defaultBranch, otherRepo))
 
   // 전달 실패는 생성을 막지 않지만 조용히 넘기면 안 된다 — 새 워크스페이스의 에이전트가
   // 프로젝트 지침(CLAUDE.local.md 등)을 못 읽은 채 다르게 동작한다.
@@ -88,6 +105,9 @@ export const createIndependentWorkspace: AgentToolHandler = async (deps, workspa
     workspaceId: newId,
     branch: result.branch,
     baseBranch: repo.defaultBranch,
+    // 다른 리포에 만들었을 때만 싣는다. 같은 리포는 말할 것이 없고, 다른 리포는 모델이 그 뒤에
+    // 쓰는 문장(사용자에게 무엇이 준비됐는지 알리는 말)이 어느 코드베이스인지 밝혀야 한다.
+    ...(otherRepo ? { repo: otherRepo.name } : {}),
     started: !!task,
     // 스택과 달리 check_stacked_work 로 이 워크스페이스를 들여다볼 수 없다(부모가 아니다).
     // 그 사실을 여기서 말해 두지 않으면, 모델은 오지 않을 보고를 기다리게 된다.
@@ -107,6 +127,63 @@ export const createIndependentWorkspace: AgentToolHandler = async (deps, workspa
             `so nothing was carried: ${carryMissing.join(', ')}.`
         }
       : {})
+  }
+}
+
+/**
+ * `create_workspace` 의 `repo` 에 적을 수 있는 값 전부.
+ *
+ * 이 도구가 없으면 다른 리포에 만드는 길은 사실상 닫혀 있다. 모델이 볼 수 있는 리포 이름은
+ * `list_workspace_peers` 가 알려 주는 것 — 즉 **지금 워크스페이스가 열려 있는** 리포뿐이라,
+ * 등록만 해 두고 아직 아무 작업도 없는 리포는 존재 자체가 보이지 않는다. 그리고 그런 리포야말로
+ * "저쪽에서 시작해야 하는 일" 이 생기는 곳이다.
+ *
+ * 자기 리포도 빼지 않고 `current` 로 표시한다. 목록에서 빠지면 모델은 `repo` 를 생략했을 때
+ * 어디에 만들어지는지를 목록과 맞춰 볼 수 없고, 굳이 자기 리포 이름을 적어 넣게 된다.
+ *
+ * 읽기 전용이라 승인 카드가 없다(catalog 의 readOnlyHint). 사용자가 이미 Wooi 에 추가해 둔
+ * 리포의 이름과 경로일 뿐이고, 매번 카드가 뜨면 정작 **생성** 카드가 묻힌다.
+ */
+export const listRepositories: AgentToolHandler = async (_deps, workspaceId) => {
+  const state = getStore().getState()
+  const ws = callerWorkspace(workspaceId)
+
+  const open = new Map<string, number>()
+  for (const w of state.workspaces) {
+    if (w.archived) continue
+    open.set(w.repoId, (open.get(w.repoId) ?? 0) + 1)
+  }
+
+  // 자기 리포를 맨 위에, 나머지는 이름순. 등록순(addedAt)은 모델에게 아무것도 뜻하지 않는다.
+  const repos = [...state.repos].sort((a, b) => {
+    if (a.id === ws.repoId) return -1
+    if (b.id === ws.repoId) return 1
+    return a.name.localeCompare(b.name)
+  })
+
+  // 이름이 겹치는 리포는 이름만으로 지목할 수 없다([[agent/tools/target]] lookupTargetRepo).
+  // 그 사실을 목록에서 미리 말해 주지 않으면, 모델은 반드시 한 번 거절당하고 나서야 안다.
+  const counts = new Map<string, number>()
+  for (const r of repos) {
+    const key = r.name.toLowerCase()
+    counts.set(key, (counts.get(key) ?? 0) + 1)
+  }
+
+  return {
+    repositories: repos.map((r) => ({
+      name: r.name,
+      path: r.path,
+      defaultBranch: r.defaultBranch,
+      ...(r.id === ws.repoId ? { current: true } : {}),
+      openWorkspaces: open.get(r.id) ?? 0,
+      // 겹치는 이름에만 붙는다 — 안 겹치는 쪽까지 경고를 달면 경고가 값을 잃는다.
+      ...((counts.get(r.name.toLowerCase()) ?? 0) > 1
+        ? { ambiguousName: true, note: 'Another repository has this name — pass `path` instead.' }
+        : {})
+    })),
+    next:
+      'Pass a `name` from this list as `create_workspace`’s `repo` to start work in another ' +
+      'repository. Omitting it creates the workspace in the one marked `current`.'
   }
 }
 

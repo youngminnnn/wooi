@@ -32,7 +32,15 @@ const sendMessage = vi.fn()
 const listModels = vi.fn<(backend: string) => Promise<ModelOption[]>>()
 const deps = { scripts: {}, sendMessage, listModels } as unknown as AgentToolDeps
 
-const repo: Partial<Repo> = { id: 'repo-1', defaultBranch: 'main' }
+const repo: Partial<Repo> = { id: 'repo-1', name: 'wooi', path: '/src/wooi', defaultBranch: 'main' }
+
+/** 호출자가 살지 않는, 사용자가 Wooi 에 따로 등록해 둔 리포. */
+const otherRepo: Partial<Repo> = {
+  id: 'repo-2',
+  name: 'oh-my-wooi',
+  path: '/src/oh-my-wooi',
+  defaultBranch: 'trunk'
+}
 
 const caller: Partial<Workspace> = {
   id: 'ws-caller',
@@ -80,7 +88,7 @@ const independent: Partial<Workspace> = {
 beforeEach(() => {
   vi.clearAllMocks()
   state.workspaces = [{ ...caller }, { ...child }]
-  state.repos = [{ ...repo }]
+  state.repos = [{ ...repo }, { ...otherRepo }]
   state.settings = { ...DEFAULT_SETTINGS }
   listModels.mockResolvedValue([{ id: 'claude-opus-5[1m]', label: 'Opus 5' }])
   clean.mockResolvedValue(true)
@@ -92,6 +100,11 @@ beforeEach(() => {
 async function create_(args: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
   const { createIndependentWorkspace } = await import('./workspace')
   return createIndependentWorkspace(deps, 'ws-caller', args) as Promise<Record<string, unknown>>
+}
+
+async function repos_(): Promise<Record<string, unknown>> {
+  const { listRepositories } = await import('./workspace')
+  return listRepositories(deps, 'ws-caller', {}) as Promise<Record<string, unknown>>
 }
 
 async function archive_(
@@ -198,6 +211,64 @@ describe('create_workspace', () => {
     })
   })
 
+  // 리포를 지목하지 않는 것이 압도적으로 흔한 경우다. 그때 다른 리포로 새면 사용자는 승인 카드
+  // 한 줄로만 알아챌 수 있고, 브랜치는 엉뚱한 코드베이스에 남는다.
+  it('repo 를 생략하면 이 워크스페이스의 리포에 만든다', async () => {
+    await create_()
+    expect(create.mock.calls[0][1]).toMatchObject({ repoId: 'repo-1' })
+  })
+
+  it('repo 이름을 주면 사용자가 등록해 둔 그 리포에 만든다', async () => {
+    const result = await create_({ repo: 'oh-my-wooi' })
+
+    expect(create.mock.calls[0][1]).toMatchObject({ repoId: 'repo-2' })
+    // base 는 **그 리포의** 기본 브랜치다 — 호출자 리포의 것을 흘리면 PR base 를 잘못 읽는다.
+    expect(result).toMatchObject({ baseBranch: 'trunk', repo: 'oh-my-wooi' })
+  })
+
+  it('사이드바 이름의 대소문자는 따지지 않는다', async () => {
+    await create_({ repo: 'Oh-My-Wooi' })
+    expect(create.mock.calls[0][1]).toMatchObject({ repoId: 'repo-2' })
+  })
+
+  // 리포 이름은 폴더 이름이라 겹칠 수 있다. 경로는 등록 시점에 유일하므로 유일한 탈출구가 된다.
+  it('체크아웃 경로로도 지목할 수 있다', async () => {
+    await create_({ repo: '/src/oh-my-wooi' })
+    expect(create.mock.calls[0][1]).toMatchObject({ repoId: 'repo-2' })
+  })
+
+  // 고칠 수 있는 오류로 만든다 — `list_repositories` 로 다시 다녀오라고만 하면, 도구가 이미
+  // 아는 답을 얻으러 왕복이 한 번 더 든다.
+  it('모르는 리포는 등록된 리포 이름과 함께 거절한다', async () => {
+    await expect(create_({ repo: 'not-registered' })).rejects.toThrow(/oh-my-wooi/)
+    expect(create).not.toHaveBeenCalled()
+  })
+
+  it('같은 이름이 둘이면 만들지 않고 경로로 다시 부르라고 한다', async () => {
+    state.repos = [{ ...repo }, { ...otherRepo, name: 'wooi' }]
+
+    await expect(create_({ repo: 'wooi' })).rejects.toThrow(/\/src\/oh-my-wooi/)
+    expect(create).not.toHaveBeenCalled()
+  })
+
+  // 인계문을 쓴 모델은 자기 리포를 보며 썼다. 그 사실을 새 워크스페이스가 모르면 없는 경로를
+  // 찾느라 몇 턴을 쓰고, 그것이 실패가 아니라 자기 착각으로 보인다.
+  it('다른 리포에 만들면 인계문이 그 사실부터 말한다', async () => {
+    await create_({ repo: 'oh-my-wooi', task: 'Add the settings page.' })
+
+    const [, text] = sendMessage.mock.calls[0]
+    expect(text).toContain('oh-my-wooi')
+    expect(text).toContain('trunk')
+  })
+
+  it('같은 리포면 리포 이야기를 꺼내지 않는다', async () => {
+    const result = await create_({ repo: 'wooi', task: 'Add the settings page.' })
+
+    expect(result).not.toHaveProperty('repo')
+    const [, text] = sendMessage.mock.calls[0]
+    expect(text).not.toContain('repository')
+  })
+
   it('미커밋 변경이 있어도 만든다 — 새 브랜치는 이 워크트리에서 갈라지지 않는다', async () => {
     clean.mockResolvedValue(false)
 
@@ -263,6 +334,70 @@ describe('create_workspace', () => {
   it('사라진 워크스페이스면 던진다', async () => {
     state.workspaces = []
     await expect(create_()).rejects.toThrow(/no longer exists/)
+  })
+})
+
+/**
+ * `create_workspace` 의 `repo` 에 무엇을 적을 수 있는지 알려 주는 유일한 도구다. 여기가 비거나
+ * 틀리면 다른 리포에 만드는 길은 "이름을 우연히 맞히는 것" 으로 좁아진다.
+ */
+describe('list_repositories', () => {
+  it('인자를 받지 않고 승인도 묻지 않는다 — 등록된 리포 이름을 읽는 것뿐이다', () => {
+    const spec = AGENT_TOOLS.find((tool) => tool.name === 'list_repositories')
+    expect(spec).toBeDefined()
+    expect(spec!.inputSchema).toEqual({})
+    expect(spec!.annotations?.readOnlyHint).toBe(true)
+  })
+
+  it('등록된 리포를 전부 주고 자기 리포를 current 로 맨 앞에 둔다', async () => {
+    const result = await repos_()
+
+    expect(result.repositories).toEqual([
+      expect.objectContaining({
+        name: 'wooi',
+        path: '/src/wooi',
+        defaultBranch: 'main',
+        current: true
+      }),
+      expect.objectContaining({ name: 'oh-my-wooi', defaultBranch: 'trunk' })
+    ])
+    // 자기 리포에는 current 가 붙고 남의 리포에는 붙지 않아야 한다 — `repo` 를 생략했을 때
+    // 어디에 만들어지는지를 이 표시 하나로 읽는다.
+    expect((result.repositories as Record<string, unknown>[])[1]).not.toHaveProperty('current')
+  })
+
+  // 작업이 하나도 없는 리포야말로 이 도구가 필요한 이유다(peers 로는 보이지 않는다). 그래서
+  // 0 이어도 목록에서 빼지 않고, 대신 얼마나 도는 중인지를 센다.
+  it('리포마다 열린 워크스페이스 수를 세고, 아카이브된 것은 빼고 센다', async () => {
+    state.workspaces = [
+      { ...caller },
+      { ...child },
+      { ...independent, archived: true },
+      { ...child, id: 'ws-far', repoId: 'repo-2' }
+    ]
+
+    const [own, other] = (await repos_()).repositories as Record<string, unknown>[]
+
+    expect(own.openWorkspaces).toBe(2)
+    expect(other.openWorkspaces).toBe(1)
+  })
+
+  it('이름이 겹치는 리포에는 경로로 부르라는 표시를 미리 붙인다', async () => {
+    state.repos = [{ ...repo }, { ...otherRepo, name: 'wooi' }]
+
+    const listed = (await repos_()).repositories as Record<string, unknown>[]
+
+    expect(listed.every((r) => r.ambiguousName === true)).toBe(true)
+    expect(listed.every((r) => typeof r.path === 'string')).toBe(true)
+  })
+
+  it('겹치지 않는 이름에는 경고를 붙이지 않는다 — 다 붙으면 경고가 값을 잃는다', async () => {
+    const listed = (await repos_()).repositories as Record<string, unknown>[]
+    expect(listed.some((r) => 'ambiguousName' in r)).toBe(false)
+  })
+
+  it('이 이름을 create_workspace 에 그대로 넘기라고 말해 준다', async () => {
+    expect(await repos_()).toMatchObject({ next: expect.stringContaining('create_workspace') })
   })
 })
 

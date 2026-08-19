@@ -1,5 +1,5 @@
 import { workspaceDisplayName } from '@shared/types'
-import type { Workspace } from '@shared/types'
+import type { Repo, Workspace } from '@shared/types'
 import { getStore } from '../../store'
 
 /**
@@ -11,6 +11,9 @@ import { getStore } from '../../store'
  *
  * 그래서 검증을 도구마다 흩뿌리지 않고 여기 모은다. 대상을 받는 도구가 하나 더 생길 때 가드를
  * 다시 발명하게 두면, 빠뜨린 가드가 곧 남의 워크스페이스를 건드리는 구멍이 된다.
+ *
+ * 파일 끝의 리포 해석도 같은 이유로 여기 있다 — create_workspace 가 다른 리포에도 만들 수 있게
+ * 되면서 "무엇에 작용하는가" 의 답이 워크스페이스 하나에서 (리포, 워크스페이스) 로 늘었다.
  *
  * **승인 카드에 기대지 않는다.** `fullAccess` 모드에서는 needsApproval 이 그냥 통과시키고
  * ([[agent/tools/permission]]), Codex 경로의 verifyCaller 는 이름 그대로 **호출자만** 본다
@@ -86,4 +89,63 @@ export function resolveTargetWorkspace(
     )
   }
   return target
+}
+
+/**
+ * 도구가 **어느 리포에 만드는가**. 워크스페이스 대상 해석과 같은 이유로 여기 둔다 — 이름을
+ * 리포로 바꾸는 규칙이 도구마다 갈리면, 갈린 쪽이 곧 엉뚱한 리포에 브랜치를 만드는 구멍이 된다.
+ *
+ * 이름으로 받는다. 모델이 볼 수 있는 것이 이름뿐이기 때문이다 — 리포 id 를 돌려주는 도구는
+ * 하나도 없고(`list_workspace_peers` 는 이름을 준다), 사용자도 사이드바에서 이름으로 부른다.
+ * 경로도 받아 주는 것은 이름이 겹칠 때의 유일한 탈출구라서다(리포 이름은 폴더 이름이라 겹칠 수
+ * 있고, 경로는 등록 시점에 유일성이 보장된다 — ipc.ts repoAdd).
+ *
+ * 던지지 않고 error 를 돌려주는 이유: 같은 판정을 승인 카드도 해야 하는데
+ * ([[agent/tools/permission]]) 거기서는 던질 수 없다. 카드가 자기 나름의 규칙을 새로 쓰면
+ * 사용자가 승인한 문장과 실제로 만들어지는 리포가 갈라진다.
+ */
+export function lookupTargetRepo(
+  caller: Workspace,
+  requested: unknown
+): { repo?: Repo; error?: string } {
+  const repos = getStore().getState().repos
+  const name = typeof requested === 'string' ? requested.trim() : ''
+
+  // 생략이 압도적으로 흔한 경우다. 그때 리포를 짜내게 하면 틀린 리포에 조용히 만들어진다.
+  if (!name) {
+    const own = repos.find((r) => r.id === caller.repoId)
+    return own
+      ? { repo: own }
+      : { error: 'This workspace’s repository is no longer registered with Wooi.' }
+  }
+
+  // 등록된 이름을 오류에 그대로 싣는다. `list_repositories` 로 다시 가라고만 하면 왕복이 한 번
+  // 더 늘고, 그 왕복은 도구가 이미 아는 답을 얻으러 가는 길이다([[agent/tools/agentOptions]] 가
+  // 모델 목록을 오류에 싣는 것과 같은 이유). 목록 도구는 자세히 볼 때(경로·기본 브랜치) 쓴다.
+  const known = repos.map((r) => r.name).join(', ')
+  const byPath = repos.find((r) => r.path === name)
+  if (byPath) return { repo: byPath }
+
+  const byName = repos.filter((r) => r.name.toLowerCase() === name.toLowerCase())
+  if (byName.length === 1) return { repo: byName[0] }
+  if (byName.length > 1) {
+    return {
+      error:
+        `Wooi has ${byName.length} repositories called "${name}", so this is ambiguous. Pass the ` +
+        `full checkout path instead: ${byName.map((r) => r.path).join(', ')}.`
+    }
+  }
+  return {
+    error:
+      `Wooi has no repository called "${name}" — it only creates workspaces in repositories the ` +
+      `user has added. Registered repositories: ${known || 'none'}. ` +
+      'Call `list_repositories` for their paths and default branches.'
+  }
+}
+
+/** 같은 판정의 던지는 판. 도구 핸들러가 쓴다 — 오류 문장이 그대로 모델에게 간다. */
+export function resolveTargetRepo(caller: Workspace, requested: unknown): Repo {
+  const { repo, error } = lookupTargetRepo(caller, requested)
+  if (!repo) throw new Error(error ?? 'Repository not found.')
+  return repo
 }

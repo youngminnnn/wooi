@@ -31,10 +31,13 @@ beforeEach(() => {
   state.repos = [
     {
       id: 'repo-1',
+      name: 'wooi',
+      path: '/src/wooi',
       defaultBranch: 'main',
       setupScript: 'npm install',
       runScripts: [{ id: 'dev-1', name: 'Dev', command: 'npm run dev', autoStart: false }]
-    }
+    },
+    { id: 'repo-2', name: 'oh-my-wooi', path: '/src/oh-my-wooi', defaultBranch: 'trunk' }
   ]
 })
 
@@ -100,6 +103,31 @@ describe('ensureToolApproved', () => {
     const pending = ensureToolApproved(workspace(), 'open_pull_request', { title: 't', body: 'b' })
     await vi.waitFor(() => expect(cards).toHaveLength(1))
 
+    expect(cards[0].title).toContain('`main`')
+
+    answer('allow')
+    await expect(pending).resolves.toBeUndefined()
+  })
+
+  // create_workspace 는 다른 리포에도 만들 수 있다. 새 워크스페이스는 화면을 가져가지 않으므로
+  // 사용자가 "엉뚱한 코드베이스에 만들려 한다" 를 알아챌 수 있는 자리는 이 카드 한 줄뿐이다.
+  it('다른 리포에 만들려 하면 카드가 그 리포와 base 를 말한다', async () => {
+    const pending = ensureToolApproved(workspace(), 'create_workspace', { repo: 'oh-my-wooi' })
+    await vi.waitFor(() => expect(cards).toHaveLength(1))
+
+    expect(cards[0].title).toContain('`oh-my-wooi`')
+    expect(cards[0].title).toContain('`trunk`')
+
+    answer('allow')
+    await expect(pending).resolves.toBeUndefined()
+  })
+
+  it('자기 리포면 리포 이름을 적지 않는다 — 매번 적으면 나가는 호출이 묻힌다', async () => {
+    const pending = ensureToolApproved(workspace(), 'create_workspace', {})
+    await vi.waitFor(() => expect(cards).toHaveLength(1))
+
+    // 문장이 늘 말하는 "the repository's setup script" 말고, **리포를 지목하는** 구절이 없어야 한다.
+    expect(cards[0].title).not.toContain('`wooi`')
     expect(cards[0].title).toContain('`main`')
 
     answer('allow')
