@@ -21,11 +21,11 @@ trap 'rm -rf "$tmp"' EXIT
 
 # rsvg-convert 는 그림이 전부 불투명하면 알파 채널을 떼고 24비트로 내보낸다. Play 는 아이콘에
 # 32비트(알파 포함)를, 피처 그래픽에 24비트(알파 없음)를 요구하므로 양쪽 다 채널을 맞춘다.
-rsvg-convert --width 512 --height 512 src/icon.svg --output "$tmp/icon.png"
-python3 src/png-recode.py "$tmp/icon.png" icon-512.png rgba
+rsvg-convert --width 512 --height 512 ../shared/icon.svg --output "$tmp/icon.png"
+python3 ../shared/png-recode.py "$tmp/icon.png" icon-512.png rgba
 
 rsvg-convert --width 1024 --height 500 src/feature-graphic.svg --output "$tmp/feature.png"
-python3 src/png-recode.py "$tmp/feature.png" feature-graphic.png rgb
+python3 ../shared/png-recode.py "$tmp/feature.png" feature-graphic.png rgb
 
 echo
 echo "만들어진 자산:"
