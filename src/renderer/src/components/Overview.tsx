@@ -8,9 +8,10 @@ import {
   Gauge,
   Timer,
   AlertTriangle,
-  MessageSquarePlus
+  MessageSquarePlus,
+  Terminal
 } from 'lucide-react'
-import { refreshAccountUsage, useStore } from '../store'
+import { backgroundTaskCount, refreshAccountUsage, useStore } from '../store'
 import { useNow } from '../lib/useNow'
 import { formatCost, formatCountdown, formatDuration, formatTime } from '../lib/format'
 import { workspaceDisplayName } from '@shared/types'
@@ -587,6 +588,7 @@ function OverviewCard({
   const pr = useStore((s) => s.prStatus[workspace.id])
   const runningSince = useStore((s) => s.runningSince[workspace.id])
   const context = useStore((s) => s.contextUsage[workspace.id])
+  const backgroundTasks = useStore((s) => backgroundTaskCount(s.runningAgents[workspace.id]))
 
   const displayName = workspaceDisplayName(workspace, pr?.title)
 
@@ -605,7 +607,11 @@ function OverviewCard({
       }
     >
       <div className="flex items-center gap-2">
-        <StatusDot workspace={workspace} attention={flags.attention} />
+        <StatusDot
+          workspace={workspace}
+          attention={flags.attention}
+          backgroundTasks={backgroundTasks}
+        />
         <span className="flex-1 min-w-0 truncate text-sm text-neutral-100" title={displayName}>
           {displayName}
         </span>
@@ -670,10 +676,13 @@ function OverviewCard({
 
 function StatusDot({
   workspace,
-  attention
+  attention,
+  backgroundTasks
 }: {
   workspace: Workspace
   attention: boolean
+  /** 에이전트가 두고 간, 아직 살아 있는 백그라운드 셸의 수. 사이드바와 같은 판단을 쓴다. */
+  backgroundTasks: number
 }): React.JSX.Element {
   if (attention) return <ShieldQuestion size={13} className="text-[var(--warning-400)] shrink-0" />
   if (workspace.status === 'running')
@@ -682,6 +691,16 @@ function StatusDot({
   if (workspace.status === 'error')
     return (
       <AlertTriangle size={12} className="text-[var(--danger-400)] shrink-0" aria-label="Error" />
+    )
+  // 대화는 끝났는데 에이전트가 두고 간 셸이 아직 돈다. 스피너를 쓰면 "에이전트가 일하는 중" 으로
+  // 읽히므로 돌지 않는 아이콘으로 사실만 알린다(사이드바 StatusDot 과 같은 어휘).
+  if (backgroundTasks > 0)
+    return (
+      <Terminal
+        size={12}
+        className="text-neutral-400 shrink-0"
+        aria-label="Background tasks running"
+      />
     )
   return <span className="h-2 w-2 rounded-full shrink-0 bg-neutral-600" aria-label="Idle" />
 }

@@ -267,6 +267,20 @@ export const REVIEW_BUSY_LABEL: Record<ReviewBusyKind, string> = {
   deleting: 'Deleting…'
 }
 
+/**
+ * 이 워크스페이스에 남아 있는 백그라운드 셸(에이전트가 두고 간 프로세스)의 수.
+ *
+ * 이것만 남았을 때 워크스페이스는 **idle** 이다([[claude/session]] syncStatus) — 그래서 상태 점은
+ * 스피너 대신 이 수를 근거로 따로 표시를 낸다. 사이드바·⌘K·Overview 가 같은 판단을 쓰도록
+ * 한 곳에 둔다.
+ *
+ * taskType 이 없는 행(서브에이전트)은 세지 않는다: 그건 살아 있으면 워크스페이스가 running 이라
+ * 점이 이미 스피너다.
+ */
+export function backgroundTaskCount(agents: RunningAgent[] | undefined): number {
+  return (agents ?? []).reduce((n, a) => n + (typeof a.taskType === 'string' ? 1 : 0), 0)
+}
+
 interface UIState {
   ready: boolean
   app: AppState | null
@@ -1331,14 +1345,24 @@ export const useStore = create<UIState>((set, get) => ({
             return { compacting }
           })
         }
-        // 실행 중이 아닌 workspace 에 살아 있는 task 가 있을 수는 없다(세션의 syncStatus 는
-        // 하나라도 남아 있으면 running 을 유지한다). 그래서 idle/error 를 보면 목록을 비운다 —
-        // 호스트가 죽어 종료 알림이 아예 오지 않는 경로에서 스피너가 영구히 남는 것을 막는 안전망.
+        // 실행 중이 아닌 workspace 에 살아 있는 **에이전트**가 있을 수는 없다(세션의 syncStatus 는
+        // 하나라도 남아 있으면 running 을 유지한다). 그래서 idle/error 를 보면 에이전트 행을
+        // 비운다 — 호스트가 죽어 종료 알림이 아예 오지 않는 경로에서 스피너가 영구히 남는 것을
+        // 막는 안전망이다.
+        //
+        // 백그라운드 task 행(taskType 이 실린 행)만은 남긴다. 백그라운드 Bash 는 상태를 붙잡지
+        // 않으므로([[claude/session]] syncStatus) idle 과 공존하는 것이 정상이고, 그 행이 바로
+        // "대화는 끝났지만 이 워크트리에 아직 도는 셸이 있다" 를 알리는 유일한 자리다. 여기서
+        // 같이 지우면 상태 점도 idle, 목록도 비어 — 아무 데서도 알 수 없게 된다.
         if (event.type === 'status' && event.status !== 'running') {
           set((s) => {
-            if (!s.runningAgents[workspaceId]) return {}
+            const current = s.runningAgents[workspaceId]
+            if (!current) return {}
+            const tasks = current.filter((agent) => typeof agent.taskType === 'string')
+            if (tasks.length === current.length) return {}
             const runningAgents = { ...s.runningAgents }
-            delete runningAgents[workspaceId]
+            if (tasks.length === 0) delete runningAgents[workspaceId]
+            else runningAgents[workspaceId] = tasks
             return { runningAgents }
           })
         }
