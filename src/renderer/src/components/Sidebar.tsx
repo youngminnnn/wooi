@@ -27,9 +27,10 @@ import {
   Copy,
   Square,
   X,
-  Hourglass
+  Hourglass,
+  Terminal
 } from 'lucide-react'
-import { REVIEW_BUSY_LABEL, useStore } from '../store'
+import { backgroundTaskCount, REVIEW_BUSY_LABEL, useStore } from '../store'
 import RowActionsMenu, { type RowAction } from './RowActionsMenu'
 import { useAvailableBackends } from '../lib/backends'
 import { useMultiAgent } from '../lib/multiAgent'
@@ -563,6 +564,7 @@ function WorkspaceRow({
   const awaitingPermission = useStore((s) =>
     s.permissions.some((p) => p.workspaceId === workspace.id)
   )
+  const backgroundTasks = useStore((s) => backgroundTaskCount(s.runningAgents[workspace.id]))
   // null 이 아니면 표시 이름 인라인 편집 중. 초깃값은 현재 표시 이름으로 채운다.
   const [editingName, setEditingName] = useState<string | null>(null)
   // null 이 아니면 오버플로 액션 메뉴가 열려 있고, 값은 메뉴를 띄울 화면 좌표.
@@ -813,6 +815,7 @@ function WorkspaceRow({
             runningMs={runningMs}
             pendingRateLimitResume={workspace.pendingRateLimitResume}
             rateLimited={rateLimited}
+            backgroundTasks={backgroundTasks}
             pr={pr}
           />
         )}
@@ -1449,6 +1452,7 @@ export function StatusDot({
   runningMs,
   pendingRateLimitResume,
   rateLimited,
+  backgroundTasks = 0,
   pr
 }: {
   status: Workspace['status']
@@ -1459,6 +1463,11 @@ export function StatusDot({
   pendingRateLimitResume?: Workspace['pendingRateLimitResume']
   /** 제한에 걸린 상태(해제 시각이 지나지 않은 것). 호출부가 activeRateLimitPause 로 걸러 넘긴다. */
   rateLimited?: RateLimitPause | null
+  /**
+   * 에이전트가 두고 간, 아직 살아 있는 백그라운드 셸의 수. 상태를 running 으로 만들지는 않는다
+   * ([[claude/session]] syncStatus) — 이 표시가 그 사실을 알리는 자리다.
+   */
+  backgroundTasks?: number
   pr?: PrStatus | null
 }): React.JSX.Element {
   // 권한 대기는 가장 행동 가능한 상태라 다른 표시보다 우선한다.
@@ -1511,6 +1520,20 @@ export function StatusDot({
     return (
       <span title="Last turn ended with an error" className="shrink-0 grid place-items-center">
         <AlertTriangle size={12} className="text-[var(--danger-400)]" aria-label="Error" />
+      </span>
+    )
+  }
+  // 대화는 끝났는데 에이전트가 두고 간 셸이 아직 돈다. 스피너를 쓰면 "에이전트가 일하는 중" 으로
+  // 읽히므로 — 그렇게 읽히는 것이 정확히 이 표시를 만들게 된 문제다 — 돌지 않는 아이콘으로 사실만
+  // 알린다. 무엇이 도는지와 개별 중지 버튼은 바로 아래 붙는 실행 목록(WorkspaceAgents)에 있다.
+  // PR 점보다 앞에 둔다: PR 상태는 언제 봐도 그대로지만 이건 지금 이 순간에만 있는 정보다.
+  if (backgroundTasks > 0) {
+    return (
+      <span
+        title={`${backgroundTasks} background ${backgroundTasks === 1 ? 'task' : 'tasks'} still running here — the agent itself is idle`}
+        className="shrink-0 grid place-items-center"
+      >
+        <Terminal size={12} className="text-neutral-400" aria-label="Background tasks running" />
       </span>
     )
   }

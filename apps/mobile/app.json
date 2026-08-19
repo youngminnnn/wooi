@@ -1,7 +1,7 @@
 {
   "expo": {
     "slug": "wooi-remote",
-    "version": "0.3.1",
+    "version": "0.4.0",
     "runtimeVersion": {
       "policy": "fingerprint"
     },
@@ -50,7 +50,8 @@
           "color": "#a684ff",
           "defaultChannel": "default"
         }
-      ]
+      ],
+      "./plugins/withGradleMemory"
     ],
     "web": {
       "favicon": "./assets/favicon.png"

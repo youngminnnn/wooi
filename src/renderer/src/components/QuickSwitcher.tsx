@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { GitBranch, LayoutDashboard, Search, Settings2 } from 'lucide-react'
-import { useStore } from '../store'
+import { backgroundTaskCount, useStore } from '../store'
 import { openRepoSettings } from '../lib/repoSettings'
 import { useNow } from '../lib/useNow'
 import { StatusDot } from './Sidebar'
@@ -53,6 +53,7 @@ export default function QuickSwitcher({ onClose }: { onClose: () => void }): Rea
   const select = useStore((s) => s.selectWorkspace)
   const permissions = useStore((s) => s.permissions)
   const compacting = useStore((s) => s.compacting)
+  const runningAgents = useStore((s) => s.runningAgents)
 
   const [query, setQuery] = useState('')
   const listRef = useRef<HTMLDivElement>(null)
@@ -230,6 +231,7 @@ export default function QuickSwitcher({ onClose }: { onClose: () => void }): Rea
                     runningMs={0}
                     pendingRateLimitResume={ws.pendingRateLimitResume}
                     rateLimited={activeRateLimitPause(ws.rateLimited, now)}
+                    backgroundTasks={backgroundTaskCount(runningAgents[ws.id])}
                     pr={prStatus[ws.id]}
                   />
                 ) : entry.kind === 'repoSettings' ? (

@@ -283,9 +283,13 @@ export function workspaceStackMembers<T extends { id: string; parentWorkspaceId:
     root = byId.get(root.parentWorkspaceId)!
   }
   const out: T[] = []
+  // 내려올 때도 방문 표시가 필요하다. 위로 올라가는 루프만 순환을 막으면, A→B→A 같은 고리에서
+  // 자식을 따라 내려오다 무한 재귀로 죽는다(orderByStack 이 같은 이유로 seen 을 든다).
+  const seen = new Set<string>()
   const collect = (wid: string): void => {
     const w = byId.get(wid)
-    if (!w) return
+    if (!w || seen.has(wid)) return
+    seen.add(wid)
     out.push(w)
     for (const c of all) if (c.parentWorkspaceId === wid) collect(c.id)
   }

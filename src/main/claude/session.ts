@@ -175,6 +175,14 @@ function overAutoCompactThreshold(ctx: ContextUsage): boolean {
 const CONTEXT_USAGE_TIMEOUT_MS = 5000
 
 /**
+ * SDK 가 백그라운드 Bash 실행(`run_in_background`)에 붙이는 task_type.
+ *
+ * 백그라운드 task 중 이것만 상태 판정에서 빠진다([[claude/session]] syncStatus) — 셸은 에이전트가
+ * 아니라 에이전트가 두고 간 프로세스다.
+ */
+const BACKGROUND_BASH_TASK_TYPE = 'local_bash'
+
+/**
  * 계획 승인 뒤 라이브 query 에 새 권한 모드를 보내기까지의 지연.
  * CLI 가 ExitPlanMode 를 처리하며 스스로 모드를 되돌리는 창을 넘긴 뒤에 우리 값을 얹는다.
  */
@@ -341,10 +349,26 @@ export class ClaudeSession {
   private active = false
   /**
    * active 가 false→true 로 바뀔 때마다 오르는 카운터. settleTurn 이 컨텍스트 확인을 기다리는
-   * 동안 새 일감(사용자 메시지·압축)이 들어왔는지 가리는 데 쓴다 — 확인을 마치고 뒤늦게 idle 을
-   * 방출하면 그 사이 시작된 턴이 idle 로 보이기 때문이다.
+   * 동안 새 일감이 들어왔는지 가리는 데 쓴다 — 확인을 마치고 뒤늦게 idle 을 방출하면 그 사이
+   * 시작된 턴이 idle 로 보이기 때문이다.
+   *
+   * **active 를 켜는 곳은 markActive 하나뿐이어야 한다.** 새 일감은 사용자 메시지·압축만이
+   * 아니다 — 백그라운드 작업이 끝나면 SDK 가 우리 send() 없이 스스로 턴을 연다(handleMessage 의
+   * 안전망). 그 경로가 카운터를 건너뛰면 이 가드는 조용히 무력해진다.
    */
   private activeSeq = 0
+  /**
+   * 모델 산출(assistant/stream_event)을 받을 때마다 오르는 카운터.
+   *
+   * activeSeq 만으로는 부족한 창이 하나 있다. settleTurn 이 컨텍스트 확인을 기다리는 동안에는
+   * this.active 가 **아직 true** 이므로, 그 사이 SDK 가 스스로 연 턴의 산출이 흘러도
+   * handleMessage 의 안전망(`if (!this.active)`)이 발동하지 않는다 — active 를 켤 일이 없으니
+   * markActive 도, activeSeq 도 움직이지 않는다. 그러면 뒤늦게 깨어난 settleTurn 이 "내가
+   * 기다리는 사이 아무 일도 없었다" 고 판단해 **살아서 도는 턴을 idle 로 꺼뜨린다.**
+   *
+   * 산출은 그 창에서도 반드시 흐르므로, 이 카운터가 그 창을 메운다.
+   */
+  private outputSeq = 0
   /**
    * 마지막으로 방출한 상태가 'running'(true) 인지 'idle'(false) 인지. running/idle 전환을 이 한
    * 곳(syncStatus)으로 모아, 실제 상태 변화가 있을 때만 방출하고 중복/역행 방출을 막는다.
@@ -612,9 +636,10 @@ export class ClaudeSession {
    * 이다" 라고 착각해 다음 턴의 running 을 통째로 삼켜, **사이드바가 영영 idle 로 굳는다.**
    *
    * 평소에는 중단 직후 도착하는 result 가 idle 을 방출하며 기억을 맞춰 줘 이 어긋남이 저절로
-   * 풀린다. 하지만 백그라운드 작업(`npm run dev` 같은 백그라운드 Bash·Monitor·워크플로우)이 하나라도
-   * 살아 있으면 syncStatus 의 shouldRun 이 계속 true 라 idle 이 방출되지 않아 영구히 굳는다 —
-   * 그 워크스페이스는 이후 모든 턴이 '진행 중' 표시 없이 돌아간다.
+   * 풀린다. 하지만 백그라운드 워크플로우나 백그라운드 서브에이전트가 하나라도 살아 있으면
+   * syncStatus 의 shouldRun 이 계속 true 라 idle 이 방출되지 않아 영구히 굳는다 — 그 워크스페이스는
+   * 이후 모든 턴이 '진행 중' 표시 없이 돌아간다. (백그라운드 Bash 는 애초에 shouldRun 에서
+   * 빠지므로 이 함정에 걸리지 않는다.)
    *
    * active 까지 내리는 이유: 중단이 실제로 먹지 않아 턴이 계속 도는 경우, handleMessage 의
    * 안전망(assistant/stream 산출이 오는데 active 가 false 면 running 을 켠다)이 다시 켜 주게
@@ -1128,14 +1153,39 @@ export class ClaudeSession {
    * 포그라운드 서브에이전트는 애초에 부모 턴을 붙잡고 있어 this.active 가 true 이므로 여기서 셀
    * 필요가 없다 — agentTasks 는 사이드바 패널에 무엇을 그릴지에만 쓴다.
    *
-   * 그래서 "idle 이면 살아 있는 서브에이전트가 없다"는 그대로 성립하고, 렌더러는 idle 을 보면
-   * 목록을 안심하고 비울 수 있다(호스트가 죽어 종료 알림이 아예 오지 않는 경우의 안전망).
+   * **백그라운드 Bash(local_bash)만은 세지 않는다.** 한때는 셌지만, 그러면 "에이전트가 할 말을
+   * 다 하고 턴을 닫았는데도 워크스페이스가 진행 중" 인 상태가 만들어진다. 실제로 겪은 모습은
+   * 이렇다 — 에이전트가 `until … gh pr checks …` 폴링 셸을 백그라운드로 띄우고 최종 보고까지
+   * 마친 뒤 턴을 닫았는데, 대화는 끝나 보이는 채로 사이드바만 몇 분을 더 돌았다. 중지를 눌러도
+   * 소용이 없다 — 중지는 턴을 끊을 뿐 셸을 죽이지 않으므로, 셸이 끝나며 모델을 깨우면 워크스페이스는
+   * 스스로 진행 중으로 되돌아간다. 사용자가 볼 수 있는 것은 "왜 도는지 알 수 없는 스피너" 뿐이다.
+   *
+   * 그래서 셸은 상태가 아니라 **정보**로 다룬다. 살아 있는 셸은 backgroundTasks 에 그대로 남아
+   * agents 목록으로 계속 나가고(사이드바 패널 + 항목별 중지 버튼), 상태는 idle 이 된다. 셸이
+   * 파일을 고칠 수 있다는 사실은 변하지 않지만, 그것을 알리는 자리는 "이 워크스페이스에 지금
+   * 말을 걸 수 있는가" 를 뜻하는 상태 점이 아니라 그 목록이다.
+   *
+   * 그래서 "idle 이면 살아 있는 **에이전트**가 없다"는 그대로 성립하고, 렌더러는 idle 을 보면
+   * 서브에이전트 행을 안심하고 비울 수 있다(호스트가 죽어 종료 알림이 아예 오지 않는 경우의
+   * 안전망). 백그라운드 셸 행만은 idle 에서도 남는다 — 그 행이 곧 위의 "정보" 다.
    */
   private syncStatus(): void {
-    const shouldRun = this.active || this.workflowTasks.size > 0 || this.backgroundTasks.size > 0
+    const shouldRun = this.active || this.workflowTasks.size > 0 || this.hasBackgroundAgents()
     if (shouldRun === this.busy) return
     this.busy = shouldRun
     this.deps.emit({ type: 'status', status: shouldRun ? 'running' : 'idle' })
+  }
+
+  /**
+   * 살아 있는 백그라운드 task 중 **에이전트가 도는 것**이 있는가(백그라운드 Bash 는 제외).
+   *
+   * 레벨 신호(backgroundTasks) 위에서 종류만 거른다 — 엣지를 세지 않는다는 원칙은 그대로다.
+   */
+  private hasBackgroundAgents(): boolean {
+    for (const task of this.backgroundTasks.values()) {
+      if (task.taskType !== BACKGROUND_BASH_TASK_TYPE) return true
+    }
+    return false
   }
 
   /** 새 일감이 시작됐음을 표시하고 running 을 방출한다(settleTurn 의 뒤늦은 idle 을 무효화한다). */
@@ -1316,10 +1366,12 @@ export class ClaudeSession {
       // 조용히 다시 돌리지 않는다. 단, error 를 실은 assistant 는 모델 산출이 아니라 API 레벨
       // 실패 보고이므로(관측 확인) 산출로 세지 않는다 — 그래야 자격증명 실패를 재시도로 흡수한다.
       if (msg.type === 'stream_event' || !msg.error) this.turnSawOutput = true
-      if (!this.active) {
-        this.active = true
-        this.syncStatus()
-      }
+      // 산출은 무조건 센다 — 아래 markActive 가 걸리지 않는 창(정산 대기 중이라 active 가 아직
+      // true 인 동안)을 이 카운터가 메운다(outputSeq 주석).
+      this.outputSeq++
+      // markActive 로 켠다 — 여기서 this.active 만 세우면 activeSeq 가 그대로라 앞 턴의
+      // settleTurn 이 이 턴을 못 본다(activeSeq 주석).
+      if (!this.active) this.markActive()
     }
 
     switch (msg.type) {
@@ -1977,9 +2029,13 @@ export class ClaudeSession {
     const mayCompact = opts.refreshUsage && opts.allowAutoCompact && this.deps.autoCompact
     if (mayCompact) {
       const seq = this.activeSeq
+      const output = this.outputSeq
       if (await this.refreshContextUsage({ allowAutoCompact: true })) return
-      // 확인을 기다리는 동안 새 턴이 시작됐다면(사용자 메시지·재시작) 그 턴이 상태를 소유한다.
-      if (this.activeSeq !== seq) return
+      // 확인을 기다리는 동안 새 턴이 시작됐다면 그 턴이 상태를 소유한다. 두 카운터를 함께 보는
+      // 이유는 새 턴이 열리는 길이 둘이기 때문이다 — 사용자 메시지·재시작은 markActive 를 타
+      // activeSeq 를 올리고, 백그라운드 작업 완료로 SDK 가 스스로 여는 턴은 active 가 아직
+      // 내려가지 않아 markActive 를 못 타므로 산출(outputSeq)로만 드러난다.
+      if (this.activeSeq !== seq || this.outputSeq !== output) return
     } else if (opts.refreshUsage) {
       // 압축으로 이어질 수 없는 갱신이라 idle 을 붙잡아 둘 이유가 없다 — 미터는 뒤늦게 따라온다.
       void this.refreshContextUsage({ allowAutoCompact: false })

@@ -867,11 +867,21 @@ function parseUnifiedDiff(raw: string): FileDiff[] {
         firstHeaderPath(lines[0]) ??
         '(unknown)'
 
+      // hunk 안에서만 센다. 접두사만 보고 `+++`/`---` 를 헤더로 걸러 내면, diff 파일 자체를
+      // 커밋할 때처럼 **본문이 `+++` 로 시작하는 줄**(= `++++`)까지 함께 빠져 숫자가 어긋난다.
+      // 헤더는 hunk 시작(`@@`) 앞에만 오므로, 위치로 가르는 편이 정확하고 더 싸다.
       let additions = 0
       let deletions = 0
+      let inHunk = false
       for (const l of lines) {
-        if (l.startsWith('+') && !l.startsWith('+++')) additions++
-        else if (l.startsWith('-') && !l.startsWith('---')) deletions++
+        if (l.startsWith('@@')) {
+          inHunk = true
+          continue
+        }
+        if (!inHunk) continue
+        // "\ No newline at end of file" 은 어느 쪽도 아니다.
+        if (l.startsWith('+')) additions++
+        else if (l.startsWith('-')) deletions++
       }
 
       return { path, status, additions, deletions, patch: binary ? '' : body, binary }

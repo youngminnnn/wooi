@@ -40,6 +40,57 @@ describe('ScriptRunner dynamic script ids', () => {
 })
 
 /**
+ * 재시작은 "죽이고 곧바로 띄우기" 다. kill 은 비동기라 옛 프로세스의 close 가 새 프로세스보다
+ * 늦게 도착하는데, 그 종료를 새 실행의 것으로 읽으면 방금 뜬 dev 서버가 "종료됨" 으로 보이고
+ * setup 재실행은 시작하자마자 실패로 표시된다. 실제 셸을 띄워 순서째로 확인한다.
+ */
+describe('ScriptRunner 재시작', () => {
+  const settle = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
+
+  it('옛 프로세스의 종료를 새 실행의 것으로 알리지 않는다', async () => {
+    const dispatch = vi.fn()
+    const runner = new ScriptRunner(dispatch)
+    try {
+      runner.run('w1', 'dev', 'sleep 30', tmpdir())
+      await settle(200)
+      dispatch.mockClear()
+
+      runner.run('w1', 'dev', 'sleep 30', tmpdir())
+      await settle(600)
+
+      const exits = dispatch.mock.calls.filter(([channel]) => channel === 'evt:scriptExit')
+      expect(exits).toEqual([])
+      // 꼬리 버퍼도 깨끗해야 한다 — 나중에 뜬 패널이 이 줄을 그대로 보여 준다.
+      expect(runner.getOutput('w1', 'dev')).not.toContain('exited')
+      expect(runner.getStatus('w1')).toEqual([
+        { scriptId: 'dev', state: 'running', exitCode: null }
+      ])
+    } finally {
+      runner.disposeAll()
+    }
+  })
+
+  // 위 가드가 "자리가 비었을 때" 까지 막으면 사용자가 직접 중지했을 때 종료 표시가 사라진다.
+  it('사용자가 중지하면 종료를 그대로 알린다', async () => {
+    const dispatch = vi.fn()
+    const runner = new ScriptRunner(dispatch)
+    try {
+      runner.run('w1', 'dev', 'sleep 30', tmpdir())
+      await settle(200)
+      dispatch.mockClear()
+
+      runner.stop('w1', 'dev')
+      await settle(600)
+
+      const exits = dispatch.mock.calls.filter(([channel]) => channel === 'evt:scriptExit')
+      expect(exits).toHaveLength(1)
+    } finally {
+      runner.disposeAll()
+    }
+  })
+})
+
+/**
  * 아카이브 스크립트가 실패했을 때 사용자가 그것을 알 수 있는지는 전적으로 이 반환값에 달렸다
  * — 여기서 종료 코드나 출력을 잃으면 `docker compose down` 이 실패해도 화면에는 아무 일도
  * 일어나지 않는다. 실제 셸을 띄워 확인한다(파이프·프로세스 그룹까지 함께 검증된다).

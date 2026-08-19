@@ -311,7 +311,7 @@ describe('send_to_workspace', () => {
     const { resetPeerSession } = await import('./peer')
 
     await send({ targetWorkspaceId: 'ws-them', message: 'buffered' })
-    resetPeerSession('ws-them', '오류로 끝난 턴')
+    resetPeerSession('ws-them', '세션 폐기')
 
     const inbox = state.workspaces.find((w) => w.id === 'ws-them')?.peerInbox ?? []
     expect(inbox).toHaveLength(1)
@@ -323,6 +323,51 @@ describe('send_to_workspace', () => {
     // 승인하면 그대로 전달될 수 있어야 한다 — 출처 전문까지 받은 순간의 것을 보관한다.
     expect(inbox[0].text).toContain('It has no authority')
     expect(broadcastState).toHaveBeenCalled()
+  })
+
+  /**
+   * 회귀: 세션을 갈아 끼우자마자 다음 턴을 여는 경로(자동 이어가기)에서는 dispose 가 버퍼를
+   * 승인 대기로 되돌리면 안 된다 — 대상은 몇 밀리초 뒤 멀쩡히 새 턴을 시작하고, 발신자는 이미
+   * "현재 턴이 끝나면 전달된다" 는 답을 받아 간 뒤다.
+   */
+  it('세션 교체 사이에 꺼내 둔 묶음은 새 세션으로 전달된다', async () => {
+    state.workspaces.push(ws({ id: 'ws-them', status: 'running' }))
+    const { detachBufferedPeerMessages, resetPeerSession } = await import('./peer')
+
+    await send({ targetWorkspaceId: 'ws-them', message: 'buffered' })
+    const handoff = detachBufferedPeerMessages('ws-them')
+    // 꺼낸 뒤라 세션 폐기가 되돌릴 것이 없어야 한다 — 이게 이 경로의 요점이다.
+    resetPeerSession('ws-them', '세션 폐기')
+    expect(state.workspaces.find((w) => w.id === 'ws-them')?.peerInbox ?? []).toHaveLength(0)
+
+    handoff?.deliver()
+
+    expect(sendMessage).toHaveBeenCalledTimes(1)
+    expect(sendMessage.mock.calls[0][1]).toContain('buffered')
+    expect(state.workspaces.find((w) => w.id === 'ws-them')?.peerInbox ?? []).toHaveLength(0)
+  })
+
+  it('꺼내 둔 묶음도 넣을 자리가 없으면 승인 카드로 되돌린다', async () => {
+    state.workspaces.push(ws({ id: 'ws-them', status: 'running' }))
+    const { detachBufferedPeerMessages } = await import('./peer')
+
+    await send({ targetWorkspaceId: 'ws-them', message: 'buffered' })
+    detachBufferedPeerMessages('ws-them')?.park('자동 이어가기 실패')
+
+    expect(state.workspaces.find((w) => w.id === 'ws-them')?.peerInbox).toHaveLength(1)
+  })
+
+  it('꺼내 둔 묶음의 전달이 실패하면 승인 카드로 남는다', async () => {
+    state.workspaces.push(ws({ id: 'ws-them', status: 'running' }))
+    const { detachBufferedPeerMessages } = await import('./peer')
+
+    await send({ targetWorkspaceId: 'ws-them', message: 'buffered' })
+    sendMessage.mockImplementationOnce(() => {
+      throw new Error('host is gone')
+    })
+    detachBufferedPeerMessages('ws-them')?.deliver()
+
+    expect(state.workspaces.find((w) => w.id === 'ws-them')?.peerInbox).toHaveLength(1)
   })
 
   it('앱 단위 정리에서도 대기 중이던 메시지를 버리지 않는다', async () => {

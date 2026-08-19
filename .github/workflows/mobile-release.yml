@@ -3,13 +3,19 @@ name: mobile-release
 # 모바일 앱 빌드. 데스크톱(build.yml)과 같은 원칙이다 — **태그가 릴리즈를 만든다.**
 # 누구의 노트북에서 무엇을 구웠는지가 아니라, 레포의 어느 커밋에서 나왔는지가 남아야 한다.
 #
-# 빌드 자체는 원래도 로컬이 아니었다(EAS 클라우드에서 굽는다). 여기서 바뀌는 것은 **트리거**다.
-# 태그를 밀면 CI 가 굽고, 실패도 성공도 Actions 에 남는다.
+# 빌드는 **GitHub 러너에서 직접 굽는다**(`eas build --local`). EAS 클라우드 빌드는 무료 플랜이
+# 월 15회(플랫폼별)뿐이라, 스토어 준비처럼 검증 빌드를 여러 번 굽는 시기에 금방 바닥난다.
+# 실제로 v1.0.0 을 준비하다 할당량이 떨어져 확인용 빌드조차 못 굽는 상황이 있었다.
 #
-# 버전 분업은 데스크톱과 같다:
-#   - 사람이 보는 버전(app.json 의 version)은 **레포**가 갖고, 태그가 그것과 일치하는지 검사한다
-#   - 스토어용 빌드 번호(versionCode / buildNumber)는 **EAS** 가 갖는다(appVersionSource: remote)
-#     이 값은 절대 되돌아가면 안 되는 단조 증가 값이라, 커밋으로 관리하면 충돌·되감기가 난다
+# 프레임워크는 그대로 Expo 다. 바뀐 것은 **어느 기계가 Gradle/Xcode 를 돌리느냐**뿐이고,
+# EAS 의 나머지 기능은 계속 쓴다:
+#   - 자격증명 — `--local` 에서도 키스토어를 EAS 서버에서 받아 온다(EXPO_TOKEN 만 있으면 된다).
+#     그래서 레포에도 시크릿에도 키스토어를 두지 않는다.
+#   - versionCode / buildNumber — `appVersionSource: remote` 그대로. 되감기면 안 되는 단조
+#     증가 값이라 커밋으로 관리하면 충돌이 난다.
+#   - 제출 — `eas submit`.
+#
+# 사람이 보는 버전(app.json 의 version)은 **레포**가 갖고, 태그가 그것과 일치하는지 검사한다.
 run-name: 'mobile: ${{ github.ref_name }}'
 
 on:
@@ -33,8 +39,13 @@ concurrency:
   group: mobile-release-${{ github.ref }}
   cancel-in-progress: false
 
+env:
+  PROFILE: ${{ inputs.profile || 'production' }}
+
 jobs:
-  build:
+  # 굽기 전에 잡는다. 로컬 빌드는 클라우드보다 오래 걸리고(러너가 Gradle 을 처음부터 받는다),
+  # 깨진 번들은 빌드가 성공해도 폰에서 죽는다.
+  check:
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -49,7 +60,7 @@ jobs:
           cache-dependency-path: apps/mobile/package-lock.json
 
       # 태그와 app.json 의 version 이 어긋나면, 스토어에는 옛 버전이 올라가는데 릴리즈 이름만
-      # 새 버전이 된다. 빌드는 성공으로 끝나므로 눈치채기 어렵다 — 20분 굽기 전에 끊는다.
+      # 새 버전이 된다. 빌드는 성공으로 끝나므로 눈치채기 어렵다 — 굽기 전에 끊는다.
       - name: Preflight — 태그와 app.json version 일치
         if: startsWith(github.ref, 'refs/tags/mobile-v')
         run: |
@@ -63,6 +74,7 @@ jobs:
           fi
           echo "태그/버전 일치 확인됨: $app"
 
+      # 자격증명과 versionCode 를 EAS 에서 받아 오므로, 로컬 빌드라도 토큰은 필요하다.
       - name: Preflight — EXPO_TOKEN 있음
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
@@ -75,108 +87,209 @@ jobs:
           echo "EXPO_TOKEN 확인됨."
 
       - run: npm ci
-
-      # 굽기 전에 잡는다. EAS 빌드는 20분 걸리고, 깨진 번들은 거기서 성공해도 폰에서 죽는다.
       - name: Typecheck
         run: npx tsc --noEmit
-
       - name: Test
         run: npm test
 
-      # 자격증명(Android 키스토어 / iOS 인증서·프로파일)은 **미리 있어야 한다.**
-      # `--non-interactive` 에서는 EAS 가 새로 만들지 못하고 그 자리에서 실패한다.
-      # 처음 한 번은 로컬에서 대화형으로 만든다 — apps/mobile/README.md 참고.
-      - name: Build
+  android:
+    needs: check
+    if: >-
+      github.event_name == 'push' ||
+      inputs.platform == 'android' ||
+      inputs.platform == 'all'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: apps/mobile
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: apps/mobile/package-lock.json
+
+      # Android Gradle Plugin 8.x 가 요구하는 최소 JDK. 러너 기본값에 맡기지 않는다 —
+      # 이미지가 바뀌면 조용히 다른 JDK 로 굽게 된다.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # `eas build --local` 은 EAS 의 캐시를 쓰지 못한다("Local builds do not support
+      # restoring cache"). 그대로 두면 매번 Gradle 배포판과 의존성을 처음부터 받는다.
+      - name: Gradle 캐시
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('apps/mobile/package-lock.json') }}
+          restore-keys: gradle-${{ runner.os }}-
+
+      - run: npm ci
+
+      - name: Build (local)
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          EAS_LOCAL_BUILD_ARTIFACTS_DIR: ${{ runner.temp }}/artifacts
         run: |
-          set -o pipefail
-          profile="${{ inputs.profile || 'production' }}"
-          platform="${{ inputs.platform || 'all' }}"
-          echo "프로파일=$profile 플랫폼=$platform"
-          # 사람이 읽는 진행 출력은 로그에 그대로 두고(--json 을 쓰면 9분간 로그가 침묵한다),
-          # 빌드 id 만 뽑아 쓰려고 사본을 남긴다.
-          npx eas build --profile "$profile" --platform "$platform" --non-interactive \
-            2>&1 | tee /tmp/eas-build.log
+          set -euo pipefail
+          mkdir -p "$EAS_LOCAL_BUILD_ARTIFACTS_DIR"
+          npx eas build --profile "$PROFILE" --platform android --local --non-interactive
 
-      # 스토어 제출. 구운 것을 사람이 다시 내려받아 올리는 단계를 없앤다.
-      #
-      # **기본은 꺼져 있다.** Play 는 신규 앱의 **첫 AAB 를 API 로 못 받는다** — 콘솔에서 한 번
-      # 손으로 올려 패키지 이름을 등록해야 그다음부터 API 가 열린다. 준비되기 전에 이 단계가
-      # 돌면 태그를 밀 때마다 릴리즈가 빨갛게 실패한다. 그래서 저장소 변수로 잠가 둔다:
+      - name: 산출물 확인
+        id: artifact
+        run: |
+          set -euo pipefail
+          dir="${{ runner.temp }}/artifacts"
+          file="$(find "$dir" -maxdepth 1 -type f \( -name '*.aab' -o -name '*.apk' \) | head -1)"
+          if [ -z "$file" ]; then
+            echo "::error::산출물이 없습니다. 빌드 로그를 확인하세요."
+            ls -la "$dir" || true
+            exit 1
+          fi
+          version="$(node -p "require('./app.json').expo.version")"
+          # eas build --local 은 산출물을 `build-<타임스탬프>.apk` 로 뱉는다. 내려받아 폰에
+          # 넣거나 콘솔에 올릴 때 그 이름으로는 무엇인지, 어느 버전인지 알 수 없다.
+          #
+          # 이름은 **앱 이름을 그대로 따라간다** — 여기에 "Wooi" 를 적어 두면 app.config.ts 와
+          # 두 벌이 되고, dev 빌드까지 운영과 같은 이름으로 나온다. 프로파일이 고르는
+          # APP_VARIANT 를 그대로 먹여 해석시키면 development 는 "Wooi (dev)" 가 된다.
+          variant="$(node -p "require('./eas.json').build['$PROFILE'].env?.APP_VARIANT ?? 'development'")"
+          appname="$(APP_VARIANT="$variant" npx expo config --json |
+            node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).name")"
+          named="$(dirname "$file")/$appname-$version.${file##*.}"
+          mv "$file" "$named"
+          echo "path=$named" >> "$GITHUB_OUTPUT"
+          # 아티팩트 이름에는 `/` 를 못 쓴다 — 브랜치에서 돌리면 ref_name 이 `ci/foo` 라 죽는다.
+          echo "name=$version-${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+          {
+            echo "## Android · $PROFILE"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| 버전 | $version |"
+            echo "| 파일 | \`$(basename "$named")\` ($(du -h "$named" | cut -f1)) |"
+            echo
+            case "$named" in
+              *.aab) echo 'AAB 입니다 — 폰에 직접 깔 수 없고 Play 업로드용입니다.' ;;
+              *) echo '아래 artifacts 에서 내려받아 폰에 설치할 수 있습니다.' ;;
+            esac
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wooi-android-${{ steps.artifact.outputs.name }}
+          path: ${{ steps.artifact.outputs.path }}
+          if-no-files-found: error
+          retention-days: 30
+
+      # 스토어 제출. **기본은 꺼져 있다** — Play 는 신규 앱의 첫 AAB 를 API 로 받지 않는다.
+      # 콘솔에서 한 번 손으로 올려 패키지 이름을 등록해야 그다음부터 API 가 열린다. 준비되기
+      # 전에 이 단계가 돌면 태그를 밀 때마다 릴리즈가 빨갛게 실패하므로 변수로 잠가 둔다:
       #
       #   Settings → Secrets and variables → Actions → Variables
       #   MOBILE_AUTO_SUBMIT = true
       #
-      # 켜기 전에 준비할 것:
-      #   1. Play Console 에 앱을 만들고 AAB 를 한 번 수동 업로드
-      #   2. Google Cloud 서비스 계정 → Play Console 에서 "출시 관리자" 권한 부여
-      #   3. `eas credentials --platform android` 로 그 키를 EAS 에 올린다
-      #      (레포에 키 파일을 두지 않으려고 serviceAccountKeyPath 대신 EAS 보관을 쓴다)
+      # 켜기 전에: ① 콘솔에 AAB 수동 업로드 ② 서비스 계정에 "출시 관리자" 권한
+      # ③ `eas credentials --platform android` 로 키를 EAS 에 올린다(레포에 키 파일을 두지 않는다).
       #
-      # 어느 트랙으로 가는지는 `eas.json` 의 submit 프로파일이 정한다 — 지금은 internal 이고,
-      # 비공개 테스트나 프로덕션으로 올리는 건 콘솔에서 사람이 한다.
-      - name: Submit — 스토어 제출
+      # `--latest` 가 아니라 `--path` 를 쓴다 — 로컬 빌드는 EAS 에 빌드 레코드를 남기지 않으므로
+      # "가장 최근 빌드" 라는 말이 성립하지 않는다.
+      - name: Submit — Play 제출
         if: startsWith(github.ref, 'refs/tags/mobile-v') && vars.MOBILE_AUTO_SUBMIT == 'true'
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
-        run: |
-          set -o pipefail
-          platform="${{ inputs.platform || 'all' }}"
-          npx eas submit --profile production --platform "$platform" --latest --non-interactive
+        run: npx eas submit --profile production --platform android --path "${{ steps.artifact.outputs.path }}" --non-interactive
 
-      # 방금 구운 것이 **어느 링크인지** Actions 화면에서 바로 집을 수 있게 한다.
-      #
-      # expo.dev 의 빌드 목록에는 옛 빌드가 함께 늘어서고 프로파일 표시가 작다. 폰으로 그
-      # 목록을 열어 고르다 보면 엉뚱한 것을 깔게 된다 — 실제로 운영 APK 대신 옛 development
-      # 빌드(`com.wooi.remote.dev`)를 깐 적이 있다. 패키지가 달라 나란히 깔리는 탓에 잘못
-      # 깔렸다는 사실조차 늦게 드러났다. 링크 하나만 남기면 고를 여지가 없다.
-      #
-      # 빌드가 실패해도 돌린다 — 그 경우 표가 비고, 그것 자체가 신호다.
-      - name: Summary — 설치 링크
-        if: always()
+  ios:
+    needs: check
+    if: >-
+      github.event_name == 'push' ||
+      inputs.platform == 'ios' ||
+      inputs.platform == 'all'
+    runs-on: macos-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: apps/mobile
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: apps/mobile/package-lock.json
+
+      - name: CocoaPods 캐시
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/CocoaPods
+          key: pods-${{ runner.os }}-${{ hashFiles('apps/mobile/package-lock.json') }}
+          restore-keys: pods-${{ runner.os }}-
+
+      - run: npm ci
+
+      - name: Build (local)
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          EAS_LOCAL_BUILD_ARTIFACTS_DIR: ${{ runner.temp }}/artifacts
         run: |
-          set -uo pipefail
-          ids="$(grep -oE 'builds/[0-9a-f-]{36}' /tmp/eas-build.log 2>/dev/null \
-                 | cut -d/ -f2 | sort -u)"
-          if [ -z "$ids" ]; then
-            echo '빌드 id 를 찾지 못했습니다 — 빌드가 시작 전에 실패했을 수 있습니다.' \
-              >> "$GITHUB_STEP_SUMMARY"
-            exit 0
+          set -euo pipefail
+          mkdir -p "$EAS_LOCAL_BUILD_ARTIFACTS_DIR"
+          npx eas build --profile "$PROFILE" --platform ios --local --non-interactive
+
+      - name: 산출물 확인
+        id: artifact
+        run: |
+          set -euo pipefail
+          dir="${{ runner.temp }}/artifacts"
+          file="$(find "$dir" -maxdepth 1 -type f \( -name '*.ipa' -o -name '*.tar.gz' \) | head -1)"
+          if [ -z "$file" ]; then
+            echo "::error::산출물이 없습니다. 빌드 로그를 확인하세요."
+            ls -la "$dir" || true
+            exit 1
           fi
-          for id in $ids; do
-            npx eas build:view "$id" --json 2>/dev/null > "/tmp/build-$id.json" || continue
-          done
-          node --input-type=module -e '
-            import { appendFileSync, readFileSync } from "node:fs"
-            const out = (s) => appendFileSync(process.env.GITHUB_STEP_SUMMARY, s + "\n")
-            const ids = process.argv.slice(1)
-            out("## 빌드 결과\n")
-            for (const id of ids) {
-              let b
-              try {
-                b = JSON.parse(readFileSync(`/tmp/build-${id}.json`, "utf8"))
-              } catch {
-                out(`- \`${id}\` — 정보를 가져오지 못했습니다.\n`)
-                continue
-              }
-              const url = b.artifacts?.applicationArchiveUrl
-              out(`### ${b.platform} · ${b.buildProfile} · ${b.status}\n`)
-              out("| | |")
-              out("|---|---|")
-              out(`| 앱 | \`${b.appIdentifier}\` |`)
-              out(`| 버전 | ${b.appVersion} (build ${b.appBuildVersion}) |`)
-              out(`| 채널 | ${b.updateChannel?.name ?? "-"} |`)
-              out(`| 로그 | https://expo.dev/accounts/${b.app?.ownerAccount?.name}/projects/${b.app?.slug}/builds/${id} |`)
-              out("")
-              if (!url) {
-                out("산출물이 없습니다.\n")
-              } else if (url.endsWith(".aab")) {
-                out(`AAB 입니다 — 폰에 직접 깔 수 없고 Play 업로드용입니다.\n\n${url}\n`)
-              } else {
-                out(`**설치 링크** (이 주소를 폰에서 엽니다)\n\n${url}\n`)
-              }
-            }
-          ' $ids
+          version="$(node -p "require('./app.json').expo.version")"
+          # eas build --local 은 산출물을 `build-<타임스탬프>.apk` 로 뱉는다. 내려받아 폰에
+          # 넣거나 콘솔에 올릴 때 그 이름으로는 무엇인지, 어느 버전인지 알 수 없다.
+          #
+          # 이름은 **앱 이름을 그대로 따라간다** — 여기에 "Wooi" 를 적어 두면 app.config.ts 와
+          # 두 벌이 되고, dev 빌드까지 운영과 같은 이름으로 나온다. 프로파일이 고르는
+          # APP_VARIANT 를 그대로 먹여 해석시키면 development 는 "Wooi (dev)" 가 된다.
+          variant="$(node -p "require('./eas.json').build['$PROFILE'].env?.APP_VARIANT ?? 'development'")"
+          appname="$(APP_VARIANT="$variant" npx expo config --json |
+            node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).name")"
+          named="$(dirname "$file")/$appname-$version.${file##*.}"
+          mv "$file" "$named"
+          echo "path=$named" >> "$GITHUB_OUTPUT"
+          # 아티팩트 이름에는 `/` 를 못 쓴다 — 브랜치에서 돌리면 ref_name 이 `ci/foo` 라 죽는다.
+          echo "name=$version-${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+          {
+            echo "## iOS · $PROFILE"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| 버전 | $version |"
+            echo "| 파일 | \`$(basename "$named")\` ($(du -h "$named" | cut -f1)) |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wooi-ios-${{ steps.artifact.outputs.name }}
+          path: ${{ steps.artifact.outputs.path }}
+          if-no-files-found: error
+          retention-days: 30
+
+      # 수출 규정 답은 App Store Connect 에 적는다 — Info.plist 가 아니라. 이유는
+      # apps/mobile/README.md 의 "수출 규정" 절.
+      - name: Submit — App Store 제출
+        if: startsWith(github.ref, 'refs/tags/mobile-v') && vars.MOBILE_AUTO_SUBMIT == 'true'
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: npx eas submit --profile production --platform ios --path "${{ steps.artifact.outputs.path }}" --non-interactive

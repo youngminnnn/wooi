@@ -146,9 +146,20 @@ export class ScriptRunner {
       this.dispatch(IPC.evtScriptOutput, { workspaceId, scriptId, stream: 'stderr', chunk })
     })
     proc.on('close', (code) => {
+      // 그 사이 **다른 프로세스가 이 자리를 차지했으면** 이 종료는 남의 것이 아니다.
+      //
+      // 재시작(run → stop → spawn)은 옛 프로세스를 죽인 뒤 곧바로 새 프로세스를 같은 키에
+      // 등록한다. kill 은 비동기라 옛 프로세스의 close 는 그 뒤에 도착하는데, 그때 키로만
+      // 찾으면 **새 실행**을 집는다 — 방금 뜬 dev 서버에 종료 이벤트가 나가고, 꼬리 버퍼
+      // 맨 앞에 "exited" 가 박히고, setup 재실행은 onExit 훅이 setupState 를 곧바로
+      // 'failed' 로 되돌린다(옛 프로세스는 SIGTERM 이라 code=null 이다).
+      //
+      // "자리가 비었을 때" 까지 막지는 않는다 — stop() 은 엔트리를 지우고 죽이므로, 그것까지
+      // 걸러내면 사용자가 직접 중지했을 때 종료 표시가 통째로 사라진다.
+      const entry = this.running.get(key)
+      if (entry && entry.proc !== proc) return
       // 종료 직전 남은 출력을 마저 비운 뒤 종료를 알린다(순서 보장).
       this.flush(workspaceId, scriptId)
-      const entry = this.running.get(key)
       if (entry) {
         if (entry.flushTimer) clearTimeout(entry.flushTimer)
         entry.flushTimer = null

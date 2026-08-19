@@ -70,6 +70,24 @@ function runLoginShell(
   })
 }
 
+/**
+ * 명령 문자열에 끼워 넣을 값을 작은따옴표로 감싼다. 내부 작은따옴표는 POSIX 방식('\'')으로
+ * 닫았다 다시 여는데, 이게 있어야 감싸기가 실제로 방어가 된다 — 그냥 감싸기만 하면 따옴표
+ * 하나로 인용이 끝나고 뒤가 명령으로 해석된다.
+ *
+ * **브랜치 이름도 반드시 이걸 거쳐야 한다.** 예전에는 "브랜치명은 sanitize 되어 있다"는 전제로
+ * `'${branch}'` 처럼 감싸기만 했는데, 그 전제가 성립하지 않는다:
+ * - git 은 ref 이름에 `'` 와 `;` 를 허용한다(`git branch "x';id;'y"` 가 그대로 만들어진다).
+ * - Wooi 의 브랜치 이름은 워크트리의 **실제 HEAD 를 그대로 읽어** 갱신되므로
+ *   ([[ipc]] reconcileWorkspaceStack), 에이전트가 워크트리에서 만든 이름이 그대로 들어온다.
+ * - GitHub API 가 주는 `baseRefName`·`headRefName` 도 우리가 정한 값이 아니다.
+ * 여기서 실행되는 것은 **메인 프로세스의 로그인 셸**이라, 뚫리면 에이전트의 권한 카드와
+ * 샌드박스를 통째로 우회한다 — PR 상태 폴링만으로 발동한다.
+ */
+function shellQuote(value: string | number): string {
+  return `'${String(value).replace(/'/g, `'\\''`)}'`
+}
+
 // ── gh 연결 여부 ────────────────────────────────────────────────────────────
 // gh 는 선택 연동이다 — 없어도 리포 연결·워크스페이스 생성·에이전트 실행 등 git 만으로 되는
 // 기능은 전부 동작해야 한다. 그래서 여기서 한 번 걸러, 미연결이면 gh 를 아예 실행하지 않는다.
@@ -204,12 +222,12 @@ const PR_LABELS: Record<PrState, string> = {
 
 /**
  * PR 상태를 조회한다. branch 를 주면 그 브랜치의 PR 을(worktree 의 현재 브랜치가 아니어도), 없으면
- * 현재 브랜치의 PR 을 조회한다(모델 B 스택 조망은 브랜치별로 호출). 브랜치명은 sanitize 되어 있어
- * 안전하지만 셸 해석 방지를 위해 작은따옴표로 감싼다.
+ * 현재 브랜치의 PR 을 조회한다(모델 B 스택 조망은 브랜치별로 호출).
+ * 브랜치명은 셸에 그대로 들어가면 안 되는 값이라 shellQuote 를 거친다.
  */
 export async function getPrStatus(worktreePath: string, branch?: string): Promise<PrStatus | null> {
   if (!(await connected())) return null
-  const target = branch ? ` '${branch}'` : ''
+  const target = branch ? ` ${shellQuote(branch)}` : ''
   const { stdout, code } = await runLoginShell(
     `gh pr view${target} --json number,url,title,state,isDraft,reviewDecision,mergeable,mergeStateStatus,statusCheckRollup`,
     worktreePath
@@ -256,7 +274,7 @@ export async function getPrMeta(
 ): Promise<PrMeta | null> {
   if (!(await connected())) return null
   const { stdout, code } = await runLoginShell(
-    `gh pr view '${selector}' --json number,state,headRefName,baseRefName,baseRefOid`,
+    `gh pr view ${shellQuote(selector)} --json number,state,headRefName,baseRefName,baseRefOid`,
     worktreePath
   )
   if (code !== 0) return null
@@ -275,7 +293,7 @@ export async function getPrMeta(
 export async function remoteRefExists(worktreePath: string, branch: string): Promise<boolean> {
   if (!(await connected())) return false
   const { code } = await runLoginShell(
-    `gh api 'repos/{owner}/{repo}/git/ref/heads/${branch}'`,
+    `gh api ${shellQuote(`repos/{owner}/{repo}/git/ref/heads/${branch}`)}`,
     worktreePath
   )
   return code === 0
@@ -292,7 +310,7 @@ export async function restoreRemoteRef(
 ): Promise<{ error?: string }> {
   if (!(await connectedFresh())) return { error: NOT_CONNECTED }
   const { stderr, code } = await runLoginShell(
-    `gh api -X POST 'repos/{owner}/{repo}/git/refs' -f 'ref=refs/heads/${branch}' -f 'sha=${sha}'`,
+    `gh api -X POST 'repos/{owner}/{repo}/git/refs' -f ${shellQuote(`ref=refs/heads/${branch}`)} -f ${shellQuote(`sha=${sha}`)}`,
     worktreePath
   )
   if (code !== 0) return { error: lastError(stderr, `Failed to restore branch ${branch}.`) }
@@ -303,7 +321,7 @@ export async function restoreRemoteRef(
 export async function deleteRemoteRef(worktreePath: string, branch: string): Promise<void> {
   if (!(await connectedFresh())) return
   await runLoginShell(
-    `gh api -X DELETE 'repos/{owner}/{repo}/git/refs/heads/${branch}'`,
+    `gh api -X DELETE ${shellQuote(`repos/{owner}/{repo}/git/refs/heads/${branch}`)}`,
     worktreePath
   )
 }
@@ -525,9 +543,8 @@ export async function createPrWeb(
   if (!(await connectedFresh())) return { error: NOT_CONNECTED }
   // stacked 면 부모 브랜치를 PR base 로 명시한다(--base). 없으면 gh 가 리포 기본 브랜치를 쓴다.
   // head 를 주면(모델 B: 현재 체크아웃되지 않은 스택 브랜치) 그 브랜치로 PR 을 연다(--head).
-  // 브랜치명은 sanitizeBranch 로 정규화돼 있어 안전하지만, 셸 해석을 막기 위해 작은따옴표로 감싼다.
-  const baseFlag = opts?.base ? ` --base '${opts.base}'` : ''
-  const headFlag = opts?.head ? ` --head '${opts.head}'` : ''
+  const baseFlag = opts?.base ? ` --base ${shellQuote(opts.base)}` : ''
+  const headFlag = opts?.head ? ` --head ${shellQuote(opts.head)}` : ''
   const { stderr, code } = await runGhWrite(
     `gh pr create --web --fill${baseFlag}${headFlag}`,
     worktreePath
@@ -590,8 +607,11 @@ export async function retargetPr(
   selector?: string
 ): Promise<{ error?: string }> {
   if (!(await connectedFresh())) return { error: NOT_CONNECTED }
-  const target = selector ? ` '${selector}'` : ''
-  const { stderr, code } = await runGhWrite(`gh pr edit${target} --base '${newBase}'`, worktreePath)
+  const target = selector ? ` ${shellQuote(selector)}` : ''
+  const { stderr, code } = await runGhWrite(
+    `gh pr edit${target} --base ${shellQuote(newBase)}`,
+    worktreePath
+  )
   if (code !== 0) return { error: lastError(stderr, 'Failed to retarget the pull request.') }
   return {}
 }
@@ -603,15 +623,6 @@ export async function retargetPr(
 /** gh 명령의 마지막 의미 있는 오류 줄을 추린다. */
 function lastError(stderr: string, fallback: string): string {
   return stderr.trim().split('\n').filter(Boolean).pop() || fallback
-}
-
-/**
- * 명령 문자열에 끼워 넣을 값을 작은따옴표로 감싼다. 내부 작은따옴표는 POSIX 방식('\'')으로
- * 닫았다 다시 여는데, 이게 있어야 감싸기가 실제로 방어가 된다 — 그냥 감싸기만 하면 따옴표
- * 하나로 인용이 끝나고 뒤가 명령으로 해석된다.
- */
-function shellQuote(value: string): string {
-  return `'${value.replace(/'/g, `'\\''`)}'`
 }
 
 /**
@@ -645,7 +656,7 @@ export async function mergePr(
 ): Promise<{ error?: string }> {
   if (!(await connectedFresh())) return { error: NOT_CONNECTED }
   const flag = method === 'merge' ? '--merge' : method === 'rebase' ? '--rebase' : '--squash'
-  const target = selector ? ` '${selector}'` : ''
+  const target = selector ? ` ${shellQuote(selector)}` : ''
   const { stderr, code } = await runGhWrite(`gh pr merge${target} ${flag}`, worktreePath)
   if (code !== 0) return { error: lastError(stderr, 'Failed to merge the pull request.') }
   return {}
@@ -669,7 +680,7 @@ export async function reopenPr(
   selector?: string | number
 ): Promise<{ error?: string }> {
   if (!(await connectedFresh())) return { error: NOT_CONNECTED }
-  const target = selector ? ` '${selector}'` : ''
+  const target = selector ? ` ${shellQuote(selector)}` : ''
   const { stderr, code } = await runGhWrite(`gh pr reopen${target}`, worktreePath)
   if (code !== 0) return { error: lastError(stderr, 'Failed to reopen the pull request.') }
   return {}

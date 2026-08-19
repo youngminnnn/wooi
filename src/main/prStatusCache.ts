@@ -20,10 +20,16 @@ const cache = new Map<string, PrStatus | null>()
  * 조회 결과를 적어 둔다. 폰이 보는 값이 바뀌었으면 `true` — 부르는 쪽이 그때 상태를
  * 방송해 미러가 새 스냅샷을 올리게 한다.
  *
- * 비교는 **투영되는 필드만** 본다(mirror.ts 의 projectPr). url·needsBaseUpdate 는 폰에
- * 가지 않으므로 그것만 달라진 것으로 방송하면 아무것도 바꾸지 못하는 방송이 된다.
- * 제목이 비교에 들어 있는 것이 중요하다 — 사용자 지정 이름이 없는 워크스페이스에서는
+ * 비교는 **투영되는 필드 전부**를 본다(mirror.ts 의 projectPr). 예전에는 number·state·label·
+ * title 만 봤는데, 그 사이 투영이 url·needsBaseUpdate 까지 싣도록 넓어졌다 — 그래서 base 가
+ * 뒤처지거나(BEHIND) 그 상태가 풀려도 방송이 없어, 폰의 "Update branch" 표시가 무관한 다른
+ * 변화가 생길 때까지 낡은 채로 남았다.
+ *
+ * 제목이 비교에 들어 있는 것도 중요하다 — 사용자 지정 이름이 없는 워크스페이스에서는
  * PR 제목이 곧 표시 이름이라, 제목만 바뀌어도 폰의 이름이 낡는다.
+ *
+ * 투영을 넓힐 때는 여기도 같이 넓혀야 한다. 반대로 좁힐 때도 마찬가지다 — 안 가는 값으로
+ * 방송하면 아무것도 바꾸지 못하는 방송이 워크스페이스 수만큼 반복된다.
  */
 export function rememberPrStatus(workspaceId: string, status: PrStatus | null): boolean {
   const known = cache.has(workspaceId)
@@ -34,7 +40,14 @@ export function rememberPrStatus(workspaceId: string, status: PrStatus | null): 
 
 function sameProjection(a: PrStatus | null, b: PrStatus | null): boolean {
   if (a === null || b === null) return a === b
-  return a.number === b.number && a.state === b.state && a.label === b.label && a.title === b.title
+  return (
+    a.number === b.number &&
+    a.state === b.state &&
+    a.label === b.label &&
+    a.title === b.title &&
+    a.url === b.url &&
+    a.needsBaseUpdate === b.needsBaseUpdate
+  )
 }
 
 export function getCachedPrStatus(workspaceId: string): PrStatus | null | undefined {

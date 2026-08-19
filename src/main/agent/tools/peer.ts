@@ -324,11 +324,61 @@ export function flushBufferedPeerMessages(workspaceId: string): boolean {
 }
 
 /**
+ * 세션이 곧바로 다시 열릴 것을 알고 있을 때, 버퍼를 **꺼내 들고** 있다가 새 세션에 넣는다.
+ *
+ * dispose 는 버퍼를 승인 대기로 되돌리는데([[resetPeerSession]]), 세션을 갈아 끼우자마자
+ * 다음 턴을 여는 경로([[agent/orchestrator]] handleTurnEnd 의 이어가기)에서는 그게 틀렸다 —
+ * 발신자는 이미 `delivered` 를 받아 갔고, 대상은 몇 밀리초 뒤에 멀쩡히 새 턴을 시작한다.
+ * 그래서 dispose 보다 먼저 꺼내 두고, 새 세션이 열린 뒤에 deliver 한다.
+ *
+ * 전달할 자리가 끝내 생기지 않으면 park 로 되돌린다 — 어느 쪽이든 조용히 사라지지는 않는다.
+ */
+export interface PeerHandoff {
+  deliver(): void
+  park(reason: string): void
+}
+
+export function detachBufferedPeerMessages(workspaceId: string): PeerHandoff | null {
+  const buffered = takeBuffered(workspaceId)
+  if (!buffered) return null
+  let settled = false
+  return {
+    deliver() {
+      if (settled) return
+      settled = true
+      try {
+        sendPeerDelivery(buffered.deps, workspaceId, buffered.messages)
+        log.info(`peer: 세션 교체 뒤 ${buffered.messages.length}건 전달 (${workspaceId})`)
+      } catch (err) {
+        log.error(`peer: 세션 교체 뒤 전달 실패 (${workspaceId})`, err)
+        parkUndelivered(buffered.deps, workspaceId, buffered.messages, '세션 교체 뒤 전달 실패')
+      }
+    },
+    park(reason: string) {
+      if (settled) return
+      settled = true
+      parkUndelivered(buffered.deps, workspaceId, buffered.messages, reason)
+    }
+  }
+}
+
+/**
+ * 세션 맥락이 새로 시작한다 — 전문 기억만 버린다.
+ *
+ * 대기 중인 묶음은 건드리지 않는다. 오류로 끝난 턴처럼 **세션이 아직 살아 있는** 자리에서
+ * 버퍼까지 되돌리면, 곧 유휴가 되어 받을 수 있는 메시지를 승인 대기로 처박게 된다
+ * (버퍼는 자기 타이머가 어차피 비운다 — PEER_BATCH_MAX_WAIT_MS).
+ */
+export function forgetPeerSessionRules(workspaceId: string): void {
+  sessionsWithPeerRules.delete(workspaceId)
+}
+
+/**
  * 세션이 사라지면 전문 기억을 버린다. 아직 모델이 보지 못한 묶음은 **버리지 않고** 승인 대기로
  * 되돌린다 — 세션이 사라진 것은 발신자의 잘못이 아니고, 그쪽은 이미 delivered 를 받아 갔다.
  */
 export function resetPeerSession(workspaceId: string, reason = '세션 재시작'): void {
-  sessionsWithPeerRules.delete(workspaceId)
+  forgetPeerSessionRules(workspaceId)
   const buffered = takeBuffered(workspaceId)
   if (buffered) parkUndelivered(buffered.deps, workspaceId, buffered.messages, reason)
 }
