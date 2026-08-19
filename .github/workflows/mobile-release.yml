@@ -154,6 +154,8 @@ jobs:
           fi
           echo "path=$file" >> "$GITHUB_OUTPUT"
           version="$(node -p "require('./app.json').expo.version")"
+          # 아티팩트 이름에는 `/` 를 못 쓴다 — 브랜치에서 돌리면 ref_name 이 `ci/foo` 라 죽는다.
+          echo "name=$version-${{ github.run_number }}" >> "$GITHUB_OUTPUT"
           {
             echo "## Android · $PROFILE"
             echo
@@ -170,7 +172,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: wooi-android-${{ github.ref_name }}
+          name: wooi-android-${{ steps.artifact.outputs.name }}
           path: ${{ steps.artifact.outputs.path }}
           if-no-files-found: error
           retention-days: 30
@@ -244,6 +246,8 @@ jobs:
           fi
           echo "path=$file" >> "$GITHUB_OUTPUT"
           version="$(node -p "require('./app.json').expo.version")"
+          # 아티팩트 이름에는 `/` 를 못 쓴다 — 브랜치에서 돌리면 ref_name 이 `ci/foo` 라 죽는다.
+          echo "name=$version-${{ github.run_number }}" >> "$GITHUB_OUTPUT"
           {
             echo "## iOS · $PROFILE"
             echo
@@ -255,7 +259,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: wooi-ios-${{ github.ref_name }}
+          name: wooi-ios-${{ steps.artifact.outputs.name }}
           path: ${{ steps.artifact.outputs.path }}
           if-no-files-found: error
           retention-days: 30
