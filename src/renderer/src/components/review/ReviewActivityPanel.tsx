@@ -1,11 +1,13 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
+  CheckCheck,
   CornerDownRight,
   ExternalLink,
   GitCommitHorizontal,
   Layers,
   Loader2,
-  Send
+  Send,
+  Undo2
 } from 'lucide-react'
 import type { ReviewActivityItem, ReviewSession } from '@shared/types'
 import { useStore } from '../../store'
@@ -210,6 +212,33 @@ function ActivityRow({
         <span>
           {item.prNumbers.map((n) => `#${n}`).join(', ')} restacked onto the new #{item.causedBy} —
           their diffs are unchanged.
+        </span>
+      </div>
+    )
+  }
+
+  // 상대가 내 지적을 Resolved 로 접었다. 답글 없이 접히는 일이 흔해서, 이 줄이 없으면
+  // "처리됐다" 는 사실이 화면 어디에도 남지 않는다.
+  if (item.kind === 'resolved') {
+    return (
+      <div className="flex items-center justify-center gap-1.5 py-1 text-xs text-[var(--success-300)]">
+        <CheckCheck size={12} className="shrink-0" />
+        <span>
+          Your comment{item.path ? ` on ${item.path}` : ''}
+          {item.prNumber ? ` (#${item.prNumber})` : ''} was marked resolved.
+        </span>
+      </div>
+    )
+  }
+
+  // 에이전트가 다시 보고 자기 지적을 거둬들였다. 카드가 말없이 사라지면 사용자는 무엇이 왜
+  // 없어졌는지 알 방법이 없다 — 이유까지 남겨야 되짚을 수 있다.
+  if (item.kind === 'withdrawn') {
+    return (
+      <div className="flex items-start justify-center gap-1.5 py-1 text-xs text-neutral-500">
+        <Undo2 size={12} className="mt-0.5 shrink-0" />
+        <span>
+          Withdrew &ldquo;{item.title}&rdquo; — {item.reason}
         </span>
       </div>
     )

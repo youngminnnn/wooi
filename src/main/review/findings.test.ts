@@ -28,6 +28,8 @@ const artifact = (over: Partial<ReviewArtifact>): ReviewArtifact => ({
   inline: [],
   stack: [],
   layers: [],
+  updates: [],
+  discards: [],
   ...over
 })
 

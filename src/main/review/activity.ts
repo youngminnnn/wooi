@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { ReviewActivityItem } from '@shared/types'
-import type { GhIssueComment, GhReviewComment } from '../github'
+import type { GhIssueComment, GhReviewComment, GhReviewThread } from '../github'
 
 export interface DetectActivityInput {
   reviewComments: GhReviewComment[]
@@ -126,6 +126,31 @@ export function detectOutdatedComments(
   for (const c of reviewComments) {
     if (!wanted.has(c.id)) continue
     out.set(c.id, c.position == null && c.line == null)
+  }
+  return out
+}
+
+/** 스레드 1건에서 우리가 쓰는 것 — node id 와 접힘 여부. */
+export interface ThreadState {
+  threadId: string
+  resolved: boolean
+}
+
+/**
+ * 내가 단 인라인 코멘트가 뿌리인 스레드의 **접힘 상태**를 코멘트 id 로 색인한다.
+ *
+ * outdated 와 마찬가지로 **목록에 없는 코멘트는 판단하지 않는다** — 아직 못 받았거나 상대가
+ * 지운 스레드를 "안 접혔다" 로 단정하면, 이미 접힌 지적이 화면에서 되살아난다.
+ */
+export function detectResolvedThreads(
+  threads: GhReviewThread[],
+  postedIds: number[]
+): Map<number, ThreadState> {
+  const wanted = new Set(postedIds)
+  const out = new Map<number, ThreadState>()
+  for (const t of threads) {
+    if (t.rootCommentId === null || !wanted.has(t.rootCommentId)) continue
+    out.set(t.rootCommentId, { threadId: t.id, resolved: t.isResolved })
   }
   return out
 }

@@ -1,6 +1,8 @@
 import type {
   ReviewArtifact,
+  ReviewFindingDiscard,
   ReviewFindingInput,
+  ReviewFindingRevision,
   ReviewLayerSummary,
   ReviewSeverity
 } from '@shared/types'
@@ -29,12 +31,16 @@ export function coerceArtifact(value: unknown): ReviewArtifact | null {
   const inline = coerceFindings(v.inline)
   const stack = coerceFindings(v.stack)
   const hasReply = typeof v.reply === 'string' && v.reply.trim().length > 0
+  // 고쳐 쓰기·거둬들이기만 담긴 턴도 유효한 결과다("다 고쳤으니 그 지적들 거둬라"). 이걸
+  // 빼먹으면 그런 턴이 통째로 "구조화 출력 없음" 으로 떨어져 원문이 총평 자리에 박힌다.
+  const revises = Array.isArray(v.updates) || Array.isArray(v.discards)
   if (
     general === null &&
     inline === null &&
     stack === null &&
     typeof v.summary !== 'string' &&
-    !hasReply
+    !hasReply &&
+    !revises
   ) {
     return null
   }
@@ -44,8 +50,51 @@ export function coerceArtifact(value: unknown): ReviewArtifact | null {
     general: general ?? [],
     inline: inline ?? [],
     stack: stack ?? [],
-    layers: coerceLayerSummaries(v.layers)
+    layers: coerceLayerSummaries(v.layers),
+    updates: coerceUpdates(v.updates),
+    discards: coerceDiscards(v.discards)
   }
+}
+
+/**
+ * 앞선 지적을 고쳐 쓰라는 지시. **핸들만 필수**다 — 나머지는 준 것만 바뀌므로, 하나도 안 준
+ * 항목은 아무 일도 하지 않는 빈 지시라 여기서 걸러 낸다.
+ */
+function coerceUpdates(value: unknown): ReviewFindingRevision[] {
+  if (!Array.isArray(value)) return []
+  const out: ReviewFindingRevision[] = []
+  for (const raw of value) {
+    if (!raw || typeof raw !== 'object') continue
+    const u = raw as Record<string, unknown>
+    const id = typeof u.id === 'string' ? u.id.trim() : ''
+    if (!id) continue
+    const title = typeof u.title === 'string' ? u.title.trim() : ''
+    const body = typeof u.body === 'string' ? u.body.trim() : ''
+    const severity = SEVERITIES.has(String(u.severity)) ? (u.severity as ReviewSeverity) : undefined
+    if (!title && !body && !severity) continue
+    out.push({
+      id,
+      ...(severity ? { severity } : {}),
+      ...(title ? { title } : {}),
+      ...(body ? { body } : {})
+    })
+  }
+  return out
+}
+
+/** 지적을 거둬들이라는 지시. 이유는 없어도 받는다 — 이유가 없다고 지시를 흘리면 목록만 남는다. */
+function coerceDiscards(value: unknown): ReviewFindingDiscard[] {
+  if (!Array.isArray(value)) return []
+  const out: ReviewFindingDiscard[] = []
+  for (const raw of value) {
+    if (!raw || typeof raw !== 'object') continue
+    const d = raw as Record<string, unknown>
+    const id = typeof d.id === 'string' ? d.id.trim() : ''
+    if (!id) continue
+    const reason = typeof d.reason === 'string' ? d.reason.trim() : ''
+    out.push({ id, ...(reason ? { reason } : {}) })
+  }
+  return out
 }
 
 function coerceLayerSummaries(value: unknown): ReviewLayerSummary[] {

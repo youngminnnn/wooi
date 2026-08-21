@@ -1118,6 +1118,93 @@ export async function listReviewComments(
   return ghApiGetAll<GhReviewComment>(repoPath, `repos/{owner}/{repo}/pulls/${n}/comments`)
 }
 
+/**
+ * PR 의 인라인 리뷰 스레드 1건.
+ *
+ * REST 의 코멘트 목록에는 **resolve 상태가 없다** — GitHub 은 그것을 GraphQL 의 reviewThread
+ * 로만 노출한다. 그래서 답글은 REST 로, 접힘 여부는 여기로 따로 받는다.
+ */
+export interface GhReviewThread {
+  /** GraphQL node id. 나중에 우리가 스레드를 접거나 펼 때 필요한 유일한 손잡이다. */
+  id: string
+  isResolved: boolean
+  /**
+   * 스레드 루트 코멘트의 REST id. 우리가 게시하며 받아 둔 값과 같은 공간이라, 이것이
+   * postedComments 와 스레드를 잇는 조인 키다.
+   */
+  rootCommentId: number | null
+}
+
+/**
+ * PR 의 리뷰 스레드와 그 resolve 상태를 가져온다.
+ *
+ * `{owner}`/`{repo}` 자리표시자는 gh 가 cwd 의 리포로 치환해 준다(REST 경로와 같은 규칙이며,
+ * graphql 하위 명령에서도 `-F` 값에 대해 동작한다). 그래서 owner/repo 를 따로 알아낼 필요가 없다.
+ *
+ * 페이지는 커서로 직접 넘긴다 — `--paginate` 는 JSON 문서를 연달아 뱉어 한 번에 파싱할 수 없다
+ * (ghApiGetAll 과 같은 이유).
+ */
+export async function listReviewThreads(
+  repoPath: string,
+  prNumber: number
+): Promise<GhReviewThread[] | null> {
+  if (!(await connected())) return null
+  const n = safePrNumber(prNumber)
+  if (n === null) return null
+
+  const query = `query($owner:String!,$name:String!,$number:Int!,$after:String){
+  repository(owner:$owner,name:$name){
+    pullRequest(number:$number){
+      reviewThreads(first:100,after:$after){
+        pageInfo{ hasNextPage endCursor }
+        nodes{ id isResolved comments(first:1){ nodes{ databaseId } } }
+      }
+    }
+  }
+}`
+
+  const out: GhReviewThread[] = []
+  let after: string | null = null
+  for (let page = 0; page < 10; page++) {
+    const cursor = after ? ` -F after=${shellQuote(after)}` : ''
+    const { stdout, code } = await runLoginShell(
+      `gh api graphql -F owner='{owner}' -F name='{repo}' -F number=${n}${cursor} -f query=${shellQuote(query)}`,
+      repoPath
+    )
+    if (code !== 0) return out.length ? out : null
+    let threads: {
+      pageInfo?: { hasNextPage?: boolean; endCursor?: string | null }
+      nodes?: Array<{
+        id?: string
+        isResolved?: boolean
+        comments?: { nodes?: Array<{ databaseId?: number | null }> }
+      }>
+    }
+    try {
+      const parsed = JSON.parse(stdout.trim()) as {
+        data?: { repository?: { pullRequest?: { reviewThreads?: typeof threads } } }
+      }
+      const found = parsed.data?.repository?.pullRequest?.reviewThreads
+      if (!found) return out.length ? out : null
+      threads = found
+    } catch {
+      return out.length ? out : null
+    }
+
+    for (const node of threads.nodes ?? []) {
+      if (!node?.id) continue
+      out.push({
+        id: node.id,
+        isResolved: node.isResolved === true,
+        rootCommentId: node.comments?.nodes?.[0]?.databaseId ?? null
+      })
+    }
+    if (!threads.pageInfo?.hasNextPage || !threads.pageInfo.endCursor) break
+    after = threads.pageInfo.endCursor
+  }
+  return out
+}
+
 /** PR 타임라인 코멘트 전체. */
 export async function listIssueComments(
   repoPath: string,

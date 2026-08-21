@@ -1,6 +1,13 @@
 import { describe, it, expect } from 'vitest'
-import { buildResumePrompt, buildReviewPrompt, crossLayerFiles, reviewOutputSchema } from './prompt'
-import type { ReviewPromptLayer } from './prompt'
+import {
+  buildFollowUpPrompt,
+  buildResumePrompt,
+  buildReviewPrompt,
+  crossLayerFiles,
+  renderFindingInventory,
+  reviewOutputSchema
+} from './prompt'
+import type { PromptFinding, ReviewPromptLayer } from './prompt'
 import { parseReviewDiff } from './diff'
 import type { ReviewLayerDiff } from '@shared/types'
 
@@ -240,5 +247,99 @@ describe('buildResumePrompt', () => {
 
     expect(text).toContain('What happened while you were stopped')
     expect(text).toContain('@someone replied')
+  })
+})
+
+describe('renderFindingInventory', () => {
+  const pending: PromptFinding = {
+    handle: 'a1b2c3d4',
+    severity: 'major',
+    title: 'Race between save and load',
+    where: 'src/main/store.ts:42',
+    state: 'pending',
+    locked: false
+  }
+  const posted: PromptFinding = {
+    handle: 'e5f6a7b8',
+    severity: 'nit',
+    title: 'Typo in the comment',
+    where: 'general',
+    state: 'posted · resolved',
+    locked: true
+  }
+
+  it('핸들·자리·상태를 한 줄에 싣는다 — 셋이 다 있어야 지목할 수 있다', () => {
+    const text = renderFindingInventory([pending])
+    expect(text).toContain('[a1b2c3d4]')
+    expect(text).toContain('src/main/store.ts:42')
+    expect(text).toContain('pending')
+    expect(text).toContain('Race between save and load')
+  })
+
+  /** 게시된 것을 고쳐 쓰라고 시키면 지시가 통째로 무시된다 — 시키기 전에 말려야 한다. */
+  it('게시된 지적이 있으면 손댈 수 없다고 못 박는다', () => {
+    const text = renderFindingInventory([pending, posted])
+    expect(text).toMatch(/cannot be rewritten or withdrawn/)
+  })
+
+  it('게시된 것이 없으면 그 경고를 붙이지 않는다', () => {
+    expect(renderFindingInventory([pending])).not.toMatch(/cannot be rewritten/)
+  })
+
+  it('지적이 없으면 아무것도 싣지 않는다', () => {
+    expect(renderFindingInventory([])).toBe('')
+  })
+})
+
+describe('buildFollowUpPrompt', () => {
+  it('사용자의 말이 맨 앞에 온다 — 프롬프트의 주제를 정하는 것은 그쪽이다', () => {
+    expect(buildFollowUpPrompt('다시 봐줘', [])).toMatch(/^다시 봐줘/)
+  })
+
+  it('지적 목록이 있으면 고쳐 쓰기·거둬들이기를 안내한다', () => {
+    const text = buildFollowUpPrompt(
+      '다시 봐줘',
+      [],
+      [
+        {
+          handle: 'a1b2c3d4',
+          severity: 'major',
+          title: 'Race',
+          where: 'a.ts:1',
+          state: 'pending',
+          locked: false
+        }
+      ]
+    )
+    expect(text).toContain('[a1b2c3d4]')
+    expect(text).toMatch(/discards/)
+    expect(text).toMatch(/updates/)
+  })
+
+  it('지적이 없으면 목록 절을 통째로 뺀다', () => {
+    expect(buildFollowUpPrompt('질문 하나', [])).not.toMatch(/Findings you have already reported/)
+  })
+})
+
+describe('reviewOutputSchema — 고쳐 쓰기 칸', () => {
+  const propsOf = (n: number): Record<string, { items?: { required?: string[] } }> =>
+    reviewOutputSchema(n).properties as Record<string, { items?: { required?: string[] } }>
+
+  /** 단일 PR 리뷰야말로 "고쳤으니 다시 봐줘" 가 가장 흔한 자리다. */
+  it('단일 PR 리뷰에도 updates·discards 칸이 있다', () => {
+    expect(propsOf(1).updates).toBeTruthy()
+    expect(propsOf(1).discards).toBeTruthy()
+  })
+
+  /** 질문 하나에 답하는 턴까지 두 칸을 채우게 만들면 모델이 없는 지시를 지어낸다. */
+  it('둘 다 required 가 아니다', () => {
+    for (const n of [1, 3]) {
+      expect(reviewOutputSchema(n).required).not.toContain('updates')
+      expect(reviewOutputSchema(n).required).not.toContain('discards')
+    }
+  })
+
+  it('거둬들이기는 이유를 요구한다 — 이유 없이 사라지면 되짚을 근거가 없다', () => {
+    expect(propsOf(1).discards.items?.required).toEqual(['id', 'reason'])
   })
 })

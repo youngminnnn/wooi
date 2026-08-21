@@ -1,6 +1,11 @@
 import { describe, it, expect } from 'vitest'
-import type { GhIssueComment, GhReviewComment } from '../github'
-import { detectNewActivity, detectOutdatedComments, type DetectActivityInput } from './activity'
+import type { GhIssueComment, GhReviewComment, GhReviewThread } from '../github'
+import {
+  detectNewActivity,
+  detectOutdatedComments,
+  detectResolvedThreads,
+  type DetectActivityInput
+} from './activity'
 
 function rc(over: Partial<GhReviewComment> & { id: number }): GhReviewComment {
   return {
@@ -184,6 +189,42 @@ describe('detectOutdatedComments', () => {
    */
   it('목록에 없는 코멘트는 손대지 않는다', () => {
     const map = detectOutdatedComments([], [100])
+    expect(map.size).toBe(0)
+  })
+})
+
+describe('detectResolvedThreads', () => {
+  const thread = (over: Partial<GhReviewThread> & { id: string }): GhReviewThread => ({
+    isResolved: false,
+    rootCommentId: null,
+    ...over
+  })
+
+  it('내 코멘트가 뿌리인 스레드의 접힘 상태를 코멘트 id 로 색인한다', () => {
+    const map = detectResolvedThreads(
+      [thread({ id: 'T1', isResolved: true, rootCommentId: 100 })],
+      [100]
+    )
+    expect(map.get(100)).toEqual({ threadId: 'T1', resolved: true })
+  })
+
+  /** 남의 스레드까지 끌어오면 다른 사람의 리뷰 상태가 내 지적 카드에 붙는다. */
+  it('내가 달지 않은 스레드는 무시한다', () => {
+    const map = detectResolvedThreads(
+      [thread({ id: 'T2', isResolved: true, rootCommentId: 999 })],
+      [100]
+    )
+    expect(map.size).toBe(0)
+  })
+
+  /** 아직 못 받았거나 지워진 스레드를 "안 접혔다" 로 단정하면 이미 접힌 지적이 되살아난다. */
+  it('목록에 없는 코멘트는 아예 판단하지 않는다', () => {
+    const map = detectResolvedThreads([], [100])
+    expect(map.has(100)).toBe(false)
+  })
+
+  it('루트 코멘트를 못 읽은 스레드는 이을 곳이 없어 건너뛴다', () => {
+    const map = detectResolvedThreads([thread({ id: 'T3', isResolved: true })], [100])
     expect(map.size).toBe(0)
   })
 })
