@@ -200,6 +200,7 @@ import type {
   Repo,
   RestackResult,
   RewindActionResult,
+  RewindMode,
   SavedPrompt,
   StackCascadeResult,
   StackCascadeStep,
@@ -3181,16 +3182,17 @@ export function registerIpc(ctx: IpcContext): void {
     }
   )
 
-  // /rewind 패널 — 고른 체크포인트(사용자 메시지 UUID)로 추적된 파일을 되돌린다.
+  // /rewind 패널 — 고른 체크포인트(사용자 메시지 UUID)로 파일·대화를 되돌린다.
   handle(
     IPC.commandRewindAction,
     async (
       _e,
       workspaceId: string,
-      userMessageId: string
+      userMessageId: string,
+      mode: RewindMode
     ): Promise<{ result?: RewindActionResult; error?: string }> => {
       try {
-        const result = await ctx.sessions.rewindAction(workspaceId, userMessageId)
+        const result = await ctx.sessions.rewindAction(workspaceId, userMessageId, mode)
         return { result }
       } catch (err) {
         return { error: err instanceof Error ? err.message : String(err) }

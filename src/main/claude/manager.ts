@@ -19,7 +19,13 @@ import {
 import { CLAUDE_META, CLAUDE_MODELS, type AgentBackend, type TurnEndHook } from '../agent/backend'
 import { agentDefaultsFor, canLeadAgentTeam, delegateBackendsFor } from '../agent/multiAgent'
 import { agentDefaultEnv } from '../agentEnv'
-import { claudeMode, type HostCommand, type HostEvent, type SessionConfig } from './protocol'
+import {
+  claudeMode,
+  type HostCommand,
+  type HostEvent,
+  type RewindHostResult,
+  type SessionConfig
+} from './protocol'
 import { runAgentTool } from '../agent/tools'
 import { RateLimitResumeCoordinator } from '../rateLimitResume'
 import { ShutdownResumeCoordinator } from '../shutdownResume'
@@ -44,6 +50,7 @@ import type {
   PermissionRequest,
   RateLimitSnapshot,
   RewindActionResult,
+  RewindMode,
   SendMessageOptions,
   SlashCommandInfo,
   UsageInfo,
@@ -500,17 +507,51 @@ export class SessionManager implements AgentBackend {
     }))
   }
 
-  /** /rewind — 고른 체크포인트로 추적된 파일을 되돌리고 결과를 돌려준다. */
-  async rewindAction(workspaceId: string, userMessageId: string): Promise<RewindActionResult> {
+  /**
+   * /rewind — 고른 체크포인트로 파일·대화를 되돌리고 결과를 돌려준다.
+   *
+   * 파일 되돌리기는 호스트가 끝까지 처리하지만, 대화 되돌리기는 반쪽만 호스트 소유다: CLI 세션을
+   * 자르는 것은 호스트가, 화면에 남은 트랜스크립트와 워크스페이스 store 를 맞추는 것은 메인이
+   * 한다. 호스트는 후자를 지시로 돌려주고(RewindHostResult), 여기서 처리한 뒤 떼고 넘긴다.
+   */
+  async rewindAction(
+    workspaceId: string,
+    userMessageId: string,
+    mode: RewindMode
+  ): Promise<RewindActionResult> {
     const ws = this.getWorkspace(workspaceId)
     if (!ws) throw new Error('Workspace not found.')
-    return this.request<RewindActionResult>((reqId) => ({
-      type: 'rewindAction',
-      reqId,
-      workspaceId,
-      config: this.configFor(ws),
-      userMessageId
-    }))
+    const { truncateFromItemId, sessionReset, ...result } = await this.request<RewindHostResult>(
+      (reqId) => ({
+        type: 'rewindAction',
+        reqId,
+        workspaceId,
+        config: this.configFor(ws),
+        userMessageId,
+        mode
+      })
+    )
+
+    if (truncateFromItemId) {
+      const dropped = getTranscripts().truncateFrom(workspaceId, truncateFromItemId)
+      // 되돌림 지점의 사용자 메시지 원문을 입력창에 채워 준다 — 고쳐서 다시 보내는 것이 이 동작의
+      // 목적이기 때문이다. 호스트가 넣어 둔 라벨(첫 줄)보다 이쪽이 정확하다(여러 줄·전체 본문).
+      const target = dropped[0]
+      if (target && 'text' in target && typeof target.text === 'string')
+        result.prefill = target.text
+      this.emit(workspaceId, { type: 'truncate', fromItemId: truncateFromItemId })
+    }
+
+    if (sessionReset) {
+      this.rateLimitResume.cancel(workspaceId)
+      getStore().update((st) => {
+        const w = st.workspaces.find((x) => x.id === workspaceId)
+        if (w) w.sessionId = null
+      })
+      this.dispatch(IPC.evtState, getStore().getState())
+    }
+
+    return result
   }
 
   /**

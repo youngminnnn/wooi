@@ -73,6 +73,7 @@ import type {
   MigrationScanArgs,
   ReviewVerdict,
   RewindActionResult,
+  RewindMode,
   StackCascadeResult,
   StackOpProgress,
   ScriptExitEvent,
@@ -594,12 +595,14 @@ export interface WooiApi {
       action: McpAction
     ): Promise<{ servers?: McpServerInfo[]; error?: string }>
     /**
-     * /rewind 패널에서 고른 체크포인트(사용자 메시지 UUID)로 추적된 파일을 되돌린다.
-     * 파일 체크포인팅이 켜진 살아 있는 세션 위에서만 의미가 있다(세션이 없으면 canRewind=false).
+     * /rewind 패널에서 고른 체크포인트(사용자 메시지 UUID)로 되돌린다. `mode` 가 파일·대화·둘 다를
+     * 가른다. 파일 되돌리기는 파일 체크포인팅이 켜진 살아 있는 세션 위에서만 의미가 있다
+     * (세션이 없으면 canRewind=false). 대화 되돌리기는 세션 객체만 살아 있으면 된다.
      */
     rewindAction(
       workspaceId: string,
-      userMessageId: string
+      userMessageId: string,
+      mode: RewindMode
     ): Promise<{ result?: RewindActionResult; error?: string }>
     /**
      * `/wooi:*` 즉시 실행 명령을 에이전트 없이 바로 돌린다([[shared/wooiCommands]]).

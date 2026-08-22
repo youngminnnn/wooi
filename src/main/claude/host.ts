@@ -241,7 +241,7 @@ async function handle(msg: HostCommand): Promise<void> {
               'No live session to rewind. Send a message first, then rewind within the same session.'
           }
         }
-        return session.rewind(msg.userMessageId)
+        return session.rewind(msg.userMessageId, msg.mode)
       })
       break
 
