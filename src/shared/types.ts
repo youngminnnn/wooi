@@ -1828,6 +1828,8 @@ export type ChatEvent =
   | { type: 'agents'; agents: RunningAgent[] }
   /** 현재 세션의 목표 전체 스냅샷. null 이면 목표가 없다(REPLACE 시맨틱, 영속 금지). */
   | { type: 'goal'; goal: WorkspaceGoal | null }
+  /** 다음 프롬프트 제안. null 이면 제거한다(REPLACE 시맨틱, 영속 금지). */
+  | { type: 'promptSuggestion'; suggestion: string | null }
   /**
    * 에이전트가 방금 작업 트리를 건드렸다 — git 상태를 다시 읽으라는 **신호**다.
    *

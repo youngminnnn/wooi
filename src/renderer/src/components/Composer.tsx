@@ -119,6 +119,8 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
   // 초안은 store 에 보관해 workspace 전환에도 살아남는다(작성 중 메시지 분실 방지).
   const text = useStore((s) => s.drafts[workspace.id] ?? '')
   const setDraft = useStore((s) => s.setDraft)
+  const promptSuggestion = useStore((s) => s.promptSuggestions[workspace.id] ?? null)
+  const clearPromptSuggestion = useStore((s) => s.clearPromptSuggestion)
   const items = useStore((s) => s.transcripts[workspace.id]) ?? EMPTY
   // 실행 중 보낸 후속 메시지의 대기 큐(전송 전이라 취소 가능, 턴 종료 시 자동 전송).
   const queue = useStore((s) => s.messageQueue[workspace.id]) ?? EMPTY_QUEUE
@@ -599,10 +601,14 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
     // steering 지원 시에는 즉시 전송해 현재 턴에 반영한다.
     setPickerCard(null)
     if (running && !backend?.capabilities.steering) {
+      clearPromptSuggestion(workspace.id)
       enqueueMessage(workspace.id, trimmed, payload.length ? payload : undefined)
       // 큐에 넣은 뒤 중단한다 — 순서가 반대면 턴이 먼저 끝나 플러시가 이 메시지를 놓친다.
       if (opts?.stopFirst) void window.api.chat.interrupt(workspace.id)
-    } else void window.api.chat.send(workspace.id, trimmed, payload.length ? payload : undefined)
+    } else {
+      clearPromptSuggestion(workspace.id)
+      void window.api.chat.send(workspace.id, trimmed, payload.length ? payload : undefined)
+    }
     setText('')
     setImages([])
     historyIdx.current = -1
@@ -881,6 +887,15 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
       }
     }
 
+    // 자동완성이 열리지 않은 빈 입력창에서만 제안을 받는다. Shift+Tab 권한 모드 순환은 건드리지 않는다.
+    if (e.key === 'Tab' && !e.shiftKey && text === '' && promptSuggestion) {
+      e.preventDefault()
+      clearPromptSuggestion(workspace.id)
+      setText(promptSuggestion)
+      historyIdx.current = -1
+      return
+    }
+
     // 카드 Esc 닫기는 window 리스너(위 useEffect)가 포커스와 무관하게 처리한다.
 
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
@@ -1021,6 +1036,8 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
               ref={taRef}
               value={text}
               onChange={(e) => {
+                // 첫 입력에서 저장된 값 자체를 버려, 다시 빈 입력으로 돌아와도 제안이 살아나지 않게 한다.
+                if (promptSuggestion) clearPromptSuggestion(workspace.id)
                 // 커서를 입력과 같은 렌더에서 갱신한다 — 한 프레임이라도 어긋나면
                 // @멘션 감지가 이전 커서로 잘못된 질의를 만든다.
                 setText(e.target.value)
@@ -1037,7 +1054,9 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
                   ? 'Compacting the conversation…  (input resumes when it finishes)'
                   : running
                     ? 'Queue a follow-up…  (Enter to queue · ⌘Enter to stop the turn and send now)'
-                    : 'Message your agent…  (Enter to send · @ for files · / for commands · ! for terminal)'
+                    : text === '' && promptSuggestion
+                      ? `⇥ ${promptSuggestion}`
+                      : 'Message your agent…  (Enter to send · @ for files · / for commands · ! for terminal)'
               }
               className="flex-1 bg-transparent resize-none outline-none text-base leading-relaxed text-neutral-200 placeholder:text-neutral-600 py-1 disabled:cursor-not-allowed"
             />
