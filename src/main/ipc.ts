@@ -26,12 +26,14 @@ import {
   fetchRemoteForRepo,
   isGitRepo,
   isWorktreeClean,
+  listCommits,
   listBranches,
   removeWorktree,
   repoNameFromPath,
   restackOnto,
   updateFromBase
 } from './git'
+import { moveCommitDown, previewCommitMove } from './commitMove'
 import {
   applyCarryExcludes,
   carryIntoWorktree,
@@ -140,6 +142,9 @@ import type {
   CodexPluginRef,
   CarryItem,
   ChatItem,
+  CommitEntry,
+  CommitMovePreview,
+  CommitMoveResult,
   CreateFanoutArgs,
   CreateFanoutResult,
   CodexLoginMethod,
@@ -1400,6 +1405,70 @@ export function registerIpc(ctx: IpcContext): void {
       operation.finish()
     }
   })
+
+  // 커밋 목록은 현재 레이어의 경계(baseBranch..HEAD)를 main 에서만 해석한다. 렌더러가 ref 조합을
+  // 만들기 시작하면 모델 A/B와 checkout 상태에 따라 같은 화면이 서로 다른 범위를 보여 주게 된다.
+  handle(IPC.stackCommitsList, async (_e, workspaceId: string): Promise<CommitEntry[]> => {
+    const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
+    if (!ws || ws.archived) return []
+    return listCommits(ws.worktreePath, ws.baseBranch)
+  })
+
+  handle(
+    IPC.stackCommitMovePreview,
+    async (
+      _e,
+      workspaceId: string,
+      sha: string
+    ): Promise<CommitMovePreview | { error: string }> => {
+      const upper = store.getState().workspaces.find((w) => w.id === workspaceId)
+      const workspaces = upper
+        ? store.getState().workspaces.filter((w) => w.repoId === upper.repoId && !w.archived)
+        : []
+      try {
+        return await previewCommitMove({ workspaces, upperWorkspaceId: workspaceId, sha })
+      } catch (err) {
+        return { error: err instanceof Error ? err.message : String(err) }
+      }
+    }
+  )
+
+  handle(
+    IPC.stackCommitMoveApply,
+    async (_e, workspaceId: string, sha: string): Promise<CommitMoveResult> => {
+      const upper = store.getState().workspaces.find((w) => w.id === workspaceId)
+      const workspaces = upper
+        ? store.getState().workspaces.filter((w) => w.repoId === upper.repoId && !w.archived)
+        : []
+      // 코어가 apply 직전에 blocker 전체를 다시 읽는다. preview 때의 깨끗함이나 원격 tip을 여기서
+      // 신뢰하면 확인 화면과 클릭 사이의 짧은 틈으로도 다른 작업을 덮어쓸 수 있다.
+      const lowerId = upper?.parentWorkspaceId ?? null
+      const affected = lowerId
+        ? workspaces.filter((candidate) => {
+            if (candidate.id === lowerId || candidate.id === workspaceId) return true
+            let parentId = candidate.parentWorkspaceId
+            while (parentId) {
+              if (parentId === lowerId) return true
+              parentId = workspaces.find((w) => w.id === parentId)?.parentWorkspaceId ?? null
+            }
+            return false
+          }).length
+        : null
+      const operation = stackProgress(workspaceId, 'commit-move', affected)
+      try {
+        const result = await moveCommitDown({
+          workspaces,
+          upperWorkspaceId: workspaceId,
+          sha,
+          progress: operation.sink
+        })
+        if (result.status === 'moved') broadcastState()
+        return result
+      } finally {
+        operation.finish()
+      }
+    }
+  )
 
   // 모델 B: worktree 내부 스택의 다른 브랜치로 체크아웃 전환한다(clean 워킹트리 필요).
   handle(

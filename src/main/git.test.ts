@@ -11,8 +11,82 @@ import {
   summarizeBranch,
   getDiff,
   getStatus,
-  fetchRemoteForRepo
+  fetchRemoteForRepo,
+  listCommits,
+  commitInRange,
+  commitChangedPaths,
+  pushBranchForceWithLease
 } from './git'
+
+describe('커밋 이동 조회 원시 연산', () => {
+  let root: string
+  const git = (args: string[]): string =>
+    execFileSync('git', args, { cwd: root, encoding: 'utf-8' }).trim()
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'wooi-commit-list-'))
+    git(['init', '-q', '-b', 'main'])
+    git(['config', 'user.email', 'test@example.com'])
+    git(['config', 'user.name', '테스터'])
+    writeFileSync(join(root, 'base.txt'), 'base\n')
+    git(['add', '-A'])
+    git(['commit', '-qm', 'base'])
+    git(['checkout', '-qb', 'upper'])
+    writeFileSync(join(root, 'one.txt'), 'one\n')
+    git(['add', '-A'])
+    git(['commit', '-qm', '탭\t| 파이프와 한글'])
+    git(['checkout', '-qb', 'side'])
+    writeFileSync(join(root, 'side.txt'), 'side\n')
+    git(['add', '-A'])
+    git(['commit', '-qm', 'side'])
+    git(['checkout', '-q', 'upper'])
+    writeFileSync(join(root, 'two.txt'), 'two\n')
+    git(['add', '-A'])
+    git(['commit', '-qm', 'two'])
+    git(['merge', '-q', '--no-ff', '-m', 'merge side', 'side'])
+  })
+
+  afterEach(() => rmSync(root, { recursive: true, force: true }))
+
+  it('최신순·비 merge 목록과 구분자에 안전한 제목, limit 을 보존한다', async () => {
+    const commits = await listCommits(root, 'main')
+    expect(commits.map((entry) => entry.subject)).toEqual(['two', 'side', '탭\t| 파이프와 한글'])
+    expect(commits[2]).toMatchObject({ authorName: '테스터' })
+    expect(commits[2].authoredAt).toBeGreaterThan(0)
+    await expect(listCommits(root, 'main', 2)).resolves.toHaveLength(2)
+  })
+
+  it('범위 밖 커밋과 merge 커밋을 거부한다', async () => {
+    const merge = git(['rev-parse', 'upper'])
+    const base = git(['rev-parse', 'main'])
+    const ordinary = git(['rev-parse', 'upper^1'])
+    await expect(commitInRange(root, 'main', ordinary)).resolves.toBe(true)
+    await expect(commitInRange(root, 'main', merge)).resolves.toBe(false)
+    await expect(commitInRange(root, 'main', base)).resolves.toBe(false)
+  })
+
+  it('커밋 하나가 건드린 경로를 반환한다', async () => {
+    const sha = git(['rev-parse', 'upper^1'])
+    await expect(commitChangedPaths(root, sha)).resolves.toEqual(['two.txt'])
+  })
+
+  it('기존 리모트 브랜치를 force-with-lease 로 갱신한다', async () => {
+    const bare = join(root, 'origin.git')
+    git(['init', '-q', '--bare', bare])
+    git(['remote', 'add', 'origin', bare])
+    git(['push', '-qu', 'origin', 'upper'])
+    const oldRemote = git(['rev-parse', 'upper'])
+    git(['reset', '-q', '--hard', 'upper^1'])
+    writeFileSync(join(root, 'replacement.txt'), 'replacement\n')
+    git(['add', '-A'])
+    git(['commit', '-qm', 'replacement'])
+    const replacement = git(['rev-parse', 'upper'])
+    expect(replacement).not.toBe(oldRemote)
+
+    await expect(pushBranchForceWithLease(root, 'upper')).resolves.toBe(true)
+    expect(git(['--git-dir', bare, 'rev-parse', 'upper'])).toBe(replacement)
+  })
+})
 
 describe('getStatus base 해석', () => {
   let root: string
