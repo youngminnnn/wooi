@@ -501,7 +501,7 @@ async function handle(msg: CodexCommand): Promise<void> {
       break
 
     case 'review':
-      await ensure(msg.workspaceId, msg.config).review()
+      await ensure(msg.workspaceId, msg.config).review(msg.target)
       break
 
     case 'shell':

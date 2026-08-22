@@ -79,8 +79,29 @@ const CODEX_COMMAND_NAMES = new Set([
   'permissions',
   'compact',
   'review',
-  'fork'
+  'fork',
+  'rename',
+  'archive',
+  'delete'
 ])
+
+export function parseReviewTarget(
+  text: string
+):
+  | { type: 'uncommittedChanges' }
+  | { type: 'baseBranch'; branch: string }
+  | { type: 'commit'; sha: string }
+  | null {
+  const match = /^\/review(?:\s+([\s\S]+))?$/.exec(text.trim())
+  if (!match) return null
+  const args = match[1]?.trim()
+  if (!args) return { type: 'uncommittedChanges' }
+  const base = /^base\s+(\S+)$/.exec(args)
+  if (base) return { type: 'baseBranch', branch: base[1] }
+  const commit = /^commit\s+(\S+)$/.exec(args)
+  if (commit) return { type: 'commit', sha: commit[1] }
+  return null
+}
 
 function describe(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
@@ -381,8 +402,9 @@ export class CodexSessionManager implements AgentBackend {
       this.send({ type: 'compact', workspaceId, config: this.configFor(ws) })
       return
     }
-    if (!images?.length && text.trim() === '/review') {
-      this.send({ type: 'review', workspaceId, config: this.configFor(ws) })
+    const reviewTarget = !images?.length ? parseReviewTarget(text) : null
+    if (reviewTarget) {
+      this.send({ type: 'review', workspaceId, config: this.configFor(ws), target: reviewTarget })
       return
     }
     // `/wooi:*` 는 Wooi 커맨드다. Claude 는 CLI 가 플러그인 본문으로 확장해 주지만 Codex 는
@@ -416,6 +438,26 @@ export class CodexSessionManager implements AgentBackend {
           text,
           skill: { name: skill.name, path: skill.path, prompt: match?.[2] ?? '' }
         })
+        return
+      }
+
+      // 전체 입력이 슬래시 명령처럼 생길 때만 막는다. 문장 중간의 경로·URL은 평범한 프롬프트다.
+      // 설치된 skill은 바로 위에서 먼저 찾으므로 동적 `/skill-name` 명령도 계속 동작한다.
+      if (match) {
+        const usage =
+          match[1] === 'review'
+            ? 'Use /review, /review base <branch>, or /review commit <sha>.'
+            : match[1] === 'delete'
+              ? '/delete is unavailable because Wooi cannot make its scope and confirmation unambiguous from chat.'
+              : `Unknown or unsupported command: /${match[1]}`
+        const item: ChatItem = {
+          id: `codex:command:${randomUUID()}`,
+          type: 'system',
+          text: usage,
+          ts: Date.now()
+        }
+        getTranscripts().upsert(workspaceId, item)
+        this.emit(workspaceId, { type: 'item', item })
         return
       }
     }

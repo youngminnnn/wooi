@@ -262,6 +262,27 @@ describe('skill 호출', () => {
   })
 })
 
+describe('lifecycle commands', () => {
+  it('passes an explicit base branch review target to app-server', async () => {
+    const rpc = {
+      request: vi.fn(async (method: string) => {
+        if (method === RPC.threadStart) return { thread: { id: 'thr1' } }
+        return {}
+      })
+    } as unknown as RpcClient
+    const { thread } = makeThread()
+    ;(thread as unknown as { deps: { rpc: () => Promise<RpcClient> } }).deps.rpc = async () => rpc
+
+    await thread.review({ type: 'baseBranch', branch: 'main' })
+
+    expect(rpc.request).toHaveBeenCalledWith(RPC.reviewStart, {
+      threadId: 'thr1',
+      target: { type: 'baseBranch', branch: 'main' },
+      delivery: 'inline'
+    })
+  })
+})
+
 describe('알 수 없는 입력', () => {
   it('같은 종류는 unknown 아이템을 한 번만 방출하고 저장한다', () => {
     const { thread, events, persisted } = makeThread()

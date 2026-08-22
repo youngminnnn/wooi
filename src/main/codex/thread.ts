@@ -220,14 +220,19 @@ export class CodexThread {
     }
   }
 
-  /** CLI `/review` 와 같은 현재 worktree 미커밋 변경 리뷰를 현재 대화에서 실행한다. */
-  async review(): Promise<void> {
+  /** CLI `/review` 와 같은 코드 리뷰를 현재 대화에서 실행한다. */
+  async review(
+    target:
+      | { type: 'uncommittedChanges' }
+      | { type: 'baseBranch'; branch: string }
+      | { type: 'commit'; sha: string }
+  ): Promise<void> {
     try {
       const rpc = await this.deps.rpc()
       const threadId = await this.ensureThread(rpc)
       await rpc.request(RPC.reviewStart, {
         threadId,
-        target: { type: 'uncommittedChanges' },
+        target,
         delivery: 'inline'
       })
     } catch (err) {
