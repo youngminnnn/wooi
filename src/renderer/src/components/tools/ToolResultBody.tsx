@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { FOLD, TOOL_VERBOSE_SHORTCUT, fold } from '@shared/toolDisplay'
 import { formatToolSummary } from '@shared/toolSummary'
 import type { ChatItem } from '@shared/types'
+import { SELECTABLE, unlessSelecting } from '../../lib/selection'
 
 /**
  * 도구 결과 본문. 접힌 상태가 기본이고, 눌러서(또는 ⌃O 로 한꺼번에) 원문을 펼친다.
@@ -39,8 +40,8 @@ export function ToolResultBody({
   return (
     <button
       type="button"
-      className="block w-full text-left"
-      onClick={() => setOpen((value) => !value)}
+      className={`block w-full text-left ${SELECTABLE}`}
+      onClick={unlessSelecting(() => setOpen((value) => !value))}
     >
       <pre className="whitespace-pre-wrap break-words font-[inherit]">
         {expanded ? result.text : body}

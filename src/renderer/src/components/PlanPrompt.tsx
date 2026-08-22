@@ -3,6 +3,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { ClipboardCheck } from 'lucide-react'
 import { useStore } from '../store'
+import { SELECTABLE, unlessSelecting } from '../lib/selection'
 import { planOptions } from '@shared/types'
 import type { PermissionOption, PermissionRequest } from '@shared/types'
 
@@ -102,9 +103,9 @@ export default function PlanPrompt({ request }: { request: PermissionRequest }):
               rowRefs.current[i] = el
             }}
             onFocus={() => setCursor(i)}
-            onClick={() => respond(option)}
+            onClick={unlessSelecting(() => respond(option))}
             className={
-              'rounded-md border px-2.5 py-1.5 text-left transition-colors focus:outline-none focus:ring-2 focus:ring-[var(--brand-300)]/50 ' +
+              `${SELECTABLE} rounded-md border px-2.5 py-1.5 text-left transition-colors focus:outline-none focus:ring-2 focus:ring-[var(--brand-300)]/50 ` +
               (cursor === i
                 ? 'border-[var(--brand-400)]/60 bg-[var(--brand-500)]/15'
                 : 'border-neutral-700/60 hover:bg-[var(--surface-2)]')

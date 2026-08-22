@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { ChevronRight, MessagesSquare } from 'lucide-react'
 import { useStore } from '../store'
+import { SELECTABLE, unlessSelecting } from '../lib/selection'
 import type { PermissionRequest } from '@shared/types'
 
 interface QuestionOption {
@@ -295,8 +296,8 @@ export default function QuestionPrompt({
                   // 접기 모드: 짧은 header 칩을 눌러 펼친다. 접힌 질문은 선택한 답 요약을,
                   // 아직 답 안 한 질문은 '답변 필요' 표시를 보여준다.
                   <button
-                    onClick={() => focusRow(qi, 0)}
-                    className="flex w-full items-center gap-2 rounded-md px-0.5 py-0.5 text-left focus:outline-none focus:ring-2 focus:ring-[var(--brand-300)]/50"
+                    onClick={unlessSelecting(() => focusRow(qi, 0))}
+                    className={`flex w-full items-center gap-2 rounded-md px-0.5 py-0.5 text-left focus:outline-none focus:ring-2 focus:ring-[var(--brand-300)]/50 ${SELECTABLE}`}
                   >
                     <ChevronRight
                       size={14}
@@ -343,8 +344,8 @@ export default function QuestionPrompt({
                               rowRefs.current[rowKey(qi, oi)] = el
                             }}
                             onFocus={() => focusRow(qi, oi)}
-                            onClick={() => toggle(qi, opt.label, multi)}
-                            className={`text-left rounded-md border px-2.5 py-1.5 transition-colors focus:outline-none focus:ring-2 focus:ring-[var(--brand-300)]/50 ${
+                            onClick={unlessSelecting(() => toggle(qi, opt.label, multi))}
+                            className={`${SELECTABLE} text-left rounded-md border px-2.5 py-1.5 transition-colors focus:outline-none focus:ring-2 focus:ring-[var(--brand-300)]/50 ${
                               on
                                 ? 'border-[var(--brand-400)]/60 bg-[var(--brand-500)]/15'
                                 : 'border-neutral-700/60 hover:bg-[var(--surface-2)]'

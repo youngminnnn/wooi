@@ -33,6 +33,7 @@ import { AgentBackendMark } from './BrandIcons'
 import { AGENT_BACKEND_LABELS, canSwitchAgentBackend } from '@shared/types'
 import type { ChatItem } from '@shared/types'
 import { BASH_FOLD, foldBashOutput } from '@shared/bashDisplay'
+import { SELECTABLE, unlessSelecting } from '../lib/selection'
 import { TOOL_VERBOSE_SHORTCUT } from '@shared/toolDisplay'
 
 function PeerMessage({
@@ -831,8 +832,8 @@ function BashBlock({
       {output && (
         <button
           type="button"
-          className="block w-full text-left"
-          onClick={() => setOpen((value) => !value)}
+          className={`block w-full text-left ${SELECTABLE}`}
+          onClick={unlessSelecting(() => setOpen((value) => !value))}
         >
           <pre
             className={
