@@ -14,7 +14,7 @@ Wooi 는 모든 코딩 에이전트 세션에 `wooi` 라는 내장 MCP 서버를
 도구는 보통 에이전트에게 `mcp__wooi__<도구-이름>` 으로 보입니다. 대부분의 도구 정의는 필요할 때
 불러오므로, 처음 모델 컨텍스트에 보이지 않아도 도구 검색을 통해 사용할 수 있습니다.
 
-핵심 도구 16개는 모든 워크스페이스에 제공됩니다. `claude_subagent` 와 `codex_subagent` 는
+핵심 도구 17개는 모든 워크스페이스에 제공됩니다. `claude_subagent` 와 `codex_subagent` 는
 멀티 에이전트 모드를 켜고 해당 백엔드에 위임할 수 있을 때만 추가됩니다.
 
 ## 안전 모델
@@ -138,6 +138,16 @@ base 로 삼습니다.
 
 보고는 부모를 방해하거나 부모의 턴을 시작하지 않습니다. 나중에 다시 보고하면 앞선 보고를
 대체합니다. 독립 워크스페이스에는 부모가 없으므로 이 도구를 성공적으로 쓸 수 없습니다.
+
+### `ask_for_decision`
+
+워크스페이스의 턴을 막지 않고 사용자에게 결정을 요청합니다. 에이전트는 답에 의존하는 작업을
+멈추고, 사용자의 답은 새 턴으로 돌아옵니다. 부모 워크스페이스가 있으면 사용자가 질문을 그쪽에
+넘길 수도 있습니다.
+
+- `question` — 무엇을 결정해야 하고 무엇이 걸려 있는지
+- `options` — 선택 사항인 2~4개의 닫힌 선택지
+- `recommendation` — 선택 사항인 에이전트의 추천안
 
 ### `notify_child`
 
@@ -341,6 +351,7 @@ Claude 는 Wooi 서브에이전트 도구 여러 개를 동시에 시작할 수 
 | `/wooi:new <할 일>` | `create_workspace` | 에이전트 |
 | `/wooi:stack <할 일>` | `create_stacked_workspace` | 에이전트 |
 | `/wooi:report [보고 내용]` | `report_to_parent` | 에이전트 |
+| `/wooi:ask [질문할 결정]` | `ask_for_decision` | 에이전트 |
 | `/wooi:notify <바뀐 것>` | `notify_child` | 에이전트 |
 | `/wooi:send <바뀐 것>` | `send_to_workspace` | 에이전트 |
 | `/wooi:team [위임할 일]` | `switch_to_agent_team` | 에이전트 |

@@ -16,7 +16,7 @@ Tools normally appear to the agent as `mcp__wooi__<tool-name>`. Most tool defini
 are loaded on demand, so a tool may not be visible in the model's initial context even
 though it is available through tool search.
 
-The 16 core tools are available in every workspace. `claude_subagent` and
+The 17 core tools are available in every workspace. `claude_subagent` and
 `codex_subagent` are added only when multi-agent mode is enabled and the corresponding
 backend is available for delegation.
 
@@ -152,6 +152,16 @@ Records a result for the workspace this one was stacked on.
 
 The report does not interrupt or start a turn in the parent. A later report replaces the
 earlier one. Independent workspaces have no parent and cannot use this tool successfully.
+
+### `ask_for_decision`
+
+Raises a decision for the user without blocking the workspace turn. The agent stops work that
+depends on the answer, and the answer returns as a new user turn. The user can instead hand the
+question to the parent workspace when one exists.
+
+- `question` — the decision and what is at stake
+- `options` — optional closed set of 2–4 choices
+- `recommendation` — optional choice the agent would make on its own
 
 ### `notify_child`
 
@@ -370,6 +380,7 @@ with your own commands: `/wooi:pr`, `/wooi:children`, and so on. The catalog is
 | `/wooi:new <what it should do>` | `create_workspace` | agent |
 | `/wooi:stack <what it should do>` | `create_stacked_workspace` | agent |
 | `/wooi:report [what to report]` | `report_to_parent` | agent |
+| `/wooi:ask [what to ask about]` | `ask_for_decision` | agent |
 | `/wooi:notify <what changed>` | `notify_child` | agent |
 | `/wooi:send <what changed>` | `send_to_workspace` | agent |
 | `/wooi:team [what to delegate]` | `switch_to_agent_team` | agent |

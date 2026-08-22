@@ -42,6 +42,12 @@ const api: WooiApi = {
       ipcRenderer.invoke(IPC.workspacePeerInboxDeliver, workspaceId, messageId),
     dismissPeerMessage: (workspaceId, messageId) =>
       ipcRenderer.invoke(IPC.workspacePeerInboxDismiss, workspaceId, messageId),
+    answerDecision: (workspaceId, decisionId, answer) =>
+      ipcRenderer.invoke(IPC.workspaceDecisionAnswer, workspaceId, decisionId, answer),
+    escalateDecision: (workspaceId, decisionId) =>
+      ipcRenderer.invoke(IPC.workspaceDecisionEscalate, workspaceId, decisionId),
+    dismissDecision: (workspaceId, decisionId) =>
+      ipcRenderer.invoke(IPC.workspaceDecisionDismiss, workspaceId, decisionId),
     setPeerInbound: (workspaceId, policy) =>
       ipcRenderer.invoke(IPC.workspaceSetPeerInbound, workspaceId, policy),
     setPermissionMode: (workspaceId, mode) =>

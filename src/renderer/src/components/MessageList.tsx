@@ -16,7 +16,8 @@ import {
   Square,
   ListTodo,
   Layers,
-  MessagesSquare
+  MessagesSquare,
+  MessageCircleQuestion
 } from 'lucide-react'
 import { useStore } from '../store'
 import { DiffLine } from './DiffView'
@@ -604,6 +605,8 @@ function Item({
       return <TaskCard item={item} />
     case 'handoff':
       return <HandoffCard item={item} />
+    case 'decision':
+      return <DecisionCard item={item} />
     case 'unknown':
       return <UnknownCard item={item} />
     default:
@@ -674,6 +677,30 @@ function HandoffCard({
       <div className="mt-1.5 whitespace-pre-wrap text-neutral-300">{item.summary}</div>
       <div className="mt-1.5 text-xs text-neutral-500">
         The agent here hasn&rsquo;t seen this — ask it to check stacked work if it should act on it.
+      </div>
+    </div>
+  )
+}
+
+function DecisionCard({
+  item
+}: {
+  item: Extract<ChatItem, { type: 'decision' }>
+}): React.JSX.Element {
+  return (
+    <div className="rounded-lg border border-[var(--border-2)] bg-[var(--surface)] px-3 py-2.5 text-sm">
+      <div className="flex items-center gap-1.5 text-neutral-200">
+        <MessageCircleQuestion size={13} className="text-[var(--accent-400)]" />
+        Asked for a decision
+      </div>
+      <div className="mt-1.5 whitespace-pre-wrap text-neutral-300">{item.question}</div>
+      {item.options && (
+        <div className="mt-1.5 text-xs text-neutral-500">
+          Options: {item.options.map((option) => option.label).join(' · ')}
+        </div>
+      )}
+      <div className="mt-1.5 text-xs text-neutral-500">
+        The agent stopped work that depends on this and will continue when the answer arrives.
       </div>
     </div>
   )
