@@ -92,7 +92,10 @@ describe('회전', () => {
 
     expect(statSync(main).size).toBeLessThanOrEqual(MAX_BYTES)
     expect(statSync(rotated).size).toBeLessThanOrEqual(MAX_BYTES)
-  })
+    // 20,000줄을 동기로 쓰는 CPU 바운드 테스트다. 혼자 돌면 1초지만 다른 파일이 코어를 물고
+    // 있으면 8초를 넘어, 기본 타임아웃 5초에 걸려 크기 단언에 닿지도 못한 채 떨어진다.
+    // 검증하려는 것은 회전 상한이지 이 머신의 속도가 아니므로 넉넉히 준다.
+  }, 30_000)
 })
 
 describe('되먹임 차단', () => {

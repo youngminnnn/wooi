@@ -2135,8 +2135,11 @@ export interface RestackResult {
  *   (base 브랜치 복원 → reopen → retarget → 발판 브랜치 정리).
  * - restack: 새 base 위로 rebase 하고 force-push.
  * - merge: 머지 트레인이 이 층의 PR 을 병합함. 진행 UI 와 최종 결과에 같은 단계로 남긴다.
+ * - cherry-pick: 커밋 이동에서 아래층이 그 커밋을 받아들임.
+ * - drop: 커밋 이동에서 위층이 그 커밋을 떨구고 다시 쌓임. cherry-pick 과 짝이다.
  */
-export type StackCascadeStepKind = 'retarget' | 'recover' | 'restack' | 'merge'
+export type StackCascadeStepKind =
+  'retarget' | 'recover' | 'restack' | 'merge' | 'cherry-pick' | 'drop'
 
 /** 캐스케이드 한 단계의 결과. 실패해도 다음 브랜치는 계속 시도하고, 결과를 모아 UI 로 올린다. */
 export interface StackCascadeStep {
@@ -2165,8 +2168,11 @@ export interface StackCascadeResult {
 
 export interface StackOpProgress {
   workspaceId: string
-  /** restack = 사용자가 직접 누른 rebase, sync = 부모 병합 후 캐스케이드, train = 머지 트레인. */
-  kind: 'restack' | 'sync' | 'train'
+  /**
+   * restack = 사용자가 직접 누른 rebase, sync = 부모 병합 후 캐스케이드,
+   * train = 머지 트레인, commit-move = 층 사이 커밋 이동.
+   */
+  kind: 'restack' | 'sync' | 'train' | 'commit-move'
   /** 예상 대상 브랜치 수. 모르면 null(단일 브랜치 restack). */
   total: number | null
   /** 끝난 단계들(순서대로). 실패·건너뜀도 담는다 — 조용히 삼키지 않는다. */
@@ -2217,6 +2223,44 @@ export function cascadeProblems(result: StackCascadeResult): StackCascadeStep[] 
   return result.steps.filter(
     (s) => s.status === 'conflict' || s.status === 'failed' || s.status === 'diverged'
   )
+}
+
+export interface CommitEntry {
+  sha: string
+  shortSha: string
+  subject: string
+  authorName: string
+  /** Unix epoch 밀리초. */
+  authoredAt: number
+}
+
+export type CommitMoveStep = 'cherry-pick' | 'replay-below' | 'replay-above' | 'cleanup'
+
+export interface CommitMoveBlocker {
+  kind: 'dirty' | 'diverged' | 'running' | 'no-lower' | 'merge-commit' | 'not-in-range' | 'model-b'
+  branch: string
+  message: string
+}
+
+export interface CommitMovePreview {
+  commit: CommitEntry
+  lower: { branch: string; prNumber: number | null; filesGained: string[] }
+  upper: { branch: string; prNumber: number | null; filesLost: string[] }
+  alsoForcePushed: Array<{ branch: string; prNumber: number | null }>
+  before: Array<{ branch: string; sha: string }>
+  blockers: CommitMoveBlocker[]
+}
+
+export interface CommitMoveResult {
+  status: 'moved' | 'blocked' | 'conflict' | 'error'
+  failedStep?: CommitMoveStep | 'preflight' | 'push-lower' | 'push-upper' | 'restack'
+  conflictedFiles?: string[]
+  message?: string
+  blockers?: CommitMoveBlocker[]
+  before: Array<{ branch: string; sha: string }>
+  after: Array<{ branch: string; sha: string }>
+  rolledBack: boolean
+  steps: StackCascadeStep[]
 }
 
 /**
@@ -2906,6 +2950,12 @@ export const IPC = {
   stackTrainPlan: 'stack:trainPlan',
   /** 사용자가 확인한 계획대로 아래→위 머지 트레인을 실행한다. */
   stackTrainRun: 'stack:trainRun',
+  /** 현재 레이어(baseBranch..HEAD)의 커밋 목록. */
+  stackCommitsList: 'stack:commitsList',
+  /** 커밋을 아래층으로 내리기 전, 아무것도 되쓰지 않고 blocker·영향 범위·복구용 tip 을 계산한다. */
+  stackCommitMovePreview: 'stack:commitMovePreview',
+  /** 사용자가 확인한 커밋 이동을 실행한다(안전 조건은 실행 시점에 다시 검사한다). */
+  stackCommitMoveApply: 'stack:commitMoveApply',
   /** 대기 중 캐스케이드 계획을 무시하고 지운다. */
   stackSyncDismiss: 'stack:syncDismiss',
   /** 스택과 어긋난 PR 의 base 를 부모 브랜치로 되돌린다(gh pr edit --base). */

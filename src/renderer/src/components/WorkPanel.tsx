@@ -1,14 +1,22 @@
 import { useEffect, useRef, useState } from 'react'
-import { Files, GitCompare, CheckCheck, MonitorPlay, SquareArrowOutUpRight } from 'lucide-react'
+import {
+  Files,
+  GitCompare,
+  GitCommitVertical,
+  CheckCheck,
+  MonitorPlay,
+  SquareArrowOutUpRight
+} from 'lucide-react'
 import FileBrowser from './FileBrowser'
 import ChangesPanel from './ChangesPanel'
+import CommitsPanel from './CommitsPanel'
 import ChecksPanel from './ChecksPanel'
 import PreviewPanel from './PreviewPanel'
 import { useStore } from '../store'
 import { isPaneWindow } from '../lib/paneWindow'
 import type { Workspace } from '@shared/types'
 
-type Tab = 'files' | 'changes' | 'check' | 'preview'
+type Tab = 'files' | 'changes' | 'commits' | 'check' | 'preview'
 
 const TABS: {
   id: Tab
@@ -17,6 +25,7 @@ const TABS: {
 }[] = [
   { id: 'files', label: 'All files', icon: Files },
   { id: 'changes', label: 'Changes', icon: GitCompare },
+  { id: 'commits', label: 'Commits', icon: GitCommitVertical },
   { id: 'check', label: 'Check', icon: CheckCheck },
   { id: 'preview', label: 'Preview', icon: MonitorPlay }
 ]
@@ -92,6 +101,7 @@ export default function WorkPanel({ workspace }: { workspace: Workspace }): Reac
         {tab === 'changes' && (
           <ChangesPanel workspaceId={workspace.id} baseBranch={workspace.baseBranch} />
         )}
+        {tab === 'commits' && <CommitsPanel workspaceId={workspace.id} />}
         {tab === 'check' && <ChecksPanel workspaceId={workspace.id} />}
         {/* 다른 탭과 달리 조건부 렌더가 아니라 감추기다 — 위 previewOpened 주석 참고. */}
         {previewOpened && (
