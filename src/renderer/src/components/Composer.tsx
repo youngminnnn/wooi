@@ -2077,19 +2077,31 @@ function CommandResultView({
 
     case 'usage': {
       const u = result.usage
+      // 라이브 세션이 없으면 세션 값은 전부 0 이다 — 0 을 그대로 그리면 "안 썼다" 로 읽히므로
+      // 그 자리에 사정을 적는다. 계정 단위 값(플랜·레이트리밋)은 단명 쿼리에서도 정확하니 남긴다.
+      const noSession = u.sessionDataAvailable === false
       return (
         <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <span className="text-neutral-400">Session cost</span>
-            <span className="font-medium text-neutral-100">${u.totalCostUsd.toFixed(4)}</span>
-          </div>
-          <div className="flex items-center justify-between text-xs">
-            <span className="text-neutral-500">Lines changed</span>
-            <span className="text-neutral-400">
-              <span className="text-[var(--success-400)]">+{u.linesAdded}</span>{' '}
-              <span className="text-[var(--danger-400)]">−{u.linesRemoved}</span>
-            </span>
-          </div>
+          {noSession ? (
+            <div className="text-xs text-neutral-500">
+              No live session — session cost and lines changed are unavailable. Send a message to
+              start one. Plan usage below is account-wide and up to date.
+            </div>
+          ) : (
+            <>
+              <div className="flex items-center justify-between">
+                <span className="text-neutral-400">Session cost</span>
+                <span className="font-medium text-neutral-100">${u.totalCostUsd.toFixed(4)}</span>
+              </div>
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-neutral-500">Lines changed</span>
+                <span className="text-neutral-400">
+                  <span className="text-[var(--success-400)]">+{u.linesAdded}</span>{' '}
+                  <span className="text-[var(--danger-400)]">−{u.linesRemoved}</span>
+                </span>
+              </div>
+            </>
+          )}
           {u.subscriptionType && (
             <div className="flex items-center justify-between text-xs">
               <span className="text-neutral-500">Plan</span>
@@ -2206,15 +2218,14 @@ function PermissionsPanel({ info }: { info: PermissionsInfo }): React.JSX.Elemen
         <Section title="Ask" rules={info.ask} tone="text-[var(--warning-400)]" />
         <Section title="Deny" rules={info.deny} tone="text-[var(--danger-400)]" />
       </div>
-      {info.sources.length > 0 ? (
-        <div className="text-xs text-neutral-600 pt-1 border-t border-[var(--border)] break-all">
-          From: {info.sources.join(' · ')}
-        </div>
-      ) : (
-        <div className="text-xs text-neutral-600 pt-1 border-t border-[var(--border)]">
-          No permission rules found in settings files.
-        </div>
-      )}
+      <div className="text-xs text-neutral-600 pt-1 border-t border-[var(--border)] space-y-0.5">
+        {info.sources.length > 0 ? (
+          <div className="break-all">From: {info.sources.join(' · ')}</div>
+        ) : (
+          <div>No permission rules found in settings files.</div>
+        )}
+        <div>Rules loaded by plugins or applied per session are not listed here.</div>
+      </div>
     </div>
   )
 }
