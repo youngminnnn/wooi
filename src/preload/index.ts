@@ -140,6 +140,8 @@ const api: WooiApi = {
   },
 
   stack: {
+    trainPlan: (workspaceId) => ipcRenderer.invoke(IPC.stackTrainPlan, workspaceId),
+    trainRun: (workspaceId, method) => ipcRenderer.invoke(IPC.stackTrainRun, workspaceId, method),
     syncApply: (workspaceId) => ipcRenderer.invoke(IPC.stackSyncApply, workspaceId),
     syncDismiss: (workspaceId) => ipcRenderer.invoke(IPC.stackSyncDismiss, workspaceId),
     baseRetarget: (workspaceId) => ipcRenderer.invoke(IPC.stackBaseRetarget, workspaceId),

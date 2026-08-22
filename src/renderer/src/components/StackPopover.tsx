@@ -1,5 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Layers, GitBranch, ExternalLink, GitPullRequestCreate, Check, ScanEye } from 'lucide-react'
+import {
+  Layers,
+  GitBranch,
+  ExternalLink,
+  GitPullRequestCreate,
+  Check,
+  ScanEye,
+  GitMerge
+} from 'lucide-react'
 import { useStore } from '../store'
 import { GithubMark } from './BrandIcons'
 import { useGithubDisconnected } from '../lib/github'
@@ -14,6 +22,7 @@ import {
 import type { PrState, PrStatus, Workspace } from '@shared/types'
 import HeaderChip from './HeaderChip'
 import MenuPanel, { menuItemCls } from './MenuPanel'
+import StackTrainModal from './StackTrainModal'
 
 /**
  * PR 상태별 점 색 + 라벨(Sidebar 의 PR_DOT 와 색 일치). Tailwind v4 는 보간한 클래스명을 스캔하지
@@ -56,6 +65,7 @@ interface Row {
  */
 export default function StackPopover({ workspace }: { workspace: Workspace }): React.JSX.Element {
   const [open, setOpen] = useState(false)
+  const [trainOpen, setTrainOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   const workspaces = useStore((s) => s.app!.workspaces)
   const gitStatus = useStore((s) => s.gitStatus)
@@ -425,7 +435,29 @@ export default function StackPopover({ workspace }: { workspace: Workspace }): R
               )
             })}
           </div>
+          {!githubDisconnected && openPrCount > 0 && (
+            <>
+              <div className="my-1 border-t border-[var(--border)]" />
+              <button
+                role="menuitem"
+                className={menuItemCls}
+                onClick={() => {
+                  setOpen(false)
+                  void requireGithub(
+                    'A merge train merges pull requests in order and force-pushes the remaining stack branches.',
+                    async () => setTrainOpen(true)
+                  )
+                }}
+              >
+                <GitMerge size={13} className="text-[var(--merged-400)]" />
+                Merge stack
+              </button>
+            </>
+          )}
         </MenuPanel>
+      )}
+      {trainOpen && (
+        <StackTrainModal workspaceId={workspace.id} onClose={() => setTrainOpen(false)} />
       )}
     </div>
   )

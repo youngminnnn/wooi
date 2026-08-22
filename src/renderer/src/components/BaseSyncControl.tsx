@@ -81,14 +81,30 @@ export default function BaseSyncControl({
       progress.total == null
         ? ''
         : ` (${Math.min(doneBranches + 1, progress.total)}/${progress.total})`
-    label = branch ? `Rebasing…${count}` : 'Preparing rebase…'
-    tooltip = branch ? `Rebasing ${branch}…${count}` : 'Preparing rebase…'
+    label =
+      progress.kind === 'train'
+        ? branch
+          ? `Merging stack…${count}`
+          : 'Preparing merge train…'
+        : branch
+          ? `Rebasing…${count}`
+          : 'Preparing rebase…'
+    tooltip =
+      progress.kind === 'train'
+        ? branch
+          ? `Merge train is processing ${branch}…${count}`
+          : 'Preparing merge train…'
+        : branch
+          ? `Rebasing ${branch}…${count}`
+          : 'Preparing rebase…'
   } else if (showFinished) {
     label = problems
       ? `Finished with ${problems} issue${problems > 1 ? 's' : ''}`
       : progress?.kind === 'sync'
         ? 'Stack sync complete'
-        : 'Rebase complete'
+        : progress?.kind === 'train'
+          ? 'Merge train complete'
+          : 'Rebase complete'
     tooltip = label
   }
 
