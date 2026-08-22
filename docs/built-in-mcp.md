@@ -53,11 +53,13 @@ backend is available for delegation.
 
 ### `create_workspace`
 
-Creates an independent workspace from the repository's default branch.
+Creates an independent workspace from the repository's default branch, or from an
+existing pull request's head branch.
 
 | Input | Type | Required | Description |
 | --- | --- | --- | --- |
-| `name` | string | No | Branch name. If omitted, Wooi generates one. |
+| `name` | string | No | Branch name. If omitted, Wooi generates one. Ignored when `pullRequestNumber` is set, because the branch comes from the pull request. |
+| `pullRequestNumber` | integer | No | Open the workspace on this pull request's head branch instead of a new branch. Cannot be combined with a stack parent. |
 | `repo` | string | No | Repository to create it in, by the name Wooi shows in the sidebar, or by its full checkout path. If omitted, the caller's own repository. |
 | `task` | string | No | First message for the new workspace. Providing it starts a turn immediately. |
 
@@ -72,6 +74,13 @@ ambiguous one (two repositories sharing a folder name) is rejected with their pa
 branch forks from that repository's own default branch, the approval card names it, and
 the handoff message tells the new workspace which repository it is in so it does not
 trust paths from the caller's.
+
+`pullRequestNumber` checks out the pull request's head branch so commits made there
+update that pull request. The base comes from the pull request, not from the caller — a
+workspace cannot be stacked on a parent and checked out at a pull request head at the
+same time, and that combination is rejected. If a workspace for that pull request already
+exists the tool returns it instead of creating a second one on the same branch. Pull
+requests from a fork are only accepted when Wooi can push to the fork.
 
 ### `list_repositories`
 
@@ -320,6 +329,21 @@ labels, and URL. It is read-only and does not create a workspace.
 Starting work on an issue is a separate `create_workspace` call whose `task` should
 include all issue details the new agent needs.
 
+### `list_pull_requests`
+
+Lists open GitHub pull requests for the current repository with their number, title,
+head and base branches, author, URL, and whether a workspace can be created from each
+one. It is read-only and does not create a workspace.
+
+| Input | Type | Required | Description |
+| --- | --- | --- | --- |
+| `limit` | integer | No | Maximum number of pull requests. Defaults to 30; maximum 100. |
+
+A pull request whose head lives in a fork Wooi cannot push to is listed with the reason,
+rather than being hidden — a tool that silently omits it leaves the agent unable to tell
+"no such pull request" from "no permission". Starting work on one is a separate
+`create_workspace` call with `pullRequestNumber`.
+
 ## Repository scripts
 
 Script names come from the repository settings. The reserved name `setup` addresses the
@@ -422,6 +446,7 @@ with your own commands: `/wooi:pr`, `/wooi:children`, and so on. The catalog is
 | `/wooi:children` | `check_stacked_work` | direct |
 | `/wooi:related [paths…]` | `check_related_work` | direct |
 | `/wooi:issues [limit]` | `list_issues` | direct |
+| `/wooi:pulls [limit]` | `list_pull_requests` | direct |
 | `/wooi:run <name>` | `run_script` | direct |
 | `/wooi:stop <name>` | `stop_script` | direct |
 | `/wooi:logs <name> [lines]` | `read_script_output` | direct |
