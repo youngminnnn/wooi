@@ -109,6 +109,13 @@ describe('parseWooiCommandArgs', () => {
     expect(parseWooiCommandArgs('related', '')).toEqual({ args: {} })
   })
 
+  it('splits child ids for /wooi:await and defaults to every child when empty', () => {
+    expect(parseWooiCommandArgs('await', 'child-1 child-2')).toEqual({
+      args: { workspaceIds: ['child-1', 'child-2'] }
+    })
+    expect(parseWooiCommandArgs('await', '')).toEqual({ args: {} })
+  })
+
   it('validates the issue limit', () => {
     expect(parseWooiCommandArgs('issues', '5')).toEqual({ args: { limit: 5 } })
     expect(parseWooiCommandArgs('issues', '')).toEqual({ args: {} })

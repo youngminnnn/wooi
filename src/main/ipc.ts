@@ -181,6 +181,7 @@ import type {
 import type { AgentOrchestrator } from './agent/orchestrator'
 import { deliverApprovedPeerMessage } from './agent/tools/peer'
 import { resolvePeerMessage } from './agent/tools/peerLedger'
+import { stackedWaits } from './stackedWait'
 import type { PaneWindows } from './paneWindows'
 import {
   cancelPreviewPick,
@@ -595,9 +596,14 @@ export function registerIpc(ctx: IpcContext): void {
 
   // 아카이브 절차 자체는 [[workspaces]] 에 있다 — 에이전트 도구도 같은 일을 해야 하기 때문이다.
   // 아카이브 스크립트가 실패했으면 그 결과를 실어 보낸다(렌더러가 토스트로 알린다).
-  handle(IPC.workspaceArchive, async (_e, workspaceId: string): Promise<ArchiveOutcome> =>
-    archiveWorkspace(archiveDeps, workspaceId)
-  )
+  handle(IPC.workspaceArchive, async (_e, workspaceId: string): Promise<ArchiveOutcome> => {
+    stackedWaits.cancel(workspaceId)
+    return archiveWorkspace(archiveDeps, workspaceId)
+  })
+
+  handle(IPC.workspaceCancelStackedWait, (_e, workspaceId: string) => {
+    stackedWaits.cancel(workspaceId, true)
+  })
 
   /**
    * 아카이브 제안을 해제한다. 어떤 병합을 해제했는지 기억해 두지 않으면 다음 재동기화가 같은
@@ -1058,10 +1064,12 @@ export function registerIpc(ctx: IpcContext): void {
   // ── 채팅 ───────────────────────────────────────────────────────────────
 
   handle(IPC.chatSend, (_e, workspaceId: string, text: string, images?: ImageAttachment[]) => {
+    stackedWaits.resetUnproductive(workspaceId)
     ctx.sessions.sendMessage(workspaceId, text, images)
   })
 
   handle(IPC.chatInterrupt, (_e, workspaceId: string) => {
+    stackedWaits.cancel(workspaceId, true)
     return ctx.sessions.interrupt(workspaceId)
   })
 
@@ -1076,6 +1084,7 @@ export function registerIpc(ctx: IpcContext): void {
   // /clear — 세션을 정리하고 대화 맥락(sessionId)·트랜스크립트를 비운다(워크스페이스는 유지).
   // 다음 메시지는 빈 맥락의 새 세션으로 시작한다. 렌더러는 호출 후 자기 트랜스크립트를 비운다.
   handle(IPC.chatClear, (_e, workspaceId: string) => {
+    stackedWaits.cancel(workspaceId)
     ctx.sessions.clearSession(workspaceId)
     getTranscripts().remove(workspaceId)
     // 맥락이 빈 채로 다시 시작한다 — 게이지도 같이 비운다(렌더러도 resetTranscript 로 그렇게 한다).

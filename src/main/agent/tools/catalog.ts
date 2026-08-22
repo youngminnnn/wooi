@@ -279,7 +279,10 @@ export const AGENT_TOOLS: AgentToolSpec[] = [
       'Reports never arrive in your conversation on their own, so call this when a child’s result',
       'would change what you do next — before building on its branch, before opening a pull',
       'request that depends on it, or when the user asks how the stack is going.',
-      'It is also where `notify_child` gets its workspace ids.'
+      'It is also where `notify_child` gets its workspace ids.',
+      'If a child is still running and you cannot go on without its result, call',
+      '`await_stacked_work` instead of calling this again in a loop — it ends your turn and Wooi',
+      'starts a new one when the reports land.'
     ].join(' '),
     inputSchema: {},
     annotations: { title: 'Check stacked workspaces', readOnlyHint: true }
@@ -670,6 +673,37 @@ export const AGENT_TOOLS: AgentToolSpec[] = [
         )
     },
     annotations: { title: 'Set the workspace name', readOnlyHint: false }
+  },
+  {
+    name: 'await_stacked_work',
+    description: [
+      'Wait for reports from workspaces stacked directly on this one without blocking or spending',
+      'tokens while waiting. This registers the condition and ends your turn; Wooi starts a new',
+      'turn when the reports arrive, the remaining children cannot make progress, or the timeout',
+      'expires. The wake-up includes report summaries, so you usually do not need to call',
+      '`check_stacked_work` afterwards.',
+      '',
+      'Use this only when a child result determines your next action: before merging, stacking on',
+      'a child branch, or opening a dependent pull request. If useful work remains that does not',
+      'need those results, do it first — every wake-up still costs one turn.'
+    ].join(' '),
+    inputSchema: {
+      workspaceIds: z
+        .array(z.string())
+        .optional()
+        .describe('Direct child workspace ids. Omit to wait for every non-archived direct child.'),
+      until: z
+        .enum(['all-reported', 'any-reported'])
+        .optional()
+        .describe('Wake after all or any target reports. Defaults to all-reported.'),
+      timeoutMinutes: z
+        .number()
+        .min(1)
+        .max(1440)
+        .optional()
+        .describe('Maximum wait in minutes. Defaults to 60; minimum 1, maximum 1440.')
+    },
+    annotations: { title: 'Wait for stacked work', readOnlyHint: false }
   }
 ]
 

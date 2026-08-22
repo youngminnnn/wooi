@@ -194,6 +194,21 @@ approval card cannot continue or report back on its own.
 Reports do not automatically enter the parent's agent context. Call this tool when a
 child's result affects the next action or before using `notify_child`.
 
+### `await_stacked_work`
+
+Registers a non-blocking wait for direct children's reports, then returns immediately so
+the current turn can end. Wooi starts a new turn when all or any selected children report,
+when none of the remaining children can progress, or when the timeout expires. Waiting uses
+no tokens; the wake-up includes the reports.
+
+| Input | Type | Required | Description |
+| --- | --- | --- | --- |
+| `workspaceIds` | string[] | No | Direct child IDs; omit to wait for every non-archived direct child. |
+| `until` | `all-reported` \| `any-reported` | No | Defaults to `all-reported`. |
+| `timeoutMinutes` | number | No | Defaults to 60; minimum 1, maximum 1440. |
+
+The waiting banner shows the condition and deadline and lets the user stop waiting.
+
 ### `report_to_parent`
 
 Records a result for the workspace this one was stacked on.
@@ -467,6 +482,7 @@ with your own commands: `/wooi:pr`, `/wooi:children`, and so on. The catalog is
 | `/wooi:repos` | `list_repositories` | direct |
 | `/wooi:peers` | `list_workspace_peers` | direct |
 | `/wooi:children` | `check_stacked_work` | direct |
+| `/wooi:await [workspace ids…]` | `await_stacked_work` | direct |
 | `/wooi:related [paths…]` | `check_related_work` | direct |
 | `/wooi:issues [limit]` | `list_issues` | direct |
 | `/wooi:pulls [limit]` | `list_pull_requests` | direct |
