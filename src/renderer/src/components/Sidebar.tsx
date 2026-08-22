@@ -28,6 +28,7 @@ import {
   Square,
   X,
   Hourglass,
+  Clock,
   Terminal
 } from 'lucide-react'
 import { backgroundTaskCount, REVIEW_BUSY_LABEL, useStore } from '../store'
@@ -137,7 +138,10 @@ export default function Sidebar({
   const anyRunningOrRateLimited = app.workspaces.some(
     (w) =>
       !w.archived &&
-      (w.status === 'running' || Boolean(w.pendingRateLimitResume) || Boolean(w.rateLimited))
+      (w.status === 'running' ||
+        Boolean(w.pendingRateLimitResume) ||
+        Boolean(w.rateLimited) ||
+        Boolean(w.awaitingStackedWork))
   )
   const now = useNow(1000, anyRunningOrRateLimited)
 
@@ -814,6 +818,7 @@ function WorkspaceRow({
             stale={stale}
             runningMs={runningMs}
             pendingRateLimitResume={workspace.pendingRateLimitResume}
+            awaitingStackedWork={workspace.awaitingStackedWork}
             rateLimited={rateLimited}
             backgroundTasks={backgroundTasks}
             pr={pr}
@@ -917,25 +922,31 @@ function WorkspaceRow({
                 · rate limit · resumes in{' '}
                 {formatCountdown(workspace.pendingRateLimitResume.retryAt - now)}
               </span>
-            ) : (
-              // 자동 이어가기가 꺼져 있어도 제한에 걸린 사실은 보여 준다 — 그러지 않으면 그냥
-              // idle 로 보여서, 사용자는 왜 멈췄는지 워크스페이스에 들어가 봐야만 알 수 있다.
-              rateLimited && (
-                <span
-                  className="text-[var(--warning-400)]/90 shrink-0 tabular-nums"
-                  title={
-                    rateLimited.resetsAt
-                      ? `Stopped by the usage limit — resets at ${new Date(rateLimited.resetsAt).toLocaleString()}`
-                      : 'Stopped by the usage limit'
-                  }
-                >
-                  · rate limit
-                  {rateLimited.resetsAt
-                    ? ` · resets in ${formatCountdown(rateLimited.resetsAt - now)}`
-                    : ''}
-                </span>
-              )
-            )}
+            ) : // 자동 이어가기가 꺼져 있어도 제한에 걸린 사실은 보여 준다 — 그러지 않으면 그냥
+            // idle 로 보여서, 사용자는 왜 멈췄는지 워크스페이스에 들어가 봐야만 알 수 있다.
+            rateLimited ? (
+              <span
+                className="text-[var(--warning-400)]/90 shrink-0 tabular-nums"
+                title={
+                  rateLimited.resetsAt
+                    ? `Stopped by the usage limit — resets at ${new Date(rateLimited.resetsAt).toLocaleString()}`
+                    : 'Stopped by the usage limit'
+                }
+              >
+                · rate limit
+                {rateLimited.resetsAt
+                  ? ` · resets in ${formatCountdown(rateLimited.resetsAt - now)}`
+                  : ''}
+              </span>
+            ) : workspace.awaitingStackedWork ? (
+              <span
+                className="text-neutral-400 shrink-0 tabular-nums"
+                title={`Waiting for ${workspace.awaitingStackedWork.targets.length} stacked workspaces until ${new Date(workspace.awaitingStackedWork.deadlineAt).toLocaleString()}`}
+              >
+                · waiting on {workspace.awaitingStackedWork.targets.length} ·{' '}
+                {formatCountdown(workspace.awaitingStackedWork.deadlineAt - now)} left
+              </span>
+            ) : null}
           </div>
           {/* 액션 클러스터는 absolute 오버레이로 띄운다. 호버 전용 컨트롤이 평상시 레이아웃 폭을
             점유하지 않게 해서 제목/메타가 사이드바 폭을 온전히 쓰도록 하는 것이 핵심이다.
@@ -1451,6 +1462,7 @@ export function StatusDot({
   stale,
   runningMs,
   pendingRateLimitResume,
+  awaitingStackedWork,
   rateLimited,
   backgroundTasks = 0,
   pr
@@ -1461,6 +1473,7 @@ export function StatusDot({
   stale: boolean
   runningMs: number
   pendingRateLimitResume?: Workspace['pendingRateLimitResume']
+  awaitingStackedWork?: Workspace['awaitingStackedWork']
   /** 제한에 걸린 상태(해제 시각이 지나지 않은 것). 호출부가 activeRateLimitPause 로 걸러 넘긴다. */
   rateLimited?: RateLimitPause | null
   /**
@@ -1512,6 +1525,16 @@ export function StatusDot({
           className="text-[var(--warning-400)]"
           aria-label="Paused by usage limit"
         />
+      </span>
+    )
+  }
+  if (awaitingStackedWork) {
+    return (
+      <span
+        title={`Waiting for ${awaitingStackedWork.targets.length} stacked workspaces — until ${new Date(awaitingStackedWork.deadlineAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`}
+        className="shrink-0 grid place-items-center"
+      >
+        <Clock size={12} className="text-neutral-400" aria-label="Waiting for stacked work" />
       </span>
     )
   }

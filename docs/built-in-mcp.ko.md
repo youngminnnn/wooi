@@ -14,7 +14,7 @@ Wooi 는 모든 코딩 에이전트 세션에 `wooi` 라는 내장 MCP 서버를
 도구는 보통 에이전트에게 `mcp__wooi__<도구-이름>` 으로 보입니다. 대부분의 도구 정의는 필요할 때
 불러오므로, 처음 모델 컨텍스트에 보이지 않아도 도구 검색을 통해 사용할 수 있습니다.
 
-핵심 도구 16개는 모든 워크스페이스에 제공됩니다. `claude_subagent` 와 `codex_subagent` 는
+핵심 도구 17개는 모든 워크스페이스에 제공됩니다. `claude_subagent` 와 `codex_subagent` 는
 멀티 에이전트 모드를 켜고 해당 백엔드에 위임할 수 있을 때만 추가됩니다.
 
 ## 안전 모델
@@ -126,6 +126,21 @@ base 로 삼습니다.
 
 보고는 부모 에이전트 컨텍스트에 자동으로 들어오지 않습니다. 자식 결과가 다음 행동에 영향을 줄 때나
 `notify_child` 를 사용하기 전에 이 도구를 호출합니다.
+
+### `await_stacked_work`
+
+바로 아래 자식의 보고를 기다리는 조건을 등록하고 즉시 돌아와 현재 턴이 끝나게 합니다.
+선택한 자식 전부 또는 하나가 보고하거나, 남은 자식이 모두 더 진행할 수 없거나, 기한이
+끝나면 Wooi 가 새 턴을 시작합니다. 기다리는 동안은 토큰을 쓰지 않고, 깨움 메시지에 보고가
+함께 들어옵니다.
+
+| 입력 | 타입 | 필수 | 설명 |
+| --- | --- | --- | --- |
+| `workspaceIds` | string[] | 아니요 | 바로 아래 자식 ID. 생략하면 아카이브하지 않은 직속 자식 전체. |
+| `until` | `all-reported` \| `any-reported` | 아니요 | 기본값은 `all-reported`. |
+| `timeoutMinutes` | number | 아니요 | 기본 60분, 최소 1분, 최대 1440분. |
+
+대기 배너에 조건과 기한이 보이고, 사용자가 대기를 멈출 수 있습니다.
 
 ### `report_to_parent`
 
@@ -347,6 +362,7 @@ Claude 는 Wooi 서브에이전트 도구 여러 개를 동시에 시작할 수 
 | `/wooi:repos` | `list_repositories` | 즉시 |
 | `/wooi:peers` | `list_workspace_peers` | 즉시 |
 | `/wooi:children` | `check_stacked_work` | 즉시 |
+| `/wooi:await [워크스페이스 id…]` | `await_stacked_work` | 즉시 |
 | `/wooi:related [경로…]` | `check_related_work` | 즉시 |
 | `/wooi:issues [개수]` | `list_issues` | 즉시 |
 | `/wooi:run <이름>` | `run_script` | 즉시 |
