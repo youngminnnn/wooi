@@ -9,6 +9,8 @@ import type {
   FileDiff,
   FileDiffStatus,
   GitStatus,
+  CommitEntry,
+  CommitMoveStep,
   RestackResult,
   UpdateFromBaseResult,
   WorkspaceDiff
@@ -762,8 +764,12 @@ export function summarizePushError(stderr: string): string {
  * 믿고 `git reset --hard origin/<branch>` 로 rebase 결과를 버릴 뻔했다(실측).
  *
  * `pushed:false` 이면서 `error` 가 없으면 **일부러 건너뛴 것**이다(리모트에 아직 브랜치가 없음).
+ *
+ * 커밋 이동(commitMove.ts)도 이 함수를 그대로 쓴다 — 되쓴 뒤 리모트에 반영한다는 점이 restack 과
+ * 같고, 자기만의 push 를 따로 만들면 fork·다른 destination 처리와 위 실패 보고가 곧바로 갈라진다.
+ * 그래서 복제하지 않고 export 만 얹었다.
  */
-async function pushForceWithLease(
+export async function pushForceWithLease(
   worktreePath: string,
   branch: string
 ): Promise<{ pushed: boolean; error?: string }> {
@@ -1053,6 +1059,187 @@ async function branchPoint(worktreePath: string, baseBranch: string): Promise<st
     }
   }
   return best
+}
+
+/** base..HEAD 커밋을 최신 먼저로 돌려준다. merge 커밋은 레이어 사이 이동 대상에서 뺀다. */
+export async function listCommits(
+  worktreePath: string,
+  baseBranch: string,
+  limit?: number
+): Promise<CommitEntry[]> {
+  const from = await branchPoint(worktreePath, baseBranch)
+  if (!from) return []
+  const args = [
+    'log',
+    '--no-merges',
+    '--format=%H%x1f%h%x1f%an%x1f%at%x1f%s',
+    ...(limit === undefined ? [] : ['-n', String(Math.max(0, limit))]),
+    `${from}..HEAD`
+  ]
+  const out = await git(worktreePath, args)
+  if (!out) return []
+  return out.split('\n').map((line) => {
+    const [sha, shortSha, authorName, authoredAt, subject] = line.split('\x1f')
+    return { sha, shortSha, authorName, authoredAt: Number(authoredAt) * 1000, subject }
+  })
+}
+
+/** 커밋 하나가 건드린 경로. rename 은 Git 이 최종 경로 하나로 표현하게 둔다. */
+export async function commitChangedPaths(worktreePath: string, sha: string): Promise<string[]> {
+  const out = await git(worktreePath, [
+    'diff-tree',
+    '--no-commit-id',
+    '--name-only',
+    '-r',
+    '--root',
+    sha
+  ])
+  return out.split('\n').filter(Boolean)
+}
+
+/** sha 가 실제 레이어 범위에 속한 비-merge 커밋인지 확인한다. */
+export async function commitInRange(
+  worktreePath: string,
+  baseBranch: string,
+  sha: string
+): Promise<boolean> {
+  const from = await branchPoint(worktreePath, baseBranch)
+  if (!from || !(await hasCommit(worktreePath, sha))) return false
+  const inRange = await gitTry(worktreePath, ['merge-base', '--is-ancestor', sha, 'HEAD'])
+  if (!inRange.ok || (await isAncestor(worktreePath, sha, from))) return false
+  const parents = await git(worktreePath, ['rev-list', '--parents', '-n', '1', sha]).catch(() => '')
+  return parents.split(/\s+/).filter(Boolean).length === 2
+}
+
+/** 충돌 경로를 반환한다. 충돌이 아닌 명령 실패에서는 빈 배열이다. */
+async function conflictedPaths(worktreePath: string): Promise<string[]> {
+  const out = await git(worktreePath, ['diff', '--name-only', '--diff-filter=U']).catch(() => '')
+  return out.split('\n').filter(Boolean)
+}
+
+/**
+ * 위층 커밋 하나를 아래층으로 옮기되 리모트에는 손대지 않는다.
+ *
+ * 첫 cherry-pick 성공을 확인하기 전에는 위층 히스토리를 절대 건드리지 않는다. 이 경계가 흐려지면
+ * 아래층 반영 실패 뒤에도 drop 단계가 진행되어 커밋이 양쪽 브랜치에서 사라질 수 있다. 실패 뒤에는
+ * 각 정리 명령의 종료 코드뿐 아니라 tip·clean 상태까지 확인해, 복구되지 않은 상태를 성공처럼 숨기지 않는다.
+ */
+export async function moveCommitDownLocal(opts: {
+  lowerWorktree: string
+  lowerBranch: string
+  upperWorktree: string
+  upperBranch: string
+  sha: string
+}): Promise<
+  | { ok: true; lowerTip: string; upperTip: string }
+  | {
+      ok: false
+      step: CommitMoveStep
+      conflictedFiles: string[]
+      message: string
+      rolledBack: boolean
+    }
+> {
+  const { lowerWorktree, lowerBranch, upperWorktree, upperBranch, sha } = opts
+  const lowerTip = await revParse(lowerWorktree, lowerBranch)
+  const upperTip = await revParse(upperWorktree, upperBranch)
+  const shortSha = sha.slice(0, 12)
+  const temporary = `wooi/commit-move-${shortSha}`
+  if (!lowerTip || !upperTip) {
+    return {
+      ok: false,
+      step: 'cherry-pick',
+      conflictedFiles: [],
+      message: 'Could not record both branch tips before moving the commit.',
+      rolledBack: true
+    }
+  }
+  if (!(await isWorktreeClean(lowerWorktree)) || !(await isWorktreeClean(upperWorktree))) {
+    return {
+      ok: false,
+      step: 'cherry-pick',
+      conflictedFiles: [],
+      message: 'Commit or stash your changes before moving a commit.',
+      rolledBack: true
+    }
+  }
+  if (
+    (await currentBranch(lowerWorktree)) !== lowerBranch ||
+    (await currentBranch(upperWorktree)) !== upperBranch
+  ) {
+    return {
+      ok: false,
+      step: 'cherry-pick',
+      conflictedFiles: [],
+      message: 'Both stack branches must be checked out in their own worktrees.',
+      rolledBack: true
+    }
+  }
+
+  const rollback = async (): Promise<boolean> => {
+    await gitTry(upperWorktree, ['rebase', '--abort'])
+    await gitTry(upperWorktree, ['checkout', upperBranch])
+    await gitTry(upperWorktree, ['reset', '--hard', upperTip])
+    await gitTry(upperWorktree, ['branch', '-D', temporary])
+    await gitTry(lowerWorktree, ['cherry-pick', '--abort'])
+    await gitTry(lowerWorktree, ['reset', '--hard', lowerTip])
+    const [lowerNow, upperNow, lowerClean, upperClean, upperCurrent, temp] = await Promise.all([
+      revParse(lowerWorktree, lowerBranch),
+      revParse(upperWorktree, upperBranch),
+      isWorktreeClean(lowerWorktree),
+      isWorktreeClean(upperWorktree),
+      currentBranch(upperWorktree),
+      revParse(upperWorktree, temporary)
+    ])
+    return (
+      lowerNow === lowerTip &&
+      upperNow === upperTip &&
+      lowerClean &&
+      upperClean &&
+      upperCurrent === upperBranch &&
+      temp === null
+    )
+  }
+  const failed = async (
+    step: CommitMoveStep,
+    result: { stderr: string }
+  ): Promise<Extract<Awaited<ReturnType<typeof moveCommitDownLocal>>, { ok: false }>> => {
+    const conflicts = await conflictedPaths(step === 'cherry-pick' ? lowerWorktree : upperWorktree)
+    const rolledBack = await rollback()
+    const recovery = rolledBack
+      ? ''
+      : ` Automatic rollback failed. Recover manually with '${lowerBranch}' at ${lowerTip} and '${upperBranch}' at ${upperTip}.`
+    return {
+      ok: false,
+      step,
+      conflictedFiles: conflicts,
+      message: (result.stderr || 'Git could not move the commit.') + recovery,
+      rolledBack
+    }
+  }
+
+  const picked = await gitTry(lowerWorktree, ['cherry-pick', sha])
+  if (!picked.ok) return failed('cherry-pick', picked)
+  const newLowerTip = await revParse(lowerWorktree, lowerBranch)
+  if (!newLowerTip) return failed('cherry-pick', { stderr: 'Could not read the new lower tip.' })
+
+  const parent = `${sha}^`
+  const madeBranch = await gitTry(upperWorktree, ['branch', temporary, parent])
+  if (!madeBranch.ok) return failed('replay-below', madeBranch)
+  const checkedOut = await gitTry(upperWorktree, ['checkout', temporary])
+  if (!checkedOut.ok) return failed('replay-below', checkedOut)
+  const below = await gitTry(upperWorktree, ['rebase', '--onto', newLowerTip, lowerTip, temporary])
+  if (!below.ok) return failed('replay-below', below)
+  const middle = await revParse(upperWorktree, 'HEAD')
+  if (!middle) return failed('replay-below', { stderr: 'Could not read the replayed lower range.' })
+
+  const above = await gitTry(upperWorktree, ['rebase', '--onto', middle, sha, upperBranch])
+  if (!above.ok) return failed('replay-above', above)
+  const cleanup = await gitTry(upperWorktree, ['branch', '-D', temporary])
+  if (!cleanup.ok) return failed('cleanup', cleanup)
+  const newUpperTip = await revParse(upperWorktree, upperBranch)
+  if (!newUpperTip) return failed('cleanup', { stderr: 'Could not read the new upper tip.' })
+  return { ok: true, lowerTip: newLowerTip, upperTip: newUpperTip }
 }
 
 export async function summarizeBranch(

@@ -10,6 +10,9 @@ import type {
   ArchiveScriptFailure,
   AuthStatus,
   CarryFailure,
+  CommitEntry,
+  CommitMovePreview,
+  CommitMoveResult,
   CreateFanoutArgs,
   CreateFanoutResult,
   ChatItem,
@@ -465,6 +468,15 @@ export interface WooiApi {
      * 반드시 사용자가 계획을 보고 승인한 뒤에만 호출한다.
      */
     trainRun(workspaceId: string, method: PrMergeMethod): Promise<StackTrainResult>
+    /** 현재 레이어(baseBranch..HEAD)의 커밋을 최신순으로 읽는다. */
+    commitsList(workspaceId: string): Promise<CommitEntry[]>
+    /** 히스토리를 바꾸기 전에 blocker·force-push 대상·복구용 tip을 한 번에 계산한다. */
+    commitMovePreview(
+      workspaceId: string,
+      sha: string
+    ): Promise<CommitMovePreview | { error: string }>
+    /** preview 뒤 사용자가 승인한 이동을 실행한다. 실행 시점의 안전 조건은 main이 다시 검사한다. */
+    commitMoveApply(workspaceId: string, sha: string): Promise<CommitMoveResult>
     /**
      * 부모 PR 병합으로 대기 중인 캐스케이드를 실행한다(어디서 병합했든 같은 경로).
      * 자식 브랜치를 rebase 후 force-push 하므로 반드시 사용자 승인 뒤에만 호출한다.
