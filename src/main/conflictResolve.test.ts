@@ -44,6 +44,15 @@ describe('pickAutoResolveStep', () => {
   it.each(['failed', 'ok', 'skipped'] as const)('%s 단계는 고르지 않는다', (status) => {
     expect(pickAutoResolveStep(true, [step({ status })])).toBeNull()
   })
+
+  // 머지 트레인의 merge 단계가 말하는 conflict 는 "PR 이 base 와 충돌한다"는 GitHub 쪽 사실이라
+  // 워크트리에는 풀 것이 없다. restack 단계만 워크트리를 rebase 진행 상태로 남긴다.
+  it.each(['merge', 'retarget', 'recover'] as const)(
+    '%s 단계의 conflict 는 워크트리 충돌이 아니므로 고르지 않는다',
+    (kind) => {
+      expect(pickAutoResolveStep(true, [step({ kind })])).toBeNull()
+    }
+  )
 })
 
 describe('buildConflictPrompt', () => {

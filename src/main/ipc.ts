@@ -230,8 +230,9 @@ export function registerIpc(ctx: IpcContext): void {
 
   /**
    * 충돌한 워크트리의 에이전트에게 해결을 맡긴다. 실제로 충돌이 있을 때만 보낸다.
-   * 트리거 지점을 한 함수로 모아 두는 이유는 merge train 이 나중에 같은 경로를 쓰더라도 토큰을
-   * 쓰기 직전의 검증과 대화 기록 정책을 우회하지 않게 하기 위해서다.
+   * 트리거 지점을 한 함수로 모아 두는 이유는 restack·캐스케이드·머지 트레인 셋이 같은 충돌을
+   * 서로 다른 자리에서 만들기 때문이다. 토큰을 쓰기 직전의 검증과 대화 기록 정책이 세 경로에서
+   * 갈리면, 어느 하나만 조용히 규칙을 벗어나도 알아채기 어렵다.
    */
   const startConflictResolve = async (
     workspaceId: string,
@@ -2153,6 +2154,15 @@ export function registerIpc(ctx: IpcContext): void {
         clearStackSync(workspaceId, true)
         for (const layer of layers) await reconcileWorkspaceStack(layer.workspaceId)
         broadcastState()
+        // 트레인은 캐스케이드를 자기가 만들지 않고 runMergeCascade 를 그대로 꽂아 쓰므로
+        // (trainDeps.runCascade) 단계마다 workspaceId 가 이미 실려 있다. 대상은 트레인을 시작한
+        // 워크스페이스가 아니라 충돌이 난 층의 워크트리다. 트레인은 첫 문제에서 멈추고 돌아오니
+        // 여기서도 한 번 실행 = 최대 한 턴이고, 실패해도 다시 태우지 않는다.
+        const autoStep = pickAutoResolveStep(
+          store.getState().settings.autoResolveConflicts,
+          result.steps
+        )
+        if (autoStep) await startConflictResolve(autoStep.workspaceId, { auto: true })
         return result
       } finally {
         mergeTrainPlans.delete(workspaceId)

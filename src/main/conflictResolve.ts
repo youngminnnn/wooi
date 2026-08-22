@@ -44,6 +44,11 @@ export function pickAutoResolveStep(
 
   for (const step of steps) {
     if (
+      // kind 까지 보는 이유는 'conflict' 라는 낱말이 두 가지를 가리키기 때문이다. 워크트리를
+      // rebase 진행 상태로 남기는 것은 restack 단계뿐이고, 머지 트레인의 merge 단계가 말하는
+      // 충돌은 "PR 이 base 와 충돌한다"는 GitHub 쪽 사실이라 워크트리에는 아무 일도 없다.
+      // 후자에 턴을 태우면 고칠 것이 없는 워크트리에 에이전트를 들여보내게 된다.
+      step.kind === 'restack' &&
       step.status === 'conflict' &&
       typeof step.workspaceId === 'string' &&
       step.workspaceId.length > 0 &&
