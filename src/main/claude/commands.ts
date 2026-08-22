@@ -53,6 +53,11 @@ const BUILTIN_COMMANDS: SlashCommandInfo[] = [
   // Composer 가 로컬/메인에서 직접 처리하는 명령들(SDK 목록엔 없음).
   { name: 'clear', description: 'Clear the conversation and start a fresh session' },
   { name: 'stop', description: 'Stop the turn that is running' },
+  {
+    name: 'subtask',
+    description: 'Delegate a task to a subagent in this workspace',
+    argumentHint: '<task>'
+  },
   { name: 'diff', description: 'Open the changes (diff) view for this workspace' },
   { name: 'copy', description: "Copy the assistant's last response to the clipboard" },
   { name: 'help', description: 'List the slash commands available here' },
