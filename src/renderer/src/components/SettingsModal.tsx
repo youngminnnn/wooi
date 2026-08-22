@@ -690,6 +690,16 @@ function AgentsPage({
             onChange={(value) => save({ autoResumeAfterRateLimit: value })}
           />
         </SettingRow>
+        <SettingRow
+          title="Resolve rebase conflicts with the agent"
+          description='When a restack or stack sync hits a rebase conflict, asks that workspace’s agent to resolve it, spending an agent turn. Leave this off to use the "resolve with agent" button yourself.'
+        >
+          <Switch
+            label="Resolve rebase conflicts with the agent"
+            checked={settings.autoResolveConflicts}
+            onChange={(value) => save({ autoResolveConflicts: value })}
+          />
+        </SettingRow>
       </SettingGroup>
     </PageFrame>
   )

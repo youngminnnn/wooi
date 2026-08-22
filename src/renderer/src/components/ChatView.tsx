@@ -49,6 +49,7 @@ import ExportMenu from './ExportMenu'
 import HeaderButton from './HeaderButton'
 import HeaderChip from './HeaderChip'
 import BaseSyncControl from './BaseSyncControl'
+import ConflictResolveAction from './ConflictResolveAction'
 import { AgentBackendMark, GithubMark } from './BrandIcons'
 import { useGithubDisconnected } from '../lib/github'
 import { useMultiAgent } from '../lib/multiAgent'
@@ -157,6 +158,7 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
     if (workspace.status !== 'error') setErrorDismissed(false)
   }, [workspace.status])
   const git = useStore((s) => s.gitStatus[workspace.id])
+  const stackProgress = useStore((s) => s.stackProgress[workspace.id])
   const pr = useStore((s) => s.prStatus[workspace.id])
   // 브랜치 전환·새로고침 중 PR 상태 조회가 진행 중이면 헤더 배지에 로딩을 표시한다.
   const prRefreshing = useStore((s) => s.prRefreshing[workspace.id] ?? false)
@@ -268,6 +270,11 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
     pushToast('info', 'Merge aborted.')
     await refresh()
   }
+
+  const lastConflict = [...(stackProgress?.done ?? [])]
+    .reverse()
+    .find((step) => step.status === 'conflict')
+  const conflictedFileCount = lastConflict?.conflictedFiles?.length
 
   // 세션이 에러(네트워크 끊김·에이전트 크래시 등)로 멈췄을 때 마지막 사용자 메시지를 다시 보내
   // 대화를 이어 간다. 재전송이 세션을 running 으로 되돌려 error 상태를 해제한다.
@@ -400,6 +407,14 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
                 >
                   abort
                 </button>
+                {/* rebase 충돌에만 붙인다 — updateFromBase 의 머지 충돌도 conflicted 를 켜지만,
+                    그쪽은 main 이 거절하므로 버튼을 띄우면 누를 때마다 실패하는 버튼이 된다. */}
+                {git.rebasing && (
+                  <ConflictResolveAction
+                    workspace={workspace}
+                    conflictedFileCount={conflictedFileCount}
+                  />
+                )}
               </span>
             )}
             {setupFailed && (

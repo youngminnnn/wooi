@@ -28,6 +28,7 @@ import {
   isGitRepo,
   isWorktreeClean,
   listBranches,
+  rebaseConflictState,
   removeWorktree,
   repoNameFromPath,
   restackOnto,
@@ -88,6 +89,7 @@ import {
   stepFromRestack
 } from './cascade'
 import type { StackProgressSink } from './cascade'
+import { buildConflictPrompt, pickAutoResolveStep } from './conflictResolve'
 import {
   getAuthStatus,
   claudeLoginStart,
@@ -235,6 +237,44 @@ export function registerIpc(ctx: IpcContext): void {
    */
   const broadcastState = (): void => {
     dispatch(IPC.evtState, store.getState())
+  }
+
+  /**
+   * 충돌한 워크트리의 에이전트에게 해결을 맡긴다. 실제로 충돌이 있을 때만 보낸다.
+   * 트리거 지점을 한 함수로 모아 두는 이유는 merge train 이 나중에 같은 경로를 쓰더라도 토큰을
+   * 쓰기 직전의 검증과 대화 기록 정책을 우회하지 않게 하기 위해서다.
+   */
+  const startConflictResolve = async (
+    workspaceId: string,
+    opts: { auto: boolean }
+  ): Promise<{ error?: string; started?: boolean }> => {
+    const ws = store.getState().workspaces.find((workspace) => workspace.id === workspaceId)
+    if (!ws || ws.archived) return { error: 'Workspace not found.' }
+
+    const { rebasing, branch, conflictedFiles } = await rebaseConflictState(ws.worktreePath)
+    if (!rebasing || conflictedFiles.length === 0) {
+      return { error: 'No rebase conflict is currently waiting in this workspace.' }
+    }
+    // 모델 B 스택은 엔트리마다 체크아웃한 뒤 rebase 하므로, 충돌한 브랜치가 워크스페이스에 기록된
+    // ws.branch 와 다를 수 있다. git 이 알려 준 브랜치를 우선하고 base 도 그 엔트리에서 찾는다 —
+    // 프롬프트가 엉뚱한 브랜치를 지목하면 에이전트가 자기가 어디에 서 있는지 모른 채 시작한다.
+    const conflictedBranch = branch ?? ws.branch
+    const entry = workspaceStack(ws).find((e) => e.branch === conflictedBranch)
+    const prompt = buildConflictPrompt({
+      branch: conflictedBranch,
+      baseBranch: entry?.baseBranch ?? ws.baseBranch,
+      conflictedFiles,
+      auto: opts.auto
+    })
+    try {
+      // 이 전송은 토큰을 쓰게 된 이유 그 자체라 transcript 에 남아야 한다. 그래서 silent 나 prefix 를
+      // 쓰지 않는다. running 가드도 두지 않는다 — Claude 는 SDK 입력 큐에 enqueue 하고, Codex 는
+      // 진행 중인 턴에 네이티브 steering 하므로 두 백엔드 모두 mid-turn 전송을 받아들인다.
+      await ctx.sessions.sendMessage(workspaceId, prompt)
+      return { started: true }
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : String(err) }
+    }
   }
 
   const stackProgress = (
@@ -1406,11 +1446,13 @@ export function registerIpc(ctx: IpcContext): void {
    * worktree 를 남겨 두고 결과를 돌려준다. 성공하면 원래 체크아웃 브랜치로 되돌아온다.
    */
   const restackWholeStack = async (
+    workspaceId: string,
     worktreePath: string,
     stack: StackedBranch[],
     returnTo: string,
     progress?: StackProgressSink
   ): Promise<RestackResult> => {
+    const emitStep = (step: StackCascadeStep): void => progress?.step({ ...step, workspaceId })
     if (!(await isWorktreeClean(worktreePath))) {
       const result: RestackResult = {
         status: 'dirty',
@@ -1418,7 +1460,7 @@ export function registerIpc(ctx: IpcContext): void {
         message: 'Commit or stash your changes before restacking the stack.'
       }
       progress?.start(returnTo, 'restack')
-      progress?.step(stepFromRestack(returnTo, null, result))
+      emitStep(stepFromRestack(returnTo, null, result))
       return result
     }
     // rebase 시작 전, 각 스택 브랜치의 현재 tip 을 잡아 둔다(상위 브랜치의 --onto oldBase 로 쓴다).
@@ -1435,7 +1477,7 @@ export function registerIpc(ctx: IpcContext): void {
       // — 즉 이 버튼도 GitHub 의 서버측 rebase 를 덮어쓸 수 있다(cascade.ts 의 실측 기록 참고).
       const remote = await detectRemoteDivergence(worktreePath, entry.branch)
       if (isDiverged(remote)) {
-        progress?.step(divergedStep(entry.branch, entry.prNumber, remote))
+        emitStep(divergedStep(entry.branch, entry.prNumber, remote))
         return {
           status: 'error',
           baseBranch: entry.baseBranch,
@@ -1444,7 +1486,7 @@ export function registerIpc(ctx: IpcContext): void {
       }
       const co = await checkoutBranch(worktreePath, entry.branch)
       if (co.error) {
-        progress?.step({
+        emitStep({
           branch: entry.branch,
           prNumber: entry.prNumber,
           kind: 'restack',
@@ -1460,7 +1502,7 @@ export function registerIpc(ctx: IpcContext): void {
         baseBranch: entry.baseBranch,
         message: err instanceof Error ? err.message : String(err)
       }))
-      progress?.step(stepFromRestack(entry.branch, entry.prNumber, res))
+      emitStep(stepFromRestack(entry.branch, entry.prNumber, res))
       if (res.status === 'conflict' || res.status === 'error' || res.status === 'dirty') return res
       // rebase 는 됐지만 push 가 거부됐다. 이 층의 리모트는 옛 커밋 그대로라 위를 계속 쌓으면
       // 스택이 절반만 옮겨진다 — 여기서 멈추고 사유를 그대로 올려 보낸다(삼키지 않는다).
@@ -1485,29 +1527,50 @@ export function registerIpc(ctx: IpcContext): void {
       }
     }
     const operation = stackProgress(workspaceId, 'restack', ws.stack?.length ?? null)
+    const steps: StackCascadeStep[] = []
+    const progress: StackProgressSink = {
+      start: operation.sink.start,
+      step: (step) => {
+        steps.push(step)
+        operation.sink.step(step)
+      }
+    }
     try {
+      let result: RestackResult
       if (ws.stack && ws.stack.length > 1) {
-        return await restackWholeStack(ws.worktreePath, ws.stack, ws.branch, operation.sink)
-      }
-      // 단일 브랜치도 안전하지 않다. oldBase 를 넘기지 않아 "뒤처졌을 때만" rebase 하지만, base 가
-      // 앞서간 상황이 바로 아래층이 병합된 직후 — GitHub 이 이 브랜치를 이미 서버에서 rebase 해 둔
-      // 그 순간이다. 그대로 두면 옛 커밋을 재생해 그 결과를 덮어쓴다.
-      operation.sink.start(ws.branch, 'restack')
-      const remote = await detectRemoteDivergence(ws.worktreePath, ws.branch)
-      if (isDiverged(remote)) {
-        operation.sink.step(divergedStep(ws.branch, ws.prNumber, remote))
-        return {
-          status: 'error',
-          baseBranch: ws.baseBranch,
-          message: divergedMessage(ws.branch, remote)
+        result = await restackWholeStack(
+          workspaceId,
+          ws.worktreePath,
+          ws.stack,
+          ws.branch,
+          progress
+        )
+      } else {
+        // 단일 브랜치도 안전하지 않다. oldBase 를 넘기지 않아 "뒤처졌을 때만" rebase 하지만, base 가
+        // 앞서간 상황이 바로 아래층이 병합된 직후 — GitHub 이 이 브랜치를 이미 서버에서 rebase 해 둔
+        // 그 순간이다. 그대로 두면 옛 커밋을 재생해 그 결과를 덮어쓴다.
+        progress.start(ws.branch, 'restack')
+        const remote = await detectRemoteDivergence(ws.worktreePath, ws.branch)
+        if (isDiverged(remote)) {
+          progress.step({ ...divergedStep(ws.branch, ws.prNumber, remote), workspaceId })
+          return {
+            status: 'error',
+            baseBranch: ws.baseBranch,
+            message: divergedMessage(ws.branch, remote)
+          }
         }
+        result = await restackOnto(ws.worktreePath, ws.baseBranch).catch((err) => ({
+          status: 'error' as const,
+          baseBranch: ws.baseBranch,
+          message: err instanceof Error ? err.message : String(err)
+        }))
+        progress.step({ ...stepFromRestack(ws.branch, ws.prNumber, result), workspaceId })
       }
-      const result = await restackOnto(ws.worktreePath, ws.baseBranch).catch((err) => ({
-        status: 'error' as const,
-        baseBranch: ws.baseBranch,
-        message: err instanceof Error ? err.message : String(err)
-      }))
-      operation.sink.step(stepFromRestack(ws.branch, ws.prNumber, result))
+      // 설정이 꺼져 있으면 순수 함수가 즉시 null 을 돌려 git/session 호출이 전혀 없다. diverged 는
+      // 사람이 어느 쪽을 버릴지 정할 상태라 제외하고, 한 작업의 첫 conflict 하나만 한 번 보낸다.
+      // 실패해도 자동 재시도하지 않는다 — 충돌 하나가 무제한 턴으로 번지는 길을 만들지 않는다.
+      const autoStep = pickAutoResolveStep(store.getState().settings.autoResolveConflicts, steps)
+      if (autoStep) await startConflictResolve(autoStep.workspaceId, { auto: true })
       return result
     } finally {
       operation.finish()
@@ -1956,6 +2019,7 @@ export function registerIpc(ctx: IpcContext): void {
       steps.push(
         ...(await cascadeRetarget({
           worktreePath: child.worktreePath,
+          workspaceId: child.id,
           mergedBranch,
           newBase: grandparentBranch,
           entries: [{ branch: child.branch, baseBranch: mergedBranch, prNumber: child.prNumber }],
@@ -1980,7 +2044,10 @@ export function registerIpc(ctx: IpcContext): void {
         () => 'unknown' as const
       )
       if (isDiverged(remote)) {
-        const step = divergedStep(child.branch, child.prNumber, remote)
+        const step = {
+          ...divergedStep(child.branch, child.prNumber, remote),
+          workspaceId: child.id
+        }
         progress?.start(child.branch, 'restack')
         steps.push(step)
         progress?.step(step)
@@ -1994,7 +2061,7 @@ export function registerIpc(ctx: IpcContext): void {
           message: err instanceof Error ? err.message : String(err)
         })
       )
-      const step = stepFromRestack(child.branch, child.prNumber, r)
+      const step = { ...stepFromRestack(child.branch, child.prNumber, r), workspaceId: child.id }
       steps.push(step)
       progress?.step(step)
     }
@@ -2012,6 +2079,7 @@ export function registerIpc(ctx: IpcContext): void {
       steps.push(
         ...(await cascadeRetarget({
           worktreePath: ws.worktreePath,
+          workspaceId,
           mergedBranch,
           newBase: mergedBase,
           entries: above,
@@ -2022,6 +2090,7 @@ export function registerIpc(ctx: IpcContext): void {
       steps.push(
         ...(await cascadeRestackBranchStack({
           worktreePath: ws.worktreePath,
+          workspaceId,
           mergedBranch,
           newBase: mergedBase,
           entries: above,
@@ -2264,6 +2333,14 @@ export function registerIpc(ctx: IpcContext): void {
           return { steps: [step] }
         })
         clearStackSync(workspaceId, true)
+        // 꺼져 있으면 여기서 즉시 null 이라 git/session 호출이 0회다. diverged 는 충돌이 아니라
+        // 사람의 선택이고, 모델 A 가 여러 conflict 를 내도 첫 하나만 골라 작업당 턴을 최대 하나로
+        // 제한한다. 해결 실패에도 자동 재시도는 없다 — 재시도 루프는 토큰을 무제한 태울 수 있다.
+        const autoStep = pickAutoResolveStep(
+          store.getState().settings.autoResolveConflicts,
+          cascade.steps
+        )
+        if (autoStep) await startConflictResolve(autoStep.workspaceId, { auto: true })
         return { cascade }
       } finally {
         operation.finish()
@@ -2328,6 +2405,12 @@ export function registerIpc(ctx: IpcContext): void {
     // 되돌려 놓아, 사용자의 선택과 어긋난 PR 이 또 만들어진다.
     await syncPrBase(ws, kept)
   })
+
+  handle(
+    IPC.stackResolveConflict,
+    async (_e, workspaceId: string): Promise<{ error?: string; started?: boolean }> =>
+      startConflictResolve(workspaceId, { auto: false })
+  )
 
   handle(IPC.prClose, async (_e, workspaceId: string): Promise<{ error?: string }> => {
     const ws = store.getState().workspaces.find((w) => w.id === workspaceId)

@@ -93,6 +93,7 @@ describe('cascadeRetarget', () => {
 
     const steps = await cascadeRetarget({
       worktreePath: WT,
+      workspaceId: 'workspace-a',
       mergedBranch: 'a',
       newBase: 'main',
       entries: [entry('b', 'a', 2), entry('c', 'a', 3)],
@@ -107,6 +108,7 @@ describe('cascadeRetarget', () => {
       ['c', 'retarget']
     ])
     expect(streamed).toEqual(steps)
+    expect(steps.every((step) => step.workspaceId === 'workspace-a')).toBe(true)
   })
 
   it('retargets a child whose base is the merged branch', async () => {
@@ -250,6 +252,24 @@ describe('cascadeRetarget', () => {
 })
 
 describe('cascadeRestackBranchStack', () => {
+  it('stamps the owning workspace onto returned and streamed steps', async () => {
+    vi.mocked(isWorktreeClean).mockResolvedValue(false)
+    const streamed: unknown[] = []
+
+    const steps = await cascadeRestackBranchStack({
+      worktreePath: WT,
+      workspaceId: 'workspace-b',
+      mergedBranch: 'a',
+      newBase: 'main',
+      entries: [entry('b', 'a', 2)],
+      allEntries: [entry('a', 'main', 1), entry('b', 'a', 2)],
+      progress: { start: vi.fn(), step: (step) => streamed.push(step) }
+    })
+
+    expect(steps).toEqual([expect.objectContaining({ branch: 'b', workspaceId: 'workspace-b' })])
+    expect(streamed).toEqual(steps)
+  })
+
   it('reports dirty worktrees instead of silently skipping the rebase', async () => {
     vi.mocked(isWorktreeClean).mockResolvedValue(false)
 
