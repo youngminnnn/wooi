@@ -26,6 +26,14 @@ describe('matchUnavailableCommand', () => {
     expect(matchUnavailableCommand('/bg')).toBe(matchUnavailableCommand('/background'))
   })
 
+  it('matches /exit and /quit to the same group', () => {
+    expect(matchUnavailableCommand('/exit')).toBe(matchUnavailableCommand('/quit'))
+  })
+
+  it('gates /skill-doctor', () => {
+    expect(matchUnavailableCommand('/skill-doctor')?.names).toContain('skill-doctor')
+  })
+
   it('ignores plain messages, available commands, and multiline prompts', () => {
     expect(matchUnavailableCommand('hello')).toBeNull()
     expect(matchUnavailableCommand('/compact')).toBeNull()

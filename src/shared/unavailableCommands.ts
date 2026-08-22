@@ -73,13 +73,6 @@ export const RESERVED_COMMANDS: readonly string[] = [
 
 /*
  * 일부러 넣지 않은 것들:
- * - `exit` · `quit` — CLI 에 `type:"local"` · `terminalOriented:!0` ·
- *   `supportsNonInteractive:!0` 변종이 있다. 비대화형에서 죽는다는 근거가 없으므로 가로막지 않는다.
- * - `skill-doctor` — `type:"local"` · `supportsNonInteractive:!0` ·
- *   `thinClientDispatch:"post-text"` · `isEnabled:()=>xn()` · `get isHidden(){return !xn()}` 다.
- *   `auto-mode-setup` 과 같은 형태라 비대화형에서 오히려 켜지도록 만든 변종이다. 리뷰에서
- *   "Unknown command: /skill-doctor" 를 봤다는 상반된 실측이 있어 근거가 갈리므로 확신이 설 때까지
- *   남겨 둔다.
  * - `rate-limit-options` · `pro-trial-expired` — CLI 가 특정 상황에 스스로 띄우는 내부 화면이라
  *   사용자가 칠 일이 없다.
  */
@@ -87,6 +80,16 @@ export const RESERVED_COMMANDS: readonly string[] = [
 // 두 목록은 직교한다. `HIDDEN_SDK_COMMANDS` 는 자동완성에서 빼고, `UNAVAILABLE_COMMANDS` 는 타이핑해
 // 보낸 것을 가로챈다. 한 이름이 둘 다 필요할 수 있다. `known` 은 이미 걸러진 목록에서 나오므로 감춘
 // 이름은 절대 `known` 에 들어가지 않고, 따라서 게이트가 확실히 잡는다.
+//
+// 판정 방법: 등록 모양은 노출 여부를 예측하지 못한다. 같은 `type:"local"` ·
+// `supportsNonInteractive:!0` 인데 `auto-mode-setup` 은 목록에 있고 `skill-doctor` · `exit` · `rewind` 는
+// 없다. 변수에 대입만 되고 레지스트리 배열에는 안 실리는 죽은 정의가 있는 것으로 보인다. 따라서
+// (1) `supportedCommands()` 에 이름이 있는지 확인하고, (2) 실제로 한 번 보내 응답을 본다. 바이너리
+// grep 은 "왜 그런가" 를 설명할 때만 쓴다.
+//
+// 근거에는 확인한 CLI 버전을 함께 적는다. Claude Code 는 자동 업데이트되고 심볼 이름도 바뀐다.
+// 비대화형 여부를 뜻하는 헬퍼는 CLI 2.1.233 에서 `xn()`, 2.1.240 에서 `Un()` 이었다. 이 파일의
+// 바이너리 인용은 별도 표기가 없으면 CLI 2.1.233(SDK 0.3.233)에서 읽은 것이다.
 export const UNAVAILABLE_COMMANDS: readonly UnavailableCommand[] = [
   // Wooi 설정이 대신 맡는 터미널 외형 명령이다.
   {
@@ -154,9 +157,18 @@ export const UNAVAILABLE_COMMANDS: readonly UnavailableCommand[] = [
     names: ['background', 'bg'],
     message: "Every Wooi workspace already runs in the background — there's nothing to move."
   },
+  // CLI 2.1.240 실측 — `supportedCommands()` 에 없고, 보내면
+  // `"/exit isn't available in this environment."` 가 온다. `quit` 은 별칭이다.
+  {
+    names: ['exit', 'quit'],
+    message:
+      "Wooi has no session to quit — close the window, or archive the workspace when you're done."
+  },
   // Claude Code 터미널 앱 안에서만 제공되는 제품·설정 진입 명령이다. CLI 내부의 백그라운드
   // 서비스·루프·워크플로 뷰, IDE 연동 패널, 인증 재설정 마법사도 전부 `type:"local-jsx"` 로만
-  // 등록돼 있다.
+  // 등록돼 있다. `skill-doctor` 는 CLI 2.1.240 실측에서 `supportedCommands()` 에 없고
+  // `"Unknown command: /skill-doctor"` 가 온다 — 오타를 쳤다는 말처럼 읽혀서 미지원 응답 중 가장
+  // 나쁘다.
   {
     names: [
       'advisor',
@@ -172,7 +184,8 @@ export const UNAVAILABLE_COMMANDS: readonly UnavailableCommand[] = [
       'workflows',
       'ide',
       'setup-bedrock',
-      'setup-vertex'
+      'setup-vertex',
+      'skill-doctor'
     ],
     message: 'This only runs in the Claude Code terminal app.'
   }
