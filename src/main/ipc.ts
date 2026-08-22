@@ -118,6 +118,7 @@ import {
 } from './fanout'
 import { resolveToolPermission } from './agent/tools/permission'
 import { runAgentTool } from './agent/tools'
+import { answerDecision, dismissDecision, escalateDecision } from './agent/tools/decision'
 import { parseWooiCommandArgs, WOOI_COMMANDS } from '@shared/wooiCommands'
 import { appendMemory } from './claude/memory'
 import { claudeConfigPath, mcpInventory } from './claude/mcp'
@@ -671,6 +672,26 @@ export function registerIpc(ctx: IpcContext): void {
         resolvePeerMessage(pending.fromWorkspaceId, pending.id, 'declined-by-user')
         broadcastState()
       }
+    }
+  )
+
+  handle(
+    IPC.workspaceDecisionAnswer,
+    async (_e, workspaceId: string, decisionId: string, answer: string): Promise<void> => {
+      answerDecision(workspaceId, decisionId, answer)
+    }
+  )
+
+  handle(
+    IPC.workspaceDecisionEscalate,
+    async (_e, workspaceId: string, decisionId: string): Promise<boolean> =>
+      escalateDecision(workspaceId, decisionId)
+  )
+
+  handle(
+    IPC.workspaceDecisionDismiss,
+    async (_e, workspaceId: string, decisionId: string): Promise<void> => {
+      dismissDecision(workspaceId, decisionId)
     }
   )
 

@@ -24,6 +24,7 @@ import {
   ArrowUpDown,
   GitPullRequest,
   MessagesSquare,
+  MessageCircleQuestion,
   Copy,
   Square,
   X,
@@ -1036,6 +1037,13 @@ function WorkspaceRow({
                 size={12}
                 className="text-[var(--info-400)]"
                 aria-label="Message waiting from another workspace"
+              />
+            )}
+            {(workspace.decisions?.length ?? 0) > 0 && (
+              <MessageCircleQuestion
+                size={12}
+                className="text-[var(--accent-400)]"
+                aria-label="Question waiting for your answer"
               />
             )}
             {workspace.muted && (

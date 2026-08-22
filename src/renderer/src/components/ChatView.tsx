@@ -43,6 +43,7 @@ import StackBaseBanner from './StackBaseBanner'
 import ArchiveSuggestBanner from './ArchiveSuggestBanner'
 import PeerInboxBanner from './PeerInboxBanner'
 import StackedWaitBanner from './StackedWaitBanner'
+import DecisionPrompt from './DecisionPrompt'
 import ExportMenu from './ExportMenu'
 import HeaderButton from './HeaderButton'
 import HeaderChip from './HeaderChip'
@@ -565,6 +566,7 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
       {/* 다른 워크스페이스가 보낸 메시지의 승인 배너(전달하면 여기서 턴이 시작된다). */}
       <PeerInboxBanner workspace={workspace} />
       <StackedWaitBanner workspace={workspace} />
+      <DecisionPrompt key={workspace.decisions?.[0]?.id} workspace={workspace} />
 
       {/* 대화 */}
       <MessageList workspaceId={workspace.id} running={running} />
