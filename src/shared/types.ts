@@ -2822,13 +2822,23 @@ export interface ReviewEnvelope {
   event: ReviewEvent
 }
 
-/** 리뷰 시작 모달의 열린 PR 목록 항목. */
-export interface ReviewPrCandidate {
+/** 리뷰 시작 모달과 워크스페이스 시작 모달이 함께 쓰는 열린 PR 목록 항목. */
+export interface PrCandidate {
   number: number
   title: string
   head: string
   base: string
   author: string
+  isCrossRepository?: boolean
+  headRepositoryOwner?: string
+  maintainerCanModify?: boolean
+  url?: string
+  isDraft?: boolean
+  /** 직접 조회한 PR 에만 붙는다. 열린 목록은 상태가 모두 OPEN 이라 싣지 않는다. */
+  state?: string
+  canCreateWorkspace?: boolean
+  createWorkspaceDisabledReason?: string
+  isViewerAuthor?: boolean
 }
 
 /** 워크스페이스 시작 모달과 에이전트 도구가 함께 쓰는 열린 이슈 목록 항목. */
@@ -2865,7 +2875,10 @@ export const IPC = {
   repoReorder: 'repo:reorder',
   repoListBranches: 'repo:listBranches',
   repoListIssues: 'repo:listIssues',
+  repoListPrs: 'repo:listPrs',
+  repoResolvePr: 'repo:resolvePr',
   repoGetIssueBody: 'repo:getIssueBody',
+  repoGetPrBody: 'repo:getPrBody',
   workspaceCreate: 'workspace:create',
   workspaceArchive: 'workspace:archive',
   /** 병합된 PR 로 뜬 아카이브 제안을 해제한다(같은 병합은 다시 제안하지 않는다). */

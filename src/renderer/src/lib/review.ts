@@ -6,7 +6,7 @@ import type {
   ReviewFinding,
   ReviewLayer,
   ReviewLayerDiff,
-  ReviewPrCandidate,
+  PrCandidate,
   ReviewProgressItem,
   ReviewSession,
   ReviewSeverity,
@@ -391,7 +391,7 @@ export function parsePrSelector(raw: string): number | null {
  * 검색어 한 줄로 열린 PR 을 걸러낸다. 제목·번호·작성자·브랜치 어느 쪽으로 기억하고 있든
  * 찾아지도록 모두 대상으로 삼는다(공백으로 나눈 낱말을 모두 포함해야 통과 — 좁혀 가는 검색).
  */
-export function matchesPrQuery(pr: ReviewPrCandidate, query: string): boolean {
+export function matchesPrQuery(pr: PrCandidate, query: string): boolean {
   const terms = query.toLowerCase().split(/\s+/).filter(Boolean)
   if (terms.length === 0) return true
   const hay = `#${pr.number} ${pr.title} ${pr.author} ${pr.head} ${pr.base}`.toLowerCase()
