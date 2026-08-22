@@ -59,9 +59,17 @@ const BUILTIN_COMMANDS: SlashCommandInfo[] = [
     argumentHint: '<task>'
   },
   { name: 'diff', description: 'Open the changes (diff) view for this workspace' },
-  { name: 'copy', description: "Copy the assistant's last response to the clipboard" },
+  {
+    name: 'copy',
+    description: "Copy the assistant's Nth-latest response to the clipboard",
+    argumentHint: '[N]'
+  },
   { name: 'help', description: 'List the slash commands available here' },
-  { name: 'memory', description: 'Open this project’s CLAUDE.md in your editor' },
+  {
+    name: 'memory',
+    description: 'Open project or user CLAUDE.md in your editor',
+    argumentHint: '[project|user]'
+  },
   {
     name: 'add-dir',
     description: 'Give the agent access to a directory outside this workspace',

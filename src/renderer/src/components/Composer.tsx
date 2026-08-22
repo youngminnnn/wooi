@@ -176,6 +176,8 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
   const [wooiCard, setWooiCard] = useState<WooiCardState | null>(null)
   // `#` 로 적은 기억. 어느 CLAUDE.md 에 남길지 고르는 동안만 들고 있는다.
   const [memoryDraft, setMemoryDraft] = useState<string | null>(null)
+  // `/memory` 에 스코프가 없을 때 어느 CLAUDE.md 를 열지 고르는 카드.
+  const [memoryOpenPick, setMemoryOpenPick] = useState(false)
   // 카드 응답을 현재 요청과만 맞추기 위한 단조 토큰(워크스페이스/명령 전환 시 stale 응답 무시).
   const cmdSeq = useRef(0)
 
@@ -204,6 +206,7 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
     setWooiCard(null)
     setPickerCard(null)
     setMemoryDraft(null)
+    setMemoryOpenPick(false)
     setImages([])
     setMentionResult(null)
     setMentionDismissedAt(null)
@@ -216,6 +219,7 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
   const openPicker = (kind: PickerKind): void => {
     setSideAnswer(null)
     setCommandCard(null)
+    setMemoryOpenPick(false)
     setPickerCard(kind)
   }
 
@@ -547,6 +551,7 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
       setCommandCard(null)
       setWooiCard(null)
       setPickerCard(null)
+      setMemoryOpenPick(false)
       setMemoryDraft(memo)
       setText('')
       historyIdx.current = -1
@@ -725,6 +730,7 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
   const saveMemory = (scope: MemoryScope): void => {
     const memo = memoryDraft
     setMemoryDraft(null)
+    setMemoryOpenPick(false)
     taRef.current?.focus()
     if (!memo) return
     void window.api.workspace.addMemory(workspace.id, scope, memo).then((r) => {
@@ -734,6 +740,15 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
           'success',
           scope === 'user' ? 'Added to ~/.claude/CLAUDE.md' : 'Added to this project’s CLAUDE.md'
         )
+    })
+  }
+
+  /** `/memory` 카드에서 고른 CLAUDE.md 를 열고 입력창으로 돌아온다. */
+  const openMemory = (scope: MemoryScope): void => {
+    setMemoryOpenPick(false)
+    taRef.current?.focus()
+    void window.api.workspace.openMemory(workspace.id, scope).then((r) => {
+      if (r.error) pushToast('error', r.error)
     })
   }
 
@@ -805,9 +820,10 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
     // 승인·질문·계획 프롬프트가 떠 있으면 Esc 는 그 프롬프트의 거부/취소다.
     if (st.permissions.some((p) => p.workspaceId === workspace.id)) return
 
-    if (memoryDraft) {
+    if (memoryDraft || memoryOpenPick) {
       e.preventDefault()
       setMemoryDraft(null)
+      setMemoryOpenPick(false)
       taRef.current?.focus()
       return
     }
@@ -869,6 +885,8 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
     setCommandCard(null)
     setWooiCard(null)
     setPickerCard(null)
+    setMemoryDraft(null) // 로컬 명령이 이어받은 뒤에도 `#` 메모를 남기면 두 메모리 카드가 서로를 가린다.
+    setMemoryOpenPick(false)
 
     if (kind === 'help') {
       setText('/') // 자동완성 메뉴로 사용 가능한 명령을 모두 보여 준다.
@@ -893,6 +911,61 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
       return
     }
 
+    if (kind === 'copy') {
+      const index = parseCopyIndex(raw)
+      if (index === null) {
+        pushToast('info', 'Usage: /copy [N] — copies the Nth-latest response (default 1).')
+        taRef.current?.focus()
+        return
+      }
+      const responses = items.filter(
+        (i): i is Extract<ChatItem, { type: 'assistant' }> =>
+          i.type === 'assistant' && !!i.text?.trim()
+      )
+      if (responses.length === 0) {
+        pushToast('info', 'No assistant response to copy yet.')
+        taRef.current?.focus()
+        return
+      }
+      const response = responses.at(-index)
+      if (!response) {
+        pushToast(
+          'info',
+          `Only ${responses.length} assistant ${responses.length === 1 ? 'response' : 'responses'} so far.`
+        )
+        taRef.current?.focus()
+        return
+      }
+      setText('')
+      void navigator.clipboard.writeText(response.text).then(
+        () =>
+          pushToast(
+            'success',
+            index === 1
+              ? 'Copied the last response to the clipboard.'
+              : `Copied response #${index} (counting back) to the clipboard.`
+          ),
+        () => pushToast('error', 'Could not copy to the clipboard.')
+      )
+      return
+    }
+
+    if (kind === 'memory') {
+      const scope = parseMemoryScope(raw)
+      if (scope === null) {
+        pushToast('info', 'Usage: /memory [project|user]')
+        taRef.current?.focus()
+        return
+      }
+      setText('')
+      if (scope === 'ask') {
+        setMemoryOpenPick(true)
+      } else {
+        openMemory(scope)
+      }
+      return
+    }
+
     setText('')
     // /stop 은 Stop 버튼·Esc 와 같은 중단이다. 돌고 있지 않을 때 입력창만 비우면 명령이
     // 먹혔는지 알 수 없으므로, 그때는 아무것도 멈추지 않았다고 말해 준다.
@@ -904,29 +977,6 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
     if (kind === 'diff') {
       // ChatView 가 가진 diff 모달을 연다(Composer 에서 직접 접근할 수 없어 이벤트로 신호한다).
       window.dispatchEvent(new CustomEvent('wooi:open-diff', { detail: workspace.id }))
-      return
-    }
-    if (kind === 'copy') {
-      const last = [...items]
-        .reverse()
-        .find(
-          (i): i is Extract<ChatItem, { type: 'assistant' }> =>
-            i.type === 'assistant' && !!i.text?.trim()
-        )
-      if (!last) {
-        pushToast('info', 'No assistant response to copy yet.')
-        return
-      }
-      void navigator.clipboard.writeText(last.text).then(
-        () => pushToast('success', 'Copied the last response to the clipboard.'),
-        () => pushToast('error', 'Could not copy to the clipboard.')
-      )
-      return
-    }
-    if (kind === 'memory') {
-      void window.api.workspace.openMemory(workspace.id).then((r) => {
-        if (r.error) pushToast('error', r.error)
-      })
       return
     }
     if (kind === 'clear') {
@@ -1060,38 +1110,60 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
             onPick={acceptMention}
           />
         )}
-        {memoryDraft && !menuOpen && !mentionOpen && (
+        {memoryDraft && !menuOpen && !mentionOpen && !memoryOpenPick && (
           <MemoryCard
+            title="Add to memory"
             text={memoryDraft}
             onPick={saveMemory}
             onClose={() => {
               setMemoryDraft(null)
+              setMemoryOpenPick(false)
               taRef.current?.focus()
             }}
           />
         )}
-        {commandCard && !menuOpen && !mentionOpen && !pickerCard && !memoryDraft && (
-          <CommandCard
-            card={commandCard}
-            workspace={workspace}
-            workspaceId={workspace.id}
-            onResult={(result) => setCommandCard((prev) => (prev ? { ...prev, result } : prev))}
-            onClose={() => setCommandCard(null)}
+        {memoryOpenPick && !menuOpen && !mentionOpen && !memoryDraft && (
+          <MemoryCard
+            title="Open memory"
+            onPick={openMemory}
+            onClose={() => {
+              setMemoryOpenPick(false)
+              taRef.current?.focus()
+            }}
           />
         )}
-        {wooiCard && !menuOpen && !mentionOpen && !commandCard && !pickerCard && !memoryDraft && (
-          <WooiCommandCard card={wooiCard} onClose={() => setWooiCard(null)} />
-        )}
+        {commandCard &&
+          !menuOpen &&
+          !mentionOpen &&
+          !pickerCard &&
+          !memoryDraft &&
+          !memoryOpenPick && (
+            <CommandCard
+              card={commandCard}
+              workspace={workspace}
+              workspaceId={workspace.id}
+              onResult={(result) => setCommandCard((prev) => (prev ? { ...prev, result } : prev))}
+              onClose={() => setCommandCard(null)}
+            />
+          )}
+        {wooiCard &&
+          !menuOpen &&
+          !mentionOpen &&
+          !commandCard &&
+          !pickerCard &&
+          !memoryDraft &&
+          !memoryOpenPick && <WooiCommandCard card={wooiCard} onClose={() => setWooiCard(null)} />}
         {sideAnswer &&
           !menuOpen &&
           !mentionOpen &&
           !commandCard &&
           !wooiCard &&
           !pickerCard &&
-          !memoryDraft && (
+          !memoryDraft &&
+          !memoryOpenPick && (
             <SideAnswerCard answer={sideAnswer} onClose={() => setSideAnswer(null)} />
           )}
-        {pickerCard && !menuOpen && !mentionOpen && !memoryDraft && (
+        {pickerCard && !menuOpen && !mentionOpen && !memoryDraft && !memoryOpenPick && (
           <PickerCard
             kind={pickerCard}
             workspace={workspace}
@@ -1439,15 +1511,17 @@ type SideAnswer = {
  * 메인 대화와 분리된 임시 표시 — 닫으면(Esc/✕) 사라지고 기록에 남지 않는다.
  */
 /**
- * `#` 로 시작한 입력을 어느 CLAUDE.md 에 남길지 고르는 카드. 터미널 Claude Code 와 같은 흐름이다 —
- * 기억할 내용을 적고, 프로젝트용인지 개인용인지만 고른다. 1/2 로 바로 고를 수 있고 Esc 로 취소한다.
+ * CLAUDE.md 의 프로젝트/사용자 스코프를 고르는 공용 카드. `#` 기억은 남길 내용을 함께 보여 주고,
+ * `/memory` 는 열 파일만 고른다. 1/2 로 바로 고를 수 있고 Esc 로 취소한다.
  */
 function MemoryCard({
+  title,
   text,
   onPick,
   onClose
 }: {
-  text: string
+  title: string
+  text?: string
   onPick: (scope: MemoryScope) => void
   onClose: () => void
 }): React.JSX.Element {
@@ -1472,7 +1546,7 @@ function MemoryCard({
     >
       <div className="flex items-center gap-2 px-3 py-2 border-b border-[var(--border)]">
         <BookMarked size={13} className="text-[var(--accent-400)] shrink-0" />
-        <span className="text-xs font-medium text-[var(--accent-300)] shrink-0">Add to memory</span>
+        <span className="text-xs font-medium text-[var(--accent-300)] shrink-0">{title}</span>
         <span className="ml-auto shrink-0 text-xs text-neutral-600 select-none">Esc to cancel</span>
         <button
           onClick={onClose}
@@ -1482,9 +1556,11 @@ function MemoryCard({
           <X size={13} />
         </button>
       </div>
-      <p className="px-3 pt-2 text-sm leading-relaxed text-neutral-200 whitespace-pre-wrap break-words">
-        {text}
-      </p>
+      {text !== undefined && (
+        <p className="px-3 pt-2 text-sm leading-relaxed text-neutral-200 whitespace-pre-wrap break-words">
+          {text}
+        </p>
+      )}
       <div className="p-2 flex flex-col gap-1">
         {choices.map((c, i) => (
           <button
@@ -1666,7 +1742,9 @@ export function matchLocal(text: string, allowClaudeOnly: boolean): LocalCommand
 }
 
 export type LifecycleCommand =
-  { kind: 'rename'; name: string } | { kind: 'archive' } | { kind: 'delete' }
+  | { kind: 'rename'; name: string }
+  | { kind: 'archive' }
+  | { kind: 'delete' }
 
 export function matchLifecycle(text: string): LifecycleCommand | null {
   const rename = /^\/rename\s+(.+)$/.exec(text)
@@ -1674,6 +1752,24 @@ export function matchLifecycle(text: string): LifecycleCommand | null {
   if (/^\/archive\s*$/.test(text)) return { kind: 'archive' }
   if (/^\/delete(?:\s[\s\S]*)?$/.test(text)) return { kind: 'delete' }
   return null
+}
+
+/** `/copy` 인자를 1-based 인덱스로 읽는다. 인자가 없으면 1(가장 최근), 숫자가 아니면 null. */
+export function parseCopyIndex(raw: string): number | null {
+  const trimmed = raw.trim()
+  if (trimmed === '/copy') return 1
+  const match = /^\/copy\s+(\d+)$/.exec(trimmed)
+  if (!match) return null
+  const index = Number(match[1])
+  return Number.isSafeInteger(index) && index > 0 ? index : null
+}
+
+/** `/memory` 인자를 스코프로 읽는다. 인자가 없으면 'ask'(카드로 고르게), 알 수 없는 값이면 null. */
+export function parseMemoryScope(raw: string): MemoryScope | 'ask' | null {
+  const trimmed = raw.trim()
+  if (trimmed === '/memory') return 'ask'
+  const match = /^\/memory\s+(project|user)$/.exec(trimmed)
+  return match ? (match[1] as MemoryScope) : null
 }
 
 /**

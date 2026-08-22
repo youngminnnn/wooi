@@ -6,7 +6,9 @@ import {
   matchLocal,
   matchMemory,
   matchPicker,
-  matchSideQuestion
+  matchSideQuestion,
+  parseCopyIndex,
+  parseMemoryScope
 } from './Composer'
 import type { CommandPanelKind } from '@shared/types'
 
@@ -66,6 +68,40 @@ describe('Codex conversation-control commands', () => {
   it('does not intercept unsupported commands or commands with arguments', () => {
     expect(matchInteractive('/goal', [])).toBeNull()
     expect(matchInteractive('/init now', supported)).toBeNull()
+  })
+})
+
+describe('/copy 인자', () => {
+  it('인자가 없으면 가장 최근 응답을 가리킨다', () => {
+    expect(parseCopyIndex('/copy')).toBe(1)
+    expect(parseCopyIndex('  /copy  ')).toBe(1)
+  })
+
+  it('양의 정수를 1-based 인덱스로 읽는다', () => {
+    expect(parseCopyIndex('/copy 3')).toBe(3)
+  })
+
+  it('양의 정수 하나가 아니면 거부한다', () => {
+    for (const command of ['/copy 0', '/copy -1', '/copy abc', '/copy 1.5', '/copy 1 2']) {
+      expect(parseCopyIndex(command)).toBeNull()
+    }
+  })
+})
+
+describe('/memory 스코프', () => {
+  it('인자가 없으면 카드에서 고르게 한다', () => {
+    expect(parseMemoryScope('/memory')).toBe('ask')
+    expect(parseMemoryScope('  /memory  ')).toBe('ask')
+  })
+
+  it('project와 user 스코프를 읽는다', () => {
+    expect(parseMemoryScope('/memory project')).toBe('project')
+    expect(parseMemoryScope('/memory user')).toBe('user')
+  })
+
+  it('알 수 없는 값과 대소문자가 다른 값은 거부한다', () => {
+    expect(parseMemoryScope('/memory global')).toBeNull()
+    expect(parseMemoryScope('/memory USER')).toBeNull()
   })
 })
 
