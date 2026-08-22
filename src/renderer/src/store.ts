@@ -346,6 +346,8 @@ interface UIState {
   activeFallbackModels: Record<string, string>
   /** workspace 별 현재 세션 목표. ChatEvent 로만 채우고 디스크에는 쓰지 않는다. */
   goals: Record<string, WorkspaceGoal>
+  /** workspace 별 다음 프롬프트 제안. 입력하거나 새 턴을 시작하면 즉시 버린다. */
+  promptSuggestions: Record<string, string>
   /**
    * workspace 별 에이전트 목록 접힘 상태(true = 접힘). 기본값은 펼침이다.
    *
@@ -588,6 +590,7 @@ interface UIState {
   /** 대기 큐에서 index 번째 메시지를 취소(제거)한다. */
   removeQueued: (workspaceId: string, index: number) => void
   setDraft: (workspaceId: string, text: string) => void
+  clearPromptSuggestion: (workspaceId: string) => void
   /** diff 라인 코멘트를 하나 추가한다. 만들어진 id 를 돌려준다(방금 만든 카드를 지목하는 용도). */
   addDiffComment: (workspaceId: string, anchor: DiffCommentAnchor, body: string) => string
   /** 코멘트 본문을 고친다. 빈 본문은 무시한다(지우려면 removeDiffComment). */
@@ -845,6 +848,7 @@ export const useStore = create<UIState>((set, get) => ({
   apiRetries: {},
   activeFallbackModels: {},
   goals: {},
+  promptSuggestions: {},
   agentsCollapsed: {},
   drafts: {},
   messageQueue: {},
@@ -1327,6 +1331,10 @@ export const useStore = create<UIState>((set, get) => ({
         // 후속 턴처럼 "끝난 줄 알았는데 다시 도는" 경우 running 과 unread 가 동시에 켜져
         // Next unread 가 뜨는 것을 막는다(작업 중에는 unread 가 아니어야 한다).
         if (event.type === 'status' && event.status === 'running') {
+          // 지난 턴의 다음 프롬프트 제안도 여기서 버린다. 컴포저 전송은 스스로 지우지만, 부모
+          // 워크스페이스의 알림이나 사용량 제한 자동 재개처럼 입력창을 거치지 않고 시작하는
+          // 턴도 있다 — 그 턴이 새 제안 없이 끝나면 한 턴 지난 제안이 되살아난다.
+          get().clearPromptSuggestion(workspaceId)
           set((s) => {
             if (!s.unread[workspaceId]) return {}
             const unread = { ...s.unread }
@@ -1442,6 +1450,13 @@ export const useStore = create<UIState>((set, get) => ({
           if (event.goal) goals[workspaceId] = event.goal
           else delete goals[workspaceId]
           return { goals }
+        })
+      } else if (event.type === 'promptSuggestion') {
+        set((s) => {
+          const promptSuggestions = { ...s.promptSuggestions }
+          if (event.suggestion) promptSuggestions[workspaceId] = event.suggestion
+          else delete promptSuggestions[workspaceId]
+          return { promptSuggestions }
         })
       }
     })
@@ -2379,6 +2394,14 @@ export const useStore = create<UIState>((set, get) => ({
     }),
 
   setDraft: (workspaceId, text) => set((s) => ({ drafts: { ...s.drafts, [workspaceId]: text } })),
+
+  clearPromptSuggestion: (workspaceId) =>
+    set((s) => {
+      if (!s.promptSuggestions[workspaceId]) return {}
+      const promptSuggestions = { ...s.promptSuggestions }
+      delete promptSuggestions[workspaceId]
+      return { promptSuggestions }
+    }),
 
   addDiffComment: (workspaceId, anchor, body) => {
     const id = `dc:${++diffCommentSeq}`

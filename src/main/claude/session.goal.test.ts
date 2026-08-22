@@ -75,3 +75,21 @@ describe('Claude active_goal', () => {
     expect(events.filter((event) => event.type === 'goal' && event.goal === null)).toHaveLength(2)
   })
 })
+
+describe('Claude prompt_suggestion', () => {
+  it('다음 프롬프트 제안을 휘발성 이벤트로 매핑하고 트랜스크립트에는 쓰지 않는다', () => {
+    const { handle, events, persisted } = makeSession()
+    handle({
+      type: 'prompt_suggestion',
+      suggestion: 'Run the focused tests',
+      uuid: '00000000-0000-0000-0000-000000000003',
+      session_id: 'session-1'
+    })
+
+    expect(events).toContainEqual({
+      type: 'promptSuggestion',
+      suggestion: 'Run the focused tests'
+    })
+    expect(persisted).toEqual([])
+  })
+})

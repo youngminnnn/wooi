@@ -790,6 +790,8 @@ export class ClaudeSession {
         options: {
           cwd: this.deps.cwd,
           includePartialMessages: true,
+          // 매 턴 뒤 Claude Code 가 예측한 다음 프롬프트를 컴포저에 제안한다.
+          promptSuggestions: true,
           // Claude Code 의 기본 시스템 프롬프트를 그대로 쓴다 — 생략하면 SDK 가 빈 프롬프트로
           // 덮어써 행동 지침이 통째로 빠진다(자세한 이유는 systemPrompt.ts 주석).
           systemPrompt: CLAUDE_CODE_SYSTEM_PROMPT,
@@ -1389,6 +1391,9 @@ export class ClaudeSession {
         break
       case 'result':
         this.handleResult(msg)
+        break
+      case 'prompt_suggestion':
+        this.deps.emit({ type: 'promptSuggestion', suggestion: msg.suggestion })
         break
       default:
         // status / session_state_changed / 기타는 무시.
