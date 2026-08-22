@@ -102,6 +102,49 @@ async function create_(args: Record<string, unknown> = {}): Promise<Record<strin
   return createStackedWorkspace(deps, 'ws-parent', args) as Promise<Record<string, unknown>>
 }
 
+async function createIndependent_(
+  args: Record<string, unknown> = {}
+): Promise<Record<string, unknown>> {
+  const { createIndependentWorkspace } = await import('./workspace')
+  return createIndependentWorkspace(deps, 'ws-parent', args) as Promise<Record<string, unknown>>
+}
+
+describe('create_workspace from pull request', () => {
+  beforeEach(() => {
+    state.repos = [{ id: 'repo-1', name: 'wooi', path: '/tmp/repo', defaultBranch: 'main' }]
+  })
+
+  it('PR 번호만 주면 PR checkout 생성 인자로 넘긴다', async () => {
+    await createIndependent_({ pullRequestNumber: 42 })
+    expect(create.mock.calls[0][1]).toMatchObject({ repoId: 'repo-1', fromPrNumber: 42 })
+  })
+
+  it('PR 번호와 stacked parent 를 함께 주면 거절한다', async () => {
+    await expect(
+      createIndependent_({ pullRequestNumber: 42, parentWorkspaceId: 'ws-parent' })
+    ).rejects.toThrow(/cannot be stacked/)
+    expect(create).not.toHaveBeenCalled()
+  })
+
+  it('PR 번호가 있으면 name 을 넘기지 않는다', async () => {
+    await createIndependent_({ pullRequestNumber: 42, name: 'feat/wrong' })
+    expect(create.mock.calls[0][1]).not.toHaveProperty('name')
+  })
+
+  it('같은 PR 워크스페이스가 있으면 열거나 복원할 수 있는 결과를 돌려준다', async () => {
+    create.mockResolvedValue({
+      existingWorkspaceId: 'ws-existing',
+      existingWorkspaceArchived: true
+    })
+    await expect(createIndependent_({ pullRequestNumber: 42 })).resolves.toMatchObject({
+      workspaceId: 'ws-existing',
+      existing: true,
+      archived: true,
+      note: expect.stringContaining('Restore')
+    })
+  })
+})
+
 async function report(
   args: Record<string, unknown>,
   from = 'ws-child'

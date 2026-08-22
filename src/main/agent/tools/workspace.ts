@@ -70,7 +70,15 @@ export const createIndependentWorkspace: AgentToolHandler = async (deps, workspa
   // clean 검사를 **하지 않는다**. 새 브랜치는 이 워크트리가 아니라 `origin/<default>` 에서
   // 갈라지므로, 여기 미커밋 변경이 있든 없든 새 워크스페이스는 정확히 같은 것을 받는다.
   // 스택에서 clean 을 요구하는 것은 조용히 어긋난 스택을 막기 위함인데, 그 사고가 여기엔 없다.
-  const name = typeof args.name === 'string' ? args.name.trim() : ''
+  const pullRequestNumber =
+    typeof args.pullRequestNumber === 'number' ? args.pullRequestNumber : undefined
+  if (pullRequestNumber !== undefined && args.parentWorkspaceId !== undefined) {
+    throw new Error(
+      'A workspace cannot be stacked on a parent branch and checked out at a pull request head.'
+    )
+  }
+  const name =
+    pullRequestNumber === undefined && typeof args.name === 'string' ? args.name.trim() : ''
   // 에이전트·모델·effort 는 여기서 검증하고 넘긴다 — 잘못된 값을 그대로 저장하면 사고는 새
   // 워크스페이스의 첫 턴에서 터진다([[agent/tools/agentOptions]]). 부모는 없다(독립이다).
   const agentOptions = await resolveRequestedAgentOptions(deps, args, null)
@@ -83,9 +91,20 @@ export const createIndependentWorkspace: AgentToolHandler = async (deps, workspa
     // 워크스페이스를 아카이브할 수 있다([[agent/tools/target]]).
     createdByWorkspaceId: ws.id,
     ...agentOptions,
+    ...(pullRequestNumber !== undefined ? { fromPrNumber: pullRequestNumber } : {}),
     ...(name ? { name } : {})
   })
   if (result.error) throw new Error(result.error)
+  if (result.existingWorkspaceId) {
+    return {
+      workspaceId: result.existingWorkspaceId,
+      existing: true,
+      archived: result.existingWorkspaceArchived ?? false,
+      note: result.existingWorkspaceArchived
+        ? `That pull request already has archived workspace ${result.existingWorkspaceId}. Restore it to continue.`
+        : `That pull request already has workspace ${result.existingWorkspaceId}. Open it to continue.`
+    }
+  }
   const newId = result.workspaceId
   if (!newId) throw new Error('The workspace was created but Wooi lost track of it.')
 

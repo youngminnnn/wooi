@@ -29,6 +29,7 @@ import {
 } from './workspace'
 import { delegateToolName } from './catalog'
 import { listIssues } from './issues'
+import { listPullRequests } from './pullRequests'
 import { AGENT_BACKEND_IDS } from '@shared/types'
 
 export { runAgentTool, type AgentToolDeps, type AgentToolHandler } from './registry'
@@ -61,6 +62,7 @@ export function initAgentTools(deps: AgentToolDeps): void {
   registerExternalAgentTool('list_workspace_peers', listWorkspacePeersExternal)
   registerExternalAgentTool('send_to_workspace', sendToWorkspaceExternal)
   registerAgentTool('list_issues', listIssues)
+  registerAgentTool('list_pull_requests', listPullRequests)
   registerAgentTool('list_repositories', listRepositories)
   registerAgentTool('create_workspace', createIndependentWorkspace)
   registerAgentTool('archive_workspace', archiveWorkspaceTool)
