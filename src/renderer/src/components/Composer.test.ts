@@ -8,6 +8,7 @@ import {
   matchPicker,
   matchSideQuestion,
   parseCopyIndex,
+  parseExportFormat,
   parseMemoryScope
 } from './Composer'
 import type { CommandPanelKind } from '@shared/types'
@@ -32,6 +33,28 @@ describe('백엔드 전용 composer 명령', () => {
     expect(matchLocal('/stop', false)).toBe('stop')
     expect(matchLocal('/stop', true)).toBe('stop')
     expect(matchLocal('/wooi:stop dev', false)).toBeNull()
+  })
+
+  it('새 로컬 명령 여섯 개는 Claude 전용이 아니다', () => {
+    for (const name of [
+      'export',
+      'login',
+      'bug',
+      'feedback',
+      'release-notes',
+      'privacy-settings'
+    ]) {
+      expect(matchLocal(`/${name}`, false)).toBe(name)
+    }
+  })
+
+  it('Codex는 send() 앞쪽의 전용 처리기를 쓰므로 /logout은 Claude에서만 가로챈다', () => {
+    expect(matchLocal('/logout', false)).toBeNull()
+    expect(matchLocal('/logout', true)).toBe('logout')
+  })
+
+  it('/export 인자가 있어도 로컬 명령으로 처리한다', () => {
+    expect(matchLocal('/export json', false)).toBe('export')
   })
 
   it('/bashes 별칭을 /tasks 로 해석하고 비슷한 이름은 거부한다', () => {
@@ -79,6 +102,24 @@ describe('Codex conversation-control commands', () => {
   it('does not intercept unsupported commands or commands with arguments', () => {
     expect(matchInteractive('/goal', [])).toBeNull()
     expect(matchInteractive('/init now', supported)).toBeNull()
+  })
+})
+
+describe('/export 형식', () => {
+  it('인자가 없으면 기존 내보내기 메뉴를 연다', () => {
+    expect(parseExportFormat('/export')).toBe('menu')
+    expect(parseExportFormat('  /export  ')).toBe('menu')
+  })
+
+  it('Markdown 별칭과 JSON 형식을 읽는다', () => {
+    expect(parseExportFormat('/export md')).toBe('md')
+    expect(parseExportFormat('/export markdown')).toBe('md')
+    expect(parseExportFormat('/export json')).toBe('json')
+  })
+
+  it('알 수 없는 값과 대소문자가 다른 값은 거부한다', () => {
+    expect(parseExportFormat('/export txt')).toBe('invalid')
+    expect(parseExportFormat('/export MD')).toBe('invalid')
   })
 })
 
@@ -135,8 +176,9 @@ describe('선택 카드 슬래시 명령', () => {
     expect(matchPicker('/models', allow)).toBeNull()
   })
 
-  it('권한 모드를 고를 수 있을 때만 /plan 을 가로챈다', () => {
+  it('권한 모드를 고를 수 있고 백엔드 전용 카드가 없을 때만 /plan 을 가로챈다', () => {
     expect(matchPicker('/plan', { fast: false, agent: false, plan: true })).toBe('plan')
+    // Codex 는 자체 /plan 카드가 있으므로 호출부에서 plan: false 를 넘긴다.
     expect(matchPicker('/plan', { fast: false, agent: false, plan: false })).toBeNull()
   })
 })

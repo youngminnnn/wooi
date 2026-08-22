@@ -82,6 +82,14 @@ const BUILTIN_COMMANDS: SlashCommandInfo[] = [
     description: 'Give the agent access to a directory outside this workspace',
     argumentHint: '<path>'
   },
+  { name: 'export', description: 'Export this conversation to a file', argumentHint: '[md|json]' },
+  { name: 'login', description: 'Sign in to the agent for this workspace' },
+  { name: 'logout', description: 'Sign out of the agent for this workspace' },
+  // Wooi 를 쓰는 중 받은 명령이므로 Anthropic 이 아니라 Wooi 의 트래커와 문서로 보낸다.
+  { name: 'bug', description: 'Report a bug in Wooi on GitHub' },
+  { name: 'feedback', description: 'Suggest a feature for Wooi on GitHub' },
+  { name: 'release-notes', description: 'See what changed in recent Wooi releases' },
+  { name: 'privacy-settings', description: 'Read Wooi’s privacy policy' },
   // /mcp·/context·/usage(+cost·stats)·/rewind·/permissions 등 인터셉트 명령(SSOT: INTERACTIVE_COMMANDS).
   ...INTERACTIVE_COMMANDS.map((c) => ({
     name: c.name,

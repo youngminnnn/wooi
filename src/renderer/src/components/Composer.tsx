@@ -93,6 +93,8 @@ import { matchWooiCommand, parseWooiCommandArgs, wooiCommandName } from '@shared
 import { conversationForkDisabledReason, parseForkCommand } from '../lib/conversationFork'
 import type { WooiCommandSpec } from '@shared/wooiCommands'
 import { openSettings } from '../lib/settingsNavigation'
+import type { ExportConversationDetail } from './ExportMenu'
+import { WOOI_URLS } from '../lib/externalLinks'
 
 /** Claude 가 받는 이미지 형식. 클립보드의 다른 형식은 붙여넣기 시 무시한다. */
 const IMAGE_TYPES: Record<string, ImageMediaType> = {
@@ -137,6 +139,7 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
   const removeQueued = useStore((s) => s.removeQueued)
   const pushToast = useStore((s) => s.pushToast)
   const confirm = useStore((s) => s.confirm)
+  const refreshAuth = useStore((s) => s.refreshAuth)
   const resetTranscript = useStore((s) => s.resetTranscript)
   const taRef = useRef<HTMLTextAreaElement>(null)
   // ↑ 로 이전 사용자 메시지를 불러올 때의 커서(끝에서부터). -1 = 미사용.
@@ -566,13 +569,17 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
       return
     }
 
+    // Codex 는 자체 카드로 app-server 의 plan mode 를 바꾸므로, 그 카드가 없는 백엔드에서만
+    // 범용 권한 모드 선택기가 /plan 을 맡는다.
+    const offersPlanPicker =
+      permissionModesFor(backend).length > 1 && !supportedCommands.includes('plan')
     // /model·/effort·/fast·/agent·/plan 은 백엔드 왕복 없이 로컬 선택 카드로 처리한다(첨부가 있으면 일반 전송).
     const picker = images.length
       ? null
       : matchPicker(trimmed, {
           fast: supportsFastMode,
           agent: agentSwitch.offered,
-          plan: permissionModesFor(backend).length > 1
+          plan: offersPlanPicker
         })
     if (picker) {
       openPicker(picker)
@@ -648,7 +655,7 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
       return
     }
 
-    // /diff·/copy·/help·/clear·/stop·/memory·/tasks 는 Wooi UI 에서 직접 처리한다(에이전트로 보내지 않는다).
+    // /diff·/copy·/help·/clear 등은 Wooi UI 에서 직접 처리한다(에이전트로 보내지 않는다).
     // runLocal 이 입력창 텍스트를 알맞게 정리하므로(대부분 비우고, /help 만 '/' 로 메뉴를 띄움)
     // 여기서는 setText 를 호출하지 않는다.
     const local = images.length ? null : matchLocal(trimmed, workspace.agentBackend === 'claude')
@@ -893,9 +900,9 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
   }
 
   /**
-   * Wooi UI 에서 직접 처리하는 로컬 명령(/diff·/copy·/help·/clear·/stop·/memory·/tasks). 에이전트로
-   * 보내지 않고 앱 기능으로 매핑한다. 입력창 텍스트 정리도 여기서 한다(대부분 비우고, /help 만
-   * 자동완성 메뉴를 다시 띄우도록 '/' 를 남긴다).
+   * Wooi UI 에서 직접 처리하는 로컬 명령. 에이전트로 보내지 않고 앱 기능으로 매핑한다.
+   * 입력창 텍스트 정리도 여기서 한다(대부분 비우고, /help 만 자동완성 메뉴를 다시 띄우도록
+   * '/' 를 남긴다).
    */
   const runLocal = (kind: LocalCommand, raw: string): void => {
     setSideAnswer(null)
@@ -908,6 +915,73 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
     if (kind === 'help') {
       setText('/') // 자동완성 메뉴로 사용 가능한 명령을 모두 보여 준다.
       taRef.current?.focus()
+      return
+    }
+
+    if (kind === 'export') {
+      const format = parseExportFormat(raw)
+      if (format === 'invalid') {
+        pushToast('info', 'Usage: /export [md|json]')
+        taRef.current?.focus()
+        return
+      }
+      setText('')
+      window.dispatchEvent(
+        new CustomEvent<ExportConversationDetail>('wooi:export-conversation', {
+          detail: {
+            workspaceId: workspace.id,
+            ...(format === 'menu' ? {} : { format })
+          }
+        })
+      )
+      return
+    }
+
+    if (kind === 'login') {
+      setText('')
+      const loginBackend: AgentBackendId = workspace.agentBackend === 'codex' ? 'codex' : 'claude'
+      window.dispatchEvent(
+        new CustomEvent<AgentBackendId>('wooi:open-login', { detail: loginBackend })
+      )
+      return
+    }
+
+    if (kind === 'logout') {
+      setText('')
+      // 이 Enter keydown 안에서 곷바로 confirm을 마운트하면, 같은 Enter가 ConfirmDialog의
+      // 전역 핸들러까지 이어져 위험 동작을 즉시 승인한다. 다음 이벤트 루프에서 열어 키를 분리한다.
+      setTimeout(() => {
+        void (async () => {
+          const ok = await confirm({
+            title: 'Sign out of Claude Code?',
+            body: 'Signing out ends any running turns for Claude Code.',
+            confirmLabel: 'Sign out',
+            danger: true
+          })
+          if (!ok) return
+          try {
+            await window.api.auth.claudeLogout()
+            await refreshAuth()
+            pushToast('success', 'Signed out of Claude Code.')
+            openSettings('integrations')
+          } catch (error) {
+            pushToast(
+              'error',
+              error instanceof Error ? error.message : 'Could not sign out of Claude Code.'
+            )
+          }
+        })()
+      }, 0)
+      return
+    }
+
+    const externalUrl =
+      kind in EXTERNAL_LOCAL_COMMANDS
+        ? EXTERNAL_LOCAL_COMMANDS[kind as keyof typeof EXTERNAL_LOCAL_COMMANDS]
+        : undefined
+    if (externalUrl) {
+      setText('')
+      void window.api.openExternal(externalUrl)
       return
     }
 
@@ -1712,8 +1786,10 @@ function WooiCommandCard({
  *
  * `allow.fast` 는 이 워크스페이스의 백엔드가 fast mode 를 지원하는지다 — 지원하지 않으면(Codex)
  * 가로채지 않고 일반 텍스트로 흘려보낸다. 아무 일도 안 하는 카드를 띄우는 것보다 낫다.
- * `allow.agent`·`allow.plan` 도 같은 이유다 — 쓸 수 있는 에이전트나 권한 모드가 하나뿐이면
- * 고를 것이 없으므로 그때의 "/agent"·"/plan" 은 에이전트에게 보내는 평범한 메시지로 둔다.
+ * `allow.agent` 도 같은 이유다 — 쓸 수 있는 에이전트가 하나뿐이면 고를 것이 없다.
+ * `allow.plan` 은 권한 모드가 여럿이면서 백엔드 전용 `/plan` 카드가 없을 때만 참이다. Codex 는
+ * 자체 카드로 app-server 의 plan mode 를 바꾸고, 범용 선택기는 그런 카드가 없는 Claude 를 맡는다.
+ * 거짓인 명령은 에이전트에게 보내는 평범한 메시지로 둔다.
  * 턴이 도는 중인지는 여기서 보지 않는다:
  * /model 과 마찬가지로 카드는 열리고, 잠긴 이유를 카드가 설명한다.
  */
@@ -1767,6 +1843,17 @@ type LocalCommand =
   | 'memory'
   | 'add-dir'
   | 'tasks'
+  | 'export'
+  | 'login'
+  | 'logout'
+  | keyof typeof EXTERNAL_LOCAL_COMMANDS
+// 사용자가 실행 중인 앱은 Wooi 이므로 Anthropic 채널이 아니라 Wooi 이슈 트래커와 문서로 보낸다.
+const EXTERNAL_LOCAL_COMMANDS = {
+  bug: WOOI_URLS.bugReport,
+  feedback: WOOI_URLS.featureRequest,
+  'release-notes': WOOI_URLS.releases,
+  'privacy-settings': WOOI_URLS.privacyPolicy
+} as const
 const LOCAL_COMMANDS: readonly LocalCommand[] = [
   'diff',
   'copy',
@@ -1775,15 +1862,19 @@ const LOCAL_COMMANDS: readonly LocalCommand[] = [
   'stop',
   'memory',
   'add-dir',
-  'tasks'
+  'tasks',
+  'export',
+  'login',
+  'logout',
+  ...(Object.keys(EXTERNAL_LOCAL_COMMANDS) as (keyof typeof EXTERNAL_LOCAL_COMMANDS)[])
 ]
 const LOCAL_ALIASES: Record<string, LocalCommand> = { bashes: 'tasks' }
-/** CLAUDE.md·작업 루트처럼 Claude Code 고유 개념이라 다른 백엔드에서는 가로채지 않는 명령. */
-const CLAUDE_ONLY_COMMANDS: readonly string[] = ['memory', 'add-dir']
+/** Claude Code 고유 기능이거나 Codex가 send() 앞쪽에 별도 처리기를 둔 명령. */
+const CLAUDE_ONLY_COMMANDS: readonly string[] = ['memory', 'add-dir', 'logout']
 
 /**
  * "/diff" 처럼 로컬에서 처리하는 명령이면 그 종류를 돌려준다(뒤따르는 인자는 호출부가 읽는다).
- * `/memory`·`/add-dir` 은 Claude 전용 기능이라 다른 백엔드의 입력을 가로채지 않는다.
+ * `/memory`·`/add-dir`·`/logout` 은 Claude 전용 경로라 다른 백엔드의 입력을 가로채지 않는다.
  */
 export function matchLocal(text: string, allowClaudeOnly: boolean): LocalCommand | null {
   const m = /^\/([\w-]+)(?:\s[\s\S]*)?$/.exec(text)
@@ -1794,9 +1885,7 @@ export function matchLocal(text: string, allowClaudeOnly: boolean): LocalCommand
 }
 
 export type LifecycleCommand =
-  | { kind: 'rename'; name: string | null }
-  | { kind: 'archive' }
-  | { kind: 'delete' }
+  { kind: 'rename'; name: string | null } | { kind: 'archive' } | { kind: 'delete' }
 
 export function matchLifecycle(text: string): LifecycleCommand | null {
   const rename = /^\/rename(?:\s+(.+))?$/.exec(text)
@@ -1815,6 +1904,17 @@ export function parseCopyIndex(raw: string): number | null {
   if (!match) return null
   const index = Number(match[1])
   return Number.isSafeInteger(index) && index > 0 ? index : null
+}
+
+export type ExportFormatResult = 'menu' | 'md' | 'json' | 'invalid'
+
+/** `/export` 인자를 메뉴 또는 직접 내보낼 형식으로 읽는다. CLI 명령처럼 대소문자를 구분한다. */
+export function parseExportFormat(raw: string): ExportFormatResult {
+  const trimmed = raw.trim()
+  if (trimmed === '/export') return 'menu'
+  if (trimmed === '/export md' || trimmed === '/export markdown') return 'md'
+  if (trimmed === '/export json') return 'json'
+  return 'invalid'
 }
 
 /** `/memory` 인자를 스코프로 읽는다. 인자가 없으면 'ask'(카드로 고르게), 알 수 없는 값이면 null. */
