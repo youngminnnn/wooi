@@ -8,6 +8,7 @@ import { getStore } from './store'
 import { getRemoteBridge } from './remote'
 import { rememberPrStatus } from './prStatusCache'
 import { forgetContextUsage } from './contextUsageCache'
+import { forgetRunningAgents } from './runningAgentsCache'
 import { getTranscripts } from './transcripts'
 import { buildHandoffPrompt, estimateHandoffTokens, formatHandoffTokens } from '@shared/handoff'
 import { listDir, readFileInRoot, searchFiles } from './fsbrowse'
@@ -869,6 +870,7 @@ export function registerIpc(ctx: IpcContext): void {
       // 새 백엔드는 새 세션이라 맥락도 처음부터다. 옛 에이전트의 사용량을 남겨 두면 인수인계
       // 턴이 값을 다시 보내 줄 때까지 폰의 게이지가 엉뚱한 양을 가리킨다.
       forgetContextUsage(workspaceId)
+      forgetRunningAgents(workspaceId)
 
       const settings = store.getState().settings
       store.update((st) => {
@@ -1033,6 +1035,7 @@ export function registerIpc(ctx: IpcContext): void {
     getTranscripts().remove(workspaceId)
     // 맥락이 빈 채로 다시 시작한다 — 게이지도 같이 비운다(렌더러도 resetTranscript 로 그렇게 한다).
     forgetContextUsage(workspaceId)
+    forgetRunningAgents(workspaceId)
     // 넘기기로 예약해 둔 대화가 방금 사라졌다 — 예약도 함께 지운다.
     store.update((st) => {
       const w = st.workspaces.find((x) => x.id === workspaceId)

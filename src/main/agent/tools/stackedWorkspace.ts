@@ -8,6 +8,7 @@ import { resolveRequestedAgentOptions } from './agentOptions'
 import { deliverOrHold } from './peer'
 import type { AgentToolHandler } from './registry'
 import { resolveTargetWorkspace } from './target'
+import { describeWorkspaceActivity } from './workspaceState'
 
 /**
  * 스택 워크스페이스 사이의 작업 인계.
@@ -295,22 +296,28 @@ export const checkStackedWork: AgentToolHandler = async (_deps, workspaceId) => 
   const children = state.workspaces.filter((w) => w.parentWorkspaceId === workspaceId)
 
   return {
-    children: children.map((c) => ({
-      workspaceId: c.id,
-      branch: c.branch,
-      name: workspaceDisplayName(c),
-      // running 이면 아직 도는 중이다 — 보고가 없다고 실패한 것이 아니다.
-      running: c.status === 'running',
-      // 지목할 수 있는 대상인가([[agent/tools/target]]). 여기가 모델이 자식의 id 를 보는 곳이므로
-      // 무엇을 지목할 수 있는지도 여기서 읽혀야 한다 — check_related_work 가 같은 값을 준다.
-      // 사람이 UI 에서 만든 스택 자식은 부모가 있어도 false 다.
-      createdByYou: c.createdByWorkspaceId === workspaceId,
-      archived: c.archived,
-      prNumber: c.prNumber,
-      report: c.handoff
-        ? { status: c.handoff.status, summary: c.handoff.summary, at: c.handoff.at }
-        : null
-    })),
+    children: children.map((c) => {
+      const activity = describeWorkspaceActivity(c)
+      return {
+        workspaceId: c.id,
+        branch: c.branch,
+        name: workspaceDisplayName(c),
+        // running 이면 아직 도는 중이다 — 보고가 없다고 실패한 것이 아니다.
+        running: c.status === 'running',
+        state: activity.state,
+        ...(activity.note ? { stateNote: activity.note } : {}),
+        lastActiveAt: activity.lastActiveAt,
+        // 지목할 수 있는 대상인가([[agent/tools/target]]). 여기가 모델이 자식의 id 를 보는 곳이므로
+        // 무엇을 지목할 수 있는지도 여기서 읽혀야 한다 — check_related_work 가 같은 값을 준다.
+        // 사람이 UI 에서 만든 스택 자식은 부모가 있어도 false 다.
+        createdByYou: c.createdByWorkspaceId === workspaceId,
+        archived: c.archived,
+        prNumber: c.prNumber,
+        report: c.handoff
+          ? { status: c.handoff.status, summary: c.handoff.summary, at: c.handoff.at }
+          : null
+      }
+    }),
     ...(children.length ? {} : { note: 'Nothing is stacked on this workspace yet.' })
   }
 }

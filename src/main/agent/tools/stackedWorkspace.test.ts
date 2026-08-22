@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { z } from 'zod'
 import { AGENT_TOOLS } from './catalog'
 import type { AgentToolDeps } from './registry'
-import type { AppSettings, ModelOption, Repo, Workspace } from '@shared/types'
+import type { AppSettings, ModelOption, PermissionRequest, Repo, Workspace } from '@shared/types'
 import { DEFAULT_SETTINGS } from '../../storeSchema'
 
 /**
@@ -16,6 +16,9 @@ import { DEFAULT_SETTINGS } from '../../storeSchema'
 const clean = vi.hoisted(() => vi.fn())
 const summarize = vi.hoisted(() => vi.fn())
 const create = vi.hoisted(() => vi.fn())
+const permissionList = vi.hoisted(() => vi.fn<() => PermissionRequest[]>(() => []))
+const permissionToolFor = vi.hoisted(() => vi.fn())
+const backgroundShellCount = vi.hoisted(() => vi.fn(() => 0))
 const state = vi.hoisted(() => ({
   workspaces: [] as Partial<Workspace>[],
   settings: {} as AppSettings,
@@ -30,6 +33,10 @@ const update = vi.hoisted(() =>
 vi.mock('../../git', () => ({ isWorktreeClean: clean, summarizeBranch: summarize }))
 vi.mock('../../workspaces', () => ({ createWorkspace: create }))
 vi.mock('../../store', () => ({ getStore: () => ({ getState: () => state, update }) }))
+vi.mock('../../remote/permissions', () => ({
+  pendingPermissions: { list: permissionList, toolFor: permissionToolFor }
+}))
+vi.mock('../../runningAgentsCache', () => ({ backgroundShellCount }))
 
 const sendMessage = vi.fn()
 const postToTranscript = vi.fn()
@@ -83,6 +90,9 @@ beforeEach(async () => {
   )
   summarize.mockResolvedValue(null)
   create.mockResolvedValue({ workspaceId: 'ws-new', name: 'feat/next', branch: 'feat/next' })
+  permissionList.mockReturnValue([])
+  permissionToolFor.mockImplementation(() => undefined)
+  backgroundShellCount.mockReturnValue(0)
   const { resetPeerRateLimitForTest } = await import('./peer')
   resetPeerRateLimitForTest()
 })
@@ -564,5 +574,99 @@ describe('check_stacked_work', () => {
     state.workspaces = [{ ...parent }]
 
     await expect(check()).resolves.toMatchObject({ children: [], note: expect.any(String) })
+  })
+
+  it('승인 대기 중인 자식과 끝난 자식이 다르게 보인다', async () => {
+    state.workspaces = [
+      { ...parent },
+      { ...child, lastActiveAt: 10 },
+      { ...child, id: 'ws-done', branch: 'feat/done', lastActiveAt: 20 }
+    ]
+    permissionList.mockReturnValue([
+      {
+        requestId: 'permission-1',
+        workspaceId: 'ws-child',
+        toolName: 'Bash',
+        input: {}
+      }
+    ])
+    permissionToolFor.mockReturnValue('Bash')
+
+    const result = (await check()) as { children: Array<Record<string, unknown>> }
+
+    expect(result.children[0]).toMatchObject({
+      state: 'waiting-for-user-permission',
+      running: false
+    })
+    expect(result.children[1]).toMatchObject({ state: 'idle', running: false })
+  })
+
+  it('승인 대기가 running 보다 우선한다', async () => {
+    state.workspaces = [{ ...parent }, { ...child, status: 'running', lastActiveAt: Date.now() }]
+    permissionList.mockReturnValue([
+      {
+        requestId: 'permission-1',
+        workspaceId: 'ws-child',
+        toolName: 'Write',
+        input: {}
+      }
+    ])
+
+    const result = (await check()) as { children: Array<Record<string, unknown>> }
+    expect(result.children[0]).toMatchObject({
+      state: 'waiting-for-user-permission',
+      running: true
+    })
+  })
+
+  it('유효한 레이트리밋에는 해제 시각을 싣고 지난 표시는 idle 로 내린다', async () => {
+    const future = Date.now() + 60_000
+    state.workspaces = [
+      {
+        ...child,
+        lastActiveAt: 30,
+        rateLimited: { backend: 'claude', detectedAt: Date.now(), resetsAt: future }
+      },
+      {
+        ...child,
+        id: 'ws-expired',
+        branch: 'feat/expired',
+        lastActiveAt: 40,
+        rateLimited: {
+          backend: 'claude',
+          detectedAt: Date.now() - 120_000,
+          resetsAt: Date.now() - 1
+        }
+      }
+    ]
+
+    const result = (await check()) as { children: Array<Record<string, unknown>> }
+    expect(result.children[0]).toMatchObject({ state: 'rate-limited' })
+    expect(result.children[0].stateNote).toContain(new Date(future).toISOString())
+    expect(result.children[1]).toMatchObject({ state: 'idle' })
+  })
+
+  it('오류로 끝난 자식을 구분한다', async () => {
+    state.workspaces = [{ ...child, status: 'error', lastActiveAt: 50 }]
+    const result = (await check()) as { children: Array<Record<string, unknown>> }
+    expect(result.children[0]).toMatchObject({ state: 'ended-with-error' })
+  })
+
+  it('유휴 자식의 백그라운드 셸을 구분하면서 running 은 false 로 둔다', async () => {
+    state.workspaces = [{ ...child, lastActiveAt: 60 }]
+    backgroundShellCount.mockReturnValue(2)
+    const result = (await check()) as { children: Array<Record<string, unknown>> }
+    expect(result.children[0]).toMatchObject({
+      state: 'background-tasks-running',
+      running: false
+    })
+    expect(result.children[0].stateNote).toContain('2 background shells')
+  })
+
+  it('lastActiveAt 을 싣고 idle 에는 stateNote 를 만들지 않는다', async () => {
+    state.workspaces = [{ ...child, lastActiveAt: 1234 }]
+    const result = (await check()) as { children: Array<Record<string, unknown>> }
+    expect(result.children[0]).toMatchObject({ state: 'idle', lastActiveAt: 1234 })
+    expect(result.children[0]).not.toHaveProperty('stateNote')
   })
 })
