@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import {
-  HIDDEN_SDK_COMMANDS,
   isHiddenSdkCommand,
   matchUnavailableCommand,
   RESERVED_COMMANDS,
@@ -22,6 +21,11 @@ describe('matchUnavailableCommand', () => {
     expect(matchUnavailableCommand('/rc')).toBe(matchUnavailableCommand('/remote-control'))
   })
 
+  it('matches aliases from cloud offload and background groups', () => {
+    expect(matchUnavailableCommand('/tp')).toBe(matchUnavailableCommand('/teleport'))
+    expect(matchUnavailableCommand('/bg')).toBe(matchUnavailableCommand('/background'))
+  })
+
   it('ignores plain messages, available commands, and multiline prompts', () => {
     expect(matchUnavailableCommand('hello')).toBeNull()
     expect(matchUnavailableCommand('/compact')).toBeNull()
@@ -39,6 +43,10 @@ describe('matchUnavailableCommand', () => {
 
   it('keeps the gate enabled when only unrelated commands are known', () => {
     expect(matchUnavailableCommand('/focus', ['compact'])?.names).toContain('focus')
+  })
+
+  it('does not let known rescue a hidden name omitted from the filtered SDK list', () => {
+    expect(matchUnavailableCommand('/color', ['compact'])?.names).toContain('color')
   })
 
   it('does not treat an empty known list as knowing every command', () => {
@@ -71,8 +79,8 @@ describe('command list guards', () => {
     expect(new Set(names).size).toBe(names.length)
   })
 
-  it('keeps hidden and unavailable command lists disjoint', () => {
-    const unavailable = new Set(UNAVAILABLE_COMMANDS.flatMap((command) => command.names))
-    expect(HIDDEN_SDK_COMMANDS.filter((name) => unavailable.has(name))).toEqual([])
+  it('keeps names in both lists when hiding them still lets typed input leak through', () => {
+    expect(isHiddenSdkCommand('color')).toBe(true)
+    expect(matchUnavailableCommand('/color')?.names).toContain('color')
   })
 })

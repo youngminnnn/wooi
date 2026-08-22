@@ -70,11 +70,35 @@ export const RESERVED_COMMANDS: readonly string[] = [
  * /status /skills /hooks /plan /login /logout /rename /tasks /bashes /export /bug /feedback
  * /release-notes /privacy-settings /memory /copy /fork /branch /rewind /stop /subtask
  */
+
+/*
+ * 일부러 넣지 않은 것들:
+ * - `exit` · `quit` — CLI 에 `type:"local"` · `terminalOriented:!0` ·
+ *   `supportsNonInteractive:!0` 변종이 있다. 비대화형에서 죽는다는 근거가 없으므로 가로막지 않는다.
+ * - `skill-doctor` — `type:"local"` · `supportsNonInteractive:!0` ·
+ *   `thinClientDispatch:"post-text"` · `isEnabled:()=>xn()` · `get isHidden(){return !xn()}` 다.
+ *   `auto-mode-setup` 과 같은 형태라 비대화형에서 오히려 켜지도록 만든 변종이다. 리뷰에서
+ *   "Unknown command: /skill-doctor" 를 봤다는 상반된 실측이 있어 근거가 갈리므로 확신이 설 때까지
+ *   남겨 둔다.
+ * - `rate-limit-options` · `pro-trial-expired` — CLI 가 특정 상황에 스스로 띄우는 내부 화면이라
+ *   사용자가 칠 일이 없다.
+ */
+
+// 두 목록은 직교한다. `HIDDEN_SDK_COMMANDS` 는 자동완성에서 빼고, `UNAVAILABLE_COMMANDS` 는 타이핑해
+// 보낸 것을 가로챈다. 한 이름이 둘 다 필요할 수 있다. `known` 은 이미 걸러진 목록에서 나오므로 감춘
+// 이름은 절대 `known` 에 들어가지 않고, 따라서 게이트가 확실히 잡는다.
 export const UNAVAILABLE_COMMANDS: readonly UnavailableCommand[] = [
   // Wooi 설정이 대신 맡는 터미널 외형 명령이다.
   {
     names: ['theme'],
     message: "Wooi isn't a terminal UI — choose the appearance you want in Wooi's settings."
+  },
+  // 감춰도 타이핑하면 CLI 로 새어 나가고, 실측하면 "Session color set to: cyan" 이라는 거짓 성공이
+  // 온다. 아무 일도 안 일어나는데 됐다고 말하므로 실패 메시지보다 나쁘다.
+  // `HIDDEN_SDK_COMMANDS` 에도 함께 있는 유일한 이름이다.
+  {
+    names: ['color'],
+    message: "Wooi has no terminal prompt bar to colour — change the appearance in Wooi's settings."
   },
   // 전부 CLI 에 `type:"local-jsx"` 로만 등록돼 있어 비대화형에서는 죽는다. `vim` 은 2.1.233 에서
   // 아예 제거돼 "Unknown command: /vim" 이 온다.
@@ -101,8 +125,10 @@ export const UNAVAILABLE_COMMANDS: readonly UnavailableCommand[] = [
   },
   // Claude Code 설치를 직접 바꾸는 명령이다. `/update` 는 `type:"local"` 변종도 있지만
   // `supportsNonInteractive:!1` · `isEnabled:()=>!1` 라 실제로 도는 것은 local-jsx 쪽뿐이다.
+  // `/version` 도 `type:"local"` 변종이 `isEnabled:()=>!1` 라 죽어 있고 실측하면
+  // "Unknown command: /version" 이 온다. 설치를 Wooi 가 관리한다는 같은 답이 맞다.
   {
-    names: ['install', 'update'],
+    names: ['install', 'update', 'version'],
     message: 'Wooi manages the Claude Code install for you.'
   },
   // 플러그인의 설치·제거는 터미널 CLI 에 남기고 Wooi 에서는 리로드만 지원한다.
@@ -117,7 +143,20 @@ export const UNAVAILABLE_COMMANDS: readonly UnavailableCommand[] = [
     names: ['remote-control', 'rc', 'session', 'remote-env'],
     message: "Claude Code's remote sessions aren't available in Wooi."
   },
-  // Claude Code 터미널 앱 안에서만 제공되는 제품·설정 진입 명령이다.
+  // 작업을 Anthropic 클라우드로 넘기는 계열이다. `tp` 는 `teleport` 의 별칭이다.
+  {
+    names: ['teleport', 'tp', 'ultraplan', 'autofix-pr'],
+    message:
+      "Wooi runs every workspace in a local git worktree, so there's nowhere for cloud-run work to land."
+  },
+  // CLI 의 전제 자체가 Wooi 에서 성립하지 않는다. `bg` 는 별칭이다.
+  {
+    names: ['background', 'bg'],
+    message: "Every Wooi workspace already runs in the background — there's nothing to move."
+  },
+  // Claude Code 터미널 앱 안에서만 제공되는 제품·설정 진입 명령이다. CLI 내부의 백그라운드
+  // 서비스·루프·워크플로 뷰, IDE 연동 패널, 인증 재설정 마법사도 전부 `type:"local-jsx"` 로만
+  // 등록돼 있다.
   {
     names: [
       'advisor',
@@ -127,7 +166,13 @@ export const UNAVAILABLE_COMMANDS: readonly UnavailableCommand[] = [
       'mobile',
       'desktop',
       'install-github-app',
-      'web-setup'
+      'web-setup',
+      'daemon',
+      'loops',
+      'workflows',
+      'ide',
+      'setup-bedrock',
+      'setup-vertex'
     ],
     message: 'This only runs in the Claude Code terminal app.'
   }
