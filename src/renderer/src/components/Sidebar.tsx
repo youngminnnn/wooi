@@ -998,7 +998,11 @@ function WorkspaceRow({
         {/* 상태 인디케이터는 "정보"이므로 고정 슬롯을 갖고, 액션 오버레이에 가려지지 않는다.
           (예전에는 호버 시 group-hover:hidden 으로 사라져서, 음소거 여부를 확인하면서
           음소거 버튼을 누를 수 없었다.) 아이콘 간 간격은 좁혀 하나의 묶음으로 읽히게 한다. */}
-        {(shortcut !== undefined || (unread && !active) || workspace.muted) && (
+        {(shortcut !== undefined ||
+          (unread && !active) ||
+          workspace.muted ||
+          (workspace.peerInbox?.length ?? 0) > 0 ||
+          (workspace.decisions?.length ?? 0) > 0) && (
           <div className="shrink-0 flex items-center gap-1.5">
             {shortcut !== undefined && (
               <kbd
