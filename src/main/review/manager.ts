@@ -812,15 +812,30 @@ export class ReviewManager {
 
       // 새 커밋 항목은 여기서 넣지 않는다 — 위쪽 레이어가 단순 restack 인지 확인한 뒤에
       // 한 번에 정리한다. 답글은 그대로 흘린다.
+      //
+      // 스레드 답글은 이제 **매번 전부** 올라온다(놓친 것을 채우기 위해). 그래서 이미 같은
+      // 내용으로 담아 둔 것은 걸러야 한다 — 그러지 않으면 폴링마다 사이드카에 같은 줄이 쌓이고,
+      // 아무것도 바뀌지 않은 폴링이 상태 방송을 일으켜 화면이 계속 다시 그려진다.
+      const known = new Map(
+        getReviewBundles()
+          .load(reviewId)
+          .activity.map((a) => [a.id, a])
+      )
+      let added = 0
+      let news = 0
       for (const item of items) {
         if (item.kind === 'commits') {
           movedLayers.push(layer.prNumber)
           continue
         }
-        this.addActivity(
-          reviewId,
-          item.kind === 'reply' ? { ...item, prNumber: layer.prNumber } : item
-        )
+        const next = item.kind === 'reply' ? { ...item, prNumber: layer.prNumber } : item
+        const before = known.get(next.id)
+        if (before && JSON.stringify(before) === JSON.stringify(next)) continue
+        this.addActivity(reviewId, next)
+        added++
+        // 내가 쓴 말은 나에게 새 소식이 아니다. 미확인 점은 남이 한 말에만 붙는다 —
+        // 내 답글로도 켜지면 GitHub 에서 답장하고 돌아올 때마다 읽지 않은 점이 붙는다.
+        if (!(next.kind === 'reply' && next.author === viewerLogin)) news++
       }
 
       // 내가 단 코멘트가 최신 diff 에서 밀려났는지도 같은 응답으로 알 수 있다 — 이걸 안 보면
@@ -861,7 +876,7 @@ export class ReviewManager {
       }
 
       if (
-        items.length > 0 ||
+        added > 0 ||
         outdatedChanged ||
         threadChanged ||
         nextSince !== layer.lastSeenAt ||
@@ -885,7 +900,7 @@ export class ReviewManager {
               return state ? { ...c, threadId: state.threadId, resolved: state.resolved } : c
             })
           }
-          if (items.some((i) => i.kind !== 'commits') || newlyResolved.length > 0) r.unread = true
+          if (news > 0 || newlyResolved.length > 0) r.unread = true
         })
       }
     }
