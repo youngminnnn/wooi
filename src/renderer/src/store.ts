@@ -1726,6 +1726,9 @@ export const useStore = create<UIState>((set, get) => ({
       }
       get().reportCarryFailures(res.carryFailures)
       get().reportCarryMissing(repoId, res.carryMissing)
+      if (res.setupSkippedForUntrustedPr) {
+        get().pushToast('info', "Setup wasn't run automatically for someone else's fork.")
+      }
       get().suggestCarry(repoId, res.workspaceId, res.carrySuggestions)
       return res.workspaceId
     }

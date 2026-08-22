@@ -3441,6 +3441,7 @@ export interface CreateWorkspaceResult {
    * 한 번만 알려 잔소리가 되지 않게 한다.
    */
   carryMissing?: string[]
+  setupSkippedForUntrustedPr?: boolean
   /**
    * 리포의 전달 목록이 **비어 있을 때만** 채워지는, 지금 리포에 실제로 존재하는 후보 경로들.
    * 이 경우 새 worktree 는 `.env`·`CLAUDE.local.md` 없이 만들어졌다는 뜻이므로 렌더러가

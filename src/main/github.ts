@@ -225,9 +225,15 @@ const PR_LABELS: Record<PrState, string> = {
  * 현재 브랜치의 PR 을 조회한다(모델 B 스택 조망은 브랜치별로 호출).
  * 브랜치명은 셸에 그대로 들어가면 안 되는 값이라 shellQuote 를 거친다.
  */
-export async function getPrStatus(worktreePath: string, branch?: string): Promise<PrStatus | null> {
+export async function getPrStatus(
+  worktreePath: string,
+  selector?: string | number
+): Promise<PrStatus | null> {
   if (!(await connected())) return null
-  const target = branch ? ` ${shellQuote(branch)}` : ''
+  const target =
+    selector !== undefined
+      ? ` ${typeof selector === 'number' ? String(selector) : shellQuote(selector)}`
+      : ''
   const { stdout, code } = await runLoginShell(
     `gh pr view${target} --json number,url,title,state,isDraft,reviewDecision,mergeable,mergeStateStatus,statusCheckRollup`,
     worktreePath
@@ -399,11 +405,14 @@ function statusFromRow(pr: GhPr): PrStatus {
 export async function findOpenPrStatus(
   worktreePath: string,
   cacheKey: string,
-  branch: string
+  branch: string,
+  prNumber?: number | null
 ): Promise<PrStatus | null> {
-  if (!branch) return null
+  if (!branch && !prNumber) return null
   const rows = await listOpenPrRows(worktreePath, cacheKey)
-  const row = rows.find((p) => p.headRefName === branch)
+  const row = prNumber
+    ? rows.find((p) => p.number === prNumber)
+    : rows.find((p) => p.headRefName === branch)
   return row ? statusFromRow(row) : null
 }
 

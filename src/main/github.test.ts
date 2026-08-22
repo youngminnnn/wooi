@@ -162,6 +162,22 @@ describe('gh 연결됨 (무회귀)', () => {
     ])
   })
 
+  it('PR 번호가 있으면 branch 대신 번호 selector 를 쓴다', async () => {
+    reply = () => ({ code: 1, stdout: '' })
+    await getPrStatus('/tmp/wt', 14196)
+    expect(commands).toEqual([
+      'gh pr view 14196 --json number,url,title,state,isDraft,reviewDecision,mergeable,mergeStateStatus,statusCheckRollup'
+    ])
+  })
+
+  it('PR 번호가 없으면 기존 branch selector 를 쓴다', async () => {
+    reply = () => ({ code: 1, stdout: '' })
+    await getPrStatus('/tmp/wt', 'patch-1')
+    expect(commands).toEqual([
+      "gh pr view 'patch-1' --json number,url,title,state,isDraft,reviewDecision,mergeable,mergeStateStatus,statusCheckRollup"
+    ])
+  })
+
   it.each([
     {
       name: '실행 중인 CI',
@@ -535,6 +551,27 @@ describe('브랜치별 PR 상태를 리포 목록에서 찾기', () => {
     await listOpenPrs('/tmp/a', 'repo-1')
     await findOpenPrStatus('/tmp/a', 'repo-1', 'feat/a')
     expect(ghCalls()).toHaveLength(1)
+  })
+
+  it('번호를 알면 같은 이름을 쓴 다른 fork PR 대신 그 번호로 찾는다', async () => {
+    reply = () => ({
+      code: 0,
+      stdout: JSON.stringify([
+        ...JSON.parse(rows),
+        {
+          ...JSON.parse(rows)[0],
+          number: 8,
+          url: 'https://gh/pr/8',
+          title: '다른 fork',
+          headRefName: 'feat/a'
+        }
+      ])
+    })
+
+    await expect(findOpenPrStatus('/tmp/a', 'repo-number', 'feat/a', 8)).resolves.toMatchObject({
+      number: 8,
+      url: 'https://gh/pr/8'
+    })
   })
 
   it('열린 PR 이 아닌 브랜치는 null 을 돌려준다(호출부가 개별 조회로 메운다)', async () => {

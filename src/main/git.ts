@@ -498,8 +498,36 @@ export async function originHasBranch(worktreePath: string, branch: string): Pro
 export async function pushCurrentBranch(
   worktreePath: string
 ): Promise<{ ok: boolean; error: string }> {
-  const r = await gitTry(worktreePath, ['push', '-u', 'origin', 'HEAD'])
+  const target = await resolveBranchPushTarget(worktreePath)
+  const refspec =
+    target.destination === target.branch ? 'HEAD' : `HEAD:refs/heads/${target.destination}`
+  const args = ['push', '-u', target.remote, refspec]
+  const r = await gitTry(worktreePath, args)
   return { ok: r.ok, error: r.ok ? '' : r.stderr || r.stdout || 'git push failed.' }
+}
+
+interface BranchPushTarget {
+  branch: string
+  remote: string
+  destination: string
+}
+
+/**
+ * checkout 을 만든 주체가 기록한 tracking 설정을 push 의 단일 소스로 쓴다. 특히 fork PR 은
+ * remote 이름 없이 URL 자체를 pushremote 로 남기므로, `origin` 으로 정규화하면 성공한 척 base
+ * 리포에 동명 브랜치를 만드는 더 위험한 실패가 된다.
+ */
+export async function resolveBranchPushTarget(worktreePath: string): Promise<BranchPushTarget> {
+  const branch = await git(worktreePath, ['rev-parse', '--abbrev-ref', 'HEAD'])
+  const config = async (key: string): Promise<string> => {
+    const result = await gitTry(worktreePath, ['config', '--get', key])
+    return result.ok ? result.stdout.trim() : ''
+  }
+  const pushRemote = await config(`branch.${branch}.pushRemote`)
+  const remote = pushRemote || (await config(`branch.${branch}.remote`)) || 'origin'
+  const merge = await config(`branch.${branch}.merge`)
+  const destination = merge.startsWith('refs/heads/') ? merge.slice('refs/heads/'.length) : merge
+  return { branch, remote, destination: destination || branch }
 }
 
 /**
@@ -596,11 +624,19 @@ export async function abortMerge(worktreePath: string): Promise<void> {
 // ── restack (stacked PR: 부모 브랜치 위로 rebase) ─────────────────────────
 
 /** 리모트에 같은 이름의 브랜치가 이미 있는지(origin/<branch>). force-push 대상 판단에 쓴다. */
-async function remoteBranchExists(worktreePath: string, branch: string): Promise<boolean> {
-  if (!branch) return false
-  return git(worktreePath, ['rev-parse', '--verify', '--quiet', `origin/${branch}`])
-    .then(() => true)
-    .catch(() => false)
+async function remoteBranchOid(
+  worktreePath: string,
+  remote: string,
+  destination: string
+): Promise<string | null> {
+  const result = await gitTry(worktreePath, [
+    'ls-remote',
+    '--heads',
+    remote,
+    `refs/heads/${destination}`
+  ])
+  if (!result.ok) return null
+  return result.stdout.trim().split(/\s+/, 1)[0] || null
 }
 
 /**
@@ -609,8 +645,21 @@ async function remoteBranchExists(worktreePath: string, branch: string): Promise
  * push 성공 여부를 돌려준다.
  */
 async function pushForceWithLease(worktreePath: string, branch: string): Promise<boolean> {
-  if (!(await remoteBranchExists(worktreePath, branch))) return false
-  const res = await gitTry(worktreePath, ['push', '--force-with-lease', 'origin', branch])
+  const target = await resolveBranchPushTarget(worktreePath)
+  const expected = await remoteBranchOid(worktreePath, target.remote, target.destination)
+  if (!expected) return false
+  // 기존 Wooi 브랜치는 명령까지 그대로 둔다. URL remote 나 다른 destination 은 remote-tracking
+  // ref 가 없을 수 있으므로, 방금 읽은 원격 SHA 를 lease 기대값으로 명시해야 동시 push 를 덮지 않는다.
+  const legacyTarget = target.remote === 'origin' && target.destination === branch
+  const args = legacyTarget
+    ? ['push', '--force-with-lease', 'origin', branch]
+    : [
+        'push',
+        `--force-with-lease=refs/heads/${target.destination}:${expected}`,
+        target.remote,
+        `HEAD:refs/heads/${target.destination}`
+      ]
+  const res = await gitTry(worktreePath, args)
   return res.ok
 }
 

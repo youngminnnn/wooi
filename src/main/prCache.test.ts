@@ -20,6 +20,23 @@ const { getWorkspacePrStatus, invalidateWorkspacePr } = await import('./prCache'
 const workspace = (id: string): Workspace =>
   ({ id, worktreePath: `/tmp/${id}`, repoId: 'repo-1' }) as Workspace
 
+it('기록된 PR 번호를 열린 목록과 개별 조회 모두에 우선 전달한다', async () => {
+  invalidateWorkspacePr()
+  github.findOpenPrStatus.mockResolvedValueOnce(null)
+  github.getPrStatus.mockResolvedValueOnce(null)
+  const ws = { ...workspace('numbered'), prNumber: 14196 }
+
+  await getWorkspacePrStatus(ws, 'patch-1')
+
+  expect(github.findOpenPrStatus).toHaveBeenLastCalledWith(
+    '/tmp/numbered',
+    'repo-1',
+    'patch-1',
+    14196
+  )
+  expect(github.getPrStatus).toHaveBeenLastCalledWith('/tmp/numbered', 14196)
+})
+
 const tick = async (times: number): Promise<void> => {
   for (let i = 0; i < times; i++) await Promise.resolve()
 }

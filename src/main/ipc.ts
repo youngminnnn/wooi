@@ -1821,7 +1821,9 @@ export function registerIpc(ctx: IpcContext): void {
   handle(IPC.prStatusForBranch, async (_e, workspaceId: string, branch: string) => {
     const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
     if (!ws || ws.archived) return null
-    const status = await getPrStatus(ws.worktreePath, branch).catch(() => null)
+    const entry = workspaceStack(ws).find((item) => item.branch === branch)
+    const prNumber = branch === ws.branch ? ws.prNumber : entry?.prNumber
+    const status = await getPrStatus(ws.worktreePath, prNumber ?? branch).catch(() => null)
     if (status) persistPrNumber(workspaceId, branch, status.number)
     return status
   })

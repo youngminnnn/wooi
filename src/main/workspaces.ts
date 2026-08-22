@@ -375,16 +375,21 @@ export async function createWorkspace(
   )
   deps.broadcastState()
 
-  // 셋업 스크립트가 설정돼 있으면 생성 직후 실행(dev 와 같은 포트 env 를 주입).
+  const setupSkippedForUntrustedPr =
+    !!repo.setupScript.trim() && shouldSkipPrSetup(prMeta, viewerLogin)
+  // 다른 사람의 fork 는 리포 설정을 신뢰할 근거가 없다. idle 로 두면 기존 스크립트 패널에서
+  // 사용자가 내용을 확인한 뒤 직접 실행할 수 있고, 자동 실행만 피하면서 복구 경로도 남는다.
   if (repo.setupScript.trim()) {
-    const ws = store.getState().workspaces.find((item) => item.id === id)!
-    deps.scripts.run(
-      id,
-      SETUP_SCRIPT_ID,
-      repo.setupScript,
-      worktreePath,
-      scriptEnvFor(repo, ws, SETUP_SCRIPT_ID)
-    )
+    if (!setupSkippedForUntrustedPr) {
+      const ws = store.getState().workspaces.find((item) => item.id === id)!
+      deps.scripts.run(
+        id,
+        SETUP_SCRIPT_ID,
+        repo.setupScript,
+        worktreePath,
+        scriptEnvFor(repo, ws, SETUP_SCRIPT_ID)
+      )
+    }
   } else {
     const ws = store.getState().workspaces.find((item) => item.id === id)!
     startAutoRunScripts(deps.scripts, ws, repo)
@@ -400,8 +405,21 @@ export async function createWorkspace(
     branch,
     carryFailures,
     carryMissing,
+    setupSkippedForUntrustedPr,
     carrySuggestions: carrySuggestionsFor(repo)
   }
+}
+
+export function shouldSkipPrSetup(
+  pr: { isCrossRepository?: boolean; headRepositoryOwner?: { login?: string } | string } | null,
+  viewerLogin: string | null
+): boolean {
+  if (!pr || pr.isCrossRepository !== true) return false
+  const owner =
+    typeof pr.headRepositoryOwner === 'string'
+      ? pr.headRepositoryOwner
+      : pr.headRepositoryOwner?.login
+  return !viewerLogin || owner !== viewerLogin
 }
 
 /**
