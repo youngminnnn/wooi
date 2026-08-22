@@ -138,6 +138,22 @@ Lists direct child workspaces, their branches, running and pull-request state, w
 the caller created them, and the latest report from each child. It takes no input and is
 read-only.
 
+Each child has a compact `state` describing its current activity:
+
+| `state` | Meaning |
+| --- | --- |
+| `running` | The agent's turn is running. |
+| `waiting-for-user-permission` | A tool is waiting at an approval card. |
+| `rate-limited` | The agent stopped at an account usage limit. |
+| `ended-with-error` | The last turn ended with an error. |
+| `background-tasks-running` | The agent is idle, but background shells are still running. |
+| `idle` | None of the states above apply. |
+
+`stateNote` appears only when the state needs a short explanation, such as the pending tool,
+usage-limit reset time, a possibly stale running turn, or the background-shell count.
+`lastActiveAt` is the workspace's last turn activity as epoch milliseconds. A child stopped at an
+approval card cannot continue or report back on its own.
+
 Reports do not automatically enter the parent's agent context. Call this tool when a
 child's result affects the next action or before using `notify_child`.
 

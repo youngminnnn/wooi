@@ -273,6 +273,8 @@ export const AGENT_TOOLS: AgentToolSpec[] = [
     description: [
       'List the workspaces stacked directly on this one, with whether each is currently running,',
       'whether you created it, its branch and pull request, and the last report it sent back.',
+      'A one-word `state` says why each child is or is not running — approval waits, usage limits,',
+      'and errors otherwise look idle, and a child waiting for the user cannot report on its own.',
       '',
       'Reports never arrive in your conversation on their own, so call this when a child’s result',
       'would change what you do next — before building on its branch, before opening a pull',
