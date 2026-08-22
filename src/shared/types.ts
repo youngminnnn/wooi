@@ -700,6 +700,8 @@ export interface Workspace {
    * 워크스페이스가 사라지면 그 앞으로 온 메시지도 함께 사라지는 것이 맞다.
    */
   peerInbox?: PendingPeerMessage[]
+  /** 이 워크스페이스가 올린, 아직 답을 못 받은 질문([[PendingDecision]]). */
+  decisions?: PendingDecision[]
   /** worktree 절대 경로 */
   worktreePath: string
   /**
@@ -1557,6 +1559,14 @@ export type ChatItem =
       summary: string
       ts: number
     }
+  | {
+      id: string
+      type: 'decision'
+      decisionId: string
+      question: string
+      options?: { label: string; description?: string }[]
+      ts: number
+    }
 
 /**
  * 워크스페이스를 가로지르는 대화 검색의 결과 1건.
@@ -1674,6 +1684,47 @@ export interface PendingPeerMessage {
   text: string
   at: number
 }
+
+/**
+ * 워크스페이스가 스스로 못 정해서 올린 질문. **기본 수신자는 사용자**이고, 답이 오기 전까지
+ * 그 워크스페이스는 멈춰 있다.
+ *
+ * 승인 대기(PermissionRequest)와 다른 것이다 — 저건 "이 행동을 해도 되나" 이고 이건 "무엇을
+ * 고를까" 다. 화면에서도 아이콘과 문구를 갈라야 한다(PR #384 가 같은 이유로 문구를 고쳤다).
+ *
+ * `peerInbox` 와 같은 이유로 **묻는 쪽**(자식)의 레코드에 둔다: 사용자가 그 워크스페이스를 열었을
+ * 때 답해야 하는 것이 "여기서 올라온 질문" 이고, 워크스페이스가 사라지면 질문도 함께 사라지는
+ * 것이 맞다.
+ */
+export interface PendingDecision {
+  id: string
+  /** 에이전트가 쓴 질문 원문. */
+  question: string
+  /** 모델이 좁혀 준 선택지. 없으면 자유 입력만 받는다. */
+  options?: { label: string; description?: string }[]
+  /** 모델이 스스로라면 골랐을 답. 사용자가 "그걸로" 만 누르면 되게 카드가 앞세운다. */
+  recommendation?: string
+  askedAt: number
+  /**
+   * 사용자가 준 답. **있으면 배달만 남은 상태다.**
+   *
+   * 답을 스토어에 적고 나서 배달하고, 배달에 성공해야 레코드를 지운다. 순서를 뒤집으면
+   * 배달에 실패한 답이 사라지고 자식은 영영 멈춘다.
+   */
+  answer?: string
+  answeredAt?: number
+  /** 배달을 시도했으나 실패했다. 카드가 재시도를 띄운다. */
+  deliveryFailed?: true
+  /** 사용자가 부모에게 넘겼다. 부모의 답은 평범한 peer 메시지로 돌아온다. */
+  escalatedTo?: { workspaceId: string; branch: string; at: number }
+}
+
+/**
+ * 워크스페이스 1곳이 쌓아 둘 수 있는 대기 질문 수.
+ *
+ * 질문을 오래된 것부터 버리면 그것을 기다리던 턴이 영영 안 오므로, 넘친 호출 자체를 거절한다.
+ */
+export const MAX_PENDING_DECISIONS = 5
 
 /** 워크스페이스 1곳이 쌓아 둘 수 있는 대기 메시지 수. 넘으면 가장 오래된 것부터 버린다. */
 export const MAX_PEER_INBOX = 20
@@ -2829,6 +2880,12 @@ export const IPC = {
   workspacePeerInboxDeliver: 'workspace:peerInboxDeliver',
   /** 대기 중인 peer 메시지를 버린다. 전달되지 않고 사라진다. */
   workspacePeerInboxDismiss: 'workspace:peerInboxDismiss',
+  /** 대기 중인 질문에 사용자가 답한다. 그 워크스페이스에서 턴이 시작된다. */
+  workspaceDecisionAnswer: 'workspace:decisionAnswer',
+  /** 대기 중인 질문을 부모 워크스페이스에 넘긴다 — 여기가 토큰을 쓰는 유일한 경로다. */
+  workspaceDecisionEscalate: 'workspace:decisionEscalate',
+  /** 대기 중인 질문을 버린다. 묻던 워크스페이스에는 알리지 않는다. */
+  workspaceDecisionDismiss: 'workspace:decisionDismiss',
   /** 다른 워크스페이스에서 오는 메시지를 받는 방식([[PeerInboundPolicy]])을 바꾼다. */
   workspaceSetPeerInbound: 'workspace:setPeerInbound',
   /** 같은 프롬프트로 후보 워크스페이스 N 개를 한 번에 만들고 한 그룹으로 묶는다. */
