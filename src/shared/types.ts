@@ -3384,6 +3384,11 @@ export interface CreateWorkspaceArgs {
   /** @deprecated 무시됨 — 항상 origin 기본 브랜치(origin/<defaultBranch>)에서 분기한다. */
   baseBranch?: string
   /**
+   * 기존 PR 에서 시작할 때의 PR 번호. head/base 는 main 이 GitHub 에서 직접 풀어 caller 가
+   * 임의의 base 를 고르거나 PR 메타데이터와 다른 브랜치를 만들 수 없게 한다.
+   */
+  fromPrNumber?: number
+  /**
    * stacked PR 부모 워크스페이스 id. 지정하면 그 워크스페이스의 브랜치 위에 새 워크스페이스를 쌓는다
    * (base = 부모의 branch). 없거나 null 이면 기본 브랜치에서 분기한 스택 뿌리로 만든다.
    */
@@ -3421,6 +3426,10 @@ export interface CreateWorkspaceResult {
   name?: string
   branch?: string
   error?: string
+  /** 같은 리포·PR 의 워크스페이스가 이미 있으면 새로 만들지 않고 그 id 를 돌려준다. */
+  existingWorkspaceId?: string
+  /** 기존 워크스페이스가 아카이브돼 Restore 가 필요한지. */
+  existingWorkspaceArchived?: boolean
   /** worktree 전달에 실패한 항목들. 생성 자체는 성공했지만 사용자에게 알려야 한다. */
   carryFailures?: CarryFailure[]
   /**

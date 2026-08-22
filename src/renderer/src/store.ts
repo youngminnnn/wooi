@@ -469,6 +469,7 @@ interface UIState {
     args?: {
       name?: string
       baseBranch?: string
+      fromPrNumber?: number
       parentWorkspaceId?: string | null
       /** 이 워크스페이스를 구동할 에이전트. 생략하면 전역 기본 백엔드. */
       agentBackend?: AgentBackendId
@@ -1683,11 +1684,14 @@ export const useStore = create<UIState>((set, get) => ({
 
     let res: {
       workspaceId?: string
+      existingWorkspaceId?: string
+      existingWorkspaceArchived?: boolean
       name?: string
       branch?: string
       error?: string
       carryFailures?: CarryFailure[]
       carryMissing?: string[]
+      setupSkippedForUntrustedPr?: boolean
       carrySuggestions?: string[]
     }
     try {
@@ -1701,6 +1705,16 @@ export const useStore = create<UIState>((set, get) => ({
     if (res.error) {
       get().pushToast('error', res.error)
       return undefined
+    }
+    if (res.existingWorkspaceId) {
+      void get().selectWorkspace(res.existingWorkspaceId)
+      get().pushToast(
+        'info',
+        res.existingWorkspaceArchived
+          ? 'A workspace for this pull request already exists and is archived.'
+          : 'A workspace for this pull request already exists.'
+      )
+      return res.existingWorkspaceId
     }
     if (res.workspaceId) {
       void get().selectWorkspace(res.workspaceId)

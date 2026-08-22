@@ -15,8 +15,20 @@ import {
   isAgentContextPath,
   type CarryReport
 } from './carry'
-import { addWorktree, removeWorktree, resolveUniqueWorktree, syncGhMergeBase } from './git'
-import { getPrStatus } from './github'
+import {
+  addWorktree,
+  checkoutPrWorktree,
+  removeWorktree,
+  resolveUniqueWorktree,
+  syncGhMergeBase
+} from './git'
+import {
+  canPushToPrHead,
+  getBaseRepoWritable,
+  getPrMeta,
+  getPrStatus,
+  getViewerLogin
+} from './github'
 import { log } from './logger'
 import { generateWorkspaceName } from './names'
 import { findFreePort } from './net'
@@ -190,6 +202,17 @@ export function carrySuggestionsFor(repo: Repo): string[] | undefined {
   return detected.length > 0 ? detected : undefined
 }
 
+/** 같은 리포에서 같은 PR 을 이미 소유한 워크스페이스를 찾는다(아카이브 포함). */
+export function findWorkspaceForPr(
+  workspaces: Workspace[],
+  repoId: string,
+  prNumber: number
+): Workspace | undefined {
+  return workspaces.find(
+    (workspace) => workspace.repoId === repoId && workspace.prNumber === prNumber
+  )
+}
+
 export async function createWorkspace(
   deps: CreateWorkspaceDeps,
   args: CreateWorkspaceArgs
@@ -198,8 +221,42 @@ export async function createWorkspace(
   const repo = repoFor(args.repoId)
   if (!repo) return { error: 'Repository not found.' }
 
+  let prMeta: Awaited<ReturnType<typeof getPrMeta>> = null
+  let viewerLogin: string | null = null
+  if (args.fromPrNumber !== undefined) {
+    const existing = findWorkspaceForPr(store.getState().workspaces, repo.id, args.fromPrNumber)
+    if (existing) {
+      return {
+        existingWorkspaceId: existing.id,
+        existingWorkspaceArchived: existing.archived
+      }
+    }
+    prMeta = await getPrMeta(repo.path, args.fromPrNumber)
+    if (!prMeta) return { error: `Pull request #${args.fromPrNumber} was not found.` }
+    const access = await Promise.all([getViewerLogin(repo.path), getBaseRepoWritable(repo.path)])
+    viewerLogin = access[0]
+    const baseRepoWritable = access[1]
+    const owner =
+      typeof prMeta.headRepositoryOwner === 'string'
+        ? prMeta.headRepositoryOwner
+        : prMeta.headRepositoryOwner?.login
+    if (
+      !canPushToPrHead(
+        {
+          isCrossRepository: prMeta.isCrossRepository,
+          headRepositoryOwner: owner,
+          maintainerCanModify: prMeta.maintainerCanModify
+        },
+        viewerLogin,
+        baseRepoWritable
+      )
+    ) {
+      return { error: `You do not have permission to push to pull request #${prMeta.number}.` }
+    }
+  }
+
   // 이름 미입력 시 자동 생성, 베이스 미입력 시 리포 기본 브랜치(main/origin) 사용.
-  let rawName = (args.name ?? '').trim()
+  let rawName = prMeta?.headRefName ?? (args.name ?? '').trim()
   if (!rawName) {
     const existing = new Set(
       store
@@ -221,13 +278,21 @@ export async function createWorkspace(
   if (args.parentWorkspaceId && !parent) {
     return { error: 'Parent workspace not found (or archived).' }
   }
-  const baseBranch = parent ? parent.branch : repo.defaultBranch
+  const baseBranch = prMeta?.baseRefName ?? (parent ? parent.branch : repo.defaultBranch)
   const parentWorkspaceId = parent ? parent.id : null
   // 기존 브랜치/worktree 디렉토리와 충돌하면 접미사(-2, -3 …)를 붙여 고유 이름을 만든다.
-  const { branch, worktreePath } = await resolveUniqueWorktree(repo.path, rawName)
+  const resolvedWorktree = await resolveUniqueWorktree(repo.path, rawName, {
+    fixedBranch: !!prMeta
+  })
+  let { branch } = resolvedWorktree
+  const { worktreePath } = resolvedWorktree
 
   try {
-    await addWorktree(repo.path, branch, baseBranch, worktreePath)
+    if (prMeta) {
+      branch = await checkoutPrWorktree(repo.path, prMeta.number, worktreePath)
+    } else {
+      await addWorktree(repo.path, branch, baseBranch, worktreePath)
+    }
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) }
   }
@@ -285,7 +350,7 @@ export async function createWorkspace(
       // 누가 만들었는가. 부모 관계와 별개로 기록한다 — 사람이 UI 에서 만들면 여기가 null 이고,
       // 그 덕에 에이전트는 자기가 만든 것에만 손댈 수 있다([[agent/tools/target]]).
       createdByWorkspaceId: args.createdByWorkspaceId ?? null,
-      prNumber: null,
+      prNumber: prMeta?.number ?? null,
       worktreePath,
       ports,
       // setup 은 아래에서 곧 실행된다. 종료 시 onExit 훅이 success/failed 로 갱신한다.

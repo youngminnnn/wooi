@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -11,8 +11,180 @@ import {
   summarizeBranch,
   getDiff,
   getStatus,
-  fetchRemoteForRepo
+  fetchRemoteForRepo,
+  checkoutPrWorktree,
+  resolveUniqueWorktree,
+  pushCurrentBranch,
+  resolveBranchPushTarget
 } from './git'
+
+describe('branch tracking push target', () => {
+  let root: string
+  let worktree: string
+  let origin: string
+  let remote: string
+  let pushRemote: string
+
+  const git = (cwd: string, args: string[]): string =>
+    execFileSync('git', args, { cwd, encoding: 'utf-8' }).trim()
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'wooi-push-target-'))
+    worktree = join(root, 'worktree')
+    origin = join(root, 'origin.git')
+    remote = join(root, 'remote.git')
+    pushRemote = join(root, 'push-remote.git')
+    for (const bare of [origin, remote, pushRemote]) git(root, ['init', '-q', '--bare', bare])
+    mkdirSync(worktree)
+    git(worktree, ['init', '-q', '-b', 'local-name'])
+    git(worktree, ['config', 'user.email', 'test@example.com'])
+    git(worktree, ['config', 'user.name', 'test'])
+    writeFileSync(join(worktree, 'file.txt'), 'one\n')
+    git(worktree, ['add', '-A'])
+    git(worktree, ['commit', '-qm', 'one'])
+    git(worktree, ['remote', 'add', 'origin', origin])
+  })
+
+  afterEach(() => rmSync(root, { recursive: true, force: true }))
+
+  it('tracking config 가 없으면 기존 origin/로컬 브랜치 대상으로 push 한다', async () => {
+    await expect(resolveBranchPushTarget(worktree)).resolves.toEqual({
+      branch: 'local-name',
+      remote: 'origin',
+      destination: 'local-name'
+    })
+    await expect(pushCurrentBranch(worktree)).resolves.toEqual({ ok: true, error: '' })
+    expect(git(origin, ['rev-parse', 'refs/heads/local-name'])).toBe(
+      git(worktree, ['rev-parse', 'HEAD'])
+    )
+  })
+
+  it('merge 만 있으면 origin 의 그 destination ref 로 push 한다', async () => {
+    git(worktree, ['config', 'branch.local-name.merge', 'refs/heads/pr-head'])
+    await expect(resolveBranchPushTarget(worktree)).resolves.toEqual({
+      branch: 'local-name',
+      remote: 'origin',
+      destination: 'pr-head'
+    })
+    await expect(pushCurrentBranch(worktree)).resolves.toMatchObject({ ok: true })
+    expect(git(origin, ['rev-parse', 'refs/heads/pr-head'])).toBe(
+      git(worktree, ['rev-parse', 'HEAD'])
+    )
+  })
+
+  it('remote + merge 는 설정된 remote URL 의 destination 으로 push 한다', async () => {
+    git(worktree, ['config', 'branch.local-name.remote', remote])
+    git(worktree, ['config', 'branch.local-name.merge', 'refs/heads/pr-head'])
+    await expect(resolveBranchPushTarget(worktree)).resolves.toEqual({
+      branch: 'local-name',
+      remote,
+      destination: 'pr-head'
+    })
+    await expect(pushCurrentBranch(worktree)).resolves.toMatchObject({ ok: true })
+    expect(git(remote, ['rev-parse', 'refs/heads/pr-head'])).toBe(
+      git(worktree, ['rev-parse', 'HEAD'])
+    )
+  })
+
+  it('pushremote 가 remote 를 덮어쓰고 같은 destination 으로 push 한다', async () => {
+    git(worktree, ['config', 'branch.local-name.remote', remote])
+    git(worktree, ['config', 'branch.local-name.pushRemote', pushRemote])
+    git(worktree, ['config', 'branch.local-name.merge', 'refs/heads/pr-head'])
+    await expect(resolveBranchPushTarget(worktree)).resolves.toEqual({
+      branch: 'local-name',
+      remote: pushRemote,
+      destination: 'pr-head'
+    })
+    await expect(pushCurrentBranch(worktree)).resolves.toMatchObject({ ok: true })
+    expect(git(pushRemote, ['rev-parse', 'refs/heads/pr-head'])).toBe(
+      git(worktree, ['rev-parse', 'HEAD'])
+    )
+    expect(git(worktree, ['ls-remote', '--heads', remote, 'refs/heads/pr-head'])).toBe('')
+  })
+})
+
+describe('PR workspace checkout', () => {
+  let root: string
+  let origin: string
+  let clone: string
+  let fakeBin: string
+  let oldPath: string | undefined
+  let oldShell: string | undefined
+  let oldWooiHome: string | undefined
+
+  const git = (cwd: string, args: string[]): string =>
+    execFileSync('git', args, { cwd, encoding: 'utf-8' }).trim()
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'wooi-pr-checkout-'))
+    origin = join(root, 'origin.git')
+    const seed = join(root, 'seed')
+    clone = join(root, 'clone')
+    fakeBin = join(root, 'bin')
+    mkdirSync(seed)
+    mkdirSync(fakeBin)
+    git(seed, ['init', '-q', '-b', 'main'])
+    git(seed, ['config', 'user.email', 'test@example.com'])
+    git(seed, ['config', 'user.name', 'test'])
+    writeFileSync(join(seed, 'README.md'), 'base\n')
+    git(seed, ['add', '-A'])
+    git(seed, ['commit', '-qm', 'base'])
+    git(seed, ['checkout', '-qb', 'feat/pr'])
+    writeFileSync(join(seed, 'pr.txt'), 'head\n')
+    git(seed, ['add', '-A'])
+    git(seed, ['commit', '-qm', 'pr'])
+    git(seed, ['init', '-q', '--bare', origin])
+    git(seed, ['push', '-q', origin, 'main'])
+    git(seed, ['push', '-q', origin, 'HEAD:refs/pull/7/head'])
+    git(origin, ['symbolic-ref', 'HEAD', 'refs/heads/main'])
+    execFileSync('git', ['clone', '-q', origin, clone])
+
+    const gh = join(fakeBin, 'gh')
+    writeFileSync(gh, '#!/bin/sh\ngit checkout -qB feat/pr\n')
+    chmodSync(gh, 0o755)
+    oldPath = process.env.PATH
+    oldShell = process.env.SHELL
+    oldWooiHome = process.env.WOOI_HOME
+    process.env.PATH = `${fakeBin}:${oldPath ?? ''}`
+    process.env.SHELL = '/bin/sh'
+    process.env.WOOI_HOME = join(root, 'wooi-home')
+  })
+
+  afterEach(() => {
+    if (oldPath === undefined) delete process.env.PATH
+    else process.env.PATH = oldPath
+    if (oldShell === undefined) delete process.env.SHELL
+    else process.env.SHELL = oldShell
+    if (oldWooiHome === undefined) delete process.env.WOOI_HOME
+    else process.env.WOOI_HOME = oldWooiHome
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('PR ref 를 fetch 해 detached worktree 를 만든 뒤 head 브랜치에 붙인다', async () => {
+    const worktree = join(root, 'worktree')
+    await expect(checkoutPrWorktree(clone, 7, worktree)).resolves.toBe('feat/pr')
+    expect(git(worktree, ['rev-parse', '--abbrev-ref', 'HEAD'])).toBe('feat/pr')
+    expect(git(worktree, ['show', 'HEAD:pr.txt'])).toBe('head')
+    expect(git(clone, ['for-each-ref', '--format=%(refname)', 'refs/wooi/pr-checkout'])).toBe('')
+  })
+
+  it('아카이브로 로컬 브랜치만 남아 있어도 그 이름을 그대로 다시 붙인다', async () => {
+    git(clone, ['branch', 'feat/pr', 'refs/remotes/origin/main'])
+    const worktree = join(root, 'restored')
+    await expect(checkoutPrWorktree(clone, 7, worktree)).resolves.toBe('feat/pr')
+    expect(git(worktree, ['show', 'HEAD:pr.txt'])).toBe('head')
+  })
+
+  it('고정 브랜치는 바꾸지 않고 이미 차지한 디렉토리만 uniquify 한다', async () => {
+    git(clone, ['branch', 'feat/pr'])
+    const first = await resolveUniqueWorktree(clone, 'feat/pr', { fixedBranch: true })
+    mkdirSync(first.worktreePath, { recursive: true })
+    const second = await resolveUniqueWorktree(clone, 'feat/pr', { fixedBranch: true })
+    expect(second.branch).toBe('feat/pr')
+    expect(second.worktreePath).not.toBe(first.worktreePath)
+    expect(second.worktreePath).toMatch(/feat-pr-2$/)
+  })
+})
 
 describe('getStatus base 해석', () => {
   let root: string

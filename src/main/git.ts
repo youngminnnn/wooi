@@ -1,8 +1,10 @@
 import { execFile } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
 import { promisify } from 'node:util'
 import { basename, join } from 'node:path'
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { wooiHome } from './paths'
+import { runGh } from './github'
 import type {
   FileDiff,
   FileDiffStatus,
@@ -115,12 +117,19 @@ async function localBranchExists(repoPath: string, branch: string): Promise<bool
  */
 export async function resolveUniqueWorktree(
   repoPath: string,
-  desiredBranch: string
+  desiredBranch: string,
+  options?: { fixedBranch?: boolean }
 ): Promise<{ branch: string; worktreePath: string }> {
   const base = sanitizeBranch(desiredBranch)
   for (let n = 1; ; n++) {
     const candidate = n === 1 ? base : `${base}-${n}`
     const worktreePath = worktreePathFor(repoPath, candidate)
+    // PR checkout 은 실제 로컬 브랜치명을 gh 가 나중에 정한다. 여기서 이름까지 uniquify 하면
+    // checkout 전의 임시 판단이 그 결정을 앞질러 버리므로, 디렉토리 충돌만 피한다.
+    if (options?.fixedBranch) {
+      if (!existsSync(worktreePath)) return { branch: base, worktreePath }
+      continue
+    }
     const taken = existsSync(worktreePath) || (await localBranchExists(repoPath, candidate))
     if (!taken) return { branch: candidate, worktreePath }
   }
@@ -304,6 +313,37 @@ export async function fetchPrHeads(
   const refspecs = prNumbers.map((n) => `+refs/pull/${n}/head:${reviewRefFor(reviewId, n)}`)
   const r = await gitTry(repoPath, ['fetch', '--no-tags', '--force', 'origin', ...refspecs])
   return r.ok
+}
+
+/** PR head 를 detached worktree 로 먼저 붙인 뒤 gh 가 정한 tracking 브랜치로 전환한다. */
+export async function checkoutPrWorktree(
+  repoPath: string,
+  prNumber: number,
+  worktreePath: string
+): Promise<string> {
+  const tempRef = `refs/wooi/pr-checkout/${prNumber}-${randomUUID()}`
+  let worktreeAdded = false
+  try {
+    await git(repoPath, [
+      'fetch',
+      '--no-tags',
+      '--force',
+      'origin',
+      `+refs/pull/${prNumber}/head:${tempRef}`
+    ])
+    await git(repoPath, ['worktree', 'add', '--detach', worktreePath, tempRef])
+    worktreeAdded = true
+    const { stderr, code } = await runGh(`gh pr checkout ${prNumber}`, worktreePath)
+    if (code !== 0) throw new Error(stderr.trim() || `Failed to check out PR #${prNumber}.`)
+    const branch = await git(worktreePath, ['rev-parse', '--abbrev-ref', 'HEAD'])
+    if (!branch || branch === 'HEAD') throw new Error(`PR #${prNumber} did not attach a branch.`)
+    return branch
+  } catch (error) {
+    if (worktreeAdded) await removeWorktree(repoPath, worktreePath, '', false)
+    throw error
+  } finally {
+    await gitTry(repoPath, ['update-ref', '-d', tempRef])
+  }
 }
 
 /** detached HEAD 로 worktree 를 추가한다. */

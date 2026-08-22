@@ -1,6 +1,52 @@
 import { describe, expect, it, vi } from 'vitest'
-import { runArchiveScript } from './workspaces'
+import { findWorkspaceForPr, runArchiveScript, shouldSkipPrSetup } from './workspaces'
 import type { RunOnceResult } from './scripts'
+import type { Workspace } from '@shared/types'
+
+describe('findWorkspaceForPr', () => {
+  const workspace = (id: string, repoId: string, prNumber: number | null, archived: boolean) =>
+    ({ id, repoId, prNumber, archived }) as Workspace
+  const workspaces = [
+    workspace('open', 'repo-1', 7, false),
+    workspace('archived', 'repo-1', 8, true),
+    workspace('other-repo', 'repo-2', 7, false)
+  ]
+
+  it('열린 워크스페이스를 찾는다', () => {
+    expect(findWorkspaceForPr(workspaces, 'repo-1', 7)).toMatchObject({
+      id: 'open',
+      archived: false
+    })
+  })
+
+  it('아카이브된 워크스페이스도 찾는다', () => {
+    expect(findWorkspaceForPr(workspaces, 'repo-1', 8)).toMatchObject({
+      id: 'archived',
+      archived: true
+    })
+  })
+
+  it('같은 리포·PR 조합이 없으면 undefined 다', () => {
+    expect(findWorkspaceForPr(workspaces, 'repo-1', 9)).toBeUndefined()
+  })
+})
+
+describe('PR setup auto-run decision', () => {
+  it.each([
+    ['normal workspace', null, 'me', false],
+    ['same-repo PR', { isCrossRepository: false }, 'me', false],
+    ['own fork', { isCrossRepository: true, headRepositoryOwner: { login: 'me' } }, 'me', false],
+    [
+      "someone else's fork",
+      { isCrossRepository: true, headRepositoryOwner: { login: 'other' } },
+      'me',
+      true
+    ],
+    ['fork with no viewer', { isCrossRepository: true, headRepositoryOwner: 'me' }, null, true]
+  ] as const)('%s', (_name, pr, viewer, expected) => {
+    expect(shouldSkipPrSetup(pr, viewer)).toBe(expected)
+  })
+})
 
 /**
  * 아카이브 스크립트 실패는 아카이브를 멈추지 않는다 — 멈추면 worktree 만 남아 상태가 더
