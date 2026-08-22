@@ -3795,6 +3795,8 @@ export type CommandPanelKind =
   | 'reloadSkills'
   | 'rewind'
   | 'permissions'
+  | 'debugConfig'
+  | 'experimental'
 
 /**
  * 입력창 인터셉트(Composer)와 자동완성 보강(commands.ts)이 같은 목록을 보도록 하는 SSOT.
@@ -3827,7 +3829,9 @@ export const INTERACTIVE_COMMANDS: {
     description: 'View permission mode and tool allow/ask/deny rules'
   },
   { name: 'reload-plugins', kind: 'reloadPlugins', description: 'Reload plugins from disk' },
-  { name: 'reload-skills', kind: 'reloadSkills', description: 'Reload skills from disk' }
+  { name: 'reload-skills', kind: 'reloadSkills', description: 'Reload skills from disk' },
+  { name: 'debug-config', kind: 'debugConfig', description: 'Show effective Codex configuration' },
+  { name: 'experimental', kind: 'experimental', description: 'Manage experimental Codex features' }
 ]
 
 /** MCP 서버 1개의 연결 상태(표시용으로 추린 것). */
@@ -4004,6 +4008,8 @@ export type CommandResult =
   | { kind: 'reloadSkills'; reload: ReloadResult }
   | { kind: 'rewind'; checkpoints: RewindPoint[] }
   | { kind: 'permissions'; permissions: PermissionsInfo }
+  | { kind: 'debugConfig'; config: unknown; sources: string[] }
+  | { kind: 'unsupported'; command: string; reason: string }
 
 // ── 파일 브라우저 (All files 탭) ──────────────────────────────────────────
 

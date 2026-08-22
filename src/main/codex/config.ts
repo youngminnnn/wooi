@@ -16,3 +16,24 @@ export function withWooiCodexConfig(args: string[]): string[] {
   if (args.length === 0) return [...WOOI_CODEX_CONFIG_ARGS]
   return [args[0], ...WOOI_CODEX_CONFIG_ARGS, ...args.slice(1)]
 }
+
+/** `/debug-config` 카드에 자격 증명이 노출되지 않도록 app-server 응답을 복사하며 가린다. */
+export function redactDebugConfig(value: unknown, parentKey = ''): unknown {
+  if (parentKey.toLowerCase() === 'env' && (!value || typeof value !== 'object')) {
+    return '[redacted]'
+  }
+  if (Array.isArray(value)) return value.map((item) => redactDebugConfig(item, parentKey))
+  if (!value || typeof value !== 'object') return value
+
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).map(([key, item]) => {
+      const sensitive =
+        parentKey.toLowerCase() === 'env' ||
+        /(?:api[_-]?key|token|secret|password|credential)/i.test(key)
+      return [key, sensitive ? '[redacted]' : redactDebugConfig(item, key)]
+    })
+  )
+}
+
+export const EXPERIMENTAL_UNSUPPORTED_REASON =
+  'Codex app-server 0.146 does not expose experimental-feature metadata or a safe feature-toggle method.'

@@ -93,8 +93,9 @@ export async function runCommandOn(
     }
     case 'rewind':
     case 'permissions':
-      // 이 둘은 라이브 Query 가 아니라 세션 상태(체크포인트)·설정 파일을 읽어야 하므로
-      // host 에서 직접 처리한다(여기로 오면 라우팅이 잘못된 것).
+    case 'debugConfig':
+    case 'experimental':
+      // 이 명령들은 라이브 Query 밖에서 처리하거나 Codex 전용이다. 여기로 오면 라우팅이 잘못됐다.
       throw new Error(`${kind} is handled in the host, not runCommandOn`)
   }
 }

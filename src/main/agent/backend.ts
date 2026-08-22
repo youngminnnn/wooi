@@ -388,7 +388,7 @@ export const CODEX_META: AgentBackendMeta = {
     effort: true,
     fastMode: true,
     // app-server 로 답할 수 있는 것만. /rewind·/agents 는 대응 개념이 없다.
-    interactiveCommands: ['mcp', 'context', 'usage', 'permissions'],
+    interactiveCommands: ['mcp', 'context', 'usage', 'permissions', 'debugConfig', 'experimental'],
     slashCommands: true,
     // app-server 의 turn/steer — 턴이 도는 중에도 입력을 밀어 넣을 수 있다.
     steering: true,

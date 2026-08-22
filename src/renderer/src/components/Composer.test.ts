@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { matchLifecycle, matchLocal, matchMemory, matchPicker, matchSideQuestion } from './Composer'
+import {
+  matchCodexLocal,
+  matchLifecycle,
+  matchLocal,
+  matchMemory,
+  matchPicker,
+  matchSideQuestion
+} from './Composer'
 
 describe('백엔드 전용 composer 명령', () => {
   it('Codex에서는 Claude 전용 /memory를 로컬 명령으로 가로채지 않는다', () => {
@@ -35,6 +42,15 @@ describe('workspace lifecycle commands', () => {
     expect(matchLifecycle('/archive')).toEqual({ kind: 'archive' })
     expect(matchLifecycle('/delete everything')).toEqual({ kind: 'delete' })
     expect(matchLifecycle('please open /archive docs')).toBeNull()
+  })
+})
+
+describe('Codex account/configuration commands', () => {
+  it('intercepts only exact /logout and /plugins commands for Codex', () => {
+    expect(matchCodexLocal('/logout', 'codex')).toBe('logout')
+    expect(matchCodexLocal('/plugins  ', 'codex')).toBe('plugins')
+    expect(matchCodexLocal('/logout now', 'codex')).toBeNull()
+    expect(matchCodexLocal('/plugins', 'claude')).toBeNull()
   })
 })
 
