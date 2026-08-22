@@ -1620,7 +1620,7 @@ export function matchPicker(
  * `supported` 는 이 워크스페이스의 백엔드가 실제로 답할 수 있는 종류다 — 지원하지 않는 명령은
  * 인터랙티브로 가로채지 않고 일반 텍스트로 흘려보낸다(에러 토스트 대신 에이전트가 답하게).
  */
-function matchInteractive(
+export function matchInteractive(
   text: string,
   supported: readonly CommandPanelKind[]
 ): (typeof INTERACTIVE_COMMANDS)[number] | null {
@@ -1728,7 +1728,10 @@ const CARD_ICON: Record<CommandPanelKind, React.ReactNode> = {
   experimental: <Activity size={13} className="text-[var(--accent-400)] shrink-0" />,
   status: <Activity size={13} className="text-[var(--accent-400)] shrink-0" />,
   skills: <Sparkles size={13} className="text-[var(--accent-400)] shrink-0" />,
-  hooks: <Webhook size={13} className="text-[var(--accent-400)] shrink-0" />
+  hooks: <Webhook size={13} className="text-[var(--accent-400)] shrink-0" />,
+  goal: <BookMarked size={13} className="text-[var(--accent-400)] shrink-0" />,
+  plan: <Wrench size={13} className="text-[var(--accent-400)] shrink-0" />,
+  init: <BookMarked size={13} className="text-[var(--accent-400)] shrink-0" />
 }
 
 /** 토큰 수를 1.2k 형태로 간결하게 표기. */
@@ -2302,6 +2305,34 @@ function CommandResultView({
 
     case 'hooks':
       return <HooksPanel info={result.hooks} />
+
+    case 'goal': {
+      const goal = result.goal
+      if (!goal) return <Empty>No goal set for this thread.</Empty>
+      return (
+        <div className="space-y-1 text-xs">
+          <div className="text-sm text-neutral-100">{goal.objective}</div>
+          <StatusRow label="Status" value={goal.status} />
+          <StatusRow
+            label="Tokens"
+            value={`${goal.tokensUsed.toLocaleString()}${goal.tokenBudget == null ? '' : ` / ${goal.tokenBudget.toLocaleString()}`}`}
+          />
+          <StatusRow label="Elapsed" value={`${goal.timeUsedSeconds}s`} />
+        </div>
+      )
+    }
+
+    case 'plan':
+      return <div className="text-[var(--success-400)]">Plan mode is now active.</div>
+
+    case 'init':
+      return (
+        <div className={result.created ? 'text-[var(--success-400)]' : 'text-neutral-400'}>
+          {result.created
+            ? `Created ${result.path}.`
+            : `Kept the existing ${result.path}; no changes were made.`}
+        </div>
+      )
   }
 }
 
@@ -2358,6 +2389,30 @@ function StatusPanel({
           <div className="text-xs text-neutral-600">
             No live session — start one to see fast mode state.
           </div>
+        )}
+        <StatusRow
+          label="Context"
+          value={
+            info.context
+              ? `${fmtTokens(info.context.usedTokens)} / ${fmtTokens(info.context.maxTokens)} (${Math.round(info.context.percentage * 100)}%)`
+              : 'No usage yet'
+          }
+        />
+        {info.usage && (
+          <StatusRow
+            label="Plan usage"
+            value={
+              info.usage.available
+                ? info.usage.windows
+                    .map((window) =>
+                      window.utilization == null
+                        ? `${window.label}: —`
+                        : `${window.label}: ${Math.round(window.utilization)}%`
+                    )
+                    .join(' · ') || 'No limits reported'
+                : 'Not available'
+            }
+          />
         )}
       </Section>
       <Section title="Workspace">

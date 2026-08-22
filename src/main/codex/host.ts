@@ -470,7 +470,7 @@ async function handle(msg: CodexCommand): Promise<void> {
       break
 
     case 'runCommand':
-      await respond(msg.reqId, () => runCommand(msg.workspaceId, msg.kind))
+      await respond(msg.reqId, () => runCommand(msg.workspaceId, msg.config, msg.kind))
       break
 
     case 'mcpAction':
@@ -651,9 +651,13 @@ async function logout(): Promise<void> {
  * Claude 는 SDK 제어 메서드로 물어보지만, Codex 는 그런 조회 API 가 없다 — 대신 턴 알림으로
  * 흘러온 값(토큰 사용량)과 계정 API(rate limit), 그리고 우리가 계산한 정책을 조합해 만든다.
  * 지원 목록은 CODEX_META.capabilities.interactiveCommands 가 SSOT 이고, 오케스트레이터가
- * 그 목록으로 먼저 가드하므로 여기 도달하는 kind 는 셋 중 하나다.
+ * 그 목록으로 먼저 가드하므로 지원하지 않는 kind 는 여기 도달하지 않는다.
  */
-async function runCommand(workspaceId: string, kind: CommandPanelKind): Promise<CommandResult> {
+async function runCommand(
+  workspaceId: string,
+  config: CodexConfig,
+  kind: CommandPanelKind
+): Promise<CommandResult> {
   const thread = threads.get(workspaceId)
 
   if (kind === 'debugConfig') {
@@ -724,6 +728,47 @@ async function runCommand(workspaceId: string, kind: CommandPanelKind): Promise<
         // Codex 에는 "한도 초과분 크레딧 지갑" 개념이 없다(플랜 창만 있다).
         extraUsage: null
       }
+    }
+  }
+
+  if (kind === 'status') {
+    const usage = thread?.contextUsage() ?? null
+    return {
+      kind: 'status',
+      status: {
+        live: thread != null,
+        account: {},
+        outputStyle: null,
+        fastMode: null,
+        sessionId: config.resumeThreadId,
+        workspace: {
+          model: thread?.currentModel() ?? config.model,
+          cwd: thread?.currentCwd() ?? config.cwd,
+          effort: config.effort,
+          fastMode: config.fastMode,
+          permissionMode: thread?.currentMode() ?? config.permissionMode
+        },
+        context: usage,
+        // 계정 단위 사용량 스냅샷은 main store 가 소유한다. manager 가 응답에 합친다.
+        usage: null
+      }
+    }
+  }
+
+  if (kind === 'goal') {
+    const goal = await ensure(workspaceId, config).getGoal()
+    return {
+      kind: 'goal',
+      goal:
+        goal?.objective && goal.status
+          ? {
+              objective: goal.objective,
+              status: goal.status,
+              tokenBudget: goal.tokenBudget ?? null,
+              tokensUsed: goal.tokensUsed ?? 0,
+              timeUsedSeconds: goal.timeUsedSeconds ?? 0
+            }
+          : null
     }
   }
 

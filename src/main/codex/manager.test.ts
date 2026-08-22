@@ -1,4 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import type { AppState, ModelOption, Workspace } from '@shared/types'
 import { DEFAULT_SETTINGS, EMPTY_STATE } from '../storeSchema'
 
@@ -40,12 +43,18 @@ describe('Codex account/configuration command catalog', () => {
   })
 })
 
-function workspace(id: string, agentBackend: 'codex' | 'claude', model: string | null): Workspace {
+function workspace(
+  id: string,
+  agentBackend: 'codex' | 'claude',
+  model: string | null,
+  worktreePath = '/tmp/worktree'
+): Workspace {
   return {
     id,
     agentBackend,
     model,
-    worktreePath: '/tmp/worktree',
+    worktreePath,
+    permissionMode: 'default',
     status: 'idle'
   } as Workspace
 }
@@ -240,5 +249,97 @@ describe('/review target parsing', () => {
 
   it('rejects ambiguous review arguments so they can be explained instead', () => {
     expect(parseReviewTarget('/review something vague')).toBeNull()
+  })
+})
+
+describe('Codex local conversation commands', () => {
+  beforeEach(() => {
+    update.mockClear()
+  })
+
+  it('/plan updates the stored permission mode and returns a local result', async () => {
+    resetState([workspace('ws-plan', 'codex', null)])
+    const manager = new CodexSessionManager(vi.fn(), () => null)
+
+    await expect(manager.runCommand('ws-plan', 'plan')).resolves.toEqual({
+      kind: 'plan',
+      permissionMode: 'plan'
+    })
+    expect(state.value?.workspaces[0].permissionMode).toBe('plan')
+  })
+
+  it('/status combines the host thread snapshot with stored plan usage', async () => {
+    resetState([workspace('ws-status', 'codex', 'gpt-test')])
+    const usage = {
+      fetchedAt: 1,
+      available: true,
+      subscriptionType: 'pro',
+      windows: [{ label: 'Weekly', utilization: 25, resetsAt: null }]
+    }
+    if (state.value) state.value.rateLimitsByAgent = { codex: usage }
+    const manager = new CodexSessionManager(vi.fn(), () => null)
+    vi.spyOn(
+      manager as unknown as { request: () => Promise<unknown> },
+      'request'
+    ).mockResolvedValue({
+      kind: 'status',
+      status: {
+        live: true,
+        account: {},
+        outputStyle: null,
+        fastMode: null,
+        sessionId: null,
+        workspace: {
+          model: 'gpt-test',
+          cwd: '/tmp/worktree',
+          effort: null,
+          fastMode: false,
+          permissionMode: 'default'
+        },
+        context: null,
+        usage: null
+      }
+    })
+
+    await expect(manager.runCommand('ws-status', 'status')).resolves.toMatchObject({
+      kind: 'status',
+      status: { workspace: { model: 'gpt-test' }, usage }
+    })
+  })
+
+  it('/init creates an AGENTS.md scaffold once', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'wooi-init-'))
+    try {
+      resetState([workspace('ws-init', 'codex', null, root)])
+      const manager = new CodexSessionManager(vi.fn(), () => null)
+
+      await expect(manager.runCommand('ws-init', 'init')).resolves.toMatchObject({
+        kind: 'init',
+        created: true,
+        path: join(root, 'AGENTS.md')
+      })
+      expect(readFileSync(join(root, 'AGENTS.md'), 'utf8')).toContain('# AGENTS.md')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('/init never overwrites an existing AGENTS.md', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'wooi-init-existing-'))
+    const path = join(root, 'AGENTS.md')
+    try {
+      writeFileSync(path, 'keep me\n')
+      resetState([workspace('ws-init-existing', 'codex', null, root)])
+      const manager = new CodexSessionManager(vi.fn(), () => null)
+
+      await expect(manager.runCommand('ws-init-existing', 'init')).resolves.toEqual({
+        kind: 'init',
+        created: false,
+        path
+      })
+      expect(readFileSync(path, 'utf8')).toBe('keep me\n')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 })

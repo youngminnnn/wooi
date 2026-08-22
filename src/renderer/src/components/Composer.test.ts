@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import {
   matchCodexLocal,
+  matchInteractive,
   matchLifecycle,
   matchLocal,
   matchMemory,
   matchPicker,
   matchSideQuestion
 } from './Composer'
+import type { CommandPanelKind } from '@shared/types'
 
 describe('백엔드 전용 composer 명령', () => {
   it('Codex에서는 Claude 전용 /memory를 로컬 명령으로 가로채지 않는다', () => {
@@ -51,6 +53,19 @@ describe('Codex account/configuration commands', () => {
     expect(matchCodexLocal('/plugins  ', 'codex')).toBe('plugins')
     expect(matchCodexLocal('/logout now', 'codex')).toBeNull()
     expect(matchCodexLocal('/plugins', 'claude')).toBeNull()
+  })
+})
+
+describe('Codex conversation-control commands', () => {
+  const supported: CommandPanelKind[] = ['status', 'goal', 'plan', 'init']
+
+  it.each(supported)('/%s is intercepted when the backend advertises it', (kind) => {
+    expect(matchInteractive(`/${kind}`, supported)?.kind).toBe(kind)
+  })
+
+  it('does not intercept unsupported commands or commands with arguments', () => {
+    expect(matchInteractive('/goal', [])).toBeNull()
+    expect(matchInteractive('/init now', supported)).toBeNull()
   })
 })
 
