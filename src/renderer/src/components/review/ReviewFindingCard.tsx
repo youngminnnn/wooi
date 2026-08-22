@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import {
   AlertCircle,
   Check,
+  CheckCheck,
   CornerDownRight,
   ExternalLink,
   History,
@@ -125,6 +126,17 @@ export default function ReviewFindingCard({
                 </span>
               )
             )}
+            {/* 상대가 이 스레드를 Resolved 로 접었다 — 답글 없이 조용히 접히는 일이 흔해서,
+                여기서 알리지 않으면 "처리됨" 과 "무시당함" 이 화면에서 똑같아 보인다. */}
+            {comment?.resolved && (
+              <span
+                title="This thread is marked resolved on GitHub."
+                className="flex items-center gap-1 rounded bg-[var(--success-500)]/15 px-1.5 py-0.5 text-[10px] font-medium text-[var(--success-300)]"
+              >
+                <CheckCheck size={10} />
+                Resolved
+              </span>
+            )}
             {/* 상대가 그 줄을 이미 고쳐 코멘트가 밀려났다 — GitHub 이 Outdated 로 접어 두는 상태.
                 여기서 알리지 않으면 사용자는 아직 살아 있는 지적으로 착각한다. */}
             {comment?.outdated && (
@@ -200,7 +212,7 @@ export default function ReviewFindingCard({
 
           {posted && (
             <span className="flex items-center gap-1 text-xs text-[var(--success-400)]">
-              <Check size={12} /> Posted
+              <Check size={12} /> {comment?.resolved ? 'Posted · resolved' : 'Posted'}
               {url && (
                 <button
                   onClick={() => void window.api.openExternal(url)}

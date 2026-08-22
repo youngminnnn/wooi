@@ -2368,6 +2368,32 @@ export interface ReviewArtifact {
   stack: ReviewFindingInput[]
   /** 레이어별 총평. 판정을 PR 마다 따로 내야 하므로 본문도 PR 마다 따로 필요하다. */
   layers: ReviewLayerSummary[]
+  /** 앞선 턴이 낸 지적을 고쳐 쓴 것. 최초 리뷰에서는 비어 있다. */
+  updates: ReviewFindingRevision[]
+  /** 앞선 턴이 낸 지적 중 거둬들일 것. 최초 리뷰에서는 비어 있다. */
+  discards: ReviewFindingDiscard[]
+}
+
+/**
+ * 에이전트가 자기 지적 1건을 고쳐 쓴 것.
+ *
+ * `id` 는 프롬프트에 실어 준 **핸들**(지적 id 의 앞부분)이다 — uuid 를 통째로 복사하게 하면
+ * 한 글자만 틀려도 조용히 무시되고, 모델도 토큰을 그만큼 더 쓴다.
+ * 나머지 필드는 **준 것만 바뀐다** — 본문만 고치려는 턴이 제목까지 다시 짓게 만들면
+ * 사용자가 이미 손본 문장이 이유 없이 사라진다.
+ */
+export interface ReviewFindingRevision {
+  id: string
+  severity?: ReviewSeverity
+  title?: string
+  body?: string
+}
+
+/** 에이전트가 거둬들이는 지적 1건. 이유는 활동 타임라인에 남는다. */
+export interface ReviewFindingDiscard {
+  id: string
+  /** 왜 더 이상 유효하지 않은지. 사용자가 되살릴지 판단하는 유일한 근거다. */
+  reason?: string
 }
 
 /** diff 의 실제 행에 확정 고정된 위치. 이 값이 있어야 인라인 코멘트를 걸 수 있다. */
@@ -2454,6 +2480,18 @@ export interface PostedComment {
    * 사용자는 아직 살아 있는 지적인 줄 안다.
    */
   outdated?: boolean
+  /**
+   * 이 코멘트가 뿌리인 GitHub 리뷰 스레드의 node id(GraphQL). REST 응답에는 없는 값이라
+   * 스레드 질의로만 채워진다. issue 코멘트에는 스레드가 없어 영영 비어 있다.
+   */
+  threadId?: string
+  /**
+   * 상대(또는 내가) GitHub 에서 이 스레드를 **Resolved 로 접었는가**.
+   *
+   * 폴링이 갱신한다. 이걸 모르면 상대가 이미 처리했다고 접어 둔 지적을 리뷰 화면은 아직
+   * 살아 있는 것으로 그려, 사용자는 끝난 일을 다시 붙잡는다.
+   */
+  resolved?: boolean
 }
 
 /**
@@ -2640,6 +2678,33 @@ export type ReviewActivityItem =
     }
   | { id: string; kind: 'commits'; headSha: string; prNumber?: number; ts: number }
   /**
+   * 내가 단 코멘트의 스레드가 GitHub 에서 Resolved 로 접혔다. 답글 없이 조용히 접히는 일이
+   * 흔해서, 이걸 알리지 않으면 "아무 반응 없음" 과 "처리됐음" 이 화면에서 구분되지 않는다.
+   */
+  | {
+      id: string
+      kind: 'resolved'
+      /** 접힌 스레드의 루트 코멘트 id(= 우리가 게시한 코멘트). */
+      commentId: number
+      /** 그 코멘트를 낳은 지적. 카드로 되짚어 갈 수 있게. */
+      findingId: string
+      path?: string
+      prNumber?: number
+      ts: number
+    }
+  /**
+   * 에이전트가 다시 보고 자기 지적을 거둬들였다. 목록에서 사라지는 일이라 흔적이 남아야 —
+   * 아무 말 없이 줄어들면 사용자는 무엇이 왜 사라졌는지 알 방법이 없다.
+   */
+  | {
+      id: string
+      kind: 'withdrawn'
+      /** 거둬들인 지적의 제목. 지적 자체는 이미 목록에 없어 여기 남은 것이 전부다. */
+      title: string
+      reason: string
+      ts: number
+    }
+  /**
    * 아래 레이어에 새 커밋이 올라가 위쪽이 통째로 rebase 됐지만 **내용은 그대로**인 경우.
    * 레이어마다 "새 커밋" 을 하나씩 띄우면 진짜 바뀐 것이 그 소음에 묻힌다.
    */
@@ -2663,7 +2728,11 @@ export type ReviewEvent =
   | { type: 'status'; status: ReviewStatus }
   | { type: 'diff'; diffs: ReviewLayerDiff[] }
   | { type: 'progress'; item: ReviewProgressItem }
-  | { type: 'findings'; findings: ReviewFinding[] }
+  /**
+   * 지적 목록의 변경분. `findings` 는 추가·갱신(같은 id 면 덮어쓴다), `removed` 는 에이전트가
+   * 거둬들여 목록에서 빠진 id 다. 둘을 한 이벤트로 보내야 화면이 한 번에 같은 상태로 간다.
+   */
+  | { type: 'findings'; findings: ReviewFinding[]; removed?: string[] }
   | { type: 'activity'; item: ReviewActivityItem }
   | { type: 'error'; message: string }
 

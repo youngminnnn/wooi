@@ -109,6 +109,50 @@ export function reviewOutputSchema(layerCount: number): Record<string, unknown> 
     }
   }
 
+  /**
+   * 앞선 턴이 낸 지적을 고쳐 쓰거나 거둬들이는 칸. 최초 리뷰에서는 가리킬 지적이 없어 빈
+   * 배열이고, 후속 턴 프롬프트가 핸들 목록을 실어 준다([[review/prompt]] renderFindingInventory).
+   *
+   * `required` 에 올리지 않는다 — 단순 질문 하나에 답하는 턴까지 두 칸을 채우게 만들면
+   * 모델이 쓸 것 없는 자리를 억지로 메운다(코덱스 경로는 strictSchema 가 알아서 올린다).
+   */
+  const updates = {
+    type: 'array',
+    description:
+      'Revisions to findings you already reported. Only for follow-up turns, and only for findings ' +
+      'listed as pending — posted ones are already on the pull request and cannot be rewritten here.',
+    items: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['id'],
+      properties: {
+        id: { type: 'string', description: 'The handle in brackets from the findings list.' },
+        severity: SEVERITY,
+        title: TITLE,
+        body: { type: 'string', description: 'The replacement body, posted verbatim.' }
+      }
+    }
+  }
+
+  const discards = {
+    type: 'array',
+    description:
+      'Findings to withdraw because they are fixed, wrong, or no longer apply. They disappear from ' +
+      'the list, so withdraw a finding instead of repeating "this is now fixed" in your reply.',
+    items: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['id', 'reason'],
+      properties: {
+        id: { type: 'string', description: 'The handle in brackets from the findings list.' },
+        reason: {
+          type: 'string',
+          description: 'One line on why it no longer stands — shown to the user in the timeline.'
+        }
+      }
+    }
+  }
+
   const schema: Record<string, unknown> = {
     type: 'object',
     additionalProperties: false,
@@ -137,7 +181,9 @@ export function reviewOutputSchema(layerCount: number): Record<string, unknown> 
           required: inlineRequired,
           properties: inlineProps
         }
-      }
+      },
+      updates,
+      discards
     }
   }
 
@@ -189,23 +235,79 @@ export function reviewOutputSchema(layerCount: number): Record<string, unknown> 
 }
 
 /**
+ * 후속 턴이 손댈 수 있는 지적 1건. 레코드에서 그대로 만들 수 있는 것만 담는다.
+ */
+export interface PromptFinding {
+  /** 에이전트가 `updates`/`discards` 에서 이 지적을 가리킬 핸들. */
+  handle: string
+  severity: string
+  title: string
+  /** 어디에 걸린 지적인가 — `src/x.ts:42`, `general`, 스택이면 `#12` 가 붙는다. */
+  where: string
+  /** 지금 상태 — `pending`, `posted`, `posted · resolved` 처럼 사람이 읽는 한 조각. */
+  state: string
+  /** 이미 PR 에 올라가 고칠 수도 거둘 수도 없는가. */
+  locked: boolean
+}
+
+/**
+ * 지금 살아 있는 지적 목록을 프롬프트에 싣는다.
+ *
+ * 이 목록이 없으면 후속 턴은 자기가 앞서 무엇을 냈는지 **대화 기록의 기억으로만** 안다 —
+ * 그 기억에는 사용자가 그새 지운 것, 사용자가 이미 게시한 것, 상대가 resolve 로 접은 것이
+ * 반영돼 있지 않다. 핸들을 함께 줘야 "그 지적은 이제 됐다" 를 문장이 아니라 지시로 표현할 수 있다.
+ */
+export function renderFindingInventory(findings: PromptFinding[]): string {
+  if (findings.length === 0) return ''
+  const rows = findings.map(
+    (f) => `  [${f.handle}] ${f.severity} · ${f.where} · ${f.state} — ${f.title}`
+  )
+  const locked = findings.filter((f) => f.locked).length
+  const lockedNote = locked
+    ? `\n\nThe ${locked === 1 ? 'one marked' : `${locked} marked`} \`posted\` ${locked === 1 ? 'is' : 'are'} already on the pull request — ` +
+      `the author has read ${locked === 1 ? 'it' : 'them'}, so ${locked === 1 ? 'it' : 'they'} cannot be rewritten or withdrawn here. ` +
+      `Say what you think about ${locked === 1 ? 'it' : 'them'} in \`reply\` instead.`
+    : ''
+  return `## Findings you have already reported
+
+${rows.join('\n')}
+
+Use the handle in brackets to \`updates\` (rewrite one) or \`discards\` (withdraw one that is now
+fixed or that you got wrong). **Do not re-report a finding that is already in this list** — new
+entries in \`inline\`/\`general\` are appended, so repeating one creates a duplicate card.${lockedNote}`
+}
+
+/**
  * 후속 턴 프롬프트.
  *
  * diff 나 규약을 다시 싣지 않는다 — resume 로 앞선 대화를 그대로 이어받으므로 모델은 이미
- * PR 과 자기 지적을 알고 있다. 다시 붙이면 컨텍스트만 태우고 오히려 앞선 판단을 흔든다.
+ * PR 을 알고 있다. 다시 붙이면 컨텍스트만 태우고 오히려 앞선 판단을 흔든다.
+ *
+ * 다만 **지적 목록만은 다시 싣는다** — 그것만이 대화 기록과 어긋날 수 있는 상태이기 때문이다
+ * (사용자가 지우거나 게시했고, 상대가 접었을 수 있다).
  */
-export function buildFollowUpPrompt(userText: string, context: string[]): string {
+export function buildFollowUpPrompt(
+  userText: string,
+  context: string[],
+  findings: PromptFinding[] = []
+): string {
   const ctx = context.length
     ? `\n\n## What happened since your review\n\n${context.join('\n\n')}\n`
     : ''
-  return `${userText.trim()}${ctx}
+  const inventory = findings.length ? `\n\n${renderFindingInventory(findings)}\n` : ''
+  return `${userText.trim()}${ctx}${inventory}
 
 ---
 
-Answer in the \`reply\` field of the required JSON schema. If — and only if — this turn produces
-genuinely new findings worth posting, add them to \`inline\`/\`general\`; they are **appended** to
-your earlier findings, so do not repeat ones you already reported. Leave \`summary\` empty unless
-the overall assessment actually changed. Write in the same language the user used.`
+Answer in the \`reply\` field of the required JSON schema.
+
+If the user asked you to look again at code they have changed, **bring your findings up to date**:
+\`discards\` for the ones they fixed or you got wrong, \`updates\` for the ones that still stand but
+need rewording, and \`inline\`/\`general\` only for problems you had not reported before. A list that
+still shows fixed problems is worse than no list.
+
+Leave \`summary\` empty unless the overall assessment actually changed — if it did, write the new
+one and it replaces the old. Write in the same language the user used.`
 }
 
 /**

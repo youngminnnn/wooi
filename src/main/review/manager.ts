@@ -24,6 +24,7 @@ import {
   getViewerLogin,
   listIssueComments,
   listReviewComments,
+  listReviewThreads,
   postInlineComment,
   postIssueComment,
   replyToReviewComment,
@@ -33,11 +34,22 @@ import { reviewRefFor } from '../git'
 import { log } from '../logger'
 import { getStore } from '../store'
 import { RATE_LIMIT_ERROR, rateLimitResetAt } from '../rateLimitText'
-import { detectNewActivity, detectOutdatedComments } from './activity'
+import {
+  detectNewActivity,
+  detectOutdatedComments,
+  detectResolvedThreads,
+  type ThreadState
+} from './activity'
 import { parseReviewDiff, resolveStackAnchor } from './diff'
 import { getReviewBundles } from './store'
 import { runReview } from './run'
-import { buildFollowUpPrompt, buildResumePrompt, type ReviewPromptLayer } from './prompt'
+import {
+  buildFollowUpPrompt,
+  buildResumePrompt,
+  type PromptFinding,
+  type ReviewPromptLayer
+} from './prompt'
+import { applyRevisions, findingHandle } from './revise'
 import { MAX_STACK_LAYERS } from './stackResolve'
 import { disposeReviewWorktree, prepareReviewWorktree, type ReviewWorktreeKey } from './worktree'
 
@@ -333,9 +345,14 @@ export class ReviewManager {
         general: [],
         inline: [],
         stack: [],
-        layers: []
+        layers: [],
+        updates: [],
+        discards: []
       }
 
+      // 이어서 돈 턴은 앞선 지적을 고쳐 쓰거나 거둬들일 수 있다(최초 리뷰에서는 가리킬
+      // 대상이 없어 아무 일도 일어나지 않는다).
+      const revised = this.reviseFindings(reviewId, artifact)
       const findings = buildFindings(diffs.diffs, artifact, session.layers)
       const bundles = getReviewBundles()
       for (const f of findings) bundles.upsertFinding(reviewId, f)
@@ -362,7 +379,11 @@ export class ReviewManager {
           ts: Date.now()
         })
       }
-      this.emit(reviewId, { type: 'findings', findings })
+      this.emit(reviewId, {
+        type: 'findings',
+        findings: [...revised.updated, ...findings],
+        removed: revised.removed
+      })
       this.setStatus(reviewId, 'done')
     } finally {
       this.running.delete(reviewId)
@@ -609,6 +630,51 @@ export class ReviewManager {
   }
 
   /**
+   * 에이전트가 자기 지적을 고쳐 쓰거나 거둬들인 것을 반영한다.
+   *
+   * 사용자의 Discard 와 **같은 자리로 떨어진다**(store.dismissFinding) — 둘 다 "이 지적은 이제
+   * 목록에 없다" 는 하나의 사실이고, 저장 경로가 갈리면 한쪽으로 지운 것이 다른 쪽 로드에서
+   * 되살아난다.
+   *
+   * 거둬들인 것은 **타임라인에 한 줄 남긴다.** 카드가 말없이 사라지면 사용자는 무엇이 왜
+   * 없어졌는지 알 방법이 없고, 에이전트가 틀렸을 때 되짚을 근거도 사라진다.
+   */
+  private reviseFindings(
+    reviewId: string,
+    artifact: ReviewArtifact | null
+  ): { updated: ReviewFinding[]; removed: string[] } {
+    const empty = { updated: [] as ReviewFinding[], removed: [] as string[] }
+    if (!artifact || (artifact.updates.length === 0 && artifact.discards.length === 0)) return empty
+    const session = this.record(reviewId)
+    if (!session) return empty
+
+    const bundles = getReviewBundles()
+    const result = applyRevisions({
+      findings: bundles.load(reviewId).findings,
+      postedIds: session.postedComments.map((c) => c.findingId),
+      updates: artifact.updates,
+      discards: artifact.discards
+    })
+
+    for (const f of result.updated) bundles.upsertFinding(reviewId, f)
+    for (const { finding, reason } of result.discarded) {
+      bundles.dismissFinding(reviewId, finding.id)
+      this.addActivity(reviewId, {
+        id: randomUUID(),
+        kind: 'withdrawn',
+        title: finding.title,
+        reason,
+        ts: Date.now()
+      })
+    }
+    for (const { id, reason } of result.ignored) {
+      log.info(`review: ignored a revision for "${id}" (${reason})`)
+    }
+
+    return { updated: result.updated, removed: result.discarded.map((d) => d.finding.id) }
+  }
+
+  /**
    * 판정을 제출한다(Approve / Request changes / Comment).
    *
    * GitHub 에 "스택을 승인" 하는 API 는 없다 — 판정은 PR 단위다. 그래서 **레이어마다 한 번씩**
@@ -716,12 +782,16 @@ export class ReviewManager {
       const tracksReplies = posted.length > 0
       if (!tracksReplies && !layer.lastSubmission) continue
 
-      const [reviewComments, issueComments, headSha] = await Promise.all([
+      // 밀려남(outdated)과 접힘(resolved) 은 둘 다 **인라인 코멘트에만** 있는 개념이다.
+      const postedInlineIds = posted.filter((c) => c.kind === 'inline').map((c) => c.commentId)
+      const tracksThreads = postedInlineIds.length > 0
+      const [reviewComments, issueComments, headSha, threads] = await Promise.all([
         tracksReplies ? listReviewComments(repoPath, layer.prNumber) : null,
         tracksReplies ? listIssueComments(repoPath, layer.prNumber) : null,
-        getPrHeadSha(repoPath, layer.prNumber)
+        getPrHeadSha(repoPath, layer.prNumber),
+        tracksThreads ? listReviewThreads(repoPath, layer.prNumber) : null
       ])
-      if (!reviewComments && !issueComments && !headSha) continue
+      if (!reviewComments && !issueComments && !headSha && !threads) continue
 
       // 워터마크가 아직 없으면 "내가 처음 코멘트를 단 시각" 을 기준으로 삼는다. 그러지 않으면
       // PR 의 오래된 대화가 통째로 새 활동으로 쏟아진다.
@@ -734,7 +804,7 @@ export class ReviewManager {
         reviewComments: reviewComments ?? [],
         issueComments: issueComments ?? [],
         headSha,
-        postedCommentIds: posted.filter((c) => c.kind === 'inline').map((c) => c.commentId),
+        postedCommentIds: postedInlineIds,
         viewerLogin,
         since,
         lastSeenHeadSha: layer.lastSeenHeadSha
@@ -742,32 +812,73 @@ export class ReviewManager {
 
       // 새 커밋 항목은 여기서 넣지 않는다 — 위쪽 레이어가 단순 restack 인지 확인한 뒤에
       // 한 번에 정리한다. 답글은 그대로 흘린다.
+      //
+      // 스레드 답글은 이제 **매번 전부** 올라온다(놓친 것을 채우기 위해). 그래서 이미 같은
+      // 내용으로 담아 둔 것은 걸러야 한다 — 그러지 않으면 폴링마다 사이드카에 같은 줄이 쌓이고,
+      // 아무것도 바뀌지 않은 폴링이 상태 방송을 일으켜 화면이 계속 다시 그려진다.
+      const known = new Map(
+        getReviewBundles()
+          .load(reviewId)
+          .activity.map((a) => [a.id, a])
+      )
+      let added = 0
+      let news = 0
       for (const item of items) {
         if (item.kind === 'commits') {
           movedLayers.push(layer.prNumber)
           continue
         }
-        this.addActivity(
-          reviewId,
-          item.kind === 'reply' ? { ...item, prNumber: layer.prNumber } : item
-        )
+        const next = item.kind === 'reply' ? { ...item, prNumber: layer.prNumber } : item
+        const before = known.get(next.id)
+        if (before && JSON.stringify(before) === JSON.stringify(next)) continue
+        this.addActivity(reviewId, next)
+        added++
+        // 내가 쓴 말은 나에게 새 소식이 아니다. 미확인 점은 남이 한 말에만 붙는다 —
+        // 내 답글로도 켜지면 GitHub 에서 답장하고 돌아올 때마다 읽지 않은 점이 붙는다.
+        if (!(next.kind === 'reply' && next.author === viewerLogin)) news++
       }
 
       // 내가 단 코멘트가 최신 diff 에서 밀려났는지도 같은 응답으로 알 수 있다 — 이걸 안 보면
       // 상대가 이미 고쳐 놓은 자리를 두고 사용자는 아직 살아 있는 지적으로 착각한다.
       const outdated = reviewComments
-        ? detectOutdatedComments(
-            reviewComments,
-            posted.filter((c) => c.kind === 'inline').map((c) => c.commentId)
-          )
+        ? detectOutdatedComments(reviewComments, postedInlineIds)
         : new Map<number, boolean>()
       const outdatedChanged = posted.some(
         (c) => outdated.has(c.commentId) && !!c.outdated !== outdated.get(c.commentId)
       )
 
+      // 스레드가 접혔다는 것은 **상대가 이 지적을 처리했다**는 뜻이다. 답글 없이 조용히 접히는
+      // 일이 흔해서, 이것을 따라가지 않으면 끝난 지적과 무시당한 지적이 화면에서 똑같아 보인다.
+      const threadStates = threads
+        ? detectResolvedThreads(threads, postedInlineIds)
+        : new Map<number, ThreadState>()
+      const threadChanged = posted.some((c) => {
+        const state = threadStates.get(c.commentId)
+        return !!state && (!!c.resolved !== state.resolved || c.threadId !== state.threadId)
+      })
+      // 방금 접힌 것만 알린다. 이미 접혀 있던 것을 매 폴링마다 다시 알리면 타임라인이 무너진다.
+      const newlyResolved = posted.filter(
+        (c) => !c.resolved && threadStates.get(c.commentId)?.resolved
+      )
+      for (const c of newlyResolved) {
+        const finding = getReviewBundles()
+          .load(reviewId)
+          .findings.find((f) => f.id === c.findingId)
+        this.addActivity(reviewId, {
+          id: `resolved-${c.commentId}`,
+          kind: 'resolved',
+          commentId: c.commentId,
+          findingId: c.findingId,
+          ...(finding?.anchor ? { path: finding.anchor.file } : {}),
+          prNumber: layer.prNumber,
+          ts: Date.now()
+        })
+      }
+
       if (
-        items.length > 0 ||
+        added > 0 ||
         outdatedChanged ||
+        threadChanged ||
         nextSince !== layer.lastSeenAt ||
         nextHeadSha !== layer.lastSeenHeadSha
       ) {
@@ -783,7 +894,13 @@ export class ReviewManager {
               outdated.has(c.commentId) ? { ...c, outdated: outdated.get(c.commentId) } : c
             )
           }
-          if (items.some((i) => i.kind !== 'commits')) r.unread = true
+          if (threadChanged) {
+            r.postedComments = r.postedComments.map((c) => {
+              const state = threadStates.get(c.commentId)
+              return state ? { ...c, threadId: state.threadId, resolved: state.resolved } : c
+            })
+          }
+          if (news > 0 || newlyResolved.length > 0) r.unread = true
         })
       }
     }
@@ -956,6 +1073,19 @@ export class ReviewManager {
       }
 
       const bundle = getReviewBundles().load(reviewId)
+      // **diff 를 다시 받는다.** 워크트리는 방금 최신 head 로 옮겨졌는데(prepareReviewWorktree)
+      // diff 만 옛 것이면, "고쳤으니 다시 봐줘" 로 나온 새 지적이 옛 줄 번호에 고정된다 —
+      // 엉뚱한 줄에 달리거나, 앵커에 실패해 전반 지적으로 강등된다.
+      // 못 받으면 갖고 있던 것으로 돈다. 답 하나 때문에 턴 전체를 버릴 이유는 없다.
+      const refreshed = await this.fetchDiffs(reviewId, repoPath, session.layers)
+      const diffs = 'error' in refreshed ? bundle.diffs : refreshed.diffs
+      if ('error' in refreshed)
+        log.warn(`review: follow-up kept the cached diff (${refreshed.error})`)
+      if (abort.signal.aborted) {
+        this.setStatus(reviewId, 'cancelled')
+        return {}
+      }
+
       this.setStatus(reviewId, 'running')
       const result = await runReview({
         backend: session.agentBackend,
@@ -964,10 +1094,14 @@ export class ReviewManager {
         model: opts.model,
         effort: opts.effort,
         userPrompt: message,
-        promptOverride: buildFollowUpPrompt(message, this.recentContext(session, bundle.activity)),
+        promptOverride: buildFollowUpPrompt(
+          message,
+          this.recentContext(session, bundle.activity),
+          promptFindings(session, bundle.findings)
+        ),
         resumeSessionId: session.agentSessionId,
         meta: { layers: promptLayers(session) },
-        diffs: bundle.diffs,
+        diffs,
         abort,
         onProgress: (item) => this.emit(reviewId, { type: 'progress', item })
       })
@@ -1000,16 +1134,18 @@ export class ReviewManager {
         })
       }
 
-      // 후속 턴의 지적은 **덧붙인다** — 앞선 지적은 이미 게시됐을 수 있어 교체하면 추적이 끊긴다.
+      // 앞선 지적을 **먼저** 정리한다 — 고쳐 쓰기·거둬들이기가 새 지적보다 뒤로 밀리면,
+      // 방금 낸 지적을 같은 턴 안에서 거둬들이라는 지시가 통해 버린다.
+      const revised = this.reviseFindings(reviewId, result.artifact)
+
+      // 새 지적은 **덧붙인다** — 앞선 지적은 이미 게시됐을 수 있어 통째로 교체하면 추적이 끊긴다.
       const extra = result.artifact
         ? buildFindings(
-            bundle.diffs,
+            diffs,
             {
+              ...result.artifact,
               summary: '',
               reply: '',
-              general: result.artifact.general,
-              inline: result.artifact.inline,
-              stack: result.artifact.stack,
               layers: []
             },
             session.layers
@@ -1018,10 +1154,24 @@ export class ReviewManager {
       if (extra.length) {
         const bundles = getReviewBundles()
         for (const f of extra) bundles.upsertFinding(reviewId, f)
-        this.emit(reviewId, { type: 'findings', findings: extra })
+      }
+      if (extra.length || revised.updated.length || revised.removed.length) {
+        this.emit(reviewId, {
+          type: 'findings',
+          findings: [...revised.updated, ...extra],
+          removed: revised.removed
+        })
       }
 
+      // 다시 본 결과 총평이 달라졌다면 그것으로 갈아 끼운다. **빈 값은 무시한다** — 질문 하나에
+      // 답한 턴까지 총평을 비우면, 제출 모달이 리뷰의 결론을 잃은 채로 열린다.
+      const artifact = result.artifact
       this.patch(reviewId, (r) => {
+        if (artifact?.summary.trim()) r.summary = artifact.summary
+        for (const l of r.layers) {
+          const summary = artifact?.layers.find((x) => x.prNumber === l.prNumber)?.summary
+          if (summary?.trim()) l.summary = summary
+        }
         r.lastError = null
       })
       this.setStatus(reviewId, 'done')
@@ -1129,6 +1279,43 @@ function promptLayers(session: ReviewSession): ReviewPromptLayer[] {
         ? reviewRefFor(session.id, session.layers[i - 1].prNumber)
         : `origin/${layer.baseRefName}`
   }))
+}
+
+/**
+ * 후속 턴 프롬프트에 실을 지적 목록.
+ *
+ * 에이전트가 자기 지적을 다시 가리키려면 **핸들과 지금 상태**가 둘 다 필요하다 — 핸들이 없으면
+ * 고쳐 쓸 대상을 지목할 수 없고, 상태가 없으면 이미 게시돼 손댈 수 없는 것까지 거둬들이려 든다.
+ */
+function promptFindings(session: ReviewSession, findings: ReviewFinding[]): PromptFinding[] {
+  const stacked = session.layers.length > 1
+  const posted = new Map(session.postedComments.map((c) => [c.findingId, c]))
+  return findings.map((f) => {
+    const at = posted.get(f.id)
+    const marks = at
+      ? ['posted', ...(at.resolved ? ['resolved'] : []), ...(at.outdated ? ['outdated'] : [])]
+      : ['pending']
+    return {
+      handle: findingHandle(f.id),
+      severity: f.severity,
+      title: f.title,
+      where: describeWhere(f, stacked),
+      state: marks.join(' · '),
+      locked: !!at
+    }
+  })
+}
+
+/** 지적이 걸린 자리를 한 조각으로 — 목록에서 같은 제목 둘을 가르는 것이 대개 이 값이다. */
+function describeWhere(finding: ReviewFinding, stacked: boolean): string {
+  if (finding.anchor) {
+    const at = stacked && finding.anchor.prNumber ? `#${finding.anchor.prNumber} ` : ''
+    return `${at}${finding.anchor.file}:${finding.anchor.line}`
+  }
+  if (finding.stackPrNumbers?.length) {
+    return `stack ${finding.stackPrNumbers.map((n) => `#${n}`).join('→')}`
+  }
+  return stacked && finding.prNumber ? `#${finding.prNumber} general` : 'general'
 }
 
 /**

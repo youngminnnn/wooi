@@ -1,6 +1,11 @@
 import { describe, it, expect } from 'vitest'
-import type { GhIssueComment, GhReviewComment } from '../github'
-import { detectNewActivity, detectOutdatedComments, type DetectActivityInput } from './activity'
+import type { GhIssueComment, GhReviewComment, GhReviewThread } from '../github'
+import {
+  detectNewActivity,
+  detectOutdatedComments,
+  detectResolvedThreads,
+  type DetectActivityInput
+} from './activity'
 
 function rc(over: Partial<GhReviewComment> & { id: number }): GhReviewComment {
   return {
@@ -67,23 +72,54 @@ describe('detectNewActivity — 인라인 답글', () => {
     expect(r.items).toEqual([])
   })
 
-  /** 내가 단 답장이 "새 활동" 으로 되돌아오면 무한히 미확인 표시가 켜진다. */
-  it('내 계정의 답글은 새 활동이 아니다', () => {
+  /**
+   * GitHub 웹에서 내가 직접 단 답글도 스레드의 일부다. 이걸 빼면 내가 한 말이 Wooi 에만
+   * 없는 상태가 되어, 대화가 상대의 말만 남은 채로 읽힌다.
+   */
+  it('내 계정의 답글도 스레드에 담아 온다', () => {
     const r = detectNewActivity(
       input({ reviewComments: [rc({ id: 1, in_reply_to_id: 100, user: { login: 'me' } })] })
     )
-    expect(r.items).toEqual([])
+    expect(r.items.map((i) => i.id)).toEqual(['reply-1'])
   })
 
-  it('워터마크보다 오래된 답글은 무시한다', () => {
+  /** 내 말로 워터마크를 밀면 그 직전에 올라온 남의 타임라인 코멘트를 영영 건너뛴다. */
+  it('내 답글로는 워터마크를 밀지 않는다', () => {
+    const r = detectNewActivity(
+      input({
+        since: '2026-01-01T00:00:00Z',
+        reviewComments: [
+          rc({
+            id: 1,
+            in_reply_to_id: 100,
+            user: { login: 'me' },
+            created_at: '2026-01-09T00:00:00Z'
+          })
+        ]
+      })
+    )
+    expect(r.nextSince).toBe('2026-01-01T00:00:00Z')
+  })
+
+  /**
+   * 워터마크로 자르면 한 번 놓친 답글은 영영 안 보인다. 스레드는 통째로 읽혀야 하므로
+   * 매번 전부 훑고, 중복은 같은 id 의 upsert 가 막는다.
+   */
+  it('워터마크보다 오래된 답글도 채워 넣는다', () => {
     const r = detectNewActivity(
       input({
         since: '2026-01-05T00:00:00Z',
         reviewComments: [rc({ id: 1, in_reply_to_id: 100, created_at: '2026-01-02T00:00:00Z' })]
       })
     )
-    expect(r.items).toEqual([])
+    expect(r.items.map((i) => i.id)).toEqual(['reply-1'])
     expect(r.nextSince).toBe('2026-01-05T00:00:00Z')
+  })
+
+  /** 타임라인 코멘트는 스레드가 없어 규칙이 다르다 — 여기서는 내 것을 끌어오면 안 된다. */
+  it('내 타임라인 코멘트는 여전히 새 활동이 아니다', () => {
+    const r = detectNewActivity(input({ issueComments: [ic({ id: 1, user: { login: 'me' } })] }))
+    expect(r.items).toEqual([])
   })
 
   it('가장 최근 활동 시각으로 워터마크를 밀어 준다', () => {
@@ -184,6 +220,42 @@ describe('detectOutdatedComments', () => {
    */
   it('목록에 없는 코멘트는 손대지 않는다', () => {
     const map = detectOutdatedComments([], [100])
+    expect(map.size).toBe(0)
+  })
+})
+
+describe('detectResolvedThreads', () => {
+  const thread = (over: Partial<GhReviewThread> & { id: string }): GhReviewThread => ({
+    isResolved: false,
+    rootCommentId: null,
+    ...over
+  })
+
+  it('내 코멘트가 뿌리인 스레드의 접힘 상태를 코멘트 id 로 색인한다', () => {
+    const map = detectResolvedThreads(
+      [thread({ id: 'T1', isResolved: true, rootCommentId: 100 })],
+      [100]
+    )
+    expect(map.get(100)).toEqual({ threadId: 'T1', resolved: true })
+  })
+
+  /** 남의 스레드까지 끌어오면 다른 사람의 리뷰 상태가 내 지적 카드에 붙는다. */
+  it('내가 달지 않은 스레드는 무시한다', () => {
+    const map = detectResolvedThreads(
+      [thread({ id: 'T2', isResolved: true, rootCommentId: 999 })],
+      [100]
+    )
+    expect(map.size).toBe(0)
+  })
+
+  /** 아직 못 받았거나 지워진 스레드를 "안 접혔다" 로 단정하면 이미 접힌 지적이 되살아난다. */
+  it('목록에 없는 코멘트는 아예 판단하지 않는다', () => {
+    const map = detectResolvedThreads([], [100])
+    expect(map.has(100)).toBe(false)
+  })
+
+  it('루트 코멘트를 못 읽은 스레드는 이을 곳이 없어 건너뛴다', () => {
+    const map = detectResolvedThreads([thread({ id: 'T3', isResolved: true })], [100])
     expect(map.size).toBe(0)
   })
 })

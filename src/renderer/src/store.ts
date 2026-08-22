@@ -811,6 +811,29 @@ function mergeFindings(prev: ReviewFinding[], incoming: ReviewFinding[]): Review
   return out
 }
 
+/**
+ * 에이전트가 거둬들인 지적을 화면 상태에서 함께 걷어낸다.
+ *
+ * 목록에서만 빼면 안 된다 — 선택·편집본·게시 실패 표시가 사라진 지적의 id 로 남아, 다음
+ * "선택한 것 모두 게시" 가 유령 id 를 집어 든다(사용자의 Discard 가 하는 정리와 같다).
+ */
+function dropFindings(
+  findings: ReviewFinding[],
+  removed: string[] | undefined,
+  view: ReviewViewState
+): Partial<ReviewViewState> {
+  if (!removed?.length) return { findings }
+  const gone = new Set(removed)
+  const prune = <T>(bag: Record<string, T>): Record<string, T> =>
+    Object.fromEntries(Object.entries(bag).filter(([id]) => !gone.has(id)))
+  return {
+    findings: findings.filter((f) => !gone.has(f.id)),
+    selected: prune(view.selected),
+    edits: prune(view.edits),
+    posting: prune(view.posting)
+  }
+}
+
 function upsertItem(items: ChatItem[], item: ChatItem): ChatItem[] {
   const idx = items.findIndex((i) => i.id === item.id)
   if (idx === -1) return [...items, item]
@@ -1492,7 +1515,8 @@ export const useStore = create<UIState>((set, get) => ({
             return { progress: [...v.progress, event.item].slice(-200) }
           case 'findings':
             // 후속 턴의 지적은 기존 목록에 덧붙는다(앞선 지적은 이미 게시됐을 수 있다).
-            return { findings: mergeFindings(v.findings, event.findings) }
+            // 에이전트가 거둬들인 것은 함께 빠진다 — 같은 이벤트로 와야 화면이 한 번에 맞는다.
+            return dropFindings(mergeFindings(v.findings, event.findings), event.removed, v)
           case 'activity':
             return { activity: upsertById(v.activity, event.item) }
           case 'error':
