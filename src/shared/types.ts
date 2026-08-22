@@ -235,15 +235,57 @@ export function allocateDevPort(used: Set<number>): number {
 
 /**
  * workspace 의 표시 이름을 결정하는 단일 출처(SSOT).
- * 우선순위: 사용자가 지정한 표시 이름(displayName) → PR 제목 → worktree 이름(name).
- * 즉 기본 규칙(최초엔 worktree 이름, PR 생성 시 PR 제목)은 유지하되,
- * 사용자가 직접 수정하면 그 값이 항상 우선한다.
+ * 우선순위: 사용자가 지정한 표시 이름(displayName) → PR 제목 → 에이전트가 붙인 이름(autoName)
+ * → worktree 이름(name). PR 제목은 밖으로 공개되고 GitHub 에서 사용자가 고칠 수 있는 이름이라,
+ * 코드가 생기기도 전에 에이전트가 처음 추측한 autoName 보다 앞선다.
  */
 export function workspaceDisplayName(
-  workspace: { name: string; displayName: string | null },
+  workspace: { name: string; displayName: string | null; autoName?: string | null },
   prTitle?: string | null
 ): string {
-  return workspace.displayName?.trim() || prTitle?.trim() || workspace.name
+  return (
+    workspace.displayName?.trim() || prTitle?.trim() || workspace.autoName?.trim() || workspace.name
+  )
+}
+
+/**
+ * 에이전트가 만드는 이름의 모양을 한 곳에서 고정한다. 도구 호출과 계획 승인 경로가 각자 다듬으면
+ * 같은 입력도 서로 다른 이름이 되고, 두 사본의 규칙은 결국 갈라진다.
+ *
+ * 60자는 이 문자열이 macOS 알림 제목에도 그대로 쓰이기 때문이다(claude/manager.ts). 사이드바는
+ * 이미 CSS 로 자르므로 레이아웃이 기준은 아니고, 화면 밖에서도 한눈에 읽히는 길이를 기준으로 한다.
+ */
+export function normalizeWorkspaceName(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null
+
+  let name = raw
+    // 유니코드 카테고리로 지운다 — 제어문자를 코드포인트 범위로 적으면 lint 가 막고
+    // (no-control-regex), 그 범위는 이름을 깨뜨리는 보이지 않는 문자(Cf, 예: zero-width space)를 놓친다.
+    .replace(/[\p{Cc}\p{Cf}]+/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/^[#*`-]+\s*/, '')
+    .trim()
+
+  const wrappingQuotes: Array<[string, string]> = [
+    ['"', '"'],
+    ["'", "'"],
+    ['“', '”'],
+    ['‘', '’']
+  ]
+  for (const [open, close] of wrappingQuotes) {
+    if (name.startsWith(open) && name.endsWith(close) && name.length >= 2) {
+      name = name.slice(open.length, -close.length).trim()
+      break
+    }
+  }
+
+  if (!name) return null
+  if (name.length <= 60) return name
+
+  const beforeCap = name.slice(0, 61)
+  const boundary = beforeCap.lastIndexOf(' ')
+  return (boundary >= 45 ? beforeCap.slice(0, boundary) : name.slice(0, 60)).trimEnd()
 }
 
 /**
@@ -600,6 +642,13 @@ export interface Workspace {
    * 아카이브 시 현재 표시 이름을 여기에 보존해, worktree·PR 정보가 없어도 같은 이름을 보여 준다.
    */
   displayName: string | null
+  /**
+   * 에이전트가 이 워크스페이스에 붙인 이름. displayName 은 "사용자가 직접 정했다"는 뜻이라 일부러
+   * 합치지 않는다 — 둘을 섞으면 사람 이름과 자동 이름을 구별할 수 없고, 끝내 에이전트가 사용자가
+   * 고른 이름을 덮어쓰게 된다. 옵셔널이라 기존 저장 데이터도 마이그레이션 없이 "자동 이름 없음"으로
+   * 읽힌다(multiAgent 와 같은 호환 규칙).
+   */
+  autoName?: string | null
   /** 이 workspace 전용 git 브랜치 */
   branch: string
   /**

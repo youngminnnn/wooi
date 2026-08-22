@@ -1,4 +1,4 @@
-import { workspaceDisplayName } from '@shared/types'
+import { normalizeWorkspaceName, workspaceDisplayName } from '@shared/types'
 import type { Repo } from '@shared/types'
 import { isWorktreeClean } from '../../git'
 import { getStore } from '../../store'
@@ -113,7 +113,8 @@ export const createIndependentWorkspace: AgentToolHandler = async (deps, workspa
     // 그 사실을 여기서 말해 두지 않으면, 모델은 오지 않을 보고를 기다리게 된다.
     next:
       'This workspace is not stacked on yours, so it will not report back and does not appear in ' +
-      '`check_stacked_work`. Tell the user it is ready and what it is for.',
+      '`check_stacked_work`. Use `set_workspace_name` if you need to rename it. Tell the user it ' +
+      'is ready and what it is for.',
     ...(task
       ? {}
       : {
@@ -184,6 +185,58 @@ export const listRepositories: AgentToolHandler = async (_deps, workspaceId) => 
     next:
       'Pass a `name` from this list as `create_workspace`’s `repo` to start work in another ' +
       'repository. Omitting it creates the workspace in the one marked `current`.'
+  }
+}
+
+export const setWorkspaceName: AgentToolHandler = async (deps, workspaceId, args) => {
+  const requested = typeof args.workspaceId === 'string' ? args.workspaceId.trim() : ''
+  // 자기 자신은 이미 존재하고 아카이브되지 않았으며, 지금 도는 턴도 바로 자기 턴이다. 그래서
+  // [[agent/tools/target]] 의 네 가지 대상 검사는 적용할 사고가 없고 callerWorkspace 만 확인한다.
+  const target =
+    !requested || requested === workspaceId
+      ? callerWorkspace(workspaceId)
+      : // running 가드는 턴을 **죽이는** 도구를 막는다. 이름 변경은 notify_child 처럼 턴을
+        // 건드리지 않으므로 도는 중인 자식도 안전하다([[agent/tools/target]]).
+        resolveTargetWorkspace(workspaceId, requested, { allowRunning: true })
+
+  const rawName = args.name
+  const clearing = typeof rawName === 'string' && rawName.trim() === ''
+  const normalized = normalizeWorkspaceName(rawName)
+  // 빈 문자열은 사이드바 rename IPC 와 같은 "자동 이름 지우기"다. 하지만 내용이 있었는데 제어
+  // 문자·마크다운 잡음만 남은 값은 실수이므로 조용히 clear 로 바꾸지 않는다.
+  if (!clearing && normalized === null) {
+    throw new Error(
+      'The workspace name must contain readable text after markdown and control characters are removed.'
+    )
+  }
+  const autoName = clearing ? null : normalized
+
+  getStore().update((state) => {
+    const workspace = state.workspaces.find((w) => w.id === target.id)
+    if (!workspace) throw new Error('This workspace no longer exists.')
+    workspace.autoName = autoName
+  })
+  deps.broadcastState()
+
+  // 쓴 뒤의 상태를 다시 읽는다 — 결과에 실을 유효 표시 이름은 방금 쓴 값이 아니라
+  // workspaceDisplayName 의 판정이고, target 은 쓰기 이전의 사본이라 그 답을 모른다.
+  const updated =
+    getStore()
+      .getState()
+      .workspaces.find((w) => w.id === target.id) ?? target
+  return {
+    workspaceId: updated.id,
+    autoName,
+    displayName: workspaceDisplayName(updated),
+    // 도구는 사람 이름을 일부러 덮을 수 없다. 이 설명이 없으면 모델은 성공 결과를 보고도 화면이
+    // 안 바뀐 이유를 몰라, 사용자에게 보이는 이름까지 바뀌었다고 잘못 보고한다.
+    ...(updated.displayName?.trim()
+      ? {
+          note:
+            'A name set by the user is still taking precedence. The user must clear it in the ' +
+            'sidebar rename box before this agent-set name will be displayed.'
+        }
+      : {})
   }
 }
 

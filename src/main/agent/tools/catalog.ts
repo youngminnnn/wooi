@@ -584,6 +584,30 @@ export const AGENT_TOOLS: AgentToolSpec[] = [
         )
     },
     annotations: { title: 'Archive a workspace', readOnlyHint: false }
+  },
+  {
+    name: 'set_workspace_name',
+    description: [
+      "Set the name shown for a workspace in Wooi's sidebar.",
+      'This changes only the display name: it does not rename the git branch or worktree directory.',
+      'Use a short 2-6 word phrase describing the work, in the same language the work is discussed in.',
+      'Omit `workspaceId` to name the workspace you are running in, or pass the id of a workspace',
+      'you created yourself. Passing an empty `name` clears the name the agent set and falls back',
+      "to Wooi's default. A name the user typed by hand always wins, so if the user already",
+      'renamed the workspace this call will not change what is displayed.'
+    ].join(' '),
+    inputSchema: {
+      name: z
+        .string()
+        .describe('A short 2-6 word workspace name, or an empty string to clear the agent name.'),
+      workspaceId: z
+        .string()
+        .optional()
+        .describe(
+          'Workspace id to name. Omit to name this workspace; otherwise it must be a workspace you created.'
+        )
+    },
+    annotations: { title: 'Set the workspace name', readOnlyHint: false }
   }
 ]
 
@@ -689,4 +713,25 @@ export function isReadOnlyWooiTool(qualifiedName: string): boolean {
   const prefix = `mcp__${WOOI_MCP_SERVER_NAME}__`
   if (!qualifiedName.startsWith(prefix)) return false
   return isReadOnlyToolName(qualifiedName.slice(prefix.length))
+}
+
+/**
+ * 읽기 전용과 **다른 이유**로 묻지 않는 도구다. 읽기 전용은 결정할 것이 없다는 뜻이고, 여기는
+ * 결정할 것은 있지만 물을 가치가 없다는 뜻이다 — Wooi 로컬 store 의 문자열 하나이고, 컴퓨터를
+ * 떠나지 않으며, 컨텍스트 메뉴 한 번으로 되돌리고, 결과가 사이드바에 즉시 보여 사후 확인된다.
+ *
+ * 앞으로 넣을 수 있는 문턱도 이 네 가지다: worktree 밖으로 나가지 않고, 네트워크를 건드리지
+ * 않으며, 한 동작으로 되돌릴 수 있고, 결과가 화면에 보여야 한다.
+ */
+const NEVER_ASKS = new Set(['set_workspace_name'])
+
+export function neverAsksToolName(name: string): boolean {
+  return NEVER_ASKS.has(name)
+}
+
+/** 다른 MCP 서버의 동명 도구까지 자동 승인하지 않도록 Wooi 접두사를 먼저 확인한다. */
+export function neverAsksWooiTool(qualifiedName: string): boolean {
+  const prefix = `mcp__${WOOI_MCP_SERVER_NAME}__`
+  if (!qualifiedName.startsWith(prefix)) return false
+  return neverAsksToolName(qualifiedName.slice(prefix.length))
 }

@@ -222,6 +222,7 @@ export function projectState(
       repoId: workspace.repoId,
       name: workspace.name,
       displayName: workspace.displayName,
+      autoName: workspace.autoName ?? null,
       branch: workspace.branch,
       status: workspace.status,
       permissionMode: workspace.permissionMode,
