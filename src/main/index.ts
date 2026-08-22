@@ -26,6 +26,7 @@ import { registerIpc } from './ipc'
 import { disposeRemote, getRemoteBridge, hasLocalRemoteOverride, initRemote } from './remote'
 import { pendingPermissions } from './remote/permissions'
 import { rememberCompacting, rememberContextUsage } from './contextUsageCache'
+import { rememberRunningAgents } from './runningAgentsCache'
 import type { AppState, ChatEvent, PermissionRequest } from '@shared/types'
 import { log } from './logger'
 import { hydrateEnvFromLoginShell } from './env'
@@ -126,6 +127,11 @@ function rememberChatStatus(payload: unknown): boolean {
     })
   }
   if (event.type === 'compacting') return rememberCompacting(workspaceId, event.active)
+  if (event.type === 'agents') {
+    rememberRunningAgents(workspaceId, event.agents)
+    // 폰 상태줄이 쓰지 않는 값이다 — 적어만 두고 재발행을 부르지 않는다.
+    return false
+  }
   return false
 }
 
