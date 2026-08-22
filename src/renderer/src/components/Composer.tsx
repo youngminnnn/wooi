@@ -34,7 +34,7 @@ import {
   Wrench
 } from 'lucide-react'
 import { useStore } from '../store'
-import { permissionModeFooter } from '../lib/permission'
+import { permissionModeFooter, permissionModesFor } from '../lib/permission'
 import { modelLabel, modelSupportsFastMode } from '../lib/models'
 import { effortLabel, effortOptionsFor } from '../lib/effort'
 import { FAST_MODE_HINT, fastModeLabel, fastModeStatus } from '../lib/fastMode'
@@ -74,12 +74,13 @@ import type {
   CommandResult,
   EffortSetting,
   FileHit,
+  HooksInfo,
   ImageAttachment,
   ImageMediaType,
   McpAction,
   McpServerInfo,
   MemoryScope,
-  HooksInfo,
+  PermissionMode,
   PermissionsInfo,
   RateLimitSnapshot,
   RewindPoint,
@@ -565,10 +566,14 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
       return
     }
 
-    // /model·/effort·/fast·/agent 는 백엔드 왕복 없이 로컬 선택 카드로 처리한다(첨부가 있으면 일반 전송).
+    // /model·/effort·/fast·/agent·/plan 은 백엔드 왕복 없이 로컬 선택 카드로 처리한다(첨부가 있으면 일반 전송).
     const picker = images.length
       ? null
-      : matchPicker(trimmed, supportsFastMode, agentSwitch.offered)
+      : matchPicker(trimmed, {
+          fast: supportsFastMode,
+          agent: agentSwitch.offered,
+          plan: permissionModesFor(backend).length > 1
+        })
     if (picker) {
       openPicker(picker)
       setText('')
@@ -643,7 +648,7 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
       return
     }
 
-    // /diff·/copy·/help·/clear·/stop·/memory 는 Wooi UI 에서 직접 처리한다(에이전트로 보내지 않는다).
+    // /diff·/copy·/help·/clear·/stop·/memory·/tasks 는 Wooi UI 에서 직접 처리한다(에이전트로 보내지 않는다).
     // runLocal 이 입력창 텍스트를 알맞게 정리하므로(대부분 비우고, /help 만 '/' 로 메뉴를 띄움)
     // 여기서는 setText 를 호출하지 않는다.
     const local = images.length ? null : matchLocal(trimmed, workspace.agentBackend === 'claude')
@@ -684,8 +689,20 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
     const lifecycle = images.length ? null : matchLifecycle(trimmed)
     if (lifecycle) {
       if (lifecycle.kind === 'rename') {
-        void window.api.workspace.rename(workspace.id, lifecycle.name)
-        pushToast('success', `Renamed workspace to “${lifecycle.name}”.`)
+        if (lifecycle.name === null) {
+          // Composer 에서는 ChatView 의 로컬 편집 상태에 닿을 수 없어 /diff 와 같은 이벤트로 연결한다.
+          window.dispatchEvent(new CustomEvent('wooi:rename-workspace', { detail: workspace.id }))
+        } else {
+          const name = lifecycle.name
+          void window.api.workspace.rename(workspace.id, name).then(
+            () => pushToast('success', `Renamed workspace to “${name}”.`),
+            (error) =>
+              pushToast(
+                'error',
+                error instanceof Error ? error.message : 'Could not rename this workspace.'
+              )
+          )
+        }
       } else {
         pushToast(
           'info',
@@ -876,7 +893,7 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
   }
 
   /**
-   * Wooi UI 에서 직접 처리하는 로컬 명령(/diff·/copy·/help·/clear·/stop·/memory). 에이전트로
+   * Wooi UI 에서 직접 처리하는 로컬 명령(/diff·/copy·/help·/clear·/stop·/memory·/tasks). 에이전트로
    * 보내지 않고 앱 기능으로 매핑한다. 입력창 텍스트 정리도 여기서 한다(대부분 비우고, /help 만
    * 자동완성 메뉴를 다시 띄우도록 '/' 를 남긴다).
    */
@@ -972,6 +989,29 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
     if (kind === 'stop') {
       if (running) void window.api.chat.interrupt(workspace.id)
       else pushToast('info', 'Nothing is running.')
+      return
+    }
+    if (kind === 'tasks') {
+      // 실행 중 진행률은 자주 바뀌므로 Composer 를 구독시키지 않고, 명령을 누른 순간의 상태만 읽는다.
+      const state = useStore.getState()
+      const agents = state.runningAgents[workspace.id] ?? []
+      if (agents.length === 0) {
+        pushToast('info', 'No background agents or tasks running.')
+        return
+      }
+      if (!(state.app?.settings.showRunningAgents ?? true)) {
+        pushToast(
+          'info',
+          `${agents.length} running — turn on “Running agents in sidebar” in Settings to see them.`
+        )
+        return
+      }
+      state.expandAgents(workspace.id)
+      // 목록이 이미 펼쳐져 있으면 화면 변화가 없어 명령이 실패한 것처럼 보일 수 있다.
+      pushToast(
+        'info',
+        `${agents.length} ${agents.length === 1 ? 'task' : 'tasks'} running — listed under this workspace in the sidebar.`
+      )
       return
     }
     if (kind === 'diff') {
@@ -1668,24 +1708,25 @@ function WooiCommandCard({
 }
 
 /**
- * "/model"·"/effort"·"/fast"·"/agent" 면 그 종류를 돌려준다(뒤따르는 인자는 무시하고 선택 카드를 연다).
+ * "/model"·"/effort"·"/fast"·"/agent"·"/plan" 이면 그 종류를 돌려준다(뒤따르는 인자는 무시하고 선택 카드를 연다).
  *
- * `allowFast` 는 이 워크스페이스의 백엔드가 fast mode 를 지원하는지다 — 지원하지 않으면(Codex)
+ * `allow.fast` 는 이 워크스페이스의 백엔드가 fast mode 를 지원하는지다 — 지원하지 않으면(Codex)
  * 가로채지 않고 일반 텍스트로 흘려보낸다. 아무 일도 안 하는 카드를 띄우는 것보다 낫다.
- * `allowAgent` 도 같은 이유다 — 쓸 수 있는 에이전트가 하나뿐이면 고를 것이 없으므로 그때의
- * "/agent" 는 에이전트에게 보내는 평범한 메시지로 둔다. 턴이 도는 중인지는 여기서 보지 않는다:
+ * `allow.agent`·`allow.plan` 도 같은 이유다 — 쓸 수 있는 에이전트나 권한 모드가 하나뿐이면
+ * 고를 것이 없으므로 그때의 "/agent"·"/plan" 은 에이전트에게 보내는 평범한 메시지로 둔다.
+ * 턴이 도는 중인지는 여기서 보지 않는다:
  * /model 과 마찬가지로 카드는 열리고, 잠긴 이유를 카드가 설명한다.
  */
 export function matchPicker(
   text: string,
-  allowFast: boolean,
-  allowAgent: boolean
+  allow: { fast: boolean; agent: boolean; plan: boolean }
 ): PickerKind | null {
-  const m = /^\/(model|effort|fast|agent)(?:\s.*)?$/.exec(text)
+  const m = /^\/(model|effort|fast|agent|plan)(?:\s.*)?$/.exec(text)
   if (!m) return null
   const kind = m[1] as PickerKind
-  if (kind === 'fast' && !allowFast) return null
-  if (kind === 'agent' && !allowAgent) return null
+  if (kind === 'fast' && !allow.fast) return null
+  if (kind === 'agent' && !allow.agent) return null
+  if (kind === 'plan' && !allow.plan) return null
   return kind
 }
 
@@ -1717,7 +1758,15 @@ export function matchCodexLocal(text: string, backend: AgentBackendId): CodexLoc
 }
 
 /** Wooi UI 가 직접 처리하는 로컬 명령(에이전트로 보내지 않음). */
-type LocalCommand = 'diff' | 'copy' | 'help' | 'clear' | 'stop' | 'memory' | 'add-dir'
+type LocalCommand =
+  | 'diff'
+  | 'copy'
+  | 'help'
+  | 'clear'
+  | 'stop'
+  | 'memory'
+  | 'add-dir'
+  | 'tasks'
 const LOCAL_COMMANDS: readonly LocalCommand[] = [
   'diff',
   'copy',
@@ -1725,8 +1774,10 @@ const LOCAL_COMMANDS: readonly LocalCommand[] = [
   'clear',
   'stop',
   'memory',
-  'add-dir'
+  'add-dir',
+  'tasks'
 ]
+const LOCAL_ALIASES: Record<string, LocalCommand> = { bashes: 'tasks' }
 /** CLAUDE.md·작업 루트처럼 Claude Code 고유 개념이라 다른 백엔드에서는 가로채지 않는 명령. */
 const CLAUDE_ONLY_COMMANDS: readonly string[] = ['memory', 'add-dir']
 
@@ -1737,18 +1788,20 @@ const CLAUDE_ONLY_COMMANDS: readonly string[] = ['memory', 'add-dir']
 export function matchLocal(text: string, allowClaudeOnly: boolean): LocalCommand | null {
   const m = /^\/([\w-]+)(?:\s[\s\S]*)?$/.exec(text)
   if (!m) return null
-  if (!(LOCAL_COMMANDS as readonly string[]).includes(m[1])) return null
-  return CLAUDE_ONLY_COMMANDS.includes(m[1]) && !allowClaudeOnly ? null : (m[1] as LocalCommand)
+  const kind = LOCAL_ALIASES[m[1]] ?? m[1]
+  if (!(LOCAL_COMMANDS as readonly string[]).includes(kind)) return null
+  return CLAUDE_ONLY_COMMANDS.includes(kind) && !allowClaudeOnly ? null : (kind as LocalCommand)
 }
 
 export type LifecycleCommand =
-  | { kind: 'rename'; name: string }
+  | { kind: 'rename'; name: string | null }
   | { kind: 'archive' }
   | { kind: 'delete' }
 
 export function matchLifecycle(text: string): LifecycleCommand | null {
-  const rename = /^\/rename\s+(.+)$/.exec(text)
-  if (rename?.[1].trim()) return { kind: 'rename', name: rename[1].trim() }
+  const rename = /^\/rename(?:\s+(.+))?$/.exec(text)
+  // 이름 없는 /rename 은 오류가 아니라 헤더 제목을 더블클릭할 때와 같은 인라인 편집 요청이다.
+  if (rename) return { kind: 'rename', name: rename[1]?.trim() || null }
   if (/^\/archive\s*$/.test(text)) return { kind: 'archive' }
   if (/^\/delete(?:\s[\s\S]*)?$/.test(text)) return { kind: 'delete' }
   return null
@@ -2941,7 +2994,7 @@ type PickerOption = {
 }
 
 /** 상태줄 클릭·슬래시 명령으로 여는 로컬 선택 카드의 종류. */
-type PickerKind = 'model' | 'effort' | 'fast' | 'agent'
+type PickerKind = 'model' | 'effort' | 'fast' | 'agent' | 'plan'
 
 /**
  * 입력창 위에 뜨는 /model·/effort 선택 카드. 백엔드 왕복 없이 로컬에서 값을 고른다 —
@@ -2988,6 +3041,14 @@ function PickerCard({
       // 항상 확정된 값이라, "안 고름" 이라는 상태가 존재하지 않는다.
       return availableAgents.map((b) => ({ value: b.id, label: b.label, mark: b.id }))
     }
+    if (kind === 'plan') {
+      // 권한 모드는 항상 확정된 값이라 /agent 처럼 전역 기본값을 따르는 가상 항목을 두지 않는다.
+      return permissionModesFor(backend).map((mode) => ({
+        value: mode.id,
+        label: mode.label,
+        hint: mode.description
+      }))
+    }
     if (kind === 'fast') {
       return [
         { value: '', label: 'Default', hint: fastModeLabel(defaults.fastMode) },
@@ -3031,15 +3092,17 @@ function PickerCard({
   const current =
     kind === 'agent'
       ? workspace.agentBackend
-      : kind === 'model'
-        ? (workspace.model ?? '')
-        : kind === 'effort'
-          ? (workspace.effort ?? '')
-          : workspace.fastMode === null
-            ? ''
-            : workspace.fastMode
-              ? 'on'
-              : 'off'
+      : kind === 'plan'
+        ? workspace.permissionMode
+        : kind === 'model'
+          ? (workspace.model ?? '')
+          : kind === 'effort'
+            ? (workspace.effort ?? '')
+            : workspace.fastMode === null
+              ? ''
+              : workspace.fastMode
+                ? 'on'
+                : 'off'
   const currentIdx = Math.max(
     0,
     options.findIndex((o) => o.value === current)
@@ -3047,8 +3110,8 @@ function PickerCard({
   const [cursor, setCursor] = useState(currentIdx)
   const activeRef = useRef<HTMLButtonElement | null>(null)
 
-  // 에이전트 교체는 지금 바꿀 수 있을 때만 — 나머지 항목은 턴 진행 중에만 잠긴다.
-  const locked = kind === 'agent' ? !agentSwitch.switchable : running
+  // /plan 은 Shift+Tab 처럼 턴 중에도 바꿀 수 있어 model·effort 의 세션 잠금을 따르지 않는다.
+  const locked = kind === 'agent' ? !agentSwitch.switchable : kind === 'plan' ? false : running
 
   /**
    * 에이전트 교체 1건. 지난 대화를 넘겨야 하는 자리에서는 먼저 확인을 받는다 — 그 인수인계는
@@ -3086,6 +3149,8 @@ function PickerCard({
     if (locked) return // 잠긴 동안에는 안내만 보여 준다.
     if (value !== current) {
       if (kind === 'agent') void switchAgent(value as AgentBackendId)
+      else if (kind === 'plan')
+        void window.api.workspace.setPermissionMode(workspace.id, value as PermissionMode)
       else if (kind === 'model') void window.api.workspace.setModel(workspace.id, value || null)
       else if (kind === 'effort')
         void window.api.workspace.setEffort(workspace.id, (value || null) as EffortSetting | null)
@@ -3120,19 +3185,23 @@ function PickerCard({
   const title =
     kind === 'agent'
       ? '/agent'
-      : kind === 'model'
-        ? '/model'
-        : kind === 'effort'
-          ? '/effort'
-          : '/fast'
+      : kind === 'plan'
+        ? '/plan'
+        : kind === 'model'
+          ? '/model'
+          : kind === 'effort'
+            ? '/effort'
+            : '/fast'
   const description =
     kind === 'agent'
       ? 'Main agent for this workspace'
-      : kind === 'model'
-        ? 'Model for this workspace'
-        : kind === 'effort'
-          ? 'Reasoning effort for this workspace'
-          : 'Fast mode for this workspace — same model, faster output'
+      : kind === 'plan'
+        ? 'Permissions for this workspace'
+        : kind === 'model'
+          ? 'Model for this workspace'
+          : kind === 'effort'
+            ? 'Reasoning effort for this workspace'
+            : 'Fast mode for this workspace — same model, faster output'
   // /fast 카드에서만: 지금 쓰는 모델이 fast mode 를 지원하지 않으면 켜도 소용없으므로 미리 알린다.
   const effectiveModel = workspace.model ?? workspace.lastModel ?? defaults.model
   const fastUnsupported = kind === 'fast' && !modelSupportsFastMode(models, effectiveModel)
@@ -3140,6 +3209,8 @@ function PickerCard({
   const icon =
     kind === 'agent' ? (
       <Bot {...iconProps} />
+    ) : kind === 'plan' ? (
+      <ShieldCheck {...iconProps} />
     ) : kind === 'model' ? (
       <Cpu {...iconProps} />
     ) : kind === 'effort' ? (

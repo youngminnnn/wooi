@@ -34,6 +34,12 @@ describe('백엔드 전용 composer 명령', () => {
     expect(matchLocal('/wooi:stop dev', false)).toBeNull()
   })
 
+  it('/bashes 별칭을 /tasks 로 해석하고 비슷한 이름은 거부한다', () => {
+    expect(matchLocal('/tasks', false)).toBe('tasks')
+    expect(matchLocal('/bashes', false)).toBe('tasks')
+    expect(matchLocal('/task', false)).toBeNull()
+  })
+
   it('Claude 백엔드에서만 /add-dir을 가로챈다', () => {
     expect(matchLocal('/add-dir ~/notes', false)).toBeNull()
     expect(matchLocal('/add-dir ~/notes', true)).toBe('add-dir')
@@ -41,6 +47,11 @@ describe('백엔드 전용 composer 명령', () => {
 })
 
 describe('workspace lifecycle commands', () => {
+  it('이름을 생략한 /rename 은 인라인 편집 요청으로 처리한다', () => {
+    expect(matchLifecycle('/rename')).toEqual({ kind: 'rename', name: null })
+    expect(matchLifecycle('/rename   ')).toEqual({ kind: 'rename', name: null })
+  })
+
   it('maps rename and the safety-gated archive/delete commands only as whole inputs', () => {
     expect(matchLifecycle('/rename Better name')).toEqual({ kind: 'rename', name: 'Better name' })
     expect(matchLifecycle('/archive')).toEqual({ kind: 'archive' })
@@ -107,20 +118,26 @@ describe('/memory 스코프', () => {
 
 describe('선택 카드 슬래시 명령', () => {
   it('고를 에이전트가 둘 이상일 때만 /agent 를 가로챈다', () => {
-    expect(matchPicker('/agent', true, true)).toBe('agent')
+    expect(matchPicker('/agent', { fast: true, agent: true, plan: true })).toBe('agent')
     // 쓸 수 있는 에이전트가 하나뿐이면 "/agent" 는 카드가 아니라 에이전트에게 보내는 평범한 메시지다.
-    expect(matchPicker('/agent', true, false)).toBeNull()
+    expect(matchPicker('/agent', { fast: true, agent: false, plan: true })).toBeNull()
   })
 
   it('fast mode 미지원 백엔드에서는 /fast 를 가로채지 않는다', () => {
-    expect(matchPicker('/fast', false, true)).toBeNull()
-    expect(matchPicker('/fast', true, true)).toBe('fast')
+    expect(matchPicker('/fast', { fast: false, agent: true, plan: true })).toBeNull()
+    expect(matchPicker('/fast', { fast: true, agent: true, plan: true })).toBe('fast')
   })
 
   it('/model·/effort 는 뒤따르는 인자와 무관하게 카드를 연다', () => {
-    expect(matchPicker('/model opus', false, false)).toBe('model')
-    expect(matchPicker('/effort high', false, false)).toBe('effort')
-    expect(matchPicker('/models', false, false)).toBeNull()
+    const allow = { fast: false, agent: false, plan: false }
+    expect(matchPicker('/model opus', allow)).toBe('model')
+    expect(matchPicker('/effort high', allow)).toBe('effort')
+    expect(matchPicker('/models', allow)).toBeNull()
+  })
+
+  it('권한 모드를 고를 수 있을 때만 /plan 을 가로챈다', () => {
+    expect(matchPicker('/plan', { fast: false, agent: false, plan: true })).toBe('plan')
+    expect(matchPicker('/plan', { fast: false, agent: false, plan: false })).toBeNull()
   })
 })
 

@@ -38,6 +38,7 @@ const BUILTIN_COMMANDS: SlashCommandInfo[] = [
     argumentHint: '<question>'
   },
   // /model·/effort·/fast 는 Composer 가 로컬 선택 카드로 처리한다(백엔드 왕복 없음). 자동완성에만 보강.
+  // /plan 도 Composer 의 로컬 선택 카드로 처리하며, 자동완성 항목은 @shared/types 의 INTERACTIVE_COMMANDS 에서 온다.
   { name: 'model', description: 'Choose the model for this workspace' },
   { name: 'effort', description: 'Choose the reasoning effort for this workspace' },
   { name: 'fast', description: 'Toggle fast mode for this workspace (same model, faster output)' },
@@ -65,6 +66,12 @@ const BUILTIN_COMMANDS: SlashCommandInfo[] = [
     argumentHint: '[N]'
   },
   { name: 'help', description: 'List the slash commands available here' },
+  { name: 'rename', description: 'Rename this workspace', argumentHint: '[name]' },
+  {
+    name: 'tasks',
+    description: 'Show the background agents and tasks running here',
+    aliases: ['bashes']
+  },
   {
     name: 'memory',
     description: 'Open project or user CLAUDE.md in your editor',
