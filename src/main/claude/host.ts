@@ -8,6 +8,7 @@ import {
   runMcpAction,
   invalidateAfterReload,
   readPermissions,
+  readHooks,
   LIVE_ONLY_COMMANDS,
   noLiveSessionError
 } from './control'
@@ -208,16 +209,15 @@ async function handle(msg: HostCommand): Promise<void> {
         if (msg.kind === 'permissions') {
           return readPermissions(msg.config)
         }
+        // /hooks 도 SDK 에 정보가 없어 설정 파일만 읽는다(Query 불필요).
+        if (msg.kind === 'hooks') {
+          return readHooks(msg.config)
+        }
         const live = sessions.get(msg.workspaceId)?.liveQuery
         if (!live && LIVE_ONLY_COMMANDS.includes(msg.kind)) throw noLiveSessionError(msg.kind)
         const result = live
-          ? await runCommandOn(msg.kind, live)
-          : await runCommandShortLived(
-              msg.kind,
-              msg.config.cwd,
-              msg.config.repoPath,
-              msg.config.mcpSettings
-            )
+          ? await runCommandOn(msg.kind, live, { config: msg.config })
+          : await runCommandShortLived(msg.kind, msg.config)
         invalidateAfterReload(msg.kind, msg.config.cwd)
         return result
       })
@@ -256,12 +256,7 @@ async function handle(msg: HostCommand): Promise<void> {
         }
         // 라이브 세션이 없다. 사용자가 명시적으로 갱신을 눌렀을 때만(fallback 제공) 단명 쿼리를 띄운다.
         if (!msg.fallback) return null
-        const result = await runCommandShortLived(
-          'usage',
-          msg.fallback.cwd,
-          msg.fallback.repoPath,
-          msg.fallback.mcpSettings
-        )
+        const result = await runCommandShortLived('usage', msg.fallback)
         return result.kind === 'usage' ? result.usage : null
       })
       break

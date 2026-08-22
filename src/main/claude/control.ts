@@ -1,5 +1,5 @@
 import { query } from '@anthropic-ai/claude-agent-sdk'
-import type { Query, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
+import type { Query, SDKUserMessage, SlashCommand } from '@anthropic-ai/claude-agent-sdk'
 import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
@@ -13,9 +13,11 @@ import type {
   CommandPanelKind,
   CommandResult,
   ContextUsageInfo,
+  HooksInfo,
   McpAction,
   McpServerInfo,
-  McpSettings,
+  SkillInfo,
+  StatusInfo,
   UsageInfo
 } from '@shared/types'
 
@@ -45,7 +47,7 @@ function withTimeout<T>(p: Promise<T>, label: string): Promise<T> {
 export async function runCommandOn(
   kind: CommandPanelKind,
   q: Query,
-  opts: { live?: boolean } = {}
+  opts: { live?: boolean; config?: SessionConfig } = {}
 ): Promise<CommandResult> {
   // 이 함수는 원래 살아 있는 쿼리 위에서 실행하는 경로다. 단명 쿼리만 명시적으로 false 를 넘겨,
   // 세션 비용과 변경 줄 수가 실제 세션에서 온 값인지 결과에 남긴다.
@@ -61,6 +63,22 @@ export async function runCommandOn(
         kind,
         agents: agents.map((a) => ({ name: a.name, description: a.description, model: a.model }))
       }
+    }
+    case 'skills': {
+      // supportedCommands()는 일반 명령과 스킬을 구분할 표식이 없다. reloadSkills()만 현재 cwd의
+      // 권위 있는 스킬 레지스트리를 돌려주므로, 디스크 리로드라는 멱등 부작용을 감수하고 사용한다.
+      const r = await withTimeout(q.reloadSkills(), 'reloadSkills')
+      return { kind, skills: mapSkills(r.skills) }
+    }
+    case 'status': {
+      // host 의 runCommand 는 언제나 config 를 싣는다. 주기 갱신(refreshUsage)만 config 없이
+      // 'usage' 로 들어오므로 여기에 닿지 않는다 — 닿았다면 라우팅이 잘못된 것이다.
+      if (!opts.config) throw new Error('status requires the session config')
+      const [init, account] = await Promise.all([
+        withTimeout(q.initializationResult(), 'initializationResult'),
+        withTimeout(q.accountInfo(), 'accountInfo')
+      ])
+      return { kind, status: mapStatus(init, account, opts.config, live) }
     }
     case 'context': {
       const ctx = await withTimeout(q.getContextUsage(), 'getContextUsage')
@@ -95,7 +113,9 @@ export async function runCommandOn(
     case 'permissions':
     case 'debugConfig':
     case 'experimental':
-      // 이 명령들은 라이브 Query 밖에서 처리하거나 Codex 전용이다. 여기로 오면 라우팅이 잘못됐다.
+    case 'hooks':
+      // 이 명령들은 host 에서 세션 상태·설정 파일을 읽어 처리하거나 Codex 전용이다.
+      // 여기로 오면 라우팅이 잘못됐다.
       throw new Error(`${kind} is handled in the host, not runCommandOn`)
   }
 }
@@ -168,6 +188,52 @@ export function permissionSettingsFiles(
   ]
 }
 
+/** /hooks — SDK 초기화 응답에는 훅 정보가 전혀 없으므로 settings.json 들을 직접 읽는다. */
+export function readHooks(config: SessionConfig): CommandResult {
+  const files = permissionSettingsFiles(config.cwd)
+  const events = new Map<string, HooksInfo['events'][number]['entries']>()
+  const sources: string[] = []
+  for (const file of files) {
+    let json: unknown
+    try {
+      json = JSON.parse(readFileSync(file, 'utf-8'))
+    } catch {
+      continue // 파일이 없거나 손상 → 건너뛴다.
+    }
+    if (!json || typeof json !== 'object' || !Object.hasOwn(json, 'hooks')) continue
+    sources.push(file)
+    const hooks = (json as { hooks?: unknown }).hooks
+    if (!hooks || typeof hooks !== 'object' || Array.isArray(hooks)) continue
+    for (const [event, rawEntries] of Object.entries(hooks)) {
+      if (!Array.isArray(rawEntries)) continue
+      const entries = events.get(event) ?? []
+      for (const rawEntry of rawEntries) {
+        if (!rawEntry || typeof rawEntry !== 'object' || Array.isArray(rawEntry)) continue
+        const entry = rawEntry as { matcher?: unknown; hooks?: unknown }
+        const commands = Array.isArray(entry.hooks)
+          ? entry.hooks.flatMap((rawHook) => {
+              if (!rawHook || typeof rawHook !== 'object' || Array.isArray(rawHook)) return []
+              const hook = rawHook as { type?: unknown; command?: unknown }
+              return hook.type === 'command' && typeof hook.command === 'string'
+                ? [hook.command]
+                : []
+            })
+          : []
+        entries.push({
+          ...(typeof entry.matcher === 'string' ? { matcher: entry.matcher } : {}),
+          commands,
+          source: file
+        })
+      }
+      if (entries.length > 0) events.set(event, entries)
+    }
+  }
+  return {
+    kind: 'hooks',
+    hooks: { events: [...events].map(([event, entries]) => ({ event, entries })), sources }
+  }
+}
+
 /** 주어진 settings 파일들에서 allow/ask/deny 를 모아 현재 모드와 함께 돌려준다(없는 파일은 건너뛴다). */
 export function collectPermissions(
   files: string[],
@@ -229,17 +295,15 @@ export function noLiveSessionError(kind: CommandPanelKind): Error {
  */
 export async function runCommandShortLived(
   kind: CommandPanelKind,
-  cwd: string,
-  repoPath: string | null,
-  mcpSettings: McpSettings
+  config: SessionConfig
 ): Promise<CommandResult> {
   const input = new AsyncQueue<SDKUserMessage>()
   const claudeExecutable = resolveClaudeExecutable()
-  const mcpServers = resolveUserMcpServers(repoPath, mcpSettings)
+  const mcpServers = resolveUserMcpServers(config.repoPath, config.mcpSettings)
   const q = query({
     prompt: input,
     options: {
-      cwd,
+      cwd: config.cwd,
       settingSources: MCP_SETTING_SOURCES,
       ...(Object.keys(mcpServers).length ? { mcpServers } : {}),
       ...(claudeExecutable ? { pathToClaudeCodeExecutable: claudeExecutable } : {})
@@ -248,7 +312,7 @@ export async function runCommandShortLived(
   try {
     // MCP 는 방금 띄운 쿼리에서 서버가 붙는 데 시간이 걸린다 — 정착을 짧게 기다린 뒤 읽는다.
     if (kind === 'mcp') return { kind, servers: await readMcpServersSettled(q) }
-    return await runCommandOn(kind, q, { live: false })
+    return await runCommandOn(kind, q, { live: false, config })
   } finally {
     input.close()
     void q.interrupt().catch(() => {})
@@ -280,7 +344,8 @@ export async function runMcpAction(
 
 /** 리로드 결과 처리 후 자동완성 캐시를 무효화해 새 명령 목록이 반영되게 한다. */
 export function invalidateAfterReload(kind: CommandPanelKind, cwd: string): void {
-  if (kind === 'reloadPlugins' || kind === 'reloadSkills') clearCommandsCache(cwd)
+  if (kind === 'reloadPlugins' || kind === 'reloadSkills' || kind === 'skills')
+    clearCommandsCache(cwd)
 }
 
 // ── 매퍼: SDK 응답 → 표시용 경량 타입 ───────────────────────────────────────
@@ -290,6 +355,74 @@ type SdkContext = Awaited<ReturnType<Query['getContextUsage']>>
 type SdkUsage = Awaited<
   ReturnType<Query['usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET']>
 >
+type SdkInit = Awaited<ReturnType<Query['initializationResult']>>
+type SdkAccount = Awaited<ReturnType<Query['accountInfo']>>
+
+/** reloadSkills 응답의 중복을 이름 기준 첫 항목 우선으로 걷어 내고 표시용 출처를 붙인다. */
+export function mapSkills(raw: SlashCommand[]): SkillInfo[] {
+  const seen = new Set<string>()
+  return raw.flatMap((skill) => {
+    if (seen.has(skill.name)) return []
+    seen.add(skill.name)
+    const source: SkillInfo['source'] = skill.name.includes(':')
+      ? 'plugin'
+      : skill.description.endsWith(' (user)')
+        ? 'user'
+        : 'builtin'
+    let description = skill.description
+    if (source === 'plugin') {
+      const plugin = skill.name.slice(0, skill.name.indexOf(':'))
+      const prefix = `(${plugin}) `
+      if (description.startsWith(prefix)) description = description.slice(prefix.length)
+    } else if (source === 'user') {
+      description = description.slice(0, -' (user)'.length)
+    }
+    return [
+      {
+        name: skill.name,
+        description,
+        ...(skill.argumentHint ? { argumentHint: skill.argumentHint } : {}),
+        source
+      }
+    ]
+  })
+}
+
+/** SDK 설정/계정과 Wooi 설정을 합치되, 단명 쿼리의 가짜 세션 상태는 노출하지 않는다. */
+export function mapStatus(
+  init: SdkInit,
+  account: SdkAccount,
+  config: SessionConfig,
+  live: boolean
+): StatusInfo {
+  return {
+    live,
+    account: {
+      ...(account.email ? { email: account.email } : {}),
+      ...(account.organization ? { organization: account.organization } : {}),
+      ...(account.subscriptionType ? { subscriptionType: account.subscriptionType } : {}),
+      ...(account.apiProvider ? { apiProvider: account.apiProvider } : {})
+    },
+    outputStyle: init.output_style ?? null,
+    fastMode:
+      live && init.fast_mode_state
+        ? {
+            state: init.fast_mode_state,
+            ...(init.fast_mode_disabled_reason
+              ? { disabledReason: init.fast_mode_disabled_reason }
+              : {})
+          }
+        : null,
+    sessionId: config.resumeSessionId,
+    workspace: {
+      cwd: config.cwd,
+      model: config.model,
+      effort: config.effort,
+      fastMode: config.fastMode,
+      permissionMode: config.permissionMode
+    }
+  }
+}
 
 function mapServer(s: SdkServer): McpServerInfo {
   const { transport, endpoint } = describeTransport(s.config)

@@ -311,7 +311,10 @@ export const CLAUDE_META: AgentBackendMeta = {
       'reloadPlugins',
       'reloadSkills',
       'rewind',
-      'permissions'
+      'permissions',
+      'status',
+      'skills',
+      'hooks'
     ],
     slashCommands: true,
     // Agent SDK 는 스트리밍 입력 큐를 쓰지만 턴이 도는 중의 입력은 다음 턴으로 넘어간다.

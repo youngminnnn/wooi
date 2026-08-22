@@ -1,13 +1,17 @@
 import { describe, expect, it } from 'vitest'
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { Query } from '@anthropic-ai/claude-agent-sdk'
+import type { Query, SlashCommand } from '@anthropic-ai/claude-agent-sdk'
+import type { SessionConfig } from './protocol'
 import {
   LIVE_ONLY_COMMANDS,
   collectPermissions,
+  mapSkills,
+  mapStatus,
   noLiveSessionError,
   permissionSettingsFiles,
+  readHooks,
   readMcpServersSettled,
   runCommandOn
 } from './control'
@@ -170,5 +174,161 @@ describe('collectPermissions', () => {
     expect(result.permissions.ask).toEqual(['Web', 'Edit'])
     expect(result.permissions.deny).toEqual(['Delete'])
     expect(result.permissions.mode).toBe('default')
+  })
+})
+
+function config(cwd: string): SessionConfig {
+  return {
+    cwd,
+    repoPath: null,
+    writeIsolationRoots: [],
+    model: 'claude-opus-4-1',
+    fallbackModels: [],
+    effort: 'high',
+    fastMode: true,
+    permissionMode: 'acceptEdits',
+    mcpSettings: { servers: [], disabledInherited: [] },
+    autoCompact: true,
+    resumeSessionId: 'session-from-config',
+    peer: { name: 'test', inbound: 'refuse' },
+    additionalDirs: [],
+    delegateBackends: [],
+    canSwitchToAgentTeam: false,
+    agentDefaults: {}
+  }
+}
+
+describe('readHooks', () => {
+  it('groups events and keeps matchers, commands, and settings sources', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'wooi-hooks-'))
+    const settingsDir = join(cwd, '.claude')
+    const settings = join(settingsDir, 'settings.json')
+    mkdirSync(settingsDir)
+    writeFileSync(
+      settings,
+      JSON.stringify({
+        hooks: {
+          PreToolUse: [
+            {
+              matcher: 'Bash',
+              hooks: [
+                { type: 'command', command: 'npm run lint' },
+                { type: 'command', command: 'npm run typecheck' }
+              ]
+            }
+          ],
+          SessionStart: [{ hooks: [{ type: 'command', command: 'echo ready' }] }]
+        }
+      })
+    )
+    writeFileSync(join(settingsDir, 'settings.local.json'), '{ corrupt')
+
+    const result = readHooks(config(cwd))
+
+    if (result.kind !== 'hooks') throw new Error('hooks 결과가 아니다')
+    expect(result.hooks.sources).toContain(settings)
+    expect(result.hooks.events).toEqual(
+      expect.arrayContaining([
+        {
+          event: 'PreToolUse',
+          entries: expect.arrayContaining([
+            {
+              matcher: 'Bash',
+              commands: ['npm run lint', 'npm run typecheck'],
+              source: settings
+            }
+          ])
+        },
+        {
+          event: 'SessionStart',
+          entries: expect.arrayContaining([{ commands: ['echo ready'], source: settings }])
+        }
+      ])
+    )
+  })
+
+  it('does not list files without a hooks key and skips missing or corrupt files', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'wooi-hooks-empty-'))
+    const settingsDir = join(cwd, '.claude')
+    mkdirSync(settingsDir)
+    writeFileSync(join(settingsDir, 'settings.json'), JSON.stringify({ permissions: {} }))
+    writeFileSync(join(settingsDir, 'settings.local.json'), '{ nope')
+
+    const result = readHooks(config(cwd))
+    if (result.kind !== 'hooks') throw new Error('hooks 결과가 아니다')
+    expect(result.hooks.sources).not.toContain(join(settingsDir, 'settings.json'))
+    expect(result.hooks.sources).not.toContain(join(settingsDir, 'settings.local.json'))
+  })
+})
+
+describe('mapSkills', () => {
+  it('dedupes by name, keeps the first hint, and classifies each source', () => {
+    const raw: SlashCommand[] = [
+      {
+        name: 'wiki-ingest:wiki-ask',
+        description: '(wiki-ingest) Ask the wiki',
+        argumentHint: '<question>'
+      },
+      {
+        name: 'wiki-ingest:wiki-ask',
+        description: '(wiki-ingest) Longer duplicate description',
+        argumentHint: ''
+      },
+      { name: 'humanize-korean', description: 'Polish Korean text (user)', argumentHint: '' },
+      { name: 'code-review', description: 'Review code changes', argumentHint: '[path]' }
+    ]
+
+    expect(mapSkills(raw)).toEqual([
+      {
+        name: 'wiki-ingest:wiki-ask',
+        description: 'Ask the wiki',
+        argumentHint: '<question>',
+        source: 'plugin'
+      },
+      { name: 'humanize-korean', description: 'Polish Korean text', source: 'user' },
+      {
+        name: 'code-review',
+        description: 'Review code changes',
+        argumentHint: '[path]',
+        source: 'builtin'
+      }
+    ])
+  })
+})
+
+describe('mapStatus', () => {
+  const init = {
+    commands: [],
+    agents: [],
+    output_style: 'default',
+    available_output_styles: [],
+    models: [],
+    account: {},
+    fast_mode_state: 'on'
+  } as Parameters<typeof mapStatus>[0]
+  const account = {
+    email: 'dev@example.com',
+    organization: 'Wooi',
+    subscriptionType: 'Claude Max',
+    apiProvider: 'firstParty'
+  } as Parameters<typeof mapStatus>[1]
+
+  it('never exposes fast mode state from a short-lived query', () => {
+    const status = mapStatus(init, account, config('/worktree'), false)
+    expect(status.fastMode).toBeNull()
+    expect(status.live).toBe(false)
+  })
+
+  it('uses live fast mode state and workspace fields from SessionConfig', () => {
+    const status = mapStatus(init, account, config('/worktree'), true)
+    expect(status.fastMode).toEqual({ state: 'on' })
+    expect(status.workspace).toEqual({
+      cwd: '/worktree',
+      model: 'claude-opus-4-1',
+      effort: 'high',
+      fastMode: true,
+      permissionMode: 'acceptEdits'
+    })
+    expect(status.sessionId).toBe('session-from-config')
   })
 })
