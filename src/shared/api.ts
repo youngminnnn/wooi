@@ -164,6 +164,8 @@ export interface WooiApi {
     deliverPeerMessage(workspaceId: string, messageId: string): Promise<void>
     /** 대기 중인 peer 메시지를 버린다. 전달되지 않고, 발신 워크스페이스는 답을 받지 못한다. */
     dismissPeerMessage(workspaceId: string, messageId: string): Promise<void>
+    /** `await_stacked_work` 가 예약한 자동 깨움을 취소한다. */
+    cancelStackedWait(workspaceId: string): Promise<void>
     /** 다른 워크스페이스에서 오는 메시지를 받는 방식. 기본은 'hold'(승인 후 전달). */
     setPeerInbound(workspaceId: string, policy: PeerInboundPolicy): Promise<void>
     setPermissionMode(workspaceId: string, mode: PermissionMode): Promise<void>

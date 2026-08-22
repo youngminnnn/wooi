@@ -7,6 +7,7 @@ import { createWorkspace } from '../../workspaces'
 import { resolveRequestedAgentOptions } from './agentOptions'
 import { deliverOrHold } from './peer'
 import type { AgentToolHandler } from './registry'
+import { stackedWaits } from '../../stackedWait'
 import { resolveTargetWorkspace } from './target'
 
 /**
@@ -199,6 +200,8 @@ export const reportToParent: AgentToolHandler = async (deps, workspaceId, args) 
   }
   deps.postToTranscript(parentId, item)
   deps.broadcastState()
+  // 부모가 이 보고를 기다리고 있으면 즉시 재평가한다. 없으면 no-op 이다.
+  stackedWaits.poke(parentId)
 
   return {
     reportedTo: { workspaceId: parentId, branch: parent.branch },

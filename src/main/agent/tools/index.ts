@@ -1,4 +1,5 @@
 import { switchToAgentTeam } from './agentTeam'
+import { awaitStackedWork } from './awaitStackedWork'
 import {
   listWorkspacePeers,
   listWorkspacePeersExternal,
@@ -60,4 +61,5 @@ export function initAgentTools(deps: AgentToolDeps): void {
   registerAgentTool('create_workspace', createIndependentWorkspace)
   registerAgentTool('archive_workspace', archiveWorkspaceTool)
   registerAgentTool('switch_to_agent_team', switchToAgentTeam)
+  registerAgentTool('await_stacked_work', awaitStackedWork)
 }

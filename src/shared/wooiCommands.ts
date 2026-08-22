@@ -283,6 +283,15 @@ export const WOOI_COMMANDS: WooiCommandSpec[] = [
     description: 'Archive a workspace created from here',
     argumentHint: '<workspace id>',
     prompt: 'Call `mcp__wooi__archive_workspace` to archive the workspace with id: $ARGUMENTS'
+  },
+  {
+    name: 'await',
+    tool: 'await_stacked_work',
+    mode: 'direct',
+    description: 'Wait without spending tokens for stacked workspace reports',
+    argumentHint: '[workspace ids…]',
+    prompt:
+      'Call `mcp__wooi__await_stacked_work` to wait for these child workspace ids (omit the list to wait for all): $ARGUMENTS'
   }
 ]
 
@@ -350,6 +359,11 @@ export function parseWooiCommandArgs(name: string, raw: string): WooiCommandArgs
     case 'peers':
     case 'repos':
       return { args: {} }
+
+    case 'await': {
+      const workspaceIds = words(rest)
+      return { args: workspaceIds.length ? { workspaceIds } : {} }
+    }
 
     case 'related': {
       const paths = words(rest)
