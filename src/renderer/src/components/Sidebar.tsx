@@ -91,6 +91,7 @@ export default function Sidebar({
   width,
   onNewWorkspace,
   onNewFromIssue,
+  onNewFromPr,
   onFanout,
   onStackWorkspace,
   onOpenQuickSwitch
@@ -98,6 +99,7 @@ export default function Sidebar({
   width: number
   onNewWorkspace: (repoId: string, agentBackend?: AgentBackendId) => void
   onNewFromIssue: (repoId: string) => void
+  onNewFromPr: (repoId: string) => void
   /** 같은 프롬프트를 후보 여럿에게 뿌리는 생성 모달을 연다. */
   onFanout: (repoId: string, agentBackend?: AgentBackendId) => void
   onStackWorkspace: (
@@ -414,6 +416,7 @@ export default function Sidebar({
                   repoId={repo.id}
                   onNewWorkspace={onNewWorkspace}
                   onNewFromIssue={onNewFromIssue}
+                  onNewFromPr={onNewFromPr}
                   onFanout={onFanout}
                 />
               </div>
@@ -1663,11 +1666,13 @@ function NewWorkspaceButton({
   repoId,
   onNewWorkspace,
   onNewFromIssue,
+  onNewFromPr,
   onFanout
 }: {
   repoId: string
   onNewWorkspace: (repoId: string, agentBackend?: AgentBackendId) => void
   onNewFromIssue: (repoId: string) => void
+  onNewFromPr: (repoId: string) => void
   onFanout: (repoId: string, agentBackend?: AgentBackendId) => void
 }): React.JSX.Element {
   const backends = useAvailableBackends()
@@ -1709,6 +1714,12 @@ function NewWorkspaceButton({
     icon: <GithubMark size={12} />,
     onSelect: () => onNewFromIssue(repoId),
     separatorBefore: true
+  })
+  actions.push({
+    key: 'pr',
+    label: 'New from PR…',
+    icon: <GithubMark size={12} />,
+    onSelect: () => onNewFromPr(repoId)
   })
   // fan-out 은 "워크스페이스 하나 더" 가 아니라 "같은 질문을 여럿에게" 다. 그래도 만드는
   // 동작이므로 다른 진입점을 새로 만들지 않고 이 메뉴 안에 둔다 — 어떻게 시작하든 새

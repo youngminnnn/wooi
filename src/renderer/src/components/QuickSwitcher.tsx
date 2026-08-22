@@ -76,7 +76,7 @@ export default function QuickSwitcher({ onClose }: { onClose: () => void }): Rea
         branch: ws.branch,
         workspace: ws,
         shortcut: i < 9 ? i + 1 : undefined,
-        haystack: `${repo} ${label} ${ws.branch}`.toLowerCase()
+        haystack: `${repo} ${label} ${ws.branch} ${ws.prNumber ?? ''}`.toLowerCase()
       }
     })
     // Overview 도 같은 팔레트에서 닿게 해 둔다(활성 워크스페이스가 있을 때만 의미가 있다).
