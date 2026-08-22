@@ -566,7 +566,7 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
       return
     }
 
-    // /diff·/copy·/help·/clear·/memory 는 Wooi UI 에서 직접 처리한다(에이전트로 보내지 않는다).
+    // /diff·/copy·/help·/clear·/stop·/memory 는 Wooi UI 에서 직접 처리한다(에이전트로 보내지 않는다).
     // runLocal 이 입력창 텍스트를 알맞게 정리하므로(대부분 비우고, /help 만 '/' 로 메뉴를 띄움)
     // 여기서는 setText 를 호출하지 않는다.
     const local = images.length ? null : matchLocal(trimmed, workspace.agentBackend === 'claude')
@@ -753,7 +753,7 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
   }
 
   /**
-   * Wooi UI 에서 직접 처리하는 로컬 명령(/diff·/copy·/help·/clear·/memory). 에이전트로
+   * Wooi UI 에서 직접 처리하는 로컬 명령(/diff·/copy·/help·/clear·/stop·/memory). 에이전트로
    * 보내지 않고 앱 기능으로 매핑한다. 입력창 텍스트 정리도 여기서 한다(대부분 비우고, /help 만
    * 자동완성 메뉴를 다시 띄우도록 '/' 를 남긴다).
    */
@@ -787,6 +787,13 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
     }
 
     setText('')
+    // /stop 은 Stop 버튼·Esc 와 같은 중단이다. 돌고 있지 않을 때 입력창만 비우면 명령이
+    // 먹혔는지 알 수 없으므로, 그때는 아무것도 멈추지 않았다고 말해 준다.
+    if (kind === 'stop') {
+      if (running) void window.api.chat.interrupt(workspace.id)
+      else pushToast('info', 'Nothing is running.')
+      return
+    }
     if (kind === 'diff') {
       // ChatView 가 가진 diff 모달을 연다(Composer 에서 직접 접근할 수 없어 이벤트로 신호한다).
       window.dispatchEvent(new CustomEvent('wooi:open-diff', { detail: workspace.id }))
@@ -1517,12 +1524,13 @@ function matchInteractive(
 }
 
 /** Wooi UI 가 직접 처리하는 로컬 명령(에이전트로 보내지 않음). */
-type LocalCommand = 'diff' | 'copy' | 'help' | 'clear' | 'memory' | 'add-dir'
+type LocalCommand = 'diff' | 'copy' | 'help' | 'clear' | 'stop' | 'memory' | 'add-dir'
 const LOCAL_COMMANDS: readonly LocalCommand[] = [
   'diff',
   'copy',
   'help',
   'clear',
+  'stop',
   'memory',
   'add-dir'
 ]
