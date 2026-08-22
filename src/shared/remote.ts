@@ -257,6 +257,14 @@ export const REMOTE_IPC = {
   /** 생존 확인. `[]` */
   ping: 'remote:ping',
   /**
+   * 첨부 1개의 조각을 올린다. `[uploadId, index, total, chunkBase64]`
+   *
+   * 결과를 기다리지 않아도 되게 설계했다 — 폰은 조각을 순서대로 **꽂아만 두고** 곧바로
+   * `chat:send` 를 보낸다. 랩탑은 명령을 created_at 순서로 처리하므로 조각이 먼저 도착하고,
+   * 빠진 조각이 있으면 그 사실은 `chat:send` 의 오류로 한 번에 드러난다.
+   */
+  upload: 'remote:upload',
+  /**
    * 폰이 스스로 페어링을 끊는다. `[]` — 브리지는 **명령을 보낸 그 기기만** revoke 하므로
    * 인자를 받지 않는다(기기 id 를 인자로 받으면 폰이 다른 폰을 끊을 수 있게 된다).
    */
@@ -287,6 +295,151 @@ export const REMOTE_MAX_PROMPT_BYTES = 32 * 1024
  * 볼 수 없지만, 앞 200KiB 를 보내면 거의 다 읽을 수 있다.
  */
 export const REMOTE_TRUNCATED_MARK = '\n…[truncated — open on desktop to see the rest]'
+
+// ── 첨부 ──────────────────────────────────────────────────────────────────
+//
+// 폰은 첨부를 **명령 여러 건으로 쪼개서** 올린다. 릴레이의 `commands.payload_ct` 는 64KiB
+// 하드 제약이라(0001_init.sql) 사진 한 장이 명령 하나에 들어가지 않는데, 그 상한은 남용 시
+// 저장량의 곱셈 인자라서 올릴 자리가 아니다. 대신 이미 있는 상한과 레이트리밋(기기당 30건/분)
+// 안에서 논다 — 릴레이 스키마를 건드리지 않으므로 이미 배포된 프로젝트에 그대로 얹힌다.
+//
+// 흐름: `remote:upload` × N → `chat:send` 가 그 묶음을 uploadId 로 가리킨다. 랩탑은 조각을
+// 모아 두었다가 chat:send 에서 꺼내 쓰고, 못 쓴 것은 시간이 지나면 버린다.
+
+/**
+ * 청크 1개에 담는 **원본** 바이트 수.
+ *
+ * base64 는 4/3 로 부풀고(45,000 → 60,000자) 그 위에 JSON 봉투와 AEAD 태그가 얹힌다.
+ * 그래도 64KiB 암호문 상한까지 5KiB 남으므로, 파일명이나 seq 가 길어져도 넘치지 않는다.
+ */
+export const REMOTE_UPLOAD_CHUNK_BYTES = 45_000
+
+/** 첨부 1개의 최대 크기(원본 바이트). */
+export const REMOTE_MAX_ATTACHMENT_BYTES = 512 * 1024
+
+/**
+ * 한 번의 전송에 실을 수 있는 첨부 총합(원본 바이트).
+ *
+ * 768KiB ≈ 18청크다. 기기당 분당 30건 제한에서 watch(40초에 1건)와 chat:send 를 빼고도
+ * 남는 만큼으로 잡았다 — 상한을 꽉 채우면 전송 자체가 레이트리밋에 걸려 실패한다.
+ */
+export const REMOTE_MAX_ATTACHMENT_TOTAL_BYTES = 768 * 1024
+
+/** 한 번의 전송에 실을 수 있는 첨부 개수. */
+export const REMOTE_MAX_ATTACHMENTS = 5
+
+/** 첨부 표시 이름의 최대 길이. */
+export const REMOTE_MAX_ATTACHMENT_NAME_LENGTH = 96
+
+/**
+ * 랩탑이 미완성 업로드를 들고 있는 시간(ms).
+ *
+ * 명령 자체의 신선도(5분)와 같게 둔다 — 그보다 오래된 조각은 짝이 될 `chat:send` 가 이미
+ * 만료로 거절되므로 메모리에 남겨 둘 이유가 없다.
+ */
+export const REMOTE_UPLOAD_TTL_MS = 5 * 60_000
+
+/** 업로드 1건이 가질 수 있는 최대 청크 수(크기 상한에서 파생 — 별도로 정하지 않는다). */
+export const REMOTE_UPLOAD_MAX_CHUNKS = Math.ceil(
+  REMOTE_MAX_ATTACHMENT_BYTES / REMOTE_UPLOAD_CHUNK_BYTES
+)
+
+/**
+ * 모델에 **인라인 이미지로** 실어 보낼 미디어 타입. types.ts 의 `ImageMediaType` 과 같은
+ * 집합이다(그쪽을 여기서 import 할 수는 없다 — 이 파일은 import 를 갖지 않는다).
+ */
+export const REMOTE_IMAGE_MEDIA_TYPES = [
+  'image/png',
+  'image/jpeg',
+  'image/gif',
+  'image/webp'
+] as const
+
+export type RemoteImageMediaType = (typeof REMOTE_IMAGE_MEDIA_TYPES)[number]
+
+export function isRemoteImageMediaType(value: string): value is RemoteImageMediaType {
+  return (REMOTE_IMAGE_MEDIA_TYPES as readonly string[]).includes(value)
+}
+
+/**
+ * 이미지가 아닌 첨부로 받을 확장자.
+ *
+ * **미디어 타입이 아니라 확장자로 판단한다.** 문서 선택기가 돌려주는 mimeType 은 플랫폼마다
+ * 다르고 비어 있기도 한데(iOS 는 `public.item` 을, 안드로이드는 `application/octet-stream` 을
+ * 주기도 한다), 정작 랩탑에서 파일을 여는 도구는 확장자를 본다. 신뢰할 수 있는 쪽을 기준으로
+ * 삼는 편이 낫다.
+ *
+ * 목록을 명시적으로 두는 이유는 이것이 곧 **랩탑 디스크에 쓰이는 파일의 종류**이기 때문이다.
+ * 실행 가능한 확장자를 여기 넣지 않는다.
+ */
+export const REMOTE_FILE_EXTENSIONS = [
+  'pdf',
+  'txt',
+  'md',
+  'markdown',
+  'csv',
+  'tsv',
+  'json',
+  'jsonl',
+  'log',
+  'yml',
+  'yaml',
+  'toml',
+  'ini',
+  'xml',
+  'html',
+  'css',
+  'scss',
+  'js',
+  'jsx',
+  'mjs',
+  'cjs',
+  'ts',
+  'tsx',
+  'py',
+  'rb',
+  'go',
+  'rs',
+  'java',
+  'kt',
+  'swift',
+  'c',
+  'h',
+  'cc',
+  'cpp',
+  'hpp',
+  'cs',
+  'php',
+  'sql',
+  'graphql',
+  'proto',
+  'diff',
+  'patch'
+] as const
+
+/** 파일명에서 소문자 확장자를 뽑는다. 없거나 목록에 없으면 null. */
+export function remoteFileExtension(name: string): string | null {
+  const dot = name.lastIndexOf('.')
+  if (dot <= 0 || dot === name.length - 1) return null
+  const ext = name.slice(dot + 1).toLowerCase()
+  return (REMOTE_FILE_EXTENSIONS as readonly string[]).includes(ext) ? ext : null
+}
+
+/**
+ * `chat:send` 에 실리는 첨부 1개. **본문은 들어 있지 않다** — 바이트는 이미 `remote:upload`
+ * 로 따로 올라갔고 여기서는 `uploadId` 로 가리키기만 한다.
+ */
+export interface RemoteAttachment {
+  /** 이 첨부의 조각들을 묶는 id. 폰이 만든다. */
+  uploadId: string
+  /** 표시 이름 겸 랩탑에 쓰일 파일명. 랩탑이 다시 한 번 정제한다. */
+  name: string
+  /**
+   * 미디어 타입. 이미지 집합에 속하면 인라인 이미지로, 아니면 확장자를 보고 파일로 다룬다.
+   * 파일 쪽에서는 참고값일 뿐이라 신뢰하지 않는다.
+   */
+  mediaType: string
+}
 
 // ── 명령 봉투 ─────────────────────────────────────────────────────────────
 

@@ -1,8 +1,15 @@
 import { IPC } from '@shared/types'
 import {
   REMOTE_IPC,
+  REMOTE_MAX_ATTACHMENT_NAME_LENGTH,
+  REMOTE_MAX_ATTACHMENTS,
   REMOTE_MAX_PROMPT_BYTES,
   REMOTE_TRANSCRIPT_MAX_LIMIT,
+  REMOTE_UPLOAD_CHUNK_BYTES,
+  REMOTE_UPLOAD_MAX_CHUNKS,
+  isRemoteImageMediaType,
+  remoteFileExtension,
+  type RemoteAttachment,
   type RemoteTranscriptQuery
 } from '@shared/remote'
 
@@ -129,20 +136,91 @@ function validateSetPermissionMode(args: readonly unknown[]): unknown[] {
   return [workspaceId, mode]
 }
 
+/**
+ * `chat:send` — 세 번째 인자는 **본문 없는 첨부 명세**다.
+ *
+ * base64 본문을 여기서 받지 않는 이유는 릴레이가 명령 하나에 64KiB 밖에 싣지 못하기 때문이다.
+ * 바이트는 `remote:upload` 로 미리 올라가 있고, 여기서는 그것을 가리키는 id 만 검증한다
+ * (브리지가 조각을 모아 실제 첨부로 바꾼다 — remote/uploads.ts).
+ */
 function validateChatSend(args: readonly unknown[]): unknown[] {
-  // 이미지 첨부는 MVP 에서 받지 않는다 — base64 본문이 릴레이 예산을 삼키고,
-  // 검증할 표면(미디어 타입·크기·디코딩)이 통째로 늘어난다.
-  expectArity(args, 2)
+  expectArity(args, 2, 3)
   const workspaceId = asWorkspaceId(args[0])
   const text = args[1]
   if (typeof text !== 'string') fail('text must be a string')
-  if (text.trim().length === 0) fail('text must not be blank')
   const bytes = byteLength(text)
   if (bytes > REMOTE_MAX_PROMPT_BYTES) {
     fail(`text is ${bytes} bytes, limit is ${REMOTE_MAX_PROMPT_BYTES}`)
   }
-  // 세 번째 인자(images)를 명시적으로 넘기지 않는다 — 핸들러가 undefined 를 받게 한다.
-  return [workspaceId, text]
+
+  const raw = args[2]
+  // 첨부를 명시적으로 넘기지 않으면 세 번째 인자 자체를 빼서 핸들러가 undefined 를 받게 한다.
+  if (raw === undefined) {
+    if (text.trim().length === 0) fail('text must not be blank')
+    return [workspaceId, text]
+  }
+  if (!Array.isArray(raw)) fail('attachments must be an array')
+  if (raw.length === 0) {
+    if (text.trim().length === 0) fail('text must not be blank')
+    return [workspaceId, text]
+  }
+  if (raw.length > REMOTE_MAX_ATTACHMENTS) {
+    fail(`too many attachments (${raw.length}), limit is ${REMOTE_MAX_ATTACHMENTS}`)
+  }
+  // 첨부만 보내는 것은 허용한다 — 데스크톱 컴포저도 이미지만 있으면 빈 본문으로 보낸다.
+  const attachments = raw.map(asAttachment)
+  const ids = new Set(attachments.map((attachment) => attachment.uploadId))
+  if (ids.size !== attachments.length) fail('attachments must not repeat an uploadId')
+  return [workspaceId, text, attachments]
+}
+
+function asAttachment(value: unknown): RemoteAttachment {
+  if (!isPlainObject(value)) fail('attachment must be an object')
+  const uploadId = asUploadId(value.uploadId)
+  const { name, mediaType } = value
+  if (typeof name !== 'string' || name.length === 0)
+    fail('attachment name must be a non-empty string')
+  if (name.length > REMOTE_MAX_ATTACHMENT_NAME_LENGTH) {
+    fail(`attachment name is longer than ${REMOTE_MAX_ATTACHMENT_NAME_LENGTH} chars`)
+  }
+  if (typeof mediaType !== 'string') fail('attachment mediaType must be a string')
+  // 이미지가 아니면 확장자로 판단한다 — 그 목록이 곧 랩탑 디스크에 쓰일 수 있는 파일의 전부다.
+  if (!isRemoteImageMediaType(mediaType) && remoteFileExtension(name) === null) {
+    fail(`"${name}" (${mediaType}) is not an accepted attachment type`)
+  }
+  return { uploadId, name, mediaType }
+}
+
+function asUploadId(value: unknown): string {
+  // 파일명이나 경로가 아니라 **불투명한 id** 다. 좁게 받아 두면 어디에 쓰이든 안전하다.
+  if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{8,64}$/.test(value)) {
+    fail('uploadId must be 8..64 chars of [A-Za-z0-9_-]')
+  }
+  return value
+}
+
+/** `remote:upload` — 첨부 조각 1개. `[uploadId, index, total, chunkBase64]` */
+function validateUpload(args: readonly unknown[]): unknown[] {
+  expectArity(args, 4)
+  const uploadId = asUploadId(args[0])
+  const index = args[1]
+  const total = args[2]
+  const chunk = args[3]
+  if (!Number.isInteger(index) || (index as number) < 0)
+    fail('index must be a non-negative integer')
+  if (
+    !Number.isInteger(total) ||
+    (total as number) < 1 ||
+    (total as number) > REMOTE_UPLOAD_MAX_CHUNKS
+  ) {
+    fail(`total must be an integer in 1..${REMOTE_UPLOAD_MAX_CHUNKS}`)
+  }
+  if ((index as number) >= (total as number)) fail('index must be less than total')
+  if (typeof chunk !== 'string' || chunk.length === 0) fail('chunk must be a non-empty string')
+  // base64 는 원본의 4/3 로 부푼다. 문자 집합까지 좁혀서 잘못된 본문이 디코딩까지 가지 않게 한다.
+  if (chunk.length > Math.ceil(REMOTE_UPLOAD_CHUNK_BYTES / 3) * 4) fail('chunk is too large')
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(chunk)) fail('chunk must be base64')
+  return [uploadId, index, total, chunk]
 }
 
 function validateTranscript(args: readonly unknown[]): unknown[] {
@@ -210,6 +288,9 @@ export const REMOTE_COMMANDS: ReadonlyMap<string, RemoteCommandSpec> = new Map<
   [REMOTE_IPC.ping, { validate: validateNoArgs, mutating: false }],
 
   // 쓰기
+  // 첨부 조각. 랩탑 메모리에만 쌓이고 chat:send 가 꺼내 가므로 부작용이 있는 쪽으로 센다
+  // (= 감사 로그에 남는다). 실제 부작용은 그것을 가리키는 chat:send 가 일으킨다.
+  [REMOTE_IPC.upload, { validate: validateUpload, mutating: true }],
   [IPC.chatSend, { validate: validateChatSend, mutating: true }],
   [IPC.chatInterrupt, { validate: validateWorkspaceIdOnly, mutating: true }],
   [IPC.permissionRespond, { validate: validatePermissionRespond, mutating: true }],

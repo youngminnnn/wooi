@@ -7,6 +7,7 @@ import {
   REMOTE_COMMAND_FAILED,
   REMOTE_IPC,
   REMOTE_TRUNCATED_MARK,
+  type RemoteAttachment,
   type RemoteCommandPayload,
   type RemoteCommandResult,
   type RemoteTranscriptQuery
@@ -20,6 +21,7 @@ import { validateRemoteCommand } from './allowlist'
 import { fromPgBytea, toPgBytea } from './bytea'
 import type { RemoteKeystore } from './keystore'
 import { pendingPermissions } from './permissions'
+import { RemoteUploads, resolveRemoteAttachments } from './uploads'
 
 const FRESHNESS_MS = 5 * 60_000
 export const REMOTE_WATCH_TTL_MS = 60_000
@@ -64,10 +66,12 @@ export class RemoteCommandBridge {
   private draining: Promise<void> | null = null
   private rerun = false
   private readonly watches = new Map<string, WatchLease>()
+  private readonly uploads: RemoteUploads
 
   constructor(options: RemoteCommandBridgeOptions) {
     this.options = options
     this.now = options.now ?? Date.now
+    this.uploads = new RemoteUploads(this.now)
     const logDir = join(app.getPath('userData'), 'logs')
     mkdirSync(logDir, { recursive: true })
     this.auditPath = join(logDir, 'remote.log')
@@ -85,6 +89,7 @@ export class RemoteCommandBridge {
   dispose(): void {
     this.disposed = true
     this.watches.clear()
+    this.uploads.clear()
     const channel = this.channel
     this.channel = null
     if (channel) void this.options.supabase().removeChannel(channel)
@@ -245,12 +250,45 @@ export class RemoteCommandBridge {
     if (channel === REMOTE_IPC.transcript) {
       return transcriptPage(args[0] as string, args[1] as RemoteTranscriptQuery)
     }
+    if (channel === REMOTE_IPC.upload) {
+      return this.uploads.chunk(
+        deviceId,
+        args[0] as string,
+        args[1] as number,
+        args[2] as number,
+        args[3] as string
+      )
+    }
     if (channel === REMOTE_IPC.unpairSelf) {
       this.watches.delete(deviceId)
+      this.uploads.forget(deviceId)
       await this.options.onUnpairSelf?.(deviceId)
       return { unpaired: true }
     }
+    if (channel === IPC.chatSend && args.length === 3) {
+      return await invokeCommand(channel, this.withAttachments(deviceId, args))
+    }
     return await invokeCommand(channel, args)
+  }
+
+  /**
+   * 첨부 명세를 실제 첨부로 바꾼다. 이미지는 모델에 인라인으로 실리고, 나머지는 디스크에
+   * 떨어진 뒤 `@경로` 로 본문 끝에 붙는다(uploads.ts).
+   *
+   * 조각이 하나라도 비면 여기서 throw 해서 전송 자체를 실패시킨다 — 첨부가 조용히 빠진 채로
+   * 프롬프트만 가면, 사용자는 보낸 줄 알고 엉뚱한 답을 받는다.
+   */
+  private withAttachments(deviceId: string, args: unknown[]): unknown[] {
+    const workspaceId = args[0] as string
+    const text = args[1] as string
+    const { images, mentions } = resolveRemoteAttachments(
+      this.uploads,
+      deviceId,
+      workspaceId,
+      args[2] as RemoteAttachment[]
+    )
+    const prompt = [text.trim(), ...mentions].filter((part) => part.length > 0).join(' ')
+    return [workspaceId, prompt, images.length > 0 ? images : undefined]
   }
 
   private async reject(
@@ -486,6 +524,8 @@ function failure(error: string): RemoteCommandResult {
  */
 function workspaceFrom(channel: string, args: unknown[]): string | null {
   if (channel === IPC.permissionRespond) return null
+  // 업로드의 첫 인자는 uploadId 다 — 워크스페이스로 읽으면 감사 로그가 거짓말을 한다.
+  if (channel === REMOTE_IPC.upload) return null
   return typeof args[0] === 'string' ? args[0] : null
 }
 

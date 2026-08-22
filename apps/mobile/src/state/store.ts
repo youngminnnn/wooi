@@ -1,7 +1,8 @@
 import { create } from 'zustand'
 import type { RemoteState } from '@shared/remote'
+import type { ChatAttachment } from '@shared/types'
 import type { StoredPairing } from '../storage/secure'
-import type { RemoteCommandChannel } from '../relay/client'
+import type { RemoteCommandChannel, RemoteCommandOptions } from '../relay/client'
 import { createDemoSession } from './demo'
 import { isPermissionRequest } from '../chat/questions'
 import type { UnpairOutcome } from './unpair'
@@ -22,6 +23,12 @@ export function isLaptopAway(seenAt: number | null, now: number = Date.now()): b
   return seenAt !== null && now - seenAt > LAPTOP_STALE_MS
 }
 
+export type RemoteCommandSender = (
+  channel: RemoteCommandChannel,
+  args: unknown[],
+  options?: RemoteCommandOptions
+) => Promise<unknown>
+
 interface RemoteStore {
   hydrated: boolean
   demo: boolean
@@ -33,7 +40,7 @@ interface RemoteStore {
   lastError: string | null
   unpairedReason: string | null
   refresh: (() => Promise<void>) | null
-  command: ((channel: RemoteCommandChannel, args: unknown[]) => Promise<unknown>) | null
+  command: RemoteCommandSender | null
   unpair: (() => Promise<UnpairOutcome>) | null
   activityRev: number
   enterDemo: () => void
@@ -47,12 +54,24 @@ interface RemoteStore {
   setLastError: (lastError: string | null) => void
   setUnpairedReason: (unpairedReason: string | null) => void
   setRefresh: (refresh: (() => Promise<void>) | null) => void
-  setCommand: (
-    command: ((channel: RemoteCommandChannel, args: unknown[]) => Promise<unknown>) | null
-  ) => void
+  setCommand: (command: RemoteCommandSender | null) => void
   setUnpair: (unpair: (() => Promise<UnpairOutcome>) | null) => void
   unpaired: (reason: string | null) => void
   bumpActivity: () => void
+}
+
+/** 데모 전송의 첨부를 트랜스크립트 칩으로 옮긴다. 본문은 어디에도 가지 않는다. */
+function demoAttachments(value: unknown): ChatAttachment[] | undefined {
+  if (!Array.isArray(value) || value.length === 0) return undefined
+  return value.map((item) => {
+    const attachment = item as { name?: unknown; mediaType?: unknown }
+    return {
+      name: typeof attachment.name === 'string' ? attachment.name : 'attachment',
+      mediaType: (typeof attachment.mediaType === 'string'
+        ? attachment.mediaType
+        : 'image/png') as ChatAttachment['mediaType']
+    }
+  })
 }
 
 export const useRemoteStore = create<RemoteStore>((set, get) => ({
@@ -73,6 +92,8 @@ export const useRemoteStore = create<RemoteStore>((set, get) => ({
     const session = createDemoSession()
     const command = async (channel: RemoteCommandChannel, args: unknown[]): Promise<unknown> => {
       if (channel === 'remote:watch' || channel === 'remote:ping') return null
+      // 데모에는 랩탑이 없다 — 조각을 받아 줄 곳도 없으니 그냥 삼킨다.
+      if (channel === 'remote:upload') return null
       if (channel === 'remote:transcript') {
         const workspaceId = args[0]
         const query = args[1]
@@ -148,7 +169,13 @@ export const useRemoteStore = create<RemoteStore>((set, get) => ({
         const timestamp = Date.now()
         const items = session.transcripts.get(workspaceId) ?? []
         items.push(
-          { id: `demo-user-${timestamp}`, type: 'user', text: prompt, ts: timestamp },
+          {
+            id: `demo-user-${timestamp}`,
+            type: 'user',
+            text: prompt,
+            ts: timestamp,
+            attachments: demoAttachments(args[2])
+          },
           {
             id: `demo-assistant-${timestamp}`,
             type: 'assistant',
