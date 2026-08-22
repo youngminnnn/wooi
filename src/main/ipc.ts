@@ -53,6 +53,7 @@ import {
   getPrStatus,
   getPrChecks,
   getPrMeta,
+  getPrHeadSha,
   createPrWeb,
   mergePr,
   closePr,
@@ -67,6 +68,7 @@ import {
   getIssueBody,
   fetchOwnerAvatarDataUrl
 } from './github'
+import { planMergeTrain, runMergeTrain, type TrainLayer } from './mergeTrain'
 import { ReviewManager } from './review/manager'
 import { resolveStackForPr } from './review/stackResolve'
 import type { ReviewVerdict, TranscriptSearchResult } from '@shared/types'
@@ -165,6 +167,8 @@ import type {
   StackOpProgress,
   StackedBranch,
   StackSyncPlan,
+  StackTrainPlan,
+  StackTrainResult,
   UpdateFromBaseResult,
   Workspace
 } from '@shared/types'
@@ -200,6 +204,15 @@ interface IpcContext {
 export function registerIpc(ctx: IpcContext): void {
   const store = getStore()
   const { dispatch } = ctx
+  const mergeTrainPlans = new Map<
+    string,
+    {
+      branches: string[]
+      headShas: Record<string, string | null>
+      plannedAt: number
+      mergeableCount: number
+    }
+  >()
 
   /**
    * 전체 상태 스냅샷을 방송한다.
@@ -1931,6 +1944,155 @@ export function registerIpc(ctx: IpcContext): void {
 
     return { steps }
   }
+
+  /**
+   * 트레인은 뿌리부터 현재 워크스페이스까지의 선형 경로만 훑는다. 위층까지 삼키면 사용자가
+   * 보고 있지 않은 PR 이 머지된다. 모델 A 의 DFS 트리 목록은 형제까지 섞으므로 여기서는 쓰지 않는다.
+   */
+  const resolveMergeTrainLayers = (workspaceId: string): TrainLayer[] => {
+    const all = store.getState().workspaces
+    const ws = all.find((w) => w.id === workspaceId)
+    if (!ws || ws.archived) return []
+    if (isBranchStack(ws)) {
+      const stack = workspaceStack(ws)
+      const current = stack.findIndex((entry) => entry.branch === ws.branch)
+      if (current < 0) return []
+      return stack.slice(0, current + 1).map((entry) => ({
+        workspaceId: ws.id,
+        worktreePath: ws.worktreePath,
+        branch: entry.branch,
+        prNumber: entry.prNumber
+      }))
+    }
+
+    const byId = new Map(all.map((item) => [item.id, item]))
+    const chain: Workspace[] = []
+    const seen = new Set<string>()
+    let cursor: Workspace | undefined = ws
+    while (cursor && !seen.has(cursor.id)) {
+      seen.add(cursor.id)
+      chain.push(cursor)
+      cursor = cursor.parentWorkspaceId ? byId.get(cursor.parentWorkspaceId) : undefined
+    }
+    return chain.reverse().map((item) => ({
+      workspaceId: item.id,
+      worktreePath: item.worktreePath,
+      branch: item.branch,
+      prNumber: item.prNumber
+    }))
+  }
+
+  const trainDeps = {
+    getPrStatus,
+    getPrMeta,
+    getPrHeadSha,
+    isWorktreeClean,
+    detectRemoteDivergence,
+    mergePr,
+    runCascade: runMergeCascade,
+    sleep: (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
+  }
+
+  const forcePushesForPlan = (
+    workspaceId: string,
+    layers: TrainLayer[],
+    plan: StackTrainPlan
+  ): string[] => {
+    const ws = store.getState().workspaces.find((item) => item.id === workspaceId)
+    if (!ws || plan.mergeableCount === 0) return []
+    const blockedIndex = plan.layers.findIndex((layer) => layer.blockedReason !== null)
+    const prefixLength = blockedIndex < 0 ? plan.layers.length : blockedIndex
+    const merging = new Set(
+      plan.layers
+        .slice(0, prefixLength)
+        .filter((layer) => layer.state !== 'merged')
+        .map((layer) => layer.branch)
+    )
+    if (isBranchStack(ws)) {
+      const stack = workspaceStack(ws)
+      const bottom = stack.findIndex((entry) => merging.has(entry.branch))
+      return bottom < 0 ? [] : stack.slice(bottom + 1).map((entry) => entry.branch)
+    }
+    const all = store.getState().workspaces
+    const branches: string[] = []
+    for (const layer of layers) {
+      if (!merging.has(layer.branch)) continue
+      for (const child of all.filter(
+        (item) => item.parentWorkspaceId === layer.workspaceId && !item.archived
+      )) {
+        if (!branches.includes(child.branch)) branches.push(child.branch)
+      }
+    }
+    return branches
+  }
+
+  handle(IPC.stackTrainPlan, async (_e, workspaceId: string): Promise<StackTrainPlan> => {
+    const ws = store.getState().workspaces.find((item) => item.id === workspaceId)
+    const layers = resolveMergeTrainLayers(workspaceId)
+    if (!ws || ws.archived) {
+      return {
+        layers: [],
+        mergeableCount: 0,
+        forcePushCount: 0,
+        forcePushBranches: [],
+        error: 'Workspace not found.'
+      }
+    }
+    if (layers.length < 2) {
+      return {
+        layers: [],
+        mergeableCount: 0,
+        forcePushCount: 0,
+        forcePushBranches: [],
+        error: 'A merge train needs at least two layers.'
+      }
+    }
+    const first = await planMergeTrain({ layers, forcePushBranches: [] }, trainDeps)
+    const forcePushBranches = forcePushesForPlan(workspaceId, layers, first)
+    const plan = { ...first, forcePushBranches, forcePushCount: forcePushBranches.length }
+    mergeTrainPlans.set(workspaceId, {
+      branches: layers.map((layer) => layer.branch),
+      headShas: plan.headShas,
+      plannedAt: Date.now(),
+      mergeableCount: plan.mergeableCount
+    })
+    const { headShas: _headShas, ...publicPlan } = plan
+    return publicPlan
+  })
+
+  handle(
+    IPC.stackTrainRun,
+    async (_e, workspaceId: string, method: PrMergeMethod): Promise<StackTrainResult> => {
+      const remembered = mergeTrainPlans.get(workspaceId)
+      const layers = resolveMergeTrainLayers(workspaceId)
+      if (
+        !remembered ||
+        remembered.branches.join('\0') !== layers.map((layer) => layer.branch).join('\0')
+      ) {
+        return {
+          mergedPrs: [],
+          steps: [],
+          stoppedAt: null,
+          error: 'Plan the merge train before running it.'
+        }
+      }
+      const operation = stackProgress(workspaceId, 'train', remembered.mergeableCount)
+      try {
+        const result = await runMergeTrain(
+          { layers, method, expectedHeadShas: remembered.headShas },
+          trainDeps,
+          operation.sink
+        )
+        clearStackSync(workspaceId, true)
+        for (const layer of layers) await reconcileWorkspaceStack(layer.workspaceId)
+        broadcastState()
+        return result
+      } finally {
+        mergeTrainPlans.delete(workspaceId)
+        operation.finish()
+      }
+    }
+  )
 
   /**
    * PR 을 병합한다. 병합만 한다 — 스택 캐스케이드(리타겟·rebase·force-push)는 여기 딸려 오지 않는다.

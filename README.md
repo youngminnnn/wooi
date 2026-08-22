@@ -161,6 +161,8 @@ those chains itself with plain `git` and `gh` — no extra stacking CLI needed.
 - **Merge cascade** — when a parent PR merges, Wooi retargets each child PR's base to the
   grandparent branch and rebases the children onto it, so the rest of the stack stays
   valid instead of turning into a pile of conflicts.
+- **Merge train** — approve once to merge a stack bottom-to-top while Wooi retargets,
+  restacks, and safely force-pushes each remaining layer.
 - **Detected, not just declared** — if an agent builds a chain on its own with
   `git checkout -b` and `gh pr create`, Wooi reconstructs the stack from the PRs' base
   links and shows it the same way.

@@ -52,6 +52,8 @@ import type {
   PreviewIssueCountEvent,
   PreviewOpenEvent,
   PrMergeMethod,
+  StackTrainPlan,
+  StackTrainResult,
   PrStatus,
   Repo,
   RestackResult,
@@ -447,6 +449,13 @@ export interface WooiApi {
   }
 
   stack: {
+    /** 스택을 아래에서 위로 훑는 머지 트레인의 사전 점검. 아무것도 실행하지 않는다. */
+    trainPlan(workspaceId: string): Promise<StackTrainPlan>
+    /**
+     * 사전 점검한 트레인을 실행한다 — 머지 N 번과 force-push M 번이 이 호출 하나에 들어 있다.
+     * 반드시 사용자가 계획을 보고 승인한 뒤에만 호출한다.
+     */
+    trainRun(workspaceId: string, method: PrMergeMethod): Promise<StackTrainResult>
     /**
      * 부모 PR 병합으로 대기 중인 캐스케이드를 실행한다(어디서 병합했든 같은 경로).
      * 자식 브랜치를 rebase 후 force-push 하므로 반드시 사용자 승인 뒤에만 호출한다.

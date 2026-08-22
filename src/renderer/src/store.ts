@@ -21,6 +21,7 @@ import type {
   PaneKind,
   PaneState,
   PermissionRequest,
+  PrMergeMethod,
   PrStatus,
   RunningAgent,
   WorkspaceGoal,
@@ -30,6 +31,7 @@ import type {
   ScriptStatus,
   StackCascadeResult,
   StackOpProgress,
+  StackTrainResult,
   UpdateStatus,
   Workspace
 } from '@shared/types'
@@ -525,6 +527,12 @@ interface UIState {
   restackWorkspace: (workspaceId: string) => Promise<void>
   /** 외부 병합으로 대기 중인 스택 캐스케이드를 실행한다(rebase + force-push — 사용자 승인 후). */
   applyStackSync: (workspaceId: string) => Promise<void>
+  /** 한 번의 승인으로 스택을 아래부터 병합하고 뒤따르는 브랜치들을 다시 쓴다. */
+  runMergeTrain: (
+    workspaceId: string,
+    method: PrMergeMethod,
+    total: number
+  ) => Promise<StackTrainResult>
   /** 대기 중인 스택 캐스케이드 계획을 무시한다. */
   dismissStackSync: (workspaceId: string) => Promise<void>
   /** PR 병합으로 뜬 아카이브 제안을 해제한다(같은 병합은 다시 제안하지 않는다). */
@@ -2103,6 +2111,28 @@ export const useStore = create<UIState>((set, get) => ({
     else if (res.cascade) get().reportCascade(res.cascade, 'Stack synced.')
     void get().refreshGit(workspaceId)
     void get().refreshPr(workspaceId)
+  },
+
+  runMergeTrain: async (workspaceId, method, total) => {
+    const optimistic = optimisticStackProgress(workspaceId, 'train', total)
+    set((s) => ({ stackProgress: { ...s.stackProgress, [workspaceId]: optimistic } }))
+    const result = await window.api.stack.trainRun(workspaceId, method).catch((err) => ({
+      mergedPrs: [],
+      steps: [],
+      stoppedAt: null,
+      error: err instanceof Error ? err.message : String(err)
+    }))
+    // main 이 계획 만료처럼 스트림을 열기 전에 거절할 수 있다. 그때 우리가 넣은 객체만
+    // 동일성으로 걷어 내야, 이미 IPC 로 넘어온 실제 진행 상태를 뒤늦게 지우지 않는다.
+    set((s) =>
+      s.stackProgress[workspaceId] === optimistic
+        ? { stackProgress: { ...s.stackProgress, [workspaceId]: null } }
+        : {}
+    )
+    if (result.error) get().pushToast('error', `Merge train failed: ${result.error}`)
+    void get().refreshGit(workspaceId)
+    void get().refreshPr(workspaceId)
+    return result
   },
 
   dismissStackSync: async (workspaceId) => {

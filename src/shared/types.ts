@@ -2134,8 +2134,9 @@ export interface RestackResult {
  * - recover: base 브랜치가 삭제돼 GitHub 가 닫아 버린 자식 PR 을 되살림
  *   (base 브랜치 복원 → reopen → retarget → 발판 브랜치 정리).
  * - restack: 새 base 위로 rebase 하고 force-push.
+ * - merge: 머지 트레인이 이 층의 PR 을 병합함. 진행 UI 와 최종 결과에 같은 단계로 남긴다.
  */
-export type StackCascadeStepKind = 'retarget' | 'recover' | 'restack'
+export type StackCascadeStepKind = 'retarget' | 'recover' | 'restack' | 'merge'
 
 /** 캐스케이드 한 단계의 결과. 실패해도 다음 브랜치는 계속 시도하고, 결과를 모아 UI 로 올린다. */
 export interface StackCascadeStep {
@@ -2164,8 +2165,8 @@ export interface StackCascadeResult {
 
 export interface StackOpProgress {
   workspaceId: string
-  /** restack = 사용자가 직접 누른 rebase, sync = 부모 병합 후 캐스케이드. */
-  kind: 'restack' | 'sync'
+  /** restack = 사용자가 직접 누른 rebase, sync = 부모 병합 후 캐스케이드, train = 머지 트레인. */
+  kind: 'restack' | 'sync' | 'train'
   /** 예상 대상 브랜치 수. 모르면 null(단일 브랜치 restack). */
   total: number | null
   /** 끝난 단계들(순서대로). 실패·건너뜀도 담는다 — 조용히 삼키지 않는다. */
@@ -2175,6 +2176,36 @@ export interface StackOpProgress {
   /** 작업이 끝났는가. 렌더러가 스피너를 내리고 결과 줄만 남긴다. */
   finished: boolean
   startedAt: number
+}
+
+/** 머지 트레인이 훑을 층 하나. 아래→위 순서로 담긴다. */
+export interface StackTrainLayer {
+  branch: string
+  prNumber: number | null
+  state: PrState | null
+  /** 이 층에서 트레인이 멈추는 이유. null 이면 머지 가능. */
+  blockedReason: string | null
+}
+
+export interface StackTrainPlan {
+  layers: StackTrainLayer[]
+  /** 막히기 전까지 실제로 머지될 층 수. */
+  mergeableCount: number
+  /** 이 트레인이 force-push 할 브랜치 수(사용자에게 반드시 보여 준다). */
+  forcePushCount: number
+  /** 위 숫자의 실제 브랜치 이름들 — 확인 화면이 나열한다. */
+  forcePushBranches: string[]
+  /** 계획 자체를 세우지 못한 이유(워크스페이스 없음·GitHub 미연결 등). */
+  error?: string
+}
+
+export interface StackTrainResult {
+  mergedPrs: number[]
+  /** 모든 층의 단계를 이어 붙인다. 머지 단계도 빠뜨리지 않는다. */
+  steps: StackCascadeStep[]
+  stoppedAt: { branch: string; reason: string } | null
+  /** 실행을 시작조차 못 한 이유. */
+  error?: string
 }
 
 /**
@@ -2871,6 +2902,10 @@ export const IPC = {
   workspaceSwitchBranch: 'workspace:switchBranch',
   /** 외부에서 부모 PR 이 병합돼 생긴 대기 중 캐스케이드(stackSync)를 사용자 승인 후 실행한다. */
   stackSyncApply: 'stack:syncApply',
+  /** 머지 N 번과 force-push M 번을 한 승인에 묶기 전, 아무것도 실행하지 않고 계획한다. */
+  stackTrainPlan: 'stack:trainPlan',
+  /** 사용자가 확인한 계획대로 아래→위 머지 트레인을 실행한다. */
+  stackTrainRun: 'stack:trainRun',
   /** 대기 중 캐스케이드 계획을 무시하고 지운다. */
   stackSyncDismiss: 'stack:syncDismiss',
   /** 스택과 어긋난 PR 의 base 를 부모 브랜치로 되돌린다(gh pr edit --base). */
