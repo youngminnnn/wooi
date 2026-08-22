@@ -222,6 +222,8 @@ async function recoverClosedPr(
  */
 export async function cascadeRetarget(opts: {
   worktreePath: string
+  /** 이 worktreePath 를 소유한 워크스페이스. 모델 B 에서는 스택 전체가 그 worktree 에 머문다. */
+  workspaceId?: string
   mergedBranch: string
   newBase: string
   entries: StackedBranch[]
@@ -230,8 +232,9 @@ export async function cascadeRetarget(opts: {
   const { worktreePath, mergedBranch, newBase, entries } = opts
   const steps: StackCascadeStep[] = []
   const push = (step: StackCascadeStep): void => {
-    steps.push(step)
-    opts.progress?.step(step)
+    const stamped = opts.workspaceId ? { ...step, workspaceId: opts.workspaceId } : step
+    steps.push(stamped)
+    opts.progress?.step(stamped)
   }
 
   for (const e of entries) {
@@ -319,6 +322,8 @@ export async function cascadeRetarget(opts: {
  */
 export async function cascadeRestackBranchStack(opts: {
   worktreePath: string
+  /** 이 worktreePath 를 소유한 워크스페이스. 모델 B 에서는 스택 전체가 그 worktree 에 머문다. */
+  workspaceId?: string
   mergedBranch: string
   newBase: string
   /** 병합 브랜치 위 엔트리들(아래→위). */
@@ -330,20 +335,26 @@ export async function cascadeRestackBranchStack(opts: {
   const { worktreePath, mergedBranch, newBase, entries, allEntries } = opts
   if (!entries.length) return []
 
+  const steps: StackCascadeStep[] = []
+  const push = (step: StackCascadeStep): void => {
+    const stamped = opts.workspaceId ? { ...step, workspaceId: opts.workspaceId } : step
+    steps.push(stamped)
+    opts.progress?.step(stamped)
+  }
+
   const clean = await isWorktreeClean(worktreePath).catch(() => false)
   if (!clean) {
-    return entries.map((e) => {
+    for (const e of entries) {
       opts.progress?.start(e.branch, 'restack')
-      const step: StackCascadeStep = {
+      push({
         branch: e.branch,
         prNumber: e.prNumber,
         kind: 'restack',
         status: 'skipped',
         message: 'uncommitted changes in the worktree — rebase skipped, restack manually'
-      }
-      opts.progress?.step(step)
-      return step
-    })
+      })
+    }
+    return steps
   }
 
   const original = await currentBranch(worktreePath).catch(() => '')
@@ -355,11 +366,6 @@ export async function cascadeRestackBranchStack(opts: {
     if (sha) oldTip.set(e.branch, sha)
   }
 
-  const steps: StackCascadeStep[] = []
-  const push = (step: StackCascadeStep): void => {
-    steps.push(step)
-    opts.progress?.step(step)
-  }
   let halted: string | null = null
   // halted 와 따로 두는 이유: 충돌·에러는 워킹트리를 rebase 진행 상태로 남겨 원래 브랜치로
   // 되돌릴 수 없지만, 갈라짐은 아무것도 건드리지 않고 멈춘 것이라 되돌려 놓는 편이 낫다.

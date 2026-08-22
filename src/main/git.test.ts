@@ -11,8 +11,75 @@ import {
   summarizeBranch,
   getDiff,
   getStatus,
-  fetchRemoteForRepo
+  fetchRemoteForRepo,
+  rebaseConflictState
 } from './git'
+
+describe('rebaseConflictState', () => {
+  let root: string
+
+  const git = (cwd: string, args: string[], allowFailure = false): string => {
+    try {
+      return execFileSync('git', args, { cwd, encoding: 'utf-8' }).trim()
+    } catch (err) {
+      if (allowFailure) return ''
+      throw err
+    }
+  }
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'wooi-rebase-state-'))
+    git(root, ['init', '-q', '-b', 'main'])
+    git(root, ['config', 'user.email', 'test@example.com'])
+    git(root, ['config', 'user.name', 'test'])
+    writeFileSync(join(root, 'shared.txt'), 'base\n')
+    git(root, ['add', '-A'])
+    git(root, ['commit', '-qm', 'base'])
+  })
+
+  afterEach(() => rmSync(root, { recursive: true, force: true }))
+
+  const startConflictedRebase = (): void => {
+    git(root, ['checkout', '-qb', 'feature'])
+    writeFileSync(join(root, 'shared.txt'), 'feature\n')
+    git(root, ['commit', '-qam', 'feature'])
+    git(root, ['checkout', '-q', 'main'])
+    writeFileSync(join(root, 'shared.txt'), 'main\n')
+    git(root, ['commit', '-qam', 'main'])
+    git(root, ['checkout', '-q', 'feature'])
+    git(root, ['rebase', 'main'], true)
+  }
+
+  it('returns an empty inactive state outside a rebase', async () => {
+    await expect(rebaseConflictState(root)).resolves.toEqual({
+      rebasing: false,
+      branch: null,
+      conflictedFiles: []
+    })
+  })
+
+  it('finds files in a genuine conflicted rebase', async () => {
+    startConflictedRebase()
+    await expect(rebaseConflictState(root)).resolves.toEqual({
+      rebasing: true,
+      branch: 'feature',
+      conflictedFiles: ['shared.txt']
+    })
+  })
+
+  // 충돌을 stage 했어도 --continue 전까지 rebase 는 계속 진행 중이다. 해결을 맡길 대상은
+  // 사라졌지만 "rebase 중"이라는 사실은 남아야, UI 가 머지 충돌과 rebase 충돌을 가릴 수 있다.
+  it('stays in a rebase after conflicts are staged, with nothing left to resolve', async () => {
+    startConflictedRebase()
+    writeFileSync(join(root, 'shared.txt'), 'resolved\n')
+    git(root, ['add', 'shared.txt'])
+    await expect(rebaseConflictState(root)).resolves.toEqual({
+      rebasing: true,
+      branch: 'feature',
+      conflictedFiles: []
+    })
+  })
+})
 
 describe('getStatus base 해석', () => {
   let root: string

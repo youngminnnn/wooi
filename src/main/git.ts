@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { basename, join } from 'node:path'
+import { basename, isAbsolute, join, resolve } from 'node:path'
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { wooiHome } from './paths'
 import type {
@@ -34,6 +34,76 @@ async function gitTry(
       stdout: (err.stdout ?? '').toString().trim(),
       stderr: (err.stderr ?? '').toString().trim()
     }
+  }
+}
+
+const parseGitPathList = (output: string): string[] =>
+  output
+    .split('\n')
+    .map((path) => path.trim())
+    .filter(Boolean)
+
+/**
+ * 이 워크트리의 git 디렉터리. 워크트리에서는 `.git` 이 디렉터리가 아니라 `gitdir: <경로>` 한 줄이
+ * 든 파일이라 두 경우를 모두 풀어야 한다. 프로세스를 띄우지 않는 것이 요점이다 — 이 경로를 쓰는
+ * getStatus 는 15초 폴링에 얹혀 있어서, 워크스페이스마다 git 을 한 번 더 부르면 그대로 비용이 된다.
+ */
+function gitDirOf(worktreePath: string): string | null {
+  const dotGit = join(worktreePath, '.git')
+  try {
+    if (statSync(dotGit).isDirectory()) return dotGit
+    const found = /^gitdir:\s*(.+)$/m.exec(readFileSync(dotGit, 'utf-8'))?.[1]?.trim()
+    if (!found) return null
+    return isAbsolute(found) ? found : resolve(worktreePath, found)
+  } catch {
+    return null
+  }
+}
+
+/** 이 워크트리에 rebase 가 진행 중인지. 충돌 여부와는 무관하다. */
+function isRebasing(worktreePath: string): boolean {
+  const dir = gitDirOf(worktreePath)
+  if (!dir) return false
+  return existsSync(join(dir, 'rebase-merge')) || existsSync(join(dir, 'rebase-apply'))
+}
+
+/** 진행 중인 rebase 가 끝나면 돌아갈 브랜치(head-name). 알 수 없으면 null. */
+function rebaseHeadName(worktreePath: string): string | null {
+  const dir = gitDirOf(worktreePath)
+  if (!dir) return null
+  for (const state of ['rebase-merge', 'rebase-apply']) {
+    try {
+      const ref = readFileSync(join(dir, state, 'head-name'), 'utf-8').trim()
+      if (ref) return ref.replace(/^refs\/heads\//, '')
+    } catch {
+      // 다음 후보를 본다 — rebase 종류에 따라 둘 중 하나만 존재한다.
+    }
+  }
+  return null
+}
+
+/**
+ * 진행 중인 rebase 와 그 충돌 파일.
+ *
+ * `rebasing` 은 충돌 여부와 **독립**이다 — 충돌을 stage 하고 아직 `--continue` 하지 않은 순간에도
+ * rebase 는 진행 중이다. 둘을 한 값으로 합치면 "지금 rebase 중인가"라는 질문에 답할 수 없게 된다.
+ *
+ * `branch` 는 rebase 가 끝나면 돌아갈 브랜치다. rebase 중에는 HEAD 가 detached 라
+ * `rev-parse --abbrev-ref HEAD` 로는 알 수 없고, 모델 B 스택처럼 엔트리마다 체크아웃해 rebase 하는
+ * 경로에서는 워크스페이스에 기록된 브랜치와 실제로 rebase 중인 브랜치가 다르다 — 그때 이 값이
+ * 유일하게 믿을 수 있는 출처다.
+ */
+export async function rebaseConflictState(
+  worktreePath: string
+): Promise<{ rebasing: boolean; branch: string | null; conflictedFiles: string[] }> {
+  if (!isRebasing(worktreePath)) return { rebasing: false, branch: null, conflictedFiles: [] }
+  const conflicts = await git(worktreePath, ['diff', '--name-only', '--diff-filter=U']).catch(
+    () => ''
+  )
+  return {
+    rebasing: true,
+    branch: rebaseHeadName(worktreePath),
+    conflictedFiles: parseGitPathList(conflicts)
   }
 }
 
@@ -382,7 +452,7 @@ export async function getStatus(worktreePath: string, baseBranch: string): Promi
     // base 브랜치 ref 가 없으면 0 으로 둔다.
   }
 
-  return { branch, ahead, behind, changedFiles, conflicted }
+  return { branch, ahead, behind, changedFiles, conflicted, rebasing: isRebasing(worktreePath) }
 }
 
 /**
@@ -614,10 +684,7 @@ export async function restackOnto(
       const conflicts = await git(worktreePath, ['diff', '--name-only', '--diff-filter=U']).catch(
         () => ''
       )
-      const conflictedFiles = conflicts
-        .split('\n')
-        .map((s) => s.trim())
-        .filter(Boolean)
+      const conflictedFiles = parseGitPathList(conflicts)
       if (conflictedFiles.length) return { status: 'conflict', baseBranch, conflictedFiles }
       // 충돌이 아닌 다른 실패 — rebase 를 깔끔히 되돌리고 메시지를 전달한다.
       await abortRebase(worktreePath)

@@ -470,6 +470,8 @@ export interface WooiApi {
     baseRetarget(workspaceId: string): Promise<{ error?: string }>
     /** 어긋난 base 를 의도한 것으로 받아들인다(그 base 를 채택하고 다시 묻지 않는다). */
     baseKeep(workspaceId: string): Promise<void>
+    /** 에이전트 한 턴을 쓰므로 명시적인 사용자 동작에서만 호출한다. */
+    resolveConflict(workspaceId: string): Promise<{ error?: string }>
   }
 
   fs: {

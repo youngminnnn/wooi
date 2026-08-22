@@ -145,7 +145,8 @@ const api: WooiApi = {
     syncApply: (workspaceId) => ipcRenderer.invoke(IPC.stackSyncApply, workspaceId),
     syncDismiss: (workspaceId) => ipcRenderer.invoke(IPC.stackSyncDismiss, workspaceId),
     baseRetarget: (workspaceId) => ipcRenderer.invoke(IPC.stackBaseRetarget, workspaceId),
-    baseKeep: (workspaceId) => ipcRenderer.invoke(IPC.stackBaseKeep, workspaceId)
+    baseKeep: (workspaceId) => ipcRenderer.invoke(IPC.stackBaseKeep, workspaceId),
+    resolveConflict: (workspaceId) => ipcRenderer.invoke(IPC.stackResolveConflict, workspaceId)
   },
 
   review: {

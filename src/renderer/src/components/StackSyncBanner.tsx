@@ -2,6 +2,7 @@ import React from 'react'
 import { AlertTriangle, Check, GitMerge, Loader2, Minus, X } from 'lucide-react'
 import type { Workspace } from '@shared/types'
 import { useStore } from '../store'
+import ConflictResolveAction from './ConflictResolveAction'
 
 /**
  * 부모 PR 이 병합돼 스택이 stale 해졌을 때 뜨는 배너.
@@ -22,6 +23,7 @@ export default function StackSyncBanner({
   const dismissStackSync = useStore((s) => s.dismissStackSync)
   const requireGithub = useStore((s) => s.requireGithub)
   const progress = useStore((s) => s.stackProgress[workspace.id])
+  const workspaces = useStore((s) => s.app?.workspaces)
   const busy = !!progress && !progress.finished
 
   const plan = workspace.stackSync
@@ -74,6 +76,10 @@ export default function StackSyncBanner({
                   .reverse()
                   .find((step) => step.branch === affected.branch)
                 const problem = done && ['conflict', 'failed', 'diverged'].includes(done.status)
+                const conflictWorkspace =
+                  done?.status === 'conflict' && done.workspaceId
+                    ? workspaces?.find((candidate) => candidate.id === done.workspaceId)
+                    : undefined
                 return (
                   <div key={affected.branch} className="flex items-center gap-1.5 text-[11px]">
                     <span className="w-3 shrink-0 grid place-items-center">
@@ -95,6 +101,12 @@ export default function StackSyncBanner({
                       <span className={problem ? 'text-[var(--warning-300)]' : 'text-neutral-500'}>
                         {done.status}
                       </span>
+                    )}
+                    {conflictWorkspace && (
+                      <ConflictResolveAction
+                        workspace={conflictWorkspace}
+                        conflictedFileCount={done?.conflictedFiles?.length}
+                      />
                     )}
                   </div>
                 )
