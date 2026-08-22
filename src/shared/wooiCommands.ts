@@ -189,6 +189,19 @@ export const WOOI_COMMANDS: WooiCommandSpec[] = [
     ].join('\n')
   },
   {
+    name: 'message-status',
+    tool: 'check_message_status',
+    mode: 'direct',
+    description: 'Check what happened to a sent workspace message',
+    argumentHint: '[message id]',
+    prompt: [
+      'Call `mcp__wooi__check_message_status` with the message id below when present; otherwise',
+      'list the recent sent-message outcomes.',
+      '',
+      'Message id: $ARGUMENTS'
+    ].join('\n')
+  },
+  {
     name: 'repos',
     tool: 'list_repositories',
     mode: 'direct',
@@ -350,6 +363,9 @@ export function parseWooiCommandArgs(name: string, raw: string): WooiCommandArgs
     case 'peers':
     case 'repos':
       return { args: {} }
+
+    case 'message-status':
+      return { args: rest ? { messageId: rest } : {} }
 
     case 'related': {
       const paths = words(rest)

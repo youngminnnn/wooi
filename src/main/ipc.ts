@@ -174,6 +174,7 @@ import type {
 } from '@shared/types'
 import type { AgentOrchestrator } from './agent/orchestrator'
 import { deliverApprovedPeerMessage } from './agent/tools/peer'
+import { resolvePeerMessage } from './agent/tools/peerLedger'
 import type { PaneWindows } from './paneWindows'
 import {
   cancelPreviewPick,
@@ -617,14 +618,19 @@ export function registerIpc(ctx: IpcContext): void {
   handle(
     IPC.workspacePeerInboxDismiss,
     async (_e, workspaceId: string, messageId: string): Promise<void> => {
-      let changed = false
+      let dismissed: PendingPeerMessage | null = null
       store.update((st) => {
         const w = st.workspaces.find((x) => x.id === workspaceId)
-        if (!w?.peerInbox?.some((m) => m.id === messageId)) return
-        w.peerInbox = w.peerInbox.filter((m) => m.id !== messageId)
-        changed = true
+        const pending = w?.peerInbox?.find((m) => m.id === messageId)
+        if (!w || !pending) return
+        dismissed = pending
+        w.peerInbox = w.peerInbox?.filter((m) => m.id !== messageId)
       })
-      if (changed) broadcastState()
+      if (dismissed !== null) {
+        const pending = dismissed as PendingPeerMessage
+        resolvePeerMessage(pending.fromWorkspaceId, pending.id, 'declined-by-user')
+        broadcastState()
+      }
     }
   )
 
@@ -636,6 +642,7 @@ export function registerIpc(ctx: IpcContext): void {
     IPC.workspaceSetPeerInbound,
     async (_e, workspaceId: string, policy: PeerInboundPolicy): Promise<void> => {
       const release: PendingPeerMessage[] = []
+      const declined: PendingPeerMessage[] = []
       store.update((st) => {
         const w = st.workspaces.find((x) => x.id === workspaceId)
         if (!w) return
@@ -646,8 +653,14 @@ export function registerIpc(ctx: IpcContext): void {
         }
         // 'refuse' 로 닫으면 대기 중이던 것도 버린다 — 받지 않겠다고 한 뒤에 남아 있는 승인
         // 카드는 그 선언과 모순이다.
-        if (policy === 'refuse') w.peerInbox = []
+        if (policy === 'refuse') {
+          for (const m of w.peerInbox ?? []) declined.push(m)
+          w.peerInbox = []
+        }
       })
+      for (const pending of declined) {
+        resolvePeerMessage(pending.fromWorkspaceId, pending.id, 'declined-by-user')
+      }
       for (const pending of release) {
         deliverApprovedPeerMessage(
           { sendMessage: (id, text, opts) => ctx.sessions.sendMessage(id, text, undefined, opts) },

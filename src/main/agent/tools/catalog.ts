@@ -408,7 +408,9 @@ export const AGENT_TOOLS: AgentToolSpec[] = [
       'arrives, so send only when the recipient genuinely needs to know something. The',
       '**receiving** workspace still decides and may be set to `hold` or `refuse`. Call',
       '`list_workspace_peers` first to check `delivery`: `immediate`, `needs approval`, or `blocked`.',
-      'Never block waiting for a reply; say what you sent and keep working.',
+      'Never block waiting for a reply; say what you sent and keep working. The result carries a',
+      '`messageId`, and `check_message_status` says later how that message ended — including',
+      'whether a held one was delivered or declined.',
       '',
       'Use this rather than the built-in `SendMessage` tool for anything inside Wooi. Wooi',
       'workspaces are also Claude Code sessions, so they show up in `ListAgents` too, but reaching',
@@ -437,6 +439,34 @@ export const AGENT_TOOLS: AgentToolSpec[] = [
         )
     },
     annotations: { title: 'Message another workspace', readOnlyHint: false }
+  },
+  {
+    name: 'check_message_status',
+    description: [
+      'Look up how a message this workspace sent with `send_to_workspace` or `notify_child`',
+      'actually ended.',
+      '',
+      'Nothing ever wakes you to tell you: a message held for the user may be delivered hours',
+      'later or declined and discarded, and a delivery can be returned undelivered if the target',
+      'session goes away. Asking is the only way to find out, so ask before you report to the user',
+      'that something was passed on, or before you act on the belief that it arrived.',
+      '',
+      'The answer is one short status: `delivered`, `delivered-after-user-approval`,',
+      '`declined-by-user`, one of the still-waiting states, or one of the `dropped-*` /',
+      '`unknown-*` ones. Outcomes are kept for 7 days, or the last 50 messages from this',
+      'workspace, whichever runs out first.'
+    ].join(' '),
+    inputSchema: {
+      messageId: z
+        .string()
+        .optional()
+        .describe(
+          'The `messageId` a peer messaging tool returned. Omit it to list the 10 most recent ' +
+            'messages sent from this workspace with their outcomes — use that when the id is ' +
+            'no longer in view.'
+        )
+    },
+    annotations: { title: 'Check message status', readOnlyHint: true }
   },
   {
     name: 'list_issues',

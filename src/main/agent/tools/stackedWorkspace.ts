@@ -265,7 +265,7 @@ export const notifyChild: AgentToolHandler = async (deps, workspaceId, args) => 
   // sendMessage 를 부르면 대상이 수신을 닫아 둔 것(peerInbound: 'refuse')을 이 도구만 무시하게
   // 된다 — 사용자가 그은 선을 스택이라는 이유로 뚫는 셈이다. 자기가 만든 자식은 저쪽의 생성자
   // 예외에 걸려 지금까지처럼 곧바로 전달된다.
-  const { delivered, buffered } = deliverOrHold(
+  const { delivered, buffered, messageId } = deliverOrHold(
     deps,
     parent,
     child,
@@ -275,6 +275,7 @@ export const notifyChild: AgentToolHandler = async (deps, workspaceId, args) => 
   )
 
   return {
+    messageId,
     notified: {
       workspaceId: child.id,
       name: workspaceDisplayName(child),
