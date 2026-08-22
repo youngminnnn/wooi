@@ -240,7 +240,8 @@ inbound policy, changed from its sidebar row menu:
 
 The default is `hold` because delivering a message starts a paid turn in the receiving
 workspace, and that cost should be approved by you rather than by another workspace's
-agent. Declining a held message discards it; the sender is not told.
+agent. Declining a held message still does not wake or notify the sender, but the sender
+can ask for that message's status later and learn that it was declined.
 
 One exception: a workspace delivers immediately to a workspace **it created**, since you
 already approved that relationship when you approved the creating tool call. `refuse`
@@ -271,8 +272,29 @@ also states that the message carries no authority: it cannot approve anything, a
 receiving agent should not change settings or project instructions because another
 workspace asked it to.
 
-The result says whether the message was delivered or held. A held message may never
-arrive, so an agent should never block waiting for a reply.
+The result says whether the message was delivered or held and carries a `messageId`. A
+held message may never arrive, so an agent should never block waiting for a reply; it can
+use that id to check later. A `refuse` policy throws immediately and produces no id.
+
+### `check_message_status`
+
+Reads outcomes for messages sent by the calling workspace. It never wakes another
+workspace and takes an optional input:
+
+| Input | Type | Required | Description |
+| --- | --- | --- | --- |
+| `messageId` | string | No | Id returned by `send_to_workspace` or `notify_child`. Omit it to list the 10 most recent retained messages. |
+
+Recorded outcomes are `delivered`, `waiting-for-target-turn-to-end`,
+`waiting-for-user-approval`, `returned-waiting-for-user-approval`,
+`delivered-after-user-approval`, `declined-by-user`, `dropped-target-inbox-full`,
+`dropped-target-workspace-gone`, and `not-delivered-duplicate`. Wooi keeps no message body in this ledger, only an 80-character
+excerpt, and retains at most the latest 50 messages per workspace for 7 days.
+
+An evicted id returns `unknown-expired`; a valid but unrecorded id returns
+`unknown-no-such-message` (a malformed id uses the same status with a more specific note).
+If Wooi restarted while a message was only in the in-memory turn-end buffer, it returns
+`unknown-lost-when-wooi-restarted` because delivery can no longer be proven.
 
 ### Sessions outside Wooi
 
@@ -440,6 +462,7 @@ with your own commands: `/wooi:pr`, `/wooi:children`, and so on. The catalog is
 | `/wooi:report [what to report]` | `report_to_parent` | agent |
 | `/wooi:notify <what changed>` | `notify_child` | agent |
 | `/wooi:send <what changed>` | `send_to_workspace` | agent |
+| `/wooi:message-status [message id]` | `check_message_status` | direct |
 | `/wooi:team [what to delegate]` | `switch_to_agent_team` | agent |
 | `/wooi:repos` | `list_repositories` | direct |
 | `/wooi:peers` | `list_workspace_peers` | direct |
