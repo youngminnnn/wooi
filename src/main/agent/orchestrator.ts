@@ -178,6 +178,17 @@ export class AgentOrchestrator {
     return this.get(ws?.agentBackend ?? DEFAULT_AGENT_BACKEND)
   }
 
+  /** 새 워크스페이스가 원본과 같은 세션 id 를 공유하지 않도록 백엔드별 분기 능력을 한곳에서 고른다. */
+  async forkSession(source: {
+    agentBackend: AgentBackendId
+    sessionId: string | null
+    worktreePath: string
+  }): Promise<string | null> {
+    if (!source.sessionId) return null
+    const backend = this.get(source.agentBackend)
+    return backend.forkSession?.(source.sessionId, source.worktreePath) ?? null
+  }
+
   /** 워크스페이스를 구동하는 백엔드의 메타(식별·표시·capabilities). */
   metaFor(workspaceId: string): AgentBackendMeta {
     return this.backendFor(workspaceId).meta

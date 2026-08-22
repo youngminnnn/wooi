@@ -508,10 +508,6 @@ async function handle(msg: CodexCommand): Promise<void> {
       await ensure(msg.workspaceId, msg.config).shell(msg.command)
       break
 
-    case 'fork':
-      await ensure(msg.workspaceId, msg.config).fork()
-      break
-
     case 'accountStatus':
       await respond(msg.reqId, accountStatus)
       break

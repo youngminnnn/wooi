@@ -246,22 +246,6 @@ export class CodexThread {
     }
   }
 
-  /** 현재 대화를 같은 워크스페이스의 새 Codex thread 로 분기한다. */
-  async fork(): Promise<void> {
-    try {
-      const rpc = await this.deps.rpc()
-      const threadId = await this.ensureThread(rpc)
-      const result = await rpc.request<ThreadResult>(RPC.threadFork, { threadId })
-      const forkedId = result?.thread?.id
-      if (!forkedId) throw new Error('Codex did not return a forked thread id')
-      this.adoptThread(forkedId)
-      await this.refreshGoal(rpc, forkedId)
-      this.notice('Forked this conversation into a new Codex thread.')
-    } catch (err) {
-      this.fail(err)
-    }
-  }
-
   async setGoal(args: {
     objective?: string | null
     status?: ThreadGoalStatus | null

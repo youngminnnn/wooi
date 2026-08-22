@@ -30,7 +30,8 @@ import {
   X,
   Hourglass,
   Clock,
-  Terminal
+  Terminal,
+  GitFork
 } from 'lucide-react'
 import { backgroundTaskCount, REVIEW_BUSY_LABEL, useStore } from '../store'
 import RowActionsMenu, { type RowAction } from './RowActionsMenu'
@@ -59,6 +60,7 @@ import {
   unresolvedFanoutGroups,
   workspaceDisplayName
 } from '@shared/types'
+import { areWorkspaceTreeSiblings, conversationForkDisabledReason } from '../lib/conversationFork'
 import { orderRowsWithPending } from '../lib/sidebarRows'
 import { useGithubDisconnected } from '../lib/github'
 import { WorkspaceAgents } from './WorkspaceAgents'
@@ -241,11 +243,7 @@ export default function Sidebar({
       const a = app.workspaces.find((w) => w.id === draggedId)
       const b = app.workspaces.find((w) => w.id === targetId)
       if (!a || !b) return false
-      return (
-        a.repoId === b.repoId &&
-        (a.parentWorkspaceId ?? null) === (b.parentWorkspaceId ?? null) &&
-        a.archived === b.archived
-      )
+      return areWorkspaceTreeSiblings(a, b)
     },
     onReorder: (workspaceId, targetId, position) =>
       void window.api.workspace.reorder(workspaceId, targetId, position)
@@ -598,6 +596,14 @@ function WorkspaceRow({
   // 에이전트 배지와 stack 생성 override 는 같은 사용 가능 목록을 쓴다.
   const availableBackends = useAvailableBackends()
   const showAgent = availableBackends.length > 1
+  const forkWorkspace = useStore((s) => s.forkWorkspace)
+  const forkDisabledReason = conversationForkDisabledReason(workspace)
+  const forkOrigin = useStore((s) =>
+    workspace.forkedFromWorkspaceId
+      ? s.app?.workspaces.find((w) => w.id === workspace.forkedFromWorkspaceId)
+      : undefined
+  )
+  const forkOriginPr = useStore((s) => (forkOrigin ? s.prStatus[forkOrigin.id] : undefined))
 
   const commitName = (): void => {
     const name = (editingName ?? '').trim()
@@ -738,6 +744,13 @@ function WorkspaceRow({
             onSelect: () => void window.api.workspace.setPeerInbound(workspace.id, 'refuse')
           }
         ]),
+    {
+      key: 'fork',
+      label: 'Fork conversation',
+      icon: <GitFork size={13} />,
+      onSelect: () => void forkWorkspace(workspace.id),
+      disabledReason: forkDisabledReason ?? undefined
+    },
     {
       key: 'archive',
       label: 'Archive workspace',
@@ -888,6 +901,14 @@ function WorkspaceRow({
                     "메인 말고도 더 있다" 를 말하고, 무엇이 있는지는 툴팁이 답한다.
                     색 처리는 index.css 참고(왜 배경이 아니라 색인지, 왜 파랑이 아닌지 적혀 있다). */}
                 {multiAgent.active && <Users size={10} className="multi-agent-mark" />}
+              </span>
+            )}
+            {!archiving && forkOrigin && (
+              <span
+                className="shrink-0 truncate"
+                title={`Forked from ${workspaceDisplayName(forkOrigin, forkOriginPr?.title)}`}
+              >
+                ⑂ from {workspaceDisplayName(forkOrigin, forkOriginPr?.title)} ·
               </span>
             )}
             {!archiving && <GitBranch size={10} className="shrink-0" />}

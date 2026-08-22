@@ -146,6 +146,8 @@ export interface AgentBackend {
    * 커맨드(`/wooi:claude` …)가 더 실리는데, 그 판단은 워크스페이스를 봐야 한다.
    */
   listCommands(workspaceId: string, cwd: string): Promise<SlashCommandInfo[]>
+  /** 백엔드가 안전하게 지원할 때만 원본 대화를 새 작업 디렉터리용 독립 세션으로 분기한다. */
+  forkSession?(sessionId: string, sourceCwd: string): Promise<string>
   /**
    * /add-dir — worktree 밖 디렉토리를 작업 루트로 더한다(capabilities.addDirectory).
    * 세션 시작 시점에 고정되는 값이라 구현은 기존 세션을 정리하고 다음 메시지에서 다시 연다.

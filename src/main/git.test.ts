@@ -18,7 +18,10 @@ import {
   resolveBranchPushTarget,
   summarizePushError,
   lastRemoteRefUpdate,
-  restackOnto
+  restackOnto,
+  addWorktree,
+  applySnapshot,
+  snapshotWorkingTree
 } from './git'
 
 describe('branch tracking push target', () => {
@@ -733,5 +736,79 @@ describe('lastRemoteRefUpdate (리모트 추적 ref 를 마지막으로 움직�
     git(worktree, ['fetch', '-q', 'origin'])
     // restackOnto 는 push 직전에 fetch 한다. 그 fetch 가 판정을 흐리지 않아야 뜻이 있다.
     await expect(lastRemoteRefUpdate(worktree, 'main')).resolves.toEqual(before)
+  })
+})
+
+describe('worktree fork 기반과 변경 스냅샷', () => {
+  let base: string
+  let repo: string
+
+  const git = (cwd: string, args: string[]): string =>
+    execFileSync('git', args, { cwd, encoding: 'utf-8' }).trim()
+
+  beforeEach(() => {
+    base = mkdtempSync(join(tmpdir(), 'wooi-fork-git-'))
+    repo = join(base, 'repo')
+    mkdirSync(repo)
+    git(repo, ['init', '-q', '-b', 'main'])
+    git(repo, ['config', 'user.email', 'test@example.com'])
+    git(repo, ['config', 'user.name', 'test'])
+    writeFileSync(join(repo, 'tracked.txt'), 'base\n')
+    git(repo, ['add', '-A'])
+    git(repo, ['commit', '-qm', 'base'])
+    git(repo, ['update-ref', 'refs/remotes/origin/main', 'HEAD'])
+  })
+
+  afterEach(() => rmSync(base, { recursive: true, force: true }))
+
+  it('명시한 startPoint 의 로컬 전용 커밋에서 새 worktree 를 만든다', async () => {
+    git(repo, ['checkout', '-qb', 'source'])
+    writeFileSync(join(repo, 'local-only.txt'), 'local\n')
+    git(repo, ['add', '-A'])
+    git(repo, ['commit', '-qm', 'local only'])
+
+    const target = join(base, 'explicit')
+    await addWorktree(repo, 'fork', 'main', target, git(repo, ['rev-parse', 'source']))
+
+    expect(git(target, ['show', 'HEAD:local-only.txt'])).toBe('local')
+  })
+
+  it('startPoint 를 생략하면 기존처럼 origin/base 에서 만든다', async () => {
+    git(repo, ['checkout', '-qb', 'local-main'])
+    writeFileSync(join(repo, 'local-only.txt'), 'local\n')
+    git(repo, ['add', '-A'])
+    git(repo, ['commit', '-qm', 'local only'])
+    git(repo, ['branch', '-f', 'main', 'HEAD'])
+
+    const target = join(base, 'default')
+    await addWorktree(repo, 'ordinary', 'main', target)
+
+    expect(git(target, ['rev-parse', 'HEAD'])).toBe(git(repo, ['rev-parse', 'origin/main']))
+  })
+
+  it('dirty tree 를 stash 스택과 원본 상태를 바꾸지 않고 스냅샷한다', async () => {
+    writeFileSync(join(repo, 'tracked.txt'), 'changed\n')
+
+    const sha = await snapshotWorkingTree(repo)
+
+    expect(sha).toMatch(/^[0-9a-f]{40}$/)
+    expect(git(repo, ['status', '--porcelain'])).toContain('tracked.txt')
+    expect(git(repo, ['stash', 'list'])).toBe('')
+  })
+
+  it('깨끗하면 스냅샷을 만들지 않는다', async () => {
+    await expect(snapshotWorkingTree(repo)).resolves.toBeNull()
+  })
+
+  it('스냅샷을 다른 worktree 의 미커밋 변경으로 적용한다', async () => {
+    const target = join(base, 'target')
+    await addWorktree(repo, 'target', 'main', target, git(repo, ['rev-parse', 'HEAD']))
+    writeFileSync(join(repo, 'tracked.txt'), 'changed\n')
+    const sha = await snapshotWorkingTree(repo)
+
+    await applySnapshot(target, sha!)
+
+    expect(git(target, ['diff', '--', 'tracked.txt'])).toContain('+changed')
+    expect(git(target, ['status', '--porcelain'])).toContain('tracked.txt')
   })
 })

@@ -112,7 +112,6 @@ export type CodexCommand =
   | { type: 'compact'; workspaceId: string; config: CodexConfig }
   | { type: 'review'; workspaceId: string; config: CodexConfig }
   | { type: 'shell'; workspaceId: string; config: CodexConfig; command: string }
-  | { type: 'fork'; workspaceId: string; config: CodexConfig }
   // ── 계정 (app-server 의 account/* 를 호스트 경유로 호출) ──────────────────
   // app-server 프로세스를 하나로 유지하기 위해 계정 조회도 같은 호스트를 지난다 —
   // 별도 연결을 두면 로그인 상태의 출처가 둘로 갈라진다.

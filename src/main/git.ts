@@ -178,14 +178,16 @@ async function resolveBaseStartPoint(repoPath: string, baseBranch: string): Prom
 
 /**
  * 새 브랜치로 worktree 를 추가한다. 브랜치가 이미 있으면 그 브랜치를 체크아웃한다.
- * 새로 만들 때는 항상 먼저 fetch 한 뒤 origin tracking ref(`origin/<base>`)에서 분기해
- * 최신 리모트 상태를 기준으로 삼는다.
+ * startPoint 가 없으면 먼저 fetch 한 뒤 origin tracking ref(`origin/<base>`)에서 분기한다.
+ * fork 는 원본의 로컬 HEAD 를 startPoint 로 넘긴다 — origin base 에서 만들면 아직 push 하지 않은
+ * 커밋이 말없이 빠져, 물려받은 대화가 전제하는 코드와 실제 코드가 서로 달라진다.
  */
 export async function addWorktree(
   repoPath: string,
   branch: string,
   baseBranch: string,
-  worktreePath: string
+  worktreePath: string,
+  startPoint?: string
 ): Promise<void> {
   const branchExists = await git(repoPath, ['rev-parse', '--verify', '--quiet', branch])
     .then(() => true)
@@ -196,10 +198,27 @@ export async function addWorktree(
     return
   }
 
-  // 항상 최신 origin 기준으로 분기하기 위해 먼저 fetch 한다.
-  await fetchRemote(repoPath)
-  const startPoint = await resolveBaseStartPoint(repoPath, baseBranch)
-  await git(repoPath, ['worktree', 'add', '-b', branch, worktreePath, startPoint])
+  let resolvedStartPoint = startPoint
+  if (!resolvedStartPoint) {
+    // 기본 생성은 최신 origin 기준으로 분기하기 위해 먼저 fetch 한다.
+    await fetchRemote(repoPath)
+    resolvedStartPoint = await resolveBaseStartPoint(repoPath, baseBranch)
+  }
+  await git(repoPath, ['worktree', 'add', '-b', branch, worktreePath, resolvedStartPoint])
+}
+
+/**
+ * 커밋하지 않은 tracked 변경을 원본 worktree 를 건드리지 않고 스냅샷한다. 깨끗하면 null.
+ * `git stash create` 는 stash 스택을 바꾸지 않는 대신 untracked 파일은 담지 않는다.
+ */
+export async function snapshotWorkingTree(worktreePath: string): Promise<string | null> {
+  const sha = await git(worktreePath, ['stash', 'create'])
+  return sha || null
+}
+
+/** snapshotWorkingTree 가 만든 스냅샷을 다른 worktree에 적용한다. */
+export async function applySnapshot(worktreePath: string, sha: string): Promise<void> {
+  await git(worktreePath, ['stash', 'apply', sha])
 }
 
 // ── gh 의 기본 PR base (branch.<name>.gh-merge-base) ────────────────────────

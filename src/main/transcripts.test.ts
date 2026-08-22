@@ -83,3 +83,40 @@ describe('TranscriptStore.costOf', () => {
     expect(t.costOf('ws-5')).toBe(0)
   })
 })
+
+describe('TranscriptStore.copy', () => {
+  it('원본과 같은 기록을 읽되 이후 갱신은 서로 독립적이다', async () => {
+    const { getTranscripts } = await import('./transcripts')
+    const t = getTranscripts()
+    t.upsert('copy-source', assistant('a1'))
+    t.upsert('copy-source', result('r1', 0.2))
+
+    t.copy('copy-source', 'copy-target')
+
+    expect(t.load('copy-target')).toEqual(t.load('copy-source'))
+    t.upsert('copy-source', assistant('source-only'))
+    t.upsert('copy-target', assistant('target-only'))
+    expect(t.load('copy-target').map((item) => item.id)).not.toContain('source-only')
+    expect(t.load('copy-source').map((item) => item.id)).not.toContain('target-only')
+  })
+
+  it('원본 기록이 없으면 조용히 아무것도 만들지 않는다', async () => {
+    const { getTranscripts } = await import('./transcripts')
+    const t = getTranscripts()
+    expect(() => t.copy('copy-missing', 'copy-missing-target')).not.toThrow()
+    expect(t.load('copy-missing-target')).toEqual([])
+  })
+
+  it('목적지의 캐시와 비용을 버리고 복사한 파일에서 다시 계산한다', async () => {
+    const { getTranscripts } = await import('./transcripts')
+    const t = getTranscripts()
+    t.upsert('copy-fresh-source', result('fresh', 0.75))
+    t.upsert('copy-stale-target', result('stale', 9))
+    expect(t.costOf('copy-stale-target')).toBe(9)
+
+    t.copy('copy-fresh-source', 'copy-stale-target')
+
+    expect(t.load('copy-stale-target')).toEqual(t.load('copy-fresh-source'))
+    expect(t.costOf('copy-stale-target')).toBeCloseTo(0.75)
+  })
+})

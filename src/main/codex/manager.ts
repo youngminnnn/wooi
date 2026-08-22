@@ -385,10 +385,6 @@ export class CodexSessionManager implements AgentBackend {
       this.send({ type: 'review', workspaceId, config: this.configFor(ws) })
       return
     }
-    if (!images?.length && text.trim() === '/fork') {
-      this.send({ type: 'fork', workspaceId, config: this.configFor(ws) })
-      return
-    }
     // `/wooi:*` 는 Wooi 커맨드다. Claude 는 CLI 가 플러그인 본문으로 확장해 주지만 Codex 는
     // app-server 에 확장 RPC 가 없어(슬래시 처리가 TUI 크레이트에만 있다) 그냥 모델에게 가는
     // 텍스트가 된다 — `/compact`·`/review` 를 전용 RPC 로 돌리는 것과 같은 이유로 여기서 푼다.
@@ -836,7 +832,6 @@ export class CodexSessionManager implements AgentBackend {
       { name: 'permissions', description: 'Show active permissions' },
       { name: 'compact', description: 'Compact the conversation' },
       { name: 'review', description: 'Review uncommitted changes' },
-      { name: 'fork', description: 'Fork the current Codex conversation' },
       // `/wooi:*` — Wooi 내장 도구를 직접 부르는 명령([[shared/wooiCommands]]).
       // Claude 는 같은 목록을 플러그인으로 받아 CLI 가 알아서 실어 주지만(agent/plugin.ts),
       // Codex 는 app-server 로 몰기 때문에 여기서 손으로 실어야 한다. 슬래시 확장이 Codex 의

@@ -84,6 +84,7 @@ import type {
   Workspace
 } from '@shared/types'
 import { matchWooiCommand, parseWooiCommandArgs, wooiCommandName } from '@shared/wooiCommands'
+import { conversationForkDisabledReason, parseForkCommand } from '../lib/conversationFork'
 import type { WooiCommandSpec } from '@shared/wooiCommands'
 
 /** Claude 가 받는 이미지 형식. 클립보드의 다른 형식은 붙여넣기 시 무시한다. */
@@ -581,6 +582,21 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
     if (wooi && wooi.spec.mode === 'direct') {
       runWooiCommand(wooi.spec, wooi.rest)
       historyIdx.current = -1
+      return
+    }
+
+    // /fork 는 에이전트 제품의 명령이 아니라 Wooi 워크스페이스를 만드는 명령이다. 두 백엔드가
+    // 같은 IPC 를 타야 원본을 보존한다는 계약과 안전 가드가 제품마다 갈라지지 않는다.
+    const fork = images.length ? null : parseForkCommand(trimmed)
+    if (fork) {
+      const disabledReason = conversationForkDisabledReason(workspace)
+      if (disabledReason) {
+        pushToast('info', disabledReason)
+        return
+      }
+      setText('')
+      historyIdx.current = -1
+      void useStore.getState().forkWorkspace(workspace.id, fork)
       return
     }
 

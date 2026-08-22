@@ -513,6 +513,16 @@ export class SessionManager implements AgentBackend {
     }))
   }
 
+  /** 원본 cwd 의 SDK 기록에서 독립 세션을 만든다. file-history 는 복제되지 않아 /rewind 는 비어 있다. */
+  async forkSession(sessionId: string, sourceCwd: string): Promise<string> {
+    return this.request<string>((reqId) => ({
+      type: 'forkSession',
+      reqId,
+      sessionId,
+      sourceCwd
+    }))
+  }
+
   /**
    * Claude 의 모델 목록은 정적이다 — CLI 가 모델 카탈로그를 질의할 API 를 주지 않으므로,
    * 검증된 모델 ID 목록을 코드로 관리한다(backend.ts 의 CLAUDE_MODELS).

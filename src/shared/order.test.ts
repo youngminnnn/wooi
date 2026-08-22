@@ -1,23 +1,26 @@
 import { describe, it, expect } from 'vitest'
-import { orderVisibleWorkspaces, reorderById, workspaceStackMembers } from './types'
+import { orderByStack, orderVisibleWorkspaces, reorderById, workspaceStackMembers } from './types'
 
 type W = {
   id: string
   repoId: string
   archived: boolean
   parentWorkspaceId: string | null
+  forkedFromWorkspaceId?: string | null
 }
 
 const ws = (
   id: string,
   repoId: string,
   parentWorkspaceId: string | null = null,
-  archived = false
+  archived = false,
+  forkedFromWorkspaceId?: string | null
 ): W => ({
   id,
   repoId,
   archived,
-  parentWorkspaceId
+  parentWorkspaceId,
+  forkedFromWorkspaceId
 })
 
 const ids = (list: W[]): string[] => list.map((w) => w.id)
@@ -35,6 +38,55 @@ describe('orderVisibleWorkspaces', () => {
     // 배열 순서는 [부모, 남, 자식] 이지만 화면에서는 부모→자식→남 으로 그려진다.
     const workspaces = [ws('parent', 'r1'), ws('other', 'r1'), ws('child', 'r1', 'parent')]
     expect(ids(orderVisibleWorkspaces(repos, workspaces))).toEqual(['parent', 'child', 'other'])
+  })
+
+  it('fork 를 원본 바로 아래에 놓고 번호 순서도 같은 트리를 따른다', () => {
+    const repos = [{ id: 'r1' }]
+    const workspaces = [
+      ws('origin', 'r1'),
+      ws('other', 'r1'),
+      ws('fork', 'r1', null, false, 'origin')
+    ]
+
+    expect(orderByStack(workspaces).map(({ workspace, depth }) => [workspace.id, depth])).toEqual([
+      ['origin', 0],
+      ['fork', 1],
+      ['other', 0]
+    ])
+    expect(ids(orderVisibleWorkspaces(repos, workspaces))).toEqual(['origin', 'fork', 'other'])
+  })
+
+  it('스택 자식의 fork 를 스택 밖으로 빼지 않고 원본 아래에 둔다', () => {
+    const workspaces = [
+      ws('root', 'r1'),
+      ws('origin', 'r1', 'root'),
+      ws('fork', 'r1', 'root', false, 'origin')
+    ]
+
+    expect(orderByStack(workspaces).map(({ workspace, depth }) => [workspace.id, depth])).toEqual([
+      ['root', 0],
+      ['origin', 1],
+      ['fork', 2]
+    ])
+  })
+
+  it('fork 원본이 보이지 않으면 기존의 없는 부모 규칙처럼 뿌리로 폴백한다', () => {
+    const archivedOrigin = ws('archived-origin', 'r1', null, true)
+    const forkOfArchived = ws('fork-a', 'r1', null, false, archivedOrigin.id)
+    const otherRepoOrigin = ws('other-origin', 'r2')
+    const forkAcrossRepo = ws('fork-b', 'r1', null, false, otherRepoOrigin.id)
+
+    expect(
+      orderByStack([forkOfArchived]).map(({ workspace, depth }) => [workspace.id, depth])
+    ).toEqual([['fork-a', 0]])
+    expect(
+      ids(
+        orderVisibleWorkspaces(
+          [{ id: 'r1' }, { id: 'r2' }],
+          [archivedOrigin, forkOfArchived, otherRepoOrigin, forkAcrossRepo]
+        )
+      )
+    ).toEqual(['fork-a', 'fork-b', 'other-origin'])
   })
 
   it('archived 워크스페이스는 번호에서 제외된다', () => {

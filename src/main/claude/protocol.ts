@@ -203,6 +203,7 @@ export type HostCommand =
   // team 은 이 워크스페이스가 위임 커맨드가 든 플러그인 변형을 쓰는지다([[agent/plugin]]).
   // 목록이 달라지므로 조회 요청에 함께 싣는다.
   | { type: 'listCommands'; reqId: string; cwd: string; team: boolean }
+  | { type: 'forkSession'; reqId: string; sessionId: string; sourceCwd: string }
   | {
       type: 'sideQuestion'
       workspaceId: string
