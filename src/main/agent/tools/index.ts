@@ -1,5 +1,6 @@
 import { switchToAgentTeam } from './agentTeam'
 import {
+  checkMessageStatus,
   listWorkspacePeers,
   listWorkspacePeersExternal,
   sendToWorkspace,
@@ -53,6 +54,7 @@ export function initAgentTools(deps: AgentToolDeps): void {
   registerAgentTool('check_related_work', checkRelatedWork)
   registerAgentTool('list_workspace_peers', listWorkspacePeers)
   registerAgentTool('send_to_workspace', sendToWorkspace)
+  registerAgentTool('check_message_status', checkMessageStatus)
   registerExternalAgentTool('list_workspace_peers', listWorkspacePeersExternal)
   registerExternalAgentTool('send_to_workspace', sendToWorkspaceExternal)
   registerAgentTool('list_issues', listIssues)
