@@ -132,6 +132,7 @@ import {
   runArchiveScript,
   scriptEnvFor,
   syncPrBase,
+  workspaceForkError,
   type ArchiveOutcome,
   type ArchiveWorkspaceDeps,
   type CreateWorkspaceDeps
@@ -278,7 +279,11 @@ export function registerIpc(ctx: IpcContext): void {
     store.getState().repos.find((r) => r.id === repoId)
 
   /** 워크스페이스 생성이 메인에서 필요로 하는 것들([[workspaces]] createWorkspace). */
-  const workspaceDeps: CreateWorkspaceDeps = { scripts: ctx.scripts, broadcastState }
+  const workspaceDeps: CreateWorkspaceDeps = {
+    scripts: ctx.scripts,
+    broadcastState,
+    forkAgentSession: (source) => ctx.sessions.forkSession(source)
+  }
   /** fan-out 은 생성에 더해 만든 후보에게 첫 프롬프트까지 보낸다([[fanout]]). */
   const fanoutDeps: CreateFanoutDeps = {
     ...workspaceDeps,
@@ -594,6 +599,26 @@ export function registerIpc(ctx: IpcContext): void {
     IPC.workspaceCreate,
     async (_e, args: CreateWorkspaceArgs): Promise<CreateWorkspaceResult> =>
       createWorkspace(workspaceDeps, args)
+  )
+
+  handle(
+    IPC.workspaceFork,
+    async (
+      _e,
+      workspaceId: string,
+      opts?: { name?: string; showSemanticsNotice?: boolean }
+    ): Promise<CreateWorkspaceResult> => {
+      const source = store.getState().workspaces.find((w) => w.id === workspaceId)
+      if (!source || source.archived) return { error: 'Workspace not found (or archived).' }
+      const guardError = workspaceForkError(source)
+      if (guardError) return { error: guardError }
+      return createWorkspace(workspaceDeps, {
+        repoId: source.repoId,
+        forkFromWorkspaceId: source.id,
+        forkSemanticsNotice: opts?.showSemanticsNotice === true,
+        ...(opts?.name?.trim() ? { name: opts.name.trim() } : {})
+      })
+    }
   )
 
   // 아카이브 절차 자체는 [[workspaces]] 에 있다 — 에이전트 도구도 같은 일을 해야 하기 때문이다.
@@ -2537,7 +2562,23 @@ export function registerIpc(ctx: IpcContext): void {
   handle(IPC.commandsList, (_e, workspaceId: string) => {
     const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
     if (!ws) return []
-    return ctx.sessions.listCommands(ws.id, ws.worktreePath).catch(() => [])
+    return ctx.sessions
+      .listCommands(ws.id, ws.worktreePath)
+      .then((commands) => [
+        {
+          name: 'fork',
+          description: 'Fork this conversation into a new workspace',
+          argumentHint: '[name]'
+        },
+        ...commands.filter((command) => command.name !== 'fork')
+      ])
+      .catch(() => [
+        {
+          name: 'fork',
+          description: 'Fork this conversation into a new workspace',
+          argumentHint: '[name]'
+        }
+      ])
   })
 
   // 인터랙티브 명령(/mcp·/context·/reload-plugins 등) — 결과 카드용 데이터를 조회한다.

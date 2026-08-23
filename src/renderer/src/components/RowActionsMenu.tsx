@@ -12,6 +12,8 @@ export type RowAction = {
   separatorBefore?: boolean
   /** 같은 일을 하는 단축키(예: '⇧⌘⌫'). 메뉴 오른쪽에 흐리게 붙는다. */
   shortcut?: string
+  /** 실행할 수 없는 이유. 항목은 감추지 않고 이 문장을 툴팁으로 보여 준다. */
+  disabledReason?: string
 }
 
 /**
@@ -115,12 +117,14 @@ export default function RowActionsMenu({
           {a.separatorBefore && <div className="my-1 border-t border-[var(--border)]" />}
           <button
             role="menuitem"
+            disabled={Boolean(a.disabledReason)}
+            title={a.disabledReason}
             onClick={() => {
               onClose()
               a.onSelect()
             }}
             className={
-              'flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-[var(--surface-2)] ' +
+              'flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-[var(--surface-2)] disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent ' +
               (a.danger ? 'text-[var(--danger-fg)]' : 'text-neutral-200')
             }
           >

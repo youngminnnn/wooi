@@ -26,6 +26,7 @@ import {
   RotateCw,
   Users,
   X,
+  GitFork,
   type LucideIcon
 } from 'lucide-react'
 import { useStore } from '../store'
@@ -53,6 +54,7 @@ import { useGithubDisconnected } from '../lib/github'
 import { useMultiAgent } from '../lib/multiAgent'
 import { openFileQuickOpen } from '../lib/fileViewer'
 import { workspaceDisplayName } from '@shared/types'
+import { conversationForkDisabledReason } from '../lib/conversationFork'
 import type { PrState, Workspace } from '@shared/types'
 
 /**
@@ -194,6 +196,8 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
   }
 
   const running = workspace.status === 'running'
+  const forkWorkspace = useStore((s) => s.forkWorkspace)
+  const forkDisabledReason = conversationForkDisabledReason(workspace)
 
   // 표시 이름: 사용자 override → PR 제목 → worktree 이름 순으로 결정한다.
   const displayName = workspaceDisplayName(workspace, pr?.title)
@@ -454,6 +458,13 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
               <FolderOpen size={15} />
             </HeaderButton>
             <ExportMenu workspaceId={workspace.id} title={displayName} />
+            <HeaderButton
+              title={forkDisabledReason ?? 'Fork conversation'}
+              onClick={() => void forkWorkspace(workspace.id)}
+              disabled={forkDisabledReason !== null}
+            >
+              <GitFork size={15} />
+            </HeaderButton>
             <HeaderButton
               title="Archive workspace"
               shortcut="⇧⌘⌫"

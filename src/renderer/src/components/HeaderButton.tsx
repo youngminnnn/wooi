@@ -12,7 +12,8 @@ export default function HeaderButton({
   indicator,
   hasPopup,
   expanded,
-  suppressTooltip
+  suppressTooltip,
+  disabled
 }: {
   children: React.ReactNode
   onClick: () => void
@@ -29,16 +30,18 @@ export default function HeaderButton({
   expanded?: boolean
   /** 드롭다운이 열려 있을 때처럼 툴팁이 방해가 되는 경우 숨긴다. */
   suppressTooltip?: boolean
+  disabled?: boolean
 }): React.JSX.Element {
   return (
     <div className="no-drag group relative inline-flex">
       <button
         onClick={onClick}
+        disabled={disabled}
         aria-label={title}
         aria-haspopup={hasPopup ? 'menu' : undefined}
         aria-expanded={hasPopup ? Boolean(expanded) : undefined}
         className={
-          'h-7 w-7 grid place-items-center rounded-md active:scale-90 ' +
+          'h-7 w-7 grid place-items-center rounded-md active:scale-90 disabled:cursor-not-allowed disabled:opacity-45 disabled:active:scale-100 ' +
           (danger
             ? 'text-neutral-400 hover:bg-[var(--danger-500)]/15 hover:text-[var(--danger-400)]'
             : active

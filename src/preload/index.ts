@@ -31,6 +31,7 @@ const api: WooiApi = {
 
   workspace: {
     create: (args) => ipcRenderer.invoke(IPC.workspaceCreate, args),
+    fork: (workspaceId, opts) => ipcRenderer.invoke(IPC.workspaceFork, workspaceId, opts),
     archive: (workspaceId) => ipcRenderer.invoke(IPC.workspaceArchive, workspaceId),
     dismissArchiveSuggest: (workspaceId) =>
       ipcRenderer.invoke(IPC.workspaceArchiveSuggestDismiss, workspaceId),

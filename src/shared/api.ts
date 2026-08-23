@@ -133,6 +133,10 @@ export interface WooiApi {
 
   workspace: {
     create(args: CreateWorkspaceArgs): Promise<CreateWorkspaceResult>
+    fork(
+      workspaceId: string,
+      opts?: { name?: string; showSemanticsNotice?: boolean }
+    ): Promise<CreateWorkspaceResult>
     /**
      * 아카이브는 스크립트가 실패해도 끝까지 진행된다 — worktree 가 사라진 뒤라 되돌릴 것이
      * 없기 때문이다. 실패는 여기 실려 오고, 렌더러가 토스트로 알린다(전문은 main 로그).

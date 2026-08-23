@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { forkSession } from '@anthropic-ai/claude-agent-sdk'
 import { ClaudeSession } from './session'
 import { askSideQuestion } from './sideQuestion'
 import {
@@ -267,6 +268,13 @@ async function handle(msg: HostCommand): Promise<void> {
 
     case 'listCommands':
       await respond(msg.reqId, () => listSlashCommands(msg.cwd, msg.team))
+      break
+
+    case 'forkSession':
+      await respond(msg.reqId, async () => {
+        const result = await forkSession(msg.sessionId, { dir: msg.sourceCwd })
+        return result.sessionId
+      })
       break
 
     case 'sideQuestion':

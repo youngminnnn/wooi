@@ -364,10 +364,20 @@ export function cascadeAffectedBranches(ws: Workspace, all: Workspace[]): string
  * 워크스페이스 목록을 stack 트리 순서로 정렬한다(부모 바로 뒤에 자식이 오도록, DFS pre-order).
  * 각 항목에 stack 들여쓰기 깊이(depth: 뿌리=0)를 함께 매겨 사이드바가 계층을 그릴 수 있게 한다.
  * 입력 순서(생성 순 등)는 형제 사이에서 보존된다. 순환(비정상 데이터)은 방문 집합으로 방지한다.
+ *
+ * **분기는 들여쓰지 않는다.** 이 화면에서 들여쓰기는 "저 브랜치 위에 쌓였다" 는 뜻이고 거기서
+ * restack·force-push 캐스케이드·PR base 재조준이 따라 나오는데, 분기는 그 관계가 하나도 없다 —
+ * 원본과 같은 base 를 향하는 형제다. 특히 스택 자식을 분기하면 분기본은 원본의 스택 부모를
+ * 그대로 물려받으므로, 원본 아래로 넣으면 진짜 스택 위치를 감추면서 없는 관계를 그리게 된다.
+ * 그래서 깊이는 원본과 같게 두고 **원본의 서브트리 바로 뒤**에 붙여 인접으로만 묶는다.
  */
-export function orderByStack<T extends { id: string; parentWorkspaceId: string | null }>(
-  workspaces: T[]
-): Array<{ workspace: T; depth: number }> {
+export function orderByStack<
+  T extends {
+    id: string
+    parentWorkspaceId: string | null
+    forkedFromWorkspaceId?: string | null
+  }
+>(workspaces: T[]): Array<{ workspace: T; depth: number }> {
   const byParent = new Map<string | null, T[]>()
   const ids = new Set(workspaces.map((w) => w.id))
   for (const w of workspaces) {
@@ -380,11 +390,27 @@ export function orderByStack<T extends { id: string; parentWorkspaceId: string |
   const out: Array<{ workspace: T; depth: number }> = []
   const seen = new Set<string>()
   const walk = (parentId: string | null, depth: number): void => {
-    for (const w of byParent.get(parentId) ?? []) {
-      if (seen.has(w.id)) continue
+    const siblings = byParent.get(parentId) ?? []
+    // 분기본은 원본과 같은 스택 부모를 갖는다 = 이 목록 안에 함께 있다. 원본별로 모아 두고
+    // 원본을 낸 직후에 붙인다. 원본이 이 목록에 없으면(아카이브 등) 그냥 제자리에서 나온다.
+    const forksOf = new Map<string, T[]>()
+    for (const w of siblings) {
+      const origin = w.forkedFromWorkspaceId
+      if (!origin || !siblings.some((s) => s.id === origin)) continue
+      forksOf.set(origin, [...(forksOf.get(origin) ?? []), w])
+    }
+    const emit = (w: T): void => {
+      if (seen.has(w.id)) return
       seen.add(w.id)
       out.push({ workspace: w, depth })
       walk(w.id, depth + 1)
+      // 분기의 분기도 같은 규칙으로 이어 붙는다(emit 이 재귀한다).
+      for (const fork of forksOf.get(w.id) ?? []) emit(fork)
+    }
+    for (const w of siblings) {
+      const origin = w.forkedFromWorkspaceId
+      if (origin && siblings.some((s) => s.id === origin)) continue
+      emit(w)
     }
   }
   walk(null, 0)
@@ -437,7 +463,13 @@ export function reorderById<T extends { id: string }>(
  */
 export function orderVisibleWorkspaces<
   R extends { id: string },
-  W extends { id: string; repoId: string; archived: boolean; parentWorkspaceId: string | null }
+  W extends {
+    id: string
+    repoId: string
+    archived: boolean
+    parentWorkspaceId: string | null
+    forkedFromWorkspaceId?: string | null
+  }
 >(repos: R[], workspaces: W[]): W[] {
   const byRepo = new Map<string, W[]>()
   for (const w of workspaces) {
@@ -678,6 +710,15 @@ export interface Workspace {
    * 기본 브랜치에서 바로 분기한 스택 뿌리면 null. 자식은 parentWorkspaceId 로 역산해 트리를 만든다.
    */
   parentWorkspaceId: string | null
+  /**
+   * 대화를 분기한 원본 워크스페이스 id. 화면 트리에서 fork 를 원본 아래에 묶는 데만 쓴다.
+   *
+   * parentWorkspaceId 는 어느 브랜치 위에 쌓였는지를 나타내는 git 관계라 base 계산·restack·
+   * PR retarget·stack-sync 캐스케이드의 입력이고, createdByWorkspaceId 는 누가 만들었는지를
+   * 나타내는 권한 관계다. fork 는 원본과 같은 base 를 향하는 형제라 둘 중 어느 쪽도 아니다 —
+   * 원본이 병합돼도 fork 를 따라 restack 하면 안 되므로 이 별도 관계는 표시 외에는 쓰지 않는다.
+   */
+  forkedFromWorkspaceId?: string | null
   /**
    * 이 워크스페이스를 만든 **에이전트의 워크스페이스** id. 사람이 UI 에서 만들었으면 null.
    *
@@ -2986,6 +3027,7 @@ export const IPC = {
   repoGetIssueBody: 'repo:getIssueBody',
   repoGetPrBody: 'repo:getPrBody',
   workspaceCreate: 'workspace:create',
+  workspaceFork: 'workspace:fork',
   workspaceArchive: 'workspace:archive',
   /** 병합된 PR 로 뜬 아카이브 제안을 해제한다(같은 병합은 다시 제안하지 않는다). */
   workspaceArchiveSuggestDismiss: 'workspace:archiveSuggestDismiss',
@@ -3506,6 +3548,10 @@ export interface CreateWorkspaceArgs {
    * (base = 부모의 branch). 없거나 null 이면 기본 브랜치에서 분기한 스택 뿌리로 만든다.
    */
   parentWorkspaceId?: string | null
+  /** 이 워크스페이스의 대화에서 분기한다. 코드 상태와 워크스페이스 설정을 원본에서 물려받는다. */
+  forkFromWorkspaceId?: string | null
+  /** 예전 /fork 의미가 바뀌었다는 one-shot 시스템 안내를 이 fork 기록에 남긴다. */
+  forkSemanticsNotice?: boolean
   /**
    * 만든 주체가 다른 워크스페이스의 에이전트면 그 워크스페이스 id. 렌더러(사람)는 넘기지 않는다.
    * 나중에 그 에이전트가 이 워크스페이스를 아카이브할 수 있는지의 근거가 된다.

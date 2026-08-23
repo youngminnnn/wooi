@@ -106,6 +106,36 @@ describe('승인용 diff 추적', () => {
   })
 })
 
+describe('thread id 소유권', () => {
+  it('openThread 의 시작 응답에서만 새 id 를 채택한다', async () => {
+    const adopted: string[] = []
+    const rpc = {
+      request: vi.fn(async (method: string) => {
+        if (method === RPC.threadStart) return { thread: { id: 'thr-started' } }
+        if (method === RPC.turnStart) return { turn: { id: 'turn-1' } }
+        return {}
+      }),
+      supports: vi.fn(() => false),
+      tryRequest: vi.fn(async () => undefined)
+    } as unknown as RpcClient
+    const { thread } = makeThread()
+    ;(
+      thread as unknown as {
+        deps: { rpc: () => Promise<RpcClient>; onThreadId: (id: string) => void }
+      }
+    ).deps = {
+      ...(thread as unknown as { deps: object }).deps,
+      rpc: async () => rpc,
+      onThreadId: (id: string) => adopted.push(id)
+    }
+
+    await thread.send('hello')
+
+    expect(adopted).toEqual(['thr-started'])
+    expect(rpc.request).not.toHaveBeenCalledWith(RPC.threadFork, expect.anything())
+  })
+})
+
 describe('goal 휘발성 상태', () => {
   const goal = {
     threadId: 'thr1',

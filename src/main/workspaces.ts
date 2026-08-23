@@ -17,9 +17,12 @@ import {
 } from './carry'
 import {
   addWorktree,
+  applySnapshot,
   checkoutPrWorktree,
   removeWorktree,
   resolveUniqueWorktree,
+  revParse,
+  snapshotWorkingTree,
   syncGhMergeBase
 } from './git'
 import {
@@ -34,6 +37,7 @@ import { generateWorkspaceName } from './names'
 import { findFreePort } from './net'
 import { invalidateWorkspacePr } from './prCache'
 import { getStore } from './store'
+import { getTranscripts } from './transcripts'
 import type { ScriptRunner } from './scripts'
 
 /**
@@ -48,6 +52,8 @@ export interface CreateWorkspaceDeps {
   scripts: ScriptRunner
   /** 생성 직후 전체 상태를 창들에 방송한다(사이드바에 새 행이 나타나는 시점). */
   broadcastState: () => void
+  /** 분기본이 원본의 대화를 이어받게 한다. 이어받을 수 없는 백엔드면 null. */
+  forkAgentSession?: (source: Workspace, fork: Workspace) => Promise<string | null>
 }
 
 /**
@@ -278,8 +284,23 @@ export async function createWorkspace(
   if (args.parentWorkspaceId && !parent) {
     return { error: 'Parent workspace not found (or archived).' }
   }
-  const baseBranch = prMeta?.baseRefName ?? (parent ? parent.branch : repo.defaultBranch)
-  const parentWorkspaceId = parent ? parent.id : null
+  const forkSource = args.forkFromWorkspaceId
+    ? store
+        .getState()
+        .workspaces.find(
+          (w) => w.id === args.forkFromWorkspaceId && w.repoId === repo.id && !w.archived
+        )
+    : null
+  if (args.forkFromWorkspaceId && !forkSource) {
+    return { error: 'Source workspace not found (or archived).' }
+  }
+  // PR 에서 만든 워크스페이스는 그 PR 의 base 를 그대로 쓴다. 분기는 원본의 base 를 물려받고
+  // (원본의 형제이므로), 스택이면 부모 브랜치가 base 다.
+  const baseBranch =
+    prMeta?.baseRefName ?? forkSource?.baseBranch ?? (parent ? parent.branch : repo.defaultBranch)
+  const parentWorkspaceId = forkSource ? forkSource.parentWorkspaceId : parent ? parent.id : null
+  const startPoint = forkSource ? await revParse(repo.path, forkSource.branch) : null
+  if (forkSource && !startPoint) return { error: 'Source workspace branch not found.' }
   // 기존 브랜치/worktree 디렉토리와 충돌하면 접미사(-2, -3 …)를 붙여 고유 이름을 만든다.
   const resolvedWorktree = await resolveUniqueWorktree(repo.path, rawName, {
     fixedBranch: !!prMeta
@@ -291,7 +312,7 @@ export async function createWorkspace(
     if (prMeta) {
       branch = await checkoutPrWorktree(repo.path, prMeta.number, worktreePath)
     } else {
-      await addWorktree(repo.path, branch, baseBranch, worktreePath)
+      await addWorktree(repo.path, branch, baseBranch, worktreePath, startPoint ?? undefined)
     }
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) }
@@ -305,21 +326,29 @@ export async function createWorkspace(
     repo,
     worktreePath
   )
+  if (forkSource) {
+    try {
+      const snapshot = await snapshotWorkingTree(forkSource.worktreePath)
+      if (snapshot) await applySnapshot(worktreePath, snapshot)
+    } catch (err) {
+      // 대화와 코드가 일부 어긋났음을 전달 실패와 같은 통로로 알리되, 만들어진 worktree 는 살린다.
+      const reason = err instanceof Error ? err.message : String(err)
+      log.warn(`fork 변경 스냅샷 적용 실패: ${reason}`)
+      carryFailures.push({ path: '.', reason, agentContext: false })
+    }
+  }
 
   const settings = store.getState().settings
   // 워크스페이스가 쓸 에이전트는 여기서 정해져 세션 내내 고정된다. 호출자가 지정하지 않은
   // 스택 자식은 부모를 상속하고, 스택 뿌리만 전역 기본값을 쓴다. 권한 모드는 최종 백엔드의
   // 전역 기본값을 따르되, 백엔드가 모르는 값이면 그 백엔드의 기본 모드로 보정한다.
-  const agentBackend = resolveWorkspaceAgentBackend(
-    args.agentBackend,
-    parent,
-    settings.defaultAgentBackend
-  )
+  const agentBackend = forkSource
+    ? forkSource.agentBackend
+    : resolveWorkspaceAgentBackend(args.agentBackend, parent, settings.defaultAgentBackend)
   const meta = backendMeta(agentBackend)
-  const permissionMode = normalizePermissionMode(
-    meta,
-    agentSettingsFor(settings, agentBackend).permissionMode
-  )
+  const permissionMode = forkSource
+    ? forkSource.permissionMode
+    : normalizePermissionMode(meta, agentSettingsFor(settings, agentBackend).permissionMode)
   const id = randomUUID()
   // 모든 run script 에 워크스페이스 전체에서 고유한 포트를 하나씩 예약한다.
   const used = new Set<number>(store.getState().workspaces.flatMap((w) => Object.values(w.ports)))
@@ -341,12 +370,13 @@ export async function createWorkspace(
       // 순간이 아니라 대화 중에 드러난다. 틀리는 대가도 비대칭이다: Solo 로 시작했다 팀이
       // 필요해지면 한 턴이면 되지만, 팀으로 두고 안 쓰면 그 워크스페이스가 사는 내내 위임 도구가
       // 매 요청에 실린다(catalog 의 alwaysLoad). 명시적으로 요청하는 경로는 fan-out 슬롯뿐이다.
-      multiAgent: args.multiAgent === true,
+      multiAgent: forkSource ? forkSource.multiAgent === true : args.multiAgent === true,
       name: rawName,
       displayName: null,
       branch,
       baseBranch,
       parentWorkspaceId,
+      forkedFromWorkspaceId: forkSource?.id ?? null,
       // 누가 만들었는가. 부모 관계와 별개로 기록한다 — 사람이 UI 에서 만들면 여기가 null 이고,
       // 그 덕에 에이전트는 자기가 만든 것에만 손댈 수 있다([[agent/tools/target]]).
       createdByWorkspaceId: args.createdByWorkspaceId ?? null,
@@ -361,9 +391,11 @@ export async function createWorkspace(
       // 새 워크스페이스의 기본은 그쪽이다 — 부모의 모델을 상속시키지 않는다. 부모가 잠깐 올려
       // 둔 값이 새 워크스페이스에 눌러앉으면, 사용자는 자기가 정한 적 없는 모델로 도는 것을
       // 나중에야 발견한다(에이전트가 만드는 워크스페이스는 화면을 가져가지도 않는다).
-      model: args.model ?? null,
-      effort: args.effort ?? null,
-      fastMode: null,
+      // fork 는 사용자가 원본 대화를 보며 만들고 곧바로 그쪽으로 이동한다. 화면을 가져가지 않는
+      // 에이전트 생성 스택과 달리 선택이 숨어 있지 않으므로, 대화가 전제한 실행 설정도 물려받는다.
+      model: forkSource ? forkSource.model : (args.model ?? null),
+      effort: forkSource ? forkSource.effort : (args.effort ?? null),
+      fastMode: forkSource ? forkSource.fastMode : null,
       status: 'idle',
       lastModel: null,
       fastModeState: null,
@@ -374,6 +406,65 @@ export async function createWorkspace(
     })
   )
   deps.broadcastState()
+
+  if (forkSource) {
+    const fork = store.getState().workspaces.find((item) => item.id === id)!
+    const transcripts = getTranscripts()
+    transcripts.copy(forkSource.id, fork.id)
+
+    let inheritedSessionId: string | null = null
+    let inheritanceFailed: boolean
+    try {
+      inheritedSessionId = (await deps.forkAgentSession?.(forkSource, fork)) ?? null
+      inheritanceFailed =
+        forkSource.agentBackend === 'claude' && !!forkSource.sessionId && !inheritedSessionId
+    } catch (err) {
+      inheritanceFailed = true
+      log.warn(`fork 세션 승계 실패: ${err instanceof Error ? err.message : String(err)}`)
+    }
+
+    if (inheritedSessionId === forkSource.sessionId) {
+      inheritanceFailed = true
+      inheritedSessionId = null
+      log.warn('fork 세션 승계가 원본 sessionId 를 반환해 거부했다')
+    }
+    if (inheritedSessionId) {
+      store.update((st) => {
+        const target = st.workspaces.find((item) => item.id === id)
+        if (target) target.sessionId = inheritedSessionId
+      })
+      transcripts.upsert(fork.id, {
+        id: `system:fork-rewind:${Date.now()}`,
+        type: 'system',
+        text: 'This fork starts without file-history checkpoints, so /rewind will be empty until new turns create checkpoints here.',
+        ts: Date.now()
+      })
+    } else if (forkSource.agentBackend === 'codex' || inheritanceFailed) {
+      // Codex thread/fork 를 다른 cwd 에서 resume 하면 성공 응답과 달리 cwd·runtimeWorkspaceRoots 가
+      // 원본 worktree 를 가리킨다(0.146.0 실측). 승계하면 분기본이 원본 파일을 고치므로 새 thread 로
+      // 시작한다. Claude 실패도 복사된 기록과 실제 모델 맥락이 다르다는 사실을 같은 자리에서 밝힌다.
+      const text =
+        forkSource.agentBackend === 'codex'
+          ? "Codex can't carry a conversation into a new working directory, so this fork starts with a fresh Codex session. The messages above are copied history."
+          : 'The conversation history was copied, but the model context could not be carried over. This fork starts with a fresh session.'
+      transcripts.upsert(fork.id, {
+        id: `system:fork-session:${Date.now()}`,
+        type: 'system',
+        text,
+        ts: Date.now()
+      })
+    }
+    if (args.forkSemanticsNotice) {
+      // 예전 Codex /fork 는 현재 자리를 새 thread 로 바꿨다. 의미가 뒤집힌 사실을 숨기면 원본이
+      // 사라졌다고 오해하므로, 첫 성공 때만 fork 기록 자체에 남긴다.
+      transcripts.upsert(fork.id, {
+        id: `system:fork-semantics:${Date.now()}`,
+        type: 'system',
+        text: '/fork now creates a new workspace and switches to it; the original conversation stays unchanged.',
+        ts: Date.now()
+      })
+    }
+  }
 
   const setupSkippedForUntrustedPr =
     !!repo.setupScript.trim() && shouldSkipPrSetup(prMeta, viewerLogin)
@@ -420,6 +511,13 @@ export function shouldSkipPrSetup(
       ? pr.headRepositoryOwner
       : pr.headRepositoryOwner?.login
   return !viewerLogin || owner !== viewerLogin
+}
+
+/** IPC 와 앞으로 생길 사람용 입구가 빈 기록이나 쓰는 중인 기록을 복제하지 않게 하는 마지막 문지기. */
+export function workspaceForkError(source: Pick<Workspace, 'sessionId' | 'status'>): string | null {
+  if (source.sessionId == null) return 'No conversation to fork yet.'
+  if (source.status === 'running') return 'Wait for the current turn to finish.'
+  return null
 }
 
 /**

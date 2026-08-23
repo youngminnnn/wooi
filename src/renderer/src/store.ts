@@ -45,7 +45,13 @@ import {
 } from '@shared/types'
 import { fileDiffHash, isFileViewed, viewedKey } from '@shared/reviewViewed'
 import { playNotification } from './lib/sound'
-import { carryMissingShownFlag, carrySuggestShownFlag, readUiFlag, setUiFlag } from './lib/uiFlags'
+import {
+  carryMissingShownFlag,
+  carrySuggestShownFlag,
+  FORK_SEMANTICS_NOTICE_SEEN,
+  readUiFlag,
+  setUiFlag
+} from './lib/uiFlags'
 import { openRepoSettings } from './lib/repoSettings'
 import {
   bodyOf,
@@ -476,6 +482,8 @@ interface UIState {
     },
     displayName?: string
   ) => Promise<string | undefined>
+  /** 현재 대화와 코드 상태를 새 워크스페이스로 복제하고 그쪽으로 전환한다. */
+  forkWorkspace: (workspaceId: string, opts?: { name?: string }) => Promise<string | undefined>
   /**
    * 같은 프롬프트로 후보 워크스페이스 여럿을 한 번에 만들고, 만들어지면 비교 화면을 연다.
    * 생성 중에는 createWorkspace 와 같은 자리표시 행을 후보 수만큼 띄운다.
@@ -1733,6 +1741,38 @@ export const useStore = create<UIState>((set, get) => ({
       return res.workspaceId
     }
     return undefined
+  },
+
+  forkWorkspace: async (workspaceId, opts) => {
+    const source = get().app?.workspaces.find((w) => w.id === workspaceId)
+    if (!source) return undefined
+    let res: Awaited<ReturnType<typeof window.api.workspace.fork>>
+    try {
+      res = await window.api.workspace.fork(workspaceId, {
+        ...opts,
+        showSemanticsNotice: !readUiFlag(FORK_SEMANTICS_NOTICE_SEEN)
+      })
+    } catch (err) {
+      res = { error: err instanceof Error ? err.message : String(err) }
+    }
+    if (res.error) {
+      get().pushToast('error', res.error)
+      return undefined
+    }
+    if (!res.workspaceId) return undefined
+    setUiFlag(FORK_SEMANTICS_NOTICE_SEEN, true)
+    void get().selectWorkspace(res.workspaceId)
+    set({ undoableCreate: { workspaceId: res.workspaceId, at: Date.now() } })
+    if (res.name && res.branch) {
+      get().pushToast(
+        'success',
+        `Forked conversation into “${res.name}” on ${res.branch} — ⌘Z to undo`
+      )
+    }
+    get().reportCarryFailures(res.carryFailures)
+    get().reportCarryMissing(source.repoId, res.carryMissing)
+    get().suggestCarry(source.repoId, res.workspaceId, res.carrySuggestions)
+    return res.workspaceId
   },
 
   createFanout: async (repoId, args) => {

@@ -19,6 +19,9 @@ export const noticeDismissedFlag = (id: string): string => `noticeDismissed.${id
 /** 사이드바 ⌘K 힌트를 사용자가 닫았는지. */
 export const QUICK_SWITCH_HINT_DISMISSED = 'quickSwitchHintDismissed'
 
+/** 예전 Codex /fork 와 달리 이제 원본을 남긴다는 안내를 이미 본 적 있는지. */
+export const FORK_SEMANTICS_NOTICE_SEEN = 'forkSemanticsNoticeSeen'
+
 /**
  * 이 리포의 설정 모달을 한 번이라도 열어 봤는지.
  *

@@ -1,5 +1,5 @@
 import { app } from 'electron'
-import { readFileSync, existsSync, mkdirSync, rmSync } from 'node:fs'
+import { copyFileSync, readFileSync, existsSync, mkdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { writeFileAtomic, appendFileDurable } from './fsutil'
 import { searchTranscripts } from './transcriptSearch'
@@ -116,6 +116,26 @@ class TranscriptStore {
       else cached.push(item)
       this.touch(workspaceId, cached)
     }
+  }
+
+  /** 워크스페이스의 대화 기록을 다른 워크스페이스로 복제한다(분기). */
+  copy(fromWorkspaceId: string, toWorkspaceId: string): void {
+    // 목적지 id 가 재사용된 비정상 상태에서도 옛 기록·비용을 다시 내놓지 않도록 먼저 끊는다.
+    this.cache.delete(toWorkspaceId)
+    this.costs.delete(toWorkspaceId)
+
+    const source = this.fileFor(fromWorkspaceId)
+    if (!existsSync(source) && existsSync(this.legacyFileFor(fromWorkspaceId))) {
+      // 레거시는 기존 읽기 경로로 마이그레이션해, 분기만 별도의 변환 규칙을 갖지 않게 한다.
+      this.readFromDisk(fromWorkspaceId)
+    }
+    if (!existsSync(source)) return
+
+    // upsert 는 캐시보다 파일 append 를 먼저 끝내므로 디스크가 늘 최신이다. 워크스페이스별 파일은
+    // 함께 읽히지 않아 ChatItem id 를 다시 만들 필요도 없다 — 같은 id 가 양쪽에 있어도 독립적이다.
+    copyFileSync(source, this.fileFor(toWorkspaceId))
+    this.cache.delete(toWorkspaceId)
+    this.costs.delete(toWorkspaceId)
   }
 
   /**
