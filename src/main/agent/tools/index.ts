@@ -1,5 +1,6 @@
 import { switchToAgentTeam } from './agentTeam'
 import { awaitStackedWork } from './awaitStackedWork'
+import { askForDecision, initDecisionDelivery } from './decision'
 import {
   checkMessageStatus,
   listWorkspacePeers,
@@ -45,8 +46,10 @@ export { runAgentTool, type AgentToolDeps, type AgentToolHandler } from './regis
  */
 export function initAgentTools(deps: AgentToolDeps): void {
   initRegistry(deps)
+  initDecisionDelivery(deps)
   registerAgentTool('create_stacked_workspace', createStackedWorkspace)
   registerAgentTool('report_to_parent', reportToParent)
+  registerAgentTool('ask_for_decision', askForDecision)
   registerAgentTool('notify_child', notifyChild)
   registerAgentTool('check_stacked_work', checkStackedWork)
   // 위임 도구는 백엔드마다 하나다. 카탈로그도 같은 이름을 같은 규칙으로 만들므로(delegateToolName)

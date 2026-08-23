@@ -460,9 +460,15 @@ export function deliverOrHold(
   text: string,
   /** 대기 카드에 보여 줄 본문 — 앱이 덧댄 문단을 뺀, 에이전트가 쓴 원문. */
   rawMessage: string,
-  route: PeerMessagePart['route'] = 'peer'
+  route: PeerMessagePart['route'] = 'peer',
+  /**
+   * 사용자가 이 전달을 **직접 지시했다**. `hold` 는 사용자에게 물으라는 정책이므로 이미 답했다.
+   * `refuse` 는 수신 자체를 닫은 선언이라 그대로 둔다.
+   */
+  userDirected = false
 ): { delivered: boolean; buffered: boolean; policy: PeerInboundPolicy; messageId: string } {
-  const policy = inboundPolicyFor(target, from.id)
+  let policy = inboundPolicyFor(target, from.id)
+  if (userDirected && policy === 'hold') policy = 'accept'
   const label = workspaceDisplayName(from)
   if (policy === 'refuse') {
     logDelivery(label, target, '거절(refuse)')
