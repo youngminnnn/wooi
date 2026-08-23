@@ -62,6 +62,7 @@ export function git(overrides: Partial<GitStatus> = {}): GitStatus {
     behind: 0,
     changedFiles: 0,
     conflicted: false,
+    rebasing: false,
     ...overrides
   }
 }
