@@ -23,7 +23,12 @@ function requiredInterfaceFields(source, name, file) {
 /** 현재 앱 소스와 대조한 최소 상태를 격리된 userData에 쓴다. */
 export async function seedAppState(
   { userDataPath, repoPath, worktrees },
-  { appDir = process.cwd(), workspaceName = Object.keys(worktrees)[0], transcript = [] } = {}
+  {
+    appDir = process.cwd(),
+    workspaceName = Object.keys(worktrees)[0],
+    transcript = [],
+    peerSent = []
+  } = {}
 ) {
   const root = resolve(appDir)
   const schemaFile = join(root, 'src/main/storeSchema.ts')
@@ -75,7 +80,9 @@ export async function seedAppState(
     fastModeReason: null,
     archived: false,
     createdAt: now,
-    lastActiveAt: now
+    lastActiveAt: now,
+    // 옵셔널 필드라 넘기지 않으면 아예 쓰지 않는다 — 마이그레이션 없이 읽히는 레코드를 그대로 둔다.
+    ...(peerSent.length > 0 ? { peerSent } : {})
   }
   const missing = requiredFields.filter((field) => !Object.hasOwn(workspace, field))
   if (missing.length > 0) {
