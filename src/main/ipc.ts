@@ -271,7 +271,17 @@ export function registerIpc(ctx: IpcContext): void {
       // 이 전송은 토큰을 쓰게 된 이유 그 자체라 transcript 에 남아야 한다. 그래서 silent 나 prefix 를
       // 쓰지 않는다. running 가드도 두지 않는다 — Claude 는 SDK 입력 큐에 enqueue 하고, Codex 는
       // 진행 중인 턴에 네이티브 steering 하므로 두 백엔드 모두 mid-turn 전송을 받아들인다.
-      await ctx.sessions.sendMessage(workspaceId, prompt)
+      //
+      // origin 은 화면에서 이 전문을 한 줄로 접기 위한 표식이다([[types]] ConflictResolveOrigin).
+      // 감추는 것과는 다르다 — 본문은 그대로 기록되고 한 번 눌러 펼치면 전부 보인다.
+      await ctx.sessions.sendMessage(workspaceId, prompt, undefined, {
+        origin: {
+          kind: 'conflictResolve',
+          branch: conflictedBranch,
+          fileCount: conflictedFiles.length,
+          auto: opts.auto
+        }
+      })
       return { started: true }
     } catch (err) {
       return { error: err instanceof Error ? err.message : String(err) }

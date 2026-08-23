@@ -1502,7 +1502,25 @@ export interface PeerMessageOrigin {
   messages: PeerMessagePart[]
 }
 
-export type ChatUserOrigin = PeerMessageOrigin
+/**
+ * Wooi 가 rebase 충돌 해결을 맡기며 넣은 사용자 턴.
+ *
+ * 이 전송은 일부러 보이게 남긴다(silent 를 쓰지 않는다) — 사용자가 토큰을 쓰는 턴이므로 무엇을
+ * 시켰는지 대화에 있어야 나중에 "이 턴은 왜 돌았지" 를 대화만 보고 답할 수 있다. 다만 프롬프트
+ * 자체는 길어서 펼쳐 둔 채로는 대화를 밀어낸다. 그래서 **감추는 대신 접는다** — 화면에는 한 줄만
+ * 두고, 전문은 한 번 눌러 펼치면 그대로 있다. 그 한 줄을 만들 재료가 이 필드들이다.
+ */
+export interface ConflictResolveOrigin {
+  kind: 'conflictResolve'
+  /** 충돌이 난 브랜치. */
+  branch: string
+  /** 충돌 파일 수 — 펼치지 않고도 규모를 알 수 있게 한다. */
+  fileCount: number
+  /** 버튼을 눌러서가 아니라 autoResolveConflicts 로 Wooi 가 시작했는지. */
+  auto: boolean
+}
+
+export type ChatUserOrigin = PeerMessageOrigin | ConflictResolveOrigin
 
 /** 백엔드까지 함께 흘려 보낼 사용자 턴의 표시·모델용 옵션. */
 export interface SendMessageOptions {
