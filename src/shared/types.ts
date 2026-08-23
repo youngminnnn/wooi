@@ -2822,13 +2822,23 @@ export interface ReviewEnvelope {
   event: ReviewEvent
 }
 
-/** 리뷰 시작 모달의 열린 PR 목록 항목. */
-export interface ReviewPrCandidate {
+/** 리뷰 시작 모달과 워크스페이스 시작 모달이 함께 쓰는 열린 PR 목록 항목. */
+export interface PrCandidate {
   number: number
   title: string
   head: string
   base: string
   author: string
+  isCrossRepository?: boolean
+  headRepositoryOwner?: string
+  maintainerCanModify?: boolean
+  url?: string
+  isDraft?: boolean
+  /** 직접 조회한 PR 에만 붙는다. 열린 목록은 상태가 모두 OPEN 이라 싣지 않는다. */
+  state?: string
+  canCreateWorkspace?: boolean
+  createWorkspaceDisabledReason?: string
+  isViewerAuthor?: boolean
 }
 
 /** 워크스페이스 시작 모달과 에이전트 도구가 함께 쓰는 열린 이슈 목록 항목. */
@@ -2865,7 +2875,10 @@ export const IPC = {
   repoReorder: 'repo:reorder',
   repoListBranches: 'repo:listBranches',
   repoListIssues: 'repo:listIssues',
+  repoListPrs: 'repo:listPrs',
+  repoResolvePr: 'repo:resolvePr',
   repoGetIssueBody: 'repo:getIssueBody',
+  repoGetPrBody: 'repo:getPrBody',
   workspaceCreate: 'workspace:create',
   workspaceArchive: 'workspace:archive',
   /** 병합된 PR 로 뜬 아카이브 제안을 해제한다(같은 병합은 다시 제안하지 않는다). */
@@ -3371,6 +3384,11 @@ export interface CreateWorkspaceArgs {
   /** @deprecated 무시됨 — 항상 origin 기본 브랜치(origin/<defaultBranch>)에서 분기한다. */
   baseBranch?: string
   /**
+   * 기존 PR 에서 시작할 때의 PR 번호. head/base 는 main 이 GitHub 에서 직접 풀어 caller 가
+   * 임의의 base 를 고르거나 PR 메타데이터와 다른 브랜치를 만들 수 없게 한다.
+   */
+  fromPrNumber?: number
+  /**
    * stacked PR 부모 워크스페이스 id. 지정하면 그 워크스페이스의 브랜치 위에 새 워크스페이스를 쌓는다
    * (base = 부모의 branch). 없거나 null 이면 기본 브랜치에서 분기한 스택 뿌리로 만든다.
    */
@@ -3408,6 +3426,10 @@ export interface CreateWorkspaceResult {
   name?: string
   branch?: string
   error?: string
+  /** 같은 리포·PR 의 워크스페이스가 이미 있으면 새로 만들지 않고 그 id 를 돌려준다. */
+  existingWorkspaceId?: string
+  /** 기존 워크스페이스가 아카이브돼 Restore 가 필요한지. */
+  existingWorkspaceArchived?: boolean
   /** worktree 전달에 실패한 항목들. 생성 자체는 성공했지만 사용자에게 알려야 한다. */
   carryFailures?: CarryFailure[]
   /**
@@ -3419,6 +3441,7 @@ export interface CreateWorkspaceResult {
    * 한 번만 알려 잔소리가 되지 않게 한다.
    */
   carryMissing?: string[]
+  setupSkippedForUntrustedPr?: boolean
   /**
    * 리포의 전달 목록이 **비어 있을 때만** 채워지는, 지금 리포에 실제로 존재하는 후보 경로들.
    * 이 경우 새 worktree 는 `.env`·`CLAUDE.local.md` 없이 만들어졌다는 뜻이므로 렌더러가

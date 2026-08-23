@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Check, Layers, Loader2, Search } from 'lucide-react'
-import type { AgentBackendId, EffortSetting, ReviewPrCandidate } from '@shared/types'
+import type { AgentBackendId, EffortSetting, PrCandidate } from '@shared/types'
 import { DEFAULT_AGENT_BACKEND } from '@shared/types'
 import Modal, { ghostBtn, inputClass, labelClass, primaryBtn } from '../Modal'
 import { useStore } from '../../store'
@@ -54,7 +54,7 @@ export default function PrReviewStartModal({
   /** 검색창에 친 글자. 번호·URL·제목 조각 무엇이든 될 수 있다. */
   const [query, setQuery] = useState('')
   /** 확정한 PR. 정해지면 목록을 접는다 — 고른 뒤에도 목록이 펼쳐져 있으면 골랐는지 알 수 없다. */
-  const [picked, setPicked] = useState<{ number: number; pr?: ReviewPrCandidate } | null>(null)
+  const [picked, setPicked] = useState<{ number: number; pr?: PrCandidate } | null>(null)
   // 남겨 둔 문장이 있으면 그것으로 시작한다(체크박스로 직접 남긴 것이므로 다시 쓰겠다는 뜻).
   const remembered = useMemo(() => readPrompt(), [])
   const [prompt, setPrompt] = useState(remembered ?? '')
@@ -63,7 +63,7 @@ export default function PrReviewStartModal({
   // 잘못 보이는 일이 없다. (effect 안에서 동기적으로 null 로 리셋하면 리렌더가 한 번 더 돈다.)
   const [candidates, setCandidates] = useState<{
     repoId: string
-    list: ReviewPrCandidate[]
+    list: PrCandidate[]
   } | null>(null)
   const [busy, setBusy] = useState(false)
   const searchRef = useRef<HTMLInputElement>(null)
@@ -144,7 +144,7 @@ export default function PrReviewStartModal({
   const resolved = stack?.prNumber === prNumber ? stack.prNumbers : null
   const isStack = (resolved?.length ?? 0) > 1
 
-  const choose = (number: number, pr?: ReviewPrCandidate): void => {
+  const choose = (number: number, pr?: PrCandidate): void => {
     setPicked({ number, pr })
     setQuery('')
     setWholeStack(true)

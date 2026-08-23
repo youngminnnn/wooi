@@ -1,8 +1,10 @@
 import { execFile } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
 import { promisify } from 'node:util'
 import { basename, join } from 'node:path'
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { wooiHome } from './paths'
+import { runGh } from './github'
 import type {
   FileDiff,
   FileDiffStatus,
@@ -115,12 +117,19 @@ async function localBranchExists(repoPath: string, branch: string): Promise<bool
  */
 export async function resolveUniqueWorktree(
   repoPath: string,
-  desiredBranch: string
+  desiredBranch: string,
+  options?: { fixedBranch?: boolean }
 ): Promise<{ branch: string; worktreePath: string }> {
   const base = sanitizeBranch(desiredBranch)
   for (let n = 1; ; n++) {
     const candidate = n === 1 ? base : `${base}-${n}`
     const worktreePath = worktreePathFor(repoPath, candidate)
+    // PR checkout 은 실제 로컬 브랜치명을 gh 가 나중에 정한다. 여기서 이름까지 uniquify 하면
+    // checkout 전의 임시 판단이 그 결정을 앞질러 버리므로, 디렉토리 충돌만 피한다.
+    if (options?.fixedBranch) {
+      if (!existsSync(worktreePath)) return { branch: base, worktreePath }
+      continue
+    }
     const taken = existsSync(worktreePath) || (await localBranchExists(repoPath, candidate))
     if (!taken) return { branch: candidate, worktreePath }
   }
@@ -306,6 +315,37 @@ export async function fetchPrHeads(
   return r.ok
 }
 
+/** PR head 를 detached worktree 로 먼저 붙인 뒤 gh 가 정한 tracking 브랜치로 전환한다. */
+export async function checkoutPrWorktree(
+  repoPath: string,
+  prNumber: number,
+  worktreePath: string
+): Promise<string> {
+  const tempRef = `refs/wooi/pr-checkout/${prNumber}-${randomUUID()}`
+  let worktreeAdded = false
+  try {
+    await git(repoPath, [
+      'fetch',
+      '--no-tags',
+      '--force',
+      'origin',
+      `+refs/pull/${prNumber}/head:${tempRef}`
+    ])
+    await git(repoPath, ['worktree', 'add', '--detach', worktreePath, tempRef])
+    worktreeAdded = true
+    const { stderr, code } = await runGh(`gh pr checkout ${prNumber}`, worktreePath)
+    if (code !== 0) throw new Error(stderr.trim() || `Failed to check out PR #${prNumber}.`)
+    const branch = await git(worktreePath, ['rev-parse', '--abbrev-ref', 'HEAD'])
+    if (!branch || branch === 'HEAD') throw new Error(`PR #${prNumber} did not attach a branch.`)
+    return branch
+  } catch (error) {
+    if (worktreeAdded) await removeWorktree(repoPath, worktreePath, '', false)
+    throw error
+  } finally {
+    await gitTry(repoPath, ['update-ref', '-d', tempRef])
+  }
+}
+
 /** detached HEAD 로 worktree 를 추가한다. */
 export async function addDetachedWorktree(
   repoPath: string,
@@ -458,8 +498,36 @@ export async function originHasBranch(worktreePath: string, branch: string): Pro
 export async function pushCurrentBranch(
   worktreePath: string
 ): Promise<{ ok: boolean; error: string }> {
-  const r = await gitTry(worktreePath, ['push', '-u', 'origin', 'HEAD'])
+  const target = await resolveBranchPushTarget(worktreePath)
+  const refspec =
+    target.destination === target.branch ? 'HEAD' : `HEAD:refs/heads/${target.destination}`
+  const args = ['push', '-u', target.remote, refspec]
+  const r = await gitTry(worktreePath, args)
   return { ok: r.ok, error: r.ok ? '' : r.stderr || r.stdout || 'git push failed.' }
+}
+
+interface BranchPushTarget {
+  branch: string
+  remote: string
+  destination: string
+}
+
+/**
+ * checkout 을 만든 주체가 기록한 tracking 설정을 push 의 단일 소스로 쓴다. 특히 fork PR 은
+ * remote 이름 없이 URL 자체를 pushremote 로 남기므로, `origin` 으로 정규화하면 성공한 척 base
+ * 리포에 동명 브랜치를 만드는 더 위험한 실패가 된다.
+ */
+export async function resolveBranchPushTarget(worktreePath: string): Promise<BranchPushTarget> {
+  const branch = await git(worktreePath, ['rev-parse', '--abbrev-ref', 'HEAD'])
+  const config = async (key: string): Promise<string> => {
+    const result = await gitTry(worktreePath, ['config', '--get', key])
+    return result.ok ? result.stdout.trim() : ''
+  }
+  const pushRemote = await config(`branch.${branch}.pushRemote`)
+  const remote = pushRemote || (await config(`branch.${branch}.remote`)) || 'origin'
+  const merge = await config(`branch.${branch}.merge`)
+  const destination = merge.startsWith('refs/heads/') ? merge.slice('refs/heads/'.length) : merge
+  return { branch, remote, destination: destination || branch }
 }
 
 /**
@@ -556,11 +624,19 @@ export async function abortMerge(worktreePath: string): Promise<void> {
 // ── restack (stacked PR: 부모 브랜치 위로 rebase) ─────────────────────────
 
 /** 리모트에 같은 이름의 브랜치가 이미 있는지(origin/<branch>). force-push 대상 판단에 쓴다. */
-async function remoteBranchExists(worktreePath: string, branch: string): Promise<boolean> {
-  if (!branch) return false
-  return git(worktreePath, ['rev-parse', '--verify', '--quiet', `origin/${branch}`])
-    .then(() => true)
-    .catch(() => false)
+async function remoteBranchOid(
+  worktreePath: string,
+  remote: string,
+  destination: string
+): Promise<string | null> {
+  const result = await gitTry(worktreePath, [
+    'ls-remote',
+    '--heads',
+    remote,
+    `refs/heads/${destination}`
+  ])
+  if (!result.ok) return null
+  return result.stdout.trim().split(/\s+/, 1)[0] || null
 }
 
 /**
@@ -569,8 +645,21 @@ async function remoteBranchExists(worktreePath: string, branch: string): Promise
  * push 성공 여부를 돌려준다.
  */
 async function pushForceWithLease(worktreePath: string, branch: string): Promise<boolean> {
-  if (!(await remoteBranchExists(worktreePath, branch))) return false
-  const res = await gitTry(worktreePath, ['push', '--force-with-lease', 'origin', branch])
+  const target = await resolveBranchPushTarget(worktreePath)
+  const expected = await remoteBranchOid(worktreePath, target.remote, target.destination)
+  if (!expected) return false
+  // 기존 Wooi 브랜치는 명령까지 그대로 둔다. URL remote 나 다른 destination 은 remote-tracking
+  // ref 가 없을 수 있으므로, 방금 읽은 원격 SHA 를 lease 기대값으로 명시해야 동시 push 를 덮지 않는다.
+  const legacyTarget = target.remote === 'origin' && target.destination === branch
+  const args = legacyTarget
+    ? ['push', '--force-with-lease', 'origin', branch]
+    : [
+        'push',
+        `--force-with-lease=refs/heads/${target.destination}:${expected}`,
+        target.remote,
+        `HEAD:refs/heads/${target.destination}`
+      ]
+  const res = await gitTry(worktreePath, args)
   return res.ok
 }
 

@@ -460,6 +460,26 @@ export const AGENT_TOOLS: AgentToolSpec[] = [
     annotations: { title: 'List open issues', readOnlyHint: true }
   },
   {
+    name: 'list_pull_requests',
+    description: [
+      'List open GitHub pull requests for this workspace’s repository, with branch, base, author,',
+      'URL, and whether a workspace can be created from each one. This tool only lists pull',
+      'requests; it does not create a workspace. To start work on one, call `create_workspace`',
+      'with its number as `pullRequestNumber` and include the pull request details in `task` so',
+      'the new workspace can act without seeing this conversation.'
+    ].join(' '),
+    inputSchema: {
+      limit: z
+        .number()
+        .int()
+        .positive()
+        .max(100)
+        .optional()
+        .describe('Maximum pull requests to return. Defaults to 30.')
+    },
+    annotations: { title: 'List open pull requests', readOnlyHint: true }
+  },
+  {
     name: 'list_repositories',
     description: [
       'List the repositories the user has added to Wooi — name, checkout path, default branch,',
@@ -502,7 +522,17 @@ export const AGENT_TOOLS: AgentToolSpec[] = [
         .optional()
         .describe(
           'Branch name for the new workspace, following the repository’s branch naming convention ' +
-            '(e.g. "feat/inline-login"). Omit to let Wooi generate one.'
+            '(e.g. "feat/inline-login"). Omit to let Wooi generate one. Ignored when ' +
+            '`pullRequestNumber` is set because the branch and base come from the pull request.'
+        ),
+      pullRequestNumber: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe(
+          'Existing GitHub pull request to check out. Its head branch and base branch come from ' +
+            'GitHub; `name` is ignored when this is set. Cannot be combined with a stacked parent.'
         ),
       repo: z
         .string()

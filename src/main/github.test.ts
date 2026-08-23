@@ -56,7 +56,11 @@ const {
   postIssueComment,
   submitPrReview,
   listOpenIssues,
+  listOpenPrCandidates,
+  canPushToPrHead,
+  annotatePrCandidates,
   getIssueBody,
+  getPrBody,
   retargetPr,
   remoteRefExists,
   restoreRemoteRef,
@@ -92,6 +96,12 @@ describe('gh 미연결', () => {
   it('열린 이슈 목록도 gh 를 실행하지 않고 빈 배열을 돌려준다', async () => {
     reply = () => ({ code: 0, stdout: '' })
     await expect(listOpenIssues('/tmp/wt')).resolves.toEqual([])
+    expect(ghCalls()).toEqual([])
+  })
+
+  it('PR 후보 목록도 gh 를 실행하지 않고 빈 배열을 돌려준다', async () => {
+    reply = () => ({ code: 0, stdout: '' })
+    await expect(listOpenPrCandidates('/tmp/wt')).resolves.toEqual([])
     expect(ghCalls()).toEqual([])
   })
 
@@ -149,6 +159,22 @@ describe('gh 연결됨 (무회귀)', () => {
     // 연결돼 있으면 확인용 셸을 추가로 띄우지 않는다.
     expect(commands).toEqual([
       'gh pr view --json number,url,title,state,isDraft,reviewDecision,mergeable,mergeStateStatus,statusCheckRollup'
+    ])
+  })
+
+  it('PR 번호가 있으면 branch 대신 번호 selector 를 쓴다', async () => {
+    reply = () => ({ code: 1, stdout: '' })
+    await getPrStatus('/tmp/wt', 14196)
+    expect(commands).toEqual([
+      'gh pr view 14196 --json number,url,title,state,isDraft,reviewDecision,mergeable,mergeStateStatus,statusCheckRollup'
+    ])
+  })
+
+  it('PR 번호가 없으면 기존 branch selector 를 쓴다', async () => {
+    reply = () => ({ code: 1, stdout: '' })
+    await getPrStatus('/tmp/wt', 'patch-1')
+    expect(commands).toEqual([
+      "gh pr view 'patch-1' --json number,url,title,state,isDraft,reviewDecision,mergeable,mergeStateStatus,statusCheckRollup"
     ])
   })
 
@@ -259,6 +285,43 @@ describe('gh 연결됨 (무회귀)', () => {
     ])
   })
 
+  it('공유 PR 후보 목록은 workspace 생성에 필요한 권한 필드를 한 번에 요청한다', async () => {
+    reply = () => ({
+      code: 0,
+      stdout: JSON.stringify([
+        {
+          number: 7,
+          title: 'PR',
+          headRefName: 'feat/pr',
+          baseRefName: 'main',
+          author: { login: 'octo' },
+          isCrossRepository: true,
+          headRepositoryOwner: { login: 'fork-owner' },
+          maintainerCanModify: true,
+          url: 'https://github.com/o/r/pull/7',
+          isDraft: false
+        }
+      ])
+    })
+    await expect(listOpenPrCandidates('/tmp/wt')).resolves.toEqual([
+      {
+        number: 7,
+        title: 'PR',
+        head: 'feat/pr',
+        base: 'main',
+        author: 'octo',
+        isCrossRepository: true,
+        headRepositoryOwner: 'fork-owner',
+        maintainerCanModify: true,
+        url: 'https://github.com/o/r/pull/7',
+        isDraft: false
+      }
+    ])
+    expect(commands).toEqual([
+      'gh pr list --state open --json number,title,headRefName,baseRefName,author,isCrossRepository,headRepositoryOwner,maintainerCanModify,url,isDraft --limit 100'
+    ])
+  })
+
   it('이슈 목록 JSON 이 깨지면 빈 배열을 반환한다', async () => {
     reply = () => ({ code: 0, stdout: '{bad' })
     await expect(listOpenIssues('/tmp/wt')).resolves.toEqual([])
@@ -273,6 +336,105 @@ describe('gh 연결됨 (무회귀)', () => {
     reply = () => ({ code: 0, stdout: JSON.stringify({ body: 'Details' }) })
     await expect(getIssueBody('/tmp/wt', 12)).resolves.toBe('Details')
     expect(commands).toEqual(['gh issue view 12 --json body'])
+  })
+
+  it('선택한 PR 본문만 별도 조회한다', async () => {
+    reply = () => ({ code: 0, stdout: JSON.stringify({ body: 'PR details' }) })
+    await expect(getPrBody('/tmp/wt', 13)).resolves.toBe('PR details')
+    expect(commands).toEqual(['gh pr view 13 --json body'])
+  })
+})
+
+describe('PR head push 권한', () => {
+  it.each([
+    ['same-repo PR', { isCrossRepository: false }, 'me', false, true],
+    [
+      'my own fork',
+      { isCrossRepository: true, headRepositoryOwner: 'me', maintainerCanModify: false },
+      'me',
+      false,
+      true
+    ],
+    [
+      "someone else's writable fork",
+      { isCrossRepository: true, headRepositoryOwner: 'other', maintainerCanModify: true },
+      'me',
+      true,
+      true
+    ],
+    [
+      "someone else's locked fork",
+      { isCrossRepository: true, headRepositoryOwner: 'other', maintainerCanModify: false },
+      'me',
+      true,
+      false
+    ],
+    ['unknown metadata', {}, 'me', true, false]
+  ] as const)('%s', (_name, pr, viewer, writable, expected) => {
+    expect(canPushToPrHead(pr, viewer, writable)).toBe(expected)
+  })
+
+  it('후보마다 생성 가능 여부와 작성자 여부를 main 에서 함께 표시한다', () => {
+    const candidates = [
+      {
+        number: 1,
+        title: 'Same repo',
+        head: 'same',
+        base: 'main',
+        author: 'me',
+        isCrossRepository: false
+      },
+      {
+        number: 2,
+        title: 'My fork',
+        head: 'mine',
+        base: 'main',
+        author: 'me',
+        isCrossRepository: true,
+        headRepositoryOwner: 'me'
+      },
+      {
+        number: 3,
+        title: 'Writable fork',
+        head: 'writable',
+        base: 'main',
+        author: 'other',
+        isCrossRepository: true,
+        headRepositoryOwner: 'other',
+        maintainerCanModify: true
+      },
+      {
+        number: 4,
+        title: 'Locked fork',
+        head: 'locked',
+        base: 'main',
+        author: 'other',
+        isCrossRepository: true,
+        headRepositoryOwner: 'other',
+        maintainerCanModify: false
+      }
+    ]
+
+    const annotated = annotatePrCandidates(candidates, 'me', true)
+
+    expect(
+      annotated.map((candidate) => ({
+        number: candidate.number,
+        canCreateWorkspace: candidate.canCreateWorkspace,
+        reason: candidate.createWorkspaceDisabledReason,
+        isViewerAuthor: candidate.isViewerAuthor
+      }))
+    ).toEqual([
+      { number: 1, canCreateWorkspace: true, reason: undefined, isViewerAuthor: true },
+      { number: 2, canCreateWorkspace: true, reason: undefined, isViewerAuthor: true },
+      { number: 3, canCreateWorkspace: true, reason: undefined, isViewerAuthor: false },
+      {
+        number: 4,
+        canCreateWorkspace: false,
+        reason: "You don't have permission to push to this PR's head branch.",
+        isViewerAuthor: false
+      }
+    ])
   })
 })
 
@@ -389,6 +551,27 @@ describe('브랜치별 PR 상태를 리포 목록에서 찾기', () => {
     await listOpenPrs('/tmp/a', 'repo-1')
     await findOpenPrStatus('/tmp/a', 'repo-1', 'feat/a')
     expect(ghCalls()).toHaveLength(1)
+  })
+
+  it('번호를 알면 같은 이름을 쓴 다른 fork PR 대신 그 번호로 찾는다', async () => {
+    reply = () => ({
+      code: 0,
+      stdout: JSON.stringify([
+        ...JSON.parse(rows),
+        {
+          ...JSON.parse(rows)[0],
+          number: 8,
+          url: 'https://gh/pr/8',
+          title: '다른 fork',
+          headRefName: 'feat/a'
+        }
+      ])
+    })
+
+    await expect(findOpenPrStatus('/tmp/a', 'repo-number', 'feat/a', 8)).resolves.toMatchObject({
+      number: 8,
+      url: 'https://gh/pr/8'
+    })
   })
 
   it('열린 PR 이 아닌 브랜치는 null 을 돌려준다(호출부가 개별 조회로 메운다)', async () => {

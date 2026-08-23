@@ -469,6 +469,7 @@ interface UIState {
     args?: {
       name?: string
       baseBranch?: string
+      fromPrNumber?: number
       parentWorkspaceId?: string | null
       /** 이 워크스페이스를 구동할 에이전트. 생략하면 전역 기본 백엔드. */
       agentBackend?: AgentBackendId
@@ -1683,11 +1684,14 @@ export const useStore = create<UIState>((set, get) => ({
 
     let res: {
       workspaceId?: string
+      existingWorkspaceId?: string
+      existingWorkspaceArchived?: boolean
       name?: string
       branch?: string
       error?: string
       carryFailures?: CarryFailure[]
       carryMissing?: string[]
+      setupSkippedForUntrustedPr?: boolean
       carrySuggestions?: string[]
     }
     try {
@@ -1702,6 +1706,16 @@ export const useStore = create<UIState>((set, get) => ({
       get().pushToast('error', res.error)
       return undefined
     }
+    if (res.existingWorkspaceId) {
+      void get().selectWorkspace(res.existingWorkspaceId)
+      get().pushToast(
+        'info',
+        res.existingWorkspaceArchived
+          ? 'A workspace for this pull request already exists and is archived.'
+          : 'A workspace for this pull request already exists.'
+      )
+      return res.existingWorkspaceId
+    }
     if (res.workspaceId) {
       void get().selectWorkspace(res.workspaceId)
       // 방금 만든 것 하나만 되돌리기 대상으로 기억한다. 토스트에 ⌘Z 를 적어 두는 이유는,
@@ -1712,6 +1726,9 @@ export const useStore = create<UIState>((set, get) => ({
       }
       get().reportCarryFailures(res.carryFailures)
       get().reportCarryMissing(repoId, res.carryMissing)
+      if (res.setupSkippedForUntrustedPr) {
+        get().pushToast('info', "Setup wasn't run automatically for someone else's fork.")
+      }
       get().suggestCarry(repoId, res.workspaceId, res.carrySuggestions)
       return res.workspaceId
     }

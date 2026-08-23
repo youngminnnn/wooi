@@ -78,9 +78,12 @@ export async function getWorkspacePrStatus(
 ): Promise<PrStatus | null> {
   if (!branch) return null
 
-  const open = await findOpenPrStatus(workspace.worktreePath, workspace.repoId, branch).catch(
-    () => null
-  )
+  const open = await findOpenPrStatus(
+    workspace.worktreePath,
+    workspace.repoId,
+    branch,
+    workspace.prNumber
+  ).catch(() => null)
   if (open) {
     // 열린 PR 을 찾았다면 예전에 기록해 둔 종결 상태는 낡은 것이다(브랜치를 재사용해 PR 을 다시
     // 열었을 수 있다). 다음 조회가 배치를 믿도록 버린다.
@@ -91,7 +94,10 @@ export async function getWorkspacePrStatus(
   const cached = fallbackCache.get(workspace.id)
   if (cached && isFresh(cached, branch, Date.now())) return cached.status
 
-  const status = await withSlot(() => getPrStatus(workspace.worktreePath, branch).catch(() => null))
+  const selector = workspace.prNumber ?? branch
+  const status = await withSlot(() =>
+    getPrStatus(workspace.worktreePath, selector).catch(() => null)
+  )
   // gh 가 미연결이면 조회 자체가 없었던 것이라 "PR 없음"이 아니다. 이걸 캐시하면 사용자가 gh 를
   // 연결한 뒤에도 한동안 PR 칩이 비어 있게 된다 — 연결 직후 전체 갱신이 이 캐시에 막히기 때문이다.
   if (status !== null || isGithubConnected()) {

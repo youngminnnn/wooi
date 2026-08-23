@@ -64,9 +64,14 @@ import {
   editPr,
   retargetPr,
   listOpenPrs,
-  listOpenPrsForReview,
+  listOpenPrCandidates,
+  resolvePrCandidate,
   listOpenIssues,
   getIssueBody,
+  getPrBody,
+  annotatePrCandidates,
+  getViewerLogin,
+  getBaseRepoWritable,
   fetchOwnerAvatarDataUrl
 } from './github'
 import { planMergeTrain, runMergeTrain, type TrainLayer } from './mergeTrain'
@@ -546,10 +551,37 @@ export function registerIpc(ctx: IpcContext): void {
     return listOpenIssues(repo.path).catch(() => [])
   })
 
+  handle(IPC.repoListPrs, async (_e, repoId: string) => {
+    const repo = repoFor(repoId)
+    if (!repo) return []
+    try {
+      const [candidates, viewerLogin, baseRepoWritable] = await Promise.all([
+        listOpenPrCandidates(repo.path),
+        getViewerLogin(repo.path),
+        getBaseRepoWritable(repo.path)
+      ])
+      return annotatePrCandidates(candidates, viewerLogin, baseRepoWritable)
+    } catch {
+      return []
+    }
+  })
+
+  handle(IPC.repoResolvePr, async (_e, repoId: string, reference: string) => {
+    const repo = repoFor(repoId)
+    if (!repo || typeof reference !== 'string') return null
+    return resolvePrCandidate(repo.path, reference).catch(() => null)
+  })
+
   handle(IPC.repoGetIssueBody, async (_e, repoId: string, number: number) => {
     const repo = repoFor(repoId)
     if (!repo) return null
     return getIssueBody(repo.path, number).catch(() => null)
+  })
+
+  handle(IPC.repoGetPrBody, async (_e, repoId: string, number: number) => {
+    const repo = repoFor(repoId)
+    if (!repo) return null
+    return getPrBody(repo.path, number).catch(() => null)
   })
 
   // ── workspace ────────────────────────────────────────────────────────────
@@ -1789,7 +1821,9 @@ export function registerIpc(ctx: IpcContext): void {
   handle(IPC.prStatusForBranch, async (_e, workspaceId: string, branch: string) => {
     const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
     if (!ws || ws.archived) return null
-    const status = await getPrStatus(ws.worktreePath, branch).catch(() => null)
+    const entry = workspaceStack(ws).find((item) => item.branch === branch)
+    const prNumber = branch === ws.branch ? ws.prNumber : entry?.prNumber
+    const status = await getPrStatus(ws.worktreePath, prNumber ?? branch).catch(() => null)
     if (status) persistPrNumber(workspaceId, branch, status.number)
     return status
   })
@@ -2297,7 +2331,7 @@ export function registerIpc(ctx: IpcContext): void {
   handle(IPC.reviewListOpenPrs, async (_e, repoId: string) => {
     const repo = repoFor(repoId)
     if (!repo) return []
-    return listOpenPrsForReview(repo.path).catch(() => [])
+    return listOpenPrCandidates(repo.path).catch(() => [])
   })
 
   // 스택 멤버십은 review/stackResolve 만 읽는다 — 여기서는 그 결과를 넘겨주기만 한다.

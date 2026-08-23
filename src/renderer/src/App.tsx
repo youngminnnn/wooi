@@ -28,6 +28,7 @@ import SettingsModal from './components/SettingsModal'
 import ErrorBoundary from './components/ErrorBoundary'
 import NewWorkspaceModal from './components/NewWorkspaceModal'
 import NewFromIssueModal from './components/NewFromIssueModal'
+import NewFromPrModal from './components/NewFromPrModal'
 import RepoConfigModal from './components/RepoConfigModal'
 import OnboardingModal from './components/OnboardingModal'
 import ShortcutsHelp from './components/ShortcutsHelp'
@@ -90,6 +91,7 @@ export default function App(): React.JSX.Element {
   const [tourOpen, setTourOpen] = useState(false)
   const [reviewStartOpen, setReviewStartOpen] = useState(false)
   const [issueRepoId, setIssueRepoId] = useState<string | null>(null)
+  const [prRepoId, setPrRepoId] = useState<string | null>(null)
   // ⇧⌘O 파일 퀵 오픈. 큰 파일 뷰어의 "주소창" 역할을 겸한다.
   const [quickOpenFile, setQuickOpenFile] = useState(false)
   const activeReviewId = useStore((s) => s.activeReviewId)
@@ -140,6 +142,7 @@ export default function App(): React.JSX.Element {
     tourOpen ||
     reviewStartOpen ||
     issueRepoId !== null ||
+    prRepoId !== null ||
     quickOpenFile
 
   // 큰 파일 뷰어가 실제로 화면에 떠 있는지 — 리뷰 화면에 들어가 있으면 가려지므로 아니다.
@@ -584,6 +587,7 @@ export default function App(): React.JSX.Element {
           width={sidebarWidth}
           onNewWorkspace={handleNewWorkspace}
           onNewFromIssue={setIssueRepoId}
+          onNewFromPr={setPrRepoId}
           onFanout={handleFanout}
           onStackWorkspace={handleStackWorkspace}
           onOpenQuickSwitch={() => setQuickSwitchOpen(true)}
@@ -652,6 +656,7 @@ export default function App(): React.JSX.Element {
       {issueRepoId && (
         <NewFromIssueModal repoId={issueRepoId} onClose={() => setIssueRepoId(null)} />
       )}
+      {prRepoId && <NewFromPrModal repoId={prRepoId} onClose={() => setPrRepoId(null)} />}
       {showSettings && (
         // 설정은 백엔드 카탈로그·인증 상태 등 바깥에서 들어오는 값을 많이 읽는다. 그중 하나가
         // 깨져도 앱 전체가 날아가지 않도록 이 서브트리만 격리한다.

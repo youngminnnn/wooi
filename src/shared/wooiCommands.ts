@@ -253,6 +253,15 @@ export const WOOI_COMMANDS: WooiCommandSpec[] = [
     prompt: 'Call `mcp__wooi__list_issues` and list the open issues. Limit (optional): $ARGUMENTS'
   },
   {
+    name: 'pulls',
+    tool: 'list_pull_requests',
+    mode: 'direct',
+    description: 'List open GitHub pull requests for this repository',
+    argumentHint: '[limit]',
+    prompt:
+      'Call `mcp__wooi__list_pull_requests` and list the open pull requests. Limit (optional): $ARGUMENTS'
+  },
+  {
     name: 'run',
     tool: 'run_script',
     mode: 'direct',
@@ -367,12 +376,13 @@ export function parseWooiCommandArgs(name: string, raw: string): WooiCommandArgs
       return { args: paths.length ? { paths } : {} }
     }
 
-    case 'issues': {
+    case 'issues':
+    case 'pulls': {
       if (!rest) return { args: {} }
       const limit = Number(rest)
       if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
         return {
-          error: 'Usage: /wooi:issues [limit] — limit must be a whole number from 1 to 100.'
+          error: `Usage: /wooi:${name} [limit] — limit must be a whole number from 1 to 100.`
         }
       }
       return { args: { limit } }

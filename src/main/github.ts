@@ -8,7 +8,7 @@ import type {
   PrMergeMethod,
   PrState,
   PrStatus,
-  ReviewPrCandidate,
+  PrCandidate,
   IssueCandidate,
   ReviewVerdict
 } from '@shared/types'
@@ -225,9 +225,15 @@ const PR_LABELS: Record<PrState, string> = {
  * 현재 브랜치의 PR 을 조회한다(모델 B 스택 조망은 브랜치별로 호출).
  * 브랜치명은 셸에 그대로 들어가면 안 되는 값이라 shellQuote 를 거친다.
  */
-export async function getPrStatus(worktreePath: string, branch?: string): Promise<PrStatus | null> {
+export async function getPrStatus(
+  worktreePath: string,
+  selector?: string | number
+): Promise<PrStatus | null> {
   if (!(await connected())) return null
-  const target = branch ? ` ${shellQuote(branch)}` : ''
+  const target =
+    selector !== undefined
+      ? ` ${typeof selector === 'number' ? String(selector) : shellQuote(selector)}`
+      : ''
   const { stdout, code } = await runLoginShell(
     `gh pr view${target} --json number,url,title,state,isDraft,reviewDecision,mergeable,mergeStateStatus,statusCheckRollup`,
     worktreePath
@@ -266,6 +272,9 @@ export interface PrMeta {
   headRefName: string
   baseRefName: string
   baseRefOid: string
+  isCrossRepository?: boolean
+  headRepositoryOwner?: { login?: string } | string
+  maintainerCanModify?: boolean
 }
 
 export async function getPrMeta(
@@ -274,7 +283,7 @@ export async function getPrMeta(
 ): Promise<PrMeta | null> {
   if (!(await connected())) return null
   const { stdout, code } = await runLoginShell(
-    `gh pr view ${shellQuote(selector)} --json number,state,headRefName,baseRefName,baseRefOid`,
+    `gh pr view ${shellQuote(selector)} --json number,state,headRefName,baseRefName,baseRefOid,isCrossRepository,headRepositoryOwner,maintainerCanModify`,
     worktreePath
   )
   if (code !== 0) return null
@@ -396,11 +405,14 @@ function statusFromRow(pr: GhPr): PrStatus {
 export async function findOpenPrStatus(
   worktreePath: string,
   cacheKey: string,
-  branch: string
+  branch: string,
+  prNumber?: number | null
 ): Promise<PrStatus | null> {
-  if (!branch) return null
+  if (!branch && !prNumber) return null
   const rows = await listOpenPrRows(worktreePath, cacheKey)
-  const row = rows.find((p) => p.headRefName === branch)
+  const row = prNumber
+    ? rows.find((p) => p.number === prNumber)
+    : rows.find((p) => p.headRefName === branch)
   return row ? statusFromRow(row) : null
 }
 
@@ -847,11 +859,11 @@ export async function getPrDiffRaw(repoPath: string, prNumber: number): Promise<
   return stdout
 }
 
-/** 리뷰 시작 모달의 열린 PR 드롭다운용. listOpenPrs 와 달리 제목·작성자까지 가져온다. */
-export async function listOpenPrsForReview(repoPath: string): Promise<ReviewPrCandidate[]> {
+/** 리뷰 시작 모달과 워크스페이스 시작 모달이 공유하는 열린 PR 목록. */
+export async function listOpenPrCandidates(repoPath: string): Promise<PrCandidate[]> {
   if (!(await connected())) return []
   const { stdout, code } = await runLoginShell(
-    `gh pr list --state open --json number,title,headRefName,baseRefName,author --limit 100`,
+    `gh pr list --state open --json number,title,headRefName,baseRefName,author,isCrossRepository,headRepositoryOwner,maintainerCanModify,url,isDraft --limit 100`,
     repoPath
   )
   if (code !== 0) return []
@@ -862,17 +874,121 @@ export async function listOpenPrsForReview(repoPath: string): Promise<ReviewPrCa
       headRefName: string
       baseRefName: string
       author?: { login?: string }
+      isCrossRepository?: boolean
+      headRepositoryOwner?: { login?: string }
+      maintainerCanModify?: boolean
+      url?: string
+      isDraft?: boolean
     }>
     return arr.map((p) => ({
       number: p.number,
       title: p.title ?? '',
       head: p.headRefName,
       base: p.baseRefName,
-      author: p.author?.login ?? ''
+      author: p.author?.login ?? '',
+      isCrossRepository: p.isCrossRepository,
+      headRepositoryOwner: p.headRepositoryOwner?.login,
+      maintainerCanModify: p.maintainerCanModify,
+      url: p.url,
+      isDraft: p.isDraft
     }))
   } catch {
     return []
   }
+}
+
+/** 목록 밖 PR 을 번호나 GitHub URL 로 찾는다. 제목 검색어를 gh 에 넘기지 않아 입력 중 조회를 막는다. */
+export async function resolvePrCandidate(
+  repoPath: string,
+  rawReference: string
+): Promise<PrCandidate | null> {
+  const reference = rawReference.trim()
+  const bareNumber = reference.match(/^#?(\d+)$/)?.[1]
+  const isGithubPrUrl = /^https?:\/\/github\.com\/[^/]+\/[^/]+\/pull\/\d+(?:[/?#].*)?$/i.test(
+    reference
+  )
+  if (!bareNumber && !isGithubPrUrl) return null
+
+  // URL 의 소유자·리포·번호 해석은 gh 에 맡긴다. 로컬 리포 번호로 다시 조회하면 다른 리포의
+  // 같은 번호를 집을 수 있으므로, 상세 조회도 원래 URL 을 유지한다.
+  const selector = bareNumber ? Number(bareNumber) : reference
+  const meta = await getPrMeta(repoPath, selector)
+  if (!meta) return null
+  const { stdout, code } = await runLoginShell(
+    `gh pr view ${shellQuote(selector)} --json title,author,url,isDraft`,
+    repoPath
+  )
+  if (code !== 0) return null
+  try {
+    const display = JSON.parse(stdout.trim()) as {
+      title?: string
+      author?: { login?: string }
+      url?: string
+      isDraft?: boolean
+    }
+    const owner =
+      typeof meta.headRepositoryOwner === 'string'
+        ? meta.headRepositoryOwner
+        : meta.headRepositoryOwner?.login
+    const [viewerLogin, baseRepoWritable] = await Promise.all([
+      getViewerLogin(repoPath),
+      getBaseRepoWritable(repoPath)
+    ])
+    return annotatePrCandidates(
+      [
+        {
+          number: meta.number,
+          title: display.title ?? '',
+          head: meta.headRefName,
+          base: meta.baseRefName,
+          author: display.author?.login ?? '',
+          isCrossRepository: meta.isCrossRepository,
+          headRepositoryOwner: owner,
+          maintainerCanModify: meta.maintainerCanModify,
+          url: display.url,
+          isDraft: display.isDraft,
+          state: meta.state
+        }
+      ],
+      viewerLogin,
+      baseRepoWritable
+    )[0]
+  } catch {
+    return null
+  }
+}
+
+/** PR head 에 실제로 push 할 수 있는지 판단하는 모든 호출 경로의 단일 규칙. */
+export function canPushToPrHead(
+  pr: Pick<PrCandidate, 'isCrossRepository' | 'headRepositoryOwner' | 'maintainerCanModify'>,
+  viewerLogin: string | null,
+  baseRepoWritable: boolean
+): boolean {
+  if (pr.isCrossRepository === false) return true
+  if (pr.isCrossRepository !== true) return false
+  return (
+    (!!viewerLogin && pr.headRepositoryOwner === viewerLogin) ||
+    (pr.maintainerCanModify === true && baseRepoWritable)
+  )
+}
+
+/** 권한 입력은 main 에만 있으므로, 렌더러에는 결정과 설명만 건넨다. */
+export function annotatePrCandidates(
+  candidates: PrCandidate[],
+  viewerLogin: string | null,
+  baseRepoWritable: boolean
+): PrCandidate[] {
+  return candidates.map((candidate) => {
+    const canCreateWorkspace = canPushToPrHead(candidate, viewerLogin, baseRepoWritable)
+    return {
+      ...candidate,
+      canCreateWorkspace,
+      createWorkspaceDisabledReason: canCreateWorkspace
+        ? undefined
+        : "You don't have permission to push to this PR's head branch.",
+      isViewerAuthor: !!viewerLogin && candidate.author === viewerLogin
+    }
+  })
 }
 
 /** 열린 이슈 선택 UI와 에이전트 도구가 공유하는 가벼운 목록. 본문은 선택 뒤 따로 읽는다. */
@@ -909,6 +1025,21 @@ export async function getIssueBody(repoPath: string, issueNumber: number): Promi
   const n = safePrNumber(issueNumber)
   if (n === null) return null
   const { stdout, code } = await runLoginShell(`gh issue view ${n} --json body`, repoPath)
+  if (code !== 0) return null
+  try {
+    const parsed = JSON.parse(stdout.trim()) as { body?: string }
+    return typeof parsed.body === 'string' ? parsed.body : ''
+  } catch {
+    return null
+  }
+}
+
+/** 목록을 가볍게 유지하려고 선택한 PR 하나의 본문만 뒤늦게 가져온다. */
+export async function getPrBody(repoPath: string, prNumber: number): Promise<string | null> {
+  if (!(await connected())) return null
+  const n = safePrNumber(prNumber)
+  if (n === null) return null
+  const { stdout, code } = await runLoginShell(`gh pr view ${n} --json body`, repoPath)
   if (code !== 0) return null
   try {
     const parsed = JSON.parse(stdout.trim()) as { body?: string }
@@ -1240,6 +1371,24 @@ export async function getViewerLogin(repoPath: string): Promise<string | null> {
   const { stdout, code } = await runLoginShell('gh api user --jq .login', repoPath)
   viewerLogin = code === 0 && stdout.trim() ? stdout.trim() : null
   return viewerLogin
+}
+
+const baseRepoWritableByPath = new Map<string, Promise<boolean>>()
+
+/** base 리포에 대한 push 권한. 로그인 계정과 리포 권한은 실행 중 바뀌지 않는 값으로 취급한다. */
+export async function getBaseRepoWritable(repoPath: string): Promise<boolean> {
+  if (!(await connected())) return false
+  const cached = baseRepoWritableByPath.get(repoPath)
+  if (cached) return cached
+  const pending = (async () => {
+    const { stdout, code } = await runLoginShell(
+      'gh api repos/{owner}/{repo} --jq .permissions.push',
+      repoPath
+    )
+    return code === 0 && stdout.trim() === 'true'
+  })()
+  baseRepoWritableByPath.set(repoPath, pending)
+  return pending
 }
 
 /**
