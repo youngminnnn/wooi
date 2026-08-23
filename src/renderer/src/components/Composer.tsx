@@ -584,22 +584,26 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
       if (codexLocal === 'plugins') {
         openSettings('plugins')
       } else {
-        void confirm({
-          title: 'Sign out of Codex?',
-          body: 'You will need to sign in again before starting another Codex session.',
-          confirmLabel: 'Sign out',
-          danger: true
-        }).then((ok) => {
-          if (!ok) return
-          void window.api.auth.codexLogout().then(
-            () => {
-              pushToast('success', 'Signed out of Codex.')
-              openSettings('integrations')
-            },
-            (error: unknown) =>
-              pushToast('error', error instanceof Error ? error.message : 'Could not sign out.')
-          )
-        })
+        // 이 Enter keydown 안에서 곧바로 confirm을 마운트하면, 같은 Enter가 ConfirmDialog의
+        // 전역 핸들러까지 이어져 위험 동작을 즉시 승인한다. 다음 이벤트 루프에서 열어 키를 분리한다.
+        setTimeout(() => {
+          void confirm({
+            title: 'Sign out of Codex?',
+            body: 'You will need to sign in again before starting another Codex session.',
+            confirmLabel: 'Sign out',
+            danger: true
+          }).then((ok) => {
+            if (!ok) return
+            void window.api.auth.codexLogout().then(
+              () => {
+                pushToast('success', 'Signed out of Codex.')
+                openSettings('integrations')
+              },
+              (error: unknown) =>
+                pushToast('error', error instanceof Error ? error.message : 'Could not sign out.')
+            )
+          })
+        }, 0)
       }
       return
     }
