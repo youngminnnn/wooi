@@ -15,7 +15,6 @@ interface Deps {
   sendMessage: (workspaceId: string, text: string) => void
   postToTranscript: (workspaceId: string, item: ChatItem) => void
   broadcastState: () => void
-  workspacesAwaitingApproval: () => Set<string>
   now?: () => number
 }
 
@@ -249,7 +248,6 @@ export class StackedWaitCoordinator {
     results: ChildResult[],
     now: number
   ): boolean {
-    const awaiting = this.deps.workspacesAwaitingApproval()
     const remaining = children.filter(
       (child) => !results.find((result) => result.workspaceId === child.id)?.reported
     )
@@ -257,7 +255,7 @@ export class StackedWaitCoordinator {
     // every 로 바로 순회하면 첫 false 에서 멈춰 뒤 자식의 유예 시계가 늦게 시작한다. 전부 판정한
     // 뒤 합쳐야 "모두 같은 90초를 멈춰 있었다" 는 실제 상태와 깨움 시각이 맞는다.
     const stalled = remaining.map((child) => {
-      const progress = stackedChildProgress(child, awaiting.has(child.id), now)
+      const progress = stackedChildProgress(child, now)
       const key = `${parentId}:${child.id}`
       if (progress.canProgress) {
         this.stalledSince.delete(key)
@@ -271,7 +269,7 @@ export class StackedWaitCoordinator {
       const grace =
         progress.reason === 'archived'
           ? 0
-          : progress.reason === 'awaiting-approval'
+          : progress.reason === 'waiting-for-user-permission'
             ? APPROVAL_GRACE_MS
             : IDLE_GRACE_MS
       return now - previous.at >= grace
@@ -298,20 +296,20 @@ export class StackedWaitCoordinator {
         : reason === 'timeout'
           ? `Timed out after ${minutes}m — not everything reported.`
           : 'None of the remaining workspaces can make progress right now.'
-    const awaiting = this.deps.workspacesAwaitingApproval()
     const shown = results.slice(0, results.length > 5 ? 4 : 5).map((result) => {
       const child = children.find((item) => item.id === result.workspaceId)
       if (result.reported)
         return `- ${result.name} (${result.branch}): ${result.status} — ${(result.summary ?? '').slice(0, 600)}`
       if (!child) return `- ${result.name}: missing, no report`
-      const progress = stackedChildProgress(child, awaiting.has(child.id), this.now())
+      const progress = stackedChildProgress(child, this.now())
       const label: Record<StackedProgressReason, string> = {
         running: 'still running',
         resuming: 'waiting to resume',
         archived: 'archived',
-        'awaiting-approval': 'waiting for approval',
+        'waiting-for-user-permission': 'waiting for your approval',
         'rate-limited': 'rate limited, no report',
-        error: 'error, no report',
+        'ended-with-error': 'error, no report',
+        'background-tasks-running': 'idle, background shells still running',
         idle: 'idle, no report'
       }
       return `- ${result.name} (${result.branch}): ${label[progress.reason]}`
