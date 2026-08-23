@@ -17,6 +17,12 @@ describe('백엔드 전용 composer 명령', () => {
     expect(matchLocal('/clear', false)).toBe('clear')
   })
 
+  it('/stop 은 백엔드를 가리지 않고 가로챈다', () => {
+    expect(matchLocal('/stop', false)).toBe('stop')
+    expect(matchLocal('/stop', true)).toBe('stop')
+    expect(matchLocal('/wooi:stop dev', false)).toBeNull()
+  })
+
   it('Claude 백엔드에서만 /add-dir을 가로챈다', () => {
     expect(matchLocal('/add-dir ~/notes', false)).toBeNull()
     expect(matchLocal('/add-dir ~/notes', true)).toBe('add-dir')

@@ -27,7 +27,8 @@ export async function seedAppState(
     appDir = process.cwd(),
     workspaceName = Object.keys(worktrees)[0],
     transcript = [],
-    peerSent = []
+    peerSent = [],
+    workspace: workspaceOverrides = {}
   } = {}
 ) {
   const root = resolve(appDir)
@@ -55,7 +56,7 @@ export async function seedAppState(
     carryItems: [],
     addedAt: now
   }
-  const workspace = {
+  const seededWorkspace = {
     id: 'ws-e2e',
     repoId: repo.id,
     agentBackend: 'claude',
@@ -84,6 +85,8 @@ export async function seedAppState(
     // 옵셔널 필드라 넘기지 않으면 아예 쓰지 않는다 — 마이그레이션 없이 읽히는 레코드를 그대로 둔다.
     ...(peerSent.length > 0 ? { peerSent } : {})
   }
+  // 기본 시드가 다루지 않는 모드도 spec에서 만들 수 있도록 덮어쓰기를 허용한다.
+  const workspace = { ...seededWorkspace, ...workspaceOverrides }
   const missing = requiredFields.filter((field) => !Object.hasOwn(workspace, field))
   if (missing.length > 0) {
     throw new Error(`e2e seed is missing required Workspace fields: ${missing.join(', ')}`)

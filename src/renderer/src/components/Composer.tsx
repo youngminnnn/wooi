@@ -64,6 +64,7 @@ import {
 } from '../lib/rateLimit'
 import { formatBytes } from '../lib/format'
 import { appendMention, findMention, mentionToken, mentionWithRange } from '../lib/mention'
+import { parseSubtaskCommand, subtaskPrompt, subtaskUnavailableReason } from '../lib/subtaskCommand'
 import type {
   AgentBackendId,
   ChatItem,
@@ -501,6 +502,23 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
   }
 
   /**
+   * 메시지를 실제로 백엔드에 넘긴다. steering 을 못 하는 백엔드만 실행 중 메시지를 대기 큐에
+   * 넣는다(Codex 처럼 지원하면 즉시 보내 현재 턴에 반영한다). /subtask 가 렌더러에서 만들어 낸
+   * 프롬프트도 이 길을 타야 큐잉·중단 규칙이 입구마다 갈라지지 않는다.
+   */
+  const deliver = (body: string, payload?: ImageAttachment[], stopFirst?: boolean): void => {
+    setPickerCard(null)
+    clearPromptSuggestion(workspace.id)
+    if (running && !backend?.capabilities.steering) {
+      enqueueMessage(workspace.id, body, payload?.length ? payload : undefined)
+      // 큐에 넣은 뒤 중단한다 — 순서가 반대면 턴이 먼저 끝나 플러시가 이 메시지를 놓친다.
+      if (stopFirst) void window.api.chat.interrupt(workspace.id)
+    } else {
+      void window.api.chat.send(workspace.id, body, payload?.length ? payload : undefined)
+    }
+  }
+
+  /**
    * 입력창 내용을 보낸다.
    *
    * stopFirst 는 "지금 하던 걸 멈추고 이거부터" — 터미널에서 Esc 로 끊고 다시 치는 조작을 한 번에
@@ -566,12 +584,40 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
       return
     }
 
-    // /diff·/copy·/help·/clear·/memory 는 Wooi UI 에서 직접 처리한다(에이전트로 보내지 않는다).
+    // /diff·/copy·/help·/clear·/stop·/memory 는 Wooi UI 에서 직접 처리한다(에이전트로 보내지 않는다).
     // runLocal 이 입력창 텍스트를 알맞게 정리하므로(대부분 비우고, /help 만 '/' 로 메뉴를 띄움)
     // 여기서는 setText 를 호출하지 않는다.
     const local = images.length ? null : matchLocal(trimmed, workspace.agentBackend === 'claude')
     if (local) {
       runLocal(local, trimmed)
+      historyIdx.current = -1
+      return
+    }
+
+    // /subtask 는 CLI 의 TUI 전용 명령이라 그냥 보내면 실패한다. Wooi 에는 같은 일을 하는 위임
+    // 커맨드가 이미 있으므로 이 워크스페이스의 백엔드 것(`/wooi:claude`·`/wooi:codex`)으로 확장해
+    // 평범한 메시지로 보낸다 — 렌더러에서 확장해야 CLI 가 확장하는 Claude 와 매니저가 확장하는
+    // Codex 가 같은 길을 탄다.
+    const subtask = images.length ? null : parseSubtaskCommand(trimmed)
+    if (subtask) {
+      const unavailable = subtaskUnavailableReason({
+        multiAgent: workspace.multiAgent ?? false,
+        canDelegate: backend?.capabilities.delegate ?? true
+      })
+      if (unavailable) {
+        // 쓸 수 없을 때는 입력창을 비우지 않는다 — 팀으로 바꾼 뒤 그대로 다시 보내면 된다.
+        pushToast('info', unavailable)
+        taRef.current?.focus()
+        return
+      }
+      if (!subtask.task) {
+        pushToast('info', 'Usage: /subtask <task> — delegates it to a subagent in this workspace.')
+        setText('/subtask ')
+        taRef.current?.focus()
+        return
+      }
+      deliver(subtaskPrompt(workspace.agentBackend, subtask.task))
+      setText('')
       historyIdx.current = -1
       return
     }
@@ -597,18 +643,7 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
       mediaType,
       dataBase64
     }))
-    // steering 미지원 백엔드만 실행 중 메시지를 대기 큐에 넣는다. Codex 같이
-    // steering 지원 시에는 즉시 전송해 현재 턴에 반영한다.
-    setPickerCard(null)
-    if (running && !backend?.capabilities.steering) {
-      clearPromptSuggestion(workspace.id)
-      enqueueMessage(workspace.id, trimmed, payload.length ? payload : undefined)
-      // 큐에 넣은 뒤 중단한다 — 순서가 반대면 턴이 먼저 끝나 플러시가 이 메시지를 놓친다.
-      if (opts?.stopFirst) void window.api.chat.interrupt(workspace.id)
-    } else {
-      clearPromptSuggestion(workspace.id)
-      void window.api.chat.send(workspace.id, trimmed, payload.length ? payload : undefined)
-    }
+    deliver(trimmed, payload, opts?.stopFirst)
     setText('')
     setImages([])
     historyIdx.current = -1
@@ -753,7 +788,7 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
   }
 
   /**
-   * Wooi UI 에서 직접 처리하는 로컬 명령(/diff·/copy·/help·/clear·/memory). 에이전트로
+   * Wooi UI 에서 직접 처리하는 로컬 명령(/diff·/copy·/help·/clear·/stop·/memory). 에이전트로
    * 보내지 않고 앱 기능으로 매핑한다. 입력창 텍스트 정리도 여기서 한다(대부분 비우고, /help 만
    * 자동완성 메뉴를 다시 띄우도록 '/' 를 남긴다).
    */
@@ -787,6 +822,13 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
     }
 
     setText('')
+    // /stop 은 Stop 버튼·Esc 와 같은 중단이다. 돌고 있지 않을 때 입력창만 비우면 명령이
+    // 먹혔는지 알 수 없으므로, 그때는 아무것도 멈추지 않았다고 말해 준다.
+    if (kind === 'stop') {
+      if (running) void window.api.chat.interrupt(workspace.id)
+      else pushToast('info', 'Nothing is running.')
+      return
+    }
     if (kind === 'diff') {
       // ChatView 가 가진 diff 모달을 연다(Composer 에서 직접 접근할 수 없어 이벤트로 신호한다).
       window.dispatchEvent(new CustomEvent('wooi:open-diff', { detail: workspace.id }))
@@ -1517,12 +1559,13 @@ function matchInteractive(
 }
 
 /** Wooi UI 가 직접 처리하는 로컬 명령(에이전트로 보내지 않음). */
-type LocalCommand = 'diff' | 'copy' | 'help' | 'clear' | 'memory' | 'add-dir'
+type LocalCommand = 'diff' | 'copy' | 'help' | 'clear' | 'stop' | 'memory' | 'add-dir'
 const LOCAL_COMMANDS: readonly LocalCommand[] = [
   'diff',
   'copy',
   'help',
   'clear',
+  'stop',
   'memory',
   'add-dir'
 ]
