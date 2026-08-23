@@ -42,7 +42,14 @@ function withTimeout<T>(p: Promise<T>, label: string): Promise<T> {
 }
 
 /** 주어진 라이브 Query 위에서 인터랙티브 명령을 실행하고 표시용 결과로 변환한다. */
-export async function runCommandOn(kind: CommandPanelKind, q: Query): Promise<CommandResult> {
+export async function runCommandOn(
+  kind: CommandPanelKind,
+  q: Query,
+  opts: { live?: boolean } = {}
+): Promise<CommandResult> {
+  // 이 함수는 원래 살아 있는 쿼리 위에서 실행하는 경로다. 단명 쿼리만 명시적으로 false 를 넘겨,
+  // 세션 비용과 변경 줄 수가 실제 세션에서 온 값인지 결과에 남긴다.
+  const live = opts.live ?? true
   switch (kind) {
     case 'mcp': {
       const servers = await withTimeout(q.mcpServerStatus(), 'mcpServerStatus')
@@ -64,7 +71,7 @@ export async function runCommandOn(kind: CommandPanelKind, q: Query): Promise<Co
         q.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET(),
         'usage'
       )
-      return { kind, usage: mapUsage(usage) }
+      return { kind, usage: mapUsage(usage, live) }
     }
     case 'reloadPlugins': {
       const r = await withTimeout(q.reloadPlugins(), 'reloadPlugins')
@@ -92,14 +99,79 @@ export async function runCommandOn(kind: CommandPanelKind, q: Query): Promise<Co
   }
 }
 
-/** /permissions — settings.json 들에서 권한 규칙(allow/ask/deny)을 모아 현재 모드와 함께 돌려준다. */
-export function readPermissions(config: SessionConfig): CommandResult {
-  // 우선순위가 낮은 것부터: 유저 → 프로젝트(worktree) → 로컬 오버라이드.
-  const files = [
-    join(homedir(), '.claude', 'settings.json'),
-    join(config.cwd, '.claude', 'settings.json'),
-    join(config.cwd, '.claude', 'settings.local.json')
+/** MCP 서버가 붙을 때까지 기다리는 상한과 재조회 간격(단명 쿼리 전용). */
+const MCP_SETTLE_TIMEOUT_MS = 3000
+const MCP_SETTLE_INTERVAL_MS = 250
+
+/**
+ * 갓 띄운 단명 쿼리에서 MCP 서버 목록을 읽는다. 0ms 에 물어보면 서버가 아직 붙는 중이라,
+ * 실측에서 2개 중 1개만 그것도 `pending` 으로 돌아왔다 — 카드가 "0 connected" 로 굳어 보인다.
+ * 목록이 더 늘지 않고 pending 도 없을 때까지(또는 상한까지) 짧게 다시 묻는다. 상한을 넘겨도
+ * 마지막으로 본 목록을 그대로 돌려주므로, 정말 연결 중인 서버는 카드에 'connecting…' 으로 남는다.
+ */
+export async function readMcpServersSettled(
+  q: Pick<Query, 'mcpServerStatus'>,
+  opts: {
+    timeoutMs?: number
+    intervalMs?: number
+    now?: () => number
+    sleep?: (ms: number) => Promise<void>
+  } = {}
+): Promise<McpServerInfo[]> {
+  const timeoutMs = opts.timeoutMs ?? MCP_SETTLE_TIMEOUT_MS
+  const intervalMs = opts.intervalMs ?? MCP_SETTLE_INTERVAL_MS
+  const now = opts.now ?? (() => Date.now())
+  const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)))
+  const started = now()
+  let last = await withTimeout(q.mcpServerStatus(), 'mcpServerStatus')
+  while (now() - started < timeoutMs) {
+    // 서버가 하나도 안 보이는 것도 "아직 못 붙었다" 에 해당한다(목록 자체가 늦게 찬다).
+    const settled = last.length > 0 && !last.some((s) => s.status === 'pending')
+    if (settled) break
+    await sleep(intervalMs)
+    last = await withTimeout(q.mcpServerStatus(), 'mcpServerStatus')
+  }
+  return last.map(mapServer)
+}
+
+/**
+ * /permissions 가 읽는 settings 파일들을 **읽는 순서대로**(유저 → 프로젝트 → 로컬 오버라이드)
+ * 나열한다. 카드는 규칙을 합집합으로 보여 주므로 이 순서가 우선순위를 뜻하지는 않는다 —
+ * 실제로는 맨 앞의 관리형 정책이 나머지 전부를 이긴다.
+ *
+ * 관리형 정책(managed-settings.json)은 조직이 배포하는 파일이고 사용자 설정으로 덮을 수 없다.
+ * 목록에서 빠져 있으면 카드가 "실제로 걸려 있는 deny 규칙" 을 통째로 놓치므로 반드시 포함한다.
+ * 경로는 Claude Code 가 쓰는 것과 같다(플랫폼별로 다르다).
+ *
+ * 이 목록이 권한 규칙의 전부는 아니다 — 플러그인이 싣는 규칙과 Wooi 가 query 에 주입하는 인라인
+ * settings 레이어는 파일로 존재하지 않고, SDK 의 initializationResult() 응답에도 권한 필드가 없다.
+ * 그래서 카드는 실제로 읽은 파일 목록(sources)을 그대로 보여 주고 전부가 아닐 수 있다고 말한다.
+ */
+export function permissionSettingsFiles(
+  cwd: string,
+  home: string = homedir(),
+  platform: NodeJS.Platform = process.platform
+): string[] {
+  const managed =
+    platform === 'darwin'
+      ? '/Library/Application Support/ClaudeCode/managed-settings.json'
+      : platform === 'win32'
+        ? join(process.env.PROGRAMDATA ?? 'C:\\ProgramData', 'ClaudeCode', 'managed-settings.json')
+        : '/etc/claude-code/managed-settings.json'
+  return [
+    managed,
+    join(home, '.claude', 'settings.json'),
+    join(home, '.claude', 'settings.local.json'),
+    join(cwd, '.claude', 'settings.json'),
+    join(cwd, '.claude', 'settings.local.json')
   ]
+}
+
+/** 주어진 settings 파일들에서 allow/ask/deny 를 모아 현재 모드와 함께 돌려준다(없는 파일은 건너뛴다). */
+export function collectPermissions(
+  files: string[],
+  mode: SessionConfig['permissionMode']
+): CommandResult {
   const allow = new Set<string>()
   const ask = new Set<string>()
   const deny = new Set<string>()
@@ -121,13 +193,33 @@ export function readPermissions(config: SessionConfig): CommandResult {
   return {
     kind: 'permissions',
     permissions: {
-      mode: config.permissionMode,
+      mode,
       allow: [...allow],
       ask: [...ask],
       deny: [...deny],
       sources
     }
   }
+}
+
+/** /permissions — settings.json 들에서 권한 규칙(allow/ask/deny)을 모아 현재 모드와 함께 돌려준다. */
+export function readPermissions(config: SessionConfig): CommandResult {
+  return collectPermissions(permissionSettingsFiles(config.cwd), config.permissionMode)
+}
+
+/**
+ * 단명 쿼리로는 **의미 있는 답을 만들 수 없는** 명령. 사용자 메시지가 하나도 없는 빈 query 의
+ * 컨텍스트는 시스템 프롬프트와 도구 정의뿐이라 Messages 카테고리가 통째로 없고, 모델 옵션도
+ * 워크스페이스가 아닌 CLI 기본값을 따른다 — 500k 짜리 대화 중에도 "26k / 2%" 라고 말하게 된다.
+ * 조용히 틀린 숫자를 보여 주느니 세션이 없다는 사실을 그대로 말한다.
+ */
+export const LIVE_ONLY_COMMANDS: CommandPanelKind[] = ['context']
+
+/** 라이브 세션이 없어 실행할 수 없을 때 카드에 그대로 보여 줄 안내. */
+export function noLiveSessionError(kind: CommandPanelKind): Error {
+  return new Error(
+    `No live session in this workspace yet. Send a message first — /${kind} reads the running session.`
+  )
 }
 
 /**
@@ -153,7 +245,9 @@ export async function runCommandShortLived(
     }
   })
   try {
-    return await runCommandOn(kind, q)
+    // MCP 는 방금 띄운 쿼리에서 서버가 붙는 데 시간이 걸린다 — 정착을 짧게 기다린 뒤 읽는다.
+    if (kind === 'mcp') return { kind, servers: await readMcpServersSettled(q) }
+    return await runCommandOn(kind, q, { live: false })
   } finally {
     input.close()
     void q.interrupt().catch(() => {})
@@ -239,7 +333,7 @@ function mapContext(c: SdkContext): ContextUsageInfo {
   }
 }
 
-function mapUsage(u: SdkUsage): UsageInfo {
+function mapUsage(u: SdkUsage, sessionDataAvailable: boolean): UsageInfo {
   const limits: UsageInfo['rateLimits'] = []
   const rl = u.rate_limits
   if (rl) {
@@ -265,6 +359,7 @@ function mapUsage(u: SdkUsage): UsageInfo {
   }
   const extra = rl?.extra_usage
   return {
+    sessionDataAvailable,
     totalCostUsd: u.session.total_cost_usd,
     linesAdded: u.session.total_lines_added,
     linesRemoved: u.session.total_lines_removed,

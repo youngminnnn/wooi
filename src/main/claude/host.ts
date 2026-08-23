@@ -6,7 +6,9 @@ import {
   runCommandShortLived,
   runMcpAction,
   invalidateAfterReload,
-  readPermissions
+  readPermissions,
+  LIVE_ONLY_COMMANDS,
+  noLiveSessionError
 } from './control'
 import { listSlashCommands } from './commands'
 import { createWooiMcpServer } from './wooiMcp'
@@ -206,6 +208,7 @@ async function handle(msg: HostCommand): Promise<void> {
           return readPermissions(msg.config)
         }
         const live = sessions.get(msg.workspaceId)?.liveQuery
+        if (!live && LIVE_ONLY_COMMANDS.includes(msg.kind)) throw noLiveSessionError(msg.kind)
         const result = live
           ? await runCommandOn(msg.kind, live)
           : await runCommandShortLived(

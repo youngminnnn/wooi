@@ -3819,6 +3819,12 @@ export interface UsageInfo {
     /** 꺼져 있으면(크레딧 소진·사용자 비활성화) 한도를 넘겨도 실제로 쓰이지 않는다. */
     isEnabled: boolean
   } | null
+  /**
+   * 세션 값(비용·바뀐 줄 수)이 **실제로 돌고 있는 세션**에서 온 것인가. 라이브 세션이 없어 단명
+   * 쿼리로 계정 값만 받아 온 경우 false — 이때 세션 값은 전부 0 이라, 그대로 그리면 "오늘 한 푼도
+   * 안 썼다" 로 읽힌다. 생략되면 true 로 본다(Codex 등 이 구분이 없는 백엔드).
+   */
+  sessionDataAvailable?: boolean
 }
 
 /**
