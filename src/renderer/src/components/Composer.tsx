@@ -638,6 +638,24 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
       return
     }
 
+    const lifecycle = images.length ? null : matchLifecycle(trimmed)
+    if (lifecycle) {
+      if (lifecycle.kind === 'rename') {
+        void window.api.workspace.rename(workspace.id, lifecycle.name)
+        pushToast('success', `Renamed workspace to “${lifecycle.name}”.`)
+      } else {
+        pushToast(
+          'info',
+          lifecycle.kind === 'archive'
+            ? 'Use the sidebar Archive action so Wooi can show the workspace safety checks.'
+            : '/delete is unavailable because its scope and confirmation cannot be made unambiguous here.'
+        )
+      }
+      setText('')
+      historyIdx.current = -1
+      return
+    }
+
     // /btw 는 사이드 질문으로 분기한다 — 일반 메시지로 보내면 현재 턴 뒤에 큐잉되어 메인 대화에
     // 쌓이므로(=오염), 맥락만 공유하는 임시 질의로 처리하고 답변은 별도 카드로 보여 준다.
     // (사이드 질문은 텍스트 전용 — 첨부가 있으면 일반 메시지로 보낸다.)
@@ -1597,6 +1615,17 @@ export function matchLocal(text: string, allowClaudeOnly: boolean): LocalCommand
   if (!m) return null
   if (!(LOCAL_COMMANDS as readonly string[]).includes(m[1])) return null
   return CLAUDE_ONLY_COMMANDS.includes(m[1]) && !allowClaudeOnly ? null : (m[1] as LocalCommand)
+}
+
+export type LifecycleCommand =
+  { kind: 'rename'; name: string } | { kind: 'archive' } | { kind: 'delete' }
+
+export function matchLifecycle(text: string): LifecycleCommand | null {
+  const rename = /^\/rename\s+(.+)$/.exec(text)
+  if (rename?.[1].trim()) return { kind: 'rename', name: rename[1].trim() }
+  if (/^\/archive\s*$/.test(text)) return { kind: 'archive' }
+  if (/^\/delete(?:\s[\s\S]*)?$/.test(text)) return { kind: 'delete' }
+  return null
 }
 
 /**

@@ -7,6 +7,7 @@ const update = vi.hoisted(() =>
   vi.fn((mutate: (value: AppState) => void) => mutate(state.value as AppState))
 )
 const info = vi.hoisted(() => vi.fn())
+const transcriptUpsert = vi.hoisted(() => vi.fn())
 
 vi.mock('electron', () => ({
   app: { getPath: () => '/tmp' },
@@ -16,21 +17,24 @@ vi.mock('electron', () => ({
 vi.mock('../store', () => ({
   getStore: () => ({ getState: () => state.value, update })
 }))
+vi.mock('../transcripts', () => ({ getTranscripts: () => ({ upsert: transcriptUpsert }) }))
 vi.mock('../logger', () => ({ log: { error: vi.fn(), info } }))
 vi.mock('../rateLimitResume', () => ({
   RATE_LIMIT_CONTINUATION: '',
   RateLimitResumeCoordinator: class {
     restore(): void {}
+    cancel(): void {}
   }
 }))
 
-import { CodexSessionManager } from './manager'
+import { CodexSessionManager, parseReviewTarget } from './manager'
 
 function workspace(id: string, agentBackend: 'codex' | 'claude', model: string | null): Workspace {
   return {
     id,
     agentBackend,
     model,
+    worktreePath: '/tmp/worktree',
     status: 'idle'
   } as Workspace
 }
@@ -131,5 +135,99 @@ describe('Codex model catalog reconciliation', () => {
     expect(state.value?.settings.agents.codex.model).toBeNull()
     expect(state.value?.settings.agents.claude.model).toBe(claudeModel)
     expect(dispatch).toHaveBeenCalledOnce()
+  })
+})
+
+describe('Codex slash command dispatch', () => {
+  beforeEach(() => {
+    transcriptUpsert.mockClear()
+    resetState([workspace('ws1', 'codex', null)])
+  })
+
+  function captureSend(manager: CodexSessionManager): ReturnType<typeof vi.fn> {
+    return vi
+      .spyOn(manager as unknown as { send: (command: unknown) => void }, 'send')
+      .mockImplementation(() => {})
+  }
+
+  it.each([
+    ['/compact', 'compact'],
+    ['/review', 'review'],
+    ['/review base main', 'review']
+  ])('keeps supported command %s on its control path', (input, type) => {
+    const dispatch = vi.fn()
+    const manager = new CodexSessionManager(dispatch, () => null)
+    const send = captureSend(manager)
+
+    manager.sendMessage('ws1', input)
+
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({ type, workspaceId: 'ws1' }))
+    expect(dispatch).not.toHaveBeenCalled()
+  })
+
+  it('intercepts an unknown command instead of sending it to the model', () => {
+    const dispatch = vi.fn()
+    const manager = new CodexSessionManager(dispatch, () => null)
+    const send = captureSend(manager)
+
+    manager.sendMessage('ws1', '/definitely-not-a-command arg')
+
+    expect(send).not.toHaveBeenCalled()
+    expect(transcriptUpsert).toHaveBeenCalledWith(
+      'ws1',
+      expect.objectContaining({ type: 'system', text: expect.stringContaining('Unknown') })
+    )
+    expect(dispatch).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ workspaceId: 'ws1' })
+    )
+  })
+
+  it('does not block prose that merely contains slashes', () => {
+    const manager = new CodexSessionManager(vi.fn(), () => null)
+    const send = captureSend(manager)
+
+    manager.sendMessage('ws1', 'Please inspect src/main/codex/manager.ts before answering.')
+
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({ type: 'send' }))
+  })
+
+  it('keeps a resolved installed skill command working before unknown interception', () => {
+    const manager = new CodexSessionManager(vi.fn(), () => null)
+    const send = captureSend(manager)
+    const skills = (manager as unknown as { skills: { resolved: Map<string, unknown[]> } }).skills
+    skills.resolved.set('/tmp/worktree', [
+      {
+        name: 'my-skill',
+        path: '/skills/my-skill/SKILL.md',
+        description: 'test',
+        scope: 'user',
+        enabled: true
+      }
+    ])
+
+    manager.sendMessage('ws1', '/my-skill target')
+
+    expect(send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'send',
+        skill: expect.objectContaining({ name: 'my-skill' })
+      })
+    )
+  })
+})
+
+describe('/review target parsing', () => {
+  it('supports uncommitted changes, a base branch, and a commit', () => {
+    expect(parseReviewTarget('/review')).toEqual({ type: 'uncommittedChanges' })
+    expect(parseReviewTarget('/review base origin/main')).toEqual({
+      type: 'baseBranch',
+      branch: 'origin/main'
+    })
+    expect(parseReviewTarget('/review commit abc123')).toEqual({ type: 'commit', sha: 'abc123' })
+  })
+
+  it('rejects ambiguous review arguments so they can be explained instead', () => {
+    expect(parseReviewTarget('/review something vague')).toBeNull()
   })
 })

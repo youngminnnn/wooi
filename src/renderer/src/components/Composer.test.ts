@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { matchLocal, matchMemory, matchPicker, matchSideQuestion } from './Composer'
+import { matchLifecycle, matchLocal, matchMemory, matchPicker, matchSideQuestion } from './Composer'
 
 describe('백엔드 전용 composer 명령', () => {
   it('Codex에서는 Claude 전용 /memory를 로컬 명령으로 가로채지 않는다', () => {
@@ -26,6 +26,15 @@ describe('백엔드 전용 composer 명령', () => {
   it('Claude 백엔드에서만 /add-dir을 가로챈다', () => {
     expect(matchLocal('/add-dir ~/notes', false)).toBeNull()
     expect(matchLocal('/add-dir ~/notes', true)).toBe('add-dir')
+  })
+})
+
+describe('workspace lifecycle commands', () => {
+  it('maps rename and the safety-gated archive/delete commands only as whole inputs', () => {
+    expect(matchLifecycle('/rename Better name')).toEqual({ kind: 'rename', name: 'Better name' })
+    expect(matchLifecycle('/archive')).toEqual({ kind: 'archive' })
+    expect(matchLifecycle('/delete everything')).toEqual({ kind: 'delete' })
+    expect(matchLifecycle('please open /archive docs')).toBeNull()
   })
 })
 
