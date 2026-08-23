@@ -34,7 +34,6 @@ import {
   resetAllPeerSessions,
   resetPeerSession
 } from './tools/peer'
-import { flushAnsweredDecisions } from './tools/decision'
 
 /**
  * 여러 에이전트 백엔드를 소유하고, 워크스페이스가 지정한 백엔드(workspace.agentBackend)로 호출을
@@ -330,10 +329,7 @@ export class AgentOrchestrator {
       // accept 메시지는 running 턴을 끊지 않고 여기까지 모은다. 여기서 true 를 돌려 idle 방송을
       // 막아야 합쳐진 사용자 메시지가 시작하는 다음 턴 사이에 거짓 idle 틈이 생기지 않는다.
       if (status !== 'idle') return false
-      // 둘 다 돌아야 한다. || 로 이으면 peer 가 true 인 순간 답 배달이 실행되지 않아 질문이 갇힌다.
-      const peerStarted = flushBufferedPeerMessages(workspaceId)
-      const answerStarted = flushAnsweredDecisions(workspaceId)
-      return peerStarted || answerStarted
+      return flushBufferedPeerMessages(workspaceId)
     }
     // 어느 쪽으로 끝났든 예약은 여기서 소진된다. 남겨 두면 한참 뒤 다른 턴이 끝날 때 뜬금없이
     // 되살아난다.

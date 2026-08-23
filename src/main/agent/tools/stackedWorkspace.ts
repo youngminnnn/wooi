@@ -76,9 +76,6 @@ function handoffMessage(task: string, parent: Workspace, summary: BranchSummary 
     'That one report closes the handoff. Anything the user asks you for afterwards is ordinary ' +
       'work in this workspace — report again only when the parent has a decision waiting on the ' +
       'answer, not at the end of every turn.',
-    'If you hit a decision you cannot make yourself and guessing wrong would waste the work that ' +
-      'follows it, call `mcp__wooi__ask_for_decision` instead of guessing or stopping silently. It ' +
-      'goes to the user first and does not block — your turn ends and the answer comes back as a new one.',
     ...(summary ? inheritedWorkSection(summary) : [])
   ].join('\n')
 }

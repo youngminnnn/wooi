@@ -151,23 +151,6 @@ export const WOOI_COMMANDS: WooiCommandSpec[] = [
     ].join('\n')
   },
   {
-    name: 'ask',
-    tool: 'ask_for_decision',
-    mode: 'agent',
-    description: 'Raise a decision for the user to make, without blocking',
-    argumentHint: '[what to ask about]',
-    prompt: [
-      'Raise a decision for the user by calling the `mcp__wooi__ask_for_decision` tool.',
-      '',
-      'Write the question for someone who has not read this conversation: what is at stake, what',
-      'you already ruled out, and what you will do once you know. Give `options` if the choice is',
-      'a closed set, and fill in `recommendation` with what you would do on your own.',
-      '',
-      'What to ask about (may be empty — then ask about whatever is actually blocking you):',
-      '$ARGUMENTS'
-    ].join('\n')
-  },
-  {
     name: 'notify',
     tool: 'notify_child',
     mode: 'agent',
