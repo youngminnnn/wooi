@@ -7,8 +7,10 @@ import { performance } from 'node:perf_hooks'
 
 const harness = process.env.WOOI_E2E_HARNESS
 const help =
-  'Set WOOI_E2E_HARNESS to the absolute wooi-run harness directory, then run npm run build && npm run e2e.'
+  'Set WOOI_E2E_HARNESS to the oh-my-wooi source checkout at plugins/wooi-run/harness, then run npm run build && npm run e2e.'
 
+// 설정하지 않은 것은 "돌리지 않겠다"는 뜻이므로 건너뛰지만, 설정했는데 경로가 틀리면
+// "돌리겠다고 했는데 못 돌렸다"는 뜻이므로 실패로 끊는다. 조용한 exit 0은 CI에서 통과로 읽힌다.
 if (!harness || !isAbsolute(harness)) {
   console.log(`[e2e] SKIP: WOOI_E2E_HARNESS is not set to an absolute path. ${help}`)
   process.exit(0)
@@ -17,8 +19,10 @@ if (!harness || !isAbsolute(harness)) {
 try {
   await access(join(harness, 'index.mjs'))
 } catch {
-  console.log(`[e2e] SKIP: WOOI_E2E_HARNESS does not contain index.mjs: ${harness}. ${help}`)
-  process.exit(0)
+  console.error(
+    `[e2e] ERROR: WOOI_E2E_HARNESS exists but has no index.mjs: ${harness}. It must point at the oh-my-wooi source checkout at plugins/wooi-run/harness; the installed plugin snapshot does not contain the harness.`
+  )
+  process.exit(1)
 }
 
 const specsDir = resolve('e2e/specs')
