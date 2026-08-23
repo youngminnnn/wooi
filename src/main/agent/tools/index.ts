@@ -1,4 +1,5 @@
 import { switchToAgentTeam } from './agentTeam'
+import { awaitStackedWork } from './awaitStackedWork'
 import {
   checkMessageStatus,
   listWorkspacePeers,
@@ -70,4 +71,5 @@ export function initAgentTools(deps: AgentToolDeps): void {
   registerAgentTool('archive_workspace', archiveWorkspaceTool)
   registerAgentTool('set_workspace_name', setWorkspaceName)
   registerAgentTool('switch_to_agent_team', switchToAgentTeam)
+  registerAgentTool('await_stacked_work', awaitStackedWork)
 }

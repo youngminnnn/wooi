@@ -617,6 +617,23 @@ export interface StackedBranch {
   prNumber: number | null
 }
 
+/**
+ * `await_stacked_work` 로 건 대기 예약. 자식들이 조건을 채우거나·더 진행할 수 없게 되거나·
+ * 기한이 지나면 Wooi 가 이 워크스페이스에 새 턴을 연다.
+ *
+ * 정본이 Workspace 인 이유는 pendingRateLimitResume 과 같다 — 앱을 재시작해도 살아남아야 한다.
+ * 밤새 기다리게 해 뒀는데 아침에 아무 일도 없으면 안 된다.
+ */
+export interface PendingStackedWait {
+  /** 기다리는 자식들과, 등록 시점에 이미 있던 보고의 시각(없었으면 null). */
+  targets: { workspaceId: string; seenReportAt: number | null }[]
+  until: 'all-reported' | 'any-reported'
+  startedAt: number
+  deadlineAt: number
+  /** 등록 당시의 세션. 바뀌었으면 과거 맥락을 깨우지 않는다. */
+  sessionId: string | null
+}
+
 /** 하나의 작업 단위. git worktree + 전용 브랜치 + 에이전트 세션 1개. */
 export interface Workspace {
   id: string
@@ -785,6 +802,8 @@ export interface Workspace {
   pendingRateLimitResume?: PendingRateLimitResume | null
   /** 마지막 턴이 사용량 제한으로 멈췄다는 표시(자동 이어가기 설정과 무관하게 기록·표시한다). */
   rateLimited?: RateLimitPause | null
+  /** `await_stacked_work` 로 건 대기 예약. 없으면 기다리는 것이 없다. */
+  awaitingStackedWork?: PendingStackedWait | null
   permissionMode: PermissionMode
   status: WorkspaceStatus
   /** 이 workspace 전용 모델 오버라이드. null 이면 전역 설정(AppSettings.model) 을 따른다. */
@@ -2920,6 +2939,7 @@ export const IPC = {
   workspacePeerInboxDeliver: 'workspace:peerInboxDeliver',
   /** 대기 중인 peer 메시지를 버린다. 전달되지 않고 사라진다. */
   workspacePeerInboxDismiss: 'workspace:peerInboxDismiss',
+  workspaceCancelStackedWait: 'workspace:cancelStackedWait',
   /** 다른 워크스페이스에서 오는 메시지를 받는 방식([[PeerInboundPolicy]])을 바꾼다. */
   workspaceSetPeerInbound: 'workspace:setPeerInbound',
   /** 같은 프롬프트로 후보 워크스페이스 N 개를 한 번에 만들고 한 그룹으로 묶는다. */

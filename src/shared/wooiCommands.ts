@@ -316,6 +316,15 @@ export const WOOI_COMMANDS: WooiCommandSpec[] = [
     description: 'Rename this workspace (no argument clears the agent-set name)',
     argumentHint: '[name]',
     prompt: 'Call `mcp__wooi__set_workspace_name` to name this workspace: $ARGUMENTS'
+  },
+  {
+    name: 'await',
+    tool: 'await_stacked_work',
+    mode: 'direct',
+    description: 'Wait without spending tokens for stacked workspace reports',
+    argumentHint: '[workspace ids…]',
+    prompt:
+      'Call `mcp__wooi__await_stacked_work` to wait for these child workspace ids (omit the list to wait for all): $ARGUMENTS'
   }
 ]
 
@@ -386,6 +395,10 @@ export function parseWooiCommandArgs(name: string, raw: string): WooiCommandArgs
 
     case 'message-status':
       return { args: rest ? { messageId: rest } : {} }
+    case 'await': {
+      const workspaceIds = words(rest)
+      return { args: workspaceIds.length ? { workspaceIds } : {} }
+    }
 
     case 'related': {
       const paths = words(rest)

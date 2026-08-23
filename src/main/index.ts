@@ -25,6 +25,7 @@ import {
 import { registerIpc } from './ipc'
 import { disposeRemote, getRemoteBridge, hasLocalRemoteOverride, initRemote } from './remote'
 import { pendingPermissions } from './remote/permissions'
+import { initStackedWaits } from './stackedWait'
 import { rememberCompacting, rememberContextUsage } from './contextUsageCache'
 import { rememberRunningAgents } from './runningAgentsCache'
 import type { AppState, ChatEvent, PermissionRequest } from '@shared/types'
@@ -173,6 +174,17 @@ initToolPermission({ dispatch: (request) => dispatch(IPC.evtPermission, request)
 
 const terminals = new TerminalManager(dispatch)
 
+const stackedWaits = initStackedWaits({
+  sendMessage: (workspaceId, text) => sessions.sendMessage(workspaceId, text),
+  postToTranscript: (workspaceId, item) => {
+    getTranscripts().upsert(workspaceId, item)
+    dispatch(IPC.evtChat, { workspaceId, event: { type: 'item', item } })
+  },
+  broadcastState: () => dispatch(IPC.evtState, getStore().getState()),
+  workspacesAwaitingApproval: () =>
+    new Set(pendingPermissions.list().map((request) => request.workspaceId))
+})
+
 // 에이전트가 Wooi 자체를 조작하는 도구들의 실행부에 필요한 것을 넘긴다([[agent/tools]]).
 // scripts·terminals 가 만들어진 뒤여야 한다 — 워크스페이스를 만드는 도구가 셋업 스크립트를
 // 돌리고, 아카이브하는 도구가 그 워크스페이스의 터미널을 끊는다.
@@ -190,6 +202,7 @@ initAgentTools({
     dispatch(IPC.evtChat, { workspaceId, event: { type: 'item', item } })
   }
 })
+stackedWaits.restore()
 
 // `/wooi:*` 슬래시 명령을 담은 Claude 플러그인을 디스크에 만든다([[agent/plugin]]).
 // 매번 다시 쓴다 — 카탈로그가 SSOT 이므로 앱을 업데이트하면 명령도 함께 바뀌어야 한다.
