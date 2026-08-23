@@ -2084,7 +2084,17 @@ export const useStore = create<UIState>((set, get) => ({
         : {}
     )
     const base = res.baseBranch || workspace?.baseBranch || 'base'
-    if (res.status === 'restacked') {
+    // push 가 거부된 경우는 rebase 가 성공했더라도 성공 토스트를 띄우지 않는다. 리모트(=PR)는 옛
+    // 커밋 그대로라 여기서 "rebased" 라고만 말하면 사용자는 다 됐다고 믿고, 그 침묵이 다음 restack
+    // 에서 "리모트를 남이 다시 썼다" 는 오진으로 되돌아온다.
+    if (res.pushError) {
+      get().pushToast(
+        'error',
+        res.status === 'restacked'
+          ? `Rebased onto ${base}, but the push was rejected: ${res.pushError}`
+          : `The push was rejected: ${res.pushError}`
+      )
+    } else if (res.status === 'restacked') {
       get().pushToast(
         'success',
         res.pushed ? `Rebased onto ${base} and pushed.` : `Rebased onto ${base}.`

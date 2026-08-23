@@ -17,6 +17,7 @@ vi.mock('./git', () => ({
   hasCommit: vi.fn(),
   isAncestor: vi.fn(),
   isWorktreeClean: vi.fn(),
+  lastRemoteRefUpdate: vi.fn(),
   remoteTipSha: vi.fn(),
   restackOnto: vi.fn(),
   revParse: vi.fn()
@@ -36,11 +37,20 @@ import {
   hasCommit,
   isAncestor,
   isWorktreeClean,
+  lastRemoteRefUpdate,
   remoteTipSha,
   restackOnto,
   revParse
 } from './git'
-import { cascadeRetarget, cascadeRestackBranchStack, detectRemoteDivergence } from './cascade'
+import {
+  cascadeRetarget,
+  cascadeRestackBranchStack,
+  detectRemoteDivergence,
+  divergedMessage,
+  divergedStep,
+  isDiverged,
+  stepFromRestack
+} from './cascade'
 
 const WT = '/tmp/wt'
 
@@ -68,6 +78,8 @@ beforeEach(() => {
   vi.mocked(remoteTipSha).mockResolvedValue(null)
   vi.mocked(hasCommit).mockResolvedValue(true)
   vi.mocked(isAncestor).mockResolvedValue(true)
+  // 기본은 "리플로그가 없다" = 원인을 가릴 근거가 없다 → 보수적으로 'diverged'.
+  vi.mocked(lastRemoteRefUpdate).mockResolvedValue(null)
 })
 
 describe('cascadeRetarget', () => {
@@ -351,6 +363,58 @@ describe('detectRemoteDivergence', () => {
     expect(await detectRemoteDivergence(WT, 'b')).toBe('diverged')
   })
 
+  // (a) 남이 리모트를 다시 썼다. 우리 리플로그의 마지막 항목은 fetch 이고, 서버가 쓴 sha 는
+  // 우리 push 로 남아 있을 수 없다 — 그러면 처방은 "리모트를 취한다" 다.
+  it('keeps calling it diverged when the remote tip arrived by fetch', async () => {
+    vi.mocked(remoteTipSha).mockResolvedValue('rewritten')
+    vi.mocked(revParse).mockResolvedValue('local')
+    vi.mocked(hasCommit).mockResolvedValue(true)
+    vi.mocked(isAncestor).mockResolvedValue(false)
+    vi.mocked(lastRemoteRefUpdate).mockResolvedValue({
+      sha: 'rewritten',
+      reason: 'fetch origin: forced-update'
+    })
+    expect(await detectRemoteDivergence(WT, 'b')).toBe('diverged')
+  })
+
+  // (b) 리모트는 우리 지난 push 자리 그대로고, 그 뒤 push 가 거부돼 로컬만 앞섰다.
+  // 처방이 정반대(force-push)라 같은 'diverged' 로 묶으면 안 된다.
+  it('names a stale push when our own push last moved the remote', async () => {
+    vi.mocked(remoteTipSha).mockResolvedValue('ours')
+    vi.mocked(revParse).mockResolvedValue('local')
+    vi.mocked(hasCommit).mockResolvedValue(true)
+    vi.mocked(isAncestor).mockResolvedValue(false)
+    vi.mocked(lastRemoteRefUpdate).mockResolvedValue({ sha: 'ours', reason: 'update by push' })
+    expect(await detectRemoteDivergence(WT, 'b')).toBe('diverged-stale-push')
+  })
+
+  // 우리가 push 한 sha 가 맞아도, 그 뒤 리모트가 더 움직였다면 마지막으로 옮긴 건 우리가 아니다.
+  it('does not blame a stale push when a later entry moved the remote on', async () => {
+    vi.mocked(remoteTipSha).mockResolvedValue('rewritten')
+    vi.mocked(revParse).mockResolvedValue('local')
+    vi.mocked(hasCommit).mockResolvedValue(true)
+    vi.mocked(isAncestor).mockResolvedValue(false)
+    vi.mocked(lastRemoteRefUpdate).mockResolvedValue({ sha: 'ours', reason: 'update by push' })
+    expect(await detectRemoteDivergence(WT, 'b')).toBe('diverged')
+  })
+
+  it('falls back to diverged when there is no reflog to judge by', async () => {
+    vi.mocked(remoteTipSha).mockResolvedValue('rewritten')
+    vi.mocked(revParse).mockResolvedValue('local')
+    vi.mocked(hasCommit).mockResolvedValue(true)
+    vi.mocked(isAncestor).mockResolvedValue(false)
+    vi.mocked(lastRemoteRefUpdate).mockResolvedValue(null)
+    expect(await detectRemoteDivergence(WT, 'b')).toBe('diverged')
+  })
+
+  it('never asks the reflog about a remote commit we do not have', async () => {
+    vi.mocked(remoteTipSha).mockResolvedValue('rewritten')
+    vi.mocked(revParse).mockResolvedValue('local')
+    vi.mocked(hasCommit).mockResolvedValue(false)
+    expect(await detectRemoteDivergence(WT, 'b')).toBe('diverged')
+    expect(lastRemoteRefUpdate).not.toHaveBeenCalled()
+  })
+
   it('treats a remote commit we have never seen as diverged without asking merge-base', async () => {
     // 우리가 모르는 객체로 merge-base 를 부르면 unknown revision 으로 실패한다 — 그 전에 끊는다.
     vi.mocked(remoteTipSha).mockResolvedValue('rewritten')
@@ -490,5 +554,75 @@ describe('cascadeRestackBranchStack — remote divergence guard', () => {
 
     expect(steps[0]).toMatchObject({ status: 'ok' })
     expect(restackOnto).toHaveBeenCalledWith(WT, 'main', 'a')
+  })
+})
+
+describe('갈라짐 문구와 restack 결과 옮기기', () => {
+  it('treats both divergence causes as reasons to stop', () => {
+    expect(isDiverged('diverged')).toBe(true)
+    expect(isDiverged('diverged-stale-push')).toBe(true)
+    expect(isDiverged('local-ahead')).toBe(false)
+    expect(isDiverged('in-sync')).toBe(false)
+    expect(isDiverged('unknown')).toBe(false)
+  })
+
+  // 두 사유는 처방이 정반대다. 지난 push 가 실패한 경우에 리모트를 취하라고 말하면
+  // 새 base 위로 옮긴 결과를 버리게 된다 — 실제로 사용자가 그럴 뻔했다.
+  it('tells the two causes apart in what it asks the user to do', () => {
+    const rewritten = divergedMessage('b', 'diverged')
+    expect(rewritten).toContain('rewritten by something other than Wooi')
+    expect(rewritten).toContain('git reset --hard origin/b')
+
+    const stale = divergedMessage('b', 'diverged-stale-push')
+    expect(stale).toContain('an earlier push was rejected')
+    expect(stale).toContain('git push --force-with-lease origin b')
+    expect(stale).not.toContain('rewritten by something other than Wooi')
+    expect(stale).toContain('do not reset to the remote')
+  })
+
+  it('keeps the rewritten wording as the default so old call sites do not change', () => {
+    expect(divergedMessage('b')).toBe(divergedMessage('b', 'diverged'))
+    expect(divergedStep('b', 7).message).toBe(divergedMessage('b', 'diverged'))
+    expect(divergedStep('b', 7, 'diverged-stale-push')).toMatchObject({
+      status: 'diverged',
+      message: divergedMessage('b', 'diverged-stale-push')
+    })
+  })
+
+  // 여기서 'ok' 로 넘어가면 push 실패가 다시 조용해진다.
+  it('reports a rejected push as a failure, not as a rebase that went fine', () => {
+    expect(
+      stepFromRestack('b', 7, {
+        status: 'restacked',
+        baseBranch: 'main',
+        pushed: false,
+        pushError: 'npm error command failed'
+      })
+    ).toMatchObject({
+      status: 'failed',
+      message: 'rebased, but the push was rejected: npm error command failed'
+    })
+    expect(
+      stepFromRestack('b', 7, {
+        status: 'up-to-date',
+        baseBranch: 'main',
+        pushed: false,
+        pushError: '! [rejected] b -> b (stale info)'
+      })
+    ).toMatchObject({
+      status: 'failed',
+      message: 'the push was rejected: ! [rejected] b -> b (stale info)'
+    })
+  })
+
+  it('still reads a skipped push (no remote branch yet) as success', () => {
+    expect(stepFromRestack('b', 7, { status: 'restacked', baseBranch: 'main' })).toMatchObject({
+      status: 'ok',
+      message: 'rebased'
+    })
+    expect(stepFromRestack('b', 7, { status: 'up-to-date', baseBranch: 'main' })).toMatchObject({
+      status: 'skipped',
+      message: 'already up to date'
+    })
   })
 })
