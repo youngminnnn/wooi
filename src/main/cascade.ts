@@ -13,6 +13,7 @@ import {
   hasCommit,
   isAncestor,
   isWorktreeClean,
+  lastRemoteRefUpdate,
   remoteTipSha,
   restackOnto,
   revParse
@@ -84,17 +85,42 @@ export interface StackProgressSink {
  * 리모트 브랜치와 로컬 tip 의 관계.
  * - in-sync: 같다.
  * - local-ahead: 리모트가 로컬 tip 의 조상이다(= 아직 push 하지 않은 커밋만 있다. 정상).
- * - diverged: 조상도 아니고 같지도 않다 — 내가 하지 않은 push 가 리모트에 있다.
+ * - diverged: 조상도 아니고 같지도 않은데, 리모트를 마지막으로 움직인 게 우리가 아니다
+ *   — 즉 남이(대개 GitHub 의 서버측 rebase 가) 다시 썼다.
+ * - diverged-stale-push: 조상도 아니고 같지도 않지만, 리모트는 **우리 자신의 마지막 성공한 push**
+ *   가 남긴 자리 그대로다 — 그 뒤의 push 가 거부돼 로컬만 앞선 것이다.
  * - unknown: 리모트에 브랜치가 없거나(아직 push 전) 조회하지 못했다. 판정하지 않는다.
  */
-export type RemoteState = 'in-sync' | 'local-ahead' | 'diverged' | 'unknown'
+export type RemoteState = 'in-sync' | 'local-ahead' | 'diverged' | 'diverged-stale-push' | 'unknown'
+
+/** rebase 를 멈춰야 하는 갈라짐 상태들. 원인·문구는 갈리지만 "멈춘다"는 대처는 같다. */
+export type DivergedState = 'diverged' | 'diverged-stale-push'
+
+/**
+ * 갈라짐인가. 호출부가 `=== 'diverged'` 로 비교하면 새 사유가 조용히 통과해 가드를 빠져나가므로
+ * 판정은 반드시 이 함수를 거친다.
+ */
+export function isDiverged(state: RemoteState): state is DivergedState {
+  return state === 'diverged' || state === 'diverged-stale-push'
+}
 
 /**
  * "내가 push 하지 않았는데 리모트가 움직였는가"를 판정한다.
  *
- * "내가 push 했는지"를 따로 기록해 둘 필요는 없다. Wooi 의 push 는 rebase 직후의
- * force-with-lease 뿐이라, 그게 성공했다면 리모트는 로컬 tip 과 **같다**. 즉 같지도 않고
- * 조상도 아니라는 사실 자체가 "내가 만든 상태가 아니다"의 충분한 증거다.
+ * ── 왜 "같지도 조상도 아니다" 만으로는 부족한가 (실측) ──────────────────────
+ * 예전에는 그 사실 자체를 "내가 만든 상태가 아니다"의 충분한 증거로 봤다. 전제는 "Wooi 의 push 는
+ * rebase 직후의 force-with-lease 뿐이고, 성공했다면 리모트는 로컬과 같다" 였는데, **push 가 실패하는
+ * 경우**를 빼먹었다. pre-push 훅이 거부하면(예: 워크트리의 node_modules 가 낡아 typecheck 실패)
+ * 리모트는 지난번 sha 에 멈추고 로컬만 새 base 위로 옮겨 간다 — 조상도 아니고 같지도 않다.
+ * 그러면 여기서 'diverged' 가 떠 "GitHub 이 다시 썼다" 는 문구가 나가고, 그 문구가 권하는
+ * `git reset --hard origin/<branch>` 는 **새 base 위로 옮긴 결과를 버린다**. 정확히 반대 처방이다.
+ *
+ * 구분할 재료는 `origin/<branch>` 의 리플로그다(lastRemoteRefUpdate 주석에 형식 실측을 적어 뒀다).
+ * 리모트 tip 을 마지막으로 그 자리에 놓은 항목이 우리 `update by push` 면 리모트를 마지막으로 움직인
+ * 건 우리 자신이다 → 남이 쓴 게 아니라 그 뒤의 내 push 가 실패한 것이다.
+ *
+ * 리플로그가 없거나(만료·`core.logAllRefUpdates` 끔) 사유가 push 가 아니면 보수적으로 'diverged' 로
+ * 남는다 — 모르면 "남이 썼을 수 있다" 쪽이 안전하다. 어느 쪽이든 rebase 는 하지 않는다.
  */
 export async function detectRemoteDivergence(
   worktreePath: string,
@@ -112,17 +138,44 @@ export async function detectRemoteDivergence(
   if (remote === local) return 'in-sync'
   // 리모트 sha 를 우리가 아예 모르면 fetch 한 적 없는 히스토리다 → 조상 판정 자체가 불가능하고,
   // 그 사실이 곧 갈라짐이다(merge-base 를 그냥 부르면 unknown revision 으로 실패한다).
+  // 우리가 push 한 sha 라면 우리 저장소가 그걸 모를 리 없으므로 리플로그를 물어볼 것도 없다.
   if (!(await hasCommit(worktreePath, remote).catch(() => false))) return 'diverged'
-  return (await isAncestor(worktreePath, remote, local).catch(() => false))
-    ? 'local-ahead'
+  if (await isAncestor(worktreePath, remote, local).catch(() => false)) return 'local-ahead'
+  return (await remoteMovedByOurPush(worktreePath, branch, remote))
+    ? 'diverged-stale-push'
     : 'diverged'
+}
+
+/** 리모트 tip 을 지금 자리에 놓은 것이 우리 자신의 push 인가. */
+async function remoteMovedByOurPush(
+  worktreePath: string,
+  branch: string,
+  remoteSha: string
+): Promise<boolean> {
+  const last = await lastRemoteRefUpdate(worktreePath, branch).catch(() => null)
+  // 사유 문구는 git 이 remote-tracking ref 를 push 로 갱신할 때 쓰는 고정 문자열이다(실측).
+  // fetch 로 갱신된 항목은 `fetch <args>: forced-update` 처럼 생겨서 여기에 걸리지 않는다.
+  return last?.sha === remoteSha && last?.reason === 'update by push'
 }
 
 /**
  * 갈라짐을 사용자에게 설명하는 문구. 캐스케이드(자동)와 수동 restack 이 같은 말을 하도록 한 곳에
  * 둔다 — 같은 원인·같은 대처인데 경로에 따라 다르게 설명하면 사용자가 다른 문제로 읽는다.
+ *
+ * 사유별로 갈라지되 갈라지는 자리는 여기 한 곳뿐이다. 두 사유는 처방이 정반대라 반드시 갈라져야
+ * 한다 — 남이 다시 썼으면 리모트를 취해야 하고, 내 push 가 실패한 거라면 force-push 해야 한다.
  */
-export function divergedMessage(branch: string): string {
+export function divergedMessage(branch: string, state: DivergedState = 'diverged'): string {
+  if (state === 'diverged-stale-push') {
+    return (
+      'the rebase result never reached the remote — an earlier push was rejected (a pre-push hook ' +
+      'or the remote refused it), so the remote branch is still where Wooi last pushed it while ' +
+      'the local branch has moved on. Nothing rewrote the remote, so the rebase was skipped to ' +
+      'avoid guessing. Run the push yourself to see the rejection ' +
+      `('git push --force-with-lease origin ${branch}'), and do not reset to the remote — that ` +
+      'would throw away the commits already replayed onto the new base.'
+    )
+  }
   return (
     'the remote branch was rewritten by something other than Wooi — GitHub rebases the branches ' +
     'above a stacked pull request when a lower one merges. Rebasing here would replay your older ' +
@@ -133,13 +186,17 @@ export function divergedMessage(branch: string): string {
 }
 
 /** 갈라짐을 캐스케이드 단계 결과로 옮긴다(모델 A·B 가 같은 문구를 쓴다). */
-export function divergedStep(branch: string, prNumber: number | null): StackCascadeStep {
+export function divergedStep(
+  branch: string,
+  prNumber: number | null,
+  state: DivergedState = 'diverged'
+): StackCascadeStep {
   return {
     branch,
     prNumber,
     kind: 'restack',
     status: 'diverged',
-    message: divergedMessage(branch)
+    message: divergedMessage(branch, state)
   }
 }
 
@@ -152,8 +209,20 @@ export function stepFromRestack(
   const base = { branch, prNumber, kind: 'restack' as const }
   switch (r.status) {
     case 'restacked':
+      // push 가 거부됐으면 'ok' 로 넘기지 않는다. rebase 는 됐어도 리모트(=PR)는 옛 커밋 그대로라,
+      // 여기서 조용히 넘어가면 다음 restack 이 그 상태를 갈라짐으로 오진한다.
+      if (r.pushError) {
+        return {
+          ...base,
+          status: 'failed',
+          message: `rebased, but the push was rejected: ${r.pushError}`
+        }
+      }
       return { ...base, status: 'ok', message: r.pushed ? 'rebased and pushed' : 'rebased' }
     case 'up-to-date':
+      if (r.pushError) {
+        return { ...base, status: 'failed', message: `the push was rejected: ${r.pushError}` }
+      }
       return { ...base, status: 'skipped', message: 'already up to date' }
     case 'conflict':
       return { ...base, status: 'conflict', conflictedFiles: r.conflictedFiles }
@@ -381,8 +450,9 @@ export async function cascadeRestackBranchStack(opts: {
     // 체크아웃보다 먼저 본다 — 갈라진 브랜치는 아예 건드리지 않는 것이 요점이라, 워킹트리를
     // 그 브랜치로 옮겨 놓지도 않는다. 위 브랜치들은 이 브랜치 tip 을 기준으로 쌓이므로,
     // 하나가 갈라졌으면 그 위도 전부 판단 근거를 잃는다 → 멈춘다.
-    if ((await detectRemoteDivergence(worktreePath, e.branch)) === 'diverged') {
-      push(divergedStep(e.branch, e.prNumber))
+    const remote = await detectRemoteDivergence(worktreePath, e.branch)
+    if (isDiverged(remote)) {
+      push(divergedStep(e.branch, e.prNumber, remote))
       halted = `${e.branch} diverged from its remote`
       continue
     }
@@ -420,6 +490,10 @@ export async function cascadeRestackBranchStack(opts: {
     } else if (r.status === 'error' || r.status === 'dirty') {
       halted = `rebase of ${e.branch} failed`
       leftMidRebase = true
+    } else if (r.pushError) {
+      // rebase 는 됐는데 리모트에 닿지 못했다. 워킹트리는 깨끗하니 되돌릴 수 있지만(leftMidRebase
+      // 는 그대로), 이 층의 리모트가 옛 커밋에 멈춘 채 위를 쌓으면 스택이 절반만 옮겨진다.
+      halted = `the push of ${e.branch} was rejected`
     }
   }
 

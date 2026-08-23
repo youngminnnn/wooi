@@ -15,7 +15,10 @@ import {
   checkoutPrWorktree,
   resolveUniqueWorktree,
   pushCurrentBranch,
-  resolveBranchPushTarget
+  resolveBranchPushTarget,
+  summarizePushError,
+  lastRemoteRefUpdate,
+  restackOnto
 } from './git'
 
 describe('branch tracking push target', () => {
@@ -528,5 +531,207 @@ describe('summarizeBranch (물려받은 코드 요약)', () => {
 
     expect(summary?.commits.join('\n')).not.toContain('release: v1.9.0')
     expect(summary?.files).toEqual(['calc.js (+1 −0)'])
+  })
+})
+
+describe('summarizePushError (거부 사유 한 줄로 다듬기)', () => {
+  // 실측한 stderr 다. 진짜 사유는 끝줄이 아니라 그 위에 있다.
+  it('skips the boilerplate tail that every push failure carries', () => {
+    expect(
+      summarizePushError(
+        [
+          'npm error Lifecycle script `typecheck` failed with error:',
+          'npm error command failed',
+          "error: failed to push some refs to '../remote.git'"
+        ].join('\n')
+      )
+    ).toBe('npm error Lifecycle script `typecheck` failed with error: — npm error command failed')
+  })
+
+  it('keeps the rejection line and drops git hints', () => {
+    expect(
+      summarizePushError(
+        [
+          'To ../remote.git',
+          ' ! [rejected]        feat/x -> feat/x (stale info)',
+          "error: failed to push some refs to '../remote.git'",
+          'hint: Updates were rejected because the remote contains work that you do not have.'
+        ].join('\n')
+      )
+    ).toBe('! [rejected]        feat/x -> feat/x (stale info)')
+  })
+
+  it('falls back rather than returning an empty reason', () => {
+    expect(summarizePushError('')).toBe('git push failed.')
+    expect(summarizePushError('hint: nothing but hints\n')).toBe('git push failed.')
+    // 상투구밖에 없으면 그거라도 보여 준다 — 침묵보다는 낫다.
+    expect(summarizePushError("error: failed to push some refs to 'x'")).toBe(
+      "error: failed to push some refs to 'x'"
+    )
+  })
+
+  it('caps a runaway stderr so a toast stays readable', () => {
+    const summary = summarizePushError('x'.repeat(1000))
+    expect(summary).toHaveLength(300)
+    expect(summary.endsWith('…')).toBe(true)
+  })
+})
+
+describe('restackOnto — push 가 거부되면 조용히 넘어가지 않는다', () => {
+  let root: string
+  let worktree: string
+  let origin: string
+
+  const git = (cwd: string, args: string[]): string =>
+    execFileSync('git', args, { cwd, encoding: 'utf-8' }).trim()
+
+  /** pre-push 훅이 거부하게 만든다(실제 사고에서는 낡은 node_modules 로 typecheck 가 깨졌다). */
+  const rejectPush = (): void => {
+    const hook = join(worktree, '.git', 'hooks', 'pre-push')
+    writeFileSync(hook, '#!/bin/sh\necho "npm error command failed" 1>&2\nexit 1\n')
+    chmodSync(hook, 0o755)
+  }
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'wooi-restack-push-'))
+    origin = join(root, 'origin.git')
+    worktree = join(root, 'worktree')
+    git(root, ['init', '-q', '--bare', '-b', 'main', origin])
+    execFileSync('git', ['clone', '-q', origin, worktree])
+    git(worktree, ['config', 'user.email', 'test@example.com'])
+    git(worktree, ['config', 'user.name', 'test'])
+    writeFileSync(join(worktree, 'base.txt'), 'one\n')
+    git(worktree, ['add', '-A'])
+    git(worktree, ['commit', '-qm', 'base'])
+    git(worktree, ['push', '-q', '-u', 'origin', 'main'])
+    // 브랜치를 내고 한 번은 성공적으로 push 한다(=PR 이 열린 상태).
+    git(worktree, ['checkout', '-qb', 'fix/x'])
+    writeFileSync(join(worktree, 'mine.txt'), 'mine\n')
+    git(worktree, ['add', '-A'])
+    git(worktree, ['commit', '-qm', 'mine'])
+    git(worktree, ['push', '-q', '-u', 'origin', 'fix/x'])
+    // 그사이 main 이 움직인다 — 이게 restack 을 부르는 이유다.
+    const other = join(root, 'other')
+    execFileSync('git', ['clone', '-q', origin, other])
+    git(other, ['config', 'user.email', 'other@example.com'])
+    git(other, ['config', 'user.name', 'other'])
+    writeFileSync(join(other, 'theirs.txt'), 'theirs\n')
+    git(other, ['add', '-A'])
+    git(other, ['commit', '-qm', 'theirs'])
+    git(other, ['push', '-q', 'origin', 'main'])
+  })
+
+  afterEach(() => rmSync(root, { recursive: true, force: true }))
+
+  it('rebases but reports the rejection instead of claiming success', async () => {
+    rejectPush()
+    const before = git(worktree, ['rev-parse', 'origin/fix/x'])
+
+    const res = await restackOnto(worktree, 'main')
+
+    // rebase 자체는 성공했다 — status 는 그 사실을 그대로 말한다.
+    expect(res.status).toBe('restacked')
+    expect(res.pushed).toBe(false)
+    expect(res.pushError).toBe('npm error command failed')
+    // 로컬은 새 base 위로 옮겨졌고 리모트는 옛 커밋 그대로다. 이 어긋남이 사고의 씨앗이었다.
+    expect(git(worktree, ['rev-parse', 'origin/main^{commit}'])).toBe(
+      git(worktree, ['rev-parse', 'HEAD~1'])
+    )
+    expect(git(worktree, ['rev-parse', 'origin/fix/x'])).toBe(before)
+  })
+
+  it('reports a rejection even when there was nothing to rebase', async () => {
+    // base 를 이미 따라잡은 뒤라 rebase 는 필요 없지만, 아직 push 되지 않은 커밋이 있다.
+    await restackOnto(worktree, 'main')
+    rejectPush()
+    writeFileSync(join(worktree, 'more.txt'), 'more\n')
+    git(worktree, ['add', '-A'])
+    git(worktree, ['commit', '-qm', 'more'])
+
+    const res = await restackOnto(worktree, 'main')
+
+    expect(res.status).toBe('up-to-date')
+    expect(res.pushed).toBe(false)
+    expect(res.pushError).toBe('npm error command failed')
+  })
+
+  it('leaves pushError unset when the push simply succeeds', async () => {
+    const res = await restackOnto(worktree, 'main')
+    expect(res).toMatchObject({ status: 'restacked', pushed: true })
+    expect(res.pushError).toBeUndefined()
+    expect(git(worktree, ['rev-parse', 'origin/fix/x'])).toBe(git(worktree, ['rev-parse', 'HEAD']))
+  })
+})
+
+describe('lastRemoteRefUpdate (리모트 추적 ref 를 마지막으로 움직인 것)', () => {
+  let root: string
+  let worktree: string
+  let origin: string
+
+  const git = (cwd: string, args: string[]): string =>
+    execFileSync('git', args, { cwd, encoding: 'utf-8' }).trim()
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'wooi-remote-reflog-'))
+    origin = join(root, 'origin.git')
+    worktree = join(root, 'worktree')
+    git(root, ['init', '-q', '--bare', '-b', 'main', origin])
+    execFileSync('git', ['clone', '-q', origin, worktree])
+    git(worktree, ['config', 'user.email', 'test@example.com'])
+    git(worktree, ['config', 'user.name', 'test'])
+    writeFileSync(join(worktree, 'base.txt'), 'one\n')
+    git(worktree, ['add', '-A'])
+    git(worktree, ['commit', '-qm', 'base'])
+    git(worktree, ['push', '-q', '-u', 'origin', 'main'])
+  })
+
+  afterEach(() => rmSync(root, { recursive: true, force: true }))
+
+  it('says nothing about a branch the remote has never seen', async () => {
+    await expect(lastRemoteRefUpdate(worktree, 'never-pushed')).resolves.toBeNull()
+    await expect(lastRemoteRefUpdate(worktree, '')).resolves.toBeNull()
+  })
+
+  it('records our own push with the exact reason we match on', async () => {
+    const last = await lastRemoteRefUpdate(worktree, 'main')
+    expect(last).toEqual({ sha: git(worktree, ['rev-parse', 'HEAD']), reason: 'update by push' })
+  })
+
+  it('does not gain an entry when a push is rejected', async () => {
+    const before = await lastRemoteRefUpdate(worktree, 'main')
+    const hook = join(worktree, '.git', 'hooks', 'pre-push')
+    writeFileSync(hook, '#!/bin/sh\nexit 1\n')
+    chmodSync(hook, 0o755)
+    writeFileSync(join(worktree, 'base.txt'), 'two\n')
+    git(worktree, ['commit', '-qam', 'two'])
+    expect(() => git(worktree, ['push', 'origin', 'main'])).toThrow()
+
+    // 이 사실이 판정의 토대다 — 실패한 push 는 흔적을 남기지 않으므로, 마지막 항목은
+    // 여전히 마지막으로 **성공한** push 다.
+    await expect(lastRemoteRefUpdate(worktree, 'main')).resolves.toEqual(before)
+  })
+
+  it('marks a remote that moved outside this repo as a fetch, not a push', async () => {
+    const other = join(root, 'other')
+    execFileSync('git', ['clone', '-q', origin, other])
+    git(other, ['config', 'user.email', 'other@example.com'])
+    git(other, ['config', 'user.name', 'other'])
+    // 서버측 rebase 처럼 tip 을 **다시 쓴다**(얹는 게 아니라) — GitHub 이 스택 위 브랜치에 하는 일이다.
+    writeFileSync(join(other, 'base.txt'), 'rewritten\n')
+    git(other, ['commit', '-qam', 'rewritten', '--amend'])
+    git(other, ['push', '-q', '--force', 'origin', 'main'])
+
+    git(worktree, ['fetch', '-q', 'origin'])
+    const last = await lastRemoteRefUpdate(worktree, 'main')
+    expect(last?.sha).toBe(git(other, ['rev-parse', 'HEAD']))
+    expect(last?.reason).not.toBe('update by push')
+    expect(last?.reason).toContain('forced-update')
+  })
+
+  it('leaves the entry alone when a fetch changes nothing', async () => {
+    const before = await lastRemoteRefUpdate(worktree, 'main')
+    git(worktree, ['fetch', '-q', 'origin'])
+    // restackOnto 는 push 직전에 fetch 한다. 그 fetch 가 판정을 흐리지 않아야 뜻이 있다.
+    await expect(lastRemoteRefUpdate(worktree, 'main')).resolves.toEqual(before)
   })
 })

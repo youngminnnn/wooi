@@ -84,6 +84,7 @@ import {
   detectRemoteDivergence,
   divergedMessage,
   divergedStep,
+  isDiverged,
   stepFromRestack
 } from './cascade'
 import type { StackProgressSink } from './cascade'
@@ -1386,12 +1387,13 @@ export function registerIpc(ctx: IpcContext): void {
       // 캐스케이드와 같은 가드. 여기도 상위 브랜치에는 oldBase 를 넘겨 무조건 rebase 하고,
       // restackOnto 가 push 직전에 fetch 해 lease 를 되살리므로 force-push 가 그대로 통한다
       // — 즉 이 버튼도 GitHub 의 서버측 rebase 를 덮어쓸 수 있다(cascade.ts 의 실측 기록 참고).
-      if ((await detectRemoteDivergence(worktreePath, entry.branch)) === 'diverged') {
-        progress?.step(divergedStep(entry.branch, entry.prNumber))
+      const remote = await detectRemoteDivergence(worktreePath, entry.branch)
+      if (isDiverged(remote)) {
+        progress?.step(divergedStep(entry.branch, entry.prNumber, remote))
         return {
           status: 'error',
           baseBranch: entry.baseBranch,
-          message: `${entry.branch}: ${divergedMessage(entry.branch)}`
+          message: `${entry.branch}: ${divergedMessage(entry.branch, remote)}`
         }
       }
       const co = await checkoutBranch(worktreePath, entry.branch)
@@ -1414,6 +1416,9 @@ export function registerIpc(ctx: IpcContext): void {
       }))
       progress?.step(stepFromRestack(entry.branch, entry.prNumber, res))
       if (res.status === 'conflict' || res.status === 'error' || res.status === 'dirty') return res
+      // rebase 는 됐지만 push 가 거부됐다. 이 층의 리모트는 옛 커밋 그대로라 위를 계속 쌓으면
+      // 스택이 절반만 옮겨진다 — 여기서 멈추고 사유를 그대로 올려 보낸다(삼키지 않는다).
+      if (res.pushError) return res
       if (res.status === 'restacked') anyChanged = true
     }
     await checkoutBranch(worktreePath, returnTo).catch(() => {})
@@ -1442,9 +1447,14 @@ export function registerIpc(ctx: IpcContext): void {
       // 앞서간 상황이 바로 아래층이 병합된 직후 — GitHub 이 이 브랜치를 이미 서버에서 rebase 해 둔
       // 그 순간이다. 그대로 두면 옛 커밋을 재생해 그 결과를 덮어쓴다.
       operation.sink.start(ws.branch, 'restack')
-      if ((await detectRemoteDivergence(ws.worktreePath, ws.branch)) === 'diverged') {
-        operation.sink.step(divergedStep(ws.branch, ws.prNumber))
-        return { status: 'error', baseBranch: ws.baseBranch, message: divergedMessage(ws.branch) }
+      const remote = await detectRemoteDivergence(ws.worktreePath, ws.branch)
+      if (isDiverged(remote)) {
+        operation.sink.step(divergedStep(ws.branch, ws.prNumber, remote))
+        return {
+          status: 'error',
+          baseBranch: ws.baseBranch,
+          message: divergedMessage(ws.branch, remote)
+        }
       }
       const result = await restackOnto(ws.worktreePath, ws.baseBranch).catch((err) => ({
         status: 'error' as const,
@@ -1531,8 +1541,7 @@ export function registerIpc(ctx: IpcContext): void {
    * 반환한다). 그래서 `ls-remote` 는 대상 브랜치당 한 번이고, 상시 폴링 비용에 얹히지 않는다.
    */
   const divergedFromRemote = async (worktreePath: string, branch: string): Promise<boolean> =>
-    (await detectRemoteDivergence(worktreePath, branch).catch(() => 'unknown' as const)) ===
-    'diverged'
+    isDiverged(await detectRemoteDivergence(worktreePath, branch).catch(() => 'unknown' as const))
 
   /**
    * "이미 병합된 부모"를 찾아 캐스케이드 계획을 만든다.
@@ -1924,8 +1933,8 @@ export function registerIpc(ctx: IpcContext): void {
       const remote = await detectRemoteDivergence(child.worktreePath, child.branch).catch(
         () => 'unknown' as const
       )
-      if (remote === 'diverged') {
-        const step = divergedStep(child.branch, child.prNumber)
+      if (isDiverged(remote)) {
+        const step = divergedStep(child.branch, child.prNumber, remote)
         progress?.start(child.branch, 'restack')
         steps.push(step)
         progress?.step(step)

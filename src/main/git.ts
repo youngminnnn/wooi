@@ -640,14 +640,47 @@ async function remoteBranchOid(
 }
 
 /**
+ * `git push` 가 실패했을 때 사용자에게 보여 줄 한 줄을 stderr 에서 뽑는다.
+ *
+ * git 의 push stderr 는 길고, **진짜 사유는 끝이 아니라 끝에서 한두 줄 위에 있다**(실측):
+ * pre-push 훅이 거부하면 훅이 stderr 에 뱉은 말 뒤에 `error: failed to push some refs to '<url>'`
+ * 라는 상투구가 붙고, lease 가 어긋나면 `To <url>` / ` ! [rejected] ... (stale info)` / 같은
+ * 상투구 순서로 붙는다. 그래서 상투구(`hint:`·`To <url>`·`failed to push some refs`)를 걷어낸 뒤
+ * 남은 **마지막 두 줄**을 쓴다 — 거부는 대개 요약 한 줄과 상세 한 줄로 갈라져 오기 때문이다.
+ */
+export function summarizePushError(stderr: string): string {
+  const lines = stderr
+    .split('\n')
+    .map((l) => l.trimEnd())
+    .filter((l) => l.trim() && !/^\s*hint:/.test(l) && !/^To\s/.test(l))
+  // 끝의 상투구는 어느 실패에나 붙는다. 그 앞줄이 진짜 사유다.
+  while (lines.length > 1 && /failed to push some refs/.test(lines[lines.length - 1])) lines.pop()
+  const tail = lines
+    .slice(-2)
+    .map((l) => l.trim())
+    .join(' — ')
+  if (!tail) return 'git push failed.'
+  return tail.length > 300 ? `${tail.slice(0, 299)}…` : tail
+}
+
+/**
  * rebase 로 히스토리를 리라이트한 뒤 리모트에 반영한다. 리모트 브랜치가 있을 때만 `--force-with-lease`
  * 로 push 해(협업자가 그 사이 push 한 커밋을 덮어쓰지 않도록), 아직 push 되지 않은 브랜치는 건너뛴다.
- * push 성공 여부를 돌려준다.
+ *
+ * 실패 사유를 반드시 함께 돌려준다. 예전에는 `res.ok` 만 보고 stderr 를 버렸는데, 그러면 pre-push
+ * 훅이 push 를 막아도 UI 는 "rebased" 라고만 말했다. 그 침묵은 나중에 오진으로 돌아온다 — 리모트가
+ * 옛 커밋에 멈춰 있으니 다음 restack 이 갈라짐으로 읽고, 사용자는 "GitHub 이 다시 썼다"는 문구를
+ * 믿고 `git reset --hard origin/<branch>` 로 rebase 결과를 버릴 뻔했다(실측).
+ *
+ * `pushed:false` 이면서 `error` 가 없으면 **일부러 건너뛴 것**이다(리모트에 아직 브랜치가 없음).
  */
-async function pushForceWithLease(worktreePath: string, branch: string): Promise<boolean> {
+async function pushForceWithLease(
+  worktreePath: string,
+  branch: string
+): Promise<{ pushed: boolean; error?: string }> {
   const target = await resolveBranchPushTarget(worktreePath)
   const expected = await remoteBranchOid(worktreePath, target.remote, target.destination)
-  if (!expected) return false
+  if (!expected) return { pushed: false }
   // 기존 Wooi 브랜치는 명령까지 그대로 둔다. URL remote 나 다른 destination 은 remote-tracking
   // ref 가 없을 수 있으므로, 방금 읽은 원격 SHA 를 lease 기대값으로 명시해야 동시 push 를 덮지 않는다.
   const legacyTarget = target.remote === 'origin' && target.destination === branch
@@ -660,7 +693,7 @@ async function pushForceWithLease(worktreePath: string, branch: string): Promise
         `HEAD:refs/heads/${target.destination}`
       ]
   const res = await gitTry(worktreePath, args)
-  return res.ok
+  return res.ok ? { pushed: true } : { pushed: false, error: summarizePushError(res.stderr) }
 }
 
 /**
@@ -718,9 +751,18 @@ export async function restackOnto(
     }
   }
 
-  const pushed = await pushForceWithLease(worktreePath, branch)
-  if (!needsRebase && !pushed) return { status: 'up-to-date', baseBranch }
-  return { status: 'restacked', baseBranch, pushed }
+  // push 가 막혀도 rebase 자체는 성공했다 — status 는 그대로 두고 사유만 실어 보낸다. status 를
+  // 'error' 로 바꾸면 호출부가 "히스토리가 안 옮겨졌다"로 읽어 되돌리려 든다(사실은 옮겨졌다).
+  const push = await pushForceWithLease(worktreePath, branch)
+  const pushError = push.error ? { pushError: push.error } : {}
+  // rebase 도 필요 없었고 push 도 건너뛴(=리모트에 브랜치가 없는) 경우만 진짜 "할 일 없음"이다.
+  // push 를 시도했다가 거부당했다면 그건 알려야 할 일이다.
+  if (!needsRebase && !push.pushed) {
+    if (!push.error) return { status: 'up-to-date', baseBranch }
+    // base 기준으로는 정말 최신이지만, 아직 push 되지 않은 커밋을 밀어 넣으려다 거부당했다.
+    return { status: 'up-to-date', baseBranch, pushed: false, ...pushError }
+  }
+  return { status: 'restacked', baseBranch, pushed: push.pushed, ...pushError }
 }
 
 // ── 리모트 tip 조회 (캐스케이드 갈라짐 판정용) ────────────────────────────
@@ -735,6 +777,42 @@ export async function remoteTipSha(worktreePath: string, branch: string): Promis
   if (!res.ok) return null
   const sha = res.stdout.split('\n')[0]?.split('\t')[0]?.trim()
   return sha && /^[0-9a-f]{7,40}$/i.test(sha) ? sha : null
+}
+
+/**
+ * `origin/<branch>` 리모트 추적 ref 를 **마지막으로 움직인 항목**(새 sha + 리플로그 사유). 리플로그가
+ * 없거나 ref 자체가 없으면 null.
+ *
+ * 갈라짐의 원인을 가르는 데 쓴다. 리모트 tip 이 로컬의 조상이 아니라는 사실만으로는 "남이 리모트를
+ * 다시 썼다" 와 "내 지난 push 가 실패해 로컬만 앞섰다" 를 구분할 수 없는데, 대처는 정반대다.
+ * 리플로그가 그 구분을 준다(실측, git 2.50):
+ * - 우리 push 가 성공하면 항목이 하나 붙고 사유는 정확히 `update by push` 다.
+ * - push 가 **실패하면 항목이 붙지 않는다**(pre-push 훅은 연결 전에 끊고, 거부는 ref 를 안 옮긴다).
+ * - 리모트가 우리 밖에서 움직인 뒤 fetch 하면 사유는 `fetch <args>: forced-update`(또는
+ *   `fast-forward`)다 — 서버가 쓴 sha 는 우리 리플로그에 push 로 남을 수 없다.
+ * - 값이 그대로면 fetch 는 항목을 남기지 않는다. 그래서 restackOnto 의 fetch 가 이 판정을 흐리지 않는다.
+ *
+ * `remoteTipSha` 와 같은 이유로 리모트 이름은 origin 으로 고정한다(둘이 같은 ref 를 봐야 뜻이 있다).
+ * 리플로그는 워크트리가 아니라 저장소 공통 디렉터리에 있으므로 어느 워크트리에서 물어도 같은 답이다.
+ */
+export async function lastRemoteRefUpdate(
+  worktreePath: string,
+  branch: string
+): Promise<{ sha: string; reason: string } | null> {
+  if (!branch) return null
+  const res = await gitTry(worktreePath, [
+    'reflog',
+    'show',
+    '--no-abbrev',
+    '-n',
+    '1',
+    '--format=%H%x09%gs',
+    `refs/remotes/origin/${branch}`
+  ])
+  if (!res.ok) return null
+  const [sha, ...rest] = res.stdout.split('\n')[0]?.split('\t') ?? []
+  if (!sha || !/^[0-9a-f]{40}$/i.test(sha.trim())) return null
+  return { sha: sha.trim(), reason: rest.join('\t').trim() }
 }
 
 /** 이 저장소가 그 커밋을 알고 있는지. 모르면 리모트가 우리에게 없는 히스토리를 들고 있다는 뜻이다. */

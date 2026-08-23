@@ -9,7 +9,7 @@ import type {
 } from '@shared/types'
 import type { PrMeta } from './github'
 import type { RemoteState, StackProgressSink } from './cascade'
-import { divergedMessage } from './cascade'
+import { divergedMessage, isDiverged } from './cascade'
 
 /** 트레인이 훑을 층 하나(토폴로지는 호출부가 이미 풀어서 넘긴다). */
 export interface TrainLayer {
@@ -94,7 +94,13 @@ async function layerBlock(
   if (!(await deps.isWorktreeClean(layer.worktreePath))) {
     return 'Uncommitted changes in the worktree.'
   }
-  if ((await deps.detectRemoteDivergence(layer.worktreePath, layer.branch)) === 'diverged') {
+  const remote = await deps.detectRemoteDivergence(layer.worktreePath, layer.branch)
+  // 계획 화면에 들어가는 한 줄이라 짧게 쓰되, 사유는 갈라 둔다 — "남이 다시 썼다" 를 잘못 읽으면
+  // 리모트를 취하려 들고, 그건 rebase 결과를 버리는 길이다(cascade.ts 의 divergedMessage 참고).
+  if (remote === 'diverged-stale-push') {
+    return 'An earlier push was rejected — the remote branch is behind the local one.'
+  }
+  if (isDiverged(remote)) {
     return 'The remote branch was rewritten outside Wooi.'
   }
   return null

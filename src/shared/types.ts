@@ -2219,6 +2219,13 @@ export interface RestackResult {
   conflictedFiles?: string[]
   /** rebase 후 리모트에 force-push 했는지(리모트 브랜치가 없으면 push 를 건너뛴다). */
   pushed?: boolean
+  /**
+   * push 를 시도했는데 거부당한 사유(한 줄로 다듬은 git stderr). rebase 자체는 성공했으므로
+   * status 는 그대로 두고 여기에만 싣는다 — 예전에는 이 사유를 통째로 버려서 UI 가 "rebased" 라고만
+   * 말했고, 리모트가 옛 커밋에 멈춘 채 다음 restack 이 그걸 갈라짐으로 오진했다.
+   * `pushed:false` 인데 이 값이 없으면 실패가 아니라 **일부러 건너뛴 것**이다(리모트에 브랜치 없음).
+   */
+  pushError?: string
   /** dirty/error 등 사용자에게 보여 줄 사유. */
   message?: string
 }
