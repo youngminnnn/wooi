@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/scripts/stop-gate.mjs\" # Set WOOI_SKIP_STOP_GATE=1 to bypass",
+            "timeout": 180
+          }
+        ]
+      }
+    ]
+  }
+}
