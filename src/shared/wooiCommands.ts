@@ -283,6 +283,17 @@ export const WOOI_COMMANDS: WooiCommandSpec[] = [
     description: 'Archive a workspace created from here',
     argumentHint: '<workspace id>',
     prompt: 'Call `mcp__wooi__archive_workspace` to archive the workspace with id: $ARGUMENTS'
+  },
+  {
+    name: 'rename',
+    tool: 'set_workspace_name',
+    mode: 'direct',
+    // 사용자가 친 문장이 곧 이름이라 모델이 읽을 맥락이 없다 — direct 가 맞는 자리다.
+    // 인자 없이 부르면 지운다. 사이드바 rename 상자는 displayName 만 다루므로,
+    // 에이전트가 붙인 이름을 되돌리는 입구는 여기뿐이다.
+    description: 'Rename this workspace (no argument clears the agent-set name)',
+    argumentHint: '[name]',
+    prompt: 'Call `mcp__wooi__set_workspace_name` to name this workspace: $ARGUMENTS'
   }
 ]
 
@@ -396,6 +407,11 @@ export function parseWooiCommandArgs(name: string, raw: string): WooiCommandArgs
       }
       return { args: { workspaceId: rest } }
     }
+
+    // 빈 인자를 오류로 막지 않는다 — 여기서는 그것이 "에이전트가 붙인 이름을 지운다" 라는
+    // 뜻이고(도구가 같은 규약을 쓴다), 지우는 다른 입구가 없다.
+    case 'rename':
+      return { args: { name: rest } }
 
     default:
       return { error: `Unknown Wooi command: /${WOOI_COMMAND_NAMESPACE}:${name}` }

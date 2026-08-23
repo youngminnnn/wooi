@@ -29,6 +29,7 @@ import { runAgentTool } from '../agent/tools'
 import { RATE_LIMIT_CONTINUATION, RateLimitResumeCoordinator } from '../rateLimitResume'
 import { notifyRemotePush } from '../remote'
 import { shouldSendRemotePush, type RemotePushKind } from '../remote/push'
+import { nameFromPlan, shouldAutoName } from './planName'
 import type {
   AgentBackendId,
   AgentSettings,
@@ -92,6 +93,9 @@ export class SessionManager implements AgentBackend {
 
   // requestId → 그 권한 요청을 띄운 workspace. dispose 시 해당 요청만 골라 취소한다.
   private pendingPermissions = new Map<string, string>()
+  // 계획 본문은 호스트 응답 뒤 비동기 이름 생성에만 필요하다. 일반 권한 hot path 의 값 모양을
+  // 넓히지 않고 계획 요청만 따로 잡아 둔다.
+  private pendingPlans = new Map<string, string>()
   // 요청-응답 명령(runCommand·mcpAction·listCommands)의 reqId → resolver.
   private pendingRequests = new Map<
     string,
@@ -194,6 +198,7 @@ export class SessionManager implements AgentBackend {
       this.dispatch(IPC.evtPermissionCancel, requestId)
     }
     this.pendingPermissions.clear()
+    this.pendingPlans.clear()
 
     for (const w of getStore().getState().workspaces) {
       if (w.agentBackend === CLAUDE_META.id) this.clearGoalState(w.id)
@@ -626,6 +631,7 @@ export class SessionManager implements AgentBackend {
     for (const [requestId, wsId] of this.pendingPermissions) {
       if (wsId !== workspaceId) continue
       this.pendingPermissions.delete(requestId)
+      this.pendingPlans.delete(requestId)
       this.sendIfHost({ type: 'permissionResponse', requestId, decision: { behavior: 'deny' } })
       this.dispatch(IPC.evtPermissionCancel, requestId)
     }
@@ -644,6 +650,7 @@ export class SessionManager implements AgentBackend {
       this.dispatch(IPC.evtPermissionCancel, requestId)
     }
     this.pendingPermissions.clear()
+    this.pendingPlans.clear()
   }
 
   /**
@@ -698,15 +705,24 @@ export class SessionManager implements AgentBackend {
   }
 
   respondPermission(requestId: string, decision: PermissionDecision): void {
-    if (!this.pendingPermissions.has(requestId)) return
+    const workspaceId = this.pendingPermissions.get(requestId)
+    if (!workspaceId) return
     this.pendingPermissions.delete(requestId)
+    const plan = this.pendingPlans.get(requestId)
+    this.pendingPlans.delete(requestId)
+    // 버튼 응답이 모델 호출을 기다리면 계획 승인이 멈춘 것처럼 보인다. 먼저 호스트에 승인부터
+    // 돌려준 뒤, 이름은 화면 뒤에서 실패해도 흐름을 막지 않는 부가 작업으로 시작한다.
     this.sendIfHost({ type: 'permissionResponse', requestId, decision })
+    if (plan) void this.autoNameFromPlan(workspaceId, plan, decision)
   }
 
   // ── 내부 ───────────────────────────────────────────────────────────────
 
   private onPermissionRequest(request: PermissionRequest): void {
     this.pendingPermissions.set(request.requestId, request.workspaceId)
+    if (request.kind === 'plan' && typeof request.input.plan === 'string') {
+      this.pendingPlans.set(request.requestId, request.input.plan)
+    }
     // 백그라운드 세션이 권한 대기로 멈춘 것을 놓치지 않도록 비활성 창에서는 알린다.
     // 질문은 승인과 다른 말로 알린다 — 답을 고르는 일과 허락하는 일은 사용자가 할 행동이
     // 다르고, 폰도 선택지 카드와 Allow/Deny 카드로 갈라 그린다.
@@ -721,6 +737,28 @@ export class SessionManager implements AgentBackend {
       question ? 'question' : 'needsInput'
     )
     this.dispatch(IPC.evtPermission, request)
+  }
+
+  private async autoNameFromPlan(
+    workspaceId: string,
+    plan: string,
+    decision: PermissionDecision
+  ): Promise<void> {
+    const before = getStore()
+      .getState()
+      .workspaces.find((workspace) => workspace.id === workspaceId)
+    if (!before || !shouldAutoName(before, decision)) return
+
+    const autoName = await nameFromPlan({ plan, cwd: before.worktreePath })
+    if (!autoName) return
+
+    getStore().update((state) => {
+      const workspace = state.workspaces.find((candidate) => candidate.id === workspaceId)
+      // 모델이 답하는 동안 사람이 이름을 붙이거나 PR 을 만들 수 있다. 호출 전 검사만 믿으면 늦게
+      // 온 결과가 그 결정을 덮으므로 쓰기 직전에 같은 조건을 다시 확인한다.
+      if (workspace && shouldAutoName(workspace, decision)) workspace.autoName = autoName
+    })
+    this.dispatch(IPC.evtState, getStore().getState())
   }
 
   // ── 레이트리밋(계정 단위) ────────────────────────────────────────────────

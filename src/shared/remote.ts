@@ -96,6 +96,9 @@ export interface RemoteWorkspace {
   // 옵셔널로 두면 **컴파일러가 모든 사용처에서 부재를 처리하도록 강제한다** — 주석으로
   // 부탁하는 것과 달리 빠뜨릴 수가 없다.
 
+  /** 에이전트가 붙인 표시 이름. 표시 규칙은 types.ts 의 workspaceDisplayName 과 같다. */
+  autoName?: string | null
+
   /** 이 워크스페이스를 돌리는 에이전트(types.ts 의 AgentBackendId). */
   agentBackend?: string
   /** 메인 에이전트 외의 종류도 돌 수 있는가(데스크톱의 사람 아이콘과 같은 의미). */

@@ -18,7 +18,7 @@ import { sessionTranscriptExists } from './sessionFiles'
 import { CLAUDE_CODE_SYSTEM_PROMPT } from './systemPrompt'
 import { log } from '../logger'
 import { MCP_SETTING_SOURCES, resolveUserMcpServers } from './mcp'
-import { isReadOnlyWooiTool, WOOI_MCP_SERVER_NAME } from '../agent/tools/catalog'
+import { isReadOnlyWooiTool, neverAsksWooiTool, WOOI_MCP_SERVER_NAME } from '../agent/tools/catalog'
 import { delegateShellAttempt, delegateShellGuidance } from '../agent/delegateShell'
 import { resolveWooiPlugin } from '../agent/plugin'
 import { WriteIsolationGuard, type WriteIsolationRoot } from './writeIsolation'
@@ -1293,6 +1293,10 @@ export class ClaudeSession {
     // 셋업 스크립트를 돌리는 것)의 카드가 그 사이에 묻힌다. 나머지 Wooi 도구는 아래의 일반
     // 승인 경로를 그대로 탄다 — 앱을 조작하는 통로에 별도의 우회로를 두지 않는다.
     if (isReadOnlyWooiTool(toolName)) {
+      return { behavior: 'allow', updatedInput: input }
+    }
+    // 상태를 바꾸지만 물을 가치가 없는 좁은 예외다 — 근거와 추가 기준은 catalog 의 별도 집합에 있다.
+    if (neverAsksWooiTool(toolName)) {
       return { behavior: 'allow', updatedInput: input }
     }
 

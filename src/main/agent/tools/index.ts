@@ -21,7 +21,12 @@ import {
   reportToParent
 } from './stackedWorkspace'
 import { runDelegateTool } from './subagent'
-import { archiveWorkspaceTool, createIndependentWorkspace, listRepositories } from './workspace'
+import {
+  archiveWorkspaceTool,
+  createIndependentWorkspace,
+  listRepositories,
+  setWorkspaceName
+} from './workspace'
 import { delegateToolName } from './catalog'
 import { listIssues } from './issues'
 import { AGENT_BACKEND_IDS } from '@shared/types'
@@ -59,5 +64,6 @@ export function initAgentTools(deps: AgentToolDeps): void {
   registerAgentTool('list_repositories', listRepositories)
   registerAgentTool('create_workspace', createIndependentWorkspace)
   registerAgentTool('archive_workspace', archiveWorkspaceTool)
+  registerAgentTool('set_workspace_name', setWorkspaceName)
   registerAgentTool('switch_to_agent_team', switchToAgentTeam)
 }

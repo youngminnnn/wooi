@@ -16,7 +16,7 @@ Tools normally appear to the agent as `mcp__wooi__<tool-name>`. Most tool defini
 are loaded on demand, so a tool may not be visible in the model's initial context even
 though it is available through tool search.
 
-The 16 core tools are available in every workspace. `claude_subagent` and
+The 17 core tools are available in every workspace. `claude_subagent` and
 `codex_subagent` are added only when multi-agent mode is enabled and the corresponding
 backend is available for delegation.
 
@@ -36,6 +36,11 @@ backend is available for delegation.
 - Read-only tools run without an approval prompt. State-changing tools follow the
   workspace's permission mode and normally show an approval card before running. Full
   Access runs them without approval.
+- `set_workspace_name` is the one state-changing tool that never shows a card. It is not
+  marked read-only — it does change state — but the change is one string in Wooi's own
+  store: it never leaves the machine, one context-menu click undoes it, and the result
+  appears in the sidebar immediately, so you see it happen rather than approving it in
+  advance.
 - Claude's in-process server knows the caller from the session. The Codex transport
   learns it from the environment Wooi gives the tool server for that thread, so the model
   never states which workspace it is and cannot claim another one. Wooi still rejects a
@@ -110,6 +115,29 @@ Archives a workspace created by the caller and removes its worktree.
 
 The target must be idle and have no uncommitted changes. Its branch, pull request, and
 conversation are retained, so the user can restore it from the sidebar.
+
+### `set_workspace_name`
+
+Sets the name a workspace shows in the sidebar. It changes the display name only — the git
+branch and the worktree directory keep the names they were created with.
+
+| Input | Type | Required | Description |
+| --- | --- | --- | --- |
+| `name` | string | Yes | A short 2–6 word name. An empty string clears the agent-set name. |
+| `workspaceId` | string | No | Omit for the calling workspace; otherwise a workspace the caller created. |
+
+Unlike `archive_workspace`, the target may be running a turn: renaming interrupts nothing.
+
+The name is stored separately from the one a user types in the sidebar rename box, and it
+never overwrites it. Wooi resolves the displayed name as **user's name → pull request title →
+agent's name → worktree name**, so a name set here fills the gap before a pull request exists.
+If the user has already renamed the workspace by hand, the call still succeeds but the display
+does not change, and the result says so.
+
+Wooi also sets this name on its own: when you accept a plan in plan mode, it names the
+workspace from the plan — but only if the workspace has no user-set name, no agent-set name
+yet, and no pull request. So a workspace names itself the first time it settles what it is
+for, and a second plan later does not rename it out from under you.
 
 ### `check_related_work`
 
@@ -382,6 +410,7 @@ with your own commands: `/wooi:pr`, `/wooi:children`, and so on. The catalog is
 | `/wooi:stop <name>` | `stop_script` | direct |
 | `/wooi:logs <name> [lines]` | `read_script_output` | direct |
 | `/wooi:archive <workspace id>` | `archive_workspace` | direct |
+| `/wooi:rename [name]` | `set_workspace_name` | direct |
 
 In a team-mode workspace, one more command per agent backend appears — `/wooi:claude` and
 `/wooi:codex` — matching the `claude_subagent` and `codex_subagent` tools. They take

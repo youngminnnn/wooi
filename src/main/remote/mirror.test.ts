@@ -85,6 +85,7 @@ function appState(statuses: Workspace['status'][] = ['idle']): AppState {
         repoId: repo.id,
         name: `workspace-${index + 1}`,
         displayName: null,
+        autoName: 'Automatic name',
         branch: `feat/${index + 1}`,
         worktreePath: `/Users/private/worktree-${index + 1}`,
         permissionMode: 'default',
@@ -179,6 +180,7 @@ describe('projectState', () => {
     expect(projection.workspaces[0]?.attention).toBe('permission')
     expect(projection.workspaces[1]?.attention).toBeNull()
     expect(projection.pendingPermissions).toEqual([pending])
+    expect(projection.workspaces[0].autoName).toBe('Automatic name')
   })
 })
 

@@ -11,7 +11,7 @@ import {
 } from '@shared/types'
 import { getStore } from '../../store'
 import { backendMeta } from '../backend'
-import { isReadOnlyToolName } from './catalog'
+import { isReadOnlyToolName, neverAsksToolName } from './catalog'
 import { resolvePrBase } from './pullRequest'
 import { scriptCommandFor } from './script'
 import { lookupTargetRepo } from './target'
@@ -88,6 +88,7 @@ function isAutonomous(workspace: Workspace): boolean {
  */
 function needsApproval(workspace: Workspace, tool: string): boolean {
   if (isReadOnlyToolName(tool)) return false
+  if (neverAsksToolName(tool)) return false
   if (workspace.permissionMode === 'fullAccess') return false
   if (AUTO_MODE_SKIPS_CARD.has(tool) && isAutonomous(workspace)) return false
   return true
@@ -187,6 +188,7 @@ const TOOL_LABELS: Record<string, string> = {
   stop_script: 'Stop a repository script',
   create_workspace: 'Create a workspace',
   archive_workspace: 'Archive a workspace',
+  set_workspace_name: 'Set the workspace name',
   switch_to_agent_team: 'Switch to an agent team'
 }
 

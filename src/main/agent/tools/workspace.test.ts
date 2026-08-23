@@ -25,12 +25,18 @@ const state = vi.hoisted(() => ({
 
 vi.mock('../../git', () => ({ isWorktreeClean: clean }))
 vi.mock('../../workspaces', () => ({ createWorkspace: create, archiveWorkspace: archive }))
-vi.mock('../../store', () => ({ getStore: () => ({ getState: () => state }) }))
+vi.mock('../../store', () => ({
+  getStore: () => ({
+    getState: () => state,
+    update: (fn: (draft: typeof state) => void) => fn(state)
+  })
+}))
 
 const sendMessage = vi.fn()
 // 모델 목록은 백엔드에 물어봐야 알 수 있다 — 빈 목록은 "알 수 없다" 라서 검증을 건너뛴다.
 const listModels = vi.fn<(backend: string) => Promise<ModelOption[]>>()
-const deps = { scripts: {}, sendMessage, listModels } as unknown as AgentToolDeps
+const broadcastState = vi.fn()
+const deps = { scripts: {}, sendMessage, listModels, broadcastState } as unknown as AgentToolDeps
 
 const repo: Partial<Repo> = { id: 'repo-1', name: 'wooi', path: '/src/wooi', defaultBranch: 'main' }
 
@@ -113,6 +119,14 @@ async function archive_(
 ): Promise<Record<string, unknown>> {
   const { archiveWorkspaceTool } = await import('./workspace')
   return archiveWorkspaceTool(deps, from, args) as Promise<Record<string, unknown>>
+}
+
+async function name_(
+  args: Record<string, unknown>,
+  from = 'ws-caller'
+): Promise<Record<string, unknown>> {
+  const { setWorkspaceName } = await import('./workspace')
+  return setWorkspaceName(deps, from, args) as Promise<Record<string, unknown>>
 }
 
 describe('create_workspace', () => {
@@ -500,5 +514,74 @@ describe('archive_workspace', () => {
   it('id 를 빠뜨리면 거부한다', async () => {
     await expect(archive_({})).rejects.toThrow(/No workspace id/)
     expect(archive).not.toHaveBeenCalled()
+  })
+})
+
+describe('set_workspace_name', () => {
+  it('자기 이름은 autoName만 바꾼다', async () => {
+    const result = await name_({ name: 'Plan automatic names' })
+    expect(state.workspaces[0]).toMatchObject({
+      autoName: 'Plan automatic names',
+      displayName: null
+    })
+    expect(result).toMatchObject({
+      autoName: 'Plan automatic names',
+      displayName: 'Plan automatic names'
+    })
+    expect(broadcastState).toHaveBeenCalledOnce()
+  })
+
+  it('자기가 만든 워크스페이스 이름을 바꾼다', async () => {
+    await name_({ workspaceId: 'ws-child', name: 'Child work' })
+    expect(state.workspaces[1].autoName).toBe('Child work')
+  })
+
+  it('남이 만든 워크스페이스는 거부한다', async () => {
+    state.workspaces[1] = { ...child, createdByWorkspaceId: 'someone-else' }
+    await expect(name_({ workspaceId: 'ws-child', name: 'No' })).rejects.toThrow(
+      /not created by this/
+    )
+  })
+
+  it('도는 중인 자식도 이름을 바꾼다', async () => {
+    state.workspaces[1] = { ...child, status: 'running' }
+    await expect(name_({ workspaceId: 'ws-child', name: 'Running child' })).resolves.toMatchObject({
+      autoName: 'Running child'
+    })
+  })
+
+  it('아카이브된 자식은 거부한다', async () => {
+    state.workspaces[1] = { ...child, archived: true }
+    await expect(name_({ workspaceId: 'ws-child', name: 'Archived' })).rejects.toThrow(
+      /already archived/
+    )
+  })
+
+  it('빈 이름은 autoName을 지운다', async () => {
+    state.workspaces[0] = { ...caller, autoName: 'Earlier' }
+    await expect(name_({ name: '   ' })).resolves.toMatchObject({
+      autoName: null,
+      displayName: 'base'
+    })
+    expect(state.workspaces[0].autoName).toBeNull()
+  })
+
+  it('사람 이름은 건드리지 않고 우선순위 note를 돌려준다', async () => {
+    state.workspaces[1] = { ...child, displayName: 'Human name' }
+    const result = await name_({ workspaceId: 'ws-child', name: 'Agent name' })
+    expect(state.workspaces[1].displayName).toBe('Human name')
+    expect(state.workspaces[1].autoName).toBe('Agent name')
+    expect(result).toMatchObject({
+      displayName: 'Human name',
+      note: expect.stringContaining('user')
+    })
+  })
+
+  it('자기 id를 명시해도 self 경로로 처리한다', async () => {
+    await expect(name_({ workspaceId: 'ws-caller', name: 'Explicit self' })).resolves.toMatchObject(
+      {
+        autoName: 'Explicit self'
+      }
+    )
   })
 })

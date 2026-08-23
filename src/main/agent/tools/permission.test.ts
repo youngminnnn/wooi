@@ -14,6 +14,7 @@ import {
   initToolPermission,
   resolveToolPermission
 } from './permission'
+import { neverAsksWooiTool } from './catalog'
 
 /**
  * Codex 의 app-server 는 MCP 도구에 대해 승인을 물어보지 않는다 — 이 문지기가 그 자리를 대신한다.
@@ -154,6 +155,28 @@ describe('ensureToolApproved', () => {
   it('읽기 전용 도구는 묻지 않는다', async () => {
     await expect(ensureToolApproved(workspace(), 'check_stacked_work', {})).resolves.toBeUndefined()
     expect(cards).toHaveLength(0)
+  })
+
+  it('워크스페이스 이름 변경은 상태를 바꿔도 카드를 띄우지 않는다', async () => {
+    await expect(
+      ensureToolApproved(workspace(), 'set_workspace_name', { name: 'New name' })
+    ).resolves.toBeUndefined()
+    expect(cards).toHaveLength(0)
+  })
+
+  it('이름 변경 예외가 다른 변경 도구로 새지 않는다', async () => {
+    for (const tool of ['archive_workspace', 'create_workspace']) {
+      cards.length = 0
+      const pending = ensureToolApproved(workspace(), tool, { workspaceId: 'ws-parent' })
+      await vi.waitFor(() => expect(cards).toHaveLength(1))
+      answer('deny')
+      await expect(pending).rejects.toThrow(/declined/)
+    }
+  })
+
+  it('Wooi 접두사의 이름 변경만 자동 승인 대상으로 알아본다', () => {
+    expect(neverAsksWooiTool('mcp__wooi__set_workspace_name')).toBe(true)
+    expect(neverAsksWooiTool('mcp__other__set_workspace_name')).toBe(false)
   })
 
   it('fullAccess 는 사용자가 고른 "묻지 마" 모드이므로 그대로 통과시킨다', async () => {
