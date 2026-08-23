@@ -361,20 +361,15 @@ export function cascadeAffectedBranches(ws: Workspace, all: Workspace[]): string
 }
 
 /**
- * 화면 트리에서만 쓰는 부모. fork 는 원본의 parentWorkspaceId 를 그대로 물려받으므로,
- * 스택 부모보다 fork 원본을 우선해야 같은 스택 안에서 원본 바로 아래에 묶인다.
- */
-export function workspaceTreeParent(w: {
-  parentWorkspaceId: string | null
-  forkedFromWorkspaceId?: string | null
-}): string | null {
-  return w.forkedFromWorkspaceId ?? w.parentWorkspaceId
-}
-
-/**
  * 워크스페이스 목록을 stack 트리 순서로 정렬한다(부모 바로 뒤에 자식이 오도록, DFS pre-order).
  * 각 항목에 stack 들여쓰기 깊이(depth: 뿌리=0)를 함께 매겨 사이드바가 계층을 그릴 수 있게 한다.
  * 입력 순서(생성 순 등)는 형제 사이에서 보존된다. 순환(비정상 데이터)은 방문 집합으로 방지한다.
+ *
+ * **분기는 들여쓰지 않는다.** 이 화면에서 들여쓰기는 "저 브랜치 위에 쌓였다" 는 뜻이고 거기서
+ * restack·force-push 캐스케이드·PR base 재조준이 따라 나오는데, 분기는 그 관계가 하나도 없다 —
+ * 원본과 같은 base 를 향하는 형제다. 특히 스택 자식을 분기하면 분기본은 원본의 스택 부모를
+ * 그대로 물려받으므로, 원본 아래로 넣으면 진짜 스택 위치를 감추면서 없는 관계를 그리게 된다.
+ * 그래서 깊이는 원본과 같게 두고 **원본의 서브트리 바로 뒤**에 붙여 인접으로만 묶는다.
  */
 export function orderByStack<
   T extends {
@@ -387,8 +382,7 @@ export function orderByStack<
   const ids = new Set(workspaces.map((w) => w.id))
   for (const w of workspaces) {
     // 부모가 이 목록에 없으면(아카이브·다른 레포 등) 뿌리로 취급한다.
-    const parentId = workspaceTreeParent(w)
-    const key = parentId && ids.has(parentId) ? parentId : null
+    const key = w.parentWorkspaceId && ids.has(w.parentWorkspaceId) ? w.parentWorkspaceId : null
     const list = byParent.get(key) ?? []
     list.push(w)
     byParent.set(key, list)
@@ -396,11 +390,27 @@ export function orderByStack<
   const out: Array<{ workspace: T; depth: number }> = []
   const seen = new Set<string>()
   const walk = (parentId: string | null, depth: number): void => {
-    for (const w of byParent.get(parentId) ?? []) {
-      if (seen.has(w.id)) continue
+    const siblings = byParent.get(parentId) ?? []
+    // 분기본은 원본과 같은 스택 부모를 갖는다 = 이 목록 안에 함께 있다. 원본별로 모아 두고
+    // 원본을 낸 직후에 붙인다. 원본이 이 목록에 없으면(아카이브 등) 그냥 제자리에서 나온다.
+    const forksOf = new Map<string, T[]>()
+    for (const w of siblings) {
+      const origin = w.forkedFromWorkspaceId
+      if (!origin || !siblings.some((s) => s.id === origin)) continue
+      forksOf.set(origin, [...(forksOf.get(origin) ?? []), w])
+    }
+    const emit = (w: T): void => {
+      if (seen.has(w.id)) return
       seen.add(w.id)
       out.push({ workspace: w, depth })
       walk(w.id, depth + 1)
+      // 분기의 분기도 같은 규칙으로 이어 붙는다(emit 이 재귀한다).
+      for (const fork of forksOf.get(w.id) ?? []) emit(fork)
+    }
+    for (const w of siblings) {
+      const origin = w.forkedFromWorkspaceId
+      if (origin && siblings.some((s) => s.id === origin)) continue
+      emit(w)
     }
   }
   walk(null, 0)

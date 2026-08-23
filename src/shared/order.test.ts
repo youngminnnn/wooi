@@ -40,7 +40,7 @@ describe('orderVisibleWorkspaces', () => {
     expect(ids(orderVisibleWorkspaces(repos, workspaces))).toEqual(['parent', 'child', 'other'])
   })
 
-  it('fork 를 원본 바로 아래에 놓고 번호 순서도 같은 트리를 따른다', () => {
+  it('fork 를 원본 바로 뒤에 놓되 들여쓰지 않는다', () => {
     const repos = [{ id: 'r1' }]
     const workspaces = [
       ws('origin', 'r1'),
@@ -50,13 +50,27 @@ describe('orderVisibleWorkspaces', () => {
 
     expect(orderByStack(workspaces).map(({ workspace, depth }) => [workspace.id, depth])).toEqual([
       ['origin', 0],
-      ['fork', 1],
+      ['fork', 0],
       ['other', 0]
     ])
     expect(ids(orderVisibleWorkspaces(repos, workspaces))).toEqual(['origin', 'fork', 'other'])
   })
 
-  it('스택 자식의 fork 를 스택 밖으로 빼지 않고 원본 아래에 둔다', () => {
+  it('fork 는 원본의 스택 자식들 뒤에 온다 — 그 자식들은 원본 위에 쌓인 것이다', () => {
+    const workspaces = [
+      ws('origin', 'r1'),
+      ws('stacked-on-origin', 'r1', 'origin'),
+      ws('fork', 'r1', null, false, 'origin')
+    ]
+
+    expect(orderByStack(workspaces).map(({ workspace, depth }) => [workspace.id, depth])).toEqual([
+      ['origin', 0],
+      ['stacked-on-origin', 1],
+      ['fork', 0]
+    ])
+  })
+
+  it('스택 자식을 fork 하면 원본과 같은 깊이에 남아 진짜 스택 위치를 감추지 않는다', () => {
     const workspaces = [
       ws('root', 'r1'),
       ws('origin', 'r1', 'root'),
@@ -66,7 +80,21 @@ describe('orderVisibleWorkspaces', () => {
     expect(orderByStack(workspaces).map(({ workspace, depth }) => [workspace.id, depth])).toEqual([
       ['root', 0],
       ['origin', 1],
-      ['fork', 2]
+      ['fork', 1]
+    ])
+  })
+
+  it('fork 의 fork 도 같은 깊이로 이어 붙는다', () => {
+    const workspaces = [
+      ws('origin', 'r1'),
+      ws('fork-2', 'r1', null, false, 'fork-1'),
+      ws('fork-1', 'r1', null, false, 'origin')
+    ]
+
+    expect(orderByStack(workspaces).map(({ workspace, depth }) => [workspace.id, depth])).toEqual([
+      ['origin', 0],
+      ['fork-1', 0],
+      ['fork-2', 0]
     ])
   })
 

@@ -121,6 +121,24 @@ export default async function 대화를_분기하면_원본의_코드와_기록�
         await wooi.win.locator(`.workspace-header [title^="${fork.name}"]`).waitFor()
         await wooi.win.getByText(`⑂ from ${E2E_WORKSPACE_DISPLAY_NAME}`).first().waitFor()
 
+        // 관계는 부제로만 말한다. 사이드바의 들여쓰기는 "저 브랜치 위에 쌓였다" 는 뜻이고
+        // 분기는 그 관계가 아니므로, 분기 행은 원본과 **같은 깊이**여야 한다.
+        const indents = await wooi.win.evaluate(
+          ([originName, forkName]) => {
+            const indentOf = (label) => {
+              const el = [...globalThis.document.querySelectorAll('[role="button"]')].find((node) =>
+                node.textContent?.includes(label)
+              )
+              return el ? globalThis.getComputedStyle(el).paddingLeft : null
+            }
+            return { origin: indentOf(originName), fork: indentOf(forkName) }
+          },
+          [E2E_WORKSPACE_DISPLAY_NAME, fork.name]
+        )
+        if (!indents.origin || indents.origin !== indents.fork) {
+          throw new Error(`fork was indented like a stack child: ${JSON.stringify(indents)}`)
+        }
+
         const screenshot = await wooi.shot('conversation-fork')
         console.log(
           `[e2e] fork=${JSON.stringify({

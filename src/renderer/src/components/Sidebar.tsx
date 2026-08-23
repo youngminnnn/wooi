@@ -60,7 +60,7 @@ import {
   unresolvedFanoutGroups,
   workspaceDisplayName
 } from '@shared/types'
-import { areWorkspaceTreeSiblings, conversationForkDisabledReason } from '../lib/conversationFork'
+import { conversationForkDisabledReason } from '../lib/conversationFork'
 import { orderRowsWithPending } from '../lib/sidebarRows'
 import { useGithubDisconnected } from '../lib/github'
 import { WorkspaceAgents } from './WorkspaceAgents'
@@ -243,7 +243,11 @@ export default function Sidebar({
       const a = app.workspaces.find((w) => w.id === draggedId)
       const b = app.workspaces.find((w) => w.id === targetId)
       if (!a || !b) return false
-      return areWorkspaceTreeSiblings(a, b)
+      return (
+        a.repoId === b.repoId &&
+        (a.parentWorkspaceId ?? null) === (b.parentWorkspaceId ?? null) &&
+        a.archived === b.archived
+      )
     },
     onReorder: (workspaceId, targetId, position) =>
       void window.api.workspace.reorder(workspaceId, targetId, position)

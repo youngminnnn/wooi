@@ -1,4 +1,4 @@
-import { workspaceTreeParent, type Workspace } from '@shared/types'
+import type { Workspace } from '@shared/types'
 
 /**
  * 세 입구(사이드바·헤더·/fork)가 서로 다른 순간에 활성화되면 사용자는 같은 동작을 믿을 수 없다.
@@ -18,16 +18,4 @@ export function parseForkCommand(text: string): { name?: string } | null {
   if (!match) return null
   const name = (match[1] ?? '').trim()
   return name ? { name } : {}
-}
-
-/** 화면에 그린 트리와 드래그 가능한 형제의 정의가 갈라지지 않게 같은 부모 함수를 쓴다. */
-export function areWorkspaceTreeSiblings(
-  a: Pick<Workspace, 'repoId' | 'archived' | 'parentWorkspaceId' | 'forkedFromWorkspaceId'>,
-  b: Pick<Workspace, 'repoId' | 'archived' | 'parentWorkspaceId' | 'forkedFromWorkspaceId'>
-): boolean {
-  return (
-    a.repoId === b.repoId &&
-    workspaceTreeParent(a) === workspaceTreeParent(b) &&
-    a.archived === b.archived
-  )
 }

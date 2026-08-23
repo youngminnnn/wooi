@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  areWorkspaceTreeSiblings,
-  conversationForkDisabledReason,
-  parseForkCommand
-} from './conversationFork'
+import { conversationForkDisabledReason, parseForkCommand } from './conversationFork'
 
 describe('conversationForkDisabledReason', () => {
   it('대화가 없으면 막는다', () => {
@@ -26,23 +22,5 @@ describe('parseForkCommand', () => {
 
   it('이름이 없으면 name 키를 만들지 않는다', () => {
     expect(parseForkCommand('/fork')).toEqual({})
-  })
-})
-
-describe('areWorkspaceTreeSiblings', () => {
-  const origin = {
-    repoId: 'repo',
-    archived: false,
-    parentWorkspaceId: null,
-    forkedFromWorkspaceId: null
-  }
-
-  it('fork 와 그 원본을 드래그 형제로 취급하지 않는다', () => {
-    expect(
-      areWorkspaceTreeSiblings(origin, {
-        ...origin,
-        forkedFromWorkspaceId: 'origin'
-      })
-    ).toBe(false)
   })
 })
