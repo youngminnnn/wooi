@@ -180,9 +180,7 @@ const stackedWaits = initStackedWaits({
     getTranscripts().upsert(workspaceId, item)
     dispatch(IPC.evtChat, { workspaceId, event: { type: 'item', item } })
   },
-  broadcastState: () => dispatch(IPC.evtState, getStore().getState()),
-  workspacesAwaitingApproval: () =>
-    new Set(pendingPermissions.list().map((request) => request.workspaceId))
+  broadcastState: () => dispatch(IPC.evtState, getStore().getState())
 })
 
 // 에이전트가 Wooi 자체를 조작하는 도구들의 실행부에 필요한 것을 넘긴다([[agent/tools]]).

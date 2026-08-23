@@ -3,7 +3,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Mock } from 'vitest'
-import type { AppState, Workspace } from '@shared/types'
+import type { AppState, PermissionRequest, Workspace } from '@shared/types'
+import { pendingPermissions } from './remote/permissions'
 import { StackedWaitCoordinator, timeoutMinutes } from './stackedWait'
 
 const NOW = Date.parse('2026-08-22T00:00:00Z')
@@ -73,13 +74,13 @@ describe('StackedWaitCoordinator', () => {
     coordinator = new StackedWaitCoordinator({
       sendMessage: sent,
       postToTranscript: vi.fn(),
-      broadcastState: vi.fn(),
-      workspacesAwaitingApproval: () => new Set()
+      broadcastState: vi.fn()
     })
   })
 
   afterEach(() => {
     coordinator.cancelAll()
+    pendingPermissions.clear()
     vi.useRealTimers()
   })
 
@@ -165,6 +166,28 @@ describe('StackedWaitCoordinator', () => {
     await vi.advanceTimersByTimeAsync(105_000)
     expect(sent).toHaveBeenCalledTimes(1)
     expect(sent.mock.calls[0][1]).toContain('cannot make progress')
+  })
+
+  /**
+   * 정지의 가장 흔한 이유가 승인 카드다. 승인 대기 중인 워크스페이스는 `status` 가 `running`
+   * 이라, 진행 판정이 `running` 을 먼저 보면 "진행 가능" 으로 읽혀 이 길이 영영 열리지 않는다.
+   * 그래서 판정을 describeWorkspaceActivity 에서 파생시켰다([[stackedProgress]]).
+   */
+  it('자식이 승인 카드에 걸려 있으면 status 가 running 이어도 stalled 로 깨운다', async () => {
+    for (const id of ['one', 'two']) {
+      pendingPermissions.add({
+        requestId: `req-${id}`,
+        workspaceId: id,
+        toolName: 'Bash'
+      } as PermissionRequest)
+    }
+    coordinator.register('parent', {})
+    // 승인 대기의 유예는 5분이다 — 사람이 곧 승인할 수 있어 성급히 깨우면 낭비다.
+    await vi.advanceTimersByTimeAsync(4 * 60_000)
+    expect(sent).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(2 * 60_000)
+    expect(sent).toHaveBeenCalledTimes(1)
+    expect(sent.mock.calls[0][1]).toContain('waiting for your approval')
   })
 
   it('유예 안의 idle 은 stalled 가 아니다', async () => {
