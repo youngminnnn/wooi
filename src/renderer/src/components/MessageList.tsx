@@ -17,7 +17,8 @@ import {
   ListTodo,
   Layers,
   MessagesSquare,
-  MessageCircleQuestion
+  MessageCircleQuestion,
+  GitMergeConflict
 } from 'lucide-react'
 import { useStore } from '../store'
 import { DiffLine } from './DiffView'
@@ -36,6 +37,62 @@ import type { ChatItem } from '@shared/types'
 import { BASH_FOLD, foldBashOutput } from '@shared/bashDisplay'
 import { SELECTABLE, unlessSelecting } from '../lib/selection'
 import { TOOL_VERBOSE_SHORTCUT } from '@shared/toolDisplay'
+
+/**
+ * Wooi 가 rebase 충돌 해결을 맡기며 넣은 사용자 턴을 한 줄로 접어 보여 준다.
+ *
+ * 이 전문은 충돌 파일 목록과 금지 사항까지 담아 길다. 대화에 남기는 것 자체는 일부러 그렇게
+ * 한 것이지만(토큰을 쓴 이유가 기록에 있어야 한다), 펼쳐 둔 채로는 앞뒤 대화를 밀어낸다.
+ * 그래서 감추지 않고 접는다 — 한 줄에 무엇을 왜 시켰는지 두고, 전문은 눌러서 펼친다.
+ */
+function ConflictResolveMessage({
+  item,
+  title
+}: {
+  item: Extract<ChatItem, { type: 'user' }>
+  title: string
+}): React.JSX.Element {
+  const [expanded, setExpanded] = useState(false)
+  const origin = item.origin
+  if (!origin || origin.kind !== 'conflictResolve')
+    return <UserMessage text={item.text} title={title} />
+
+  return (
+    <div className="flex justify-end my-2" title={title}>
+      <button
+        type="button"
+        aria-expanded={expanded}
+        onClick={() => setExpanded((value) => !value)}
+        className="max-w-[min(42rem,88%)] rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2.5 py-1.5 text-left text-xs text-neutral-400 hover:border-[var(--border-strong)] hover:text-neutral-300"
+      >
+        <span className="flex items-center gap-1.5">
+          <GitMergeConflict size={12} className="shrink-0 text-neutral-500" />
+          <span>Resolve rebase conflict on</span>
+          <span className="truncate font-mono text-neutral-300">{origin.branch}</span>
+          <span className="shrink-0 text-neutral-500">
+            · {origin.fileCount} file{origin.fileCount === 1 ? '' : 's'}
+          </span>
+          {/* 자동으로 시작된 턴이라는 사실은 접힌 상태에서도 읽혀야 한다 — 사용자가 누르지 않은
+              턴이 왜 돌았는지 묻게 만드는 것이 바로 이 경우다. */}
+          {origin.auto && (
+            <span className="shrink-0 rounded bg-[var(--surface-2)] px-1.5 py-0.5 text-[10px] text-neutral-500">
+              auto
+            </span>
+          )}
+          <ChevronRight
+            size={12}
+            className={`ml-auto shrink-0 transition-transform ${expanded ? 'rotate-90' : ''}`}
+          />
+        </span>
+        {expanded && (
+          <span className="mt-2 block whitespace-pre-wrap break-words border-t border-[var(--border)] pt-2 text-sm leading-relaxed text-neutral-300">
+            {item.text}
+          </span>
+        )}
+      </button>
+    </div>
+  )
+}
 
 function PeerMessage({
   item,
@@ -515,6 +572,8 @@ function Item({
   switch (item.type) {
     case 'user':
       if (item.origin?.kind === 'peer') return <PeerMessage item={item} title={time} />
+      if (item.origin?.kind === 'conflictResolve')
+        return <ConflictResolveMessage item={item} title={time} />
       return (
         <UserMessage text={item.text} title={time}>
           {item.attachments && item.attachments.length > 0 && (

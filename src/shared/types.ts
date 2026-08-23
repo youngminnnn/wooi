@@ -1266,6 +1266,14 @@ export interface AppSettings {
   /** Claude/Codex 계정 사용량 제한이 풀리면 중단된 작업을 같은 세션에서 자동으로 이어간다. */
   autoResumeAfterRateLimit: boolean
   /**
+   * restack·캐스케이드가 충돌하면 그 워크트리의 에이전트에게 해결을 맡긴다. **기본 꺼짐.**
+   *
+   * 꺼져 있어도 충돌 카드의 "Resolve with agent" 버튼은 그대로 있다 — 이 설정은 "버튼을 없애고
+   * 자동으로 시작할지"만 정한다. 기본을 끔으로 두는 이유는 토큰이다. 해결 턴 하나는 사용자가
+   * 시키지도 않은 턴이고, 그 비용을 기본값으로 떠안기지 않는다.
+   */
+  autoResolveConflicts: boolean
+  /**
    * true 면 새 workspace 생성 시 이름·베이스 브랜치를 직접 입력하는 모달을 띄운다.
    * false(기본) 면 이름을 자동 생성하고 베이스는 리포 기본 브랜치(main/origin)로 즉시 만든다.
    */
@@ -1494,7 +1502,25 @@ export interface PeerMessageOrigin {
   messages: PeerMessagePart[]
 }
 
-export type ChatUserOrigin = PeerMessageOrigin
+/**
+ * Wooi 가 rebase 충돌 해결을 맡기며 넣은 사용자 턴.
+ *
+ * 이 전송은 일부러 보이게 남긴다(silent 를 쓰지 않는다) — 사용자가 토큰을 쓰는 턴이므로 무엇을
+ * 시켰는지 대화에 있어야 나중에 "이 턴은 왜 돌았지" 를 대화만 보고 답할 수 있다. 다만 프롬프트
+ * 자체는 길어서 펼쳐 둔 채로는 대화를 밀어낸다. 그래서 **감추는 대신 접는다** — 화면에는 한 줄만
+ * 두고, 전문은 한 번 눌러 펼치면 그대로 있다. 그 한 줄을 만들 재료가 이 필드들이다.
+ */
+export interface ConflictResolveOrigin {
+  kind: 'conflictResolve'
+  /** 충돌이 난 브랜치. */
+  branch: string
+  /** 충돌 파일 수 — 펼치지 않고도 규모를 알 수 있게 한다. */
+  fileCount: number
+  /** 버튼을 눌러서가 아니라 autoResolveConflicts 로 Wooi 가 시작했는지. */
+  auto: boolean
+}
+
+export type ChatUserOrigin = PeerMessageOrigin | ConflictResolveOrigin
 
 /** 백엔드까지 함께 흘려 보낼 사용자 턴의 표시·모델용 옵션. */
 export interface SendMessageOptions {
@@ -2273,6 +2299,12 @@ export interface GitStatus {
   changedFiles: number
   /** 미해결 머지 충돌이 있는지(예: updateFromBase 후 충돌). UI 가 해결 안내를 띄울 때 쓴다. */
   conflicted: boolean
+  /**
+   * 이 워크트리에 rebase 가 진행 중인지. `conflicted` 만으로는 머지 충돌과 rebase 충돌을 가릴 수
+   * 없어서 따로 둔다 — "에이전트에게 해결을 맡긴다" 는 rebase 에만 성립하므로, 머지 충돌에까지
+   * 그 버튼을 띄우면 누를 때마다 거절당하는 버튼이 된다.
+   */
+  rebasing: boolean
 }
 
 // ── base 브랜치에서 업데이트(머지) ────────────────────────────────────────
@@ -2338,6 +2370,12 @@ export type StackCascadeStepKind = 'retarget' | 'recover' | 'restack' | 'merge'
 export interface StackCascadeStep {
   branch: string
   prNumber: number | null
+  /**
+   * 모델 A 캐스케이드는 자식마다 별도 worktree 를 써서, 시작한 워크스페이스와 충돌이 난
+   * 워크스페이스가 다르다. branch/prNumber 만으로 어느 에이전트가 그 worktree 를 소유하는지 알 수
+   * 없어 싣는다. 이 필드 이전에 만든 단계와 worktree 가 자명한 경로의 단계는 없을 수 있다.
+   */
+  workspaceId?: string
   kind: StackCascadeStepKind
   /**
    * - skipped: 이미 원하는 상태였음(GitHub 가 자동 retarget 한 경우 등).
@@ -3129,6 +3167,8 @@ export const IPC = {
   stackBaseRetarget: 'stack:baseRetarget',
   /** 어긋난 base 를 의도한 것으로 받아들인다(그 base 를 채택하고 다시 묻지 않는다). */
   stackBaseKeep: 'stack:baseKeep',
+  /** 충돌한 워크트리의 에이전트에게 rebase 충돌 해결을 맡긴다(사용자가 눌렀거나 autoResolveConflicts). */
+  stackResolveConflict: 'stack:resolveConflict',
   /** 진행 중인 머지를 취소한다(충돌 포기). */
   gitAbortMerge: 'git:abortMerge',
   prStatus: 'pr:status',

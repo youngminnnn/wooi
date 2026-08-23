@@ -158,6 +158,8 @@ those chains itself with plain `git` and `gh` — no extra stacking CLI needed.
 - **Restack** — **Restack onto `<base>`** rebases a workspace onto the latest parent
   branch and pushes with `--force-with-lease`. A conflict stops in the worktree so you
   can resolve it there.
+- **Resolve rebase conflicts with the agent** — hand a conflict to that workspace's agent
+  with one button; automatic starts are off by default and opt-in in Settings.
 - **Merge cascade** — when a parent PR merges, Wooi retargets each child PR's base to the
   grandparent branch and rebases the children onto it, so the rest of the stack stays
   valid instead of turning into a pile of conflicts.

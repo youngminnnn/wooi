@@ -46,6 +46,7 @@ const agentsOf = (out: Record<string, unknown>): Record<string, AgentSettings> =
 describe('current defaults', () => {
   it('rate-limit 자동 재개는 명시적으로 켜기 전까지 꺼져 있다', () => {
     expect(DEFAULT_SETTINGS.autoResumeAfterRateLimit).toBe(false)
+    expect(DEFAULT_SETTINGS.autoResolveConflicts).toBe(false)
   })
 
   it('모델 폴백은 Claude 에만 소비되고 Codex 기본 동작은 빈 목록으로 남는다', () => {

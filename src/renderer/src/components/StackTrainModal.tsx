@@ -8,6 +8,7 @@ import type {
   StackTrainResult
 } from '@shared/types'
 import { useStore } from '../store'
+import ConflictResolveAction from './ConflictResolveAction'
 import Modal, { ghostBtn, primaryBtn } from './Modal'
 
 type Phase = 'plan' | 'running' | 'result'
@@ -53,6 +54,7 @@ export default function StackTrainModal({
   const progress = useStore((s) => s.stackProgress[workspaceId])
   const runMergeTrain = useStore((s) => s.runMergeTrain)
   const setOverlayOpen = useStore((s) => s.setOverlayOpen)
+  const workspaces = useStore((s) => s.app?.workspaces)
 
   useEffect(() => {
     setOverlayOpen(true)
@@ -102,6 +104,13 @@ export default function StackTrainModal({
     /diverg|rewritten/i.test(result?.stoppedAt?.reason ?? '')
   const conflict =
     stoppedProblem?.status === 'conflict' || /conflict/i.test(result?.stoppedAt?.reason ?? '')
+  // 충돌은 트레인을 시작한 워크스페이스가 아니라 그 층의 워크트리에 남는다 — 단계가 들고 온
+  // workspaceId 로만 대상을 정한다. 위 conflict 는 reason 문구까지 훑는 느슨한 판정이라
+  // 안내 문구용으로는 맞지만, 토큰을 쓰는 액션의 근거로 삼기에는 느슨하다.
+  const conflictWorkspace =
+    stoppedProblem?.status === 'conflict' && stoppedProblem.workspaceId
+      ? workspaces?.find((candidate) => candidate.id === stoppedProblem.workspaceId)
+      : undefined
 
   return (
     <Modal
@@ -274,7 +283,18 @@ export default function StackTrainModal({
                     .
                   </>
                 ) : conflict ? (
-                  <>Resolve the conflict in the worktree, then re-run the merge train.</>
+                  <>
+                    Resolve the conflict in the worktree, then re-run the merge train.
+                    {conflictWorkspace && (
+                      <>
+                        {' '}
+                        <ConflictResolveAction
+                          workspace={conflictWorkspace}
+                          conflictedFileCount={stoppedProblem?.conflictedFiles?.length}
+                        />
+                      </>
+                    )}
+                  </>
                 ) : (
                   <>Address the reason above, refresh the stack, and re-run the merge train.</>
                 )}

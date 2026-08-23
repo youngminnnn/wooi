@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import ChatView from './ChatView'
 import { app, git, pr, workspace } from '../test/fixtures'
 import { renderWithStore, resetStore, useStore } from '../test/harness'
@@ -50,5 +51,59 @@ describe('대화 헤더 파생 상태 표시', () => {
     expect(container.querySelector('.workspace-header-identity')).toBeInTheDocument()
     expect(container.querySelector('.workspace-header-actions')).toBeInTheDocument()
     expect(screen.getByText('Renderer tests')).toBeVisible()
+  })
+})
+
+describe('충돌 해결 턴은 접혀 있다', () => {
+  const PROMPT = [
+    'Branch feat/test is being rebased onto main, and a rebase is currently in progress.',
+    '',
+    'Conflicted files:',
+    '- src/a.ts',
+    '- src/b.ts'
+  ].join('\n')
+
+  function renderResolveTurn(auto: boolean) {
+    const ws = workspace()
+    useStore.setState({
+      app: app([ws]),
+      selectedWorkspaceId: ws.id,
+      gitStatus: { [ws.id]: git() },
+      prStatus: { [ws.id]: pr('open') },
+      loadedTranscripts: { [ws.id]: true },
+      transcripts: {
+        [ws.id]: [
+          {
+            id: 'user:1',
+            type: 'user',
+            text: PROMPT,
+            ts: 1,
+            origin: { kind: 'conflictResolve', branch: 'feat/test', fileCount: 2, auto }
+          }
+        ]
+      }
+    })
+    return renderWithStore(<ChatView workspace={ws} />)
+  }
+
+  // 감추는 것이 아니라 접는 것이다 — 눌러서 펼치면 전문이 그대로 있어야 한다.
+  it('전문 대신 한 줄만 두고, 펼치면 전문이 나온다', async () => {
+    const user = userEvent.setup()
+    renderResolveTurn(false)
+
+    const fold = screen.getByText('Resolve rebase conflict on').closest('button')!
+    expect(screen.getByText('· 2 files')).toBeInTheDocument()
+    expect(fold).toHaveAttribute('aria-expanded', 'false')
+    expect(fold.textContent).not.toContain('- src/a.ts')
+
+    await user.click(fold)
+    expect(fold).toHaveAttribute('aria-expanded', 'true')
+    expect(fold.textContent).toContain(PROMPT)
+  })
+
+  it('자동으로 시작된 턴은 접힌 채로도 그렇다고 읽힌다', () => {
+    renderResolveTurn(true)
+
+    expect(screen.getByText('auto')).toBeInTheDocument()
   })
 })
