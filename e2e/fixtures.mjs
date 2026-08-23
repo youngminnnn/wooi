@@ -120,6 +120,26 @@ export async function seedAppState(
   return { repo, workspace, schemaVersion, requiredWorkspaceFieldCount: requiredFields.length }
 }
 
+/**
+ * 메인 프로세스가 보내는 승인 요청 이벤트를 그대로 흉내 낸다.
+ *
+ * 모델 턴 없이 승인·질문 카드를 띄우는 유일한 길이다. 채널 이름은 소스에서 읽는다 — 여기에
+ * 문자열을 박아 두면 IPC 상수가 바뀐 날 스펙은 조용히 아무것도 검사하지 않게 된다.
+ */
+export async function sendPermissionRequest(app, request, { appDir = process.cwd() } = {}) {
+  const typesFile = join(resolve(appDir), 'src/shared/types.ts')
+  const channel = (await readFile(typesFile, 'utf8')).match(/evtPermission:\s*'([^']+)'/)?.[1]
+  if (!channel) throw new Error(`evtPermission channel not found in ${typesFile}`)
+  await app.evaluate(
+    ({ BrowserWindow }, payload) => {
+      const win = BrowserWindow.getAllWindows()[0]
+      if (!win) throw new Error('no window to deliver the permission request to')
+      win.webContents.send(payload.channel, payload.request)
+    },
+    { channel, request }
+  )
+}
+
 /** 시작 화면이 Overview든 자동 선택된 대화든 같은 워크스페이스 헤더까지 들어간다. */
 export async function openSeededWorkspace(win) {
   const header = win.locator('.workspace-header')
