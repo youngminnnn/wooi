@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { ShieldQuestion, Clock } from 'lucide-react'
 import { useStore } from '../store'
 import { summarizePermission } from '../lib/permission'
+import { unlessSelecting } from '../lib/selection'
 import { DiffLine } from './DiffView'
 import type { PermissionDecision, PermissionOption, PermissionRequest } from '@shared/types'
 
@@ -147,7 +148,7 @@ export default function PermissionPrompt({
           {options.slice(0, -1).map((option) => (
             <button
               key={option.id}
-              onClick={() => respond(option)}
+              onClick={unlessSelecting(() => respond(option))}
               title={option.description}
               className={
                 'text-sm px-2.5 py-1 rounded-md ' +
@@ -164,7 +165,7 @@ export default function PermissionPrompt({
           )}
           <button
             ref={primaryRef}
-            onClick={() => respond(primary)}
+            onClick={unlessSelecting(() => respond(primary))}
             className="text-sm px-3 py-1 rounded-md bg-[var(--warning-500)]/90 text-black font-medium shadow-sm hover:bg-[var(--warning-400)] focus:outline-none focus:ring-2 focus:ring-[var(--warning-300)]/60"
           >
             {primary.label}

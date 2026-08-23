@@ -1,4 +1,5 @@
 import type { ToolCardStyleProps } from './styleProps'
+import { SELECTABLE, unlessSelecting } from '../../lib/selection'
 
 /**
  * Claude Code 터미널의 도구 로그 문법을 그대로 옮긴 외형 — 불릿 `⏺` 과 결과 거터 `⎿`.
@@ -23,14 +24,18 @@ export function ToolCardTerminal({
     <div className="font-mono text-sm text-neutral-300">
       <button
         type="button"
-        onClick={toggle}
-        className="block w-full break-words text-left hover:text-neutral-100"
+        onClick={unlessSelecting(toggle)}
+        className={`block w-full break-words text-left hover:text-neutral-100 ${SELECTABLE}`}
       >
         <span className={pending ? 'text-[var(--warning-500)]' : 'text-[var(--accent-400)]'}>
           ⏺
         </span>{' '}
-        {name}
-        {arg && `(${arg})`}
+        {/* 이름과 인자는 span 으로 감싼다 — 크로미움은 버튼 자신의 글자에서 드래그 선택을
+            시작하지 못해서, 감싸지 않으면 파일 경로·명령을 복사할 수 없다. */}
+        <span>
+          {name}
+          {arg && `(${arg})`}
+        </span>
         {stat && (
           <span className="tabular-nums">
             {' '}

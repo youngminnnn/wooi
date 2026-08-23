@@ -4,6 +4,7 @@ import type { ChatItem } from '@shared/types'
 import { formatToolGroup, type ToolGroup } from '@shared/toolGroups'
 import { ToolCard } from './ToolCard'
 import type { ToolGroupStyleProps } from './styleProps'
+import { SELECTABLE, unlessSelecting } from '../../lib/selection'
 
 export function ToolGroupCard({
   group,
@@ -64,8 +65,8 @@ function WooiGroup({ label, hint, active, open, toggle, children }: ToolGroupSty
       <button
         type="button"
         aria-expanded={open}
-        onClick={toggle}
-        className="flex w-full items-center gap-1.5 text-left text-neutral-400 hover:text-neutral-200"
+        onClick={unlessSelecting(toggle)}
+        className={`flex w-full items-center gap-1.5 text-left text-neutral-400 hover:text-neutral-200 ${SELECTABLE}`}
       >
         {active ? (
           <Loader2 size={12} className="shrink-0 animate-spin text-[var(--warning-500)]/80" />
@@ -95,11 +96,11 @@ function TerminalGroup({ label, hint, active, open, toggle, children }: ToolGrou
       <button
         type="button"
         aria-expanded={open}
-        onClick={toggle}
-        className="block w-full text-left hover:text-neutral-100"
+        onClick={unlessSelecting(toggle)}
+        className={`block w-full text-left hover:text-neutral-100 ${SELECTABLE}`}
       >
         <span className={active ? 'text-[var(--warning-500)]' : 'text-[var(--accent-400)]'}>⏺</span>{' '}
-        {label}
+        <span>{label}</span>
       </button>
       {hint && (
         <div className="truncate text-xs text-neutral-500">
