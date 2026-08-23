@@ -259,7 +259,8 @@ describe('Codex local conversation commands', () => {
 
   it('/plan updates the stored permission mode and returns a local result', async () => {
     resetState([workspace('ws-plan', 'codex', null)])
-    const manager = new CodexSessionManager(vi.fn(), () => null)
+    const dispatch = vi.fn()
+    const manager = new CodexSessionManager(dispatch, () => null)
 
     await expect(manager.runCommand('ws-plan', 'plan')).resolves.toEqual({
       kind: 'plan',

@@ -87,6 +87,13 @@ describe('백엔드 간 관계', () => {
     })
   })
 
+  it('Codex Plan 모드를 읽기 전용 선택지로 표시한다', () => {
+    expect(CODEX_META.permissionModes.find((item) => item.id === 'plan')).toMatchObject({
+      label: 'Plan mode',
+      footer: { symbol: '⏸', text: 'plan mode on' }
+    })
+  })
+
   it('식별자가 서로 다르다', () => {
     expect(CLAUDE_META.id).not.toBe(CODEX_META.id)
   })

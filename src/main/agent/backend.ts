@@ -349,6 +349,12 @@ export const CODEX_PERMISSION_MODES: PermissionModeInfo[] = [
     footer: { symbol: '⏵⏵', text: 'approve for me on' }
   },
   {
+    id: 'plan',
+    label: 'Plan mode',
+    description: 'Read-only — plan without executing',
+    footer: { symbol: '⏸', text: 'plan mode on' }
+  },
+  {
     id: 'fullAccess',
     label: 'Full access',
     description: 'No sandbox, no approvals — including network access',
