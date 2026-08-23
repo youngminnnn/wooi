@@ -8,6 +8,7 @@ const sidebarProps = {
   width: 280,
   onNewWorkspace: () => {},
   onNewFromIssue: () => {},
+  onNewFromPr: () => {},
   onFanout: () => {},
   onStackWorkspace: () => {},
   onOpenQuickSwitch: () => {}
