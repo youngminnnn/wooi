@@ -66,6 +66,13 @@ async function sendExternal(args: Record<string, unknown>): Promise<Record<strin
   return sendToWorkspaceExternal(deps, args) as Promise<Record<string, unknown>>
 }
 
+async function status(messageId?: string, workspaceId = 'ws-me'): Promise<Record<string, unknown>> {
+  const { checkMessageStatus } = await import('./peer')
+  return checkMessageStatus(deps, workspaceId, messageId ? { messageId } : {}) as Promise<
+    Record<string, unknown>
+  >
+}
+
 describe('list_workspace_peers', () => {
   it('외부 호출자에게는 자기 자신이 없으므로 열린 workspace를 모두 보여 준다', async () => {
     state.workspaces.push(ws({ id: 'ws-other', archived: true }))
@@ -112,6 +119,137 @@ describe('list_workspace_peers', () => {
 })
 
 describe('send_to_workspace', () => {
+  it('메시지 id를 돌려주고 즉시 전달 결말을 조회한다', async () => {
+    state.workspaces.push(ws({ id: 'ws-them' }))
+    const out = await send({ targetWorkspaceId: 'ws-them', message: 'heads up' })
+    expect(out.messageId).toMatch(/^pm-[0-9a-z]+-[0-9a-f]{8}$/)
+    await expect(status(out.messageId as string)).resolves.toMatchObject({
+      status: 'delivered',
+      final: true,
+      messageId: out.messageId
+    })
+  })
+
+  it('승인 대기와 승인 뒤 전달을 같은 id로 기록한다', async () => {
+    state.workspaces.push(ws({ id: 'ws-them', peerInbound: 'hold' }))
+    const out = await send({ targetWorkspaceId: 'ws-them', message: 'heads up' })
+    const pending = state.workspaces.find((w) => w.id === 'ws-them')?.peerInbox?.[0]
+    expect(pending?.id).toBe(out.messageId)
+    await expect(status(out.messageId as string)).resolves.toMatchObject({
+      status: 'waiting-for-user-approval',
+      final: false
+    })
+    const { deliverApprovedPeerMessage } = await import('./peer')
+    deliverApprovedPeerMessage(deps, 'ws-them', pending!)
+    await expect(status(out.messageId as string)).resolves.toMatchObject({
+      status: 'delivered-after-user-approval',
+      final: true
+    })
+  })
+
+  it('사용자 거절은 뒤늦은 상태 전이로 덮어쓰지 않는다', async () => {
+    state.workspaces.push(ws({ id: 'ws-them', peerInbound: 'hold' }))
+    const out = await send({ targetWorkspaceId: 'ws-them', message: 'heads up' })
+    const { resolvePeerMessage } = await import('./peerLedger')
+    resolvePeerMessage('ws-me', out.messageId as string, 'declined-by-user')
+    resolvePeerMessage('ws-me', out.messageId as string, 'delivered-after-user-approval')
+    expect((await status(out.messageId as string)).status).toBe('declined-by-user')
+  })
+
+  it('보관 기한이 지난 id와 새 미등록 id를 구분한다', async () => {
+    const oldId = `pm-${(Date.now() - 8 * 24 * 60 * 60 * 1000).toString(36)}-12345678`
+    const freshId = `pm-${Date.now().toString(36)}-87654321`
+    expect((await status(oldId)).status).toBe('unknown-expired')
+    expect((await status(freshId)).status).toBe('unknown-no-such-message')
+  })
+
+  it('발신 기록 50건 상한에서 가장 오래된 것만 만료된다', async () => {
+    state.workspaces.push(ws({ id: 'ws-them' }))
+    const ids: string[] = []
+    let tick = Date.now()
+    const now = vi.spyOn(Date, 'now').mockImplementation(() => tick++)
+    for (let i = 0; i < 51; i += 1) {
+      const out = await send({ targetWorkspaceId: 'ws-them', message: `message ${i}` })
+      ids.push(out.messageId as string)
+    }
+    now.mockRestore()
+    expect((await status(ids[0])).status).toBe('unknown-expired')
+    expect((await status(ids.at(-1)!)).status).toBe('delivered')
+  })
+
+  it('running 버퍼는 flush 뒤 전달되고 reset이면 같은 id로 승인 대기에 돌아간다', async () => {
+    state.workspaces.push(ws({ id: 'ws-them', status: 'running' }))
+    const first = await send({ targetWorkspaceId: 'ws-them', message: 'first' })
+    expect((await status(first.messageId as string)).status).toBe('waiting-for-target-turn-to-end')
+    const { flushBufferedPeerMessages, resetPeerSession } = await import('./peer')
+    expect(flushBufferedPeerMessages('ws-them')).toBe(true)
+    expect((await status(first.messageId as string)).status).toBe('delivered')
+
+    const second = await send({ targetWorkspaceId: 'ws-them', message: 'second' })
+    resetPeerSession('ws-them')
+    expect((await status(second.messageId as string)).status).toBe(
+      'returned-waiting-for-user-approval'
+    )
+    expect(state.workspaces.find((w) => w.id === 'ws-them')?.peerInbox?.[0]?.id).toBe(
+      second.messageId
+    )
+  })
+
+  it('되돌릴 워크스페이스가 사라졌으면 승인 대기가 아니라 유실로 기록한다', async () => {
+    state.workspaces.push(ws({ id: 'ws-them', status: 'running' }))
+    const out = await send({ targetWorkspaceId: 'ws-them', message: 'heads up' })
+    // 대상이 사라진 뒤의 park 는 되돌릴 자리가 없다. 그때 "승인 대기" 로 남기면 발신자는
+    // 오지 않을 결말을 영영 기다린다.
+    state.workspaces = state.workspaces.filter((w) => w.id !== 'ws-them')
+    const { resetPeerSession } = await import('./peer')
+    resetPeerSession('ws-them')
+    await expect(status(out.messageId as string)).resolves.toMatchObject({
+      status: 'dropped-target-workspace-gone',
+      final: true
+    })
+  })
+
+  it('중복 폐기도 id와 조회 가능한 결말을 돌려준다', async () => {
+    state.workspaces.push(ws({ id: 'ws-them' }))
+    await send({ targetWorkspaceId: 'ws-them', message: 'same' })
+    const duplicate = await send({ targetWorkspaceId: 'ws-them', message: 'same' })
+    expect(duplicate.messageId).toMatch(/^pm-/)
+    expect((await status(duplicate.messageId as string)).status).toBe('not-delivered-duplicate')
+  })
+
+  it('다른 워크스페이스의 발신 기록은 조회할 수 없다', async () => {
+    state.workspaces.push(ws({ id: 'ws-other' }), ws({ id: 'ws-them' }))
+    const { recordPeerSend, newPeerMessageId } = await import('./peerLedger')
+    const id = newPeerMessageId()
+    recordPeerSend('ws-other', {
+      id,
+      toWorkspaceId: 'ws-them',
+      toName: 'them',
+      excerpt: 'secret',
+      outcome: 'delivered',
+      at: Date.now(),
+      outcomeAt: Date.now()
+    })
+    expect((await status(id)).status).toBe('unknown-no-such-message')
+  })
+
+  it('승인 대기함 상한은 가장 오래된 메시지를 dropped로 기록한다', async () => {
+    state.workspaces.push(ws({ id: 'ws-them', peerInbound: 'hold' }))
+    const ids: string[] = []
+    for (let i = 0; i <= MAX_PEER_INBOX; i += 1) {
+      const out = await send({ targetWorkspaceId: 'ws-them', message: `held ${i}` })
+      ids.push(out.messageId as string)
+    }
+    expect((await status(ids[0])).status).toBe('dropped-target-inbox-full')
+    expect((await status(ids.at(-1)!)).status).toBe('waiting-for-user-approval')
+  })
+
+  it('외부 발신은 id만 돌려주고 어느 워크스페이스에도 기록하지 않는다', async () => {
+    state.workspaces.push(ws({ id: 'ws-them' }))
+    const out = await sendExternal({ targetWorkspaceId: 'ws-them', message: 'outside' })
+    expect(out.messageId).toMatch(/^pm-/)
+    expect(state.workspaces.every((w) => !w.peerSent?.length)).toBe(true)
+  })
   it('외부 메시지는 refuse 대상에 전달되지 않는다', async () => {
     state.workspaces.push(ws({ id: 'ws-them', peerInbound: 'refuse' }))
     await expect(

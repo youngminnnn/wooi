@@ -749,6 +749,8 @@ export interface Workspace {
    * 워크스페이스가 사라지면 그 앞으로 온 메시지도 함께 사라지는 것이 맞다.
    */
   peerInbox?: PendingPeerMessage[]
+  /** 이 워크스페이스가 보낸 peer 메시지의 결말 기록. 옵셔널이라 마이그레이션이 필요 없다. */
+  peerSent?: SentPeerMessage[]
   /** worktree 절대 경로 */
   worktreePath: string
   /**
@@ -1722,6 +1724,33 @@ export interface PendingPeerMessage {
    */
   text: string
   at: number
+}
+
+/** 발신자가 나중에 조회할 수 있는 peer 메시지의 현재 결말. */
+export type PeerMessageOutcome =
+  | 'delivered'
+  | 'waiting-for-target-turn-to-end'
+  | 'waiting-for-user-approval'
+  | 'returned-waiting-for-user-approval'
+  | 'delivered-after-user-approval'
+  | 'declined-by-user'
+  | 'dropped-target-inbox-full'
+  | 'dropped-target-workspace-gone'
+  | 'not-delivered-duplicate'
+
+/** 본문 없이 발신 워크스페이스에 작게 남기는 peer 메시지 결말 기록. */
+export interface SentPeerMessage {
+  id: string
+  toWorkspaceId: string
+  /** 표시용 대상 이름(발신 시점 스냅샷) — 대상이 사라져도 답할 수 있어야 한다. */
+  toName: string
+  /** 어느 메시지였는지 사람이/모델이 알아보게 하는 한 줄 발췌(최대 80자, 개행은 공백으로). */
+  excerpt: string
+  outcome: PeerMessageOutcome
+  at: number
+  outcomeAt: number
+  /** 메모리에 매달린 중간 상태를 남긴 앱 실행 id. 재시작을 건너뛴 중간 상태를 가려낸다. */
+  runId?: string
 }
 
 /** 워크스페이스 1곳이 쌓아 둘 수 있는 대기 메시지 수. 넘으면 가장 오래된 것부터 버린다. */

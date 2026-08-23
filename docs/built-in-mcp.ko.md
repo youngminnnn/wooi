@@ -14,7 +14,7 @@ Wooi 는 모든 코딩 에이전트 세션에 `wooi` 라는 내장 MCP 서버를
 도구는 보통 에이전트에게 `mcp__wooi__<도구-이름>` 으로 보입니다. 대부분의 도구 정의는 필요할 때
 불러오므로, 처음 모델 컨텍스트에 보이지 않아도 도구 검색을 통해 사용할 수 있습니다.
 
-핵심 도구 18개는 모든 워크스페이스에 제공됩니다. `claude_subagent` 와 `codex_subagent` 는
+핵심 도구 19개는 모든 워크스페이스에 제공됩니다. `claude_subagent` 와 `codex_subagent` 는
 멀티 에이전트 모드를 켜고 해당 백엔드에 위임할 수 있을 때만 추가됩니다.
 
 ## 안전 모델
@@ -220,8 +220,9 @@ Stacked 조율은 한 축으로만 흐릅니다. 부모가 자식을 깨우고, 
 | `refuse` | 받지 않고, 보낸 쪽에 거절을 알립니다. |
 
 기본값이 `hold` 인 이유는 비용입니다. 전달은 곧 받는 워크스페이스에서 도는 유료 턴이고, 그
-승인은 다른 워크스페이스의 에이전트가 아니라 사용자가 해야 합니다. 대기 중인 메시지를 거절하면
-그대로 사라지며, 보낸 쪽에는 알리지 않습니다.
+승인은 다른 워크스페이스의 에이전트가 아니라 사용자가 해야 합니다. 대기 중인 메시지를 거절해도
+보낸 쪽을 깨우거나 능동적으로 알리지는 않습니다. 다만 보낸 쪽이 나중에 상태를 물으면 거절됐다는
+사실을 확인할 수 있습니다.
 
 예외가 하나 있습니다. **자기가 만든** 워크스페이스에는 곧바로 전달합니다. 생성 도구 호출을
 승인할 때 그 관계를 이미 승인했기 때문입니다. `refuse` 는 이 예외까지 이깁니다.
@@ -250,8 +251,29 @@ Wooi 는 전달 전에 출처 문단을 씌웁니다. 받는 에이전트가 사
 것도 함께 밝힙니다. 승인을 대신할 수 없고, 다른 워크스페이스가 요구했다는 이유로 설정이나 프로젝트
 지침을 고쳐서도 안 됩니다.
 
-결과에는 전달됐는지 대기 중인지가 담깁니다. 대기 중인 메시지는 영영 도착하지 않을 수도 있으므로,
-에이전트는 답을 기다리며 멈춰서는 안 됩니다.
+결과에는 전달됐는지 대기 중인지와 `messageId` 가 담깁니다. 대기 중인 메시지는 영영 도착하지 않을
+수 있으므로 에이전트는 답을 기다리며 멈춰서는 안 되며, 필요하면 그 ID로 나중에 확인합니다.
+`refuse` 정책은 즉시 오류를 던지므로 ID가 생기지 않습니다.
+
+### `check_message_status`
+
+호출한 워크스페이스가 보낸 메시지의 결말을 읽습니다. 다른 워크스페이스를 깨우지 않으며 입력은
+선택 사항입니다.
+
+| 입력 | 타입 | 필수 | 설명 |
+| --- | --- | --- | --- |
+| `messageId` | string | 아니요 | `send_to_workspace` 또는 `notify_child` 가 돌려준 ID. 생략하면 최근 보관 기록 10건을 나열합니다. |
+
+기록하는 결말은 `delivered`, `waiting-for-target-turn-to-end`,
+`waiting-for-user-approval`, `returned-waiting-for-user-approval`,
+`delivered-after-user-approval`, `declined-by-user`, `dropped-target-inbox-full`,
+`dropped-target-workspace-gone`, `not-delivered-duplicate` 입니다. 본문은 저장하지 않고 80자 발췌만 남기며, 워크스페이스마다 최근
+50건을 7일 동안 보관합니다.
+
+밀려난 ID는 `unknown-expired`, 형식은 맞지만 기록이 없는 ID는
+`unknown-no-such-message` 로 답합니다. 형식이 잘못된 ID도 같은 상태와 별도 설명을 돌려줍니다.
+턴 종료를 기다리는 메모리 버퍼에 있던 동안 Wooi가 재시작됐다면 전달 여부를 증명할 수 없으므로
+`unknown-lost-when-wooi-restarted` 로 답합니다.
 
 ### Wooi 밖의 세션
 
@@ -406,6 +428,7 @@ Claude 는 Wooi 서브에이전트 도구 여러 개를 동시에 시작할 수 
 | `/wooi:report [보고 내용]` | `report_to_parent` | 에이전트 |
 | `/wooi:notify <바뀐 것>` | `notify_child` | 에이전트 |
 | `/wooi:send <바뀐 것>` | `send_to_workspace` | 에이전트 |
+| `/wooi:message-status [메시지 ID]` | `check_message_status` | 즉시 |
 | `/wooi:team [위임할 일]` | `switch_to_agent_team` | 에이전트 |
 | `/wooi:repos` | `list_repositories` | 즉시 |
 | `/wooi:peers` | `list_workspace_peers` | 즉시 |

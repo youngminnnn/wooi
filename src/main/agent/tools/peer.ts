@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto'
 import { DEFAULT_PEER_INBOUND, MAX_PEER_INBOX, workspaceDisplayName } from '@shared/types'
 import type {
   PeerInboundPolicy,
@@ -11,6 +10,14 @@ import { log } from '../../logger'
 import { getStore } from '../../store'
 import type { AgentToolDeps, AgentToolHandler } from './registry'
 import { callerWorkspace } from './target'
+import {
+  lookupPeerMessage,
+  newPeerMessageId,
+  peerMessageIdSentAt,
+  recentPeerMessages,
+  recordPeerSend,
+  resolvePeerMessage
+} from './peerLedger'
 
 /**
  * 워크스페이스 사이의 **평문 메시지**. 스택 관계도 리포 경계도 넘는다.
@@ -72,6 +79,7 @@ interface BufferedPeerDelivery {
 }
 
 interface PeerDelivery {
+  messageId: string
   part: PeerMessagePart
   /** 단건이 세션의 첫 peer 메시지일 때 쓸, 도구별 전문 포함 문자열. */
   fullText: string
@@ -259,27 +267,44 @@ function parkUndelivered(
 ): void {
   if (!deliveries.length) return
   const at = Date.now()
-  const pending: PendingPeerMessage[] = deliveries.map(({ part, fullText, fromWorkspaceId }) => ({
-    id: randomUUID(),
-    fromWorkspaceId,
-    fromName: part.fromName,
-    fromBranch: part.fromBranch,
-    fromRepoName: part.fromRepoName,
-    crossRepo: part.crossRepo,
-    message: part.message,
-    route: part.route,
-    text: fullText,
-    undelivered: true,
-    at
-  }))
+  const pending: PendingPeerMessage[] = deliveries.map(
+    ({ messageId, part, fullText, fromWorkspaceId }) => ({
+      id: messageId,
+      fromWorkspaceId,
+      fromName: part.fromName,
+      fromBranch: part.fromBranch,
+      fromRepoName: part.fromRepoName,
+      crossRepo: part.crossRepo,
+      message: part.message,
+      route: part.route,
+      text: fullText,
+      undelivered: true,
+      at
+    })
+  )
 
   let parked = false
+  const evicted: PendingPeerMessage[] = []
   getStore().update((st) => {
     const to = st.workspaces.find((w) => w.id === workspaceId)
     if (!to) return
-    to.peerInbox = [...(to.peerInbox ?? []), ...pending].slice(-MAX_PEER_INBOX)
+    const inbox = [...(to.peerInbox ?? []), ...pending]
+    evicted.push(...inbox.slice(0, -MAX_PEER_INBOX))
+    to.peerInbox = inbox.slice(-MAX_PEER_INBOX)
     parked = true
   })
+  for (const delivery of deliveries) {
+    resolvePeerMessage(
+      delivery.fromWorkspaceId,
+      delivery.messageId,
+      // 되돌릴 자리가 없었으면 "승인 대기" 는 거짓이다 — 카드도 없고 결말도 영영 오지 않는다.
+      // 물어 온 발신자에게 그때도 대기 중이라고 답하면, 눈에 보이게 만들려던 유실이 다시 조용해진다.
+      parked ? 'returned-waiting-for-user-approval' : 'dropped-target-workspace-gone'
+    )
+  }
+  for (const item of evicted) {
+    resolvePeerMessage(item.fromWorkspaceId, item.id, 'dropped-target-inbox-full')
+  }
   // 워크스페이스가 사라진 뒤라면 되돌릴 자리도 없다. 그래도 조용히 지나가지는 않는다 —
   // 이 로그가 없으면 다음 신고 때도 "보냈는데 안 왔다" 에서 한 발짝도 못 나간다.
   if (!parked) {
@@ -313,6 +338,9 @@ function flushBuffered(workspaceId: string): boolean {
     log.error(`peer: 턴 종료 뒤 대기 중이던 메시지 전달 실패 (${workspaceId})`, err)
     parkUndelivered(buffered.deps, workspaceId, buffered.messages, '전달 실패')
     return false
+  }
+  for (const delivery of buffered.messages) {
+    resolvePeerMessage(delivery.fromWorkspaceId, delivery.messageId, 'delivered')
   }
   log.info(`peer: 대기 중이던 ${buffered.messages.length}건 전달 (${workspaceId})`)
   return true
@@ -348,6 +376,9 @@ export function detachBufferedPeerMessages(workspaceId: string): PeerHandoff | n
       settled = true
       try {
         sendPeerDelivery(buffered.deps, workspaceId, buffered.messages)
+        for (const delivery of buffered.messages) {
+          resolvePeerMessage(delivery.fromWorkspaceId, delivery.messageId, 'delivered')
+        }
         log.info(`peer: 세션 교체 뒤 ${buffered.messages.length}건 전달 (${workspaceId})`)
       } catch (err) {
         log.error(`peer: 세션 교체 뒤 전달 실패 (${workspaceId})`, err)
@@ -430,7 +461,7 @@ export function deliverOrHold(
   /** 대기 카드에 보여 줄 본문 — 앱이 덧댄 문단을 뺀, 에이전트가 쓴 원문. */
   rawMessage: string,
   route: PeerMessagePart['route'] = 'peer'
-): { delivered: boolean; buffered: boolean; policy: PeerInboundPolicy } {
+): { delivered: boolean; buffered: boolean; policy: PeerInboundPolicy; messageId: string } {
   const policy = inboundPolicyFor(target, from.id)
   const label = workspaceDisplayName(from)
   if (policy === 'refuse') {
@@ -441,8 +472,22 @@ export function deliverOrHold(
     )
   }
 
+  const messageId = newPeerMessageId()
+  const at = Date.now()
+  const record = (outcome: Parameters<typeof recordPeerSend>[1]['outcome']): void =>
+    recordPeerSend(from.id, {
+      id: messageId,
+      toWorkspaceId: target.id,
+      toName: workspaceDisplayName(target),
+      excerpt: rawMessage.replace(/\s+/g, ' ').slice(0, 80),
+      outcome,
+      at,
+      outcomeAt: at
+    })
+
   if (policy === 'accept') {
     const delivery = {
+      messageId,
       part: partOf(from, target, rawMessage, route),
       fullText: text,
       fromWorkspaceId: from.id
@@ -450,12 +495,13 @@ export function deliverOrHold(
     const buffered = target.status === 'running'
     if (buffered) bufferPeerDelivery(deps, target.id, delivery)
     else sendPeerDelivery(deps, target.id, [delivery])
+    record(buffered ? 'waiting-for-target-turn-to-end' : 'delivered')
     logDelivery(label, target, buffered ? '턴 종료까지 대기(running)' : '즉시 전달')
-    return { delivered: true, buffered, policy }
+    return { delivered: true, buffered, policy, messageId }
   }
 
   const pending: PendingPeerMessage = {
-    id: randomUUID(),
+    id: messageId,
     fromWorkspaceId: from.id,
     fromName: workspaceDisplayName(from),
     fromBranch: from.branch,
@@ -467,6 +513,7 @@ export function deliverOrHold(
     at: Date.now()
   }
 
+  const evicted: PendingPeerMessage[] = []
   getStore().update((st) => {
     const to = st.workspaces.find((w) => w.id === target.id)
     if (!to) return
@@ -474,11 +521,16 @@ export function deliverOrHold(
     inbox.push(pending)
     // 상한을 넘으면 **가장 오래된 것부터** 버린다. 조용히 버리는 것은 아니다 — 사용자에게는
     // 카드가 계속 보이고, 발신자는 아래 결과 문장으로 대기 중임을 안다.
+    evicted.push(...inbox.slice(0, -MAX_PEER_INBOX))
     to.peerInbox = inbox.slice(-MAX_PEER_INBOX)
   })
+  record('waiting-for-user-approval')
+  for (const item of evicted) {
+    resolvePeerMessage(item.fromWorkspaceId, item.id, 'dropped-target-inbox-full')
+  }
   logDelivery(label, target, '승인 대기(hold) — 배달되지 않았다')
   deps.broadcastState()
-  return { delivered: false, buffered: false, policy }
+  return { delivered: false, buffered: false, policy, messageId }
 }
 
 function deliverOrHoldExternal(
@@ -486,7 +538,7 @@ function deliverOrHoldExternal(
   target: Workspace,
   text: string,
   rawMessage: string
-): { delivered: boolean; buffered: boolean; policy: PeerInboundPolicy } {
+): { delivered: boolean; buffered: boolean; policy: PeerInboundPolicy; messageId: string } {
   const policy = inboundPolicyFor(target, undefined)
   if (policy === 'refuse') {
     logDelivery('outside session', target, '거절(refuse)')
@@ -495,6 +547,8 @@ function deliverOrHoldExternal(
         'Tell the user what you wanted to send there instead.'
     )
   }
+
+  const messageId = newPeerMessageId()
 
   const part: PeerMessagePart = {
     fromName: 'Outside Claude Code session',
@@ -505,29 +559,35 @@ function deliverOrHoldExternal(
     route: 'peer'
   }
   if (policy === 'accept') {
-    const delivery = { part, fullText: text, fromWorkspaceId: null }
+    const delivery = { messageId, part, fullText: text, fromWorkspaceId: null }
     const buffered = target.status === 'running'
     if (buffered) bufferPeerDelivery(deps, target.id, delivery)
     else sendPeerDelivery(deps, target.id, [delivery])
     logDelivery('outside session', target, buffered ? '턴 종료까지 대기(running)' : '즉시 전달')
-    return { delivered: true, buffered, policy }
+    return { delivered: true, buffered, policy, messageId }
   }
 
   const pending: PendingPeerMessage = {
-    id: randomUUID(),
+    id: messageId,
     fromWorkspaceId: null,
     ...part,
     text,
     at: Date.now()
   }
+  const evicted: PendingPeerMessage[] = []
   getStore().update((st) => {
     const to = st.workspaces.find((w) => w.id === target.id)
     if (!to) return
-    to.peerInbox = [...(to.peerInbox ?? []), pending].slice(-MAX_PEER_INBOX)
+    const inbox = [...(to.peerInbox ?? []), pending]
+    evicted.push(...inbox.slice(0, -MAX_PEER_INBOX))
+    to.peerInbox = inbox.slice(-MAX_PEER_INBOX)
   })
+  for (const item of evicted) {
+    resolvePeerMessage(item.fromWorkspaceId, item.id, 'dropped-target-inbox-full')
+  }
   logDelivery('outside session', target, '승인 대기(hold) — 배달되지 않았다')
   deps.broadcastState()
-  return { delivered: false, buffered: false, policy }
+  return { delivered: false, buffered: false, policy, messageId }
 }
 
 /** hold 승인 경로는 accept 도착 버퍼와 섞지 않고, 사용자가 고른 즉시 한 턴으로 전달한다. */
@@ -545,8 +605,14 @@ export function deliverApprovedPeerMessage(
     route: pending.route ?? 'peer'
   }
   sendPeerDelivery(deps, workspaceId, [
-    { part, fullText: pending.text, fromWorkspaceId: pending.fromWorkspaceId }
+    {
+      messageId: pending.id,
+      part,
+      fullText: pending.text,
+      fromWorkspaceId: pending.fromWorkspaceId
+    }
   ])
+  resolvePeerMessage(pending.fromWorkspaceId, pending.id, 'delivered-after-user-approval')
 }
 
 /** 리포 안을 먼저, 그 안에서는 최근 활동 순. 잘려 나가는 쪽이 항상 덜 관련된 쪽이어야 한다. */
@@ -663,8 +729,19 @@ export const sendToWorkspace: AgentToolHandler = async (deps, workspaceId, args)
   pruneRecentSends(now)
   const key = duplicateKey(workspaceId, targetId, message)
   if (recentSends.has(key)) {
+    const messageId = newPeerMessageId()
+    recordPeerSend(workspaceId, {
+      id: messageId,
+      toWorkspaceId: target.id,
+      toName: workspaceDisplayName(target),
+      excerpt: message.replace(/\s+/g, ' ').slice(0, 80),
+      outcome: 'not-delivered-duplicate',
+      at: now,
+      outcomeAt: now
+    })
     logDelivery(workspaceDisplayName(from), target, '중복으로 폐기(60초 창)')
     return {
+      messageId,
       status: 'not-delivered-duplicate',
       delivered: false,
       duplicate: true,
@@ -676,7 +753,7 @@ export const sendToWorkspace: AgentToolHandler = async (deps, workspaceId, args)
   const crossRepo = from.repoId !== target.repoId
   // 지문은 **성공한 뒤에** 남긴다. 먼저 남기면 거절당한 전송(수신 차단)이 재시도에서 "중복"
   // 으로 보여, 모델이 진짜 이유를 두 번 다시 듣지 못한다.
-  const { delivered, buffered } = deliverOrHold(
+  const { delivered, buffered, messageId } = deliverOrHold(
     deps,
     from,
     target,
@@ -689,6 +766,7 @@ export const sendToWorkspace: AgentToolHandler = async (deps, workspaceId, args)
   if (delivered) recentSends.set(key, now)
 
   return {
+    messageId,
     // 이 한 줄이 압축을 견뎌야 한다. 아래 note 는 요약에서 가장 먼저 잘려 나가는 부분이고,
     // 그렇게 잘린 자리에서 모델은 실패한 전송을 "보냈다" 로 보고해 왔다.
     status: delivered
@@ -710,7 +788,8 @@ export const sendToWorkspace: AgentToolHandler = async (deps, workspaceId, args)
         : 'That workspace was idle, so this starts a turn there right away.'
       : 'NOT DELIVERED. Wooi is holding this for the user to approve, and it never will be ' +
         'delivered if they decline. Retrying will not change that — do not wait on a reply, ' +
-        'tell the user what you wanted to send and carry on.'
+        'tell the user what you wanted to send and carry on. `check_message_status` with the ' +
+        'id above says how it ended.'
   }
 }
 
@@ -736,15 +815,26 @@ export async function sendToWorkspaceExternal(
   pruneRecentSends(now)
   const key = duplicateKey('external', targetId, message)
   if (recentSends.has(key)) {
+    const messageId = newPeerMessageId()
+    recordPeerSend(null, {
+      id: messageId,
+      toWorkspaceId: target.id,
+      toName: workspaceDisplayName(target),
+      excerpt: message.replace(/\s+/g, ' ').slice(0, 80),
+      outcome: 'not-delivered-duplicate',
+      at: now,
+      outcomeAt: now
+    })
     logDelivery('outside session', target, '중복으로 폐기(60초 창)')
     return {
+      messageId,
       status: 'not-delivered-duplicate',
       delivered: false,
       duplicate: true,
       note: 'NOT DELIVERED. Wooi dropped this as a repeat of a message delivered moments ago.'
     }
   }
-  const { delivered, buffered } = deliverOrHoldExternal(
+  const { delivered, buffered, messageId } = deliverOrHoldExternal(
     deps,
     target,
     externalPeerMessageText(message),
@@ -753,6 +843,7 @@ export async function sendToWorkspaceExternal(
   // 앱 안 경로와 같은 이유로 실제로 닿은 전송만 남긴다(sendToWorkspace 의 주석 참고).
   if (delivered) recentSends.set(key, now)
   return {
+    messageId,
     status: delivered
       ? buffered
         ? 'delivered-when-current-turn-ends'
@@ -771,5 +862,69 @@ export async function sendToWorkspaceExternal(
         : 'That workspace was idle, so this starts a turn there right away.'
       : 'NOT DELIVERED. Wooi is holding this for the user to approve — it has not reached the ' +
         'model, and retrying will not change that.'
+  }
+}
+
+/** 발신 워크스페이스에 저장된 peer 메시지 결말만 읽는다. */
+export const checkMessageStatus: AgentToolHandler = async (_deps, workspaceId, args) => {
+  const messageId = typeof args.messageId === 'string' ? args.messageId.trim() : ''
+  if (!messageId) {
+    const recent = recentPeerMessages(workspaceId, 10)
+    return {
+      recent: recent.map((entry) => ({
+        messageId: entry.id,
+        status: entry.outcome,
+        sentTo: { workspaceId: entry.toWorkspaceId, name: entry.toName },
+        sentAt: entry.at,
+        excerpt: entry.excerpt
+      })),
+      note: recent.length
+        ? 'These are this workspace’s 10 most recent retained message outcomes, newest first.'
+        : 'This workspace has no retained sent-message outcomes.'
+    }
+  }
+
+  const sentAt = peerMessageIdSentAt(messageId)
+  const { entry, cutoff, lostAfterRestart } = lookupPeerMessage(workspaceId, messageId)
+  if (!entry) {
+    if (sentAt !== null && sentAt < cutoff) {
+      return {
+        status: 'unknown-expired',
+        final: true,
+        messageId,
+        note: 'Wooi keeps outcomes for 7 days or the last 50 messages from a workspace.'
+      }
+    }
+    return {
+      status: 'unknown-no-such-message',
+      final: true,
+      messageId,
+      note:
+        sentAt === null
+          ? 'That is not a Wooi peer message id.'
+          : 'Nothing with that id was sent from this workspace.'
+    }
+  }
+
+  const status = lostAfterRestart ? 'unknown-lost-when-wooi-restarted' : entry.outcome
+  const final =
+    lostAfterRestart ||
+    ![
+      'waiting-for-target-turn-to-end',
+      'waiting-for-user-approval',
+      'returned-waiting-for-user-approval'
+    ].includes(entry.outcome)
+  return {
+    status,
+    final,
+    messageId,
+    sentTo: { workspaceId: entry.toWorkspaceId, name: entry.toName },
+    sentAt: entry.at,
+    settledAt: entry.outcomeAt,
+    note: lostAfterRestart
+      ? 'The message was still in memory waiting for the target turn to end when Wooi stopped, so Wooi cannot say whether it arrived.'
+      : final
+        ? 'This is the final recorded outcome for that message.'
+        : 'This message has not reached a final outcome yet.'
   }
 }
