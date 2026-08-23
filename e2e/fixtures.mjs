@@ -28,6 +28,8 @@ export async function seedAppState(
     workspaceName = Object.keys(worktrees)[0],
     transcript = [],
     peerSent = [],
+    // "물려받았다" 를 확인하는 스펙은 기본값과 **다른** 값에서 출발해야 한다 — 기본값 그대로면
+    // 상속했는지 전역 기본을 다시 읽었는지 구별되지 않는다.
     workspace: workspaceOverrides = {}
   } = {}
 ) {
@@ -148,6 +150,22 @@ export async function openSeededWorkspace(win) {
   }
   await header.waitFor()
   return header
+}
+
+/**
+ * 시드된 워크스페이스의 사이드바 행. 행 전체가 우클릭 대상이므로 안쪽 이름 스팬을 잡으면
+ * 컨텍스트 메뉴가 열리지 않는다 — 그 차이를 스펙마다 다시 알아내지 않게 여기 둔다.
+ */
+export function seededWorkspaceRow(win) {
+  return win.locator('[role="button"]').filter({ hasText: E2E_WORKSPACE_DISPLAY_NAME }).first()
+}
+
+/** 행 컨텍스트 메뉴를 열고 이름으로 항목을 돌려준다(비활성 항목도 남아 있으므로 그대로 잡힌다). */
+export async function openRowMenuItem(win, name) {
+  await seededWorkspaceRow(win).click({ button: 'right' })
+  const item = win.getByRole('menuitem', { name })
+  await item.waitFor()
+  return item
 }
 
 /** 수동 PNG 확인이 필요할 때만 scratch 정리 전에 창을 유지한다. */
