@@ -607,6 +607,21 @@ interface BranchPushTarget {
  * checkout 을 만든 주체가 기록한 tracking 설정을 push 의 단일 소스로 쓴다. 특히 fork PR 은
  * remote 이름 없이 URL 자체를 pushremote 로 남기므로, `origin` 으로 정규화하면 성공한 척 base
  * 리포에 동명 브랜치를 만드는 더 위험한 실패가 된다.
+ *
+ * ── 자동으로 붙은 tracking 은 목적지가 아니다 (실측) ──────────────────────────
+ * tracking 설정을 남기는 주체가 `gh pr checkout` 만인 것은 아니다. Wooi 는 워크트리를
+ * `git worktree add -b <branch> <path> origin/<default>` 로 만드는데, 시작점이 remote-tracking
+ * ref 라 git 이 **스스로** upstream 을 걸어 준다(autoSetupMerge 기본값). 그래서 아직 한 번도
+ * push 하지 않은 워크스페이스는 전부 `branch.<name>.merge = refs/heads/main` 을 들고 있다.
+ *
+ * 그걸 목적지로 읽으면 그 브랜치의 tip 이 **`main` 으로 force-push 된다**. 실측(2026-08-23,
+ * stacked-pr-playground): 워크스페이스 커밋이 두 번 main 에 얹혔고, 미push 워크스페이스에서
+ * 이 함수가 만드는 명령을 dry-run 하면 `+ 14ace7a...f71c618 HEAD -> main (forced update)` 로
+ * **main 을 되감는다**. restack 버튼 한 번, PR 만들기 한 번으로 나갈 수 있는 경로였다.
+ *
+ * 그래서 "리포 자신(origin)의 기본 브랜치를 가리키는데 내 이름과 다르다" 면 자동으로 붙은
+ * 것으로 보고 자기 브랜치로 떨어뜨린다. 진짜 fork PR 은 pushRemote(URL)를 들고 있어 걸리지
+ * 않고, 같은 리포 PR 의 head 는 기본 브랜치일 수 없다(main→main PR 은 열리지 않는다).
  */
 export async function resolveBranchPushTarget(worktreePath: string): Promise<BranchPushTarget> {
   const branch = await git(worktreePath, ['rev-parse', '--abbrev-ref', 'HEAD'])
@@ -618,7 +633,12 @@ export async function resolveBranchPushTarget(worktreePath: string): Promise<Bra
   const remote = pushRemote || (await config(`branch.${branch}.remote`)) || 'origin'
   const merge = await config(`branch.${branch}.merge`)
   const destination = merge.startsWith('refs/heads/') ? merge.slice('refs/heads/'.length) : merge
-  return { branch, remote, destination: destination || branch }
+  if (!destination || destination === branch) return { branch, remote, destination: branch }
+  if (!pushRemote && remote === 'origin') {
+    const defaultBranch = await detectDefaultBranch(worktreePath).catch(() => '')
+    if (destination === defaultBranch) return { branch, remote, destination: branch }
+  }
+  return { branch, remote, destination }
 }
 
 /**

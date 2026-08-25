@@ -254,6 +254,48 @@ describe('branch tracking push target', () => {
     )
     expect(git(worktree, ['ls-remote', '--heads', remote, 'refs/heads/pr-head'])).toBe('')
   })
+
+  // Wooi 는 워크트리를 `worktree add -b <branch> <path> origin/<default>` 로 만들고, 시작점이
+  // remote-tracking ref 라 git 이 스스로 upstream 을 건다. 그 자동 설정을 push 목적지로 읽으면
+  // 워크스페이스 브랜치가 **기본 브랜치를 덮어쓴다** — 실측으로 두 번 일어난 사고다.
+  it('worktree add 가 자동으로 건 기본 브랜치 tracking 은 push 목적지가 아니다', async () => {
+    git(worktree, ['branch', '-m', 'main'])
+    git(worktree, ['push', '-q', 'origin', 'main'])
+    git(worktree, ['update-ref', 'refs/remotes/origin/main', git(worktree, ['rev-parse', 'HEAD'])])
+    git(worktree, ['symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main'])
+
+    const child = join(root, 'child')
+    git(worktree, ['worktree', 'add', '-q', '-b', 'feature', child, 'origin/main'])
+    // 전제 확인: git 이 정말로 upstream 을 걸어 준다. 이게 거짓이면 이 테스트는 무의미하다.
+    expect(git(child, ['config', '--get', 'branch.feature.merge'])).toBe('refs/heads/main')
+
+    await expect(resolveBranchPushTarget(child)).resolves.toEqual({
+      branch: 'feature',
+      remote: 'origin',
+      destination: 'feature'
+    })
+
+    const mainBefore = git(origin, ['rev-parse', 'refs/heads/main'])
+    writeFileSync(join(child, 'file.txt'), 'two\n')
+    git(child, ['commit', '-qam', 'two'])
+    await expect(pushCurrentBranch(child)).resolves.toMatchObject({ ok: true })
+
+    expect(git(origin, ['rev-parse', 'refs/heads/feature'])).toBe(git(child, ['rev-parse', 'HEAD']))
+    // 핵심 단언 — 기본 브랜치는 움직이지 않는다.
+    expect(git(origin, ['rev-parse', 'refs/heads/main'])).toBe(mainBefore)
+  })
+
+  // 반대편 경계: fork PR 은 pushRemote(URL)를 들고 오므로 위 가드에 걸리면 안 된다.
+  it('pushremote 가 있으면 destination 이 기본 브랜치여도 그대로 존중한다', async () => {
+    git(worktree, ['symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main'])
+    git(worktree, ['config', 'branch.local-name.pushRemote', pushRemote])
+    git(worktree, ['config', 'branch.local-name.merge', 'refs/heads/main'])
+    await expect(resolveBranchPushTarget(worktree)).resolves.toEqual({
+      branch: 'local-name',
+      remote: pushRemote,
+      destination: 'main'
+    })
+  })
 })
 
 describe('PR workspace checkout', () => {
