@@ -24,10 +24,10 @@ describe('codexToolResult', () => {
     })
   })
 
-  it('비텍스트 MCP 콘텐츠는 정보가 사라지지 않게 JSON 폴백한다', () => {
-    const result = { content: [{ type: 'image', data: 'opaque' }] }
+  it('MCP 바이너리 콘텐츠는 base64 대신 사람이 읽을 설명만 남긴다', () => {
+    const result = { content: [{ type: 'image', mimeType: 'image/png', data: 'opaque' }] }
     expect(codexToolResult({ type: 'mcpToolCall', result }).text).toBe(
-      JSON.stringify(result, null, 2)
+      '[Image content omitted (image/png)]'
     )
   })
 
