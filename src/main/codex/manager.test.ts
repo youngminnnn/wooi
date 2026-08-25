@@ -27,11 +27,7 @@ vi.mock('../rateLimitResume', () => ({
   }
 }))
 
-import {
-  CODEX_ACCOUNT_CONFIG_COMMANDS,
-  CodexSessionManager,
-  parseReviewTarget
-} from './manager'
+import { CODEX_ACCOUNT_CONFIG_COMMANDS, CodexSessionManager, parseReviewTarget } from './manager'
 
 describe('Codex account/configuration command catalog', () => {
   it('advertises every locally handled account/configuration command exactly once', () => {
