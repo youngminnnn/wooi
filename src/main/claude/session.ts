@@ -176,11 +176,25 @@ const AUTO_COMPACT_FALLBACK_PERCENT = 92
  *
  * 그래서 근사하지 않고 SDK 가 준 값을 그대로 쓴다.
  */
+/** 안내에 쓰는 토큰 표기(1,000 단위로 접는다 — 정확한 자릿수가 판단을 바꾸지 않는다). */
+function formatTokens(n: number): string {
+  return n >= 1000 ? `${Math.round(n / 1000)}k` : String(n)
+}
+
 function overAutoCompactThreshold(ctx: ContextUsage): boolean {
   const threshold = ctx.autoCompactThreshold
   if (typeof threshold === 'number' && threshold > 0) return ctx.totalTokens >= threshold
   return ctx.percentage >= AUTO_COMPACT_FALLBACK_PERCENT
 }
+
+/**
+ * 콜드 resume 안내를 남길 기준(토큰).
+ *
+ * 임계치를 **비율이 아니라 절대 토큰 수**로 잡는다 — 다시 읽는 값은 창의 몇 %냐가 아니라 몇
+ * 토큰이냐에 비례하기 때문이다. 1M 창 세션의 20% 는 여전히 200K 토큰이고, 그건 알릴 값어치가
+ * 있다. 반대로 200K 창의 20%(40K)까지 매번 알리면 안내가 소음이 된다.
+ */
+const LARGE_RESUME_NOTICE_TOKENS = 100_000
 
 /** getContextUsage 제어 요청 상한. 지연돼도 미터·자동압축 판단이 멈추지 않도록 둔다. */
 const CONTEXT_USAGE_TIMEOUT_MS = 5000
@@ -633,6 +647,23 @@ export class ClaudeSession {
         parent_tool_use_id: null
       })
       return
+    }
+
+    // 압축할 만큼은 아니어도 큰 세션이라면, 이어가는 값이 얼마인지는 알려 준다. 콜드 resume 은
+    // 이 맥락을 디스크에서 되살려 캐시에 새로 써 넣는다 — 세션이 다시 열릴 때마다 무는 비용이
+    // 바로 이것이고, 그걸 모르면 사용량이 왜 빨리 도는지 알 길이 없다.
+    //
+    // **자동으로 압축하지 않는다.** 이어갈지 `/clear` 할지는 사용자의 판단이다 — 여기서는 사실만
+    // 적고 결정은 넘긴다. (자동 압축을 꺼 둔 세션은 preflight 자체를 돌지 않아 이 안내도 없다.)
+    if (ctx.totalTokens >= LARGE_RESUME_NOTICE_TOKENS) {
+      this.emitItem({
+        id: `system:resume-size:${Date.now()}`,
+        type: 'system',
+        text:
+          `Picking this conversation back up restores about ${formatTokens(ctx.totalTokens)} tokens ` +
+          'of context from disk. Use /clear to start fresh if you no longer need the history.',
+        ts: Date.now()
+      })
     }
 
     this.flushBuffered()
