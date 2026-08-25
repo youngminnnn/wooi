@@ -118,23 +118,41 @@ git log --oneline $(git describe --tags --abbrev=0)..main
 
 ## 7. 릴리스 절차
 
-1. **번호를 정한다** — [§2](#2-어느-자리를-올릴까).
-2. **`release/vX.Y.Z` 브랜치**를 만들고 `package.json` 의 `version` 을 bump 한 뒤
+1. **내보낼 대상을 검증한다.** 빌드한 뒤 공유 하네스로 전체 Electron e2e 스위트를 돌린다.
+   ```bash
+   npm run build
+   WOOI_E2E_HARNESS=/absolute/path/to/wooi-run/harness npm run e2e
+   ```
+   `WOOI_E2E_HARNESS`가 무엇이고 어떻게 설정하는지는
+   [`e2e/README.md`](../e2e/README.md)를 참고한다.
+   마지막 `[e2e] N passed, M failed` 개수(또는 `.wooi-e2e/report.json` 의 `total`)로
+   스펙이 실제 실행됐는지 확인한다. 하네스가 없거나 잘못되면 `SKIP` 을 출력하고도 0으로
+   종료하므로 종료 코드만 초록이면 충분하지 않다. 실패 내용은 `report.json` 에서 읽고,
+   고치는 동안 `npm run e2e -- --only <name>` 으로 실패한 스펙만 다시 돌린다. 다 고친 뒤에는
+   전체 스위트를 한 번 더 돌린다.
+
+   실제로 설치된 CLI와 자격증명이 필요해 다른 곳에서는 늘 건너뛰는 테스트도 실행한다.
+   ```bash
+   WOOI_E2E=1 WOOI_E2E_AGENTS=1 WOOI_E2E_CHOICE=1 npx vitest run src/main/claude/session.hooks.e2e.test.ts src/main/claude/session.restart.e2e.test.ts src/main/subagent/run.e2e.test.ts src/main/subagent/choice.e2e.test.ts
+   ```
+   전체 e2e 스위트와 이 가드 테스트가 모두 초록이 되기 전에는 태그 단계로 넘어가지 않는다.
+2. **번호를 정한다** — [§2](#2-어느-자리를-올릴까).
+3. **`release/vX.Y.Z` 브랜치**를 만들고 `package.json` 의 `version` 을 bump 한 뒤
    `npm install` 로 `package-lock.json` 을 따라오게 한다.
-3. **`release: vX.Y.Z` 로 커밋**한다. 본문에는 이전 태그 이후의 사용자 눈에 보이는
+4. **`release: vX.Y.Z` 로 커밋**한다. 본문에는 이전 태그 이후의 사용자 눈에 보이는
    변경을 나열한다(나중에 메인테이너가 읽는 요약이 된다).
-4. **`main` 에 병합**한다.
-5. **병합 커밋에 태그를 달아 push** 한다.
+5. **`main` 에 병합**한다.
+6. **병합 커밋에 태그를 달아 push** 한다.
    ```bash
    git checkout main && git pull
    git tag "v$(node -p "require('./package.json').version")"
    git push origin "v$(node -p "require('./package.json').version")"
    ```
    태그를 `package.json` 에서 파생시키면 아래의 불일치 사고를 원천 차단할 수 있다.
-6. **나머지는 `build.yml` 이 한다** — 태그와 `package.json` 일치 검증, 서명 시크릿
+7. **나머지는 `build.yml` 이 한다** — 태그와 `package.json` 일치 검증, 서명 시크릿
    확인, 빌드·서명·공증, `codesign`/`stapler`/`spctl` 재검증, 그리고 자동 생성 노트로
    GitHub Release 생성.
-7. **이어서 `homebrew-tap` 잡이 돈다** — 방금 올라간 `Wooi-arm64.dmg` 를 다시 받아
+8. **이어서 `homebrew-tap` 잡이 돈다** — 방금 올라간 `Wooi-arm64.dmg` 를 다시 받아
    해시를 계산하고, `build/homebrew/wooi.rb` 에 새 버전과 `sha256` 을 채워
    `youngminnnn/homebrew-tap` 의 `Casks/wooi.rb` 로 push 한다. 그래야
    `brew install --cask youngminnnn/tap/wooi` 가 새 빌드를 가리킨다. tap 저장소에
@@ -158,7 +176,7 @@ bump 없이 `v1.1.0` 태그만 밀면 빌드는 **성공한다**. 대신 릴리�
 저장소는 이미 Conventional Commits 형식의 PR 제목을 squash merge 하고 있고, 그게 정확히
 release-please 의 입력이다. 도입하면 §2 를 통째로 넘길 수 있고(사람이 번호를 고르지
 않는다), `CHANGELOG.md` 를 유지해 주며, 버전 bump PR 생성과 태그 push 까지 자동화된다.
-위 절차 1~5 단계가 대체된다.
+위 절차 2~6 단계가 대체된다.
 
 다만 §3 의 주 1회 리듬이 자리잡은 뒤에 붙이는 게 낫다. 자동화가 먼저 오면 지금의
 습관이 봇에 그대로 굳는다.
