@@ -85,6 +85,11 @@ describe('회전', () => {
     expect(statSync(main).size).toBeLessThanOrEqual(MAX_BYTES)
   })
 
+  // 20,000 줄을 동기로 쓰는 처리량 검사라 vitest 기본 5초에 부하로 밀린다. 워커 예산은 이미
+  // 루트 maxWorkers 로 묶었지만([[vitest-worker-budget]]) 그것이 잡는 것은 vitest 안의 경합뿐이고,
+  // 같은 머신에서 다른 워크스페이스가 돌면 코어는 그대로 초과 구독된다. 이 테스트가 지키는 것은
+  // **불변식**(파일이 상한 안에 남는다)이지 시간 예산이 아니므로, 단언은 그대로 두고 시계만 넉넉히
+  // 준다 — 간헐적으로 빨개지는 게이트는 아무도 믿지 않는다.
   it('폭주해도 파일은 상한 안에 머무른다', async () => {
     const { log } = await freshLogger(dir)
     // 같은 줄 접기를 우회하려고 매번 다른 줄을 쓴다.
@@ -92,7 +97,7 @@ describe('회전', () => {
 
     expect(statSync(main).size).toBeLessThanOrEqual(MAX_BYTES)
     expect(statSync(rotated).size).toBeLessThanOrEqual(MAX_BYTES)
-  })
+  }, 30_000)
 })
 
 describe('되먹임 차단', () => {

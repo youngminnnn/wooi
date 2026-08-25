@@ -163,9 +163,10 @@ created that workspace. Results are capped at 20 workspaces and 50 paths per wor
 overlapping workspaces are prioritized. A `note` states whether anything overlaps and, when
 it does, directs the caller to tell the user before editing those paths.
 
-This tool's definition is always loaded into the system prompt (`alwaysLoad`). Left behind
-tool search like the others, it is only reachable by an agent that already suspects an
-overlap — which is exactly the agent that does not need it.
+This check runs only when you ask for it — by saying so, or with `/wooi:related`. The agent
+does not run it on its own before editing. It used to, and the cost outweighed the value: the
+definition rode in every request for every workspace, and a single answer can carry hundreds
+of paths. The trade is deliberate — if you never ask, an overlap surfaces at merge time.
 
 ## Stacked-workspace coordination
 
