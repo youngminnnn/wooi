@@ -92,6 +92,7 @@ import type {
   WorkspaceUsageInfo
 } from '@shared/types'
 import { matchWooiCommand, parseWooiCommandArgs, wooiCommandName } from '@shared/wooiCommands'
+import { matchUnavailableCommand } from '@shared/unavailableCommands'
 import { conversationForkDisabledReason, parseForkCommand } from '../lib/conversationFork'
 import type { WooiCommandSpec } from '@shared/wooiCommands'
 import { openSettings } from '../lib/settingsNavigation'
@@ -358,6 +359,15 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
       setLoadingCommands(false)
     })
   }, [slashQuery, fresh, loadingCommands, workspace.id, commandsKey])
+
+  /**
+   * 이 워크스페이스가 실제로 답할 수 있는 명령 이름(별칭 포함).
+   * 미지원 명령 게이트가 사용자의 개인 명령을 가로채지 않도록 하는 데 쓴다([[shared/unavailableCommands]]).
+   */
+  const knownCommandNames = useMemo(
+    () => (fresh ? fresh.flatMap((c) => [c.name, ...(c.aliases ?? [])]) : undefined),
+    [fresh]
+  )
 
   // 접두사 우선, 없으면 부분일치로 필터링. 접두사 매치를 위로 올린다.
   const matches = useMemo(() => {
@@ -743,6 +753,19 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
       setPickerCard(null)
       setWooiCard(null)
       void window.api.chat.sideQuestion(workspace.id, question)
+      setText('')
+      historyIdx.current = -1
+      return
+    }
+
+    // 터미널 Claude Code 전용 명령은 CLI 로 흘려보내지 않는다 — 흘려보내면 실패 메시지가
+    // Claude Code 의 목소리로 돌아와, 사용자에게는 Wooi 가 하는 말처럼 읽힌다. 대안이 있으면
+    // 어디로 가면 되는지 Wooi 가 직접 알려 준다([[shared/unavailableCommands]]).
+    // 목록을 아직 못 받았으면(undefined) 게이트는 평소대로 동작한다 — 목록은 사용자가 `/` 를 치는
+    // 순간 lazy 하게 받아 두므로, 슬래시 명령을 타이핑해 보내는 흐름에서는 대개 이미 도착해 있다.
+    const unavailable = images.length ? null : matchUnavailableCommand(trimmed, knownCommandNames)
+    if (unavailable) {
+      pushToast('info', unavailable.message)
       setText('')
       historyIdx.current = -1
       return

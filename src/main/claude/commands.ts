@@ -5,6 +5,7 @@ import { resolveClaudeExecutable } from './executable'
 import { MCP_SETTING_SOURCES } from './mcp'
 import { resolveWooiPlugin } from '../agent/plugin'
 import { INTERACTIVE_COMMANDS } from '@shared/types'
+import { isHiddenSdkCommand } from '@shared/unavailableCommands'
 import type { SlashCommandInfo } from '@shared/types'
 
 /**
@@ -160,13 +161,16 @@ async function fetchCommands(cwd: string, team: boolean): Promise<SlashCommandIn
       setTimeout(() => reject(new Error('supportedCommands timed out')), FETCH_TIMEOUT_MS)
     )
     const commands = await Promise.race([q.supportedCommands(), timeout])
-    const fromSdk = commands.map((c) => ({
-      name: c.name,
-      description: c.description ?? '',
-      argumentHint: c.argumentHint || undefined,
-      // SDK 가 돌려주는 별칭(예: /cost·/stats → /usage)을 자동완성 매칭에 함께 싣는다.
-      ...(c.aliases && c.aliases.length ? { aliases: c.aliases } : {})
-    }))
+    // Wooi 에서 의미가 없거나 CLI 내부용인 명령은 자동완성에서 감춘다([[shared/unavailableCommands]]).
+    const fromSdk = commands
+      .filter((c) => !isHiddenSdkCommand(c.name))
+      .map((c) => ({
+        name: c.name,
+        description: c.description ?? '',
+        argumentHint: c.argumentHint || undefined,
+        // SDK 가 돌려주는 별칭(예: /cost·/stats → /usage)을 자동완성 매칭에 함께 싣는다.
+        ...(c.aliases && c.aliases.length ? { aliases: c.aliases } : {})
+      }))
 
     return mergeCommands(fromSdk)
   } finally {
