@@ -661,6 +661,24 @@ export class ClaudeSession {
   }
 
   /**
+   * 모델 오버라이드를 살아 있는 query 위에서 바꾼다(SDK 의 setModel — 이어지는 응답부터 적용).
+   *
+   * **세션을 버리지 않는 것이 요점이다.** 예전에는 매니저가 dispose 했는데, 그러면 다음 메시지가
+   * resume 으로 query 를 다시 열면서 디스크 트랜스크립트를 통째로 다시 입력으로 보내고, CLI
+   * 프로세스와 MCP 서버까지 새로 띄운다. 모델을 한 번 갈아 보는 값으로는 너무 비싸다.
+   *
+   * 프롬프트 캐시가 이걸로 살아나지는 않는다 — 캐시는 모델별이라 어차피 갈린다. 사라지는 것은
+   * 재시작·재생·재기동 쪽이고, A→B→A 로 되돌아왔을 때 원래 캐시가 아직 살아 있을 여지가 남는다.
+   *
+   * deps 도 함께 갱신한다 — 이 세션이 나중에 다시 열릴 때(프로세스 교체·크래시 복구) 새 모델로
+   * 열려야 한다.
+   */
+  async setModel(model: string | null): Promise<void> {
+    this.deps.model = model
+    await this.q?.setModel(model ?? undefined).catch(() => {})
+  }
+
+  /**
    * 계획 승인 결과를 반영한다(plan → acceptEdits/default).
    *
    * 우리 값이 다음 query 에도 남도록 deps 는 즉시 갱신하되, 라이브 query 로 보내는 제어 요청은

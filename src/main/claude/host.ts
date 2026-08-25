@@ -161,6 +161,10 @@ async function handle(msg: HostCommand): Promise<void> {
       await sessions.get(msg.workspaceId)?.setPermissionMode(msg.mode)
       break
 
+    case 'setModel':
+      await sessions.get(msg.workspaceId)?.setModel(msg.model)
+      break
+
     case 'dispose':
       dispose(msg.workspaceId)
       break

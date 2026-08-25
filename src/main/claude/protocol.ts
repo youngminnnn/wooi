@@ -162,6 +162,12 @@ export type HostCommand =
   | { type: 'forcedIdle'; workspaceId: string }
   | { type: 'stopTask'; workspaceId: string; taskId: string }
   | { type: 'setPermissionMode'; workspaceId: string; mode: ClaudePermissionMode }
+  /**
+   * 모델 오버라이드를 **살아 있는 세션 위에서** 바꾼다. 세션을 버리고 다시 여는 대신 이 명령을
+   * 쓰는 이유는 [[claude/session]] setModel 에 적혀 있다(디스크 트랜스크립트 재생·프로세스·MCP
+   * 재기동 비용). effort·fastMode 는 SDK 에 등가 제어가 없어 여전히 dispose 로 간다.
+   */
+  | { type: 'setModel'; workspaceId: string; model: string | null }
   | { type: 'dispose'; workspaceId: string }
   | { type: 'disposeAll' }
   | {

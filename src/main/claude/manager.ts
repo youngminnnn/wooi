@@ -554,48 +554,80 @@ export class SessionManager implements AgentBackend {
   }
 
   /**
-   * 모델 오버라이드를 바꾼다. 모델은 query 시작 시점에 고정되므로 기존 세션은 dispose 한다 —
-   * 다음 메시지에서 새 모델로 query 를 다시 열되 resume(세션 ID)로 대화 맥락을 이어받는다.
+   * 고른 값이 지금 값과 같으면 아무것도 하지 않도록, store 갱신을 "실제로 바뀌었을 때만" 으로
+   * 감싼다. 바뀌지 않았다고 알려 주면 부르는 쪽이 dispose 를 건너뛴다 — 이미 선택된 항목을 다시
+   * 누른 것만으로 멀쩡한 세션을 버리고, 다음 메시지가 트랜스크립트를 통째로 다시 읽게 되던
+   * 경로가 여기서 끊긴다.
+   */
+  private updateIfChanged(
+    workspaceId: string,
+    isSame: (w: Workspace) => boolean,
+    apply: (w: Workspace) => void
+  ): boolean {
+    let changed = false
+    getStore().update((st) => {
+      const w = st.workspaces.find((x) => x.id === workspaceId)
+      if (!w || isSame(w)) return
+      apply(w)
+      changed = true
+    })
+    return changed
+  }
+
+  /**
+   * 모델 오버라이드를 바꾼다.
+   *
+   * 세션을 버리지 않는다 — SDK 의 `Query.setModel` 로 **살아 있는 세션 위에서** 갈아 끼운다
+   * ([[claude/session]] setModel 에 비용 근거가 있다). 라이브 query 가 없으면(첫 메시지 전, 또는
+   * 이미 정리된 세션) store 만 갱신하면 된다 — 다음 query 가 새 모델로 열린다.
    */
   setModel(workspaceId: string, model: string | null): void {
-    getStore().update((st) => {
-      const w = st.workspaces.find((x) => x.id === workspaceId)
-      if (w) w.model = model
-    })
-    this.dispose(workspaceId)
+    const changed = this.updateIfChanged(
+      workspaceId,
+      (w) => w.model === model,
+      (w) => {
+        w.model = model
+      }
+    )
+    if (!changed) return
+    this.sendIfHost({ type: 'setModel', workspaceId, model })
   }
 
   /**
-   * reasoning effort 오버라이드를 바꾼다. effort 는 모델과 마찬가지로 query 시작 시점에 고정되므로
-   * 기존 세션을 dispose 한다 — 다음 메시지에서 새 effort 로 query 를 다시 열되 resume(세션 ID)로
-   * 대화 맥락을 이어받는다.
+   * reasoning effort 오버라이드를 바꾼다. effort 는 query 시작 시점에 고정되고 SDK 에 이를 갈아
+   * 끼울 제어 메서드가 없으므로(모델과 달리) 기존 세션을 dispose 한다 — 다음 메시지에서 새 effort
+   * 로 query 를 다시 열되 resume(세션 ID)로 대화 맥락을 이어받는다.
    */
   setEffort(workspaceId: string, effort: EffortSetting | null): void {
-    getStore().update((st) => {
-      const w = st.workspaces.find((x) => x.id === workspaceId)
-      if (w) w.effort = effort
-    })
-    this.dispose(workspaceId)
+    const changed = this.updateIfChanged(
+      workspaceId,
+      (w) => w.effort === effort,
+      (w) => {
+        w.effort = effort
+      }
+    )
+    if (changed) this.dispose(workspaceId)
   }
 
   /**
-   * fast mode 오버라이드를 바꾼다. fast mode 는 query 시작 시점의 settings 레이어로 전달되므로
-   * 모델·effort 와 마찬가지로 기존 세션을 dispose 한다 — 다음 메시지에서 새 값으로 query 를 다시
-   * 열되 resume(세션 ID)로 대화 맥락을 이어받는다.
+   * fast mode 오버라이드를 바꾼다. fast mode 는 query 시작 시점의 settings 레이어로 전달되고
+   * effort 와 마찬가지로 갈아 끼울 제어 메서드가 없으므로 기존 세션을 dispose 한다 — 다음
+   * 메시지에서 새 값으로 query 를 다시 열되 resume(세션 ID)로 대화 맥락을 이어받는다.
    *
    * 실제 적용 여부는 CLI 가 정한다(지원 모델·플랜·쿨다운). 그래서 이전 세션이 보고했던 상태는
    * 여기서 지워, 새 세션의 result 가 알려 줄 때까지 "미확인" 으로 둔다.
    */
   setFastMode(workspaceId: string, fastMode: boolean | null): void {
-    getStore().update((st) => {
-      const w = st.workspaces.find((x) => x.id === workspaceId)
-      if (w) {
+    const changed = this.updateIfChanged(
+      workspaceId,
+      (w) => w.fastMode === fastMode,
+      (w) => {
         w.fastMode = fastMode
         w.fastModeState = null
         w.fastModeReason = null
       }
-    })
-    this.dispose(workspaceId)
+    )
+    if (changed) this.dispose(workspaceId)
   }
 
   /**
