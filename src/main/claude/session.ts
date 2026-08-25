@@ -899,7 +899,19 @@ export class ClaudeSession {
         )
       }
     } catch (err) {
-      retrying = this.handleQueryDeath(err, stalled)
+      // 남은 일이 없는 query 가 던지고 끝나는 것은 사용자에게 보고할 사고가 아니다 — 유휴 세션
+      // 정리([[agent/orchestrator]] trimIdleSessions)로 우리가 끊은 경우가 대표적이고, 다음 전송이
+      // resume 으로 같은 대화를 이어 간다. 그래서 예외 없이 끝난 경우와 같은 기준으로 가른다.
+      //
+      // 이 갈림이 없으면 조용해야 할 정리가 오류 카드로 샌다: SDK 는 프로세스 종료 오류를 마지막
+      // **오류 result 의 문구로 갈아 끼우므로**(sdk.mjs readMessages), 사용량 제한으로 멈춰 이어가기를
+      // 기다리던 세션을 정리하면 "Claude Code returned an error result: You've hit your session
+      // limit…" 이 한참 뒤 오류 카드 + 알림으로 떠, 이미 끝난 제한을 사고처럼 두 번 알린다.
+      if (this.diedWithWorkPending()) {
+        retrying = this.handleQueryDeath(err, stalled)
+      } else {
+        log.info(`session: query ended with no work pending (${String(err)}) — not surfacing`)
+      }
     } finally {
       clearTimeout(watchdog)
       this.q = null
@@ -1033,6 +1045,9 @@ export class ClaudeSession {
    * dispose 로 입력 큐를 닫아 정상 종료한 경우와, 애초에 할 일이 없어 끝난 경우(예: /mcp warm-up)는
    * 제외한다. 남은 일이란 진행 중이던 턴(active), 아직 방출되지 않은 preflight 버퍼,
    * 또는 우리가 의도적으로 요청한 프로세스 교체다.
+   *
+   * **조용히 끝났든 예외를 던졌든 같은 기준을 쓴다** — 남은 일이 없다면 죽음의 모양은 사용자와
+   * 무관하고, 다음 전송이 resume 으로 같은 대화를 이어 간다.
    */
   private diedWithWorkPending(): boolean {
     if (this.input.isClosed) return false
