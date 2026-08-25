@@ -26,7 +26,7 @@ export type ItemStatus = 'inProgress' | 'completed' | 'failed' | 'declined'
 /** 오류 payload — 턴 실패와 error 알림이 같은 모양을 쓴다. */
 export interface CodexError {
   message?: string
-  /** `ContextWindowExceeded` · `UsageLimitExceeded` · `Unauthorized` 등. 문자열로 열어 둔다. */
+  /** `contextWindowExceeded` · `usageLimitExceeded` · `unauthorized` 등. 문자열로 열어 둔다. */
   codexErrorInfo?: string
   additionalDetails?: unknown
 }

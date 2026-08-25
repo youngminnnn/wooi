@@ -14,7 +14,9 @@ import type { RpcClient } from './jsonrpc'
  * 이 순서가 깨지거나 추적을 놓치면 사용자가 **내용을 못 보고 패치를 승인**하게 되므로 고정해 둔다.
  */
 
-function makeThread() {
+function makeThread(
+  options: { onRateLimit?: () => void; autoResumeAfterRateLimit?: boolean } = {}
+) {
   const events: ChatEvent[] = []
   const persisted: ChatItem[] = []
   const thread = new CodexThread(
@@ -27,13 +29,15 @@ function makeThread() {
       permissionMode: 'default',
       delegateBackends: [],
       delegateInstructions: null,
-      resumeThreadId: null
+      resumeThreadId: null,
+      autoResumeAfterRateLimit: options.autoResumeAfterRateLimit
     },
     {
       rpc: () => Promise.reject(new Error('not used')),
       emit: (e) => events.push(e),
       persist: (i) => persisted.push(i),
       onThreadId: () => {},
+      onRateLimit: options.onRateLimit,
       settleIdle: () => {}
     }
   )
@@ -229,6 +233,30 @@ describe('턴 추적', () => {
     })
     expect(events).toEqual([])
   })
+})
+
+describe('사용량 제한', () => {
+  it.each(['usageLimitExceeded', 'UsageLimitExceeded'])(
+    '%s 오류를 자동 이어가기 경로에 알린다',
+    (codexErrorInfo) => {
+      const onRateLimit = vi.fn()
+      const { thread, events } = makeThread({
+        onRateLimit,
+        autoResumeAfterRateLimit: true
+      })
+
+      thread.handleNotification(NOTIFY.turnCompleted, {
+        turn: {
+          id: 't1',
+          status: 'failed',
+          error: { message: 'limit', codexErrorInfo }
+        }
+      })
+
+      expect(onRateLimit).toHaveBeenCalledOnce()
+      expect(events).toEqual([])
+    }
+  )
 })
 
 describe('skill 호출', () => {

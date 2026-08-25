@@ -65,6 +65,16 @@ describe('스레드·턴 수명주기', () => {
     const r = map(NOTIFY.turnCompleted, {
       turn: {
         status: 'failed',
+        error: { message: 'limit', codexErrorInfo: 'usageLimitExceeded' }
+      }
+    })
+    expect((items(r)[0] as { text: string }).text).toMatch(/usage limit/i)
+  })
+
+  it('구버전 PascalCase 오류 분류도 안내한다', () => {
+    const r = map(NOTIFY.turnCompleted, {
+      turn: {
+        status: 'failed',
         error: { message: 'limit', codexErrorInfo: 'UsageLimitExceeded' }
       }
     })
