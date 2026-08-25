@@ -16,7 +16,8 @@ import { useStore } from '../store'
 import { isPaneWindow } from '../lib/paneWindow'
 import type { Workspace } from '@shared/types'
 
-type Tab = 'files' | 'changes' | 'commits' | 'check' | 'preview'
+type Tab = 'files' | 'changes' | 'check' | 'preview'
+type ChangesView = 'changes' | 'commits'
 
 const TABS: {
   id: Tab
@@ -25,7 +26,6 @@ const TABS: {
 }[] = [
   { id: 'files', label: 'All files', icon: Files },
   { id: 'changes', label: 'Changes', icon: GitCompare },
-  { id: 'commits', label: 'Commits', icon: GitCommitVertical },
   { id: 'check', label: 'Check', icon: CheckCheck },
   { id: 'preview', label: 'Preview', icon: MonitorPlay }
 ]
@@ -33,6 +33,7 @@ const TABS: {
 /** 우상단 탭 패널: All files / Changes / Check / Preview. */
 export default function WorkPanel({ workspace }: { workspace: Workspace }): React.JSX.Element {
   const [tab, setTab] = useState<Tab>('changes')
+  const [changesView, setChangesView] = useState<ChangesView>('changes')
   const detachPane = useStore((s) => s.detachPane)
 
   // Preview 는 한 번 연 뒤로는 계속 붙여 둔다(탭을 옮길 때마다 언마운트하면 보고 있던 dev
@@ -108,9 +109,47 @@ export default function WorkPanel({ workspace }: { workspace: Workspace }): Reac
       <div className="flex-1 min-h-0">
         {tab === 'files' && <FileBrowser workspaceId={workspace.id} />}
         {tab === 'changes' && (
-          <ChangesPanel workspaceId={workspace.id} baseBranch={workspace.baseBranch} />
+          <div className="h-full flex flex-col min-h-0">
+            <div
+              role="tablist"
+              aria-label="Changes view"
+              className="h-9 shrink-0 flex items-center gap-1 px-3 border-b border-[var(--border)]"
+            >
+              {(
+                [
+                  { id: 'changes', label: 'Changes', icon: GitCompare },
+                  { id: 'commits', label: 'Commits', icon: GitCommitVertical }
+                ] as const
+              ).map(({ id, label, icon: Icon }) => {
+                const active = changesView === id
+                return (
+                  <button
+                    key={id}
+                    role="tab"
+                    aria-selected={active}
+                    onClick={() => setChangesView(id)}
+                    className={
+                      'flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs ' +
+                      (active
+                        ? 'bg-[var(--surface-2)] text-neutral-200'
+                        : 'text-neutral-500 hover:text-neutral-300')
+                    }
+                  >
+                    <Icon size={12} />
+                    {label}
+                  </button>
+                )
+              })}
+            </div>
+            <div className="flex-1 min-h-0">
+              {changesView === 'changes' ? (
+                <ChangesPanel workspaceId={workspace.id} baseBranch={workspace.baseBranch} />
+              ) : (
+                <CommitsPanel workspaceId={workspace.id} />
+              )}
+            </div>
+          </div>
         )}
-        {tab === 'commits' && <CommitsPanel workspaceId={workspace.id} />}
         {tab === 'check' && <ChecksPanel workspaceId={workspace.id} />}
         {/* 다른 탭과 달리 조건부 렌더가 아니라 감추기다 — 위 previewOpened 주석 참고. */}
         {previewOpened && (
