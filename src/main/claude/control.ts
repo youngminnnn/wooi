@@ -117,6 +117,10 @@ export async function runCommandOn(
       // 이 명령들은 host 에서 세션 상태·설정 파일을 읽어 처리하거나 Codex 전용이다.
       // 여기로 오면 라우팅이 잘못됐다.
       throw new Error(`${kind} is handled in the host, not runCommandOn`)
+    case 'goal':
+    case 'plan':
+    case 'init':
+      throw new Error(`${kind} is not supported by Claude`)
   }
 }
 

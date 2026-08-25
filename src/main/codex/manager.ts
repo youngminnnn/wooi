@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   utilityProcess,
@@ -68,6 +69,21 @@ import type {
 
 type Dispatch = (channel: string, payload: unknown) => void
 
+export const AGENTS_SCAFFOLD = `# AGENTS.md
+
+## Project overview
+
+<!-- Describe the project and its purpose. -->
+
+## Development workflow
+
+<!-- Add setup, build, test, and lint commands. -->
+
+## Conventions
+
+<!-- Add repository-specific coding and review guidance. -->
+`
+
 const CODEX_COMMAND_NAMES = new Set([
   'model',
   'effort',
@@ -77,6 +93,10 @@ const CODEX_COMMAND_NAMES = new Set([
   'context',
   'usage',
   'permissions',
+  'status',
+  'goal',
+  'plan',
+  'init',
   'compact',
   'review',
   'fork',
@@ -801,13 +821,41 @@ export class CodexSessionManager implements AgentBackend {
   }
 
   /** /context·/usage·/permissions 카드. 지원 범위는 meta.capabilities.interactiveCommands. */
-  runCommand(workspaceId: string, kind: CommandPanelKind): Promise<CommandResult> {
-    return this.request<CommandResult>((reqId) => ({
+  async runCommand(workspaceId: string, kind: CommandPanelKind): Promise<CommandResult> {
+    if (kind === 'plan') {
+      await this.setPermissionMode(workspaceId, 'plan')
+      return {
+        kind: 'plan',
+        permissionMode: 'plan'
+      }
+    }
+    if (kind === 'init') {
+      const ws = this.getWorkspace(workspaceId)
+      if (!ws) throw new Error('Workspace not found.')
+      const path = join(ws.worktreePath, 'AGENTS.md')
+      try {
+        writeFileSync(path, AGENTS_SCAFFOLD, { encoding: 'utf8', flag: 'wx' })
+        return { kind: 'init', path, created: true }
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === 'EEXIST') {
+          return { kind: 'init', path, created: false }
+        }
+        throw err
+      }
+    }
+    const ws = this.getWorkspace(workspaceId)
+    if (!ws) throw new Error('Workspace not found.')
+    const result = await this.request<CommandResult>((reqId) => ({
       type: 'runCommand',
       reqId,
       workspaceId,
+      config: this.configFor(ws),
       kind
     }))
+    if (result.kind === 'status') {
+      result.status.usage = getStore().getState().rateLimitsByAgent?.codex ?? null
+    }
+    return result
   }
 
   /** /compact — 대화 압축을 시작한다. 진행 상황은 일반 턴 이벤트로 흘러온다. */
@@ -873,6 +921,10 @@ export class CodexSessionManager implements AgentBackend {
       { name: 'usage', description: 'Show plan usage' },
       { name: 'permissions', description: 'Show active permissions' },
       ...CODEX_ACCOUNT_CONFIG_COMMANDS,
+      { name: 'status', description: 'Show the current Codex session status' },
+      { name: 'goal', description: 'Show the current thread goal' },
+      { name: 'plan', description: 'Switch to Plan permission mode' },
+      { name: 'init', description: 'Create an AGENTS.md scaffold for this project' },
       { name: 'compact', description: 'Compact the conversation' },
       { name: 'review', description: 'Review uncommitted changes' },
       // `/wooi:*` — Wooi 내장 도구를 직접 부르는 명령([[shared/wooiCommands]]).

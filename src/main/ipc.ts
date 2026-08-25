@@ -2673,6 +2673,9 @@ export function registerIpc(ctx: IpcContext): void {
     ): Promise<{ result?: CommandResult; error?: string }> => {
       try {
         const result = await ctx.sessions.runCommand(workspaceId, kind)
+        // /plan은 commandRun 안에서 권한 모드를 바꾼다. 일반 workspaceSetPermissionMode handler와
+        // 달리 이 경로에는 자동 방송이 없으므로, 성공한 뒤 renderer AppState도 함께 갱신한다.
+        if (kind === 'plan') broadcastState()
         return { result }
       } catch (err) {
         // 명령 실행 실패는 렌더러 카드로만 전달돼 진단이 어렵다. 영속 로그에도 남긴다.

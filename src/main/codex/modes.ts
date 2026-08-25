@@ -54,6 +54,15 @@ export function turnPolicyFor(
   worktreePath: string
 ): CodexTurnPolicy {
   switch (normalizePermissionMode(CODEX_META, mode)) {
+    case 'plan':
+      return {
+        sandboxPolicy: { type: 'readOnly' },
+        sandboxMode: 'read-only',
+        approvalPolicy: 'never',
+        approvalsReviewer: 'user',
+        collaborationMode: 'plan'
+      }
+
     // Ask for approval: workspace 경계 안은 허용하고, 경계를 넘는 요청은 사용자가 검토한다.
     case 'askForApproval':
       return {

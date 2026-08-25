@@ -96,7 +96,13 @@ export type CodexCommand =
   | { type: 'listModels'; reqId: string }
   | { type: 'listSkills'; reqId: string; cwd: string }
   /** /context·/usage·/permissions 카드용 데이터 조회. */
-  | { type: 'runCommand'; reqId: string; workspaceId: string; kind: CommandPanelKind }
+  | {
+      type: 'runCommand'
+      reqId: string
+      workspaceId: string
+      config: CodexConfig
+      kind: CommandPanelKind
+    }
   | { type: 'mcpAction'; reqId: string; serverName: string; action: McpAction }
   // 설정 화면용 — 워크스페이스와 무관한 계정/설치 단위 조회라 workspaceId 를 싣지 않는다.
   | { type: 'mcpConfigList'; reqId: string }

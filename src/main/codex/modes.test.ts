@@ -35,6 +35,16 @@ describe('turnPolicyFor', () => {
     })
   })
 
+  it('Plan mode — 읽기 전용 샌드박스와 plan 협업 모드', () => {
+    expect(turnPolicyFor('plan', WORKTREE)).toEqual({
+      sandboxPolicy: { type: 'readOnly' },
+      sandboxMode: 'read-only',
+      approvalPolicy: 'never',
+      approvalsReviewer: 'user',
+      collaborationMode: 'plan'
+    })
+  })
+
   it('fullAccess — 샌드박스·승인 모두 해제', () => {
     expect(turnPolicyFor('fullAccess', WORKTREE)).toEqual({
       sandboxPolicy: { type: 'dangerFullAccess' },
@@ -53,7 +63,7 @@ describe('turnPolicyFor', () => {
   // Claude 전용·이전 Codex 모드가 저장값에 남아 있을 수 있다.
   // 그때 조용히 넓은 권한으로 떨어지면 안 된다.
   it('Codex 가 모르는 모드는 기본(Auto)으로 보정한다 — 더 넓은 권한으로 열리지 않는다', () => {
-    for (const foreign of ['acceptEdits', 'auto', 'readOnly', 'plan'] as const) {
+    for (const foreign of ['acceptEdits', 'auto', 'readOnly'] as const) {
       const policy = turnPolicyFor(foreign, WORKTREE)
       expect(policy.sandboxPolicy.type).toBe('workspaceWrite')
       expect(policy.approvalPolicy).toBe('on-request')
@@ -75,7 +85,7 @@ describe('sandboxMode 와 sandboxPolicy 의 일관성', () => {
     dangerFullAccess: 'danger-full-access'
   }
   it('모든 모드에서 두 표현이 같은 것을 가리킨다', () => {
-    for (const mode of ['askForApproval', 'default', 'fullAccess'] as const) {
+    for (const mode of ['askForApproval', 'default', 'plan', 'fullAccess'] as const) {
       const p = turnPolicyFor(mode, WORKTREE)
       expect(p.sandboxMode).toBe(EQUIV[p.sandboxPolicy.type])
     }
@@ -83,8 +93,9 @@ describe('sandboxMode 와 sandboxPolicy 의 일관성', () => {
 })
 
 describe('asksForApproval', () => {
-  it('fullAccess 만 승인을 요구하지 않는다', () => {
+  it('fullAccess 와 읽기 전용 Plan 모드는 승인을 요구하지 않는다', () => {
     expect(asksForApproval('fullAccess')).toBe(false)
+    expect(asksForApproval('plan')).toBe(false)
     for (const mode of ['askForApproval', 'default'] as const) {
       expect(asksForApproval(mode)).toBe(true)
     }

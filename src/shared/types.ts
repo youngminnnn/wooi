@@ -3743,6 +3743,9 @@ export type CommandPanelKind =
   | 'status'
   | 'skills'
   | 'hooks'
+  | 'goal'
+  | 'plan'
+  | 'init'
 
 /**
  * 입력창 인터셉트(Composer)와 자동완성 보강(commands.ts)이 같은 목록을 보도록 하는 SSOT.
@@ -3777,6 +3780,9 @@ export const INTERACTIVE_COMMANDS: {
   { name: 'status', kind: 'status', description: 'Show session, account, and workspace status' },
   { name: 'skills', kind: 'skills', description: 'List skills available in this session' },
   { name: 'hooks', kind: 'hooks', description: 'View hooks configured in settings files' },
+  { name: 'goal', kind: 'goal', description: 'Show the current thread goal' },
+  { name: 'plan', kind: 'plan', description: 'Switch to Plan permission mode' },
+  { name: 'init', kind: 'init', description: 'Create an AGENTS.md scaffold for this project' },
   { name: 'reload-plugins', kind: 'reloadPlugins', description: 'Reload plugins from disk' },
   { name: 'reload-skills', kind: 'reloadSkills', description: 'Reload skills from disk' },
   { name: 'debug-config', kind: 'debugConfig', description: 'Show effective Codex configuration' },
@@ -3999,6 +4005,10 @@ export interface StatusInfo {
     fastMode: boolean
     permissionMode: string
   }
+  /** Codex가 마지막으로 관측한 컨텍스트 사용량. Claude 상태에는 없다. */
+  context?: { usedTokens: number; maxTokens: number; percentage: number } | null
+  /** main store가 보관하는 Codex 계정 사용량 스냅샷. Claude 상태에는 없다. */
+  usage?: RateLimitSnapshot | null
 }
 
 /** 인터랙티브 명령 실행 결과. kind 로 카드 렌더링을 분기한다. */
@@ -4016,6 +4026,18 @@ export type CommandResult =
   | { kind: 'status'; status: StatusInfo }
   | { kind: 'skills'; skills: SkillInfo[] }
   | { kind: 'hooks'; hooks: HooksInfo }
+  | {
+      kind: 'goal'
+      goal: {
+        objective: string
+        status: string
+        tokenBudget: number | null
+        tokensUsed: number
+        timeUsedSeconds: number
+      } | null
+    }
+  | { kind: 'plan'; permissionMode: 'plan' }
+  | { kind: 'init'; path: string; created: boolean }
 
 // ── 파일 브라우저 (All files 탭) ──────────────────────────────────────────
 
