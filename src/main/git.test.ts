@@ -22,8 +22,88 @@ import {
   addWorktree,
   applySnapshot,
   snapshotWorkingTree,
-  rebaseConflictState
+  rebaseConflictState,
+  listCommits,
+  commitInRange,
+  commitChangedPaths,
+  pushForceWithLease
 } from './git'
+
+describe('커밋 이동 조회 원시 연산', () => {
+  let root: string
+  const git = (args: string[]): string =>
+    execFileSync('git', args, { cwd: root, encoding: 'utf-8' }).trim()
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'wooi-commit-list-'))
+    git(['init', '-q', '-b', 'main'])
+    git(['config', 'user.email', 'test@example.com'])
+    git(['config', 'user.name', '테스터'])
+    writeFileSync(join(root, 'base.txt'), 'base\n')
+    git(['add', '-A'])
+    git(['commit', '-qm', 'base'])
+    git(['checkout', '-qb', 'upper'])
+    writeFileSync(join(root, 'one.txt'), 'one\n')
+    git(['add', '-A'])
+    git(['commit', '-qm', '탭\t| 파이프와 한글'])
+    git(['checkout', '-qb', 'side'])
+    writeFileSync(join(root, 'side.txt'), 'side\n')
+    git(['add', '-A'])
+    git(['commit', '-qm', 'side'])
+    git(['checkout', '-q', 'upper'])
+    writeFileSync(join(root, 'two.txt'), 'two\n')
+    git(['add', '-A'])
+    git(['commit', '-qm', 'two'])
+    git(['merge', '-q', '--no-ff', '-m', 'merge side', 'side'])
+  })
+
+  afterEach(() => rmSync(root, { recursive: true, force: true }))
+
+  it('최신순·비 merge 목록과 구분자에 안전한 제목, limit 을 보존한다', async () => {
+    const commits = await listCommits(root, 'main')
+    expect(commits.map((entry) => entry.subject)).toEqual(['two', 'side', '탭\t| 파이프와 한글'])
+    expect(commits[2]).toMatchObject({ authorName: '테스터' })
+    expect(commits[2].authoredAt).toBeGreaterThan(0)
+    await expect(listCommits(root, 'main', 2)).resolves.toHaveLength(2)
+  })
+
+  it('범위 밖 커밋과 merge 커밋을 거부한다', async () => {
+    const merge = git(['rev-parse', 'upper'])
+    const base = git(['rev-parse', 'main'])
+    const ordinary = git(['rev-parse', 'upper^1'])
+    await expect(commitInRange(root, 'main', ordinary)).resolves.toBe(true)
+    await expect(commitInRange(root, 'main', merge)).resolves.toBe(false)
+    await expect(commitInRange(root, 'main', base)).resolves.toBe(false)
+  })
+
+  it('커밋 하나가 건드린 경로를 반환한다', async () => {
+    const sha = git(['rev-parse', 'upper^1'])
+    await expect(commitChangedPaths(root, sha)).resolves.toEqual(['two.txt'])
+  })
+
+  it('기존 리모트 브랜치를 force-with-lease 로 갱신한다', async () => {
+    const bare = join(root, 'origin.git')
+    git(['init', '-q', '--bare', bare])
+    git(['remote', 'add', 'origin', bare])
+    git(['push', '-qu', 'origin', 'upper'])
+    const oldRemote = git(['rev-parse', 'upper'])
+    git(['reset', '-q', '--hard', 'upper^1'])
+    writeFileSync(join(root, 'replacement.txt'), 'replacement\n')
+    git(['add', '-A'])
+    git(['commit', '-qm', 'replacement'])
+    const replacement = git(['rev-parse', 'upper'])
+    expect(replacement).not.toBe(oldRemote)
+
+    await expect(pushForceWithLease(root, 'upper')).resolves.toEqual({ pushed: true })
+    expect(git(['--git-dir', bare, 'rev-parse', 'upper'])).toBe(replacement)
+  })
+
+  // 커밋 이동은 아직 PR 을 열지 않은 층에서도 돈다. 그때 push 를 "실패" 로 세면 로컬에만 있는
+  // 스택에서 이동이 항상 error 로 끝나므로, 건너뜀(error 없음)과 실패를 가르는 계약을 고정한다.
+  it('리모트에 없는 브랜치는 실패가 아니라 건너뜀으로 돌려준다', async () => {
+    await expect(pushForceWithLease(root, 'upper')).resolves.toEqual({ pushed: false })
+  })
+})
 
 describe('rebaseConflictState', () => {
   let root: string
@@ -173,6 +253,48 @@ describe('branch tracking push target', () => {
       git(worktree, ['rev-parse', 'HEAD'])
     )
     expect(git(worktree, ['ls-remote', '--heads', remote, 'refs/heads/pr-head'])).toBe('')
+  })
+
+  // Wooi 는 워크트리를 `worktree add -b <branch> <path> origin/<default>` 로 만들고, 시작점이
+  // remote-tracking ref 라 git 이 스스로 upstream 을 건다. 그 자동 설정을 push 목적지로 읽으면
+  // 워크스페이스 브랜치가 **기본 브랜치를 덮어쓴다** — 실측으로 두 번 일어난 사고다.
+  it('worktree add 가 자동으로 건 기본 브랜치 tracking 은 push 목적지가 아니다', async () => {
+    git(worktree, ['branch', '-m', 'main'])
+    git(worktree, ['push', '-q', 'origin', 'main'])
+    git(worktree, ['update-ref', 'refs/remotes/origin/main', git(worktree, ['rev-parse', 'HEAD'])])
+    git(worktree, ['symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main'])
+
+    const child = join(root, 'child')
+    git(worktree, ['worktree', 'add', '-q', '-b', 'feature', child, 'origin/main'])
+    // 전제 확인: git 이 정말로 upstream 을 걸어 준다. 이게 거짓이면 이 테스트는 무의미하다.
+    expect(git(child, ['config', '--get', 'branch.feature.merge'])).toBe('refs/heads/main')
+
+    await expect(resolveBranchPushTarget(child)).resolves.toEqual({
+      branch: 'feature',
+      remote: 'origin',
+      destination: 'feature'
+    })
+
+    const mainBefore = git(origin, ['rev-parse', 'refs/heads/main'])
+    writeFileSync(join(child, 'file.txt'), 'two\n')
+    git(child, ['commit', '-qam', 'two'])
+    await expect(pushCurrentBranch(child)).resolves.toMatchObject({ ok: true })
+
+    expect(git(origin, ['rev-parse', 'refs/heads/feature'])).toBe(git(child, ['rev-parse', 'HEAD']))
+    // 핵심 단언 — 기본 브랜치는 움직이지 않는다.
+    expect(git(origin, ['rev-parse', 'refs/heads/main'])).toBe(mainBefore)
+  })
+
+  // 반대편 경계: fork PR 은 pushRemote(URL)를 들고 오므로 위 가드에 걸리면 안 된다.
+  it('pushremote 가 있으면 destination 이 기본 브랜치여도 그대로 존중한다', async () => {
+    git(worktree, ['symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main'])
+    git(worktree, ['config', 'branch.local-name.pushRemote', pushRemote])
+    git(worktree, ['config', 'branch.local-name.merge', 'refs/heads/main'])
+    await expect(resolveBranchPushTarget(worktree)).resolves.toEqual({
+      branch: 'local-name',
+      remote: pushRemote,
+      destination: 'main'
+    })
   })
 })
 

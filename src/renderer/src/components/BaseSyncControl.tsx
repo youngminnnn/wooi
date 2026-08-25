@@ -1,9 +1,48 @@
 import { useEffect, useRef, useState } from 'react'
 import { ChevronDown, GitMerge, Loader2, RefreshCw } from 'lucide-react'
-import type { GitStatus, PrState, Workspace } from '@shared/types'
+import type { GitStatus, PrState, StackOpProgress, Workspace } from '@shared/types'
 import { useStore } from '../store'
 import HeaderChip from './HeaderChip'
 import MenuPanel, { menuItemCls } from './MenuPanel'
+
+/**
+ * 진행 중인 스택 작업의 종류별 문구.
+ *
+ * 종류가 넷이 되면서 중첩 삼항으로는 어느 작업이 무슨 말을 하는지 눈으로 대조할 수 없게 됐다
+ * (머지 트레인과 커밋 이동이 같은 식에 각각 한 갈래씩 얹었다). 한 줄씩 늘어놓으면 새 작업이
+ * 붙을 때 빠뜨린 자리를 타입이 잡아 준다 — Record 라 키가 비면 컴파일되지 않는다.
+ *
+ * restack 과 sync 는 사용자에게 같은 일(rebase)이라 진행 문구를 공유하고, 끝난 뒤의 말만 다르다.
+ */
+const OP_COPY: Record<
+  StackOpProgress['kind'],
+  { busy: string; preparing: string; tooltip: (branch: string) => string; finished: string }
+> = {
+  restack: {
+    busy: 'Rebasing…',
+    preparing: 'Preparing rebase…',
+    tooltip: (branch) => `Rebasing ${branch}…`,
+    finished: 'Rebase complete'
+  },
+  sync: {
+    busy: 'Rebasing…',
+    preparing: 'Preparing rebase…',
+    tooltip: (branch) => `Rebasing ${branch}…`,
+    finished: 'Stack sync complete'
+  },
+  train: {
+    busy: 'Merging stack…',
+    preparing: 'Preparing merge train…',
+    tooltip: (branch) => `Merge train is processing ${branch}…`,
+    finished: 'Merge train complete'
+  },
+  'commit-move': {
+    busy: 'Moving commit…',
+    preparing: 'Preparing commit move…',
+    tooltip: (branch) => `Rewriting ${branch}…`,
+    finished: 'Commit move complete'
+  }
+}
 
 /** 뒤처지지 않았을 때의 톤 — 자리는 지키되 행동을 재촉하지 않는다. */
 const IDLE_TONE =
@@ -81,30 +120,15 @@ export default function BaseSyncControl({
       progress.total == null
         ? ''
         : ` (${Math.min(doneBranches + 1, progress.total)}/${progress.total})`
-    label =
-      progress.kind === 'train'
-        ? branch
-          ? `Merging stack…${count}`
-          : 'Preparing merge train…'
-        : branch
-          ? `Rebasing…${count}`
-          : 'Preparing rebase…'
-    tooltip =
-      progress.kind === 'train'
-        ? branch
-          ? `Merge train is processing ${branch}…${count}`
-          : 'Preparing merge train…'
-        : branch
-          ? `Rebasing ${branch}…${count}`
-          : 'Preparing rebase…'
+    const copy = OP_COPY[progress.kind]
+    label = branch ? `${copy.busy}${count}` : copy.preparing
+    tooltip = branch ? `${copy.tooltip(branch)}${count}` : copy.preparing
   } else if (showFinished) {
     label = problems
       ? `Finished with ${problems} issue${problems > 1 ? 's' : ''}`
-      : progress?.kind === 'sync'
-        ? 'Stack sync complete'
-        : progress?.kind === 'train'
-          ? 'Merge train complete'
-          : 'Rebase complete'
+      : progress
+        ? OP_COPY[progress.kind].finished
+        : 'Rebase complete'
     tooltip = label
   }
 
