@@ -642,7 +642,7 @@ export class SessionManager implements AgentBackend {
    * `/add-dir` — worktree 밖 디렉토리를 작업 루트로 더한다.
    *
    * SDK 의 additionalDirectories 는 query 를 열 때 고정되고 세션 중에 넓힐 수 없다(제어 채널의
-   * register_repo_root 는 cwd 하위만 받는다). 그래서 모델·effort 와 같은 방식으로 기존 세션을
+   * register_repo_root 는 cwd 하위만 받는다). 그래서 effort·fast mode 와 같은 방식으로 기존 세션을
    * dispose 하고, 다음 메시지에서 새 루트로 query 를 다시 열되 resume 으로 맥락을 이어받는다.
    */
   addDirectory(workspaceId: string, dir: string): { error?: string } {
