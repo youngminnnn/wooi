@@ -1058,6 +1058,25 @@ export class ClaudeSession {
   }
 
   /**
+   * 자동 재시도를 트랜스크립트에 남긴다.
+   *
+   * 재시도 자체는 옳다 — 산출이 없었던 턴이라 부작용이 없고, 이게 없으면 사용자가 직접 다시
+   * 보내야 한다. 다만 **조용히** 하면 안 된다: 첫 시도의 입력이 이미 API 로 나갔다면 사용자는
+   * 모르는 채로 같은 맥락을 두 번 낸다. 사용량이 예상보다 빨리 도는 이유를 볼 수 있어야 한다.
+   *
+   * 어휘와 방식은 [[rateLimitResume]]·[[stackedWait]] 의 안내와 맞춘다 — Wooi 가 대신 한 일을
+   * 사실대로 한 줄 남기고, 판단은 사용자에게 넘긴다.
+   */
+  private noteAutoRetry(reason: string): void {
+    this.emitItem({
+      id: `system:auto-retry:${Date.now()}`,
+      type: 'system',
+      text: `${reason} Wooi restarted the agent and sent your message again — the first attempt may already have been billed.`,
+      ts: Date.now()
+    })
+  }
+
+  /**
    * 지금 도는 query(옛 자격증명을 든 CLI 프로세스)를 끊고, 같은 메시지를 새 프로세스에서 다시
    * 돌리도록 요청한다. 상태는 running 으로 유지해 사용자에게는 하나의 연속된 턴으로 보인다.
    */
@@ -1073,6 +1092,7 @@ export class ClaudeSession {
       `session: turn failed before any output (result=${subtype}, error=${this.turnError ?? 'none'}) ` +
         '— restarting the agent process and retrying the message once (session context kept)'
     )
+    this.noteAutoRetry('The turn failed before the agent said anything.')
     this.abort?.abort()
     void this.q?.interrupt().catch(() => {})
   }
@@ -1139,6 +1159,7 @@ export class ClaudeSession {
           '(session context kept; e.g. stale credentials after an account switch)',
         err
       )
+      this.noteAutoRetry('The agent process stopped before saying anything.')
       return true
     }
 
