@@ -1,13 +1,9 @@
 /* global console, process */
 
-import { join } from 'node:path'
-import { pathToFileURL } from 'node:url'
 import { openSeededWorkspace, seedAppState, waitForInspection } from '../fixtures.mjs'
+import { launchWooi, withScratchRepo } from '../harness.mjs'
 
 export default async function 좁은_pane에서도_워크스페이스_헤더가_남는다() {
-  const { withScratchRepo, launchWooi } = await import(
-    pathToFileURL(join(process.env.WOOI_E2E_HARNESS, 'index.mjs')).href
-  )
   await withScratchRepo(
     { worktrees: ['feature-test'], seed: (scratch) => seedAppState(scratch) },
     async (scratch) => {

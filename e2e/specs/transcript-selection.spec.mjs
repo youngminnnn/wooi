@@ -1,13 +1,12 @@
 /* global console, process */
 
-import { join } from 'node:path'
-import { pathToFileURL } from 'node:url'
 import {
   openSeededWorkspace,
   seedAppState,
   sendPermissionRequest,
   waitForInspection
 } from '../fixtures.mjs'
+import { launchWooi, withScratchRepo } from '../harness.mjs'
 
 /**
  * 읽으라고 내놓은 글자는 고를 수 있어야 하고, 고르는 손짓이 카드를 건드려서는 안 된다.
@@ -23,9 +22,6 @@ const COMMAND = 'npm run build -- selectable-permission-text'
 const OPTION = 'Selectable option one'
 
 export default async function 읽는_글자는_드래그로_고를_수_있다() {
-  const { withScratchRepo, launchWooi } = await import(
-    pathToFileURL(join(process.env.WOOI_E2E_HARNESS, 'index.mjs')).href
-  )
   const now = Date.now()
   await withScratchRepo(
     {

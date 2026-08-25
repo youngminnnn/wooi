@@ -2,8 +2,8 @@
 
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { pathToFileURL } from 'node:url'
 import { E2E_WORKSPACE_DISPLAY_NAME, seedAppState, waitForInspection } from '../fixtures.mjs'
+import { launchWooi, withScratchRepo } from '../harness.mjs'
 
 const PARENT = 'parent-e2e'
 const CHILDREN = ['child-one', 'child-two']
@@ -53,19 +53,10 @@ async function seedWaitingParent(scratch) {
 }
 
 export default async function 스택_대기가_화면에_보이고_사용자가_취소할_수_있다() {
-  const { withScratchRepo, launchWooi } = await import(
-    pathToFileURL(join(process.env.WOOI_E2E_HARNESS, 'index.mjs')).href
-  )
   await withScratchRepo(
     { worktrees: [PARENT, ...CHILDREN], seed: seedWaitingParent },
     async (scratch) => {
-      // 기본 스크래치 루트는 실행이 끝나면 통째로 지워져 PNG 도 함께 사라진다. 사람이 눈으로
-      // 확인해야 할 때만 WOOI_E2E_SHOTS 로 살아남는 경로를 준다.
-      const wooi = await launchWooi({
-        appDir: process.cwd(),
-        ...scratch,
-        ...(process.env.WOOI_E2E_SHOTS ? { shotsPath: process.env.WOOI_E2E_SHOTS } : {})
-      })
+      const wooi = await launchWooi({ appDir: process.cwd(), ...scratch })
       const { win } = wooi
       try {
         // 1. 사이드바 — 기다리는 중임이 표시된다. 아무 표시가 없으면 사용자는 죽은 줄 안다.

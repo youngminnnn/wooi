@@ -2,8 +2,8 @@
 
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { pathToFileURL } from 'node:url'
 import { openSeededWorkspace, seedAppState, waitForInspection } from '../fixtures.mjs'
+import { launchWooi, withScratchRepo } from '../harness.mjs'
 
 /**
  * 인터랙티브 명령 카드가 **없는 세션을 있는 척 세지 않는지**를 실제 앱에서 고정한다.
@@ -63,10 +63,6 @@ async function closeCard(win) {
 }
 
 export default async function 명령_카드가_라이브_세션이_없는_사정을_그대로_보여_준다() {
-  const { withScratchRepo, launchWooi } = await import(
-    pathToFileURL(join(process.env.WOOI_E2E_HARNESS, 'index.mjs')).href
-  )
-
   await withScratchRepo(
     {
       worktrees: ['feature-test'],

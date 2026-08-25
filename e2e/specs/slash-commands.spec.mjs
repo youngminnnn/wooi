@@ -1,8 +1,7 @@
 /* global console, process */
 
-import { join } from 'node:path'
-import { pathToFileURL } from 'node:url'
 import { openSeededWorkspace, seedAppState, waitForInspection } from '../fixtures.mjs'
+import { launchWooi, withScratchRepo } from '../harness.mjs'
 
 const transcript = [
   { id: 'user-e2e', type: 'user', text: 'Seeded conversation', ts: Date.now() - 1 },
@@ -54,10 +53,6 @@ async function workspaceStatus(win) {
 }
 
 export default async function 슬래시_명령이_실제_앱에서_입력과_상태를_올바르게_처리한다() {
-  const { withScratchRepo, launchWooi } = await import(
-    pathToFileURL(join(process.env.WOOI_E2E_HARNESS, 'index.mjs')).href
-  )
-
   await withScratchRepo(
     {
       worktrees: ['feature-test'],
