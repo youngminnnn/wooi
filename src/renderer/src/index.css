@@ -581,9 +581,8 @@ code.hljs {
 }
 
 /* work panel 의 탭 줄. 헤더와 같은 사정이라 같은 기법을 쓴다 — 이 패널의 폭은 창이 아니라
-   스플리터가 정하므로 viewport 미디어 쿼리로는 맞출 수 없다. 탭이 다섯이 되면서(All files ·
-   Changes · Commits · Check · Preview) 좁은 폭에서 글자가 서로 밀렸다. 아이콘은 남기고 라벨만
-   접으면 다섯 개가 그대로 눌리지 않고 들어간다. */
+   스플리터가 정하므로 viewport 미디어 쿼리로는 맞출 수 없다. 아이콘은 남기고 라벨만 접으면
+   탭이 눌리지 않고 들어간다. */
 .workpanel-tabs {
   container-type: inline-size;
 }
