@@ -324,6 +324,123 @@ describe('RateLimitResumeCoordinator', () => {
     expect(store.getState().workspaces[0].rateLimited).toBeNull()
   })
 
+  it('네트워크가 없으면 보내지 않고 기다렸다가, 연결이 돌아오면 이어 보낸다', async () => {
+    const { getStore } = await import('./store')
+    const store = getStore()
+    seedWorkspace(store)
+    let online = false
+    const sent = vi.fn()
+    const coordinator = new RateLimitResumeCoordinator({
+      backend: 'claude',
+      refreshLimits: async () => {},
+      sendContinuation: sent,
+      emitItem: () => {},
+      isOnline: () => online,
+      broadcastState: () => {}
+    })
+
+    await coordinator.noteRateLimit(WORKSPACE_ID)
+    await vi.advanceTimersByTimeAsync(5 * 60_000 + 15_000)
+
+    // 오프라인에서는 한 번도 보내지 않는다 — 보내 봐야 오류 카드만 쌓인다.
+    expect(sent).not.toHaveBeenCalled()
+    expect(store.getState().workspaces[0].pendingRateLimitResume?.blocked).toBe('offline')
+
+    online = true
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(sent).toHaveBeenCalledWith(WORKSPACE_ID)
+    expect(store.getState().workspaces[0].pendingRateLimitResume).toBeNull()
+  })
+
+  it('맥이 자는 동안 예약 시각이 지나 버려도 깨어나서 이어 보낸다', async () => {
+    const { getStore } = await import('./store')
+    seedWorkspace(getStore())
+    const sent = vi.fn()
+    const coordinator = new RateLimitResumeCoordinator({
+      backend: 'claude',
+      refreshLimits: async () => {},
+      sendContinuation: sent,
+      emitItem: () => {},
+      isOnline: () => true,
+      broadcastState: () => {}
+    })
+
+    await coordinator.noteRateLimit(WORKSPACE_ID, Date.now() + 5 * 60 * 60_000)
+    // 잠든 사이 벽시계만 6시간 흘렀다(가짜 타이머의 setSystemTime 은 예약된 타이머의 남은 시간을
+    // 그대로 유지한다 — 잠든 동안 멈춰 있던 타이머와 같은 상황이다).
+    vi.setSystemTime(Date.now() + 6 * 60 * 60_000)
+    await vi.advanceTimersByTimeAsync(60_000)
+
+    expect(sent).toHaveBeenCalledWith(WORKSPACE_ID)
+  })
+
+  it('이어 보낸 턴이 실패하면 다시 예약하고, 그래도 안 되면 예산 안에서 멈춘다', async () => {
+    const { getStore } = await import('./store')
+    const store = getStore()
+    seedWorkspace(store)
+    let sent = 0
+    const coordinator = new RateLimitResumeCoordinator({
+      backend: 'claude',
+      refreshLimits: async () => {},
+      sendContinuation: (workspaceId) => {
+        sent++
+        // 턴이 제한이 아닌 이유로 실패한다(호스트가 죽었다·요청이 끊겼다).
+        coordinator.noteTurnEnd(workspaceId, 'error')
+      },
+      emitItem: () => {},
+      isOnline: () => true,
+      broadcastState: () => {}
+    })
+
+    await coordinator.noteRateLimit(WORKSPACE_ID)
+    await vi.advanceTimersByTimeAsync(5 * 60_000 + 15_000)
+
+    expect(sent).toBe(1)
+    // 예전에는 여기서 오류 카드 한 장만 남고 예약이 사라져 영영 이어가지 못했다.
+    expect(store.getState().workspaces[0].pendingRateLimitResume?.blocked).toBe('error')
+
+    await vi.advanceTimersByTimeAsync(24 * 60 * 60_000)
+    expect(sent).toBe(5)
+    expect(store.getState().workspaces[0].pendingRateLimitResume).toBeNull()
+  })
+
+  it('네트워크가 끊겨 실패한 턴은 시도 예산을 쓰지 않는다', async () => {
+    const { getStore } = await import('./store')
+    const store = getStore()
+    seedWorkspace(store)
+    let online = true
+    let sent = 0
+    const coordinator = new RateLimitResumeCoordinator({
+      backend: 'claude',
+      refreshLimits: async () => {},
+      sendContinuation: (workspaceId) => {
+        sent++
+        // 보내는 도중에 네트워크가 끊긴다.
+        online = false
+        coordinator.noteTurnEnd(workspaceId, 'error')
+      },
+      emitItem: () => {},
+      isOnline: () => online,
+      broadcastState: () => {}
+    })
+
+    await coordinator.noteRateLimit(WORKSPACE_ID)
+    await vi.advanceTimersByTimeAsync(5 * 60_000 + 15_000)
+
+    expect(sent).toBe(1)
+    expect(store.getState().workspaces[0].pendingRateLimitResume?.blocked).toBe('offline')
+
+    // 끊겨 있는 동안 하루가 지나도 아무것도 보내지 않고, 예약도 접지 않는다 — 연결만 기다린다.
+    await vi.advanceTimersByTimeAsync(24 * 60 * 60_000)
+    expect(sent).toBe(1)
+    expect(store.getState().workspaces[0].pendingRateLimitResume?.blocked).toBe('offline')
+
+    // 예산을 쓰지 않았으므로, 연결이 돌아오면 (몇 번이 됐든) 다시 이어 보낸다.
+    online = true
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(sent).toBe(2)
+  })
+
   it('이어 보낸 턴이 곧바로 다시 걸리면 시도 횟수를 이어받아 결국 멈춘다', async () => {
     const { getStore } = await import('./store')
     const store = getStore()

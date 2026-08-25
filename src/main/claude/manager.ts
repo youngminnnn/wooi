@@ -7,6 +7,7 @@ import {
   Notification,
   app,
   powerMonitor,
+  net,
   BrowserWindow,
   type UtilityProcess
 } from 'electron'
@@ -121,6 +122,8 @@ export class SessionManager implements AgentBackend {
       sendContinuation: (workspaceId) => this.sendContinuation(workspaceId),
       emitItem: (workspaceId, item) =>
         this.dispatch(IPC.evtChat, { workspaceId, event: { type: 'item', item } }),
+      // 맥이 자다 깼거나 와이파이가 꺼져 있으면 이어 보내 봐야 실패한다 — 보내기 전에 물어본다.
+      isOnline: () => net.isOnline(),
       broadcastState: () => this.dispatch(IPC.evtState, getStore().getState())
     })
     this.rateLimitResume.restore()
@@ -910,7 +913,15 @@ export class SessionManager implements AgentBackend {
       // 턴이 끝났다 — 소유자가 이어서 한 턴을 더 보냈다면 이 종료는 없던 일로 한다([[agent/backend]]
       // TurnEndHook). 여기서 빠져나가는 것이 요점이다: 아래로 내려가면 idle 이 방송돼 대화가 잠깐
       // 쉬는 것처럼 보이고, 그 틈에 사용자가 친 말이 사용자가 시작하지 않은 턴에 섞여 들어간다.
-      if (event.status !== 'running' && this.onTurnEnd?.(workspaceId, event.status)) return
+      const consumed =
+        event.status !== 'running' && (this.onTurnEnd?.(workspaceId, event.status) ?? false)
+      // 자동 이어가기가 보낸 턴이면 그 결과를 코디네이터가 알아야 한다 — 실패로 끝났을 때
+      // 포기하지 않고 다시 예약하는 판단이 거기 있다. 소유자가 이 종료를 삼켰다면(=이미 다음 턴이
+      // 돌고 있다) 실패로 넘기지 않는다 — 그 위에 이어가기를 또 얹으면 같은 지시가 두 번 간다.
+      if (event.status !== 'running') {
+        this.rateLimitResume.noteTurnEnd(workspaceId, consumed ? 'idle' : event.status)
+      }
+      if (consumed) return
       getStore().update((st) => {
         const w = st.workspaces.find((x) => x.id === workspaceId)
         if (w) {
