@@ -8,6 +8,7 @@ import {
 import { getStore } from '../../store'
 import { log } from '../../logger'
 import { runSubAgent } from '../../subagent/run'
+import { recordDelegatedUsage } from '../../usageLedger'
 import { agentDefaultsFor, delegateBackendsFor } from '../multiAgent'
 import { askSubAgentPermission } from './permission'
 import type { AgentToolDeps } from './registry'
@@ -137,7 +138,8 @@ export function runDelegateTool(backend: AgentBackendId) {
         },
         // Codex 서브런은 이 콜백을 쓰지 않는다 — `codex exec` 가 비대화형이라 승인 채널이 없고,
         // 그 경로에서는 샌드박스가 유일한 방어선이다.
-        canUseTool: (toolName, input) => askSubAgentPermission(ws, backend, toolName, input)
+        canUseTool: (toolName, input) => askSubAgentPermission(ws, backend, toolName, input),
+        onUsage: (usage) => recordDelegatedUsage(workspaceId, usage)
       })
 
       if (result.error && !result.text) throw new Error(result.error)

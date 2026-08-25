@@ -3846,6 +3846,42 @@ export const SESSION_RATE_LIMIT_LABEL = '5-hour'
  */
 export const WEEKLY_RATE_LIMIT_LABEL = 'Weekly'
 
+/**
+ * 토큰·비용 누계 한 묶음. 입력 토큰이 셋으로 갈리는 것이 요점이다 — 같은 1M 토큰이라도
+ * 캐시에서 읽으면 싸고, 캐시에 새로 쓰면 정가보다 비싸다.
+ */
+export interface UsageTotals {
+  /** 캐시를 타지 않은 순수 입력 토큰. */
+  inputTokens: number
+  outputTokens: number
+  /** 프롬프트 캐시에서 읽은 입력 토큰(가장 싸다). */
+  cacheReadTokens: number
+  /** 프롬프트 캐시에 새로 쓴 입력 토큰(정가보다 비싸다 — 세션이 다시 열릴 때마다 여기가 는다). */
+  cacheCreationTokens: number
+  costUsd: number
+}
+
+/**
+ * Wooi 가 직접 센 이 워크스페이스의 토큰 장부. SDK 의 /usage(계정 단위)에는 없는 값이다.
+ *
+ * 앱을 켠 뒤부터 세고, `/clear` 하면 0 부터 다시 센다. 세션이 다시 열리면 SDK 의 누계가 0으로
+ * 돌아가므로, main 의 장부가 그 리셋을 감지해 이전 구간을 확정하고 더한다 — 그 리셋 횟수가 곧
+ * `sessionRestarts` 다([[usageLedger]]).
+ */
+export interface WorkspaceUsageInfo {
+  /** 이 워크스페이스에 청구되는 모든 것(메인 대화 + 위임 서브런). */
+  total: UsageTotals
+  /** 그중 위임 서브런 몫. 별도 query 라 CLI 의 회계에는 안 잡힌다. total 에는 포함돼 있다. */
+  delegated: UsageTotals
+  /**
+   * 코드 리뷰 실행의 **앱 전체** 누계. 리뷰는 워크스페이스가 아니라 PR 에 매여 있어 어느 한
+   * 워크스페이스에 달 수 없으므로 total 에 넣지 않고 따로 보여 준다.
+   */
+  reviews: UsageTotals
+  /** 세션이 다시 열린 횟수. 한 번마다 대화 맥락 전체를 다시 읽는다. */
+  sessionRestarts: number
+}
+
 /** /usage — 세션 비용 + (가능하면) 요금제 사용률 창. */
 export interface UsageInfo {
   totalCostUsd: number
@@ -3878,6 +3914,12 @@ export interface UsageInfo {
    * 안 썼다" 로 읽힌다. 생략되면 true 로 본다(Codex 등 이 구분이 없는 백엔드).
    */
   sessionDataAvailable?: boolean
+  /**
+   * Wooi 가 직접 센 워크스페이스 장부. main 이 호스트의 응답에 얹어 준다 — 호스트는 이 장부를
+   * 모른다(세션이 다시 열려도 살아남아야 해서 main 이 들고 있다). Claude 세션에서만 채워지므로
+   * 없을 수 있다.
+   */
+  workspace?: WorkspaceUsageInfo | null
 }
 
 /**

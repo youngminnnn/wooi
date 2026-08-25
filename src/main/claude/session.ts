@@ -26,6 +26,7 @@ import { fastModeReasonText, planApprovalMode, planOptions, unknownItemId } from
 import { supportsAutoMode } from '../agent/backend'
 import { RATE_LIMIT_ERROR, rateLimitResetAt } from '../rateLimitText'
 import { asClaudeMode, claudeEffort, claudeMode, type ClaudePermissionMode } from './protocol'
+import { usageFromResult } from './resultUsage'
 import type {
   AgentBackendId,
   ChatItem,
@@ -40,7 +41,8 @@ import type {
   RewindPoint,
   RewindActionResult,
   RunningAgent,
-  SendMessageOptions
+  SendMessageOptions,
+  UsageTotals
 } from '@shared/types'
 
 export interface SessionDeps {
@@ -124,6 +126,15 @@ export interface SessionDeps {
    * "Response complete" 알림을 띄우지 않도록 manager.forceIdle 로 연결한다.
    */
   settleIdle: () => void
+  /**
+   * 이 result 가 실어 온 토큰·비용 **누계**와, 그 누계를 싣고 온 query 의 id.
+   *
+   * 누계는 query 단위라 세션이 다시 열리면 0부터 다시 시작한다. 워크스페이스 단위 총계로 접는
+   * 일은 메인의 장부가 한다([[usageLedger]]) — 세션이 다시 열려도 살아남아야 하는 상태라 여기
+   * 두면 안 된다. runId 를 함께 주는 이유도 같다: 구간이 언제 바뀌었는지를 장부가 숫자로 추측
+   * 하는 대신, 그 사실을 아는 세션이 그대로 알려 준다.
+   */
+  onUsage?: (runId: string, usage: UsageTotals) => void
 }
 
 type Block = { type: string; [k: string]: unknown }
@@ -277,6 +288,14 @@ export class ClaudeSession {
    */
   private inFlight: SDKUserMessage[] = []
   private q: Query | null = null
+  /**
+   * 지금 열려 있는 query 의 id. query 를 열 때마다 새로 발급한다.
+   *
+   * 사용량 누계가 어느 구간의 것인지 가리는 데만 쓴다([[usageLedger]]). 프로세스 단위 카운터가
+   * 아니라 UUID 인 이유는 호스트가 죽고 다시 떠도 메인의 장부가 같은 구간으로 착각하면 안 되기
+   * 때문이다.
+   */
+  private runId = randomUUID()
   private currentApiMsgId: string | null = null
   /** 사용자가 "always allow" 한 도구 이름. 이 세션 동안 다시 묻지 않는다. */
   private alwaysAllow = new Set<string>()
@@ -803,6 +822,7 @@ export class ClaudeSession {
       )
       // team 모드 세션에만 위임 커맨드가 든 변형을 물린다 — 쓸 수 없는 명령은 보이지 않아야 한다.
       const wooiPlugin = resolveWooiPlugin(!!this.deps.delegateBackends?.length)
+      this.runId = randomUUID()
       this.q = query({
         prompt: this.promptStream(this.input),
         options: {
@@ -1989,6 +2009,7 @@ export class ClaudeSession {
     // 턴이 result 까지 도달했다 — 자동 재시도 예산을 되돌려 다음 턴이 다시 1회를 쓸 수 있게 한다.
     if (msg.subtype === 'success') this.autoRetried = false
     this.deps.onSessionId(msg.session_id)
+    this.deps.onUsage?.(this.runId, usageFromResult(msg))
     this.emitItem({
       id: `result:${msg.uuid}`,
       type: 'result',

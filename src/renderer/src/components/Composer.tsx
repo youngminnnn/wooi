@@ -87,7 +87,9 @@ import type {
   SlashCommandInfo,
   SkillInfo,
   StatusInfo,
-  Workspace
+  UsageTotals,
+  Workspace,
+  WorkspaceUsageInfo
 } from '@shared/types'
 import { matchWooiCommand, parseWooiCommandArgs, wooiCommandName } from '@shared/wooiCommands'
 import { conversationForkDisabledReason, parseForkCommand } from '../lib/conversationFork'
@@ -1997,6 +1999,86 @@ function fmtTokens(n: number): string {
   return `${(n / 1000).toFixed(n < 10000 ? 1 : 0)}k`
 }
 
+/** 장부 한 줄 — "$0.12 · 340k tokens". 위임·리뷰처럼 곁가지 항목을 한 줄로 접을 때 쓴다. */
+function ledgerLine(t: UsageTotals): string {
+  const tokens = t.inputTokens + t.outputTokens + t.cacheReadTokens + t.cacheCreationTokens
+  return `$${t.costUsd.toFixed(4)} · ${fmtTokens(tokens)} tokens`
+}
+
+/**
+ * Wooi 가 직접 센 워크스페이스 장부. 계정 단위 /usage 아래에 붙는다.
+ *
+ * **캐시 읽기 대 쓰기 비율이 이 표시의 핵심이다.** 대화가 길어져도 프롬프트 캐시가 살아 있으면
+ * 맥락은 싼 "읽기" 로 다시 들어온다. 그런데 세션이 다시 열리면 같은 맥락이 비싼 "쓰기" 로 처음
+ * 부터 다시 들어온다 — 그게 세션 재시작이 비싼 이유의 실제 모습이라, 재시작 횟수를 바로 옆에 둔다.
+ */
+function WorkspaceLedger({ info }: { info: WorkspaceUsageInfo }): React.JSX.Element {
+  const t = info.total
+  const input = t.cacheReadTokens + t.cacheCreationTokens + t.inputTokens
+  const hit = input > 0 ? Math.round((t.cacheReadTokens / input) * 100) : null
+  const delegated = ledgerHasAny(info.delegated)
+  const reviews = ledgerHasAny(info.reviews)
+  return (
+    <div className="space-y-1.5 pt-2 border-t border-[var(--border)]">
+      <div className="text-xs text-neutral-500">
+        This workspace <span className="text-neutral-600">· since the app started</span>
+      </div>
+      <div className="flex items-center gap-2">
+        <span className="text-xs text-neutral-500 w-24 shrink-0">Cache hit</span>
+        <div className="flex-1 h-1.5 rounded-full bg-[var(--surface-3)] overflow-hidden">
+          <div className="h-full bg-[var(--success-400)]" style={{ width: `${hit ?? 0}%` }} />
+        </div>
+        <span className="text-xs text-neutral-500 shrink-0">{hit == null ? '—' : `${hit}%`}</span>
+      </div>
+      <div
+        className="text-xs text-neutral-600 pl-24"
+        title="Cache read is the cheap path. Cache write is what a fresh session pays to put the conversation back."
+      >
+        read {fmtTokens(t.cacheReadTokens)} · write {fmtTokens(t.cacheCreationTokens)} · uncached{' '}
+        {fmtTokens(t.inputTokens)}
+      </div>
+      <LedgerRow label="Output" value={fmtTokens(t.outputTokens)} />
+      <LedgerRow
+        label="Session restarts"
+        value={String(info.sessionRestarts)}
+        title="Each restart replays the whole conversation from disk, so its context comes back as cache writes rather than cache reads."
+      />
+      <LedgerRow label="Cost (est.)" value={`$${t.costUsd.toFixed(4)}`} />
+      {delegated && <LedgerRow label="Delegated runs" value={ledgerLine(info.delegated)} />}
+      {reviews && (
+        <LedgerRow
+          label="Code reviews"
+          value={ledgerLine(info.reviews)}
+          title="Reviews belong to a pull request rather than a workspace, so this is the app-wide total and is not included above."
+        />
+      )}
+    </div>
+  )
+}
+
+function ledgerHasAny(t: UsageTotals): boolean {
+  return (
+    t.costUsd > 0 || t.inputTokens + t.outputTokens + t.cacheReadTokens + t.cacheCreationTokens > 0
+  )
+}
+
+function LedgerRow({
+  label,
+  value,
+  title
+}: {
+  label: string
+  value: string
+  title?: string
+}): React.JSX.Element {
+  return (
+    <div className="flex items-center justify-between text-xs" title={title}>
+      <span className="text-neutral-500">{label}</span>
+      <span className="text-neutral-400">{value}</span>
+    </div>
+  )
+}
+
 const MCP_STATUS_COLOR: Record<string, string> = {
   connected: 'bg-[var(--success-400)]',
   failed: 'bg-[var(--danger-400)]',
@@ -2498,6 +2580,7 @@ function CommandResultView({
               Plan rate limits not available for this session.
             </div>
           )}
+          {u.workspace && <WorkspaceLedger info={u.workspace} />}
         </div>
       )
     }

@@ -12,6 +12,7 @@ import {
   type UtilityProcess
 } from 'electron'
 import { getStore } from '../store'
+import { getWorkspaceUsage, recordSessionUsage } from '../usageLedger'
 import { wooiMcpSettings } from '../mcpSettings'
 import { getTranscripts } from '../transcripts'
 import { log } from '../logger'
@@ -241,6 +242,9 @@ export class SessionManager implements AgentBackend {
       case 'settleIdle':
         this.forceIdle(msg.workspaceId)
         break
+      case 'usage':
+        recordSessionUsage(msg.workspaceId, msg.runId, msg.usage)
+        break
       case 'permissionRequest':
         this.onPermissionRequest(msg.request)
         break
@@ -448,13 +452,17 @@ export class SessionManager implements AgentBackend {
   async runCommand(workspaceId: string, kind: CommandPanelKind): Promise<CommandResult> {
     const ws = this.getWorkspace(workspaceId)
     if (!ws) throw new Error('Workspace not found.')
-    return this.request<CommandResult>((reqId) => ({
+    const result = await this.request<CommandResult>((reqId) => ({
       type: 'runCommand',
       reqId,
       workspaceId,
       config: this.configFor(ws),
       kind
     }))
+    // 워크스페이스 장부는 메인에만 있다(호스트는 세션이 다시 열리면 잊는다) — 호스트가 돌려준
+    // 계정 단위 /usage 위에 여기서 얹어 준다.
+    if (result.kind === 'usage') result.usage.workspace = getWorkspaceUsage(workspaceId) ?? null
+    return result
   }
 
   /** /mcp 패널의 서버별 동작(재연결·활성/비활성)을 실행하고 갱신된 서버 목록을 돌려준다. */

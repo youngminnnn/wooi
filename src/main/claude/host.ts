@@ -106,7 +106,8 @@ function ensure(workspaceId: string, config: SessionConfig): ClaudeSession {
     onSessionId: (sessionId: string) => post({ type: 'sessionId', workspaceId, sessionId }),
     onRateLimit: (resetAt?: number) => post({ type: 'rateLimit', workspaceId, resetAt }),
     onPermissionMode: (mode) => post({ type: 'permissionMode', workspaceId, mode }),
-    settleIdle: () => post({ type: 'settleIdle', workspaceId })
+    settleIdle: () => post({ type: 'settleIdle', workspaceId }),
+    onUsage: (runId, usage) => post({ type: 'usage', workspaceId, runId, usage })
   })
   sessions.set(workspaceId, session)
   return session

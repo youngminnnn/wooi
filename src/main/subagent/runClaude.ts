@@ -3,6 +3,7 @@ import type { SDKMessage, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
 import { resolveClaudeExecutable } from '../claude/executable'
 import { MCP_SETTING_SOURCES, resolveUserMcpServers } from '../claude/mcp'
 import { claudeEffort, claudeMode } from '../claude/protocol'
+import { usageFromResult } from '../claude/resultUsage'
 import { CLAUDE_CODE_SYSTEM_PROMPT } from '../claude/systemPrompt'
 import { log } from '../logger'
 import { wooiMcpSettings } from '../mcpSettings'
@@ -67,6 +68,8 @@ export async function runClaudeSubAgent(deps: SubAgentRunDeps): Promise<SubAgent
       }
       if (msg.type === 'result') {
         sessionId = msg.session_id
+        // 이 서브런은 부모와 별도 query 라 부모 회계에 안 잡힌다 — 여기서 장부에 달아 준다.
+        deps.onUsage?.(usageFromResult(msg))
         if (msg.subtype === 'success') {
           // result 의 최종 텍스트가 정본이다. 스트리밍으로 모은 것은 중간 발화까지 섞여 있다.
           text = msg.result || text

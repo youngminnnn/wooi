@@ -5,8 +5,10 @@ import type { ReviewArtifact, ReviewProgressItem } from '@shared/types'
 import { resolveClaudeExecutable } from '../claude/executable'
 import { MCP_SETTING_SOURCES, resolveUserMcpServers } from '../claude/mcp'
 import { claudeEffort } from '../claude/protocol'
+import { usageFromResult } from '../claude/resultUsage'
 import { log } from '../logger'
 import { wooiMcpSettings } from '../mcpSettings'
+import { recordReviewUsage } from '../usageLedger'
 import { coerceArtifact, describeArg, extractFencedJson, truncate } from './artifact'
 import { schemaFor, type BackendReviewResult, type ReviewRunDeps } from './run'
 
@@ -75,6 +77,9 @@ export async function runClaudeReview(
       if (msg.type === 'result') {
         // 성공·실패 모두 세션 id 를 준다. 실패한 턴이라도 맥락은 남아 있어 이어 물을 수 있다.
         sessionId = msg.session_id
+        // 리뷰도 별도 query 라 어느 세션의 회계에도 안 잡힌다. 워크스페이스가 아니라 PR 에 매여
+        // 있어 한 워크스페이스에 달 수 없으므로 앱 전체 칸에 더한다([[usageLedger]]).
+        recordReviewUsage(usageFromResult(msg))
         if (msg.subtype === 'success') {
           rawText = msg.result || rawText
           artifact = coerceArtifact(msg.structured_output) ?? extractFencedJson(rawText)

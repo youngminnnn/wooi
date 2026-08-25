@@ -12,7 +12,8 @@ import type {
   PermissionDecision,
   PermissionMode,
   PermissionRequest,
-  SendMessageOptions
+  SendMessageOptions,
+  UsageTotals
 } from '@shared/types'
 import { CLAUDE_META } from '../agent/backend'
 
@@ -233,6 +234,13 @@ export type HostEvent =
   | { type: 'event'; workspaceId: string; event: ChatEvent }
   | { type: 'persist'; workspaceId: string; item: ChatItem }
   | { type: 'sessionId'; workspaceId: string; sessionId: string }
+  /**
+   * 방금 끝난 턴의 result 가 실어 온 토큰·비용 **누계**(query 단위, 워크스페이스 단위가 아니다)와
+   * 그 누계를 싣고 온 query 의 id. 세션이 다시 열리면 누계는 0부터 다시 시작하므로, 구간들을
+   * 접어 워크스페이스 총계로 만드는 일은 메인의 장부가 한다([[usageLedger]]) — 호스트가 죽어도
+   * 살아남아야 하는 상태다.
+   */
+  | { type: 'usage'; workspaceId: string; runId: string; usage: UsageTotals }
   // resetAt 은 제한 오류가 직접 알려 준 해제 시각(epoch ms). 사용량 스냅샷이 비어 있을 때
   // "언제 다시 보낼지" 를 아는 유일한 근거라 함께 넘긴다.
   | { type: 'rateLimit'; workspaceId: string; resetAt?: number }
