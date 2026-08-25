@@ -370,12 +370,18 @@ function mapTurnEnd(params: TurnParams, ts: number): Mapped {
 }
 
 /** 오류 payload 를 사람이 읽을 문장으로. 분류 코드가 있으면 실행 가능한 안내를 덧붙인다. */
-function errorText(error?: { message?: string; codexErrorInfo?: string }): string | null {
+function errorText(error?: { message?: string; codexErrorInfo?: unknown }): string | null {
   if (!error) return null
   const base = error.message?.trim()
-  const hint = ERROR_HINTS[error.codexErrorInfo ?? '']
+  const hint = ERROR_HINTS[normalizeCodexErrorInfo(error.codexErrorInfo) ?? '']
   if (!base) return hint ?? null
   return hint ? `${base}\n\n${hint}` : base
+}
+
+/** 최신 app-server의 camelCase와 구버전의 PascalCase 오류 코드를 같은 값으로 맞춘다. */
+export function normalizeCodexErrorInfo(value: unknown): string | null {
+  if (typeof value !== 'string' || value.length === 0) return null
+  return value[0].toLowerCase() + value.slice(1)
 }
 
 /**
@@ -383,10 +389,10 @@ function errorText(error?: { message?: string; codexErrorInfo?: string }): strin
  * 모르는 분류는 안내 없이 원문만 보여 준다.
  */
 const ERROR_HINTS: Record<string, string> = {
-  UsageLimitExceeded: 'Your ChatGPT usage limit is reached. Check /usage for when it resets.',
-  SessionBudgetExceeded: 'This session hit its token budget. Start a new session to continue.',
-  ContextWindowExceeded: 'The conversation outgrew the context window. Try /compact.',
-  Unauthorized: 'Codex is not signed in. Connect your account in Settings → Integrations.'
+  usageLimitExceeded: 'Your ChatGPT usage limit is reached. Check /usage for when it resets.',
+  sessionBudgetExceeded: 'This session hit its token budget. Start a new session to continue.',
+  contextWindowExceeded: 'The conversation outgrew the context window. Try /compact.',
+  unauthorized: 'Codex is not signed in. Connect your account in Settings → Integrations.'
 }
 
 // ── 아이템 ──────────────────────────────────────────────────────────────

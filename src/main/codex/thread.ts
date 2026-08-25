@@ -27,6 +27,7 @@ import { wooiMcpServerTable, wooiToolServer } from './appServer'
 import {
   createMapperState,
   mapNotification,
+  normalizeCodexErrorInfo,
   rememberOptimisticUser,
   type MapperState
 } from './mapping'
@@ -460,7 +461,10 @@ export class CodexThread {
     // 사용량 제한은 **설정과 무관하게** 메인에 알린다 — 자동 이어가기가 꺼져 있어도 사이드바가
     // "제한 때문에 멈췄다" 를 보여 줘야 한다. 오류 카드를 감추는 것(=return)은 이어가기를 예약할
     // 때뿐이다. 그때는 사용자에게 "잠시 멈췄다가 이어감" 한 흐름으로 보여야 하기 때문이다.
-    if (method === NOTIFY.turnCompleted && errorInfo === 'UsageLimitExceeded') {
+    if (
+      method === NOTIFY.turnCompleted &&
+      normalizeCodexErrorInfo(errorInfo) === 'usageLimitExceeded'
+    ) {
       this.deps.onRateLimit?.()
       if (this.config.autoResumeAfterRateLimit) return
     }
