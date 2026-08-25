@@ -26,6 +26,7 @@ import { fastModeReasonText, planApprovalMode, planOptions, unknownItemId } from
 import { supportsAutoMode } from '../agent/backend'
 import { RATE_LIMIT_ERROR, rateLimitResetAt } from '../rateLimitText'
 import { asClaudeMode, claudeEffort, claudeMode, type ClaudePermissionMode } from './protocol'
+import { usageFromResult } from './resultUsage'
 import type {
   AgentBackendId,
   ChatItem,
@@ -40,7 +41,8 @@ import type {
   RewindPoint,
   RewindActionResult,
   RunningAgent,
-  SendMessageOptions
+  SendMessageOptions,
+  UsageTotals
 } from '@shared/types'
 
 export interface SessionDeps {
@@ -124,6 +126,15 @@ export interface SessionDeps {
    * "Response complete" 알림을 띄우지 않도록 manager.forceIdle 로 연결한다.
    */
   settleIdle: () => void
+  /**
+   * 이 result 가 실어 온 토큰·비용 **누계**와, 그 누계를 싣고 온 query 의 id.
+   *
+   * 누계는 query 단위라 세션이 다시 열리면 0부터 다시 시작한다. 워크스페이스 단위 총계로 접는
+   * 일은 메인의 장부가 한다([[usageLedger]]) — 세션이 다시 열려도 살아남아야 하는 상태라 여기
+   * 두면 안 된다. runId 를 함께 주는 이유도 같다: 구간이 언제 바뀌었는지를 장부가 숫자로 추측
+   * 하는 대신, 그 사실을 아는 세션이 그대로 알려 준다.
+   */
+  onUsage?: (runId: string, usage: UsageTotals) => void
 }
 
 type Block = { type: string; [k: string]: unknown }
@@ -165,11 +176,25 @@ const AUTO_COMPACT_FALLBACK_PERCENT = 92
  *
  * 그래서 근사하지 않고 SDK 가 준 값을 그대로 쓴다.
  */
+/** 안내에 쓰는 토큰 표기(1,000 단위로 접는다 — 정확한 자릿수가 판단을 바꾸지 않는다). */
+function formatTokens(n: number): string {
+  return n >= 1000 ? `${Math.round(n / 1000)}k` : String(n)
+}
+
 function overAutoCompactThreshold(ctx: ContextUsage): boolean {
   const threshold = ctx.autoCompactThreshold
   if (typeof threshold === 'number' && threshold > 0) return ctx.totalTokens >= threshold
   return ctx.percentage >= AUTO_COMPACT_FALLBACK_PERCENT
 }
+
+/**
+ * 콜드 resume 안내를 남길 기준(토큰).
+ *
+ * 임계치를 **비율이 아니라 절대 토큰 수**로 잡는다 — 다시 읽는 값은 창의 몇 %냐가 아니라 몇
+ * 토큰이냐에 비례하기 때문이다. 1M 창 세션의 20% 는 여전히 200K 토큰이고, 그건 알릴 값어치가
+ * 있다. 반대로 200K 창의 20%(40K)까지 매번 알리면 안내가 소음이 된다.
+ */
+const LARGE_RESUME_NOTICE_TOKENS = 100_000
 
 /** getContextUsage 제어 요청 상한. 지연돼도 미터·자동압축 판단이 멈추지 않도록 둔다. */
 const CONTEXT_USAGE_TIMEOUT_MS = 5000
@@ -277,6 +302,14 @@ export class ClaudeSession {
    */
   private inFlight: SDKUserMessage[] = []
   private q: Query | null = null
+  /**
+   * 지금 열려 있는 query 의 id. query 를 열 때마다 새로 발급한다.
+   *
+   * 사용량 누계가 어느 구간의 것인지 가리는 데만 쓴다([[usageLedger]]). 프로세스 단위 카운터가
+   * 아니라 UUID 인 이유는 호스트가 죽고 다시 떠도 메인의 장부가 같은 구간으로 착각하면 안 되기
+   * 때문이다.
+   */
+  private runId = randomUUID()
   private currentApiMsgId: string | null = null
   /** 사용자가 "always allow" 한 도구 이름. 이 세션 동안 다시 묻지 않는다. */
   private alwaysAllow = new Set<string>()
@@ -616,6 +649,23 @@ export class ClaudeSession {
       return
     }
 
+    // 압축할 만큼은 아니어도 큰 세션이라면, 이어가는 값이 얼마인지는 알려 준다. 콜드 resume 은
+    // 이 맥락을 디스크에서 되살려 캐시에 새로 써 넣는다 — 세션이 다시 열릴 때마다 무는 비용이
+    // 바로 이것이고, 그걸 모르면 사용량이 왜 빨리 도는지 알 길이 없다.
+    //
+    // **자동으로 압축하지 않는다.** 이어갈지 `/clear` 할지는 사용자의 판단이다 — 여기서는 사실만
+    // 적고 결정은 넘긴다. (자동 압축을 꺼 둔 세션은 preflight 자체를 돌지 않아 이 안내도 없다.)
+    if (ctx.totalTokens >= LARGE_RESUME_NOTICE_TOKENS) {
+      this.emitItem({
+        id: `system:resume-size:${Date.now()}`,
+        type: 'system',
+        text:
+          `Picking this conversation back up restores about ${formatTokens(ctx.totalTokens)} tokens ` +
+          'of context from disk. Use /clear to start fresh if you no longer need the history.',
+        ts: Date.now()
+      })
+    }
+
     this.flushBuffered()
   }
 
@@ -658,6 +708,24 @@ export class ClaudeSession {
   async setPermissionMode(mode: ClaudePermissionMode): Promise<void> {
     this.deps.permissionMode = mode
     await this.q?.setPermissionMode(mode).catch(() => {})
+  }
+
+  /**
+   * 모델 오버라이드를 살아 있는 query 위에서 바꾼다(SDK 의 setModel — 이어지는 응답부터 적용).
+   *
+   * **세션을 버리지 않는 것이 요점이다.** 예전에는 매니저가 dispose 했는데, 그러면 다음 메시지가
+   * resume 으로 query 를 다시 열면서 디스크 트랜스크립트를 통째로 다시 입력으로 보내고, CLI
+   * 프로세스와 MCP 서버까지 새로 띄운다. 모델을 한 번 갈아 보는 값으로는 너무 비싸다.
+   *
+   * 프롬프트 캐시가 이걸로 살아나지는 않는다 — 캐시는 모델별이라 어차피 갈린다. 사라지는 것은
+   * 재시작·재생·재기동 쪽이고, A→B→A 로 되돌아왔을 때 원래 캐시가 아직 살아 있을 여지가 남는다.
+   *
+   * deps 도 함께 갱신한다 — 이 세션이 나중에 다시 열릴 때(프로세스 교체·크래시 복구) 새 모델로
+   * 열려야 한다.
+   */
+  async setModel(model: string | null): Promise<void> {
+    this.deps.model = model
+    await this.q?.setModel(model ?? undefined).catch(() => {})
   }
 
   /**
@@ -785,6 +853,7 @@ export class ClaudeSession {
       )
       // team 모드 세션에만 위임 커맨드가 든 변형을 물린다 — 쓸 수 없는 명령은 보이지 않아야 한다.
       const wooiPlugin = resolveWooiPlugin(!!this.deps.delegateBackends?.length)
+      this.runId = randomUUID()
       this.q = query({
         prompt: this.promptStream(this.input),
         options: {
@@ -1020,6 +1089,25 @@ export class ClaudeSession {
   }
 
   /**
+   * 자동 재시도를 트랜스크립트에 남긴다.
+   *
+   * 재시도 자체는 옳다 — 산출이 없었던 턴이라 부작용이 없고, 이게 없으면 사용자가 직접 다시
+   * 보내야 한다. 다만 **조용히** 하면 안 된다: 첫 시도의 입력이 이미 API 로 나갔다면 사용자는
+   * 모르는 채로 같은 맥락을 두 번 낸다. 사용량이 예상보다 빨리 도는 이유를 볼 수 있어야 한다.
+   *
+   * 어휘와 방식은 [[rateLimitResume]]·[[stackedWait]] 의 안내와 맞춘다 — Wooi 가 대신 한 일을
+   * 사실대로 한 줄 남기고, 판단은 사용자에게 넘긴다.
+   */
+  private noteAutoRetry(reason: string): void {
+    this.emitItem({
+      id: `system:auto-retry:${Date.now()}`,
+      type: 'system',
+      text: `${reason} Wooi restarted the agent and sent your message again — the first attempt may already have been billed.`,
+      ts: Date.now()
+    })
+  }
+
+  /**
    * 지금 도는 query(옛 자격증명을 든 CLI 프로세스)를 끊고, 같은 메시지를 새 프로세스에서 다시
    * 돌리도록 요청한다. 상태는 running 으로 유지해 사용자에게는 하나의 연속된 턴으로 보인다.
    */
@@ -1035,6 +1123,7 @@ export class ClaudeSession {
       `session: turn failed before any output (result=${subtype}, error=${this.turnError ?? 'none'}) ` +
         '— restarting the agent process and retrying the message once (session context kept)'
     )
+    this.noteAutoRetry('The turn failed before the agent said anything.')
     this.abort?.abort()
     void this.q?.interrupt().catch(() => {})
   }
@@ -1101,6 +1190,7 @@ export class ClaudeSession {
           '(session context kept; e.g. stale credentials after an account switch)',
         err
       )
+      this.noteAutoRetry('The agent process stopped before saying anything.')
       return true
     }
 
@@ -1934,6 +2024,12 @@ export class ClaudeSession {
     // CLI 가 이 턴에 fast mode 를 실제로 썼는지 알려 준다(설정과 다를 수 있다 — 미지원 모델·플랜
     // 제한이면 'off', fast 전용 rate limit 을 넘겼으면 'cooldown').
     this.reportFastModeState(msg.fast_mode_state, msg.fast_mode_disabled_reason)
+
+    // 사용량은 **어느 갈래로 빠지든 먼저** 적는다. 아래에는 이른 return 이 둘 있는데(조용한 자동
+    // 재시도, 사용량 제한 뒤 자동 이어가기), 둘 다 "돈이 안 든 턴" 이 아니다 — 특히 자동 재시도는
+    // 첫 시도의 입력이 이미 API 로 나간 경우가 있어, 여기서 빠뜨리면 장부가 정확히 그 숨은 비용만
+    // 놓친다. modelUsage 는 query 단위 누계라 언제 읽어도 같은 값이므로 앞에서 읽어도 안전하다.
+    this.deps.onUsage?.(this.runId, usageFromResult(msg))
 
     // 자격증명 문제로 아무것도 못 하고 끝난 턴이면, 사용자에게 오류를 보이는 대신 프로세스를
     // 갈아 끼워 같은 메시지를 다시 돌린다(터미널에서 CLI 를 재시작하는 것과 같은 처방).

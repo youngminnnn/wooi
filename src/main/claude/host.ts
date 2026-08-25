@@ -92,7 +92,8 @@ function ensure(workspaceId: string, config: SessionConfig): ClaudeSession {
     delegateBackends: config.delegateBackends,
     canSwitchToAgentTeam: config.canSwitchToAgentTeam,
     // 위임 시점의 config 가 아니라 세션 생성 시점의 값을 쓴다 — 위임 도구는 세션과 함께 살고,
-    // 모델·effort 를 바꾸면 어차피 매니저가 세션을 다시 연다.
+    // 이 값은 워크스페이스의 모델·effort 가 아니라 설정의 백엔드별 기본값이라 워크스페이스에서
+    // 모델을 갈아 끼워도(setModel) 달라지지 않는다.
     agentDefaults: (backend) => config.agentDefaults[backend] ?? { model: null, effort: null },
     emit: (event: ChatEvent) => post({ type: 'event', workspaceId, event }),
     persist: (item: ChatItem) => post({ type: 'persist', workspaceId, item }),
@@ -106,7 +107,8 @@ function ensure(workspaceId: string, config: SessionConfig): ClaudeSession {
     onSessionId: (sessionId: string) => post({ type: 'sessionId', workspaceId, sessionId }),
     onRateLimit: (resetAt?: number) => post({ type: 'rateLimit', workspaceId, resetAt }),
     onPermissionMode: (mode) => post({ type: 'permissionMode', workspaceId, mode }),
-    settleIdle: () => post({ type: 'settleIdle', workspaceId })
+    settleIdle: () => post({ type: 'settleIdle', workspaceId }),
+    onUsage: (runId, usage) => post({ type: 'usage', workspaceId, runId, usage })
   })
   sessions.set(workspaceId, session)
   return session
@@ -159,6 +161,10 @@ async function handle(msg: HostCommand): Promise<void> {
 
     case 'setPermissionMode':
       await sessions.get(msg.workspaceId)?.setPermissionMode(msg.mode)
+      break
+
+    case 'setModel':
+      await sessions.get(msg.workspaceId)?.setModel(msg.model)
       break
 
     case 'dispose':

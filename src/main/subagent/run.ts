@@ -1,5 +1,5 @@
 import type { PermissionResult } from '@anthropic-ai/claude-agent-sdk'
-import type { AgentBackendId, EffortSetting, PermissionMode } from '@shared/types'
+import type { AgentBackendId, EffortSetting, PermissionMode, UsageTotals } from '@shared/types'
 import { runClaudeSubAgent } from './runClaude'
 import { runCodexSubAgent } from './runCodex'
 
@@ -61,6 +61,12 @@ export interface SubAgentRunDeps {
    * 쓰지 않으며, 그 경로에서는 샌드박스가 유일한 방어선이다.
    */
   canUseTool?: SubAgentPermission
+  /**
+   * 이 서브런이 쓴 토큰·비용. 부모와 **별도 query** 라 부모 result 의 회계에 절대 나타나지 않으므로
+   * (터미널의 네이티브 Task 서브에이전트와 다른 점이다), 여기서 알려 주지 않으면 Wooi 고유 비용만
+   * 장부에서 빠진다. 부르는 쪽이 워크스페이스를 알고 있으므로 그쪽에서 장부에 단다.
+   */
+  onUsage?: (usage: UsageTotals) => void
 }
 
 /** 부모 세션의 canUseTool 과 같은 모양. Claude 경로만 사용한다. */

@@ -116,6 +116,33 @@ describe('ClaudeSession cold-resume preflight', () => {
     expect(events.some((e) => e.type === 'compacting')).toBe(true)
   }, 15_000)
 
+  it('압축할 정도는 아니어도 큰 세션이면 다시 읽는 양을 알린다', async () => {
+    // 1M 창 세션의 120K — 비율로는 12% 라 압축 임계치와는 한참 멀지만, 콜드 resume 이 되살리는
+    // 토큰 수로는 알릴 값어치가 있다.
+    const { received, items } = await runFirstTurn(true, {
+      totalTokens: 120_000,
+      percentage: 12,
+      autoCompactThreshold: 967_000
+    })
+
+    const notice = items.find((i) => i.type === 'system' && i.id.startsWith('system:resume-size:'))
+    expect(notice?.type === 'system' && notice.text).toContain('120k tokens')
+    // 안내만 남기고 압축하지는 않는다 — 이어갈지 /clear 할지는 사용자 판단이다.
+    expect(received[0]).toContain('hello')
+  }, 15_000)
+
+  it('작은 세션에는 안내를 남기지 않는다 — 매번 뜨면 소음이다', async () => {
+    const { items } = await runFirstTurn(true, {
+      totalTokens: 1_000,
+      percentage: 5,
+      autoCompactThreshold: 100_000
+    })
+
+    expect(items.some((i) => i.type === 'system' && i.id.startsWith('system:resume-size:'))).toBe(
+      false
+    )
+  }, 15_000)
+
   it('autoCompact 가 꺼져 있으면 버퍼링 없이 그대로 보낸다', async () => {
     const { received } = await runFirstTurn(false, {
       totalTokens: 150_000,
