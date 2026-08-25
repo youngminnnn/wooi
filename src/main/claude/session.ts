@@ -2025,6 +2025,12 @@ export class ClaudeSession {
     // 제한이면 'off', fast 전용 rate limit 을 넘겼으면 'cooldown').
     this.reportFastModeState(msg.fast_mode_state, msg.fast_mode_disabled_reason)
 
+    // 사용량은 **어느 갈래로 빠지든 먼저** 적는다. 아래에는 이른 return 이 둘 있는데(조용한 자동
+    // 재시도, 사용량 제한 뒤 자동 이어가기), 둘 다 "돈이 안 든 턴" 이 아니다 — 특히 자동 재시도는
+    // 첫 시도의 입력이 이미 API 로 나간 경우가 있어, 여기서 빠뜨리면 장부가 정확히 그 숨은 비용만
+    // 놓친다. modelUsage 는 query 단위 누계라 언제 읽어도 같은 값이므로 앞에서 읽어도 안전하다.
+    this.deps.onUsage?.(this.runId, usageFromResult(msg))
+
     // 자격증명 문제로 아무것도 못 하고 끝난 턴이면, 사용자에게 오류를 보이는 대신 프로세스를
     // 갈아 끼워 같은 메시지를 다시 돌린다(터미널에서 CLI 를 재시작하는 것과 같은 처방).
     // inFlight 를 비우지 않고 running 도 유지해, 사용자 눈에는 하나의 연속된 턴으로 보인다.
@@ -2061,7 +2067,6 @@ export class ClaudeSession {
     // 턴이 result 까지 도달했다 — 자동 재시도 예산을 되돌려 다음 턴이 다시 1회를 쓸 수 있게 한다.
     if (msg.subtype === 'success') this.autoRetried = false
     this.deps.onSessionId(msg.session_id)
-    this.deps.onUsage?.(this.runId, usageFromResult(msg))
     this.emitItem({
       id: `result:${msg.uuid}`,
       type: 'result',
