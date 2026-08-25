@@ -30,6 +30,26 @@ jobs:
           HEAD_REF: ${{ github.head_ref }}
         run: node scripts/check-branch-name.mjs "$HEAD_REF"
 
+  # 사용자에게 보이는 feat/fix 변경이 e2e 스펙 또는 사유가 적힌 예외와 함께 오는지 검증한다.
+  # 커밋 범위만 읽는 독립 잡이라 의존성을 설치하지 않고, verify 잡의 실행 경로에도 영향을 주지 않는다.
+  e2e-coverage:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+
+      - name: Validate e2e coverage
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+          BASE_REF: ${{ github.base_ref }}
+        run: node scripts/check-e2e-coverage.mjs "$HEAD_REF"
+
   verify:
     runs-on: ubuntu-latest
     steps:

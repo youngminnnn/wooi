@@ -2,8 +2,8 @@
 
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { pathToFileURL } from 'node:url'
 import { openSeededWorkspace, seedAppState, waitForInspection } from '../fixtures.mjs'
+import { launchWooi, withScratchRepo } from '../harness.mjs'
 
 const transcript = [
   { id: 'user-e2e', type: 'user', text: 'Seeded Codex conversation', ts: Date.now() - 1 },
@@ -43,10 +43,6 @@ async function closeCard(win) {
 }
 
 export default async function Codex_대화_제어_명령을_모델_턴_없이_실행한다() {
-  const { withScratchRepo, launchWooi } = await import(
-    pathToFileURL(join(process.env.WOOI_E2E_HARNESS, 'index.mjs')).href
-  )
-
   await withScratchRepo(
     {
       worktrees: ['feature-test'],

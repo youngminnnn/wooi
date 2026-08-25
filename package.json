@@ -15,6 +15,7 @@
   },
   "scripts": {
     "dev": "electron-vite dev",
+    "dev:sandbox": "node scripts/dev-sandbox.mjs",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "start": "electron-vite preview",

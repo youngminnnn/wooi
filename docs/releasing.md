@@ -127,24 +127,45 @@ were most likely to never learn about a release.
 
 ## 7. Release procedure
 
-1. **Decide the number** using [§2](#2-which-number-to-bump).
-2. **Open a `release/vX.Y.Z` branch**, bump `version` in `package.json`, and run
+1. **Verify what you are about to release.** Build, then run the full Electron
+   e2e suite with the shared harness:
+   ```bash
+   npm run build
+   WOOI_E2E_HARNESS=/absolute/path/to/wooi-run/harness npm run e2e
+   ```
+   See [`e2e/README.md`](../e2e/README.md) for what `WOOI_E2E_HARNESS` is and
+   how to set it up.
+   Confirm the final `[e2e] N passed, M failed` count (or `total` in
+   `.wooi-e2e/report.json`) shows that specs actually ran. A missing or invalid
+   harness prints `SKIP` and exits 0, so a green exit alone is not enough. Read
+   failures from `report.json`; while fixing them, rerun only the failing specs
+   with `npm run e2e -- --only <name>`, then run the full suite once more.
+
+   Also run the tests that require real installed CLIs and credentials and are
+   otherwise skipped everywhere:
+   ```bash
+   WOOI_E2E=1 WOOI_E2E_AGENTS=1 WOOI_E2E_CHOICE=1 npx vitest run src/main/claude/session.hooks.e2e.test.ts src/main/claude/session.restart.e2e.test.ts src/main/subagent/run.e2e.test.ts src/main/subagent/choice.e2e.test.ts
+   ```
+   Do not proceed to the tag until the full e2e suite and these gated tests are
+   green.
+2. **Decide the number** using [§2](#2-which-number-to-bump).
+3. **Open a `release/vX.Y.Z` branch**, bump `version` in `package.json`, and run
    `npm install` so `package-lock.json` follows.
-3. **Commit as `release: vX.Y.Z`**, with a body listing user-visible changes
+4. **Commit as `release: vX.Y.Z`**, with a body listing user-visible changes
    since the previous tag (this becomes the summary maintainers read later).
-4. **Merge to `main`.**
-5. **Tag the merge commit and push:**
+5. **Merge to `main`.**
+6. **Tag the merge commit and push:**
    ```bash
    git checkout main && git pull
    git tag "v$(node -p "require('./package.json').version")"
    git push origin "v$(node -p "require('./package.json').version")"
    ```
    Deriving the tag from `package.json` avoids the mismatch described below.
-6. **`build.yml` takes over** — it verifies the tag matches `package.json`,
+7. **`build.yml` takes over** — it verifies the tag matches `package.json`,
    checks signing secrets, builds, signs, notarizes, verifies with `codesign` /
    `stapler` / `spctl`, then creates the GitHub Release with auto-generated
    notes.
-7. **The `homebrew-tap` job follows** — it re-downloads the published
+8. **The `homebrew-tap` job follows** — it re-downloads the published
    `Wooi-arm64.dmg`, hashes it, renders `build/homebrew/wooi.rb` with the new
    version + `sha256`, and pushes it to `youngminnnn/homebrew-tap` as
    `Casks/wooi.rb`, so `brew install --cask youngminnnn/tap/wooi` lands on the
@@ -169,7 +190,7 @@ notarization burns any time. Don't remove it.
 repo already squash-merges Conventional-Commit-titled PRs, which is exactly its
 input. It would take over §2 entirely (no human picks the number), maintain a
 `CHANGELOG.md`, and open the version-bump PR and push the tag automatically —
-replacing steps 1–5 above.
+replacing steps 2–6 above.
 
 Worth adopting once release cadence has settled into the weekly rhythm in §3.
 Automating first would just freeze whatever the current habits are into a bot.

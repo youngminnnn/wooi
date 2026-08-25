@@ -1,8 +1,7 @@
 /* global console, process */
 
-import { join } from 'node:path'
-import { pathToFileURL } from 'node:url'
 import { openSeededWorkspace, seedAppState, waitForInspection } from '../fixtures.mjs'
+import { launchWooi, withScratchRepo } from '../harness.mjs'
 
 // 기본 스크래치 루트는 한 번에 하나의 실행만 감당한다(하네스 계약). 다른 워크스페이스가 동시에
 // e2e 를 돌리면 정리가 ENOTEMPTY 로 깨지므로 이 스펙만의 루트를 쓴다.
@@ -71,10 +70,6 @@ function expectExcludes(actual, forbidden, subject) {
 }
 
 export default async function 새_명령_카드_셋이_실제_앱에서_뜬다() {
-  const { withScratchRepo, launchWooi } = await import(
-    pathToFileURL(join(process.env.WOOI_E2E_HARNESS, 'index.mjs')).href
-  )
-
   await withScratchRepo(
     {
       root: ROOT,

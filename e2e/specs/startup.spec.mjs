@@ -1,13 +1,9 @@
 /* global console, process */
 
-import { join } from 'node:path'
-import { pathToFileURL } from 'node:url'
 import { openSeededWorkspace, seedAppState, waitForInspection } from '../fixtures.mjs'
+import { launchWooi, withScratchRepo } from '../harness.mjs'
 
 export default async function 앱이_시드된_대화로_사용_가능한_화면에_도달한다() {
-  const { withScratchRepo, launchWooi } = await import(
-    pathToFileURL(join(process.env.WOOI_E2E_HARNESS, 'index.mjs')).href
-  )
   await withScratchRepo(
     {
       worktrees: ['feature-test'],

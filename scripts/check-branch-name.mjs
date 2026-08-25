@@ -9,9 +9,11 @@
 //   통과: exit 0 / 위반: exit 1 / 잘못된 호출: exit 2
 
 import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { resolve } from 'node:path'
 
 // 커밋 메시지 prefix 와 동일한 타입 집합.
-const TYPES = [
+export const TYPES = [
   'feat',
   'fix',
   'docs',
@@ -36,7 +38,7 @@ const EXEMPT = new Set(['main', 'HEAD'])
 const EXEMPT_PREFIXES = ['dependabot/']
 
 // 예) feat/inline-login, fix/first-message-stall, chore/deps/bump-electron
-const PATTERN = new RegExp(`^(${TYPES.join('|')})\\/[A-Za-z0-9._/-]+$`)
+export const PATTERN = new RegExp(`^(${TYPES.join('|')})\\/[A-Za-z0-9._/-]+$`)
 
 // 삭제 push 는 local_sha 가 전부 0 으로 온다.
 const ZERO_SHA = /^0+$/
@@ -112,16 +114,21 @@ function checkPrePush() {
   process.exit(ok ? 0 : 1)
 }
 
-const arg = (process.argv[2] ?? '').trim()
+function run() {
+  const arg = (process.argv[2] ?? '').trim()
 
-if (arg === '--pre-push') {
-  checkPrePush()
-} else if (!arg) {
-  console.error('check-branch-name: 브랜치 이름 인자가 필요합니다.')
-  process.exit(2)
-} else if (isAllowed(arg)) {
-  process.exit(0)
-} else {
-  reportViolation(arg)
-  process.exit(1)
+  if (arg === '--pre-push') {
+    checkPrePush()
+  } else if (!arg) {
+    console.error('check-branch-name: 브랜치 이름 인자가 필요합니다.')
+    process.exit(2)
+  } else if (isAllowed(arg)) {
+    process.exit(0)
+  } else {
+    reportViolation(arg)
+    process.exit(1)
+  }
 }
+
+const isMain = process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])
+if (isMain) run()

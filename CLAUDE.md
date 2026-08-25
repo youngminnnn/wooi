@@ -11,6 +11,8 @@
 ## 명령어
 
 - `npm run dev` — 개발 모드 실행 (electron-vite)
+- `npm run dev:sandbox` — 이 워크트리의 빌드를 `.wooi-dev/`에 완전히 격리해 실행
+  (`--build`는 강제 재빌드, `--fresh`는 저장 상태 초기화). 설치본과 `Wooi (dev)` 데이터는 건드리지 않는다.
 - `npm run build` — 빌드
 - `npm run typecheck` — node + web 타입체크
 - `npm run dist` — macOS 배포 빌드

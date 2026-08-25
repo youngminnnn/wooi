@@ -1,13 +1,12 @@
 /* global console, process */
 
-import { join } from 'node:path'
-import { pathToFileURL } from 'node:url'
 import {
   openRowMenuItem,
   openSeededWorkspace,
   seedAppState,
   waitForInspection
 } from '../fixtures.mjs'
+import { launchWooi, withScratchRepo } from '../harness.mjs'
 
 /**
  * 이어받을 대화가 없으면 분기 입구는 **막히되 보여야** 한다.
@@ -18,9 +17,6 @@ import {
  * ([[narrow-pane-header.spec]]) — 폭과 무관한 경로라야 이 스펙이 창 크기에 흔들리지 않는다.
  */
 export default async function 대화가_없으면_분기_입구가_이유와_함께_막힌다() {
-  const { withScratchRepo, launchWooi } = await import(
-    pathToFileURL(join(process.env.WOOI_E2E_HARNESS, 'index.mjs')).href
-  )
   await withScratchRepo(
     // 트랜스크립트를 주지 않으면 시드가 sessionId 를 null 로 둔다 = 이어받을 대화가 없는 상태.
     { worktrees: ['feature-test'], seed: (scratch) => seedAppState(scratch) },

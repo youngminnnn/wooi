@@ -1,8 +1,7 @@
 /* global console, process */
 
-import { join } from 'node:path'
-import { pathToFileURL } from 'node:url'
 import { openSeededWorkspace, seedAppState, waitForInspection } from '../fixtures.mjs'
+import { launchWooi, withScratchRepo } from '../harness.mjs'
 
 /**
  * 보낸 메시지의 결말은 **앱을 껐다 켠 뒤에도** 물으면 답이 나와야 한다.
@@ -40,10 +39,6 @@ async function runCommand(win, text) {
 }
 
 export default async function 보낸_메시지의_결말을_재시작_뒤에도_조회한다() {
-  const { withScratchRepo, launchWooi } = await import(
-    pathToFileURL(join(process.env.WOOI_E2E_HARNESS, 'index.mjs')).href
-  )
-
   const now = Date.now()
   const declinedAt = now - 2 * HOUR
   const waitingAt = now - HOUR

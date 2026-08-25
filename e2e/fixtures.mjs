@@ -11,6 +11,21 @@ function exportedNumber(source, name, file) {
   return Number(match[1])
 }
 
+/** 시드가 현재 앱의 스키마와 약관 버전을 한 곳에서 읽게 한다. */
+export async function readAppVersions({ appDir = process.cwd() } = {}) {
+  const root = resolve(appDir)
+  const schemaFile = join(root, 'src/main/storeSchema.ts')
+  const typesFile = join(root, 'src/shared/types.ts')
+  const [schemaSource, typesSource] = await Promise.all([
+    readFile(schemaFile, 'utf8'),
+    readFile(typesFile, 'utf8')
+  ])
+  return {
+    schemaVersion: exportedNumber(schemaSource, 'CURRENT_SCHEMA_VERSION', schemaFile),
+    termsVersion: exportedNumber(typesSource, 'CURRENT_TERMS_VERSION', typesFile)
+  }
+}
+
 function requiredInterfaceFields(source, name, file) {
   const body = source.match(new RegExp(`export interface ${name}\\s*{([\\s\\S]*?)\\n}`))?.[1]
   if (!body) throw new Error(`${name} interface not found in ${file}`)
@@ -34,14 +49,11 @@ export async function seedAppState(
   } = {}
 ) {
   const root = resolve(appDir)
-  const schemaFile = join(root, 'src/main/storeSchema.ts')
   const typesFile = join(root, 'src/shared/types.ts')
-  const [schemaSource, typesSource] = await Promise.all([
-    readFile(schemaFile, 'utf8'),
+  const [{ schemaVersion, termsVersion }, typesSource] = await Promise.all([
+    readAppVersions({ appDir: root }),
     readFile(typesFile, 'utf8')
   ])
-  const schemaVersion = exportedNumber(schemaSource, 'CURRENT_SCHEMA_VERSION', schemaFile)
-  const termsVersion = exportedNumber(typesSource, 'CURRENT_TERMS_VERSION', typesFile)
   const requiredFields = requiredInterfaceFields(typesSource, 'Workspace', typesFile)
   const worktreePath = worktrees[workspaceName]
   if (!worktreePath) throw new Error(`worktree not found for ${workspaceName}`)

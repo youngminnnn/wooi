@@ -3,7 +3,6 @@
 import { execFileSync } from 'node:child_process'
 import { appendFile, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { pathToFileURL } from 'node:url'
 import {
   E2E_WORKSPACE_DISPLAY_NAME,
   openRowMenuItem,
@@ -11,6 +10,7 @@ import {
   seedAppState,
   waitForInspection
 } from '../fixtures.mjs'
+import { launchWooi, withScratchRepo } from '../harness.mjs'
 
 const SEEDED_SESSION = 'session-e2e-seeded'
 const COPIED_LINE = 'Bumped answer to 42.'
@@ -30,9 +30,6 @@ const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8' 
  * 이 기능이 존재하는 이유가 바로 그 상황을 만들지 않는 것이다.
  */
 export default async function 대화를_분기하면_원본의_코드와_기록을_물려받는다() {
-  const { withScratchRepo, launchWooi } = await import(
-    pathToFileURL(join(process.env.WOOI_E2E_HARNESS, 'index.mjs')).href
-  )
   await withScratchRepo(
     {
       worktrees: ['feature-test'],
