@@ -12,6 +12,7 @@ import { AsyncQueue } from './asyncQueue'
 import { clampText, clampInput } from './clamp'
 import { buildFileChangeDiff, isFileChangeTool } from './editDiff'
 import { summarizeToolResult } from './toolResult'
+import { binaryContentPlaceholder } from '@shared/toolContent'
 import { matchesRule, ruleForRequest, saveAllowRule } from './permissionRules'
 import { resolveClaudeExecutable } from './executable'
 import { sessionTranscriptExists } from './sessionFiles'
@@ -2317,6 +2318,8 @@ function normalizeToolResult(content: unknown): string {
       .map((b) => {
         if (typeof b === 'string') return b
         if (b && typeof b === 'object' && 'text' in b) return String((b as { text: unknown }).text)
+        const binary = binaryContentPlaceholder(b)
+        if (binary) return binary
         return JSON.stringify(b)
       })
       .join('\n')

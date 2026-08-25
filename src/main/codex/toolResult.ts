@@ -1,4 +1,5 @@
 import type { ToolSummary } from '@shared/toolSummary'
+import { binaryContentPlaceholder } from '@shared/toolContent'
 import type { ThreadItem } from './wire'
 
 export interface CodexToolResult {
@@ -51,7 +52,7 @@ export function codexToolResult(item: ThreadItem): CodexToolResult {
   return { text: describeResult(item.result) }
 }
 
-/** 전부 텍스트 블록일 때만 벗긴다. 이미지·리소스가 섞이면 JSON 폴백이 정보를 보존한다. */
+/** 텍스트는 보존하되 바이너리 블록은 base64 대신 짧은 설명으로 바꾼다. */
 function textContent(content: unknown[]): string | null {
   const parts: string[] = []
   for (const raw of content) {
@@ -60,6 +61,11 @@ function textContent(content: unknown[]): string | null {
       continue
     }
     const block = record(raw)
+    const binary = binaryContentPlaceholder(block)
+    if (binary) {
+      parts.push(binary)
+      continue
+    }
     if (block?.type !== 'text' && block?.type !== 'inputText') return null
     if (typeof block.text !== 'string') return null
     parts.push(block.text)
