@@ -3,7 +3,6 @@ import { IPC } from '@shared/types'
 import { applyDevPaths, isDevIsolated, toolShimPath, wooiHome } from './paths'
 import { AgentOrchestrator } from './agent/orchestrator'
 import { initAgentTools } from './agent/tools'
-import { flushAnsweredDecisionsOnStartup } from './agent/tools/decision'
 import { writeWooiPlugins } from './agent/plugin'
 import { cancelToolPermissions, initToolPermission } from './agent/tools/permission'
 import { startToolSocket, stopToolSocket } from './agent/tools/socket'
@@ -202,9 +201,6 @@ initAgentTools({
   }
 })
 stackedWaits.restore()
-// 답은 디스크에 남지만 세션은 앱과 함께 사라진다. 재기동 뒤 idle 워크스페이스에 다시 밀어 넣어
-// 사용자가 이미 한 답이 영영 갇히지 않게 한다([[agent/tools/decision]]).
-flushAnsweredDecisionsOnStartup()
 
 // `/wooi:*` 슬래시 명령을 담은 Claude 플러그인을 디스크에 만든다([[agent/plugin]]).
 // 매번 다시 쓴다 — 카탈로그가 SSOT 이므로 앱을 업데이트하면 명령도 함께 바뀌어야 한다.

@@ -236,68 +236,6 @@ export const AGENT_TOOLS: AgentToolSpec[] = [
     annotations: { title: 'Report to the parent workspace', readOnlyHint: false }
   },
   {
-    name: 'ask_for_decision',
-    description: [
-      'Raise a decision you cannot make yourself and keep the answer coming back to you, without',
-      'blocking. Use it when you have hit a fork that changes everything downstream and guessing',
-      'wrong would waste the work that follows it: a schema change you were not asked to make, two',
-      'defensible names for a public API, a requirement that contradicts what you found in the code.',
-      '',
-      'The question goes to **the user** first. Your turn then ends normally — this tool does not',
-      'wait, and there is nothing to poll. When the user answers, their answer arrives here as a new',
-      'turn and you pick the work back up. If they decide the parent workspace should call it, they',
-      'hand it there themselves; that is their choice, not yours.',
-      '',
-      'This is not `AskUserQuestion`. That one stops your turn and only works while somebody is',
-      'watching this conversation. Use this one instead whenever the user may not be looking — which',
-      'is the normal case for a workspace running on its own.',
-      '',
-      'Ask about a decision, not for a status check or reassurance, and ask once: the question waits',
-      'until it is answered, so calling again just buries it. Everything you can settle by reading',
-      'the code, the tests, or the task you were handed, settle yourself.',
-      '',
-      'Write the question for someone who has not read a line of this conversation: what you are',
-      'deciding, what each way costs, and what you will do with the answer. Give `options` whenever',
-      'the choice is closed — one tap beats typing a sentence — and leave them out when it is open.'
-    ].join(' '),
-    inputSchema: {
-      question: z
-        .string()
-        .describe(
-          'The decision, written for someone who cannot see this conversation: what is at stake, ' +
-            'what you already ruled out, and what you will do once you know. One or two sentences.'
-        ),
-      options: z
-        .array(
-          z.object({
-            label: z
-              .string()
-              .describe('The choice itself, a few words — this is what the user taps.'),
-            description: z
-              .string()
-              .optional()
-              .describe('One line on what picking it means or costs.')
-          })
-        )
-        .min(2)
-        .max(4)
-        .optional()
-        .describe(
-          'Closed set of answers, 2 to 4. Put the one you would pick first and say so in its ' +
-            'description. The user can always answer in their own words instead, so leave this ' +
-            'out when the question is genuinely open-ended.'
-        ),
-      recommendation: z
-        .string()
-        .optional()
-        .describe(
-          'What you would do if you had to decide alone, and why. Answering is much cheaper for ' +
-            'the user when there is something to agree with, so fill this in whenever you lean one way.'
-        )
-    },
-    annotations: { title: 'Ask for a decision', readOnlyHint: false }
-  },
-  {
     name: 'notify_child',
     description: [
       'Send a message to a workspace stacked directly on this one. Use it when something here',

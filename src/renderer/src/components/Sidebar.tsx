@@ -24,7 +24,6 @@ import {
   ArrowUpDown,
   GitPullRequest,
   MessagesSquare,
-  MessageCircleQuestion,
   Copy,
   Square,
   X,
@@ -1040,8 +1039,7 @@ function WorkspaceRow({
         {(shortcut !== undefined ||
           (unread && !active) ||
           workspace.muted ||
-          (workspace.peerInbox?.length ?? 0) > 0 ||
-          (workspace.decisions?.length ?? 0) > 0) && (
+          (workspace.peerInbox?.length ?? 0) > 0) && (
           <div className="shrink-0 flex items-center gap-1.5">
             {shortcut !== undefined && (
               <kbd
@@ -1066,13 +1064,6 @@ function WorkspaceRow({
                 size={12}
                 className="text-[var(--info-400)]"
                 aria-label="Message waiting from another workspace"
-              />
-            )}
-            {(workspace.decisions?.length ?? 0) > 0 && (
-              <MessageCircleQuestion
-                size={12}
-                className="text-[var(--accent-400)]"
-                aria-label="Question waiting for your answer"
               />
             )}
             {workspace.muted && (

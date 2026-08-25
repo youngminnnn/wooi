@@ -54,10 +54,7 @@ function startMessage(task: string, baseBranch: string, otherRepo: Repo | null):
         ]
       : []),
     'Nothing crosses between workspaces on its own, and there is no workspace for you to report ' +
-      'back to — when you finish or get stuck, say so to the user.',
-    'If you hit a decision you cannot make yourself and guessing wrong would waste the work that ' +
-      'follows it, call `mcp__wooi__ask_for_decision` instead of guessing or stopping silently. ' +
-      'It goes to the user and does not block — your turn ends and the answer comes back as a new one.'
+      'back to — when you finish or get stuck, say so to the user.'
   ].join('\n')
 }
 
