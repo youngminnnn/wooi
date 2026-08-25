@@ -6,7 +6,10 @@ import {
   matchLocal,
   matchMemory,
   matchPicker,
-  matchSideQuestion
+  matchSideQuestion,
+  parseCopyIndex,
+  parseExportFormat,
+  parseMemoryScope
 } from './Composer'
 import type { CommandPanelKind } from '@shared/types'
 
@@ -32,6 +35,34 @@ describe('백엔드 전용 composer 명령', () => {
     expect(matchLocal('/wooi:stop dev', false)).toBeNull()
   })
 
+  it('새 로컬 명령 여섯 개는 Claude 전용이 아니다', () => {
+    for (const name of [
+      'export',
+      'login',
+      'bug',
+      'feedback',
+      'release-notes',
+      'privacy-settings'
+    ]) {
+      expect(matchLocal(`/${name}`, false)).toBe(name)
+    }
+  })
+
+  it('Codex는 send() 앞쪽의 전용 처리기를 쓰므로 /logout은 Claude에서만 가로챈다', () => {
+    expect(matchLocal('/logout', false)).toBeNull()
+    expect(matchLocal('/logout', true)).toBe('logout')
+  })
+
+  it('/export 인자가 있어도 로컬 명령으로 처리한다', () => {
+    expect(matchLocal('/export json', false)).toBe('export')
+  })
+
+  it('/bashes 별칭을 /tasks 로 해석하고 비슷한 이름은 거부한다', () => {
+    expect(matchLocal('/tasks', false)).toBe('tasks')
+    expect(matchLocal('/bashes', false)).toBe('tasks')
+    expect(matchLocal('/task', false)).toBeNull()
+  })
+
   it('Claude 백엔드에서만 /add-dir을 가로챈다', () => {
     expect(matchLocal('/add-dir ~/notes', false)).toBeNull()
     expect(matchLocal('/add-dir ~/notes', true)).toBe('add-dir')
@@ -39,6 +70,11 @@ describe('백엔드 전용 composer 명령', () => {
 })
 
 describe('workspace lifecycle commands', () => {
+  it('이름을 생략한 /rename 은 인라인 편집 요청으로 처리한다', () => {
+    expect(matchLifecycle('/rename')).toEqual({ kind: 'rename', name: null })
+    expect(matchLifecycle('/rename   ')).toEqual({ kind: 'rename', name: null })
+  })
+
   it('maps rename and the safety-gated archive/delete commands only as whole inputs', () => {
     expect(matchLifecycle('/rename Better name')).toEqual({ kind: 'rename', name: 'Better name' })
     expect(matchLifecycle('/archive')).toEqual({ kind: 'archive' })
@@ -69,22 +105,81 @@ describe('Codex conversation-control commands', () => {
   })
 })
 
+describe('/export 형식', () => {
+  it('인자가 없으면 기존 내보내기 메뉴를 연다', () => {
+    expect(parseExportFormat('/export')).toBe('menu')
+    expect(parseExportFormat('  /export  ')).toBe('menu')
+  })
+
+  it('Markdown 별칭과 JSON 형식을 읽는다', () => {
+    expect(parseExportFormat('/export md')).toBe('md')
+    expect(parseExportFormat('/export markdown')).toBe('md')
+    expect(parseExportFormat('/export json')).toBe('json')
+  })
+
+  it('알 수 없는 값과 대소문자가 다른 값은 거부한다', () => {
+    expect(parseExportFormat('/export txt')).toBe('invalid')
+    expect(parseExportFormat('/export MD')).toBe('invalid')
+  })
+})
+
+describe('/copy 인자', () => {
+  it('인자가 없으면 가장 최근 응답을 가리킨다', () => {
+    expect(parseCopyIndex('/copy')).toBe(1)
+    expect(parseCopyIndex('  /copy  ')).toBe(1)
+  })
+
+  it('양의 정수를 1-based 인덱스로 읽는다', () => {
+    expect(parseCopyIndex('/copy 3')).toBe(3)
+  })
+
+  it('양의 정수 하나가 아니면 거부한다', () => {
+    for (const command of ['/copy 0', '/copy -1', '/copy abc', '/copy 1.5', '/copy 1 2']) {
+      expect(parseCopyIndex(command)).toBeNull()
+    }
+  })
+})
+
+describe('/memory 스코프', () => {
+  it('인자가 없으면 카드에서 고르게 한다', () => {
+    expect(parseMemoryScope('/memory')).toBe('ask')
+    expect(parseMemoryScope('  /memory  ')).toBe('ask')
+  })
+
+  it('project와 user 스코프를 읽는다', () => {
+    expect(parseMemoryScope('/memory project')).toBe('project')
+    expect(parseMemoryScope('/memory user')).toBe('user')
+  })
+
+  it('알 수 없는 값과 대소문자가 다른 값은 거부한다', () => {
+    expect(parseMemoryScope('/memory global')).toBeNull()
+    expect(parseMemoryScope('/memory USER')).toBeNull()
+  })
+})
+
 describe('선택 카드 슬래시 명령', () => {
   it('고를 에이전트가 둘 이상일 때만 /agent 를 가로챈다', () => {
-    expect(matchPicker('/agent', true, true)).toBe('agent')
+    expect(matchPicker('/agent', { fast: true, agent: true, plan: true })).toBe('agent')
     // 쓸 수 있는 에이전트가 하나뿐이면 "/agent" 는 카드가 아니라 에이전트에게 보내는 평범한 메시지다.
-    expect(matchPicker('/agent', true, false)).toBeNull()
+    expect(matchPicker('/agent', { fast: true, agent: false, plan: true })).toBeNull()
   })
 
   it('fast mode 미지원 백엔드에서는 /fast 를 가로채지 않는다', () => {
-    expect(matchPicker('/fast', false, true)).toBeNull()
-    expect(matchPicker('/fast', true, true)).toBe('fast')
+    expect(matchPicker('/fast', { fast: false, agent: true, plan: true })).toBeNull()
+    expect(matchPicker('/fast', { fast: true, agent: true, plan: true })).toBe('fast')
   })
 
   it('/model·/effort 는 뒤따르는 인자와 무관하게 카드를 연다', () => {
-    expect(matchPicker('/model opus', false, false)).toBe('model')
-    expect(matchPicker('/effort high', false, false)).toBe('effort')
-    expect(matchPicker('/models', false, false)).toBeNull()
+    const allow = { fast: false, agent: false, plan: false }
+    expect(matchPicker('/model opus', allow)).toBe('model')
+    expect(matchPicker('/effort high', allow)).toBe('effort')
+    expect(matchPicker('/models', allow)).toBeNull()
+  })
+
+  it('권한 모드를 고를 수 있고 백엔드 전용 카드가 없을 때만 /plan 을 가로챈다', () => {
+    expect(matchPicker('/plan', { fast: false, agent: false, plan: true })).toBe('plan')
+    // Codex 는 자체 /plan 카드가 있으므로 호출부에서 plan: false 를 넘긴다.
+    expect(matchPicker('/plan', { fast: false, agent: false, plan: false })).toBeNull()
   })
 })
 

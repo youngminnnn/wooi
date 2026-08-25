@@ -67,7 +67,8 @@ const api: WooiApi = {
       ipcRenderer.invoke(IPC.workspaceReorder, workspaceId, targetWorkspaceId, position),
     revealInFinder: (workspaceId) => ipcRenderer.invoke(IPC.workspaceRevealInFinder, workspaceId),
     openInEditor: (workspaceId) => ipcRenderer.invoke(IPC.workspaceOpenInEditor, workspaceId),
-    openMemory: (workspaceId) => ipcRenderer.invoke(IPC.workspaceOpenMemory, workspaceId),
+    openMemory: (workspaceId, scope) =>
+      ipcRenderer.invoke(IPC.workspaceOpenMemory, workspaceId, scope),
     addMemory: (workspaceId, scope, text) =>
       ipcRenderer.invoke(IPC.workspaceAddMemory, workspaceId, scope, text),
     addDir: (workspaceId, dir) => ipcRenderer.invoke(IPC.workspaceAddDir, workspaceId, dir)

@@ -34,7 +34,7 @@ import {
   Wrench
 } from 'lucide-react'
 import { useStore } from '../store'
-import { permissionModeFooter } from '../lib/permission'
+import { permissionModeFooter, permissionModesFor } from '../lib/permission'
 import { modelLabel, modelSupportsFastMode } from '../lib/models'
 import { effortLabel, effortOptionsFor } from '../lib/effort'
 import { FAST_MODE_HINT, fastModeLabel, fastModeStatus } from '../lib/fastMode'
@@ -74,12 +74,13 @@ import type {
   CommandResult,
   EffortSetting,
   FileHit,
+  HooksInfo,
   ImageAttachment,
   ImageMediaType,
   McpAction,
   McpServerInfo,
   MemoryScope,
-  HooksInfo,
+  PermissionMode,
   PermissionsInfo,
   RateLimitSnapshot,
   RewindPoint,
@@ -92,6 +93,8 @@ import { matchWooiCommand, parseWooiCommandArgs, wooiCommandName } from '@shared
 import { conversationForkDisabledReason, parseForkCommand } from '../lib/conversationFork'
 import type { WooiCommandSpec } from '@shared/wooiCommands'
 import { openSettings } from '../lib/settingsNavigation'
+import type { ExportConversationDetail } from './ExportMenu'
+import { WOOI_URLS } from '../lib/externalLinks'
 
 /** Claude 가 받는 이미지 형식. 클립보드의 다른 형식은 붙여넣기 시 무시한다. */
 const IMAGE_TYPES: Record<string, ImageMediaType> = {
@@ -136,6 +139,7 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
   const removeQueued = useStore((s) => s.removeQueued)
   const pushToast = useStore((s) => s.pushToast)
   const confirm = useStore((s) => s.confirm)
+  const refreshAuth = useStore((s) => s.refreshAuth)
   const resetTranscript = useStore((s) => s.resetTranscript)
   const taRef = useRef<HTMLTextAreaElement>(null)
   // ↑ 로 이전 사용자 메시지를 불러올 때의 커서(끝에서부터). -1 = 미사용.
@@ -176,6 +180,8 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
   const [wooiCard, setWooiCard] = useState<WooiCardState | null>(null)
   // `#` 로 적은 기억. 어느 CLAUDE.md 에 남길지 고르는 동안만 들고 있는다.
   const [memoryDraft, setMemoryDraft] = useState<string | null>(null)
+  // `/memory` 에 스코프가 없을 때 어느 CLAUDE.md 를 열지 고르는 카드.
+  const [memoryOpenPick, setMemoryOpenPick] = useState(false)
   // 카드 응답을 현재 요청과만 맞추기 위한 단조 토큰(워크스페이스/명령 전환 시 stale 응답 무시).
   const cmdSeq = useRef(0)
 
@@ -204,6 +210,7 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
     setWooiCard(null)
     setPickerCard(null)
     setMemoryDraft(null)
+    setMemoryOpenPick(false)
     setImages([])
     setMentionResult(null)
     setMentionDismissedAt(null)
@@ -216,6 +223,7 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
   const openPicker = (kind: PickerKind): void => {
     setSideAnswer(null)
     setCommandCard(null)
+    setMemoryOpenPick(false)
     setPickerCard(kind)
   }
 
@@ -547,6 +555,7 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
       setCommandCard(null)
       setWooiCard(null)
       setPickerCard(null)
+      setMemoryOpenPick(false)
       setMemoryDraft(memo)
       setText('')
       historyIdx.current = -1
@@ -560,10 +569,18 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
       return
     }
 
-    // /model·/effort·/fast·/agent 는 백엔드 왕복 없이 로컬 선택 카드로 처리한다(첨부가 있으면 일반 전송).
+    // Codex 는 자체 카드로 app-server 의 plan mode 를 바꾸므로, 그 카드가 없는 백엔드에서만
+    // 범용 권한 모드 선택기가 /plan 을 맡는다.
+    const offersPlanPicker =
+      permissionModesFor(backend).length > 1 && !supportedCommands.includes('plan')
+    // /model·/effort·/fast·/agent·/plan 은 백엔드 왕복 없이 로컬 선택 카드로 처리한다(첨부가 있으면 일반 전송).
     const picker = images.length
       ? null
-      : matchPicker(trimmed, supportsFastMode, agentSwitch.offered)
+      : matchPicker(trimmed, {
+          fast: supportsFastMode,
+          agent: agentSwitch.offered,
+          plan: offersPlanPicker
+        })
     if (picker) {
       openPicker(picker)
       setText('')
@@ -638,7 +655,7 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
       return
     }
 
-    // /diff·/copy·/help·/clear·/stop·/memory 는 Wooi UI 에서 직접 처리한다(에이전트로 보내지 않는다).
+    // /diff·/copy·/help·/clear 등은 Wooi UI 에서 직접 처리한다(에이전트로 보내지 않는다).
     // runLocal 이 입력창 텍스트를 알맞게 정리하므로(대부분 비우고, /help 만 '/' 로 메뉴를 띄움)
     // 여기서는 setText 를 호출하지 않는다.
     const local = images.length ? null : matchLocal(trimmed, workspace.agentBackend === 'claude')
@@ -679,8 +696,20 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
     const lifecycle = images.length ? null : matchLifecycle(trimmed)
     if (lifecycle) {
       if (lifecycle.kind === 'rename') {
-        void window.api.workspace.rename(workspace.id, lifecycle.name)
-        pushToast('success', `Renamed workspace to “${lifecycle.name}”.`)
+        if (lifecycle.name === null) {
+          // Composer 에서는 ChatView 의 로컬 편집 상태에 닿을 수 없어 /diff 와 같은 이벤트로 연결한다.
+          window.dispatchEvent(new CustomEvent('wooi:rename-workspace', { detail: workspace.id }))
+        } else {
+          const name = lifecycle.name
+          void window.api.workspace.rename(workspace.id, name).then(
+            () => pushToast('success', `Renamed workspace to “${name}”.`),
+            (error) =>
+              pushToast(
+                'error',
+                error instanceof Error ? error.message : 'Could not rename this workspace.'
+              )
+          )
+        }
       } else {
         pushToast(
           'info',
@@ -725,6 +754,7 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
   const saveMemory = (scope: MemoryScope): void => {
     const memo = memoryDraft
     setMemoryDraft(null)
+    setMemoryOpenPick(false)
     taRef.current?.focus()
     if (!memo) return
     void window.api.workspace.addMemory(workspace.id, scope, memo).then((r) => {
@@ -734,6 +764,15 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
           'success',
           scope === 'user' ? 'Added to ~/.claude/CLAUDE.md' : 'Added to this project’s CLAUDE.md'
         )
+    })
+  }
+
+  /** `/memory` 카드에서 고른 CLAUDE.md 를 열고 입력창으로 돌아온다. */
+  const openMemory = (scope: MemoryScope): void => {
+    setMemoryOpenPick(false)
+    taRef.current?.focus()
+    void window.api.workspace.openMemory(workspace.id, scope).then((r) => {
+      if (r.error) pushToast('error', r.error)
     })
   }
 
@@ -805,9 +844,10 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
     // 승인·질문·계획 프롬프트가 떠 있으면 Esc 는 그 프롬프트의 거부/취소다.
     if (st.permissions.some((p) => p.workspaceId === workspace.id)) return
 
-    if (memoryDraft) {
+    if (memoryDraft || memoryOpenPick) {
       e.preventDefault()
       setMemoryDraft(null)
+      setMemoryOpenPick(false)
       taRef.current?.focus()
       return
     }
@@ -860,19 +900,88 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
   }
 
   /**
-   * Wooi UI 에서 직접 처리하는 로컬 명령(/diff·/copy·/help·/clear·/stop·/memory). 에이전트로
-   * 보내지 않고 앱 기능으로 매핑한다. 입력창 텍스트 정리도 여기서 한다(대부분 비우고, /help 만
-   * 자동완성 메뉴를 다시 띄우도록 '/' 를 남긴다).
+   * Wooi UI 에서 직접 처리하는 로컬 명령. 에이전트로 보내지 않고 앱 기능으로 매핑한다.
+   * 입력창 텍스트 정리도 여기서 한다(대부분 비우고, /help 만 자동완성 메뉴를 다시 띄우도록
+   * '/' 를 남긴다).
    */
   const runLocal = (kind: LocalCommand, raw: string): void => {
     setSideAnswer(null)
     setCommandCard(null)
     setWooiCard(null)
     setPickerCard(null)
+    setMemoryDraft(null) // 로컬 명령이 이어받은 뒤에도 `#` 메모를 남기면 두 메모리 카드가 서로를 가린다.
+    setMemoryOpenPick(false)
 
     if (kind === 'help') {
       setText('/') // 자동완성 메뉴로 사용 가능한 명령을 모두 보여 준다.
       taRef.current?.focus()
+      return
+    }
+
+    if (kind === 'export') {
+      const format = parseExportFormat(raw)
+      if (format === 'invalid') {
+        pushToast('info', 'Usage: /export [md|json]')
+        taRef.current?.focus()
+        return
+      }
+      setText('')
+      window.dispatchEvent(
+        new CustomEvent<ExportConversationDetail>('wooi:export-conversation', {
+          detail: {
+            workspaceId: workspace.id,
+            ...(format === 'menu' ? {} : { format })
+          }
+        })
+      )
+      return
+    }
+
+    if (kind === 'login') {
+      setText('')
+      const loginBackend: AgentBackendId = workspace.agentBackend === 'codex' ? 'codex' : 'claude'
+      window.dispatchEvent(
+        new CustomEvent<AgentBackendId>('wooi:open-login', { detail: loginBackend })
+      )
+      return
+    }
+
+    if (kind === 'logout') {
+      setText('')
+      // 이 Enter keydown 안에서 곷바로 confirm을 마운트하면, 같은 Enter가 ConfirmDialog의
+      // 전역 핸들러까지 이어져 위험 동작을 즉시 승인한다. 다음 이벤트 루프에서 열어 키를 분리한다.
+      setTimeout(() => {
+        void (async () => {
+          const ok = await confirm({
+            title: 'Sign out of Claude Code?',
+            body: 'Signing out ends any running turns for Claude Code.',
+            confirmLabel: 'Sign out',
+            danger: true
+          })
+          if (!ok) return
+          try {
+            await window.api.auth.claudeLogout()
+            await refreshAuth()
+            pushToast('success', 'Signed out of Claude Code.')
+            openSettings('integrations')
+          } catch (error) {
+            pushToast(
+              'error',
+              error instanceof Error ? error.message : 'Could not sign out of Claude Code.'
+            )
+          }
+        })()
+      }, 0)
+      return
+    }
+
+    const externalUrl =
+      kind in EXTERNAL_LOCAL_COMMANDS
+        ? EXTERNAL_LOCAL_COMMANDS[kind as keyof typeof EXTERNAL_LOCAL_COMMANDS]
+        : undefined
+    if (externalUrl) {
+      setText('')
+      void window.api.openExternal(externalUrl)
       return
     }
 
@@ -893,6 +1002,61 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
       return
     }
 
+    if (kind === 'copy') {
+      const index = parseCopyIndex(raw)
+      if (index === null) {
+        pushToast('info', 'Usage: /copy [N] — copies the Nth-latest response (default 1).')
+        taRef.current?.focus()
+        return
+      }
+      const responses = items.filter(
+        (i): i is Extract<ChatItem, { type: 'assistant' }> =>
+          i.type === 'assistant' && !!i.text?.trim()
+      )
+      if (responses.length === 0) {
+        pushToast('info', 'No assistant response to copy yet.')
+        taRef.current?.focus()
+        return
+      }
+      const response = responses.at(-index)
+      if (!response) {
+        pushToast(
+          'info',
+          `Only ${responses.length} assistant ${responses.length === 1 ? 'response' : 'responses'} so far.`
+        )
+        taRef.current?.focus()
+        return
+      }
+      setText('')
+      void navigator.clipboard.writeText(response.text).then(
+        () =>
+          pushToast(
+            'success',
+            index === 1
+              ? 'Copied the last response to the clipboard.'
+              : `Copied response #${index} (counting back) to the clipboard.`
+          ),
+        () => pushToast('error', 'Could not copy to the clipboard.')
+      )
+      return
+    }
+
+    if (kind === 'memory') {
+      const scope = parseMemoryScope(raw)
+      if (scope === null) {
+        pushToast('info', 'Usage: /memory [project|user]')
+        taRef.current?.focus()
+        return
+      }
+      setText('')
+      if (scope === 'ask') {
+        setMemoryOpenPick(true)
+      } else {
+        openMemory(scope)
+      }
+      return
+    }
+
     setText('')
     // /stop 은 Stop 버튼·Esc 와 같은 중단이다. 돌고 있지 않을 때 입력창만 비우면 명령이
     // 먹혔는지 알 수 없으므로, 그때는 아무것도 멈추지 않았다고 말해 준다.
@@ -901,32 +1065,32 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
       else pushToast('info', 'Nothing is running.')
       return
     }
-    if (kind === 'diff') {
-      // ChatView 가 가진 diff 모달을 연다(Composer 에서 직접 접근할 수 없어 이벤트로 신호한다).
-      window.dispatchEvent(new CustomEvent('wooi:open-diff', { detail: workspace.id }))
-      return
-    }
-    if (kind === 'copy') {
-      const last = [...items]
-        .reverse()
-        .find(
-          (i): i is Extract<ChatItem, { type: 'assistant' }> =>
-            i.type === 'assistant' && !!i.text?.trim()
-        )
-      if (!last) {
-        pushToast('info', 'No assistant response to copy yet.')
+    if (kind === 'tasks') {
+      // 실행 중 진행률은 자주 바뀌므로 Composer 를 구독시키지 않고, 명령을 누른 순간의 상태만 읽는다.
+      const state = useStore.getState()
+      const agents = state.runningAgents[workspace.id] ?? []
+      if (agents.length === 0) {
+        pushToast('info', 'No background agents or tasks running.')
         return
       }
-      void navigator.clipboard.writeText(last.text).then(
-        () => pushToast('success', 'Copied the last response to the clipboard.'),
-        () => pushToast('error', 'Could not copy to the clipboard.')
+      if (!(state.app?.settings.showRunningAgents ?? true)) {
+        pushToast(
+          'info',
+          `${agents.length} running — turn on “Running agents in sidebar” in Settings to see them.`
+        )
+        return
+      }
+      state.expandAgents(workspace.id)
+      // 목록이 이미 펼쳐져 있으면 화면 변화가 없어 명령이 실패한 것처럼 보일 수 있다.
+      pushToast(
+        'info',
+        `${agents.length} ${agents.length === 1 ? 'task' : 'tasks'} running — listed under this workspace in the sidebar.`
       )
       return
     }
-    if (kind === 'memory') {
-      void window.api.workspace.openMemory(workspace.id).then((r) => {
-        if (r.error) pushToast('error', r.error)
-      })
+    if (kind === 'diff') {
+      // ChatView 가 가진 diff 모달을 연다(Composer 에서 직접 접근할 수 없어 이벤트로 신호한다).
+      window.dispatchEvent(new CustomEvent('wooi:open-diff', { detail: workspace.id }))
       return
     }
     if (kind === 'clear') {
@@ -1060,38 +1224,60 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
             onPick={acceptMention}
           />
         )}
-        {memoryDraft && !menuOpen && !mentionOpen && (
+        {memoryDraft && !menuOpen && !mentionOpen && !memoryOpenPick && (
           <MemoryCard
+            title="Add to memory"
             text={memoryDraft}
             onPick={saveMemory}
             onClose={() => {
               setMemoryDraft(null)
+              setMemoryOpenPick(false)
               taRef.current?.focus()
             }}
           />
         )}
-        {commandCard && !menuOpen && !mentionOpen && !pickerCard && !memoryDraft && (
-          <CommandCard
-            card={commandCard}
-            workspace={workspace}
-            workspaceId={workspace.id}
-            onResult={(result) => setCommandCard((prev) => (prev ? { ...prev, result } : prev))}
-            onClose={() => setCommandCard(null)}
+        {memoryOpenPick && !menuOpen && !mentionOpen && !memoryDraft && (
+          <MemoryCard
+            title="Open memory"
+            onPick={openMemory}
+            onClose={() => {
+              setMemoryOpenPick(false)
+              taRef.current?.focus()
+            }}
           />
         )}
-        {wooiCard && !menuOpen && !mentionOpen && !commandCard && !pickerCard && !memoryDraft && (
-          <WooiCommandCard card={wooiCard} onClose={() => setWooiCard(null)} />
-        )}
+        {commandCard &&
+          !menuOpen &&
+          !mentionOpen &&
+          !pickerCard &&
+          !memoryDraft &&
+          !memoryOpenPick && (
+            <CommandCard
+              card={commandCard}
+              workspace={workspace}
+              workspaceId={workspace.id}
+              onResult={(result) => setCommandCard((prev) => (prev ? { ...prev, result } : prev))}
+              onClose={() => setCommandCard(null)}
+            />
+          )}
+        {wooiCard &&
+          !menuOpen &&
+          !mentionOpen &&
+          !commandCard &&
+          !pickerCard &&
+          !memoryDraft &&
+          !memoryOpenPick && <WooiCommandCard card={wooiCard} onClose={() => setWooiCard(null)} />}
         {sideAnswer &&
           !menuOpen &&
           !mentionOpen &&
           !commandCard &&
           !wooiCard &&
           !pickerCard &&
-          !memoryDraft && (
+          !memoryDraft &&
+          !memoryOpenPick && (
             <SideAnswerCard answer={sideAnswer} onClose={() => setSideAnswer(null)} />
           )}
-        {pickerCard && !menuOpen && !mentionOpen && !memoryDraft && (
+        {pickerCard && !menuOpen && !mentionOpen && !memoryDraft && !memoryOpenPick && (
           <PickerCard
             kind={pickerCard}
             workspace={workspace}
@@ -1439,15 +1625,17 @@ type SideAnswer = {
  * 메인 대화와 분리된 임시 표시 — 닫으면(Esc/✕) 사라지고 기록에 남지 않는다.
  */
 /**
- * `#` 로 시작한 입력을 어느 CLAUDE.md 에 남길지 고르는 카드. 터미널 Claude Code 와 같은 흐름이다 —
- * 기억할 내용을 적고, 프로젝트용인지 개인용인지만 고른다. 1/2 로 바로 고를 수 있고 Esc 로 취소한다.
+ * CLAUDE.md 의 프로젝트/사용자 스코프를 고르는 공용 카드. `#` 기억은 남길 내용을 함께 보여 주고,
+ * `/memory` 는 열 파일만 고른다. 1/2 로 바로 고를 수 있고 Esc 로 취소한다.
  */
 function MemoryCard({
+  title,
   text,
   onPick,
   onClose
 }: {
-  text: string
+  title: string
+  text?: string
   onPick: (scope: MemoryScope) => void
   onClose: () => void
 }): React.JSX.Element {
@@ -1472,7 +1660,7 @@ function MemoryCard({
     >
       <div className="flex items-center gap-2 px-3 py-2 border-b border-[var(--border)]">
         <BookMarked size={13} className="text-[var(--accent-400)] shrink-0" />
-        <span className="text-xs font-medium text-[var(--accent-300)] shrink-0">Add to memory</span>
+        <span className="text-xs font-medium text-[var(--accent-300)] shrink-0">{title}</span>
         <span className="ml-auto shrink-0 text-xs text-neutral-600 select-none">Esc to cancel</span>
         <button
           onClick={onClose}
@@ -1482,9 +1670,11 @@ function MemoryCard({
           <X size={13} />
         </button>
       </div>
-      <p className="px-3 pt-2 text-sm leading-relaxed text-neutral-200 whitespace-pre-wrap break-words">
-        {text}
-      </p>
+      {text !== undefined && (
+        <p className="px-3 pt-2 text-sm leading-relaxed text-neutral-200 whitespace-pre-wrap break-words">
+          {text}
+        </p>
+      )}
       <div className="p-2 flex flex-col gap-1">
         {choices.map((c, i) => (
           <button
@@ -1592,24 +1782,27 @@ function WooiCommandCard({
 }
 
 /**
- * "/model"·"/effort"·"/fast"·"/agent" 면 그 종류를 돌려준다(뒤따르는 인자는 무시하고 선택 카드를 연다).
+ * "/model"·"/effort"·"/fast"·"/agent"·"/plan" 이면 그 종류를 돌려준다(뒤따르는 인자는 무시하고 선택 카드를 연다).
  *
- * `allowFast` 는 이 워크스페이스의 백엔드가 fast mode 를 지원하는지다 — 지원하지 않으면(Codex)
+ * `allow.fast` 는 이 워크스페이스의 백엔드가 fast mode 를 지원하는지다 — 지원하지 않으면(Codex)
  * 가로채지 않고 일반 텍스트로 흘려보낸다. 아무 일도 안 하는 카드를 띄우는 것보다 낫다.
- * `allowAgent` 도 같은 이유다 — 쓸 수 있는 에이전트가 하나뿐이면 고를 것이 없으므로 그때의
- * "/agent" 는 에이전트에게 보내는 평범한 메시지로 둔다. 턴이 도는 중인지는 여기서 보지 않는다:
+ * `allow.agent` 도 같은 이유다 — 쓸 수 있는 에이전트가 하나뿐이면 고를 것이 없다.
+ * `allow.plan` 은 권한 모드가 여럿이면서 백엔드 전용 `/plan` 카드가 없을 때만 참이다. Codex 는
+ * 자체 카드로 app-server 의 plan mode 를 바꾸고, 범용 선택기는 그런 카드가 없는 Claude 를 맡는다.
+ * 거짓인 명령은 에이전트에게 보내는 평범한 메시지로 둔다.
+ * 턴이 도는 중인지는 여기서 보지 않는다:
  * /model 과 마찬가지로 카드는 열리고, 잠긴 이유를 카드가 설명한다.
  */
 export function matchPicker(
   text: string,
-  allowFast: boolean,
-  allowAgent: boolean
+  allow: { fast: boolean; agent: boolean; plan: boolean }
 ): PickerKind | null {
-  const m = /^\/(model|effort|fast|agent)(?:\s.*)?$/.exec(text)
+  const m = /^\/(model|effort|fast|agent|plan)(?:\s.*)?$/.exec(text)
   if (!m) return null
   const kind = m[1] as PickerKind
-  if (kind === 'fast' && !allowFast) return null
-  if (kind === 'agent' && !allowAgent) return null
+  if (kind === 'fast' && !allow.fast) return null
+  if (kind === 'agent' && !allow.agent) return null
+  if (kind === 'plan' && !allow.plan) return null
   return kind
 }
 
@@ -1641,7 +1834,26 @@ export function matchCodexLocal(text: string, backend: AgentBackendId): CodexLoc
 }
 
 /** Wooi UI 가 직접 처리하는 로컬 명령(에이전트로 보내지 않음). */
-type LocalCommand = 'diff' | 'copy' | 'help' | 'clear' | 'stop' | 'memory' | 'add-dir'
+type LocalCommand =
+  | 'diff'
+  | 'copy'
+  | 'help'
+  | 'clear'
+  | 'stop'
+  | 'memory'
+  | 'add-dir'
+  | 'tasks'
+  | 'export'
+  | 'login'
+  | 'logout'
+  | keyof typeof EXTERNAL_LOCAL_COMMANDS
+// 사용자가 실행 중인 앱은 Wooi 이므로 Anthropic 채널이 아니라 Wooi 이슈 트래커와 문서로 보낸다.
+const EXTERNAL_LOCAL_COMMANDS = {
+  bug: WOOI_URLS.bugReport,
+  feedback: WOOI_URLS.featureRequest,
+  'release-notes': WOOI_URLS.releases,
+  'privacy-settings': WOOI_URLS.privacyPolicy
+} as const
 const LOCAL_COMMANDS: readonly LocalCommand[] = [
   'diff',
   'copy',
@@ -1649,31 +1861,68 @@ const LOCAL_COMMANDS: readonly LocalCommand[] = [
   'clear',
   'stop',
   'memory',
-  'add-dir'
+  'add-dir',
+  'tasks',
+  'export',
+  'login',
+  'logout',
+  ...(Object.keys(EXTERNAL_LOCAL_COMMANDS) as (keyof typeof EXTERNAL_LOCAL_COMMANDS)[])
 ]
-/** CLAUDE.md·작업 루트처럼 Claude Code 고유 개념이라 다른 백엔드에서는 가로채지 않는 명령. */
-const CLAUDE_ONLY_COMMANDS: readonly string[] = ['memory', 'add-dir']
+const LOCAL_ALIASES: Record<string, LocalCommand> = { bashes: 'tasks' }
+/** Claude Code 고유 기능이거나 Codex가 send() 앞쪽에 별도 처리기를 둔 명령. */
+const CLAUDE_ONLY_COMMANDS: readonly string[] = ['memory', 'add-dir', 'logout']
 
 /**
  * "/diff" 처럼 로컬에서 처리하는 명령이면 그 종류를 돌려준다(뒤따르는 인자는 호출부가 읽는다).
- * `/memory`·`/add-dir` 은 Claude 전용 기능이라 다른 백엔드의 입력을 가로채지 않는다.
+ * `/memory`·`/add-dir`·`/logout` 은 Claude 전용 경로라 다른 백엔드의 입력을 가로채지 않는다.
  */
 export function matchLocal(text: string, allowClaudeOnly: boolean): LocalCommand | null {
   const m = /^\/([\w-]+)(?:\s[\s\S]*)?$/.exec(text)
   if (!m) return null
-  if (!(LOCAL_COMMANDS as readonly string[]).includes(m[1])) return null
-  return CLAUDE_ONLY_COMMANDS.includes(m[1]) && !allowClaudeOnly ? null : (m[1] as LocalCommand)
+  const kind = LOCAL_ALIASES[m[1]] ?? m[1]
+  if (!(LOCAL_COMMANDS as readonly string[]).includes(kind)) return null
+  return CLAUDE_ONLY_COMMANDS.includes(kind) && !allowClaudeOnly ? null : (kind as LocalCommand)
 }
 
 export type LifecycleCommand =
-  { kind: 'rename'; name: string } | { kind: 'archive' } | { kind: 'delete' }
+  { kind: 'rename'; name: string | null } | { kind: 'archive' } | { kind: 'delete' }
 
 export function matchLifecycle(text: string): LifecycleCommand | null {
-  const rename = /^\/rename\s+(.+)$/.exec(text)
-  if (rename?.[1].trim()) return { kind: 'rename', name: rename[1].trim() }
+  const rename = /^\/rename(?:\s+(.+))?$/.exec(text)
+  // 이름 없는 /rename 은 오류가 아니라 헤더 제목을 더블클릭할 때와 같은 인라인 편집 요청이다.
+  if (rename) return { kind: 'rename', name: rename[1]?.trim() || null }
   if (/^\/archive\s*$/.test(text)) return { kind: 'archive' }
   if (/^\/delete(?:\s[\s\S]*)?$/.test(text)) return { kind: 'delete' }
   return null
+}
+
+/** `/copy` 인자를 1-based 인덱스로 읽는다. 인자가 없으면 1(가장 최근), 숫자가 아니면 null. */
+export function parseCopyIndex(raw: string): number | null {
+  const trimmed = raw.trim()
+  if (trimmed === '/copy') return 1
+  const match = /^\/copy\s+(\d+)$/.exec(trimmed)
+  if (!match) return null
+  const index = Number(match[1])
+  return Number.isSafeInteger(index) && index > 0 ? index : null
+}
+
+export type ExportFormatResult = 'menu' | 'md' | 'json' | 'invalid'
+
+/** `/export` 인자를 메뉴 또는 직접 내보낼 형식으로 읽는다. CLI 명령처럼 대소문자를 구분한다. */
+export function parseExportFormat(raw: string): ExportFormatResult {
+  const trimmed = raw.trim()
+  if (trimmed === '/export') return 'menu'
+  if (trimmed === '/export md' || trimmed === '/export markdown') return 'md'
+  if (trimmed === '/export json') return 'json'
+  return 'invalid'
+}
+
+/** `/memory` 인자를 스코프로 읽는다. 인자가 없으면 'ask'(카드로 고르게), 알 수 없는 값이면 null. */
+export function parseMemoryScope(raw: string): MemoryScope | 'ask' | null {
+  const trimmed = raw.trim()
+  if (trimmed === '/memory') return 'ask'
+  const match = /^\/memory\s+(project|user)$/.exec(trimmed)
+  return match ? (match[1] as MemoryScope) : null
 }
 
 /**
@@ -2845,7 +3094,7 @@ type PickerOption = {
 }
 
 /** 상태줄 클릭·슬래시 명령으로 여는 로컬 선택 카드의 종류. */
-type PickerKind = 'model' | 'effort' | 'fast' | 'agent'
+type PickerKind = 'model' | 'effort' | 'fast' | 'agent' | 'plan'
 
 /**
  * 입력창 위에 뜨는 /model·/effort 선택 카드. 백엔드 왕복 없이 로컬에서 값을 고른다 —
@@ -2892,6 +3141,14 @@ function PickerCard({
       // 항상 확정된 값이라, "안 고름" 이라는 상태가 존재하지 않는다.
       return availableAgents.map((b) => ({ value: b.id, label: b.label, mark: b.id }))
     }
+    if (kind === 'plan') {
+      // 권한 모드는 항상 확정된 값이라 /agent 처럼 전역 기본값을 따르는 가상 항목을 두지 않는다.
+      return permissionModesFor(backend).map((mode) => ({
+        value: mode.id,
+        label: mode.label,
+        hint: mode.description
+      }))
+    }
     if (kind === 'fast') {
       return [
         { value: '', label: 'Default', hint: fastModeLabel(defaults.fastMode) },
@@ -2935,15 +3192,17 @@ function PickerCard({
   const current =
     kind === 'agent'
       ? workspace.agentBackend
-      : kind === 'model'
-        ? (workspace.model ?? '')
-        : kind === 'effort'
-          ? (workspace.effort ?? '')
-          : workspace.fastMode === null
-            ? ''
-            : workspace.fastMode
-              ? 'on'
-              : 'off'
+      : kind === 'plan'
+        ? workspace.permissionMode
+        : kind === 'model'
+          ? (workspace.model ?? '')
+          : kind === 'effort'
+            ? (workspace.effort ?? '')
+            : workspace.fastMode === null
+              ? ''
+              : workspace.fastMode
+                ? 'on'
+                : 'off'
   const currentIdx = Math.max(
     0,
     options.findIndex((o) => o.value === current)
@@ -2951,8 +3210,8 @@ function PickerCard({
   const [cursor, setCursor] = useState(currentIdx)
   const activeRef = useRef<HTMLButtonElement | null>(null)
 
-  // 에이전트 교체는 지금 바꿀 수 있을 때만 — 나머지 항목은 턴 진행 중에만 잠긴다.
-  const locked = kind === 'agent' ? !agentSwitch.switchable : running
+  // /plan 은 Shift+Tab 처럼 턴 중에도 바꿀 수 있어 model·effort 의 세션 잠금을 따르지 않는다.
+  const locked = kind === 'agent' ? !agentSwitch.switchable : kind === 'plan' ? false : running
 
   /**
    * 에이전트 교체 1건. 지난 대화를 넘겨야 하는 자리에서는 먼저 확인을 받는다 — 그 인수인계는
@@ -2990,6 +3249,8 @@ function PickerCard({
     if (locked) return // 잠긴 동안에는 안내만 보여 준다.
     if (value !== current) {
       if (kind === 'agent') void switchAgent(value as AgentBackendId)
+      else if (kind === 'plan')
+        void window.api.workspace.setPermissionMode(workspace.id, value as PermissionMode)
       else if (kind === 'model') void window.api.workspace.setModel(workspace.id, value || null)
       else if (kind === 'effort')
         void window.api.workspace.setEffort(workspace.id, (value || null) as EffortSetting | null)
@@ -3024,19 +3285,23 @@ function PickerCard({
   const title =
     kind === 'agent'
       ? '/agent'
-      : kind === 'model'
-        ? '/model'
-        : kind === 'effort'
-          ? '/effort'
-          : '/fast'
+      : kind === 'plan'
+        ? '/plan'
+        : kind === 'model'
+          ? '/model'
+          : kind === 'effort'
+            ? '/effort'
+            : '/fast'
   const description =
     kind === 'agent'
       ? 'Main agent for this workspace'
-      : kind === 'model'
-        ? 'Model for this workspace'
-        : kind === 'effort'
-          ? 'Reasoning effort for this workspace'
-          : 'Fast mode for this workspace — same model, faster output'
+      : kind === 'plan'
+        ? 'Permissions for this workspace'
+        : kind === 'model'
+          ? 'Model for this workspace'
+          : kind === 'effort'
+            ? 'Reasoning effort for this workspace'
+            : 'Fast mode for this workspace — same model, faster output'
   // /fast 카드에서만: 지금 쓰는 모델이 fast mode 를 지원하지 않으면 켜도 소용없으므로 미리 알린다.
   const effectiveModel = workspace.model ?? workspace.lastModel ?? defaults.model
   const fastUnsupported = kind === 'fast' && !modelSupportsFastMode(models, effectiveModel)
@@ -3044,6 +3309,8 @@ function PickerCard({
   const icon =
     kind === 'agent' ? (
       <Bot {...iconProps} />
+    ) : kind === 'plan' ? (
+      <ShieldCheck {...iconProps} />
     ) : kind === 'model' ? (
       <Cpu {...iconProps} />
     ) : kind === 'effort' ? (

@@ -5,6 +5,7 @@ import { useNow } from '../lib/useNow'
 import { ghostBtn, primaryBtn } from './Modal'
 import type { RemoteDeviceSummary, RemoteStatus } from '@shared/remote'
 import { CURRENT_REMOTE_CONSENT_VERSION, type AppSettings } from '@shared/types'
+import { WOOI_URLS } from '../lib/externalLinks'
 
 /**
  * 원격 접근(모바일 컴패니언) 설정 패널.
@@ -301,9 +302,7 @@ function ConsentGate({
       <button
         type="button"
         className="text-xs text-neutral-500 hover:text-neutral-300 underline underline-offset-2 transition-colors"
-        onClick={() =>
-          void window.api.openExternal('https://github.com/youngminnnn/wooi/blob/main/PRIVACY.md')
-        }
+        onClick={() => void window.api.openExternal(WOOI_URLS.privacyPolicy)}
       >
         Read the full privacy policy
       </button>

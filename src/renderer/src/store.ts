@@ -627,6 +627,8 @@ interface UIState {
   setScriptPanelOpen: (workspaceId: string, open: boolean) => void
   /** 해당 workspace 의 에이전트 목록 접힘 상태를 뒤집는다. */
   toggleAgentsCollapsed: (workspaceId: string) => void
+  /** 이미 펼쳐져 있어도 유지하며 해당 workspace 의 에이전트 목록을 펼친다. */
+  expandAgents: (workspaceId: string) => void
   setRightWidth: (px: number) => void
   setSidebarWidth: (px: number) => void
   toggleRightPanel: () => void
@@ -2622,6 +2624,9 @@ export const useStore = create<UIState>((set, get) => ({
     set((s) => ({
       agentsCollapsed: { ...s.agentsCollapsed, [workspaceId]: !s.agentsCollapsed[workspaceId] }
     })),
+
+  expandAgents: (workspaceId) =>
+    set((s) => ({ agentsCollapsed: { ...s.agentsCollapsed, [workspaceId]: false } })),
 
   // 우측 패널 너비 — 대화/터미널이 너무 좁아지지 않도록 양끝을 클램프한다.
   setRightWidth: (px) => set({ rightWidth: Math.max(320, Math.min(900, Math.round(px))) }),

@@ -40,6 +40,9 @@ import GithubConnectModal from './components/GithubConnectModal'
 import Toaster from './components/Toaster'
 import ConfirmDialog from './components/ConfirmDialog'
 import Logo from './components/Logo'
+import ClaudeLoginModal from './components/ClaudeLoginModal'
+import CodexLoginModal from './components/CodexLoginModal'
+import type { ExportConversationDetail } from './components/ExportMenu'
 
 export default function App(): React.JSX.Element {
   const ready = useStore((s) => s.ready)
@@ -80,6 +83,8 @@ export default function App(): React.JSX.Element {
     window.addEventListener(OPEN_SETTINGS_EVENT, open)
     return () => window.removeEventListener(OPEN_SETTINGS_EVENT, open)
   }, [])
+  // Composer 에서 Settings 전체를 끌어오지 않고도 백엔드 로그인 모달을 열 수 있게 App 이 소유한다.
+  const [loginBackend, setLoginBackend] = useState<AgentBackendId | null>(null)
   const [showShortcuts, setShowShortcuts] = useState(false)
   const [newWs, setNewWs] = useState<{
     repoId: string
@@ -111,6 +116,14 @@ export default function App(): React.JSX.Element {
     void init()
   }, [init])
 
+  useEffect(() => {
+    const onOpenLogin = (e: Event): void => {
+      setLoginBackend((e as CustomEvent<AgentBackendId>).detail)
+    }
+    window.addEventListener('wooi:open-login', onOpenLogin)
+    return () => window.removeEventListener('wooi:open-login', onOpenLogin)
+  }, [])
+
   // 파일 퀵 오픈은 대상 워크스페이스가 있어야 뜻이 있다 — Overview 로 빠지면 닫는다
   // (열린 채로 남으면 렌더되지 않으면서 전역 단축키만 계속 막는다).
   useEffect(() => {
@@ -138,6 +151,7 @@ export default function App(): React.JSX.Element {
 
   const anyModalOpen =
     showSettings ||
+    loginBackend !== null ||
     showShortcuts ||
     quickSwitchOpen ||
     transcriptSearchOpen ||
@@ -447,7 +461,11 @@ export default function App(): React.JSX.Element {
         // ⇧⌘X: 대화 내보내기 메뉴 열기(ExportMenu 가 이벤트를 받아 드롭다운을 연다).
         if (e.code === 'KeyX') {
           e.preventDefault()
-          window.dispatchEvent(new CustomEvent('wooi:export-conversation', { detail: selId }))
+          window.dispatchEvent(
+            new CustomEvent<ExportConversationDetail>('wooi:export-conversation', {
+              detail: { workspaceId: selId }
+            })
+          )
           return
         }
         // ⇧⌘⌫: workspace 아카이브(ChatView 가 확인 다이얼로그와 함께 처리).
@@ -677,6 +695,8 @@ export default function App(): React.JSX.Element {
         </ErrorBoundary>
       )}
       {tourOpen && <FeatureTour onDone={() => setTourOpen(false)} />}
+      {loginBackend === 'claude' && <ClaudeLoginModal onClose={() => setLoginBackend(null)} />}
+      {loginBackend === 'codex' && <CodexLoginModal onClose={() => setLoginBackend(null)} />}
       {showShortcuts && <ShortcutsHelp onClose={() => setShowShortcuts(false)} />}
       {quickSwitchOpen && <QuickSwitcher onClose={() => setQuickSwitchOpen(false)} />}
       {transcriptSearchOpen && <TranscriptSearch onClose={() => setTranscriptSearchOpen(false)} />}

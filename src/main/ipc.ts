@@ -1,9 +1,10 @@
 import { app, dialog, shell, BrowserWindow } from 'electron'
 import { randomUUID } from 'node:crypto'
-import { spawn } from 'node:child_process'
-import { existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 import { handle } from './commandRegistry'
+import { openInEditor } from './openInEditor'
+import { memoryFile } from './claude/memory'
 import { getStore } from './store'
 import { getRemoteBridge } from './remote'
 import { rememberPrStatus } from './prStatusCache'
@@ -1089,34 +1090,31 @@ export function registerIpc(ctx: IpcContext): void {
   handle(IPC.workspaceOpenInEditor, (_e, workspaceId: string) => {
     const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
     if (!ws) return
-
-    // VS Code 의 `code` CLI 를 best-effort 로 호출, 실패하면 Finder 로 폴백.
-    // 경로는 positional 인자($1)로 넘겨 셸 보간을 거치지 않는다 — 리포 폴더명에
-    // 셸 메타문자가 섞여도 명령으로 해석되지 않는다. PATH 확보를 위해 로그인 셸은 유지.
-    const loginShell = process.env.SHELL || '/bin/zsh'
-    const proc = spawn(loginShell, ['-lc', 'code "$1"', loginShell, ws.worktreePath])
-    proc.on('error', () => shell.openPath(ws.worktreePath))
-    proc.on('exit', (code) => {
-      if (code !== 0) shell.openPath(ws.worktreePath)
-    })
+    openInEditor(ws.worktreePath)
   })
 
-  // /memory — worktree 의 CLAUDE.md 를 에디터로 연다. 파일이 없으면 worktree 디렉토리를 열어
-  // 사용자가 새로 만들 수 있게 한다(VS Code `code`, 실패 시 Finder 폴백).
-  handle(IPC.workspaceOpenMemory, (_e, workspaceId: string): { error?: string } => {
-    const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
-    if (!ws) return { error: 'Workspace not found.' }
+  // /memory 는 선택한 스코프의 파일을 먼저 만들어 언제나 바로 편집할 수 있게 한다. 에디터를 못
+  // 띄워도 폴더를 Finder 로 여는 대신 파일 자체를 OS 기본 앱에 맡긴다 — 명령이 약속한 대상은
+  // CLAUDE.md 이지 그 파일이 든 디렉토리가 아니다.
+  handle(
+    IPC.workspaceOpenMemory,
+    (_e, workspaceId: string, scope: MemoryScope): { error?: string } => {
+      const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
+      if (!ws) return { error: 'Workspace not found.' }
 
-    const memoryPath = join(ws.worktreePath, 'CLAUDE.md')
-    const target = existsSync(memoryPath) ? memoryPath : ws.worktreePath
-    const loginShell = process.env.SHELL || '/bin/zsh'
-    const proc = spawn(loginShell, ['-lc', 'code "$1"', loginShell, target])
-    proc.on('error', () => shell.openPath(ws.worktreePath))
-    proc.on('exit', (code) => {
-      if (code !== 0) shell.openPath(ws.worktreePath)
-    })
-    return {}
-  })
+      const file = memoryFile(scope, ws.worktreePath)
+      try {
+        if (!existsSync(file)) {
+          mkdirSync(dirname(file), { recursive: true })
+          writeFileSync(file, '')
+        }
+      } catch (error) {
+        return { error: error instanceof Error ? error.message : String(error) }
+      }
+      openInEditor(file)
+      return {}
+    }
+  )
 
   // `#` 단축키 — 대화를 끊지 않고 CLAUDE.md 에 기억 한 줄을 덧붙인다.
   handle(

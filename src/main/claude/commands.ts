@@ -38,6 +38,7 @@ const BUILTIN_COMMANDS: SlashCommandInfo[] = [
     argumentHint: '<question>'
   },
   // /model·/effort·/fast 는 Composer 가 로컬 선택 카드로 처리한다(백엔드 왕복 없음). 자동완성에만 보강.
+  // /plan 도 Composer 의 로컬 선택 카드로 처리하며, 자동완성 항목은 @shared/types 의 INTERACTIVE_COMMANDS 에서 온다.
   { name: 'model', description: 'Choose the model for this workspace' },
   { name: 'effort', description: 'Choose the reasoning effort for this workspace' },
   { name: 'fast', description: 'Toggle fast mode for this workspace (same model, faster output)' },
@@ -59,14 +60,36 @@ const BUILTIN_COMMANDS: SlashCommandInfo[] = [
     argumentHint: '<task>'
   },
   { name: 'diff', description: 'Open the changes (diff) view for this workspace' },
-  { name: 'copy', description: "Copy the assistant's last response to the clipboard" },
+  {
+    name: 'copy',
+    description: "Copy the assistant's Nth-latest response to the clipboard",
+    argumentHint: '[N]'
+  },
   { name: 'help', description: 'List the slash commands available here' },
-  { name: 'memory', description: 'Open this project’s CLAUDE.md in your editor' },
+  { name: 'rename', description: 'Rename this workspace', argumentHint: '[name]' },
+  {
+    name: 'tasks',
+    description: 'Show the background agents and tasks running here',
+    aliases: ['bashes']
+  },
+  {
+    name: 'memory',
+    description: 'Open project or user CLAUDE.md in your editor',
+    argumentHint: '[project|user]'
+  },
   {
     name: 'add-dir',
     description: 'Give the agent access to a directory outside this workspace',
     argumentHint: '<path>'
   },
+  { name: 'export', description: 'Export this conversation to a file', argumentHint: '[md|json]' },
+  { name: 'login', description: 'Sign in to the agent for this workspace' },
+  { name: 'logout', description: 'Sign out of the agent for this workspace' },
+  // Wooi 를 쓰는 중 받은 명령이므로 Anthropic 이 아니라 Wooi 의 트래커와 문서로 보낸다.
+  { name: 'bug', description: 'Report a bug in Wooi on GitHub' },
+  { name: 'feedback', description: 'Suggest a feature for Wooi on GitHub' },
+  { name: 'release-notes', description: 'See what changed in recent Wooi releases' },
+  { name: 'privacy-settings', description: 'Read Wooi’s privacy policy' },
   // /mcp·/context·/usage(+cost·stats)·/rewind·/permissions 등 인터셉트 명령(SSOT: INTERACTIVE_COMMANDS).
   ...INTERACTIVE_COMMANDS.map((c) => ({
     name: c.name,

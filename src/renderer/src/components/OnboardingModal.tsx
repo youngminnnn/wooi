@@ -7,10 +7,7 @@ import { primaryBtn } from './Modal'
 import { useStore } from '../store'
 import { CURRENT_TERMS_VERSION, hasAnyAgent } from '@shared/types'
 import type { AppSettings } from '@shared/types'
-
-// 배포 시 실제 공개 URL 로 교체한다(현재는 앱과 함께 제공되는 repo 문서를 가리킨다).
-const PRIVACY_URL = 'https://github.com/youngminnnn/wooi/blob/main/PRIVACY.md'
-const TERMS_URL = 'https://github.com/youngminnnn/wooi/blob/main/TERMS.md'
+import { WOOI_URLS } from '../lib/externalLinks'
 
 type Step = 'consent' | 'integrations' | 'features' | 'preferences'
 
@@ -129,16 +126,16 @@ function ConsentStep({ onContinue }: { onContinue: () => void }): React.JSX.Elem
           <span>
             I have read and agree to the{' '}
             <a
-              href={PRIVACY_URL}
-              onClick={openDoc(PRIVACY_URL)}
+              href={WOOI_URLS.privacyPolicy}
+              onClick={openDoc(WOOI_URLS.privacyPolicy)}
               className="text-[var(--info-400)] hover:underline"
             >
               Privacy Policy
             </a>{' '}
             and{' '}
             <a
-              href={TERMS_URL}
-              onClick={openDoc(TERMS_URL)}
+              href={WOOI_URLS.terms}
+              onClick={openDoc(WOOI_URLS.terms)}
               className="text-[var(--info-400)] hover:underline"
             >
               Terms of Use

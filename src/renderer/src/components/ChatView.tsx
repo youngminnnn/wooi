@@ -203,6 +203,15 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
   // 표시 이름: 사용자 override → PR 제목 → worktree 이름 순으로 결정한다.
   const displayName = workspaceDisplayName(workspace, pr?.title)
 
+  // Composer 는 ChatView 가 가진 인라인 편집 상태에 직접 닿을 수 없어, /rename 의 대상만 window 이벤트로 전달한다.
+  useEffect(() => {
+    const onRenameWorkspace = (e: Event): void => {
+      if ((e as CustomEvent<string>).detail === workspace.id) setEditingName(displayName)
+    }
+    window.addEventListener('wooi:rename-workspace', onRenameWorkspace)
+    return () => window.removeEventListener('wooi:rename-workspace', onRenameWorkspace)
+  }, [workspace.id, displayName])
+
   // 에이전트 배지는 고를 수 있는 에이전트가 둘 이상일 때만 의미가 있다.
   const backends = useStore((s) => s.backends)
   const showAgentBadge = backends.filter((b) => b.available).length > 1

@@ -214,8 +214,8 @@ export interface WooiApi {
     reorder(workspaceId: string, targetWorkspaceId: string, position: DropPosition): Promise<void>
     revealInFinder(workspaceId: string): Promise<void>
     openInEditor(workspaceId: string): Promise<void>
-    /** /memory — worktree 의 CLAUDE.md 를 에디터로 연다(없으면 worktree 디렉토리를 연다). */
-    openMemory(workspaceId: string): Promise<{ error?: string }>
+    /** /memory — 선택한 스코프의 CLAUDE.md 를 에디터로 연다. */
+    openMemory(workspaceId: string, scope: MemoryScope): Promise<{ error?: string }>
     /** `#` 단축키 — CLAUDE.md 에 기억 한 줄을 덧붙이고 쓴 파일 경로를 돌려준다. */
     addMemory(
       workspaceId: string,

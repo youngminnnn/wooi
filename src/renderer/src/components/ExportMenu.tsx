@@ -5,6 +5,11 @@ import { chatToJson, chatToMarkdown, downloadText } from '../lib/exportChat'
 import HeaderButton from './HeaderButton'
 import type { ChatItem } from '@shared/types'
 
+export type ExportConversationDetail = {
+  workspaceId: string
+  format?: 'md' | 'json'
+}
+
 /** 대화 내보내기 메뉴(마크다운 / JSON). 헤더 버튼에서 열린다. */
 export default function ExportMenu({
   workspaceId,
@@ -34,15 +39,6 @@ export default function ExportMenu({
     }
   }, [open])
 
-  // ⇧⌘X 전역 단축키(App.tsx)가 이 이벤트로 내보내기 메뉴를 연다.
-  useEffect(() => {
-    const onOpen = (e: Event): void => {
-      if ((e as CustomEvent<string>).detail === workspaceId) setOpen(true)
-    }
-    window.addEventListener('wooi:export-conversation', onOpen)
-    return () => window.removeEventListener('wooi:export-conversation', onOpen)
-  }, [workspaceId])
-
   const exportAs = (kind: 'md' | 'json'): void => {
     setOpen(false)
     if (transcript.length === 0) {
@@ -56,6 +52,23 @@ export default function ExportMenu({
     }
     pushToast('success', 'Conversation exported.')
   }
+
+  // Composer 도 메뉴와 같은 내보내기를 써야 하므로 형식을 이벤트에 싣는다. exportAs 를 복제하면
+  // 헤더 메뉴와 슬래시 명령의 동작이 서로 어긋날 수 있다.
+  // 최신 상태를 보는 핸들러는 매 렌더 갱신하고 전역 리스너는 한 번만 바인딩한다.
+  const exportHandlerRef = useRef<(e: Event) => void>(() => {})
+  exportHandlerRef.current = (e: Event): void => {
+    const detail = (e as CustomEvent<ExportConversationDetail>).detail
+    if (detail.workspaceId !== workspaceId) return
+    if (detail.format) exportAs(detail.format)
+    else setOpen(true)
+  }
+
+  useEffect(() => {
+    const onOpen = (e: Event): void => exportHandlerRef.current(e)
+    window.addEventListener('wooi:export-conversation', onOpen)
+    return () => window.removeEventListener('wooi:export-conversation', onOpen)
+  }, [])
 
   const itemCls =
     'flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-neutral-200 hover:bg-[var(--surface-2)]'
