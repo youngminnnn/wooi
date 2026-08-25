@@ -3481,6 +3481,14 @@ export interface PendingRateLimitResume {
   detectedAt: number
   retryAt: number
   attempt: number
+  /**
+   * 시각이 됐는데도 아직 이어 보내지 못한 이유. 없으면 그냥 해제 시각을 기다리는 중이다.
+   *
+   * - 'offline': 네트워크가 없다(맥이 자고 일어난 직후·와이파이 꺼짐). 시도 횟수를 쓰지 않고
+   *   연결이 돌아올 때까지 기다리기만 한다 — 보내 봐야 실패할 것이 뻔하기 때문이다.
+   * - 'error': 이어 보낸 턴이 제한이 아닌 이유로 실패했다. 물러섰다가 다시 보낸다.
+   */
+  blocked?: 'offline' | 'error' | null
 }
 
 /**

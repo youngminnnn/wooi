@@ -531,6 +531,19 @@ function RepoIcon({ repo }: { repo: Repo }): React.JSX.Element {
   return <FolderGit2 size={14} className="text-neutral-500 shrink-0" />
 }
 
+/**
+ * 자동 이어가기 예약의 툴팁. 시각 하나만 보여 주면 "그때가 됐는데 왜 안 갔지" 를 설명하지 못한다 —
+ * 네트워크가 없거나 이어 보낸 턴이 실패해 다시 기다리는 중이면 그 사정까지 말한다.
+ */
+function resumeTitle(pending: NonNullable<Workspace['pendingRateLimitResume']>): string {
+  if (pending.blocked === 'offline')
+    return 'Paused by usage limit — waiting for a network connection to continue'
+  const at = new Date(pending.retryAt).toLocaleString()
+  return pending.blocked === 'error'
+    ? `Paused by usage limit — the last attempt to continue failed, retrying at ${at}`
+    : `Paused by usage limit — scheduled to resume at ${at}`
+}
+
 function WorkspaceRow({
   workspace,
   depth,
@@ -943,12 +956,18 @@ function WorkspaceRow({
             {workspace.pendingRateLimitResume ? (
               <span
                 className="text-[var(--warning-400)]/90 shrink-0 tabular-nums"
-                title={`Usage limit reached — scheduled to resume at ${new Date(
-                  workspace.pendingRateLimitResume.retryAt
-                ).toLocaleString()}`}
+                title={resumeTitle(workspace.pendingRateLimitResume)}
               >
-                · rate limit · resumes in{' '}
-                {formatCountdown(workspace.pendingRateLimitResume.retryAt - now)}
+                {/* 네트워크가 없어 기다리는 중에는 카운트다운이 거짓말이 된다 — 연결이 언제
+                    돌아올지는 우리가 모른다. 그때는 무엇을 기다리는지만 말한다. */}
+                {workspace.pendingRateLimitResume.blocked === 'offline' ? (
+                  <>· rate limit · waiting for network</>
+                ) : (
+                  <>
+                    · rate limit · resumes in{' '}
+                    {formatCountdown(workspace.pendingRateLimitResume.retryAt - now)}
+                  </>
+                )}
               </span>
             ) : // 자동 이어가기가 꺼져 있어도 제한에 걸린 사실은 보여 준다 — 그러지 않으면 그냥
             // idle 로 보여서, 사용자는 왜 멈췄는지 워크스페이스에 들어가 봐야만 알 수 있다.
@@ -1545,7 +1564,7 @@ export function StatusDot({
   // 상태에는 양보한다. 자동 이어가기가 꺼져 있어도(예약 없이 표시만 있어도) 같은 아이콘을 쓴다.
   if (pendingRateLimitResume || rateLimited) {
     const title = pendingRateLimitResume
-      ? `Paused by usage limit — scheduled to resume at ${new Date(pendingRateLimitResume.retryAt).toLocaleString()}`
+      ? resumeTitle(pendingRateLimitResume)
       : rateLimited?.resetsAt
         ? `Stopped by usage limit — resets at ${new Date(rateLimited.resetsAt).toLocaleString()}`
         : 'Stopped by usage limit'
