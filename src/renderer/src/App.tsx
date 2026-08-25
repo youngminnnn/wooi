@@ -10,6 +10,7 @@ import { openNewWorkspaceMenu } from './lib/newWorkspaceMenu'
 import { applyTheme } from './lib/theme'
 import { finishSwitchHint } from './lib/uiFlags'
 import { OPEN_SETTINGS_EVENT } from './lib/settingsNavigation'
+import { FOCUS_COMPOSER_EVENT } from './lib/composerFocus'
 import TitleBar from './components/TitleBar'
 import { UpdateBanner } from './components/UpdateBanner'
 import { NoticeBanner } from './components/NoticeBanner'
@@ -208,7 +209,7 @@ export default function App(): React.JSX.Element {
   }, [])
 
   // 키보드: ⇧⇥ 권한 모드 순환, ⌘1–9 워크스페이스 선택, ⌘↑ / ⌘↓ 이전/다음,
-  // ⌘[ 직전에 보던 워크스페이스로 뒤로가기, ⇧⌘R PR 리뷰 시작.
+  // ⌘L 메시지 입력창 포커스, ⌘[ 직전에 보던 워크스페이스로 뒤로가기, ⇧⌘R PR 리뷰 시작.
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       const st = useStore.getState()
@@ -256,6 +257,22 @@ export default function App(): React.JSX.Element {
       }
 
       if (!e.metaKey) return
+
+      // ⌘L: 현재 워크스페이스의 메시지 입력창으로 돌아간다. 브라우저의 주소창과 같은
+      // "입력을 시작할 곳" 역할이라 기억하기 쉽고, 기존 Wooi 단축키와도 겹치지 않는다.
+      // 대화가 다른 화면에 가려졌다면 뒤쪽 textarea 를 몰래 포커스하지 않는다.
+      if (e.code === 'KeyL' && !e.shiftKey && !e.ctrlKey && !e.altKey) {
+        if (
+          st.selectedWorkspaceId &&
+          !st.activeReviewId &&
+          !st.activeFanoutGroupId &&
+          !fileViewerVisible
+        ) {
+          e.preventDefault()
+          window.dispatchEvent(new CustomEvent(FOCUS_COMPOSER_EVENT))
+        }
+        return
+      }
 
       // ⌘Z: 가장 최근 워크스페이스 생성 또는 병합 PR 일괄 아카이브를 되돌린다.
       // 글을 쓰는 중이라면 텍스트 실행취소가 우선이므로 그냥 양보한다 — preventDefault 를
@@ -520,7 +537,7 @@ export default function App(): React.JSX.Element {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [anyModalOpen])
+  }, [anyModalOpen, fileViewerVisible])
 
   if (!ready || !app) {
     return (

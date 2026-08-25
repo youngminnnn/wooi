@@ -70,6 +70,7 @@ const GROUPS: { title: string; items: { keys: string[]; label: string }[] }[] = 
   {
     title: 'Conversation',
     items: [
+      { keys: ['⌘L'], label: 'Focus the message input' },
       { keys: ['⌘F'], label: 'Search the conversation' },
       { keys: ['⌃O'], label: 'Expand or collapse all tool results' },
       { keys: ['⇧⌘↓'], label: 'Jump to the latest message' },
