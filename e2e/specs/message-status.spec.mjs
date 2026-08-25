@@ -24,9 +24,12 @@ function messageId(at, suffix) {
 
 async function runCommand(win, text) {
   const box = win.locator('textarea[placeholder^="Message your agent"]')
-  await box.fill(text)
-  // `/` 로 시작하면 자동완성 메뉴가 열리고 Enter 를 가져간다. 메뉴를 먼저 닫고 보낸다.
-  await box.press('Escape')
+  // 뒤 공백이 자동완성 메뉴를 닫는다(`slashQuery` 는 공백 없는 `/…` 에만 매치한다).
+  // Escape 로 닫으면 안 된다 — 슬래시 메뉴에서 Escape 는 메뉴만 닫는 게 아니라 초안을 통째로
+  // 비운다(Composer 의 `if (menuOpen) setText('')`). 인자 없는 `/wooi:message-status` 는
+  // 공백이 없어 메뉴가 열리므로 그대로 두면 빈 메시지가 나가고 카드가 영영 뜨지 않는다.
+  // command-cards.spec.mjs 와 codex-session-commands.spec.mjs 도 같은 수법을 쓴다.
+  await box.fill(`${text} `)
   await box.press('Enter')
   await win.getByText(`/wooi:message-status`, { exact: true }).waitFor()
   const body = win.locator('pre')
