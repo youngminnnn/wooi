@@ -95,6 +95,7 @@ import type { WooiCommandSpec } from '@shared/wooiCommands'
 import { openSettings } from '../lib/settingsNavigation'
 import type { ExportConversationDetail } from './ExportMenu'
 import { WOOI_URLS } from '../lib/externalLinks'
+import { FOCUS_COMPOSER_EVENT } from '../lib/composerFocus'
 
 /** Claude 가 받는 이미지 형식. 클립보드의 다른 형식은 붙여넣기 시 무시한다. */
 const IMAGE_TYPES: Record<string, ImageMediaType> = {
@@ -303,6 +304,13 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
   }, [workspace.id])
 
   const setText = (v: string): void => setDraft(workspace.id, v)
+
+  // App 의 전역 ⌘L 단축키가 현재 대화의 실제 textarea 를 직접 알 필요가 없도록 이벤트로 잇는다.
+  useEffect(() => {
+    const focus = (): void => taRef.current?.focus()
+    window.addEventListener(FOCUS_COMPOSER_EVENT, focus)
+    return () => window.removeEventListener(FOCUS_COMPOSER_EVENT, focus)
+  }, [])
 
   // textarea 높이 자동 조절.
   useEffect(() => {
