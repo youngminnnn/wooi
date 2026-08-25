@@ -9,6 +9,7 @@ import { OPEN_FILE_QUICK_OPEN_EVENT, openFileQuickOpen } from './lib/fileViewer'
 import { openNewWorkspaceMenu } from './lib/newWorkspaceMenu'
 import { applyTheme } from './lib/theme'
 import { finishSwitchHint } from './lib/uiFlags'
+import { OPEN_SETTINGS_EVENT } from './lib/settingsNavigation'
 import TitleBar from './components/TitleBar'
 import { UpdateBanner } from './components/UpdateBanner'
 import { NoticeBanner } from './components/NoticeBanner'
@@ -74,6 +75,11 @@ export default function App(): React.JSX.Element {
   }, [])
 
   const [showSettings, setShowSettings] = useState(false)
+  useEffect(() => {
+    const open = (): void => setShowSettings(true)
+    window.addEventListener(OPEN_SETTINGS_EVENT, open)
+    return () => window.removeEventListener(OPEN_SETTINGS_EVENT, open)
+  }, [])
   const [showShortcuts, setShowShortcuts] = useState(false)
   const [newWs, setNewWs] = useState<{
     repoId: string

@@ -872,6 +872,7 @@ export class CodexSessionManager implements AgentBackend {
       { name: 'context', description: 'Show context usage' },
       { name: 'usage', description: 'Show plan usage' },
       { name: 'permissions', description: 'Show active permissions' },
+      ...CODEX_ACCOUNT_CONFIG_COMMANDS,
       { name: 'compact', description: 'Compact the conversation' },
       { name: 'review', description: 'Review uncommitted changes' },
       // `/wooi:*` — Wooi 내장 도구를 직접 부르는 명령([[shared/wooiCommands]]).
@@ -994,3 +995,9 @@ export class CodexSessionManager implements AgentBackend {
     notification.show()
   }
 }
+export const CODEX_ACCOUNT_CONFIG_COMMANDS: SlashCommandInfo[] = [
+  { name: 'logout', description: 'Sign out of Codex' },
+  { name: 'debug-config', description: 'Show effective Codex configuration' },
+  { name: 'plugins', description: 'Open installed Codex plugins' },
+  { name: 'experimental', description: 'Manage experimental Codex features' }
+]

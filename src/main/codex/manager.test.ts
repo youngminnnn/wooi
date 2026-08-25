@@ -27,7 +27,18 @@ vi.mock('../rateLimitResume', () => ({
   }
 }))
 
-import { CodexSessionManager, parseReviewTarget } from './manager'
+import { CODEX_ACCOUNT_CONFIG_COMMANDS, CodexSessionManager, parseReviewTarget } from './manager'
+
+describe('Codex account/configuration command catalog', () => {
+  it('advertises every locally handled account/configuration command exactly once', () => {
+    expect(CODEX_ACCOUNT_CONFIG_COMMANDS.map((command) => command.name)).toEqual([
+      'logout',
+      'debug-config',
+      'plugins',
+      'experimental'
+    ])
+  })
+})
 
 function workspace(id: string, agentBackend: 'codex' | 'claude', model: string | null): Workspace {
   return {

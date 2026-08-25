@@ -32,6 +32,7 @@ import { permissionModesFor } from '../lib/permission'
 import { effortOptionsFor } from '../lib/effort'
 import { useAvailableBackends, useBackend, useModels } from '../lib/backends'
 import { applyTheme } from '../lib/theme'
+import { SETTINGS_PAGE_KEY, type SettingsPage } from '../lib/settingsNavigation'
 import {
   DEFAULT_AGENT_SETTINGS,
   DEFAULT_NOTIFICATION_SETTINGS,
@@ -54,19 +55,10 @@ import type {
   ThemePreference
 } from '@shared/types'
 
-type Page =
-  | 'general'
-  | 'agents'
-  | 'notifications'
-  | 'integrations'
-  | 'mcp'
-  | 'plugins'
-  | 'repositories'
-  | 'about'
+type Page = SettingsPage
 type SaveState = 'idle' | 'saving' | 'saved' | 'error'
 type NotificationPreset = 'recommended' | 'quiet' | 'everything' | 'custom'
 
-const PAGE_KEY = 'settings.lastPage'
 const NOTIFICATION_EVENTS: NotificationEvent[] = ['completed', 'error', 'needsInput']
 const NOTIFICATION_CHANNELS: NotificationChannel[] = ['osNotification', 'sound', 'badge']
 const THEME_OPTIONS: { value: ThemePreference; label: string }[] = [
@@ -201,7 +193,7 @@ export default function SettingsModal({
   const updateStatus = useStore((s) => s.updateStatus)
   const auth = useStore((s) => s.authStatus)
   const [page, setPageState] = useState<Page>(() => {
-    const stored = localStorage.getItem(PAGE_KEY) as Page | null
+    const stored = localStorage.getItem(SETTINGS_PAGE_KEY) as Page | null
     return PAGES.some((item) => item.id === stored) ? stored! : 'general'
   })
   const [query, setQuery] = useState('')
@@ -219,7 +211,7 @@ export default function SettingsModal({
 
   const setPage = (next: Page): void => {
     setPageState(next)
-    localStorage.setItem(PAGE_KEY, next)
+    localStorage.setItem(SETTINGS_PAGE_KEY, next)
     setQuery('')
   }
 

@@ -26,6 +26,7 @@ import {
 } from './wire'
 import type { CodexCommand, CodexConfig, CodexEvent, CodexLoginMethod } from './protocol'
 import { toPluginDetail, toPluginInventory } from './plugins'
+import { EXPERIMENTAL_UNSUPPORTED_REASON, redactDebugConfig } from './config'
 import type {
   AgentAuthStatus,
   ChatEvent,
@@ -654,6 +655,33 @@ async function logout(): Promise<void> {
  */
 async function runCommand(workspaceId: string, kind: CommandPanelKind): Promise<CommandResult> {
   const thread = threads.get(workspaceId)
+
+  if (kind === 'debugConfig') {
+    const result = await (
+      await rpc()
+    ).request<{
+      config?: unknown
+      layers?: Array<{ source?: unknown; filePath?: string | null }>
+    }>(RPC.configRead, { cwd: thread?.currentCwd() || undefined, includeLayers: true })
+    return {
+      kind: 'debugConfig',
+      config: redactDebugConfig(result.config ?? {}),
+      sources: (result.layers ?? [])
+        .map((layer) => layer.filePath ?? (layer.source ? JSON.stringify(layer.source) : ''))
+        .filter(Boolean) as string[]
+    }
+  }
+
+  if (kind === 'experimental') {
+    // codex app-server 0.146 has config/read and config/value/write, but no RPC that describes the
+    // available experimental flags, their types, or restart requirements. Guessing key paths and
+    // writing them would be unsafe; keep this out of the model turn and state the exact boundary.
+    return {
+      kind: 'unsupported',
+      command: '/experimental',
+      reason: EXPERIMENTAL_UNSUPPORTED_REASON
+    }
+  }
 
   if (kind === 'mcp') return { kind: 'mcp', servers: await listMcpServers() }
 

@@ -86,6 +86,7 @@ import type {
 import { matchWooiCommand, parseWooiCommandArgs, wooiCommandName } from '@shared/wooiCommands'
 import { conversationForkDisabledReason, parseForkCommand } from '../lib/conversationFork'
 import type { WooiCommandSpec } from '@shared/wooiCommands'
+import { openSettings } from '../lib/settingsNavigation'
 
 /** Claude 가 받는 이미지 형식. 클립보드의 다른 형식은 붙여넣기 시 무시한다. */
 const IMAGE_TYPES: Record<string, ImageMediaType> = {
@@ -572,6 +573,38 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
       runInteractive(interactive)
       setText('')
       historyIdx.current = -1
+      return
+    }
+
+    // Codex 계정/설치 화면 명령. 기존 설정·인증 경로를 재사용하고 모델 턴으로 보내지 않는다.
+    const codexLocal = images.length ? null : matchCodexLocal(trimmed, workspace.agentBackend)
+    if (codexLocal) {
+      setText('')
+      historyIdx.current = -1
+      if (codexLocal === 'plugins') {
+        openSettings('plugins')
+      } else {
+        // 이 Enter keydown 안에서 곧바로 confirm을 마운트하면, 같은 Enter가 ConfirmDialog의
+        // 전역 핸들러까지 이어져 위험 동작을 즉시 승인한다. 다음 이벤트 루프에서 열어 키를 분리한다.
+        setTimeout(() => {
+          void confirm({
+            title: 'Sign out of Codex?',
+            body: 'You will need to sign in again before starting another Codex session.',
+            confirmLabel: 'Sign out',
+            danger: true
+          }).then((ok) => {
+            if (!ok) return
+            void window.api.auth.codexLogout().then(
+              () => {
+                pushToast('success', 'Signed out of Codex.')
+                openSettings('integrations')
+              },
+              (error: unknown) =>
+                pushToast('error', error instanceof Error ? error.message : 'Could not sign out.')
+            )
+          })
+        }, 0)
+      }
       return
     }
 
@@ -1592,6 +1625,15 @@ function matchInteractive(
   return found && supported.includes(found.kind) ? found : null
 }
 
+type CodexLocalCommand = 'logout' | 'plugins'
+
+/** account/logout와 Settings → Plugins로 처리할 Codex 전용 로컬 명령만 찾는다. */
+export function matchCodexLocal(text: string, backend: AgentBackendId): CodexLocalCommand | null {
+  if (backend !== 'codex') return null
+  const match = /^\/(logout|plugins)\s*$/.exec(text)
+  return match ? (match[1] as CodexLocalCommand) : null
+}
+
 /** Wooi UI 가 직접 처리하는 로컬 명령(에이전트로 보내지 않음). */
 type LocalCommand = 'diff' | 'copy' | 'help' | 'clear' | 'stop' | 'memory' | 'add-dir'
 const LOCAL_COMMANDS: readonly LocalCommand[] = [
@@ -1675,7 +1717,9 @@ const CARD_ICON: Record<CommandPanelKind, React.ReactNode> = {
   reloadPlugins: <RefreshCw size={13} className="text-[var(--accent-400)] shrink-0" />,
   reloadSkills: <RefreshCw size={13} className="text-[var(--accent-400)] shrink-0" />,
   rewind: <History size={13} className="text-[var(--accent-400)] shrink-0" />,
-  permissions: <ShieldCheck size={13} className="text-[var(--accent-400)] shrink-0" />
+  permissions: <ShieldCheck size={13} className="text-[var(--accent-400)] shrink-0" />,
+  debugConfig: <Wrench size={13} className="text-[var(--accent-400)] shrink-0" />,
+  experimental: <Activity size={13} className="text-[var(--accent-400)] shrink-0" />
 }
 
 /** 토큰 수를 1.2k 형태로 간결하게 표기. */
@@ -2210,6 +2254,27 @@ function CommandResultView({
 
     case 'permissions':
       return <PermissionsPanel info={result.permissions} />
+
+    case 'debugConfig':
+      return (
+        <div className="space-y-2">
+          {result.sources.length > 0 && (
+            <ul className="space-y-0.5 text-xs text-neutral-500">
+              {result.sources.map((source) => (
+                <li key={source} className="break-all">
+                  {source}
+                </li>
+              ))}
+            </ul>
+          )}
+          <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-all rounded bg-[var(--surface-2)] p-2 text-xs text-neutral-300">
+            {JSON.stringify(result.config, null, 2)}
+          </pre>
+        </div>
+      )
+
+    case 'unsupported':
+      return <div className="text-[var(--warning-500)]">{result.reason}</div>
   }
 }
 
