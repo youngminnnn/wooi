@@ -26,6 +26,8 @@ import {
   Check,
   History,
   ShieldCheck,
+  Sparkles,
+  Webhook,
   RotateCcw,
   Activity,
   BookMarked,
@@ -77,10 +79,13 @@ import type {
   McpAction,
   McpServerInfo,
   MemoryScope,
+  HooksInfo,
   PermissionsInfo,
   RateLimitSnapshot,
   RewindPoint,
   SlashCommandInfo,
+  SkillInfo,
+  StatusInfo,
   Workspace
 } from '@shared/types'
 import { matchWooiCommand, parseWooiCommandArgs, wooiCommandName } from '@shared/wooiCommands'
@@ -1068,6 +1073,7 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
         {commandCard && !menuOpen && !mentionOpen && !pickerCard && !memoryDraft && (
           <CommandCard
             card={commandCard}
+            workspace={workspace}
             workspaceId={workspace.id}
             onResult={(result) => setCommandCard((prev) => (prev ? { ...prev, result } : prev))}
             onClose={() => setCommandCard(null)}
@@ -1719,7 +1725,10 @@ const CARD_ICON: Record<CommandPanelKind, React.ReactNode> = {
   rewind: <History size={13} className="text-[var(--accent-400)] shrink-0" />,
   permissions: <ShieldCheck size={13} className="text-[var(--accent-400)] shrink-0" />,
   debugConfig: <Wrench size={13} className="text-[var(--accent-400)] shrink-0" />,
-  experimental: <Activity size={13} className="text-[var(--accent-400)] shrink-0" />
+  experimental: <Activity size={13} className="text-[var(--accent-400)] shrink-0" />,
+  status: <Activity size={13} className="text-[var(--accent-400)] shrink-0" />,
+  skills: <Sparkles size={13} className="text-[var(--accent-400)] shrink-0" />,
+  hooks: <Webhook size={13} className="text-[var(--accent-400)] shrink-0" />
 }
 
 /** 토큰 수를 1.2k 형태로 간결하게 표기. */
@@ -2063,11 +2072,13 @@ function McpHint({ text }: { text: string }): React.JSX.Element {
  */
 function CommandCard({
   card,
+  workspace,
   workspaceId,
   onResult,
   onClose
 }: {
   card: CommandCardState
+  workspace: Workspace
   workspaceId: string
   /** mcp 패널의 서버 동작 후 갱신된 결과를 카드에 반영하기 위한 콜백. */
   onResult: (result: CommandResult) => void
@@ -2097,7 +2108,12 @@ function CommandCard({
           <span className="text-[var(--danger-400)]">{card.error || 'Command failed.'}</span>
         ) : (
           card.result && (
-            <CommandResultView result={card.result} workspaceId={workspaceId} onResult={onResult} />
+            <CommandResultView
+              result={card.result}
+              workspace={workspace}
+              workspaceId={workspaceId}
+              onResult={onResult}
+            />
           )
         )}
       </div>
@@ -2108,10 +2124,12 @@ function CommandCard({
 /** CommandResult 종류별 본문 렌더링. */
 function CommandResultView({
   result,
+  workspace,
   workspaceId,
   onResult
 }: {
   result: CommandResult
+  workspace: Workspace
   workspaceId: string
   onResult: (result: CommandResult) => void
 }): React.JSX.Element {
@@ -2275,7 +2293,156 @@ function CommandResultView({
 
     case 'unsupported':
       return <div className="text-[var(--warning-500)]">{result.reason}</div>
+
+    case 'status':
+      return <StatusPanel info={result.status} workspace={workspace} />
+
+    case 'skills':
+      return <SkillsPanel skills={result.skills} />
+
+    case 'hooks':
+      return <HooksPanel info={result.hooks} />
   }
+}
+
+/** 상태 카드에서 반복되는 label/value 한 줄. */
+function StatusRow({ label, value }: { label: string; value: React.ReactNode }): React.JSX.Element {
+  return (
+    <div className="flex items-start justify-between gap-3 text-xs">
+      <span className="text-neutral-500 shrink-0">{label}</span>
+      <span className="text-neutral-300 text-right break-all">{value}</span>
+    </div>
+  )
+}
+
+/** /status — 계정·세션·Wooi 워크스페이스 설정을 한 장에서 구분해 보여 준다. */
+function StatusPanel({
+  info,
+  workspace
+}: {
+  info: StatusInfo
+  workspace: Workspace
+}): React.JSX.Element {
+  const backend = useWorkspaceBackend(workspace)
+  const agentLabel = backend?.label ?? AGENT_BACKEND_LABELS[workspace.agentBackend]
+  const Section = ({
+    title,
+    children
+  }: {
+    title: string
+    children: React.ReactNode
+  }): React.JSX.Element => (
+    <div className="space-y-1">
+      <div className="text-xs font-medium text-neutral-400">{title}</div>
+      {children}
+    </div>
+  )
+  return (
+    <div className="space-y-2.5">
+      <Section title="Account">
+        <StatusRow label="Email" value={info.account.email ?? '—'} />
+        <StatusRow label="Organization" value={info.account.organization ?? '—'} />
+        <StatusRow label="Plan" value={info.account.subscriptionType ?? '—'} />
+        <StatusRow label="Provider" value={info.account.apiProvider ?? '—'} />
+      </Section>
+      <Section title="Session">
+        <StatusRow label="State" value={info.live ? 'Live session' : 'No live session'} />
+        {info.sessionId && <StatusRow label="Session ID" value={info.sessionId} />}
+        <StatusRow label="Output style" value={info.outputStyle ?? '—'} />
+        {info.fastMode ? (
+          <StatusRow
+            label="Fast mode"
+            value={`${info.fastMode.state}${info.fastMode.disabledReason ? ` — ${info.fastMode.disabledReason}` : ''}`}
+          />
+        ) : (
+          <div className="text-xs text-neutral-600">
+            No live session — start one to see fast mode state.
+          </div>
+        )}
+      </Section>
+      <Section title="Workspace">
+        <StatusRow label="Model" value={info.workspace.model ?? 'Default'} />
+        <StatusRow label="Effort" value={info.workspace.effort ?? 'Default'} />
+        <StatusRow label="Fast mode preference" value={info.workspace.fastMode ? 'On' : 'Off'} />
+        <StatusRow label="Permission mode" value={info.workspace.permissionMode} />
+        <StatusRow label="Branch" value={workspace.branch} />
+        <StatusRow label="Agent" value={agentLabel} />
+        <StatusRow label="Working directory" value={info.workspace.cwd} />
+      </Section>
+    </div>
+  )
+}
+
+/** /skills — 출처 배지와 함께 긴 설명은 두 줄까지만 보여 준다. */
+function SkillsPanel({ skills }: { skills: SkillInfo[] }): React.JSX.Element {
+  if (skills.length === 0) return <Empty>No skills available in this session.</Empty>
+  const badge: Record<SkillInfo['source'], string> = {
+    plugin: 'Plugin',
+    user: 'User',
+    builtin: 'Built-in'
+  }
+  return (
+    <ul className="space-y-2">
+      {skills.map((skill) => (
+        <li key={skill.name} className="min-w-0">
+          <div className="flex items-baseline gap-2 min-w-0">
+            <span className="font-medium text-neutral-100 truncate">/{skill.name}</span>
+            {skill.argumentHint && (
+              <span className="text-xs font-mono text-neutral-500 shrink-0">
+                {skill.argumentHint}
+              </span>
+            )}
+            <span className="text-[10px] text-neutral-500 bg-[var(--surface-3)] rounded px-1 shrink-0">
+              {badge[skill.source]}
+            </span>
+          </div>
+          <div className="text-xs text-neutral-500 leading-snug line-clamp-2">
+            {skill.description}
+          </div>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+/** /hooks — 설정 파일에서 선언된 훅을 이벤트별로 읽기 전용 표시한다. */
+function HooksPanel({ info }: { info: HooksInfo }): React.JSX.Element {
+  if (info.events.length === 0) {
+    return (
+      <Empty>
+        No hooks configured. Hooks run shell commands on session events — configure them in
+        <span className="font-mono"> .claude/settings.json</span>.
+      </Empty>
+    )
+  }
+  return (
+    <div className="space-y-2.5">
+      {info.events.map(({ event, entries }) => (
+        <div key={event} className="space-y-1">
+          <div className="text-xs font-medium text-neutral-400">{event}</div>
+          {entries.map((entry, index) => (
+            <div key={`${entry.source}:${index}`} className="pl-2 border-l border-[var(--border)]">
+              <div className="text-xs text-neutral-600">
+                {entry.matcher ? `Matcher: ${entry.matcher}` : 'All matches'}
+              </div>
+              {entry.commands.length > 0 ? (
+                entry.commands.map((command) => (
+                  <div key={command} className="text-xs font-mono text-neutral-300 break-all">
+                    {command}
+                  </div>
+                ))
+              ) : (
+                <div className="text-xs text-neutral-600">No command hooks</div>
+              )}
+            </div>
+          ))}
+        </div>
+      ))}
+      <div className="text-xs text-neutral-600 pt-1 border-t border-[var(--border)] break-all">
+        From: {info.sources.join(' · ')}
+      </div>
+    </div>
+  )
 }
 
 /** 권한 모드별 한 줄 설명(상태줄·footer 와 같은 의미). */

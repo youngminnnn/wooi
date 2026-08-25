@@ -75,6 +75,20 @@ const BUILTIN_COMMANDS: SlashCommandInfo[] = [
   }))
 ]
 
+/** SDK 목록과 Wooi 내장 목록을 합쳐 자동완성용 최종 목록을 만든다. 순수 함수 — 테스트에서 직접 부른다. */
+export function mergeCommands(fromSdk: SlashCommandInfo[]): SlashCommandInfo[] {
+  const seen = new Set(BUILTIN_COMMANDS.map((command) => command.name))
+  // 같은 이름이면 Wooi 쪽이 이긴다 — 이 이름들은 Composer.tsx·sideQuestion.ts·control.ts 에서
+  // Wooi 가 직접 처리하므로 CLI 내부 동작을 설명하는 SDK 문구는 틀린 안내가 된다. 특히 /agents 는
+  // CLI 에서 "(removed) ..." 로 바뀌었는데 Wooi 는 supportedAgents() 카드를 멀쩡히 띄운다.
+  const remainingSdk = fromSdk.filter((command) => {
+    if (seen.has(command.name)) return false
+    seen.add(command.name)
+    return true
+  })
+  return [...BUILTIN_COMMANDS, ...remainingSdk]
+}
+
 /** 플러그인/스킬 리로드 후 자동완성 명령 목록을 다시 받도록 캐시를 비운다. */
 export function clearCommandsCache(cwd?: string): void {
   if (!cwd) return cache.clear()
@@ -131,9 +145,7 @@ async function fetchCommands(cwd: string, team: boolean): Promise<SlashCommandIn
       ...(c.aliases && c.aliases.length ? { aliases: c.aliases } : {})
     }))
 
-    // 내장 명령을 앞에 보강하되, SDK 가 같은 이름을 이미 돌려줬다면 중복을 피한다.
-    const present = new Set(fromSdk.map((c) => c.name))
-    return [...BUILTIN_COMMANDS.filter((c) => !present.has(c.name)), ...fromSdk]
+    return mergeCommands(fromSdk)
   } finally {
     // 정리는 fire-and-forget — 조회 결과 반환을 인터럽트 응답 대기로 막지 않는다.
     input.close()

@@ -3740,6 +3740,9 @@ export type CommandPanelKind =
   | 'permissions'
   | 'debugConfig'
   | 'experimental'
+  | 'status'
+  | 'skills'
+  | 'hooks'
 
 /**
  * 입력창 인터셉트(Composer)와 자동완성 보강(commands.ts)이 같은 목록을 보도록 하는 SSOT.
@@ -3771,6 +3774,9 @@ export const INTERACTIVE_COMMANDS: {
     kind: 'permissions',
     description: 'View permission mode and tool allow/ask/deny rules'
   },
+  { name: 'status', kind: 'status', description: 'Show session, account, and workspace status' },
+  { name: 'skills', kind: 'skills', description: 'List skills available in this session' },
+  { name: 'hooks', kind: 'hooks', description: 'View hooks configured in settings files' },
   { name: 'reload-plugins', kind: 'reloadPlugins', description: 'Reload plugins from disk' },
   { name: 'reload-skills', kind: 'reloadSkills', description: 'Reload skills from disk' },
   { name: 'debug-config', kind: 'debugConfig', description: 'Show effective Codex configuration' },
@@ -3941,6 +3947,60 @@ export interface PermissionsInfo {
   sources: string[]
 }
 
+/** /hooks — settings.json 들에서 모은 훅 설정(읽기 전용). */
+export interface HooksInfo {
+  /** 이벤트별 등록 항목. 파일 순서(유저 → 프로젝트 → 로컬)대로 합친다. */
+  events: {
+    event: string
+    entries: {
+      /** 이 항목이 걸리는 도구 패턴. 없으면 그 이벤트 전체에 걸린다. */
+      matcher?: string
+      /** 실행할 명령들(type:'command' 인 훅의 command). */
+      commands: string[]
+      /** 이 항목을 읽어 온 설정 파일 경로. */
+      source: string
+    }[]
+  }[]
+  /** hooks 키가 있던 설정 파일 경로(있는 것만). */
+  sources: string[]
+}
+
+/** /skills — 이 세션에서 쓸 수 있는 스킬 1개. */
+export interface SkillInfo {
+  name: string
+  description: string
+  argumentHint?: string
+  /** 출처 — 플러그인 스킬(name 에 ':')·유저 스킬(설명 끝 '(user)')·Claude Code 번들. */
+  source: 'plugin' | 'user' | 'builtin'
+}
+
+/** /status — 세션·계정·워크스페이스 상태 한 장. */
+export interface StatusInfo {
+  /** 라이브 세션 위에서 조회했는지. false 면 세션 상태(fastMode)를 알 수 없다. */
+  live: boolean
+  /** 로그인 계정 — 단명 쿼리로도 정확하다. */
+  account: {
+    email?: string
+    organization?: string
+    subscriptionType?: string
+    apiProvider?: string
+  }
+  /** 출력 스타일 — 설정에서 오므로 단명 쿼리로도 정확하다. */
+  outputStyle: string | null
+  /** fast mode 상태. 세션 상태라 live 일 때만 채운다 — 없으면 null(모른다는 뜻). */
+  fastMode: { state: string; disabledReason?: string } | null
+  /** 이어 갈 Claude Code 세션 id. 없으면 아직 세션이 시작되지 않았다. */
+  sessionId: string | null
+  /** Wooi 워크스페이스 설정 — store 에서 오므로 항상 정확하다. */
+  workspace: {
+    cwd: string
+    model: string | null
+    effort: string | null
+    fastMode: boolean
+    permissionMode: string
+  }
+}
+
 /** 인터랙티브 명령 실행 결과. kind 로 카드 렌더링을 분기한다. */
 export type CommandResult =
   | { kind: 'mcp'; servers: McpServerInfo[] }
@@ -3953,6 +4013,9 @@ export type CommandResult =
   | { kind: 'permissions'; permissions: PermissionsInfo }
   | { kind: 'debugConfig'; config: unknown; sources: string[] }
   | { kind: 'unsupported'; command: string; reason: string }
+  | { kind: 'status'; status: StatusInfo }
+  | { kind: 'skills'; skills: SkillInfo[] }
+  | { kind: 'hooks'; hooks: HooksInfo }
 
 // ── 파일 브라우저 (All files 탭) ──────────────────────────────────────────
 

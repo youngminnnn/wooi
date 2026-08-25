@@ -841,11 +841,7 @@ export class SessionManager implements AgentBackend {
         .workspaces.find((w) => !w.archived)
       if (ws) {
         const config = this.configFor(ws)
-        fallback = {
-          cwd: ws.worktreePath,
-          repoPath: config.repoPath,
-          mcpSettings: config.mcpSettings
-        }
+        fallback = config
       }
     }
 
