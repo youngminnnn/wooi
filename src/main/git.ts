@@ -207,6 +207,35 @@ export async function resolveUniqueWorktree(
   }
 }
 
+/** `git worktree list` 한 항목. detached HEAD 면 branch 가 null 이다. */
+export interface WorktreeEntry {
+  path: string
+  branch: string | null
+}
+
+/**
+ * 이 리포에 딸린 worktree 전부(메인 체크아웃 포함). 마이그레이션이 다른 도구가 만들어 둔
+ * worktree 를 **실제로 살아 있는 것만** 골라내는 근거다 — 그 도구의 DB·JSON 은 지워진
+ * worktree 도 기억하고 있으므로, git 에게 물어 확인한 목록과 교집합을 취해야 한다.
+ */
+export async function listWorktrees(repoPath: string): Promise<WorktreeEntry[]> {
+  const out = await git(repoPath, ['worktree', 'list', '--porcelain']).catch(() => '')
+  const entries: WorktreeEntry[] = []
+  let current: WorktreeEntry | null = null
+  for (const line of out.split('\n')) {
+    if (line.startsWith('worktree ')) {
+      current = { path: line.slice('worktree '.length).trim(), branch: null }
+      entries.push(current)
+    } else if (line.startsWith('branch ') && current) {
+      current.branch = line
+        .slice('branch '.length)
+        .trim()
+        .replace(/^refs\/heads\//, '')
+    }
+  }
+  return entries
+}
+
 /** origin 에서 fetch 한다 (origin 미설정/오프라인 등은 조용히 무시). */
 export async function fetchRemote(repoPath: string): Promise<void> {
   await git(repoPath, ['fetch', 'origin', '--prune']).catch(() => {

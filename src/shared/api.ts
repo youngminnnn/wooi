@@ -64,6 +64,9 @@ import type {
   ReviewEnvelope,
   PrCandidate,
   IssueCandidate,
+  MigrationImportResult,
+  MigrationImportSelection,
+  MigrationScan,
   ReviewVerdict,
   RewindActionResult,
   StackCascadeResult,
@@ -89,6 +92,15 @@ import type { PreviewIssue } from './previewIssues'
  */
 export interface WooiApi {
   getState(): Promise<AppState>
+
+  /**
+   * Conductor·Orca 에서 옮겨오기. 스캔은 읽기만 하고, 들여오기는 고른 키를 main 이 **다시
+   * 훑어 대조한** 뒤에만 등록한다(경로를 렌더러에서 받아 그대로 믿지 않는다).
+   */
+  migrate: {
+    scan(): Promise<MigrationScan>
+    run(selection: MigrationImportSelection): Promise<MigrationImportResult>
+  }
 
   repo: {
     add(): Promise<{ repo?: Repo; error?: string }>

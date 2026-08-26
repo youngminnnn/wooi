@@ -11,6 +11,11 @@ function subscribe<T>(channel: string, cb: (payload: T) => void): () => void {
 const api: WooiApi = {
   getState: () => ipcRenderer.invoke(IPC.appGetState),
 
+  migrate: {
+    scan: () => ipcRenderer.invoke(IPC.migrateScan),
+    run: (selection) => ipcRenderer.invoke(IPC.migrateImport, selection)
+  },
+
   repo: {
     add: () => ipcRenderer.invoke(IPC.repoAdd),
     update: (repoId, patch) => ipcRenderer.invoke(IPC.repoUpdate, repoId, patch),

@@ -50,6 +50,7 @@ import {
   switchClickCount
 } from '../lib/uiFlags'
 import { OPEN_REPO_SETTINGS_EVENT, openRepoSettings } from '../lib/repoSettings'
+import { openMigrate } from '../lib/migrate'
 import {
   AGENT_BACKEND_LABELS,
   DEFAULT_PEER_INBOUND,
@@ -205,6 +206,24 @@ export default function Sidebar({
     ordered.length > 1 &&
     !showQuickSwitchHint
 
+  // 리포가 하나도 없을 때만 다른 도구의 데이터를 찾아본다. 옮겨오기를 권할 자리는 첫 화면
+  // 하나뿐이고, 스캔은 git 을 리포마다 부르므로 상시로 돌릴 이유가 없다.
+  const [migratable, setMigratable] = useState(false)
+  const noRepos = app.repos.length === 0
+  useEffect(() => {
+    if (!noRepos) return
+    let active = true
+    void window.api.migrate
+      .scan()
+      .then((scan) => {
+        if (active) setMigratable(scan.sources.length > 0)
+      })
+      .catch(() => undefined)
+    return () => {
+      active = false
+    }
+  }, [noRepos])
+
   const addRepo = async (): Promise<void> => {
     const res = await window.api.repo.add()
     if (res.error) {
@@ -339,11 +358,21 @@ export default function Sidebar({
         </div>
 
         {app.repos.length === 0 && (
-          <p className="px-3 py-8 text-xs text-neutral-500 text-center leading-relaxed">
+          <div className="px-3 py-8 text-xs text-neutral-500 text-center leading-relaxed">
             No repositories yet.
             <br />
             Use the + button above to add a git repo.
-          </p>
+            {/* Conductor·Orca 를 쓰던 사람에게는 이 화면이 첫 화면이다. 여기서 알려주지 않으면
+                이미 등록해 둔 리포와 worktree 를 손으로 다시 만들게 된다. */}
+            {migratable && (
+              <button
+                onClick={openMigrate}
+                className="mt-3 block w-full rounded-lg border border-[var(--border-2)] px-3 py-2 text-xs text-neutral-300 hover:bg-[var(--surface-2)]"
+              >
+                Import from Conductor or Orca
+              </button>
+            )}
+          </div>
         )}
 
         {app.repos.map((repo) => {

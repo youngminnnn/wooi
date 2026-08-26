@@ -14,6 +14,7 @@ import { forgetRunningAgents } from './runningAgentsCache'
 import { getTranscripts } from './transcripts'
 import { buildHandoffPrompt, estimateHandoffTokens, formatHandoffTokens } from '@shared/handoff'
 import { listDir, readFileInRoot, searchFiles } from './fsbrowse'
+import { importMigration, scanMigrationSources } from './migrate'
 import { formatIssues } from '@shared/previewIssues'
 import { log } from './logger'
 import {
@@ -82,7 +83,13 @@ import {
 import { planMergeTrain, runMergeTrain, type TrainLayer } from './mergeTrain'
 import { ReviewManager } from './review/manager'
 import { resolveStackForPr } from './review/stackResolve'
-import type { ReviewVerdict, TranscriptSearchResult } from '@shared/types'
+import type {
+  MigrationImportResult,
+  MigrationImportSelection,
+  MigrationScan,
+  ReviewVerdict,
+  TranscriptSearchResult
+} from '@shared/types'
 import {
   cascadeRetarget,
   cascadeRestackBranchStack,
@@ -649,6 +656,36 @@ export function registerIpc(ctx: IpcContext): void {
     if (!repo) return null
     return getPrBody(repo.path, number).catch(() => null)
   })
+
+  // ── 다른 도구에서 옮겨오기 ────────────────────────────────────────────────
+
+  /**
+   * 스캔과 들여오기가 같은 deps 를 본다. 들여오기는 이 deps 로 **다시 스캔해** 키를 대조하므로,
+   * 렌더러가 보낸 것 중 실제로 쓰이는 것은 키 문자열뿐이다(경로·이름은 전부 재확인된 값).
+   */
+  const migrationDeps = {
+    env: { home: app.getPath('home'), appData: app.getPath('appData') },
+    getState: () => store.getState(),
+    update: (mutate: (state: Pick<AppState, 'repos' | 'workspaces'>) => void) =>
+      store.update(mutate),
+    onRepoAdded: (repoId: string) => void backfillRepoAvatar(repoId)
+  }
+
+  handle(IPC.migrateScan, (): Promise<MigrationScan> => scanMigrationSources(migrationDeps))
+
+  handle(
+    IPC.migrateImport,
+    async (_e, selection: MigrationImportSelection): Promise<MigrationImportResult> => {
+      const keys = (value: unknown): string[] =>
+        Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
+      const result = await importMigration(
+        { repoKeys: keys(selection?.repoKeys), workspaceKeys: keys(selection?.workspaceKeys) },
+        migrationDeps
+      )
+      if (result.repos > 0 || result.workspaces > 0) broadcastState()
+      return result
+    }
+  )
 
   // ── workspace ────────────────────────────────────────────────────────────
 

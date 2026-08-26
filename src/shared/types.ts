@@ -3036,6 +3036,69 @@ export interface IssueCandidate {
  */
 export type MemoryScope = 'project' | 'user'
 
+// ── 다른 도구에서 옮겨오기 ────────────────────────────────────────────────
+
+/**
+ * 마이그레이션 출처. 둘 다 Wooi 와 같은 일(리포 하나에 worktree 여러 개 + 에이전트)을 하는
+ * 도구라, 사용자가 이미 만들어 둔 리포 등록과 worktree 를 그대로 이어받을 수 있다.
+ */
+export type MigrationSourceId = 'conductor' | 'orca'
+
+/** 들여올 수 있는 worktree 하나. 이미 git 에 살아 있다고 확인된 것만 온다. */
+export interface MigrationWorkspaceCandidate {
+  /** 선택을 main 으로 되돌려 보낼 때 쓰는 키. 경로에서 파생되며 스캔마다 같다. */
+  key: string
+  /** 그 도구가 붙여 둔 표시 이름(없으면 디렉터리 이름). */
+  name: string
+  branch: string
+  worktreePath: string
+  /** 이미 Wooi 워크스페이스가 이 worktree(또는 브랜치)를 쓰고 있다. */
+  alreadyImported: boolean
+}
+
+/** 들여올 수 있는 리포 하나. */
+export interface MigrationRepoCandidate {
+  key: string
+  name: string
+  path: string
+  /** 이미 Wooi 에 등록된 리포다. 등록은 건너뛰고 worktree 만 들여온다. */
+  alreadyAdded: boolean
+  /** 함께 옮겨올 설정. 비어 있으면 그 도구에도 설정이 없었다는 뜻이다. */
+  setupScript: string
+  archiveScript: string
+  runScripts: { name: string; command: string }[]
+  workspaces: MigrationWorkspaceCandidate[]
+}
+
+export interface MigrationSource {
+  id: MigrationSourceId
+  /** 사용자에게 보여 줄 도구 이름 ("Conductor" · "Orca"). */
+  label: string
+  /** 읽어 낸 데이터 파일의 절대 경로. 무엇을 근거로 이 목록이 나왔는지 보여 준다. */
+  dataPath: string
+  repos: MigrationRepoCandidate[]
+}
+
+export interface MigrationScan {
+  /** 들여올 것이 하나라도 남은 출처만 담는다(전부 이미 옮겼으면 빈 배열). */
+  sources: MigrationSource[]
+  /** 데이터는 찾았지만 읽지 못한 경우의 사유(예: sqlite3 없음). 사용자에게 그대로 보여 준다. */
+  warnings: string[]
+}
+
+/** 사용자가 고른 항목. main 은 이 키를 다시 스캔해 대조한다(IPC 는 신뢰 경계다). */
+export interface MigrationImportSelection {
+  repoKeys: string[]
+  workspaceKeys: string[]
+}
+
+export interface MigrationImportResult {
+  repos: number
+  workspaces: number
+  /** 항목별 실패 사유. 전체를 멈추지 않고 나머지는 계속 들여온다. */
+  errors: string[]
+}
+
 // ── IPC 채널 이름 ────────────────────────────────────────────────────────
 
 export const IPC = {
@@ -3059,6 +3122,10 @@ export const IPC = {
   repoResolvePr: 'repo:resolvePr',
   repoGetIssueBody: 'repo:getIssueBody',
   repoGetPrBody: 'repo:getPrBody',
+  /** 다른 병렬 에이전트 도구(Conductor·Orca)가 남긴 리포·worktree 를 훑는다. */
+  migrateScan: 'migrate:scan',
+  /** 훑어 낸 것 중 사용자가 고른 리포·worktree 를 Wooi 로 들여온다. */
+  migrateImport: 'migrate:import',
   workspaceCreate: 'workspace:create',
   workspaceFork: 'workspace:fork',
   workspaceArchive: 'workspace:archive',

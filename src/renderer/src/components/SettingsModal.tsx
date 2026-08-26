@@ -20,6 +20,7 @@ import {
 } from 'lucide-react'
 import { useStore } from '../store'
 import { openRepoSettings } from '../lib/repoSettings'
+import { openMigrate } from '../lib/migrate'
 import { hasNewVersion, scheduledRestartText, updateStatusText } from '../lib/update'
 import { useNow } from '../lib/useNow'
 import { inputClass } from './Modal'
@@ -817,6 +818,26 @@ function RepositoriesPage({
           Configured only
         </button>
       </div>
+      {/* 다른 병렬 에이전트 도구에서 넘어오는 사람을 위한 상시 입구. 사이드바 안내는 리포가
+          하나도 없을 때만 뜨므로, 일부만 옮겨 둔 사람은 여기서 나머지를 마저 옮긴다. */}
+      <button
+        onClick={() => {
+          onClose()
+          openMigrate()
+        }}
+        className="flex w-full items-center gap-3 rounded-xl border border-[var(--border)] px-4 py-3 text-left hover:bg-[var(--surface-2)]"
+      >
+        <Download size={15} className="text-neutral-500" />
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm font-medium text-neutral-200">
+            Import from Conductor or Orca
+          </span>
+          <span className="block text-xs text-neutral-600">
+            Adds their repositories and points Wooi at the worktrees they already created.
+          </span>
+        </span>
+        <ChevronRight size={15} className="text-neutral-600" />
+      </button>
       <div className="overflow-hidden rounded-xl border border-[var(--border)] divide-y divide-[var(--border)]">
         {filtered.map((repo) => (
           <button
