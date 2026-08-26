@@ -534,14 +534,18 @@ function RepoIcon({ repo }: { repo: Repo }): React.JSX.Element {
 /**
  * 자동 이어가기 예약의 툴팁. 시각 하나만 보여 주면 "그때가 됐는데 왜 안 갔지" 를 설명하지 못한다 —
  * 네트워크가 없거나 이어 보낸 턴이 실패해 다시 기다리는 중이면 그 사정까지 말한다.
+ *
+ * 무엇 때문에 멈췄는지도 함께 말한다 — API 에 닿지 못해 걸린 예약을 "usage limit" 이라고 부르면
+ * 사용자는 있지도 않은 제한이 풀리기를 기다리게 된다.
  */
 function resumeTitle(pending: NonNullable<Workspace['pendingRateLimitResume']>): string {
-  if (pending.blocked === 'offline')
-    return 'Paused by usage limit — waiting for a network connection to continue'
+  const why =
+    pending.cause === 'connection' ? 'Paused — no connection to the API' : 'Paused by usage limit'
+  if (pending.blocked === 'offline') return `${why} — waiting for a network connection to continue`
   const at = new Date(pending.retryAt).toLocaleString()
   return pending.blocked === 'error'
-    ? `Paused by usage limit — the last attempt to continue failed, retrying at ${at}`
-    : `Paused by usage limit — scheduled to resume at ${at}`
+    ? `${why} — the last attempt to continue failed, retrying at ${at}`
+    : `${why} — scheduled to resume at ${at}`
 }
 
 function WorkspaceRow({
@@ -961,11 +965,20 @@ function WorkspaceRow({
                 {/* 네트워크가 없어 기다리는 중에는 카운트다운이 거짓말이 된다 — 연결이 언제
                     돌아올지는 우리가 모른다. 그때는 무엇을 기다리는지만 말한다. */}
                 {workspace.pendingRateLimitResume.blocked === 'offline' ? (
-                  <>· rate limit · waiting for network</>
+                  <>
+                    ·{' '}
+                    {workspace.pendingRateLimitResume.cause === 'connection'
+                      ? 'no connection'
+                      : 'rate limit'}{' '}
+                    · waiting for network
+                  </>
                 ) : (
                   <>
-                    · rate limit · resumes in{' '}
-                    {formatCountdown(workspace.pendingRateLimitResume.retryAt - now)}
+                    ·{' '}
+                    {workspace.pendingRateLimitResume.cause === 'connection'
+                      ? 'no connection'
+                      : 'rate limit'}{' '}
+                    · resumes in {formatCountdown(workspace.pendingRateLimitResume.retryAt - now)}
                   </>
                 )}
               </span>
@@ -1573,7 +1586,11 @@ export function StatusDot({
         <Hourglass
           size={12}
           className="text-[var(--warning-400)]"
-          aria-label="Paused by usage limit"
+          aria-label={
+            pendingRateLimitResume?.cause === 'connection'
+              ? 'Paused — no connection to the API'
+              : 'Paused by usage limit'
+          }
         />
       </span>
     )

@@ -3541,6 +3541,14 @@ export interface PendingRateLimitResume {
    * - 'error': 이어 보낸 턴이 제한이 아닌 이유로 실패했다. 물러섰다가 다시 보낸다.
    */
   blocked?: 'offline' | 'error' | null
+  /**
+   * 무엇이 이 턴을 멈췄나. 없으면 'rateLimit'(이 필드보다 먼저 저장된 예약).
+   *
+   * - 'rateLimit': 계정 사용량 제한. 해제 시각을 알 수 있고, 시도 예산(MAX_ATTEMPTS)을 쓴다.
+   * - 'connection': API 에 닿지 못했다(DNS·네트워크). 언제 돌아올지 알 수 없어 예산 대신
+   *   확인 간격을 늘려 가며 기다린다([[rateLimitResume]] noteConnectionLost).
+   */
+  cause?: 'rateLimit' | 'connection'
 }
 
 /**

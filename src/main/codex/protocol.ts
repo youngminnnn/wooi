@@ -145,6 +145,8 @@ export type CodexEvent =
   /** 확정된 thread id — 메인이 workspace.sessionId 에 저장해 다음 실행에서 resume 한다. */
   | { type: 'sessionId'; workspaceId: string; sessionId: string }
   | { type: 'rateLimit'; workspaceId: string }
+  /** API 에 닿지 못해 턴이 끊겼다 — 연결이 돌아오면 이어가도록 메인이 예약한다. */
+  | { type: 'connectionLost'; workspaceId: string }
   /** 턴이 정상 종료 없이 끝났을 때 'running' 에 갇히지 않도록 idle 로 확정한다. */
   | { type: 'settleIdle'; workspaceId: string }
   | { type: 'permissionRequest'; request: PermissionRequest }

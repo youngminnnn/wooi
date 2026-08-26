@@ -71,7 +71,9 @@ export function describeWorkspaceActivity(ws: Workspace, now = Date.now()): Work
       ...base,
       state: 'rate-limited',
       note: resume
-        ? `Paused by the usage limit and scheduled to resume at ${new Date(resume.retryAt).toISOString()}.`
+        ? resume.cause === 'connection'
+          ? `Paused because Wooi could not reach the API; it will retry at ${new Date(resume.retryAt).toISOString()}.`
+          : `Paused by the usage limit and scheduled to resume at ${new Date(resume.retryAt).toISOString()}.`
         : resetsAt != null
           ? `Stopped by the usage limit until ${new Date(resetsAt).toISOString()}.`
           : 'Stopped by the usage limit; the reset time is unknown.'

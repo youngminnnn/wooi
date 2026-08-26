@@ -27,6 +27,17 @@ const WAKE_CHECK_MS = 60_000
  */
 const OFFLINE_RECHECK_MS = 30_000
 /**
+ * 연결이 끊겨 기다릴 때 확인 간격의 상한. 프록시 오설정처럼 영영 돌아오지 않는 환경에서
+ * 30초마다 CLI 를 새로 띄우지 않도록 물러선다. 시도 **횟수**는 여전히 세지 않는다.
+ */
+const MAX_OFFLINE_RECHECK_MS = 5 * 60_000
+/**
+ * 연결 복구를 사용량 조회로만 확인하는 횟수. 조회 자체가 종종 실패하므로(라이브 세션 없이
+ * 부르면 타임아웃이 잦다) 조회 성공만 고집하면 연결이 돌아왔는데도 영영 이어가지 못한다.
+ * 이 횟수를 넘기면 실제 턴을 한 번 보내 확인한다.
+ */
+const PROBE_PATIENCE = 5
+/**
  * 이어 보낸 턴이 이 시간 안에 다시 제한에 걸리면 "같은 제한이 아직 안 풀린 것" 으로 본다.
  * 그보다 오래 정상으로 돌다가 걸린 것은 새 제한이므로 시도 횟수를 처음부터 센다.
  */
@@ -35,10 +46,18 @@ const STREAK_WINDOW_MS = 10 * 60_000
 export const RATE_LIMIT_CONTINUATION =
   'The previous turn stopped because the provider usage limit was reached. Inspect the current conversation and workspace state, then continue the unfinished task. Do not repeat work that is already complete.'
 
+export const CONNECTION_CONTINUATION =
+  'The previous turn stopped because Wooi could not reach the API. Inspect the current conversation and workspace state, then continue the unfinished task. Do not repeat work that is already complete.'
+
+/** 예약이 걸린 이유. 저장된 옛 레코드에는 없으므로 사용량 제한으로 읽는다. */
+function causeOf(pending: Workspace['pendingRateLimitResume']): 'rateLimit' | 'connection' {
+  return pending?.cause ?? 'rateLimit'
+}
+
 interface Deps {
   backend: AgentBackendId
   refreshLimits: () => Promise<void>
-  sendContinuation: (workspaceId: string) => void
+  sendContinuation: (workspaceId: string, text: string) => void
   emitItem: (workspaceId: string, item: ChatItem) => void
   /**
    * 지금 네트워크에 닿을 수 있는지. 알 수 없는 환경(테스트 등)에서는 넘기지 않아도 되고,
@@ -72,13 +91,18 @@ export class RateLimitResumeCoordinator {
    * 끊겼거나 호스트가 죽었거나) 그대로 포기하지 않고 다시 예약하기 위해 들고 있는다
    * ([[rateLimitResume]] noteTurnEnd).
    */
-  private continuing = new Set<string>()
+  private continuing = new Map<string, 'rateLimit' | 'connection'>()
   /**
    * 이어 보낸 턴이 제한이 아닌 이유로 잇따라 실패한 횟수. streak 과 따로 세는 이유는 시간 창이다 —
    * streak 은 10분(STREAK_WINDOW_MS)이 지나면 "새 제한" 으로 보고 0 으로 되돌리는데, 15분 돌다가
    * 실패하는 턴에 그 규칙을 쓰면 예산이 영영 차지 않아 같은 실패를 무한히 반복한다.
    */
   private failures = new Map<string, number>()
+  /**
+   * 연결이 끊겨 다시 확인한 횟수. 포기의 근거가 아니라 **간격을 늘리는** 근거로만 쓴다
+   * (noteConnectionLost). 턴이 끝까지 가면 0 으로 되돌린다.
+   */
+  private offlineRetries = new Map<string, number>()
 
   constructor(private deps: Deps) {}
 
@@ -113,6 +137,62 @@ export class RateLimitResumeCoordinator {
     // 이어가기를 걸지 않아도 "언제 풀리는지" 는 알려 주고 싶다 — 오류가 시각을 안 줬을 때만
     // 사용량을 한 번 더 물어본다(예약 경로는 schedule 이 이미 조회한다).
     if (resetAt === undefined) await this.learnResetTime(workspaceId)
+  }
+
+  /**
+   * 워크스페이스의 턴이 **API 에 닿지 못해** 멈췄다(DNS 실패·연결 거부·소켓 끊김).
+   *
+   * 사용량 제한과 같은 예약 장치를 쓰되 세 가지가 다르다.
+   *
+   * 1. **누가 보낸 턴이든 받는다.** noteTurnEnd 는 우리가 이어 보낸 턴만 보므로, 사용자가 직접
+   *    보낸 턴이 ENOTFOUND 로 죽으면 오류 카드 한 장만 남고 그대로 끝났다 — 사용자가 원한 것은
+   *    "연결이 돌아오면 이어간다" 이지 "한 번 해 보고 만다" 가 아니다.
+   * 2. **시도 예산을 쓰지 않는다.** 연결이 돌아오는 데 걸리는 시간은 우리가 정할 수 없고,
+   *    다섯 번 만에 포기하면 자다 깬 맥이나 잠깐 끊긴 와이파이에서는 늘 진다.
+   * 3. **rateLimited 표시는 남기지 않는다.** 제한에 걸린 것이 아니기 때문이다 — 사이드바가
+   *    "rate limit" 이라고 말하면 사용자는 없는 제한을 기다리게 된다.
+   *
+   * 대신 확인 간격을 30초에서 5분까지 늘려, 영영 돌아오지 않는 환경에서 CLI 를 계속 띄우지 않는다.
+   */
+  noteConnectionLost(workspaceId: string): void {
+    const state = getStore().getState()
+    const ws = state.workspaces.find((item) => item.id === workspaceId)
+    if (!ws || ws.archived || ws.agentBackend !== this.deps.backend || !ws.sessionId) return
+    if (!state.settings.autoResumeAfterRateLimit) return
+    // 사용량 제한 예약이 이미 걸려 있으면 그쪽이 우선이다 — 해제 시각을 아는 예약을, 그것을
+    // 모르는 예약으로 덮지 않는다.
+    if (ws.pendingRateLimitResume && causeOf(ws.pendingRateLimitResume) === 'rateLimit') return
+
+    // 안내는 기다리기 **시작할 때** 한 번만 남긴다 — 확인할 때마다 같은 말을 쌓으면 대화가
+    // 오류 로그가 된다. 이어 보내기 직전에 예약 레코드를 지우므로(continueNow), "처음인가" 는
+    // 예약의 유무가 아니라 이 카운터로 판단해야 한다.
+    if ((this.offlineRetries.get(workspaceId) ?? 0) === 0) {
+      this.notice(
+        workspaceId,
+        'Wooi could not reach the API, so the task stopped. It will continue once the connection is back.'
+      )
+    }
+    this.holdConnection(workspaceId)
+  }
+
+  /**
+   * 연결이 돌아오기를 기다린다 — 확인 간격을 늘려 가며 다시 깨어날 시각을 예약한다.
+   *
+   * 간격을 늘리는 이유는 조회·턴 하나하나가 공짜가 아니어서다. 대신 **횟수는 세지 않는다** —
+   * 연결이 언제 돌아올지는 우리가 정할 수 없고, 다섯 번 만에 포기하면 자다 깬 맥에서는 늘 진다.
+   */
+  private holdConnection(workspaceId: string): void {
+    const tries = (this.offlineRetries.get(workspaceId) ?? 0) + 1
+    this.offlineRetries.set(workspaceId, tries)
+    const wait = Math.min(OFFLINE_RECHECK_MS * 2 ** (tries - 1), MAX_OFFLINE_RECHECK_MS)
+    const retryAt = Date.now() + wait
+    this.writePending(workspaceId, {
+      retryAt,
+      attempt: 0,
+      blocked: 'offline',
+      cause: 'connection'
+    })
+    this.arm(workspaceId, retryAt)
   }
 
   /** 제한 표시를 기록·갱신하고 방송한다. 이미 아는 해제 시각은 덮어쓰지 않는다. */
@@ -200,6 +280,7 @@ export class RateLimitResumeCoordinator {
         backend: this.deps.backend,
         sessionId: target.sessionId,
         detectedAt: previous?.detectedAt ?? Date.now(),
+        cause: 'rateLimit',
         retryAt,
         attempt
       }
@@ -220,6 +301,7 @@ export class RateLimitResumeCoordinator {
     this.streak.delete(workspaceId)
     this.continuing.delete(workspaceId)
     this.failures.delete(workspaceId)
+    this.offlineRetries.delete(workspaceId)
     const hadPending = this.clearPending(workspaceId)
     this.unmark(workspaceId)
     if (announce && hadPending) this.notice(workspaceId, 'Automatic continuation was cancelled.')
@@ -232,6 +314,7 @@ export class RateLimitResumeCoordinator {
     this.streak.clear()
     this.continuing.clear()
     this.failures.clear()
+    this.offlineRetries.clear()
     getStore().update((draft) => {
       for (const ws of draft.workspaces) {
         if (ws.pendingRateLimitResume?.backend === this.deps.backend)
@@ -305,6 +388,13 @@ export class RateLimitResumeCoordinator {
       this.holdOffline(workspaceId)
       return
     }
+    // 연결이 끊겨 기다리던 예약은 **보내기 전에 닿는지부터 확인한다.** 사용량 조회는 대화를
+    // 건드리지 않으므로, 아직 못 닿는 동안 이어가기 지시가 트랜스크립트에 계속 쌓이는 것을 막는다
+    // (사용량 제한과 달리 여기서는 시도 횟수를 세지 않아, 그대로 두면 몇 시간이고 쌓인다).
+    if (causeOf(before.pendingRateLimitResume!) === 'connection') {
+      await this.probeConnection(workspaceId)
+      return
+    }
     this.setBlocked(workspaceId, null)
 
     const previousFetchedAt =
@@ -340,19 +430,55 @@ export class RateLimitResumeCoordinator {
     this.continueNow(workspaceId, current, pending)
   }
 
+  /**
+   * 아직 API 에 닿는지 확인하고, 닿으면 이어 보낸다.
+   *
+   * 확인은 사용량 조회로 한다 — 대화를 건드리지 않는 유일한 왕복이다. `fetchedAt` 이 새로
+   * 찍혔다면 요청이 서버까지 갔다 온 것이므로 연결이 돌아왔다는 뜻이다. 조회가 계속 실패해도
+   * PROBE_PATIENCE 를 넘기면 실제 턴으로 한 번 확인한다(조회 쪽이 고장 난 경우 대비).
+   */
+  private async probeConnection(workspaceId: string): Promise<void> {
+    const previousFetchedAt =
+      getStore().getState().rateLimitsByAgent?.[this.deps.backend]?.fetchedAt
+    await this.deps.refreshLimits().catch(() => {})
+    const current = this.pendingWorkspace(workspaceId)
+    if (!current) return
+    const snapshot = getStore().getState().rateLimitsByAgent?.[this.deps.backend]
+    const reachable = Boolean(snapshot && snapshot.fetchedAt !== previousFetchedAt)
+    // 카운터는 되돌리지 않는다 — PROBE_PATIENCE 번마다 한 번씩 실제 턴을 끼워 넣고, 나머지는
+    // 조회로만 확인한다. 되돌리면 "처음인가" 판정(noteConnectionLost 의 안내)도 함께 무너진다.
+    const tries = this.offlineRetries.get(workspaceId) ?? 0
+    if (!reachable && tries % PROBE_PATIENCE !== 0) {
+      this.holdConnection(workspaceId)
+      return
+    }
+    this.setBlocked(workspaceId, null)
+    this.continueNow(workspaceId, current, current.pendingRateLimitResume!)
+  }
+
   private continueNow(
     workspaceId: string,
     current: Workspace,
     pending: NonNullable<Workspace['pendingRateLimitResume']>
   ): void {
     if (current.sessionId !== pending.sessionId) return this.cancel(workspaceId)
+    const connection = causeOf(pending) === 'connection'
     // 이어 보낸 턴이 곧바로 또 걸리면 이 횟수를 물려받아 무한 재시도를 막는다(streak 주석 참고).
     this.streak.set(workspaceId, { attempt: pending.attempt + 1, at: Date.now() })
-    this.continuing.add(workspaceId)
+    this.continuing.set(workspaceId, connection ? 'connection' : 'rateLimit')
     this.clearPending(workspaceId)
     this.unmark(workspaceId)
-    this.notice(workspaceId, 'Usage limit reset. Continuing the unfinished task…')
-    this.deps.sendContinuation(workspaceId)
+    // 연결이 돌아왔는지는 보내 봐야 안다 — 그래서 "돌아왔다" 가 아니라 "다시 해 본다" 라고 쓴다.
+    this.notice(
+      workspaceId,
+      connection
+        ? 'Retrying the connection. Continuing the unfinished task…'
+        : 'Usage limit reset. Continuing the unfinished task…'
+    )
+    this.deps.sendContinuation(
+      workspaceId,
+      connection ? CONNECTION_CONTINUATION : RATE_LIMIT_CONTINUATION
+    )
   }
 
   /** 아직 풀리지 않았다 — 시도 예산이 남았으면 다시 예약하고, 아니면 예약을 접는다. */
@@ -391,17 +517,19 @@ export class RateLimitResumeCoordinator {
    * 아니다.
    */
   noteTurnEnd(workspaceId: string, status: 'idle' | 'error'): void {
+    const cause = this.continuing.get(workspaceId)
     if (!this.continuing.delete(workspaceId)) return
     if (status !== 'error') {
-      // 끝까지 갔다 — 다음에 또 실패하더라도 예산은 처음부터 센다.
+      // 끝까지 갔다 — 다음에 또 실패하더라도 예산과 대기 간격은 처음부터 센다.
       this.failures.delete(workspaceId)
+      this.offlineRetries.delete(workspaceId)
       return
     }
-    this.retryAfterFailure(workspaceId)
+    this.retryAfterFailure(workspaceId, cause ?? 'rateLimit')
   }
 
   /** 이어 보낸 턴이 실패했다 — 네트워크가 없으면 연결을 기다리고, 아니면 물러섰다가 다시 보낸다. */
-  private retryAfterFailure(workspaceId: string): void {
+  private retryAfterFailure(workspaceId: string, cause: 'rateLimit' | 'connection'): void {
     const state = getStore().getState()
     const ws = state.workspaces.find((item) => item.id === workspaceId)
     if (!ws || ws.archived || ws.agentBackend !== this.deps.backend || !ws.sessionId) return
@@ -428,7 +556,8 @@ export class RateLimitResumeCoordinator {
     this.writePending(workspaceId, {
       retryAt,
       attempt: this.recentAttempts(workspaceId),
-      blocked: offline ? 'offline' : 'error'
+      blocked: offline ? 'offline' : 'error',
+      cause
     })
     this.notice(
       workspaceId,
@@ -466,7 +595,12 @@ export class RateLimitResumeCoordinator {
   /** 예약 레코드를 새로 쓴다(detectedAt 은 있으면 물려받는다). */
   private writePending(
     workspaceId: string,
-    fields: { retryAt: number; attempt: number; blocked: 'offline' | 'error' | null }
+    fields: {
+      retryAt: number
+      attempt: number
+      blocked: 'offline' | 'error' | null
+      cause?: 'rateLimit' | 'connection'
+    }
   ): void {
     getStore().update((draft) => {
       const target = draft.workspaces.find((item) => item.id === workspaceId)
@@ -477,6 +611,7 @@ export class RateLimitResumeCoordinator {
         backend: this.deps.backend,
         sessionId: target.sessionId,
         detectedAt: target.pendingRateLimitResume?.detectedAt ?? Date.now(),
+        cause: causeOf(target.pendingRateLimitResume),
         ...fields
       }
     })

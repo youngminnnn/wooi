@@ -3,6 +3,7 @@ import { writeFileSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { log } from '../logger'
+import { isConnectionError } from '../connectionError'
 import type {
   ChatEvent,
   ChatItem,
@@ -51,6 +52,11 @@ export interface ThreadDeps {
   /** 확정된 threadId 를 메인에 알린다(resume 토큰으로 저장된다). */
   onThreadId: (id: string) => void
   onRateLimit?: () => void
+  /**
+   * API 에 닿지 못해 턴이 끊겼다. 사용량 제한과 같은 이어가기 장치를 쓴다
+   * ([[rateLimitResume]] noteConnectionLost).
+   */
+  onConnectionLost?: () => void
   /** 턴이 정상 종료 없이 끝났을 때 상태를 idle 로 확정한다. */
   settleIdle: () => void
 }
@@ -526,6 +532,9 @@ export class CodexThread {
     log.error(`codex: turn failed for ${this.workspaceId}`, err)
     this.deps.persist(errorItem(text))
     this.deps.emit({ type: 'item', item: errorItem(text) })
+    // 원인이 연결이면 이어가기 대상이다 — 사용자가 지금 할 수 있는 일이 없다는 점은 사용량
+    // 제한과 같고, 다른 점은 언제 풀릴지를 아무도 알려 주지 않는다는 것뿐이다.
+    if (isConnectionError(text)) this.deps.onConnectionLost?.()
     this.deps.emit({ type: 'status', status: 'error' })
     this.activeTurnId = null
   }

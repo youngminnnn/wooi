@@ -5,6 +5,8 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { activeRateLimitPause } from '@shared/types'
 import type { AppState, RateLimitPause, RateLimitSnapshot, Workspace } from '@shared/types'
 import {
+  CONNECTION_CONTINUATION,
+  RATE_LIMIT_CONTINUATION,
   RateLimitResumeCoordinator,
   backoffWait,
   exhaustedResetTimes,
@@ -280,7 +282,7 @@ describe('RateLimitResumeCoordinator', () => {
     await coordinator.noteRateLimit(WORKSPACE_ID)
     await vi.advanceTimersByTimeAsync(5 * 60_000 + 15_000)
 
-    expect(sent).toHaveBeenCalledWith(WORKSPACE_ID)
+    expect(sent).toHaveBeenCalledWith(WORKSPACE_ID, RATE_LIMIT_CONTINUATION)
     expect(store.getState().workspaces[0].pendingRateLimitResume).toBeNull()
     expect(store.getState().workspaces[0].rateLimited).toBeNull()
   })
@@ -319,7 +321,7 @@ describe('RateLimitResumeCoordinator', () => {
     await coordinator.noteRateLimit(WORKSPACE_ID, Date.now() + 60_000)
     await vi.advanceTimersByTimeAsync(75_000)
 
-    expect(sent).toHaveBeenCalledWith(WORKSPACE_ID)
+    expect(sent).toHaveBeenCalledWith(WORKSPACE_ID, RATE_LIMIT_CONTINUATION)
     expect(store.getState().workspaces[0].pendingRateLimitResume).toBeNull()
     expect(store.getState().workspaces[0].rateLimited).toBeNull()
   })
@@ -348,7 +350,7 @@ describe('RateLimitResumeCoordinator', () => {
 
     online = true
     await vi.advanceTimersByTimeAsync(30_000)
-    expect(sent).toHaveBeenCalledWith(WORKSPACE_ID)
+    expect(sent).toHaveBeenCalledWith(WORKSPACE_ID, RATE_LIMIT_CONTINUATION)
     expect(store.getState().workspaces[0].pendingRateLimitResume).toBeNull()
   })
 
@@ -371,7 +373,7 @@ describe('RateLimitResumeCoordinator', () => {
     vi.setSystemTime(Date.now() + 6 * 60 * 60_000)
     await vi.advanceTimersByTimeAsync(60_000)
 
-    expect(sent).toHaveBeenCalledWith(WORKSPACE_ID)
+    expect(sent).toHaveBeenCalledWith(WORKSPACE_ID, RATE_LIMIT_CONTINUATION)
   })
 
   it('이어 보낸 턴이 실패하면 다시 예약하고, 그래도 안 되면 예산 안에서 멈춘다', async () => {
@@ -478,6 +480,181 @@ describe('RateLimitResumeCoordinator', () => {
 
     // 예산(5회)만큼만 보낸다 — 예전에는 attempt 가 매번 0 으로 되돌아가 끝없이 보냈다.
     expect(sent).toBe(5)
+    expect(store.getState().workspaces[0].pendingRateLimitResume).toBeNull()
+  })
+})
+
+/**
+ * API 에 닿지 못해 멈춘 턴의 계약. 사용량 제한과 달리 **누가 보낸 턴이든** 이어가기 대상이고,
+ * 언제 풀릴지 아무도 알려 주지 않으므로 시도 예산이 아니라 확인 간격으로 물러선다.
+ */
+describe('연결 실패 이어가기', () => {
+  const WORKSPACE_ID = 'ws-1'
+
+  function seed(store: { update: (mutate: (state: AppState) => void) => void }): void {
+    store.update((draft) => {
+      draft.workspaces = [
+        {
+          id: WORKSPACE_ID,
+          repoId: 'repo-1',
+          agentBackend: 'claude',
+          name: 'ws',
+          displayName: null,
+          branch: 'feat/x',
+          baseBranch: 'main',
+          worktreePath: '/tmp/ws',
+          status: 'error',
+          sessionId: 'sess-1',
+          archived: false,
+          pendingRateLimitResume: null,
+          rateLimited: null
+        } as unknown as Workspace
+      ]
+      draft.settings.autoResumeAfterRateLimit = true
+      draft.rateLimitsByAgent = {}
+    })
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('사용자가 직접 보낸 턴이 ENOTFOUND 로 죽어도 이어가기를 예약한다', async () => {
+    const { getStore } = await import('./store')
+    const store = getStore()
+    seed(store)
+    const sent = vi.fn()
+    const coordinator = new RateLimitResumeCoordinator({
+      backend: 'claude',
+      // 조회가 새 fetchedAt 을 찍었다 = 요청이 서버까지 갔다 왔다 = 연결이 돌아왔다.
+      refreshLimits: async () => {
+        store.update((state) => {
+          state.rateLimitsByAgent = {
+            claude: {
+              fetchedAt: Date.now(),
+              available: true,
+              subscriptionType: 'pro',
+              windows: []
+            }
+          }
+        })
+      },
+      sendContinuation: sent,
+      emitItem: () => {},
+      broadcastState: () => {}
+    })
+
+    coordinator.noteConnectionLost(WORKSPACE_ID)
+
+    const pending = store.getState().workspaces[0].pendingRateLimitResume
+    expect(pending?.cause).toBe('connection')
+    expect(pending?.blocked).toBe('offline')
+    // 제한에 걸린 것이 아니므로 제한 표시는 남기지 않는다 — 없는 제한을 기다리게 하면 안 된다.
+    expect(store.getState().workspaces[0].rateLimited).toBeNull()
+
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(sent).toHaveBeenCalledWith(WORKSPACE_ID, CONNECTION_CONTINUATION)
+    expect(store.getState().workspaces[0].pendingRateLimitResume).toBeNull()
+  })
+
+  it('연결이 안 돌아오는 동안에는 조회로만 확인하고 대화에 이어가기 지시를 쌓지 않는다', async () => {
+    const { getStore } = await import('./store')
+    const store = getStore()
+    seed(store)
+    let sent = 0
+    let probes = 0
+    const coordinator: RateLimitResumeCoordinator = new RateLimitResumeCoordinator({
+      backend: 'claude',
+      // 조회도 못 닿는다 — fetchedAt 이 갱신되지 않는다.
+      refreshLimits: async () => {
+        probes++
+      },
+      sendContinuation: () => {
+        sent++
+        // 실제 턴도 같은 이유로 죽는다.
+        coordinator.noteConnectionLost(WORKSPACE_ID)
+        coordinator.noteTurnEnd(WORKSPACE_ID, 'error')
+      },
+      emitItem: () => {},
+      broadcastState: () => {}
+    })
+
+    coordinator.noteConnectionLost(WORKSPACE_ID)
+    await vi.advanceTimersByTimeAsync(60 * 60_000)
+
+    // 한 시간 동안 확인은 여러 번 하되(30s→5m 로 물러선다), 대화를 건드리는 실제 턴은 드물게만
+    // 보낸다 — 예전 설계처럼 매번 보내면 이어가기 지시가 트랜스크립트에 수십 개 쌓인다.
+    expect(probes).toBeGreaterThan(5)
+    expect(sent).toBeLessThanOrEqual(3)
+    // 그래도 포기하지는 않는다 — 예약이 살아 있어야 연결이 돌아왔을 때 이어갈 수 있다.
+    expect(store.getState().workspaces[0].pendingRateLimitResume?.cause).toBe('connection')
+  })
+
+  it('안내는 기다리기 시작할 때 한 번만 남긴다 — 확인할 때마다 쌓지 않는다', async () => {
+    const { getStore } = await import('./store')
+    const store = getStore()
+    seed(store)
+    const items: string[] = []
+    const coordinator: RateLimitResumeCoordinator = new RateLimitResumeCoordinator({
+      backend: 'claude',
+      refreshLimits: async () => {},
+      sendContinuation: () => {
+        coordinator.noteConnectionLost(WORKSPACE_ID)
+        coordinator.noteTurnEnd(WORKSPACE_ID, 'error')
+      },
+      emitItem: (_id, item) => {
+        if (item.type === 'system') items.push(item.text)
+      },
+      broadcastState: () => {}
+    })
+
+    coordinator.noteConnectionLost(WORKSPACE_ID)
+    await vi.advanceTimersByTimeAsync(60 * 60_000)
+
+    expect(items.filter((text) => text.includes('could not reach the API'))).toHaveLength(1)
+  })
+
+  it('사용량 제한 예약을 연결 실패로 덮지 않는다 — 해제 시각을 아는 쪽이 우선이다', async () => {
+    const { getStore } = await import('./store')
+    const store = getStore()
+    seed(store)
+    const coordinator = new RateLimitResumeCoordinator({
+      backend: 'claude',
+      refreshLimits: async () => {},
+      sendContinuation: () => {},
+      emitItem: () => {},
+      broadcastState: () => {}
+    })
+
+    const resetAt = Date.now() + 4 * 60 * 60_000
+    await coordinator.noteRateLimit(WORKSPACE_ID, resetAt)
+    coordinator.noteConnectionLost(WORKSPACE_ID)
+
+    const pending = store.getState().workspaces[0].pendingRateLimitResume
+    expect(pending?.cause).toBe('rateLimit')
+    expect(pending?.retryAt).toBe(resetAt + 15_000)
+  })
+
+  it('자동 이어가기가 꺼져 있으면 예약하지 않는다', async () => {
+    const { getStore } = await import('./store')
+    const store = getStore()
+    seed(store)
+    store.update((state) => {
+      state.settings.autoResumeAfterRateLimit = false
+    })
+    const coordinator = new RateLimitResumeCoordinator({
+      backend: 'claude',
+      refreshLimits: async () => {},
+      sendContinuation: () => {},
+      emitItem: () => {},
+      broadcastState: () => {}
+    })
+
+    coordinator.noteConnectionLost(WORKSPACE_ID)
     expect(store.getState().workspaces[0].pendingRateLimitResume).toBeNull()
   })
 })

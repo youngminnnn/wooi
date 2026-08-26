@@ -28,7 +28,7 @@ import { abortAllSubAgents, abortSubAgents } from '../agent/tools/subagent'
 import { durationLabel } from './rateLimits'
 import { CodexSkillsCache, mergeSkillCommands } from './skills'
 import type { SkillsListResponse } from './wire'
-import { RATE_LIMIT_CONTINUATION, RateLimitResumeCoordinator } from '../rateLimitResume'
+import { RateLimitResumeCoordinator } from '../rateLimitResume'
 import { notifyRemotePush } from '../remote'
 import { shouldSendRemotePush, type RemotePushKind } from '../remote/push'
 import {
@@ -199,7 +199,7 @@ export class CodexSessionManager implements AgentBackend {
     this.rateLimitResume = new RateLimitResumeCoordinator({
       backend: CODEX_META.id,
       refreshLimits: () => this.refreshRateLimits(true),
-      sendContinuation: (workspaceId) => this.sendContinuation(workspaceId),
+      sendContinuation: (workspaceId, text) => this.sendContinuation(workspaceId, text),
       emitItem: (workspaceId, item) =>
         this.dispatch(IPC.evtChat, { workspaceId, event: { type: 'item', item } }),
       // 맥이 자다 깼거나 와이파이가 꺼져 있으면 이어 보내 봐야 실패한다 — 보내기 전에 물어본다.
@@ -302,6 +302,9 @@ export class CodexSessionManager implements AgentBackend {
         break
       case 'rateLimit':
         void this.rateLimitResume.noteRateLimit(msg.workspaceId)
+        break
+      case 'connectionLost':
+        this.rateLimitResume.noteConnectionLost(msg.workspaceId)
         break
       case 'settleIdle':
         this.forceIdle(msg.workspaceId)
@@ -503,15 +506,10 @@ export class CodexSessionManager implements AgentBackend {
     })
   }
 
-  private sendContinuation(workspaceId: string): void {
+  private sendContinuation(workspaceId: string, text: string): void {
     const ws = this.getWorkspace(workspaceId)
     if (!ws) return
-    this.send({
-      type: 'send',
-      workspaceId,
-      config: this.configFor(ws),
-      text: RATE_LIMIT_CONTINUATION
-    })
+    this.send({ type: 'send', workspaceId, config: this.configFor(ws), text })
   }
 
   async interrupt(workspaceId: string): Promise<void> {

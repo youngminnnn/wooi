@@ -28,7 +28,7 @@ import { CLAUDE_META, CLAUDE_MODELS, type AgentBackend, type TurnEndHook } from 
 import { agentDefaultsFor, canLeadAgentTeam, delegateBackendsFor } from '../agent/multiAgent'
 import { claudeMode, type HostCommand, type HostEvent, type SessionConfig } from './protocol'
 import { runAgentTool } from '../agent/tools'
-import { RATE_LIMIT_CONTINUATION, RateLimitResumeCoordinator } from '../rateLimitResume'
+import { RateLimitResumeCoordinator } from '../rateLimitResume'
 import { notifyRemotePush } from '../remote'
 import { shouldSendRemotePush, type RemotePushKind } from '../remote/push'
 import { nameFromPlan, shouldAutoName } from './planName'
@@ -120,7 +120,7 @@ export class SessionManager implements AgentBackend {
     this.rateLimitResume = new RateLimitResumeCoordinator({
       backend: CLAUDE_META.id,
       refreshLimits: () => this.refreshRateLimits(true),
-      sendContinuation: (workspaceId) => this.sendContinuation(workspaceId),
+      sendContinuation: (workspaceId, text) => this.sendContinuation(workspaceId, text),
       emitItem: (workspaceId, item) =>
         this.dispatch(IPC.evtChat, { workspaceId, event: { type: 'item', item } }),
       // 맥이 자다 깼거나 와이파이가 꺼져 있으면 이어 보내 봐야 실패한다 — 보내기 전에 물어본다.
@@ -238,6 +238,9 @@ export class SessionManager implements AgentBackend {
         break
       case 'rateLimit':
         void this.rateLimitResume.noteRateLimit(msg.workspaceId, msg.resetAt)
+        break
+      case 'connectionLost':
+        this.rateLimitResume.noteConnectionLost(msg.workspaceId)
         break
       case 'settleIdle':
         this.forceIdle(msg.workspaceId)
@@ -415,15 +418,10 @@ export class SessionManager implements AgentBackend {
     })
   }
 
-  private sendContinuation(workspaceId: string): void {
+  private sendContinuation(workspaceId: string, text: string): void {
     const ws = this.getWorkspace(workspaceId)
     if (!ws) return
-    this.send({
-      type: 'send',
-      workspaceId,
-      config: this.configFor(ws),
-      text: RATE_LIMIT_CONTINUATION
-    })
+    this.send({ type: 'send', workspaceId, config: this.configFor(ws), text })
   }
 
   /** /btw 사이드 질문. 메인 세션과 분리된 임시 query 로 호스트가 처리한다. */
