@@ -26,7 +26,7 @@ const DEFAULT_MODEL = CLAUDE_DEFAULT_MODEL
  * 디스크 영속 형식의 현재 스키마 버전. 영속 데이터 모양이 바뀔 때마다 1 올리고,
  * MIGRATIONS 에 직전 버전 → 새 버전 변환 함수를 추가한다.
  */
-export const CURRENT_SCHEMA_VERSION = 23
+export const CURRENT_SCHEMA_VERSION = 24
 
 /**
  * v12 이하의 settings 모양. 그 시절엔 에이전트가 Claude 하나뿐이라 모델·effort·fast mode·
@@ -125,6 +125,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
 export const EMPTY_STATE: AppState = {
   repos: [],
   workspaces: [],
+  unreadWorkspaceIds: [],
   fanoutGroups: [],
   reviews: [],
   settings: DEFAULT_SETTINGS
@@ -443,7 +444,10 @@ export const MIGRATIONS: Array<(raw: Record<string, unknown>) => Record<string, 
           : workspace.model
     }))
     return { ...raw, workspaces }
-  }
+  },
+  // v23 → v24: 완료 응답의 미확인 배지를 앱 재시작 뒤에도 복원한다. 과거에는 렌더러 메모리에만
+  // 살아 기존 파일에서 옮겨 올 값이 없으므로 빈 목록으로 시작한다.
+  (raw) => ({ ...raw, unreadWorkspaceIds: [] })
 ]
 
 /**
@@ -548,7 +552,8 @@ export function normalizeShape(raw: Record<string, unknown>): Record<string, unk
   const reviews = ((raw.reviews as Array<Record<string, unknown>>) ?? []).map((review) =>
     foldReviewIntoLayer(review)
   )
-  return { ...raw, repos, workspaces, fanoutGroups, reviews }
+  const unreadWorkspaceIds = Array.isArray(raw.unreadWorkspaceIds) ? raw.unreadWorkspaceIds : []
+  return { ...raw, repos, workspaces, unreadWorkspaceIds, fanoutGroups, reviews }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

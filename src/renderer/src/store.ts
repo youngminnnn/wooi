@@ -1055,7 +1055,14 @@ export const useStore = create<UIState>((set, get) => ({
     const app = await window.api.getState()
     // 재시작 시점에 이미 running 인 워크스페이스는 진입 시각을 알 수 없으므로 현재 시각으로 근사한다.
     const seededRunningSince: Record<string, number> = {}
+    const seededUnread: Record<string, boolean> = {}
     const startedAt = Date.now()
+    const liveWorkspaceIds = new Set(
+      app.workspaces.filter((workspace) => !workspace.archived).map((workspace) => workspace.id)
+    )
+    for (const id of app.unreadWorkspaceIds ?? []) {
+      if (liveWorkspaceIds.has(id)) seededUnread[id] = true
+    }
     for (const w of app.workspaces) {
       if (!w.archived && w.status === 'running') seededRunningSince[w.id] = startedAt
     }
@@ -1067,7 +1074,13 @@ export const useStore = create<UIState>((set, get) => ({
         ? Object.fromEntries(app.workspaces.map((workspace) => [workspace.id, remembered]))
         : (remembered ?? {})
     if (typeof remembered === 'boolean') rememberRightPanels(rightPanelOpen)
-    set({ app, ready: true, runningSince: seededRunningSince, rightPanelOpen })
+    set({
+      app,
+      ready: true,
+      unread: seededUnread,
+      runningSince: seededRunningSince,
+      rightPanelOpen
+    })
 
     // Overview에 들어간 뒤에야 Codex usage 조회를 시작하면 첫 화면에서 RPC 시간만큼 기다리게 된다.
     // workspace 또는 저장된 스냅샷이 있으면 renderer 초기화와 동시에 미리 갱신한다.
@@ -1259,9 +1272,8 @@ export const useStore = create<UIState>((set, get) => ({
           if (!muted.has(p.workspaceId)) needsAttention.add(p.workspaceId)
       void window.api.app.setBadgeCount(needsAttention.size)
     }
-    // 미확인은 이 스토어(렌더러 메모리)에만 있어서 원격 투영이 볼 수 없다. 폰에도 같은 점을
-    // 그리려면 바뀔 때마다 올려 줘야 한다 — 반대 방향(폰에서 읽음)은 이미 onRemoteRead 로 온다.
-    // 원격이 꺼져 있으면 main 쪽이 곧바로 반환하므로 여기서 따로 게이팅하지 않는다.
+    // 미확인은 렌더러가 판정한다. 바뀔 때마다 main 으로 보내 디스크에 남기고 폰에도 같은 점을
+    // 투영한다 — 반대 방향(폰에서 읽음)은 이미 onRemoteRead 로 온다.
     const pushUnreadToRemote = (state: UIState): void => {
       void window.api.remote
         .setUnread(Object.keys(state.unread).filter((id) => state.unread[id]))
@@ -1281,8 +1293,7 @@ export const useStore = create<UIState>((set, get) => ({
       }
       if (state.unread !== prev.unread) pushUnreadToRemote(state)
     })
-    // 시작할 때 한 번 — 렌더러를 새로고침하면 미확인은 비지만 main 은 직전 목록을 그대로
-    // 들고 있다. 여기서 비워 주지 않으면 폰에 존재하지 않는 미확인이 영영 남는다.
+    // 시작할 때도 한 번 보내 복원한 목록과 원격 미러를 즉시 맞춘다.
     pushUnreadToRemote(useStore.getState())
 
     window.api.onChat(({ workspaceId, event }: ChatEnvelope) => {

@@ -370,6 +370,13 @@ describe('v22 → v23 (폐기된 Codex 모델 정리)', () => {
   })
 })
 
+describe('v23 → v24 (미확인 워크스페이스 영속)', () => {
+  it('기존 파일은 미확인 목록을 추측하지 않고 빈 배열로 시작한다', () => {
+    const out = migrate({ schemaVersion: 23, repos: [], workspaces: [] }, 23)
+    expect(out.unreadWorkspaceIds).toEqual([])
+  })
+})
+
 describe('레거시 파일 전체 경로', () => {
   it('v0(버전 필드 없음) 파일을 현재 스키마까지 끝까지 변환한다', () => {
     const legacy = {
@@ -456,8 +463,13 @@ describe('normalizeShape (구버전 빌드가 남긴 레코드 메우기)', () =
       reviews: [],
       repos: [],
       workspaces: [],
+      unreadWorkspaceIds: [],
       fanoutGroups: []
     })
+  })
+
+  it('미확인 목록이 없는 최신 버전 파일도 빈 배열로 메운다', () => {
+    expect(normalizeShape({ repos: [], workspaces: [] }).unreadWorkspaceIds).toEqual([])
   })
 
   it('이미 있는 fan-out 그룹은 그대로 둔다', () => {

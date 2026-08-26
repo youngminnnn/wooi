@@ -42,6 +42,21 @@ describe('Store.getState', () => {
       windows: [{ label: 'Weekly', utilization: 36, resetsAt: null }]
     })
   })
+
+  it('미확인 워크스페이스 목록을 런타임 상태와 디스크에 유지한다', async () => {
+    const { getStore, flushStore } = await import('./store')
+    const store = getStore()
+    store.update((state) => {
+      state.unreadWorkspaceIds = ['w-unread']
+    })
+
+    expect(store.getState().unreadWorkspaceIds).toEqual(['w-unread'])
+    flushStore()
+    const onDisk = JSON.parse(readFileSync(join(userData, 'wooi.json'), 'utf-8')) as {
+      unreadWorkspaceIds?: string[]
+    }
+    expect(onDisk.unreadWorkspaceIds).toEqual(['w-unread'])
+  })
 })
 
 /**
