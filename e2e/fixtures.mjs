@@ -43,6 +43,7 @@ export async function seedAppState(
     workspaceName = Object.keys(worktrees)[0],
     transcript = [],
     peerSent = [],
+    unreadWorkspaceIds = [],
     // "물려받았다" 를 확인하는 스펙은 기본값과 **다른** 값에서 출발해야 한다 — 기본값 그대로면
     // 상속했는지 전역 기본을 다시 읽었는지 구별되지 않는다.
     workspace: workspaceOverrides = {}
@@ -119,6 +120,7 @@ export async function seedAppState(
         schemaVersion,
         repos: [repo],
         workspaces: [workspace],
+        unreadWorkspaceIds,
         fanoutGroups: [],
         reviews: [],
         settings: {
