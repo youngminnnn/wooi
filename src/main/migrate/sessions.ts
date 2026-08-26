@@ -142,7 +142,8 @@ export function detectClaudeSession(
     backend: 'claude',
     sessionId: best.id,
     label: claudeLabel(best.path) || 'Claude Code conversation',
-    updatedAt: best.updatedAt
+    updatedAt: best.updatedAt,
+    sourcePath: best.path
   }
 }
 
@@ -210,7 +211,8 @@ export function detectCodexSessions(
       backend: 'codex',
       sessionId: id,
       label: names.get(id) || 'Codex conversation',
-      updatedAt: Number.isFinite(timestamp) ? timestamp : 0
+      updatedAt: Number.isFinite(timestamp) ? timestamp : 0,
+      sourcePath: file
     })
   }
   return found

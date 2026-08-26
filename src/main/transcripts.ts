@@ -118,6 +118,22 @@ class TranscriptStore {
     }
   }
 
+  /**
+   * 여러 항목을 한 번에 적재한다(다른 도구에서 옮겨 온 지난 대화).
+   *
+   * upsert 를 반복하지 않는 이유는 비용이다 — 항목마다 append 를 한 번씩 하면 수백~수천 번의
+   * 쓰기가 되고, 그 사이 캐시도 매번 흔들린다. 들여오기는 워크스페이스가 만들어지는 순간
+   * 딱 한 번 일어나므로, 한 번에 쓰고 캐시는 다음 읽기에서 다시 만들게 둔다.
+   */
+  importItems(workspaceId: string, items: ChatItem[]): void {
+    if (items.length === 0) return
+    if (!this.cache.has(workspaceId)) this.load(workspaceId)
+    appendFileDurable(this.fileFor(workspaceId), items.map(serializeItem).join(''))
+    // 캐시·비용 집계는 버린다. 다음 load 가 파일에서 정확한 상태를 다시 만든다.
+    this.cache.delete(workspaceId)
+    this.costs.delete(workspaceId)
+  }
+
   /** 워크스페이스의 대화 기록을 다른 워크스페이스로 복제한다(분기). */
   copy(fromWorkspaceId: string, toWorkspaceId: string): void {
     // 목적지 id 가 재사용된 비정상 상태에서도 옛 기록·비용을 다시 내놓지 않도록 먼저 끊는다.

@@ -7,6 +7,7 @@ import { DEFAULT_AGENT_BACKEND, DEFAULT_NOTIFICATION_SETTINGS } from '@shared/ty
 import type {
   AppSettings,
   AppState,
+  ChatItem,
   MigrationImportSelection,
   MigrationScan,
   Repo,
@@ -54,12 +55,19 @@ function writeOrcaData(repos: unknown[], worktreeMeta: Record<string, unknown>):
 }
 
 /** 그 worktree 에서 Claude Code 를 돌린 것처럼 세션 파일을 심는다. */
-function writeClaudeSession(cwd: string, sessionId: string, title: string): void {
+function writeClaudeSession(
+  cwd: string,
+  sessionId: string,
+  title: string,
+  lines: unknown[] = []
+): void {
   const dir = join(home, '.claude', 'projects', realpathSync(cwd).replace(/\//g, '-'))
   mkdirSync(dir, { recursive: true })
   writeFileSync(
     join(dir, `${sessionId}.jsonl`),
-    `${JSON.stringify({ type: 'custom-title', customTitle: title, sessionId })}\n`
+    [{ type: 'custom-title', customTitle: title, sessionId }, ...lines]
+      .map((line) => JSON.stringify(line))
+      .join('\n') + '\n'
   )
 }
 
@@ -288,21 +296,38 @@ describe('importMigration', () => {
     expect(state.workspaces[0].repoId).toBe(repo.id)
   })
 
-  it('세션을 고르면 id 와 백엔드를 이어받고 안내를 남긴다', async () => {
+  it('세션을 고르면 id·백엔드를 이어받고 지난 대화를 옮겨 적는다', async () => {
     registerRepo()
-    writeClaudeSession(worktreePath, 'abc-123', 'Fix the parser')
-    const notes: Array<{ workspaceId: string; text: string }> = []
+    writeClaudeSession(worktreePath, 'abc-123', 'Fix the parser', [
+      {
+        type: 'user',
+        timestamp: '2026-08-01T00:00:00.000Z',
+        message: { content: '파서를 고쳐 줘' }
+      },
+      {
+        type: 'assistant',
+        timestamp: '2026-08-01T00:00:01.000Z',
+        message: { content: [{ type: 'text', text: '고쳤습니다' }] }
+      }
+    ])
+    const imported: Array<{ workspaceId: string; items: ChatItem[] }> = []
 
     const result = await importMigration(selectAll(await scan()), {
       ...deps(),
-      noteImport: (workspaceId, text) => notes.push({ workspaceId, text })
+      noteImport: (workspaceId, items) => imported.push({ workspaceId, items })
     })
 
     expect(result).toMatchObject({ workspaces: 1, sessions: 1 })
     expect(state.workspaces[0]).toMatchObject({ sessionId: 'abc-123', agentBackend: 'claude' })
-    expect(notes).toHaveLength(1)
-    expect(notes[0].workspaceId).toBe(state.workspaces[0].id)
-    expect(notes[0].text).toContain('Fix the parser')
+    expect(imported).toHaveLength(1)
+    expect(imported[0].workspaceId).toBe(state.workspaces[0].id)
+    const [note, ...restored] = imported[0].items
+    expect(note).toMatchObject({ type: 'system' })
+    expect(note.type === 'system' && note.text).toContain('Fix the parser')
+    expect(note.type === 'system' && note.text).toContain('2 messages below')
+    expect(restored.map((item) => item.type)).toEqual(['user', 'assistant'])
+    // 안내는 옮겨 온 첫 항목보다 앞선 시각이어야 한다.
+    expect(note.ts).toBeLessThan(restored[0].ts)
   })
 
   it('세션을 고르지 않으면 대화를 이어받지 않는다', async () => {

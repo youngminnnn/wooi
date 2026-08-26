@@ -3057,6 +3057,12 @@ export interface MigrationAgentSession {
   label: string
   /** 마지막으로 쓰인 시각(ms). 여러 개 중 가장 최근 것을 고르는 근거다. */
   updatedAt: number
+  /**
+   * 그 CLI 가 대화를 적어 둔 파일. main 이 지난 대화를 트랜스크립트로 옮길 때만 쓴다
+   * ([[migrate/convert]]) — 렌더러는 읽지 않는다. 들여오기는 이 값을 렌더러에서 받지 않고
+   * **다시 훑어 얻은 것**만 쓰므로, 여기 실려 나가도 신뢰 경계는 그대로다.
+   */
+  sourcePath: string
 }
 
 /** 들여올 수 있는 worktree 하나. git 이 실재를 확인해 준 것만 온다. */

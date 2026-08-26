@@ -8,6 +8,7 @@ import { promisify } from 'node:util'
 import { agentSettingsFor, normalizePermissionMode } from '@shared/types'
 import type {
   AppState,
+  ChatItem,
   MigrationAgentSession,
   MigrationImportResult,
   MigrationImportSelection,
@@ -25,6 +26,7 @@ import { detectDefaultBranch, isGitRepo, listWorktrees } from '../git'
 import { log } from '../logger'
 import { findFreePort } from '../net'
 import { parseConductor, parseOrca, type ForeignRepo } from './parse'
+import { convertTranscript } from './convert'
 import { detectAgentSessions } from './sessions'
 
 /**
@@ -63,8 +65,12 @@ export interface MigrationDeps {
   update: (mutate: (state: Pick<AppState, 'repos' | 'workspaces'>) => void) => void
   /** 리포를 새로 등록한 직후(아바타 백필 등 부수 작업 훅). */
   onRepoAdded?: (repoId: string) => void
-  /** 대화를 이어받은 워크스페이스의 트랜스크립트에 남길 안내(system 항목). */
-  noteImport?: (workspaceId: string, text: string) => void
+  /**
+   * 대화를 이어받은 워크스페이스의 트랜스크립트를 채운다 — 옮겨 온 지난 대화와, 그 앞에
+   * 놓일 안내 한 줄. 트랜스크립트 저장소는 electron userData 에 매여 있어 여기서 직접
+   * 건드리지 않고 주입받는다(테스트가 파일을 만들지 않도록).
+   */
+  noteImport?: (workspaceId: string, items: ChatItem[]) => void
 }
 
 /**
@@ -430,7 +436,7 @@ export async function importMigration(
         importedWorkspaces++
         if (session) {
           importedSessions++
-          deps.noteImport?.(workspace.id, importNote(ws, session))
+          deps.noteImport?.(workspace.id, restoredTranscript(ws, session))
         }
       } catch (err) {
         errors.push(`${ws.name}: ${errorText(err)}`)
@@ -447,21 +453,50 @@ export async function importMigration(
 }
 
 /**
- * 대화를 이어받은 워크스페이스의 첫 항목.
+ * 이어받은 워크스페이스의 트랜스크립트 — 안내 한 줄 + 옮겨 온 지난 대화.
  *
- * 이 문장이 없으면 화면과 실제가 어긋난다 — 에이전트는 지난 맥락을 전부 기억하는데 대화창은
- * 비어 있어서, 사용자는 자기가 하지 않은 말을 전제로 답하는 에이전트를 보게 된다.
+ * 안내가 없으면 화면과 실제가 어긋난다: 에이전트는 지난 맥락을 전부 기억하는데 대화창은
+ * 비어 있어서, 사용자는 자기가 하지 않은 말을 전제로 답하는 에이전트를 보게 된다. 지난 대화를
+ * 옮겨 오면 그 어긋남은 사라지지만, **누가 쓴 기록인지**는 여전히 말해 줘야 한다 — 이 항목들은
+ * Wooi 가 만든 것이 아니라 다른 도구의 파일을 옮겨 적은 사본이다.
+ *
+ * 옮기기에 실패해도(형식이 바뀌었거나 파일이 사라졌거나) 안내는 남는다. 그 경우 이어받기 자체는
+ * 여전히 유효하다 — 맥락은 CLI 가 들고 있고, 화면에만 안 보일 뿐이다.
  */
-export function importNote(
+export function restoredTranscript(
   candidate: Pick<MigrationWorkspaceCandidate, 'worktreePath'>,
   session: MigrationAgentSession
-): string {
+): ChatItem[] {
   const tool = session.backend === 'claude' ? 'Claude Code' : 'Codex'
+  let restored: ChatItem[] = []
+  let dropped = 0
+  try {
+    const converted = convertTranscript(session.backend, readFileSync(session.sourcePath, 'utf-8'))
+    restored = converted.items
+    dropped = converted.dropped
+  } catch (err) {
+    log.warn(`지난 대화를 옮기지 못했습니다(${session.sourcePath}): ${String(err)}`)
+  }
+
+  const summary =
+    restored.length > 0
+      ? `The ${restored.length.toLocaleString()} message${restored.length === 1 ? '' : 's'} below came from that conversation${dropped > 0 ? `, with ${dropped.toLocaleString()} older ones left out` : ''}.`
+      : 'Its earlier messages could not be read, so they are not shown here — the agent still has them.'
+
   return [
-    `Imported this worktree from ${candidate.worktreePath}.`,
-    `Continuing the ${tool} conversation “${session.label}” — the agent keeps its full context,`,
-    'but the earlier messages were not written by Wooi and are not shown here.'
-  ].join(' ')
+    {
+      id: 'import-note',
+      type: 'system',
+      text: [
+        `Imported this worktree from ${candidate.worktreePath}, continuing the ${tool} conversation “${session.label}”.`,
+        summary
+      ].join(' '),
+      // 옮겨 온 첫 항목보다 앞선 시각으로 둔다 — 화면 순서는 배열이 정하지만, 표시되는 시각이
+      // 뒤따르는 메시지보다 미래면 읽는 사람이 순서를 의심하게 된다.
+      ts: restored[0] ? restored[0].ts - 1 : Date.now()
+    },
+    ...restored
+  ]
 }
 
 /** 후보를 Wooi 의 리포 레코드로 옮긴다. 기본 브랜치와 전달 목록은 Wooi 가 새로 판정한다. */

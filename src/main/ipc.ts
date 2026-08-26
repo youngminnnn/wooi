@@ -670,15 +670,9 @@ export function registerIpc(ctx: IpcContext): void {
     update: (mutate: (state: Pick<AppState, 'repos' | 'workspaces'>) => void) =>
       store.update(mutate),
     onRepoAdded: (repoId: string) => void backfillRepoAvatar(repoId),
-    // 이어받은 대화는 Wooi 가 쓴 기록이 아니라 화면에 나오지 않는다. 무슨 일이 있었는지
-    // 대화 첫 줄에 남겨, 사용자가 자기가 하지 않은 말을 전제로 답하는 에이전트를 마주하지 않게 한다.
-    noteImport: (workspaceId: string, text: string) =>
-      getTranscripts().upsert(workspaceId, {
-        id: randomUUID(),
-        type: 'system',
-        text,
-        ts: Date.now()
-      })
+    // 이어받은 대화(안내 한 줄 + 다른 도구에서 옮겨 온 지난 메시지)를 트랜스크립트에 적재한다.
+    noteImport: (workspaceId: string, items: ChatItem[]) =>
+      getTranscripts().importItems(workspaceId, items)
   }
 
   handle(IPC.migrateScan, (_e, args?: MigrationScanArgs): Promise<MigrationScan> =>

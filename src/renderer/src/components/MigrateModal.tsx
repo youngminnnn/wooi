@@ -145,7 +145,8 @@ export default function MigrateModal({
           <p className="text-sm text-neutral-400 leading-relaxed">
             Wooi points at worktrees that already exist —{' '}
             <b className="text-neutral-300">nothing is moved, copied or deleted</b>. Where a coding
-            agent was running in one, you can pick up that conversation where it left off.
+            agent was running in one, you can pick up that conversation where it left off, with its
+            earlier messages copied into the chat.
           </p>
 
           <div className="overflow-hidden rounded-xl border border-[var(--border)] divide-y divide-[var(--border)]">
@@ -288,7 +289,7 @@ function RepoRow({
                       <AgentBackendMark backend={ws.session.backend} size={11} />
                     </span>
                     <span className="min-w-0 truncate text-xs text-neutral-400">
-                      Continue “{ws.session.label}”
+                      Continue “{ws.session.label}” and bring its messages
                     </span>
                   </label>
                 )}
