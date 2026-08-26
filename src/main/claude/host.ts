@@ -106,6 +106,7 @@ function ensure(workspaceId: string, config: SessionConfig): ClaudeSession {
       }),
     onSessionId: (sessionId: string) => post({ type: 'sessionId', workspaceId, sessionId }),
     onRateLimit: (resetAt?: number) => post({ type: 'rateLimit', workspaceId, resetAt }),
+    onConnectionLost: () => post({ type: 'connectionLost', workspaceId }),
     onPermissionMode: (mode) => post({ type: 'permissionMode', workspaceId, mode }),
     settleIdle: () => post({ type: 'settleIdle', workspaceId }),
     onUsage: (runId, usage) => post({ type: 'usage', workspaceId, runId, usage })

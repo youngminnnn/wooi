@@ -372,6 +372,7 @@ function ensure(workspaceId: string, config: CodexConfig): CodexThread {
     persist: (item: ChatItem) => post({ type: 'persist', workspaceId, item }),
     onThreadId: (sessionId: string) => post({ type: 'sessionId', workspaceId, sessionId }),
     onRateLimit: () => post({ type: 'rateLimit', workspaceId }),
+    onConnectionLost: () => post({ type: 'connectionLost', workspaceId }),
     settleIdle: () => post({ type: 'settleIdle', workspaceId })
   })
   threads.set(workspaceId, thread)

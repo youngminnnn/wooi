@@ -26,6 +26,7 @@ import { WriteIsolationGuard, type WriteIsolationRoot } from './writeIsolation'
 import { fastModeReasonText, planApprovalMode, planOptions, unknownItemId } from '@shared/types'
 import { supportsAutoMode } from '../agent/backend'
 import { RATE_LIMIT_ERROR, rateLimitResetAt } from '../rateLimitText'
+import { isConnectionError } from '../connectionError'
 import { asClaudeMode, claudeEffort, claudeMode, type ClaudePermissionMode } from './protocol'
 import { usageFromResult } from './resultUsage'
 import type {
@@ -116,6 +117,11 @@ export interface SessionDeps {
    * resetAt 은 제한 오류가 직접 알려 준 해제 시각(epoch ms)이다 — 모르면 넘기지 않는다.
    */
   onRateLimit?: (resetAt?: number) => void
+  /**
+   * API 에 닿지 못해 턴이 중단됐다(DNS 실패·연결 거부). 메인이 연결이 돌아오면 이어가도록
+   * 예약한다([[rateLimitResume]] noteConnectionLost).
+   */
+  onConnectionLost?: () => void
   /**
    * 세션이 스스로 권한 모드를 바꿨음을 알린다(계획 승인 → acceptEdits/default).
    * 모드는 workspace 상태의 일부라 메인이 store 에 반영하고 UI 로 방송해야 한다.
@@ -1222,6 +1228,14 @@ export class ClaudeSession {
     this.busy = false
     this.workflowTasks.clear()
     this.clearAgents()
+    // result 까지 가지 못하고 죽은 턴도 원인이 연결이면 이어가기 대상이다 — SDK 가 예외로
+    // 던지는 경로(스트림이 끊김)와 오류 result 경로(handleResult) 둘 다 막아야 한다.
+    if (
+      !stalled &&
+      (isConnectionError(this.turnError) ||
+        isConnectionError(err instanceof Error ? err.message : String(err)))
+    )
+      this.deps.onConnectionLost?.()
     this.deps.emit({ type: 'status', status: 'error' })
     return false
   }
@@ -2059,6 +2073,12 @@ export class ClaudeSession {
       return
     }
     if (rateLimited) this.deps.onRateLimit?.(resetAt ?? undefined)
+
+    // API 에 닿지 못해 끝난 턴도 이어가기 대상이다 — 사용량 제한과 달리 해제 시각을 아무도
+    // 알려 주지 않을 뿐, 사용자가 지금 할 수 있는 일이 없다는 점은 같다. 실패 카드는 그대로
+    // 둔다: 제한과 달리 사용자가 고칠 수 있는 원인(와이파이·VPN·프록시)일 수 있어, 무엇이
+    // 끊겼는지는 보여야 한다.
+    if (!rateLimited && isConnectionError(this.turnError)) this.deps.onConnectionLost?.()
 
     // 보류해 둔 실패 보고가 있으면(재시도하지 않기로 확정) 이제 표시하고, 턴 상태를 닫는다.
     this.flushPendingFailure()
