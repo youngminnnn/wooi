@@ -11,16 +11,20 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  View
+  View,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent
 } from 'react-native'
 import {
   ArrowRightLeft,
+  ArrowUp,
   Brain,
   ChevronDown,
   ChevronRight,
   CircleDashed,
   CornerDownRight,
   ListTodo,
+  Square,
   Terminal,
   Users,
   Wrench,
@@ -34,7 +38,9 @@ import { formatToolGroup } from '@shared/toolGroups'
 import { BrandMark } from '../../../src/components/BrandMark'
 import { DemoBanner } from '../../../src/components/DemoBanner'
 import { QuestionCard } from '../../../src/components/QuestionCard'
+import { PlainText, RichText } from '../../../src/components/RichText'
 import {
+  ActivityPill,
   PermissionModeFooter,
   WorkspaceStatusBar
 } from '../../../src/components/WorkspaceStatusBar'
@@ -44,6 +50,7 @@ import { agoLabel, untilLabel, useNow } from '../../../src/state/useNow'
 import { useDeviceAuthentication } from '../../../src/state/useDeviceAuth'
 import { useTheme, useThemedStyles } from '../../../src/state/theme'
 import type { Theme } from '../../../src/theme'
+import { activityLabel } from '../../../src/chat/activity'
 import { buildChatRows, type ChatRowModel, type ToolCardModel } from '../../../src/chat/rows'
 import { isPermissionRequest, isQuestionRequest } from '../../../src/chat/questions'
 
@@ -297,62 +304,6 @@ function parseTranscript(value: unknown): ChatItem[] {
   return value.filter(isChatItem)
 }
 
-/**
- * 한 번에 그릴 본문 길이. 랩탑은 봉투에 들어가는 만큼(수십만 자) 보내 주는데, 그걸 그대로
- * Text 하나에 넣으면 스크롤이 끊긴다. 앞부분만 먼저 그리고 나머지는 눌러서 펼친다 —
- * 자르는 게 아니라 **미루는 것**이라 내용은 그대로 다 있다.
- */
-const RENDER_CHARS = 8000
-
-function RichText({
-  text,
-  color
-}: {
-  text: string
-  color?: string
-}): React.JSX.Element {
-  const theme = useTheme()
-  const styles = useThemedStyles(makeStyles)
-  const tint = color ?? theme.text
-  const [expanded, setExpanded] = useState(false)
-  const hidden = expanded ? 0 : Math.max(0, text.length - RENDER_CHARS)
-  // 서러게이트 쌍 한가운데서 자르면 이모지가 깨진 글자로 남는다.
-  const cut = /[\uD800-\uDBFF]/.test(text.charAt(RENDER_CHARS - 1))
-    ? RENDER_CHARS - 1
-    : RENDER_CHARS
-  const shown = hidden > 0 ? text.slice(0, cut) : text
-  const parts = shown.split(/(```[\s\S]*?```)/g).filter(Boolean)
-  return (
-    <View>
-      {parts.map((part, index) => {
-        const fenced = part.startsWith('```') && part.endsWith('```')
-        if (!fenced) {
-          return (
-            <Text key={index} style={[styles.bodyText, { color: tint }]} selectable>
-              {part}
-            </Text>
-          )
-        }
-        const code = part.slice(3, -3).replace(/^[^\n]*\n/, '')
-        return (
-          <ScrollView key={index} horizontal style={styles.codeScroll}>
-            <Text style={styles.code} selectable>
-              {code}
-            </Text>
-          </ScrollView>
-        )
-      })}
-      {hidden > 0 ? (
-        <Pressable onPress={() => setExpanded(true)}>
-          <Text style={styles.moreButton}>
-            Show the rest ({hidden.toLocaleString()} more characters)
-          </Text>
-        </Pressable>
-      ) : null}
-    </View>
-  )
-}
-
 function Collapsible({
   title,
   text,
@@ -360,6 +311,7 @@ function Collapsible({
   icon: Icon,
   error = false,
   expandable = true,
+  markdown = false,
   children
 }: {
   title: string
@@ -368,6 +320,8 @@ function Collapsible({
   icon: LucideIcon
   error?: boolean
   expandable?: boolean
+  /** 본문이 **모델이 쓴 말**인가(생각·요약). 도구가 뱉은 것이면 글자 그대로 둔다. */
+  markdown?: boolean
   children?: React.ReactNode
 }): React.JSX.Element {
   const theme = useTheme()
@@ -404,7 +358,12 @@ function Collapsible({
     >
       {head}
       {open
-        ? children ?? <RichText text={text ?? ''} color={error ? theme.danger : theme.textMuted} />
+        ? children ??
+          (markdown ? (
+            <RichText text={text ?? ''} color={error ? theme.danger : theme.textMuted} />
+          ) : (
+            <PlainText text={text ?? ''} color={error ? theme.danger : theme.textMuted} compact />
+          ))
         : null}
     </Pressable>
   )
@@ -422,7 +381,7 @@ function ToolCard({ card }: { card: ToolCardModel }): React.JSX.Element {
       expandable={card.body !== undefined}
     >
       {card.body ? (
-        <RichText text={card.body} color={card.error ? theme.danger : theme.textMuted} />
+        <PlainText text={card.body} color={card.error ? theme.danger : theme.textMuted} compact />
       ) : null}
       {card.omittedLines > 0 ? (
         <Text style={styles.truncated}>Output truncated · {card.omittedLines} lines omitted</Text>
@@ -448,18 +407,23 @@ function ChatRow({ row }: { row: ChatRowModel }): React.JSX.Element | null {
   }
   const item = row.item
   switch (item.type) {
+    // 내가 한 말은 오른쪽 말풍선, 에이전트가 한 말은 폭을 다 쓰는 본문. 데스크톱
+    // ChatPrimitives 의 UserMessage/AgentMessage 와 같은 규칙이다 — 대문자 라벨(YOU/AGENT)로
+    // 가르던 것을 형태로 옮겼다. 라벨은 줄마다 세로 자리를 먹으면서, 정작 옆에 도구 카드가
+    // 섞이면 그것들과 구별되지도 않았다.
     case 'user':
       return (
-        <View style={[styles.message, styles.userMessage]}>
-          <Text style={styles.label}>YOU</Text>
-          <RichText text={item.text} />
+        <View style={styles.userRow}>
+          <View style={styles.userBubble}>
+            {/* 사용자가 친 글은 마크다운으로 읽지 않는다 — 별표나 밑줄을 적었으면 적은 그대로다. */}
+            <PlainText text={item.text} />
+          </View>
         </View>
       )
     case 'assistant':
       return (
-        <View style={styles.message}>
-          <Text style={styles.label}>AGENT{item.streaming ? ' · WRITING' : ''}</Text>
-          <RichText text={item.text} />
+        <View style={styles.agentMessage}>
+          <RichText text={item.text} streaming={item.streaming === true} />
         </View>
       )
     case 'thinking':
@@ -469,6 +433,7 @@ function ChatRow({ row }: { row: ChatRowModel }): React.JSX.Element | null {
           icon={Brain}
           title={item.streaming ? 'Thinking…' : 'Thinking'}
           text={item.text}
+          markdown
         />
       )
     case 'result':
@@ -480,13 +445,13 @@ function ChatRow({ row }: { row: ChatRowModel }): React.JSX.Element | null {
     case 'error':
       return (
         <View style={styles.errorCard}>
-          <RichText text={item.text} color={theme.dangerFg} />
+          <PlainText text={item.text} color={theme.dangerFg} compact />
         </View>
       )
     case 'system':
       return (
         <View style={styles.compactCard}>
-          <RichText text={item.text} color={theme.textDim} />
+          <PlainText text={item.text} color={theme.textDim} compact />
         </View>
       )
     case 'unknown':
@@ -513,6 +478,7 @@ function ChatRow({ row }: { row: ChatRowModel }): React.JSX.Element | null {
           title={`${item.name} · ${item.status}`}
           text={item.summary ?? item.description}
           error={item.status === 'failed'}
+          markdown
         />
       )
     case 'handoff':
@@ -522,6 +488,7 @@ function ChatRow({ row }: { row: ChatRowModel }): React.JSX.Element | null {
           title={`Handoff · ${item.childName}`}
           text={item.summary}
           error={item.status === 'blocked'}
+          markdown
         />
       )
     case 'compaction':
@@ -572,8 +539,27 @@ export default function WorkspaceScreen(): React.JSX.Element {
   const [stopping, setStopping] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const rows = useMemo(() => buildChatRows(items), [items])
+  const activity = useMemo(
+    () => activityLabel(rows, workspace?.status === 'running'),
+    [rows, workspace?.status]
+  )
   const refreshing = useRef(false)
   const focused = useRef(false)
+  const listRef = useRef<FlatList<ChatRowModel>>(null)
+  const [scrolledUp, setScrolledUp] = useState(false)
+
+  /**
+   * 얼마나 올라가야 "돌아갈 길"이 필요한가. 한 화면 남짓(320dp)으로 둔다 — 이보다 짧으면
+   * 손가락 한 번으로 닿는 거리라 버튼이 오히려 본문을 가린다.
+   */
+  const onScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>): void => {
+    setScrolledUp(event.nativeEvent.contentOffset.y > 320)
+  }, [])
+
+  // inverted 리스트라 "맨 아래"(가장 최근)가 오프셋 0 이다.
+  const jumpToLatest = useCallback((): void => {
+    listRef.current?.scrollToOffset({ offset: 0, animated: true })
+  }, [])
 
   const mergeItems = useCallback((next: ChatItem[]): void => {
     setItems((current) => {
@@ -667,13 +653,15 @@ export default function WorkspaceScreen(): React.JSX.Element {
     try {
       await command('chat:send', [workspaceId, prompt])
       setText('')
+      // 위로 올려 읽던 중이었다면 방금 보낸 말이 화면 밖에 남는다. 보낸 사람은 그것부터 본다.
+      jumpToLatest()
       await loadLatest()
     } catch (sendError) {
       setError(errorMessage(sendError))
     } finally {
       setSending(false)
     }
-  }, [authenticate, command, loadLatest, sending, text, workspace, workspaceId])
+  }, [authenticate, command, jumpToLatest, loadLatest, sending, text, workspace, workspaceId])
 
   const stop = useCallback(async (): Promise<void> => {
     if (command === null || workspaceId === undefined || stopping) return
@@ -796,13 +784,9 @@ export default function WorkspaceScreen(): React.JSX.Element {
               </Text>
             ) : null}
           </View>
-          {workspace?.status === 'running' ? (
-            <Pressable style={styles.stopButton} disabled={stopping} onPress={() => void stop()}>
-              <Text style={styles.stopText}>{stopping ? 'Stopping…' : 'Stop'}</Text>
-            </Pressable>
-          ) : (
-            <View style={styles.headerSpacer} />
-          )}
+          {/* 제목을 가운데 두려면 왼쪽 Back 과 같은 폭이 오른쪽에도 있어야 한다. Stop 은
+              컴포저로 내려갔다 — 화면 반대편 끝에 두면 멈추려고 엄지가 화면을 가로질러야 했다. */}
+          <View style={styles.headerSpacer} />
         </View>
         <DemoBanner />
         {/* 두 가지는 다른 문제다: 내 신호가 안 나가는 것과, 받을 상대가 없는 것. */}
@@ -817,23 +801,42 @@ export default function WorkspaceScreen(): React.JSX.Element {
           </Text>
         ) : null}
         {error ? <Text style={styles.errorBanner}>{error}</Text> : null}
-        <FlatList
-          inverted
-          data={rows}
-          keyExtractor={(row) => row.id}
-          renderItem={({ item: row }) => <ChatRow row={row} />}
-          contentContainerStyle={styles.list}
-          onEndReached={() => void loadOlder()}
-          onEndReachedThreshold={0.3}
-          ListFooterComponent={loadingOlder ? <ActivityIndicator color={theme.accent} /> : null}
-          ListEmptyComponent={
-            loading ? (
-              <ActivityIndicator style={styles.loading} color={theme.accent} />
-            ) : (
-              <Text style={styles.empty}>No conversation yet</Text>
-            )
-          }
-        />
+        <View style={styles.listWrap}>
+          <FlatList
+            ref={listRef}
+            inverted
+            style={styles.listFlex}
+            data={rows}
+            keyExtractor={(row) => row.id}
+            renderItem={({ item: row }) => <ChatRow row={row} />}
+            contentContainerStyle={styles.list}
+            onEndReached={() => void loadOlder()}
+            onEndReachedThreshold={0.3}
+            onScroll={onScroll}
+            scrollEventThrottle={32}
+            ListFooterComponent={loadingOlder ? <ActivityIndicator color={theme.accent} /> : null}
+            ListEmptyComponent={
+              loading ? (
+                <ActivityIndicator style={styles.loading} color={theme.accent} />
+              ) : (
+                <Text style={styles.empty}>No conversation yet</Text>
+              )
+            }
+          />
+          {/* 위로 올려 읽다가 돌아오는 길. inverted 라 "맨 아래" 는 오프셋 0 이다.
+              이게 없으면 돌아오는 방법이 스와이프뿐인데, 긴 대화에서는 그게 여러 번이다. */}
+          {scrolledUp ? (
+            <Pressable
+              accessibilityLabel="Jump to the latest message"
+              accessibilityRole="button"
+              hitSlop={6}
+              onPress={jumpToLatest}
+              style={({ pressed }) => [styles.jumpButton, pressed && styles.jumpPressed]}
+            >
+              <ChevronDown color={theme.text} size={20} strokeWidth={2.2} />
+            </Pressable>
+          ) : null}
+        </View>
         {/* 답을 받아야 하는 질문(AskUserQuestion)은 Allow/Deny 가 아니라 선택지 UI 로 분기한다 —
             데스크톱 ChatView 와 같은 갈림이다. 승인해 봐야 답이 비면 모델은 그냥 진행한다. */}
         {permission !== undefined && command !== null ? (
@@ -855,6 +858,7 @@ export default function WorkspaceScreen(): React.JSX.Element {
             셋을 한 블록으로 묶고 경계선은 바깥에 둔다 — 선이 입력창에 붙어 있으면 상태줄이
             대화 쪽에 딸린 것처럼 읽히고, 상태줄을 못 받는 옛 랩탑에서는 선이 통째로 사라진다. */}
         <View style={styles.dock}>
+          <ActivityPill label={activity} />
           <WorkspaceStatusBar status={statusLine} />
           <View style={styles.composer}>
             <TextInput
@@ -867,12 +871,46 @@ export default function WorkspaceScreen(): React.JSX.Element {
               placeholder="Follow up…"
               placeholderTextColor={theme.textFaint}
             />
+            {/* Stop 은 Send 를 대신하지 않고 **옆에 선다.** 데스크톱 컴포저와 같은 규칙이다 —
+                돌고 있는 동안에도 다음 할 말을 보낼 수 있어야 하는데, 한 버튼을 토글로 만들면
+                폰에서만 그 길이 막힌다. */}
+            {workspace?.status === 'running' ? (
+              <Pressable
+                accessibilityLabel="Stop the current turn"
+                accessibilityRole="button"
+                disabled={stopping}
+                onPress={() => void stop()}
+                style={({ pressed }) => [
+                  styles.circleButton,
+                  styles.stopButton,
+                  stopping && styles.disabled,
+                  pressed && styles.buttonPressed
+                ]}
+              >
+                {stopping ? (
+                  <ActivityIndicator color={theme.danger} size="small" />
+                ) : (
+                  <Square color={theme.danger} fill={theme.danger} size={14} />
+                )}
+              </Pressable>
+            ) : null}
             <Pressable
-              style={[styles.sendButton, (sending || text.trim().length === 0) && styles.disabled]}
+              accessibilityLabel="Send"
+              accessibilityRole="button"
               disabled={sending || text.trim().length === 0}
               onPress={() => void send()}
+              style={({ pressed }) => [
+                styles.circleButton,
+                styles.sendButton,
+                (sending || text.trim().length === 0) && styles.disabled,
+                pressed && styles.buttonPressed
+              ]}
             >
-              <Text style={styles.sendText}>{sending ? 'Sending…' : 'Send'}</Text>
+              {sending ? (
+                <ActivityIndicator color={theme.onAccentStrong} size="small" />
+              ) : (
+                <ArrowUp color={theme.onAccentStrong} size={20} strokeWidth={2.6} />
+              )}
             </Pressable>
           </View>
           {/* 띄울 것이 없는 모드(Claude 의 'default')에서는 데스크톱처럼 아무것도 띄우지 않는다. */}
@@ -910,16 +948,6 @@ const makeStyles = (theme: Theme) =>
     title: { color: theme.text, fontSize: 15, fontWeight: '600', maxWidth: '100%' },
     connection: { color: theme.textDim, fontSize: 10, marginTop: 2, textTransform: 'capitalize' },
     headerSpacer: { width: 68 },
-    stopButton: {
-      alignItems: 'center',
-      borderColor: theme.dangerBorder,
-      borderRadius: 6,
-      borderWidth: 1,
-      marginTop: 9,
-      paddingVertical: 6,
-      width: 68
-    },
-    stopText: { color: theme.danger, fontSize: 12, fontWeight: '600' },
     offline: {
       backgroundColor: theme.border,
       color: theme.textMuted,
@@ -936,32 +964,38 @@ const makeStyles = (theme: Theme) =>
       paddingHorizontal: 14,
       paddingVertical: 8
     },
-    list: { paddingHorizontal: 14, paddingVertical: 12 },
-    message: {
-      borderBottomColor: theme.border,
-      borderBottomWidth: StyleSheet.hairlineWidth,
-      paddingVertical: 14
+    listWrap: { flex: 1 },
+    listFlex: { flex: 1 },
+    list: { paddingHorizontal: 16, paddingVertical: 12 },
+    // 대화 위에 뜨지만 마지막 줄을 가리지 않을 만큼만 안쪽으로. 44dp 는 손가락 최소 크기다.
+    jumpButton: {
+      alignItems: 'center',
+      backgroundColor: theme.surface2,
+      borderColor: theme.border2,
+      borderRadius: 22,
+      borderWidth: StyleSheet.hairlineWidth,
+      bottom: 10,
+      height: 44,
+      justifyContent: 'center',
+      position: 'absolute',
+      right: 12,
+      width: 44
     },
-    userMessage: {
-      backgroundColor: theme.surface,
-      borderRadius: 7,
-      marginVertical: 5,
-      paddingHorizontal: 11
+    jumpPressed: { backgroundColor: theme.surface4 },
+    userRow: { alignItems: 'flex-end', marginVertical: 6 },
+    // 값은 데스크톱 UserMessage 그대로다 — surface-4, rounded-2xl 에 오른쪽 아래만 작게,
+    // 최대 85%. 폰이 자기 말풍선을 따로 고르면 같은 대화가 두 화면에서 다르게 보인다.
+    userBubble: {
+      backgroundColor: theme.surface4,
+      borderBottomRightRadius: 6,
+      borderRadius: 16,
+      maxWidth: '85%',
+      paddingHorizontal: 14,
+      paddingVertical: 9
     },
-    label: {
-      color: theme.textDim,
-      fontSize: 9,
-      fontWeight: '700',
-      letterSpacing: 1,
-      marginBottom: 6
-    },
-    bodyText: { fontSize: 14, lineHeight: 21 },
-    moreButton: {
-      color: theme.accent,
-      fontSize: 12,
-      fontWeight: '600',
-      paddingVertical: 8
-    },
+    // 에이전트 쪽은 면도 테두리도 주지 않는다. 폭을 다 쓰는 본문이 곧 "이건 답이다" 라는
+    // 표시이고, 여백만으로 앞뒤 도구 카드와 갈린다.
+    agentMessage: { marginVertical: 8 },
     compactCard: {
       backgroundColor: theme.bg2,
       borderColor: theme.border,
@@ -976,13 +1010,6 @@ const makeStyles = (theme: Theme) =>
     cardSubtitle: { color: theme.textFaint, fontSize: 11, marginLeft: 21, marginTop: 4 },
     groupBody: { marginTop: 4 },
     truncated: { color: theme.textFaint, fontSize: 10, marginTop: 6 },
-    codeScroll: { backgroundColor: theme.bg, borderRadius: 5, marginVertical: 7, padding: 10 },
-    code: {
-      color: theme.textMuted,
-      fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace' }),
-      fontSize: 12,
-      lineHeight: 18
-    },
     footer: {
       borderBottomColor: theme.border,
       borderBottomWidth: StyleSheet.hairlineWidth,
@@ -1088,23 +1115,33 @@ const makeStyles = (theme: Theme) =>
     input: {
       backgroundColor: theme.bg2,
       borderColor: theme.surface2,
-      borderRadius: 8,
+      // 둥근 알약 모양. 옆의 두 버튼이 원이라 같은 곡률로 맞춘다.
+      borderRadius: 22,
       borderWidth: 1,
       color: theme.text,
       flex: 1,
-      fontSize: 14,
+      // 본문과 같은 크기로 올린다 — 방금 읽은 글보다 내가 쓰는 글이 작을 이유가 없다.
+      fontSize: 16,
       maxHeight: 120,
-      minHeight: 42,
-      paddingHorizontal: 11,
-      paddingVertical: 10
+      minHeight: 44,
+      paddingHorizontal: 16,
+      paddingVertical: 11
     },
-    sendButton: {
-      backgroundColor: theme.accentStrong,
-      borderRadius: 7,
+    /** 손가락 최소 크기(44dp)를 채운 원. 글자 대신 아이콘이라 폭을 뺏지 않는다. */
+    circleButton: {
+      alignItems: 'center',
+      borderRadius: 22,
+      height: 44,
       justifyContent: 'center',
-      minHeight: 42,
-      paddingHorizontal: 14
+      width: 44
     },
-    sendText: { color: theme.onAccentStrong, fontSize: 13, fontWeight: '700' },
+    sendButton: { backgroundColor: theme.accentStrong },
+    // 멈춤은 파괴적이지 않다 — 솔리드 빨강은 과하다. 데스크톱과 같은 틴트 + 테두리로 둔다.
+    stopButton: {
+      backgroundColor: theme.dangerSurface,
+      borderColor: theme.dangerBorder,
+      borderWidth: 1
+    },
+    buttonPressed: { opacity: 0.7 },
     disabled: { opacity: 0.45 }
   })
