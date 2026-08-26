@@ -1440,6 +1440,8 @@ export interface AdoptFanoutResult {
 export interface AppState {
   repos: Repo[]
   workspaces: Workspace[]
+  /** 응답이 끝났지만 아직 열어 보지 않은 워크스페이스 ID. 재시작 뒤에도 배지를 복원한다. */
+  unreadWorkspaceIds?: string[]
   /**
    * 같은 프롬프트로 한꺼번에 만든 워크스페이스 묶음(fan-out). 워크스페이스와 같은 상태 방송에
    * 실어, 사이드바·비교 화면이 별도 조회 없이 형제 관계를 알 수 있게 한다.
