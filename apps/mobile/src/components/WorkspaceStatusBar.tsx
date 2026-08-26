@@ -1,4 +1,4 @@
-import { StyleSheet, Text, View } from 'react-native'
+import { ActivityIndicator, StyleSheet, Text, View } from 'react-native'
 import { Cpu, FastForward, Gauge, Pause, Zap } from 'lucide-react-native'
 import type { RemoteWorkspace } from '@shared/remote'
 import { useTheme, useThemedStyles } from '../state/theme'
@@ -95,6 +95,30 @@ function ContextMeter({
 }
 
 /**
+ * 지금 무엇이 돌고 있는지 한 줄. 상태줄 **위**, 대화 바로 아래에 둔다.
+ *
+ * 상태줄이 "무엇으로 보낼 것인가"(모델·노력·맥락)라면 이 줄은 "지금 무슨 일이 일어나는가"다.
+ * 둘은 다른 질문이라 자리를 나누고, 대화에 딸린 이 줄이 대화 쪽에 더 가깝게 붙는다.
+ *
+ * 문구는 `activityLabel` 이 정한다 — 도는 중이 아니거나 답을 쓰는 중(커서가 이미 말한다)이면
+ * null 이 와서 이 줄 자체가 사라진다.
+ */
+export function ActivityPill({ label }: { label: string | null }): React.JSX.Element | null {
+  const theme = useTheme()
+  const styles = useThemedStyles(makeStyles)
+  if (label === null) return null
+  return (
+    <View style={styles.activity}>
+      {/* 돌아가는 것이 곧 신호다 — 글자만 두면 멈춘 화면과 구별되지 않는다. */}
+      <ActivityIndicator color={theme.accent} size="small" style={styles.activitySpinner} />
+      <Text style={styles.activityText} numberOfLines={1}>
+        {label}
+      </Text>
+    </View>
+  )
+}
+
+/**
  * 컴포저 아래 권한 모드 배너. 띄울 것이 없는 모드(Claude 의 'default')에서는 데스크톱처럼
  * 아무것도 띄우지 않는다.
  *
@@ -135,6 +159,16 @@ const makeStyles = (theme: Theme) =>
       paddingHorizontal: 14
     },
     item: { alignItems: 'center', flexDirection: 'row', gap: 4 },
+    activity: {
+      alignItems: 'center',
+      flexDirection: 'row',
+      gap: 7,
+      paddingBottom: 5,
+      paddingHorizontal: 14
+    },
+    // ActivityIndicator 의 'small' 은 20dp 다. 옆 글자가 11px 이라 그대로 두면 글자보다 크다.
+    activitySpinner: { transform: [{ scale: 0.7 }] },
+    activityText: { color: theme.textMuted, flexShrink: 1, fontSize: 12 },
     // 모델 이름이 가장 길다("Opus 5 (1M context)"). 남는 폭은 여기에 주고, 모자라면 여기서 자른다 —
     // effort·컨텍스트는 짧고 고정폭에 가까워 잘리면 읽을 것이 남지 않는다.
     model: { flexShrink: 1, minWidth: 0 },

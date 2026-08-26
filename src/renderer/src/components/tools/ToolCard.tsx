@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { diffStat } from '@shared/diff'
 import { toolActivity, toolDisplayName, toolUseSummary } from '@shared/toolDisplay'
 import type { ChatItem } from '@shared/types'
 import { ToolResultBody } from './ToolResultBody'
@@ -55,15 +56,4 @@ export function ToolCard({
     children
   }
   return style === 'terminal' ? <ToolCardTerminal {...props} /> : <ToolCardWooi {...props} />
-}
-
-/** 통합 diff 의 추가/삭제 줄 수(파일 헤더 ---/+++ 는 제외). */
-function diffStat(diff: string): { added: number; removed: number } {
-  let added = 0
-  let removed = 0
-  for (const line of diff.split('\n')) {
-    if (line.startsWith('+') && !line.startsWith('+++')) added++
-    else if (line.startsWith('-') && !line.startsWith('---')) removed++
-  }
-  return { added, removed }
 }
