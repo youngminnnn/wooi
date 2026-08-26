@@ -216,8 +216,38 @@ export function RichText({
 }
 
 /**
+ * 사용자가 친 글. **울타리도 가리지 않는다** — 적은 그대로가 곧 내용이다. 데스크톱
+ * `UserMessage` 도 마크다운 없이 `whitespace-pre-wrap` 하나로 그린다.
+ *
+ * `PlainText` 를 쓰지 않는 이유는 취향이 아니라 **레이아웃 안전**이다. `PlainText` 는 코드
+ * 울타리를 만나면 `CodeBlock` 을 만들고 그 안에는 가로 `ScrollView` 가 있는데, 가로
+ * ScrollView 는 고유 폭이 무한대다. 말풍선은 `maxWidth` 만 있고 폭이 내용으로 정해지는
+ * 컨테이너라, 그 둘이 겹치면 형제인 이 `Text` 의 폭이 0 으로 접힌다 — 글자마다 줄바꿈되어
+ * 높이가 폭발하고 폭이 0 이라 아무것도 그려지지 않는다. 실제로 그렇게 터졌다: 폭 제한이
+ * 없는 에이전트 쪽(전폭)은 멀쩡하고 말풍선만 빈 회색 덩어리가 됐다.
+ *
+ * 그러니 **여기에 `PlainText`·`RichText` 를 다시 끼우지 마라.** 꼭 필요하면 말풍선에 확정된
+ * 폭을 주는 것이 먼저다.
+ */
+export function UserText({ text }: { text: string }): React.JSX.Element {
+  const theme = useTheme()
+  const styles = useThemedStyles(makeStyles)
+  const { shown, hidden, reveal } = useDeferredTail(text)
+  return (
+    <View>
+      <Text style={[styles.body, { color: theme.text }]} selectable>
+        {shown}
+      </Text>
+      {hidden > 0 ? <MoreButton hidden={hidden} onPress={reveal} /> : null}
+    </View>
+  )
+}
+
+/**
  * 글자 그대로. 코드 울타리만 가려 가로 스크롤되는 상자로 만든다 — 도구 출력에는 긴 줄이
  * 흔하고, 그걸 접으면 어느 줄이 어느 줄인지 알 수 없게 된다.
+ *
+ * **폭이 확정된 컨테이너에서만 쓴다**(전폭 본문·카드). 이유는 `UserText` 주석 참고.
  */
 export function PlainText({
   text,

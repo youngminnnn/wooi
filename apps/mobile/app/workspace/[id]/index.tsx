@@ -46,7 +46,7 @@ import { formatToolGroup } from '@shared/toolGroups'
 import { BrandMark } from '../../../src/components/BrandMark'
 import { DemoBanner } from '../../../src/components/DemoBanner'
 import { QuestionCard } from '../../../src/components/QuestionCard'
-import { PlainText, RichText } from '../../../src/components/RichText'
+import { PlainText, RichText, UserText } from '../../../src/components/RichText'
 import {
   ActivityPill,
   PermissionModeFooter,
@@ -585,8 +585,10 @@ function ChatRow({ row }: { row: ChatRowModel }): React.JSX.Element | null {
       return (
         <View style={styles.userRow}>
           <View style={styles.userBubble}>
-            {/* 사용자가 친 글은 마크다운으로 읽지 않는다 — 별표나 밑줄을 적었으면 적은 그대로다. */}
-            <PlainText text={item.text} />
+            {/* 사용자가 친 글은 마크다운으로도, 코드 울타리로도 읽지 않는다 — 적은 그대로다.
+                울타리를 가리면 말풍선 안에 가로 ScrollView 가 생겨 레이아웃이 무너진다
+                (UserText 주석 참고). */}
+            <UserText text={item.text} />
           </View>
         </View>
       )
