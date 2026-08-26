@@ -114,7 +114,9 @@ function RootShell(): React.JSX.Element {
     })
     client.current = relay
     useRemoteStore.getState().setRefresh(() => relay.refresh())
-    useRemoteStore.getState().setCommand((channel, args) => relay.command(channel, args))
+    useRemoteStore
+      .getState()
+      .setCommand((channel, args, options) => relay.command(channel, args, options))
     useRemoteStore.getState().setUnpair(() => relay.unpairSelf())
     void relay.connect()
     return () => {

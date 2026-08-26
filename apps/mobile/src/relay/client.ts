@@ -31,10 +31,23 @@ export type RemoteCommandChannel =
   | 'pr:checks'
   | 'remote:watch'
   | 'remote:ping'
+  | 'remote:upload'
   | 'remote:unpairSelf'
   | 'chat:send'
   | 'chat:interrupt'
   | 'permission:respond'
+
+export interface RemoteCommandOptions {
+  /**
+   * 랩탑의 응답을 기다릴 것인가. 기본값은 기다린다.
+   *
+   * 첨부 조각(`remote:upload`)만 이걸 끈다. 조각마다 왕복을 기다리면 사진 한 장에 십수 초가
+   * 걸리는데, 어차피 랩탑은 명령을 **넣은 순서대로** 처리하므로 조각은 그 뒤에 오는
+   * `chat:send` 보다 반드시 먼저 처리된다. 빠진 조각이 있으면 그 사실이 `chat:send` 의
+   * 오류 하나로 드러난다 — 기다려서 더 알게 되는 것이 없다.
+   */
+  awaitResult?: boolean
+}
 
 export class RemoteCommandTimeoutError extends Error {
   constructor() {
@@ -213,8 +226,13 @@ export class RelayClient {
     this.handlers.onError(null)
   }
 
-  async command(channel: RemoteCommandChannel, args: unknown[]): Promise<unknown> {
+  async command(
+    channel: RemoteCommandChannel,
+    args: unknown[],
+    options?: RemoteCommandOptions
+  ): Promise<unknown> {
     const id = await this.enqueue(channel, args)
+    if (options?.awaitResult === false) return null
     return this.pollCommand(id)
   }
 
