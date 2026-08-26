@@ -288,6 +288,12 @@ MOBILE_AUTO_SUBMIT = true
 3번을 EAS 보관으로 하는 이유는 `serviceAccountKeyPath` 를 쓰면 키 파일이 레포에 있어야
 하기 때문이다. 스토어에 무엇이든 올릴 수 있는 자격증명을 커밋할 이유가 없다.
 
+**제출 프로파일은 앱 식별자를 직접 못박는다**(`eas.json` 의 `submit.production`). 빌드
+프로파일의 `env.APP_VARIANT` 는 **빌드에만** 적용되고 `eas submit` 에는 넘어가지 않는다.
+그래서 못박지 않으면 `app.config.ts` 가 기본값 `development` 로 떨어져 제출이 개발용
+패키지(`com.wooi.remote.dev`)를 향한다. 실제로 v0.5.0 에서 Android 제출이 그렇게 어긋났다 —
+iOS 는 `bundleIdentifier` 를 못박아 둔 덕에 멀쩡했고, Android 만 비어 있었다.
+
 어느 트랙으로 가는지는 `eas.json` 이 정한다 — 지금은 `internal` 이다. 비공개 테스트나
 프로덕션으로 **올리는 건 콘솔에서 사람이 한다.** 자동으로 프로덕션까지 가면, 태그 하나가
 전 사용자에게 도달하는 데 사람의 확인이 한 번도 끼지 않는다.
