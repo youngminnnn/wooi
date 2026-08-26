@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
+  Animated,
   FlatList,
   Dimensions,
   Keyboard,
@@ -22,7 +23,10 @@ import {
   Brain,
   ChevronDown,
   ChevronRight,
+  Check,
+  ChevronLeft,
   CircleDashed,
+  Copy,
   CornerDownRight,
   ListTodo,
   Maximize2,
@@ -51,6 +55,7 @@ import {
 import { usePrColors } from '../../../src/state/prColors'
 import { isLaptopAway, useRemoteStore } from '../../../src/state/store'
 import { agoLabel, untilLabel, useNow } from '../../../src/state/useNow'
+import { useCopy } from '../../../src/state/useCopy'
 import { useDeviceAuthentication } from '../../../src/state/useDeviceAuth'
 import { useTheme, useThemedStyles } from '../../../src/state/theme'
 import type { Theme } from '../../../src/theme'
@@ -127,6 +132,7 @@ function PermissionSubstance({
   const theme = useTheme()
   const styles = useThemedStyles(makeStyles)
   const [full, setFull] = useState(false)
+  const { copied, copy } = useCopy()
   const diff = request.kind === 'fileChange' ? request.diff : undefined
   const stat = useMemo(() => (diff === undefined ? null : diffStat(diff)), [diff])
   const path = useMemo(() => (diff === undefined ? null : diffFilePath(diff)), [diff])
@@ -182,6 +188,24 @@ function PermissionSubstance({
               <Text style={styles.sheetTitle} numberOfLines={1} ellipsizeMode="head">
                 {path ?? request.toolName}
               </Text>
+              {/* 폰에서 패치를 손으로 옮겨 적을 수는 없다. 승인을 미루고 랩탑에서 확인하려면
+                  이걸 통째로 집어 갈 수 있어야 한다. */}
+              <Pressable
+                accessibilityLabel={copied ? 'Copied' : 'Copy'}
+                accessibilityRole="button"
+                hitSlop={10}
+                onPress={() => copy(diff ?? substance)}
+                style={({ pressed }) => [styles.sheetCopy, pressed && styles.expandPressed]}
+              >
+                {copied ? (
+                  <Check color={theme.success} size={14} strokeWidth={2.6} />
+                ) : (
+                  <Copy color={theme.textMuted} size={14} />
+                )}
+                <Text style={[styles.sheetCopyText, copied && { color: theme.success }]}>
+                  {copied ? 'Copied' : 'Copy'}
+                </Text>
+              </Pressable>
               <Pressable
                 accessibilityLabel="Close"
                 accessibilityRole="button"
@@ -423,6 +447,27 @@ function parseTranscript(value: unknown): ChatItem[] {
   return value.filter(isChatItem)
 }
 
+/**
+ * 펼쳐진 내용이 그냥 튀어나오지 않게 살짝 떠오르게 한다.
+ *
+ * `LayoutAnimation` 을 쓰지 않는 이유가 있다 — 이 앱은 Expo SDK 54 기본값대로 New
+ * Architecture 로 도는데, 거기서 LayoutAnimation 은 보장되지 않는다. 불투명도는 두 아키텍처
+ * 모두에서 같게 동작하고 네이티브 드라이버도 탄다.
+ */
+function FadeIn({ children }: { children: React.ReactNode }): React.JSX.Element {
+  const opacity = useRef(new Animated.Value(0)).current
+  useEffect(() => {
+    const animation = Animated.timing(opacity, {
+      duration: 140,
+      toValue: 1,
+      useNativeDriver: true
+    })
+    animation.start()
+    return () => animation.stop()
+  }, [opacity])
+  return <Animated.View style={{ opacity }}>{children}</Animated.View>
+}
+
 function Collapsible({
   title,
   text,
@@ -469,6 +514,10 @@ function Collapsible({
   if (!expandable) return <View style={styles.compactCard}>{head}</View>
   return (
     <Pressable
+      // 카드 높이는 40dp 남짓이다. 나머지는 hitSlop 으로 채워 손가락 최소 크기(44dp)를 만든다 —
+      // 높이를 더 키우면 대화가 도구 카드로 밀려 올라간다. 위아래 2dp 는 카드 사이 간격(6dp)
+      // 안에 들어가 이웃 카드의 영역을 뺏지 않는다.
+      hitSlop={{ bottom: 2, top: 2 }}
       style={styles.compactCard}
       onPress={(event) => {
         event.stopPropagation()
@@ -476,14 +525,16 @@ function Collapsible({
       }}
     >
       {head}
-      {open
-        ? children ??
-          (markdown ? (
-            <RichText text={text ?? ''} color={error ? theme.danger : theme.textMuted} />
-          ) : (
-            <PlainText text={text ?? ''} color={error ? theme.danger : theme.textMuted} compact />
-          ))
-        : null}
+      {open ? (
+        <FadeIn>
+          {children ??
+            (markdown ? (
+              <RichText text={text ?? ''} color={error ? theme.danger : theme.textMuted} />
+            ) : (
+              <PlainText text={text ?? ''} color={error ? theme.danger : theme.textMuted} compact />
+            ))}
+        </FadeIn>
+      ) : null}
     </Pressable>
   )
 }
@@ -845,18 +896,24 @@ export default function WorkspaceScreen(): React.JSX.Element {
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
       <View style={[styles.screen, { paddingBottom: keyboardInset }]}>
+        {/* 예전에는 다섯 줄(리포·제목·브랜치·PR·사용량)이 가운데 정렬로 쌓였다. 가운데 정렬은
+            줄마다 길이가 달라 좌우 끝이 들쭉날쭉해지고, 제목을 가운데 두려고 오른쪽에 Back 과
+            같은 폭의 빈 칸(68dp)을 잡아 두느라 정작 제목이 쓸 폭도 좁았다.
+
+            왼쪽 정렬로 바꾸고 리포를 브랜치 줄로 합쳐 최대 세 줄로 줄인다. **하나도 버리지
+            않는다** — 리포·PR·사용량은 전부 "폰에서 이걸 모르면 랩탑으로 돌아가야 한다" 는
+            이유로 여기 있는 것들이라, 시트 뒤로 숨기면 그 이유가 그대로 되살아난다. */}
         <View style={styles.header}>
-          <Pressable onPress={() => router.back()} hitSlop={12}>
-            <Text style={styles.back}>‹ Back</Text>
+          <Pressable
+            accessibilityLabel="Back"
+            accessibilityRole="button"
+            hitSlop={12}
+            onPress={() => router.back()}
+            style={({ pressed }) => [styles.back, pressed && styles.headerPrPressed]}
+          >
+            <ChevronLeft color={theme.accent} size={26} />
           </Pressable>
           <View style={styles.headerTitle}>
-            {/* 목록에서 보던 정보를 그대로 가져온다. 워크스페이스에 들어온 순간 어느 리포의
-                무엇을 보고 있는지 모르게 되면, 폰에서는 되돌아가 확인하는 비용이 크다. */}
-            {repoName !== null ? (
-              <Text style={styles.headerRepo} numberOfLines={1}>
-                {repoName}
-              </Text>
-            ) : null}
             <Text style={styles.title} numberOfLines={1}>
               {title}
             </Text>
@@ -868,44 +925,56 @@ export default function WorkspaceScreen(): React.JSX.Element {
                   <Users size={11} color={theme.accent} />
                 </View>
               ) : null}
+              {/* 어느 리포의 무엇을 보고 있는지. 제 줄을 갖고 있었지만 브랜치와 나란히 둬도
+                  읽히고, 그러면 대화가 한 줄만큼 넓어진다. */}
+              {repoName !== null ? (
+                <Text style={styles.headerRepo} numberOfLines={1}>
+                  {repoName} ·
+                </Text>
+              ) : null}
               <Text style={styles.headerMeta} numberOfLines={1}>
                 {headerMeta}
               </Text>
             </View>
             {/* PR 줄은 화면으로 가는 문이다 — 라벨 한 줄은 무엇이 막고 있는지 말하지 못하고,
                 그걸 확인하러 랩탑으로 돌아가는 비용이 폰에서는 크다. 이미 PR 을 말하고 있는
-                줄에 붙이므로 새 어포던스를 하나 더 만들지 않는다. */}
-            {workspace?.pr ? (
-              <Pressable
-                accessibilityHint="Shows CI checks for this pull request"
-                accessibilityLabel={`Pull request #${workspace.pr.number}, ${workspace.pr.label}`}
-                accessibilityRole="button"
-                hitSlop={8}
-                onPress={() => router.push(`/workspace/${workspaceId}/pr`)}
-                style={({ pressed }) => [styles.headerPrRow, pressed && styles.headerPrPressed]}
-              >
-                <Text
-                  style={[styles.headerPr, { color: prColors[workspace.pr.state] ?? theme.textDim }]}
-                  numberOfLines={1}
-                >
-                  #{workspace.pr.number} · {workspace.pr.label}
-                </Text>
-                <ChevronRight
-                  color={prColors[workspace.pr.state] ?? theme.textDim}
-                  size={12}
-                  strokeWidth={2.2}
-                />
-              </Pressable>
-            ) : null}
-            {limitLabel !== null ? (
-              <Text style={styles.headerLimit} numberOfLines={1}>
-                {limitLabel}
-              </Text>
+                줄에 붙이므로 새 어포던스를 하나 더 만들지 않는다.
+                사용량 제한도 같은 줄에 태운다 — 둘 다 "왜 멈춰 있나" 에 답하는 값이다. */}
+            {workspace?.pr || limitLabel !== null ? (
+              <View style={styles.headerStatusLine}>
+                {workspace?.pr ? (
+                  <Pressable
+                    accessibilityHint="Shows CI checks for this pull request"
+                    accessibilityLabel={`Pull request #${workspace.pr.number}, ${workspace.pr.label}`}
+                    accessibilityRole="button"
+                    hitSlop={8}
+                    onPress={() => router.push(`/workspace/${workspaceId}/pr`)}
+                    style={({ pressed }) => [styles.headerPrRow, pressed && styles.headerPrPressed]}
+                  >
+                    <Text
+                      style={[
+                        styles.headerPr,
+                        { color: prColors[workspace.pr.state] ?? theme.textDim }
+                      ]}
+                      numberOfLines={1}
+                    >
+                      #{workspace.pr.number} · {workspace.pr.label}
+                    </Text>
+                    <ChevronRight
+                      color={prColors[workspace.pr.state] ?? theme.textDim}
+                      size={12}
+                      strokeWidth={2.2}
+                    />
+                  </Pressable>
+                ) : null}
+                {limitLabel !== null ? (
+                  <Text style={styles.headerLimit} numberOfLines={1}>
+                    {limitLabel}
+                  </Text>
+                ) : null}
+              </View>
             ) : null}
           </View>
-          {/* 제목을 가운데 두려면 왼쪽 Back 과 같은 폭이 오른쪽에도 있어야 한다. Stop 은
-              컴포저로 내려갔다 — 화면 반대편 끝에 두면 멈추려고 엄지가 화면을 가로질러야 했다. */}
-          <View style={styles.headerSpacer} />
         </View>
         <DemoBanner />
         {/* 두 가지는 다른 문제다: 내 신호가 안 나가는 것과, 받을 상대가 없는 것. */}
@@ -1050,23 +1119,27 @@ const makeStyles = (theme: Theme) =>
       borderBottomColor: theme.border,
       borderBottomWidth: StyleSheet.hairlineWidth,
       flexDirection: 'row',
+      gap: 6,
       minHeight: 54,
       paddingBottom: 10,
-      paddingHorizontal: 14,
+      paddingHorizontal: 12,
       paddingTop: 8
     },
-    back: { color: theme.accent, fontSize: 15, marginTop: 13, width: 68 },
-    headerTitle: { alignItems: 'center', flex: 1 },
-    headerRepo: { color: theme.textDim, fontSize: 10, fontWeight: '700', letterSpacing: 0.8 },
-    headerMetaLine: { alignItems: 'center', flexDirection: 'row', gap: 5, marginTop: 2 },
-    headerMeta: { color: theme.textDim, fontSize: 11 },
-    headerPrRow: { alignItems: 'center', flexDirection: 'row', gap: 2 },
-    headerPr: { fontSize: 11, marginTop: 2 },
+    // 44dp 를 채운 아이콘 자리. pr.tsx 가 이미 같은 셰브런을 쓴다 — '‹ Back' 글자는 그
+    // 화면과 어긋났고, 68dp 를 먹으면서 오른쪽에 같은 크기의 빈 칸까지 요구했다.
+    back: { alignItems: 'center', height: 44, justifyContent: 'center', marginLeft: -6, width: 34 },
+    headerTitle: { alignItems: 'flex-start', flex: 1, minWidth: 0, paddingTop: 3 },
+    headerRepo: { color: theme.textDim, flexShrink: 1, fontSize: 11 },
+    headerMetaLine: { alignItems: 'center', flexDirection: 'row', gap: 5, marginTop: 3 },
+    headerMeta: { color: theme.textDim, flexShrink: 1, fontSize: 11 },
+    // PR 과 사용량 제한은 한 줄을 나눠 쓴다. 둘 다 '왜 멈춰 있나' 에 답하는 값이라 붙어 있어야
+    // 한눈에 읽히고, 줄을 따로 주면 헤더가 다시 네 줄이 된다.
+    headerStatusLine: { alignItems: 'center', flexDirection: 'row', gap: 8, marginTop: 3 },
+    headerPrRow: { alignItems: 'center', flexDirection: 'row', flexShrink: 1, gap: 2 },
+    headerPr: { flexShrink: 1, fontSize: 11.5 },
     headerPrPressed: { opacity: 0.55 },
-    headerLimit: { color: theme.warningFg, fontSize: 11, marginTop: 2 },
-    title: { color: theme.text, fontSize: 15, fontWeight: '600', maxWidth: '100%' },
-    connection: { color: theme.textDim, fontSize: 10, marginTop: 2, textTransform: 'capitalize' },
-    headerSpacer: { width: 68 },
+    headerLimit: { color: theme.warningFg, flexShrink: 1, fontSize: 11.5 },
+    title: { color: theme.text, fontSize: 16, fontWeight: '600', maxWidth: '100%' },
     offline: {
       backgroundColor: theme.border,
       color: theme.textMuted,
@@ -1203,6 +1276,8 @@ const makeStyles = (theme: Theme) =>
       paddingTop: 12
     },
     sheetTitle: { color: theme.text, flex: 1, fontSize: 15, fontWeight: '600' },
+    sheetCopy: { alignItems: 'center', flexDirection: 'row', gap: 5 },
+    sheetCopyText: { color: theme.textMuted, fontSize: 13, fontWeight: '600' },
     sheetBody: { paddingVertical: 12 },
     sheetText: { paddingHorizontal: 16 },
     permissionCodeScroll: { maxHeight: 145, paddingVertical: 7 },

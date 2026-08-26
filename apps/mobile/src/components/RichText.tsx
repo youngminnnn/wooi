@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import { Linking, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
+import { Check, Copy } from 'lucide-react-native'
 import { parseMarkdown, type Block, type Span } from '../chat/markdown'
 import { useTheme, useThemedStyles } from '../state/theme'
+import { useCopy } from '../state/useCopy'
 import type { Theme } from '../theme'
 
 /**
@@ -306,12 +308,18 @@ const makeStyles = (theme: Theme) =>
       overflow: 'hidden'
     },
     codeHead: {
+      alignItems: 'center',
       backgroundColor: theme.bg3,
       borderBottomColor: theme.border,
       borderBottomWidth: StyleSheet.hairlineWidth,
+      flexDirection: 'row',
+      justifyContent: 'space-between',
       paddingHorizontal: 10,
-      paddingVertical: 4
+      paddingVertical: 5
     },
+    copyButton: { alignItems: 'center', flexDirection: 'row', gap: 4 },
+    copyPressed: { opacity: 0.5 },
+    copyText: { color: theme.textDim, fontSize: 11, fontWeight: '600' },
     codeLanguage: { color: theme.textFaint, fontSize: 10, fontWeight: '700', letterSpacing: 0.6 },
     codeScroll: { padding: 10 },
     code: { color: theme.textMuted, fontFamily: MONO, fontSize: 13, lineHeight: 19 },
