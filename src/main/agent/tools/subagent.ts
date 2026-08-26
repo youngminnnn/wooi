@@ -10,6 +10,7 @@ import { log } from '../../logger'
 import { runSubAgent } from '../../subagent/run'
 import { recordDelegatedUsage } from '../../usageLedger'
 import { agentDefaultsFor, delegateBackendsFor } from '../multiAgent'
+import { validateAgentRunOptions } from './agentOptions'
 import { askSubAgentPermission } from './permission'
 import type { AgentToolDeps } from './registry'
 
@@ -103,6 +104,17 @@ export function runDelegateTool(backend: AgentBackendId) {
     const prompt = String(args.prompt ?? '')
     if (!prompt.trim()) throw new Error('The subagent needs a prompt describing its task.')
 
+    // 검증은 **사이드바에 행을 올리기 전에** 한다. 뒤로 미루면 거절된 호출이 "돌고 있는 서브에이전트"
+    // 를 잠깐 그렸다 지우고, 사용자는 자기가 못 본 실행이 있었다고 읽는다.
+    //
+    // 지정하지 않은 축만 전역 기본값으로 떨어진다([[agent/multiAgent]] agentDefaultsFor). 둘 중
+    // 하나만 고르는 것이 흔하기 때문이다 — "Haiku 로 훑되 강도는 평소대로" 에서 effort 까지
+    // 기본값에서 떼어 내면 사용자가 설정해 둔 값이 조용히 사라진다.
+    const requested = await validateAgentRunOptions(deps, backend, args)
+    const defaults = agentDefaultsFor(settings)[backend] ?? { model: null, effort: null }
+    const model = requested.model ?? defaults.model
+    const effort = requested.effort ?? defaults.effort
+
     const taskId = randomUUID()
     const abort = new AbortController()
     running.set(taskId, { workspaceId, abort })
@@ -117,7 +129,6 @@ export function runDelegateTool(backend: AgentBackendId) {
     }
     upsertAgent(deps, workspaceId, agent)
 
-    const { model, effort } = agentDefaultsFor(settings)[backend] ?? { model: null, effort: null }
     try {
       const result = await runSubAgent({
         backend,

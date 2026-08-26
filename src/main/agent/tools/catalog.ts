@@ -727,6 +727,44 @@ export function agentToolsFor(
 }
 
 /**
+ * 위임 서브런의 model·effort 파라미터. 워크스페이스 쪽 agentOptionParams 와 **일부러 다르다.**
+ *
+ * 하나 — 백엔드가 도구 이름으로 이미 정해져 있으므로(`codex_subagent`) 그 백엔드의 목록만 싣는다.
+ * 합집합을 실으면 Codex 에 없는 `ultracode` 같은 값이 유효해 보이고, 모델은 스키마가 허락한 값을
+ * 고른 뒤 도구 오류를 받는다.
+ *
+ * 둘 — `ultracode` 는 **어느 백엔드에서도 빼낸다.** effort 레벨이 아니라 모드라, 서브런이 그 모드로
+ * 돌면 위임받은 실행이 또 워크플로우를 조율하기 시작한다. 실행기가 이미 그 성분을 벗기고 있어
+ * (subagent/runClaude.ts) 받아도 조용히 무시될 값이고, 스키마에 남겨 두면 거짓 약속이 된다.
+ *
+ * 셋 — 설명이 짧다. 위임 도구는 alwaysLoad 라 이 스키마가 **매 요청** 실린다.
+ */
+function subAgentRunParams(backend: AgentBackendId): z.ZodRawShape {
+  const meta = AGENT_BACKENDS[backend]
+  const label = meta?.label ?? backend
+  const efforts = (meta?.efforts ?? [])
+    .map((option) => option.id)
+    .filter((id) => id !== 'ultracode') as EffortSetting[]
+  return {
+    model: z
+      .string()
+      .optional()
+      .describe(
+        `Model for this subagent, as a ${label} model id. Omit to use the configured default — ` +
+          'do not guess an id; Wooi rejects the call and lists the ones it accepts.'
+      ),
+    ...(meta?.capabilities.effort && efforts.length
+      ? {
+          effort: z
+            .enum(efforts as [EffortSetting, ...EffortSetting[]])
+            .optional()
+            .describe(`Reasoning effort for this subagent. Omit to use the configured default.`)
+        }
+      : {})
+  }
+}
+
+/**
  * 백엔드마다 서브에이전트 도구 하나.
  *
  * 이름이 판단을 대신한다. 처음에는 도구 하나(`delegate`) + `backend` enum 이었는데, Codex 메인
@@ -764,7 +802,9 @@ export function delegateToolSpecs(
           : 'Several can run at the same time.',
         'The subagent works in this same worktree under your permission mode, starts from an',
         'empty context, and reports back exactly once as text — it cannot ask you anything',
-        'mid-run, so put everything it needs into the prompt.'
+        'mid-run, so put everything it needs into the prompt.',
+        'It does not have to run on the same model as you: dial `model` and `effort` down for',
+        'mechanical work and up for the hard judgement calls.'
       ].join(' '),
       inputSchema: {
         description: z
@@ -777,7 +817,8 @@ export function delegateToolSpecs(
           .describe(
             'The complete task brief. The subagent starts with a blank context and cannot see ' +
               'this conversation, so restate every fact it needs: files, constraints, and what to return.'
-          )
+          ),
+        ...subAgentRunParams(backend)
       },
       annotations: { title: `Run a ${label} subagent`, readOnlyHint: false },
       // 지연 로딩(tool search) 뒤에 두지 않는다. 실측에서 모델이 이 도구를 쓰기 전에 ToolSearch
