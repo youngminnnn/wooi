@@ -5,6 +5,7 @@ import {
   FlatList,
   Dimensions,
   Keyboard,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -24,16 +25,19 @@ import {
   CircleDashed,
   CornerDownRight,
   ListTodo,
+  Maximize2,
   Square,
   Terminal,
   Users,
   Wrench,
+  X,
   type LucideIcon
 } from 'lucide-react-native'
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router'
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
+import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import type { ChatItem, PermissionRequest } from '@shared/types'
 import { workspaceDisplayName } from '@shared/types'
+import { diffFilePath, diffStat } from '@shared/diff'
 import { formatToolGroup } from '@shared/toolGroups'
 import { BrandMark } from '../../../src/components/BrandMark'
 import { DemoBanner } from '../../../src/components/DemoBanner'
@@ -77,10 +81,10 @@ function formatPermissionInput(request: PermissionRequest): string {
   return JSON.stringify(request.input, null, 2)
 }
 
-function Diff({ value }: { value: string }): React.JSX.Element {
+function Diff({ value, full = false }: { value: string; full?: boolean }): React.JSX.Element {
   const styles = useThemedStyles(makeStyles)
   return (
-    <ScrollView horizontal style={styles.permissionCodeScroll}>
+    <ScrollView horizontal style={full ? undefined : styles.permissionCodeScroll}>
       <View>
         {value.split('\n').map((line, index) => (
           <View
@@ -98,6 +102,113 @@ function Diff({ value }: { value: string }): React.JSX.Element {
         ))}
       </View>
     </ScrollView>
+  )
+}
+
+/**
+ * 승인 판단의 근거 — diff 나 명령. 두 가지를 한다.
+ *
+ * 1. **먼저 요약을 적는다.** `+12 −3 · src/main/git.ts` 한 줄이면 대개 판단이 끝나는데,
+ *    지금까지는 그걸 알려면 150dp 짜리 창 안에서 헤더가 나올 때까지 스크롤해야 했다.
+ * 2. **전체를 볼 길을 낸다.** 데스크톱은 높이만 묶고 스크롤시키는데(PermissionPrompt 의
+ *    DiffPreview), 거기서는 못 미더우면 옆의 diff 화면으로 가면 된다. 폰에는 그 화면이 없다 —
+ *    이 창이 패치를 볼 수 있는 유일한 자리라, 좁은 창 하나로 끝낼 수 없다.
+ *
+ * 미리보기 자체는 데스크톱처럼 자르지 않고 스크롤한다. 앞 몇 줄만 남기면 정작 판단에 필요한
+ * 줄이 잘려 나가는 쪽이 더 잦다.
+ */
+function PermissionSubstance({
+  request,
+  substance
+}: {
+  request: PermissionRequest
+  substance: string
+}): React.JSX.Element {
+  const theme = useTheme()
+  const styles = useThemedStyles(makeStyles)
+  const [full, setFull] = useState(false)
+  const diff = request.kind === 'fileChange' ? request.diff : undefined
+  const stat = useMemo(() => (diff === undefined ? null : diffStat(diff)), [diff])
+  const path = useMemo(() => (diff === undefined ? null : diffFilePath(diff)), [diff])
+
+  return (
+    <View>
+      {stat !== null ? (
+        <View style={styles.substanceSummary}>
+          <Text style={styles.statAdded}>+{stat.added}</Text>
+          {/* U+2212. shared/toolSummary 가 같은 자리에 쓰는 글자다(하이픈이 아니다). */}
+          <Text style={styles.statRemoved}>−{stat.removed}</Text>
+          {path !== null ? (
+            <Text style={styles.statPath} numberOfLines={1} ellipsizeMode="head">
+              {path}
+            </Text>
+          ) : null}
+        </View>
+      ) : null}
+      <View style={styles.permissionSubstance}>
+        {diff !== undefined ? (
+          <Diff value={diff} />
+        ) : (
+          <ScrollView style={styles.permissionTextScroll} nestedScrollEnabled>
+            <Text style={styles.permissionCode} selectable>
+              {substance}
+            </Text>
+          </ScrollView>
+        )}
+      </View>
+      <Pressable
+        accessibilityRole="button"
+        hitSlop={6}
+        onPress={() => setFull(true)}
+        style={({ pressed }) => [styles.expandRow, pressed && styles.expandPressed]}
+      >
+        <Maximize2 color={theme.accent} size={12} />
+        <Text style={styles.expandText}>
+          {diff !== undefined ? 'View the whole patch' : 'View the whole input'}
+        </Text>
+      </Pressable>
+      <Modal
+        animationType="slide"
+        onRequestClose={() => setFull(false)}
+        presentationStyle="pageSheet"
+        visible={full}
+      >
+        {/* Modal 은 네이티브 뷰 계층을 따로 만들어서 앱 루트의 safe-area context 가 여기까지
+            닿지 않는다. provider 를 안에 한 번 더 두지 않으면 inset 이 0 이거나 낡은 값으로
+            와서, 안드로이드의 전체화면 다이얼로그에서 헤더가 상태바 밑에 깔린다. */}
+        <SafeAreaProvider>
+          <SafeAreaView style={styles.sheet} edges={['top', 'bottom']}>
+            <View style={styles.sheetHeader}>
+              <Text style={styles.sheetTitle} numberOfLines={1} ellipsizeMode="head">
+                {path ?? request.toolName}
+              </Text>
+              <Pressable
+                accessibilityLabel="Close"
+                accessibilityRole="button"
+                hitSlop={12}
+                onPress={() => setFull(false)}
+              >
+                <X color={theme.text} size={22} />
+              </Pressable>
+            </View>
+            {/* 높이를 묶지 않는다 — 전체를 보러 온 화면이다. */}
+            <ScrollView contentContainerStyle={styles.sheetBody}>
+              {diff !== undefined ? (
+                // diff 줄은 배경이 폭을 다 써야 어느 줄이 늘고 줄었는지 읽힌다 — 좌우 여백은
+                // 줄 안쪽(diffLine)이 갖는다.
+                <Diff value={diff} full />
+              ) : (
+                <View style={styles.sheetText}>
+                  <Text style={styles.permissionCode} selectable>
+                    {substance}
+                  </Text>
+                </View>
+              )}
+            </ScrollView>
+          </SafeAreaView>
+        </SafeAreaProvider>
+      </Modal>
+    </View>
   )
 }
 
@@ -160,17 +271,7 @@ function PermissionCard({
         {request.title ?? request.displayName ?? 'Approve this action?'}
       </Text>
       <Text style={styles.permissionTool}>{request.toolName}</Text>
-      <View style={styles.permissionSubstance}>
-        {request.kind === 'fileChange' && request.diff !== undefined ? (
-          <Diff value={request.diff} />
-        ) : (
-          <ScrollView style={styles.permissionTextScroll} nestedScrollEnabled>
-            <Text style={styles.permissionCode} selectable>
-              {substance}
-            </Text>
-          </ScrollView>
-        )}
-      </View>
+      <PermissionSubstance request={request} substance={substance} />
       {responseError ? <Text style={styles.permissionError}>{responseError}</Text> : null}
       {request.rule ? (
         <View style={styles.ruleBox}>
@@ -181,27 +282,45 @@ function PermissionCard({
       <Text style={styles.permissionScope}>
         “Always” applies for the rest of this session only.
       </Text>
+      {/* 세 버튼의 무게가 같으면 어느 것이 기본인지 보이지 않는다. 데스크톱 PermissionPrompt
+          와 같은 서열을 쓴다 — 솔리드는 주 액션 하나뿐이고, 그 하나가 더 넓다. Deny 는
+          **빨강이 아니다**: 거절은 파괴적인 행동이 아니라 아무 일도 일어나지 않는 쪽이다. */}
       <View style={styles.permissionActions}>
         <Pressable
-          style={[styles.permissionButton, responding && styles.disabled]}
           disabled={responding}
           onPress={() => void respond('deny')}
+          style={({ pressed }) => [
+            styles.permissionButton,
+            styles.denyButton,
+            responding && styles.disabled,
+            pressed && styles.buttonPressed
+          ]}
         >
           <Text style={styles.denyButtonText}>{pending === 'deny' ? 'Sending…' : 'Deny'}</Text>
         </Pressable>
         <Pressable
-          style={[styles.permissionButton, styles.sessionButton, responding && styles.disabled]}
           disabled={responding}
           onPress={() => void respond('session')}
+          style={({ pressed }) => [
+            styles.permissionButton,
+            styles.sessionButton,
+            responding && styles.disabled,
+            pressed && styles.buttonPressed
+          ]}
         >
           <Text style={styles.sessionButtonText}>
             {pending === 'session' ? 'Sending…' : 'Always'}
           </Text>
         </Pressable>
         <Pressable
-          style={[styles.permissionButton, styles.allowButton, responding && styles.disabled]}
           disabled={responding}
           onPress={() => void respond('once')}
+          style={({ pressed }) => [
+            styles.permissionButton,
+            styles.allowButton,
+            responding && styles.disabled,
+            pressed && styles.buttonPressed
+          ]}
         >
           <Text style={styles.allowButtonText}>{pending === 'once' ? 'Sending…' : 'Allow'}</Text>
         </Pressable>
@@ -1058,6 +1177,34 @@ const makeStyles = (theme: Theme) =>
       maxHeight: 150
     },
     permissionTextScroll: { maxHeight: 145, padding: 9 },
+    substanceSummary: { alignItems: 'center', flexDirection: 'row', gap: 7, marginTop: 9 },
+    statAdded: { color: theme.success, fontSize: 12, fontWeight: '700' },
+    statRemoved: { color: theme.danger, fontSize: 12, fontWeight: '700' },
+    // 경로는 앞이 아니라 **뒤**가 중요하다 — 잘릴 때 파일 이름이 남아야 한다(ellipsizeMode="head").
+    statPath: { color: theme.textDim, flexShrink: 1, fontSize: 12 },
+    expandRow: {
+      alignItems: 'center',
+      alignSelf: 'flex-start',
+      flexDirection: 'row',
+      gap: 5,
+      paddingVertical: 8
+    },
+    expandPressed: { opacity: 0.55 },
+    expandText: { color: theme.accent, fontSize: 12, fontWeight: '600' },
+    sheet: { backgroundColor: theme.bg, flex: 1 },
+    sheetHeader: {
+      alignItems: 'center',
+      borderBottomColor: theme.border,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      flexDirection: 'row',
+      gap: 12,
+      paddingBottom: 12,
+      paddingHorizontal: 16,
+      paddingTop: 12
+    },
+    sheetTitle: { color: theme.text, flex: 1, fontSize: 15, fontWeight: '600' },
+    sheetBody: { paddingVertical: 12 },
+    sheetText: { paddingHorizontal: 16 },
     permissionCodeScroll: { maxHeight: 145, paddingVertical: 7 },
     permissionCode: {
       color: theme.textMuted,
@@ -1073,19 +1220,25 @@ const makeStyles = (theme: Theme) =>
     permissionActions: { flexDirection: 'row', gap: 8, marginTop: 8 },
     permissionButton: {
       alignItems: 'center',
-      borderColor: theme.border2,
-      borderRadius: 8,
-      borderWidth: 1,
+      borderRadius: 10,
       flex: 1,
       justifyContent: 'center',
-      minHeight: 44,
-      paddingHorizontal: 5
+      minHeight: 46,
+      paddingHorizontal: 6
     },
-    denyButtonText: { color: theme.textMuted, fontSize: 12, fontWeight: '600', textAlign: 'center' },
-    sessionButton: { borderColor: theme.warningBorder },
-    sessionButtonText: { color: theme.warningFg, fontSize: 12, fontWeight: '600', textAlign: 'center' },
-    allowButton: { backgroundColor: theme.warning, borderColor: theme.warning },
-    allowButtonText: { color: theme.onWarning, fontSize: 13, fontWeight: '700', textAlign: 'center' },
+    // 테두리 상자 대신 면으로 눌러지는 자리를 낸다. 폰에서는 고스트 버튼이 어디를 눌러야
+    // 하는지 말해 주지 못한다 — 데스크톱은 hover 로 답하지만 손가락에는 hover 가 없다.
+    denyButton: { backgroundColor: theme.surface2 },
+    denyButtonText: { color: theme.textMuted, fontSize: 13, fontWeight: '600', textAlign: 'center' },
+    sessionButton: {
+      backgroundColor: theme.warningSurface,
+      borderColor: theme.warningBorder,
+      borderWidth: 1
+    },
+    sessionButtonText: { color: theme.warningFg, fontSize: 13, fontWeight: '600', textAlign: 'center' },
+    // 유일한 솔리드이자 가장 넓은 버튼. 데스크톱도 주 액션만 채우고 조금 더 넓게 둔다.
+    allowButton: { backgroundColor: theme.warning, flex: 1.6 },
+    allowButtonText: { color: theme.onWarning, fontSize: 14, fontWeight: '700', textAlign: 'center' },
     ruleBox: {
       backgroundColor: theme.bg3,
       borderRadius: 4,
