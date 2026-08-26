@@ -18,11 +18,20 @@ import type { AgentToolDeps } from './registry'
  * 정당하게 고른 모델을 거절하는 쪽이 더 나쁘다.
  */
 
-/** createWorkspace 에 그대로 펼쳐 넣을 수 있는 모양. 지정하지 않은 것은 키 자체가 없다. */
-export interface RequestedAgentOptions {
-  agentBackend?: AgentBackendId
+/**
+ * 어떤 실행이든 공통으로 고를 수 있는 것 — 모델과 추론 강도. 지정하지 않은 것은 키 자체가 없다.
+ *
+ * 워크스페이스와 위임 서브런이 이 모양을 공유한다. 둘은 백엔드를 정하는 방식이 다르지만(워크스페이스는
+ * 인자·부모·기본값에서 **고르고**, 위임은 도구 이름으로 이미 **정해져 있다**) 그 뒤의 검증은 같다.
+ */
+export interface AgentRunOptions {
   model?: string
   effort?: EffortSetting
+}
+
+/** createWorkspace 에 그대로 펼쳐 넣을 수 있는 모양. */
+export interface RequestedAgentOptions extends AgentRunOptions {
+  agentBackend?: AgentBackendId
 }
 
 function readString(value: unknown): string {
@@ -47,6 +56,25 @@ export async function resolveRequestedAgentOptions(
     parent,
     getStore().getState().settings.defaultAgentBackend
   )
+  return {
+    ...(agentBackend ? { agentBackend } : {}),
+    ...(await validateAgentRunOptions(deps, backend, args))
+  }
+}
+
+/**
+ * 백엔드가 **이미 정해진** 실행의 model·effort 를 검증한다.
+ *
+ * 위임 서브런이 이 길로 온다([[agent/tools/subagent]]) — 거기서는 백엔드가 도구 이름으로 정해져
+ * 있어(`codex_subagent`) 고를 것이 없고, 남는 것은 "이 백엔드가 그 모델과 강도를 받는가" 뿐이다.
+ * 워크스페이스 생성과 같은 함수를 쓰는 이유는 메시지 때문이다 — 같은 실수에 같은 문장이 나와야
+ * 모델이 한 번 배운 것으로 두 곳을 다 고칠 수 있다.
+ */
+export async function validateAgentRunOptions(
+  deps: Pick<AgentToolDeps, 'listModels'>,
+  backend: AgentBackendId,
+  args: Record<string, unknown>
+): Promise<AgentRunOptions> {
   const meta = backendMeta(backend)
 
   const effort = readString(args.effort)
@@ -76,7 +104,6 @@ export async function resolveRequestedAgentOptions(
   }
 
   return {
-    ...(agentBackend ? { agentBackend } : {}),
     ...(model ? { model } : {}),
     ...(effort ? { effort: effort as EffortSetting } : {})
   }

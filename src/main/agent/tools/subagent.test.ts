@@ -78,3 +78,97 @@ describe('병렬 위임', () => {
     expect(emitted[emitted.length - 1]).toEqual([])
   })
 })
+
+/**
+ * 위임마다 모델·강도를 따로 고를 수 있는가.
+ *
+ * 이 축이 없던 동안 위임은 전역 백엔드 설정으로만 돌았고, 그래서 한 워크스페이스 안에서
+ * "훑는 일은 싸게, 판정은 깊게" 를 나눌 방법이 없었다. 검증하는 것은 셋이다 — 요청이 기본값을
+ * 덮는가, **지정하지 않은 축만** 기본값으로 떨어지는가, 그리고 거절이 사이드바에 흔적을 남기지
+ * 않는가.
+ */
+describe('위임 실행의 모델·강도', () => {
+  const deps = (listModels = vi.fn(async () => [{ id: 'claude-haiku-4-5' }])): never =>
+    ({ emitChatEvent: () => {}, listModels }) as never
+
+  beforeEach(() => {
+    state.value = {
+      workspaces: [WORKSPACE],
+      repos: [{ id: 'r1', path: '/tmp/repo' }],
+      settings: { agents: { claude: { model: 'claude-opus-5', effort: 'high' }, codex: {} } }
+    }
+    runSubAgent.mockResolvedValue({ text: 'done', sessionId: null, error: null })
+  })
+
+  it('요청한 값이 전역 기본값을 덮는다', async () => {
+    const { runDelegateTool } = await import('./subagent')
+    await runDelegateTool('claude')(deps(), 'ws1', {
+      description: 'A',
+      prompt: 'a',
+      model: 'claude-haiku-4-5',
+      effort: 'low'
+    })
+    expect(runSubAgent).toHaveBeenCalledWith(
+      expect.objectContaining({ model: 'claude-haiku-4-5', effort: 'low' })
+    )
+  })
+
+  it('지정하지 않은 축은 전역 기본값을 그대로 쓴다', async () => {
+    const { runDelegateTool } = await import('./subagent')
+    await runDelegateTool('claude')(deps(), 'ws1', {
+      description: 'A',
+      prompt: 'a',
+      model: 'claude-haiku-4-5'
+    })
+    // effort 를 함께 떨어뜨리면 사용자가 설정해 둔 값이 조용히 사라진다.
+    expect(runSubAgent).toHaveBeenCalledWith(
+      expect.objectContaining({ model: 'claude-haiku-4-5', effort: 'high' })
+    )
+  })
+
+  it('아무것도 지정하지 않으면 예전과 같이 돈다', async () => {
+    const { runDelegateTool } = await import('./subagent')
+    const listModels = vi.fn(async () => [{ id: 'claude-haiku-4-5' }])
+    await runDelegateTool('claude')(deps(listModels), 'ws1', { description: 'A', prompt: 'a' })
+    expect(runSubAgent).toHaveBeenCalledWith(
+      expect.objectContaining({ model: 'claude-opus-5', effort: 'high' })
+    )
+    // 모델을 고르지 않았으면 카탈로그를 물어볼 이유가 없다 — 조회는 비동기 왕복이다.
+    expect(listModels).not.toHaveBeenCalled()
+  })
+
+  it('카탈로그에 없는 모델은 고를 수 있는 값을 적어 거절한다', async () => {
+    const { runDelegateTool } = await import('./subagent')
+    const emitted: RunningAgent[][] = []
+    const rejected = {
+      emitChatEvent: (_id: string, event: ChatEvent) => {
+        if (event.type === 'agents') emitted.push(event.agents)
+      },
+      listModels: vi.fn(async () => [{ id: 'claude-haiku-4-5' }])
+    } as never
+
+    await expect(
+      runDelegateTool('claude')(rejected, 'ws1', {
+        description: 'A',
+        prompt: 'a',
+        model: 'gpt-9'
+      })
+    ).rejects.toThrow(/claude-haiku-4-5/)
+
+    expect(runSubAgent).not.toHaveBeenCalled()
+    // 거절된 호출은 사이드바에 잠깐이라도 나타나지 않는다.
+    expect(emitted).toEqual([])
+  })
+
+  it('그 백엔드에 없는 강도는 거절한다', async () => {
+    const { runDelegateTool } = await import('./subagent')
+    await expect(
+      runDelegateTool('codex')(deps(), 'ws1', {
+        description: 'A',
+        prompt: 'a',
+        effort: 'ultracode'
+      })
+    ).rejects.toThrow(/ultracode/)
+    expect(runSubAgent).not.toHaveBeenCalled()
+  })
+})

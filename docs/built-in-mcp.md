@@ -459,6 +459,13 @@ context and cannot ask questions mid-run.
 | --- | --- | --- | --- |
 | `description` | string | Yes | Short 3–6 word label shown while the task runs. |
 | `prompt` | string | Yes | Complete, self-contained task brief including files, constraints, and expected result. |
+| `model` | string | No | Model id in that backend's own catalogue. Omitted axes fall back to the backend's configured default, so setting only one keeps the other. |
+| `effort` | string | No | Reasoning effort, limited to the values that backend accepts. `ultracode` is never offered here: it is a mode rather than a level, and a delegated run must not start orchestrating workflows of its own. |
+
+A delegated run does not have to match the workspace it was launched from, which is what
+makes it worth dialling these down for mechanical work and up for hard judgement calls.
+Wooi rejects the call and lists the values it accepts if the model id or effort is not one
+of them.
 
 Claude can launch several Wooi subagent tool calls concurrently. Codex currently
 serializes MCP tool calls, so multiple delegated runs complete one after another.
