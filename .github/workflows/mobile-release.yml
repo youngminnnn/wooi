@@ -122,7 +122,7 @@ jobs:
       # `eas build --local` 은 EAS 의 캐시를 쓰지 못한다("Local builds do not support
       # restoring cache"). 그대로 두면 매번 Gradle 배포판과 의존성을 처음부터 받는다.
       - name: Gradle 캐시
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.gradle/caches
@@ -227,7 +227,7 @@ jobs:
           cache-dependency-path: apps/mobile/package-lock.json
 
       - name: CocoaPods 캐시
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/Library/Caches/CocoaPods
           key: pods-${{ runner.os }}-${{ hashFiles('apps/mobile/package-lock.json') }}
