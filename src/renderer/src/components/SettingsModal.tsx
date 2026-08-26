@@ -818,8 +818,8 @@ function RepositoriesPage({
           Configured only
         </button>
       </div>
-      {/* 다른 병렬 에이전트 도구에서 넘어오는 사람을 위한 상시 입구. 사이드바 안내는 리포가
-          하나도 없을 때만 뜨므로, 일부만 옮겨 둔 사람은 여기서 나머지를 마저 옮긴다. */}
+      {/* 리포를 가리지 않는 상시 입구. 사이드바 안내는 리포가 하나도 없을 때만 뜨고 + 메뉴는
+          리포 하나만 보므로, 여러 리포에 흩어진 worktree 를 한 번에 훑는 자리는 여기다. */}
       <button
         onClick={() => {
           onClose()
@@ -830,10 +830,11 @@ function RepositoriesPage({
         <Download size={15} className="text-neutral-500" />
         <span className="min-w-0 flex-1">
           <span className="block text-sm font-medium text-neutral-200">
-            Import from Conductor or Orca
+            Import existing worktrees
           </span>
           <span className="block text-xs text-neutral-600">
-            Adds their repositories and points Wooi at the worktrees they already created.
+            Turns worktrees that already exist — including ones Conductor or Orca made — into
+            workspaces, and can pick up the agent conversation that was running in them.
           </span>
         </span>
         <ChevronRight size={15} className="text-neutral-600" />

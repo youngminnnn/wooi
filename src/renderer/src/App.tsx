@@ -97,7 +97,7 @@ export default function App(): React.JSX.Element {
     fanout?: boolean
   } | null>(null)
   const [configRepoId, setConfigRepoId] = useState<string | null>(null)
-  const [migrateOpen, setMigrateOpen] = useState(false)
+  const [migrateFor, setMigrateFor] = useState<{ repoId: string | null } | null>(null)
   // ⌘K 퀵 스위처. ⌘1–9 로 닿지 않는(10번째 이후) 워크스페이스로 이동하는 기본 경로다.
   const [quickSwitchOpen, setQuickSwitchOpen] = useState(false)
   // ⇧⌘K 대화 검색. ⌘K 가 "이름으로 이동" 이라면 이쪽은 "내용으로 찾기" 다.
@@ -161,7 +161,7 @@ export default function App(): React.JSX.Element {
     transcriptSearchOpen ||
     newWs !== null ||
     configRepoId !== null ||
-    migrateOpen ||
+    migrateFor !== null ||
     onboardingOpen ||
     githubGateOpen ||
     tourOpen ||
@@ -214,7 +214,8 @@ export default function App(): React.JSX.Element {
 
   // 옮겨오기 모달도 같은 이유로 이벤트로 받는다 — 사이드바 빈 화면과 설정 양쪽에서 연다.
   useEffect(() => {
-    const onOpen = (): void => setMigrateOpen(true)
+    const onOpen = (e: Event): void =>
+      setMigrateFor({ repoId: (e as CustomEvent<string | null>).detail ?? null })
     window.addEventListener(OPEN_MIGRATE_EVENT, onOpen)
     return () => window.removeEventListener(OPEN_MIGRATE_EVENT, onOpen)
   }, [])
@@ -709,7 +710,9 @@ export default function App(): React.JSX.Element {
         <NewFromIssueModal repoId={issueRepoId} onClose={() => setIssueRepoId(null)} />
       )}
       {prRepoId && <NewFromPrModal repoId={prRepoId} onClose={() => setPrRepoId(null)} />}
-      {migrateOpen && <MigrateModal onClose={() => setMigrateOpen(false)} />}
+      {migrateFor && (
+        <MigrateModal repoId={migrateFor.repoId} onClose={() => setMigrateFor(null)} />
+      )}
       {showSettings && (
         // 설정은 백엔드 카탈로그·인증 상태 등 바깥에서 들어오는 값을 많이 읽는다. 그중 하나가
         // 깨져도 앱 전체가 날아가지 않도록 이 서브트리만 격리한다.

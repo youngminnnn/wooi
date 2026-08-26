@@ -8,8 +8,12 @@ import { isPaneWindow } from './paneWindow'
 
 export const OPEN_MIGRATE_EVENT = 'wooi:open-migrate'
 
-export function openMigrate(): void {
+/**
+ * 들여오기 모달을 연다. repoId 를 주면 그 리포 하나만 훑는다(리포 메뉴에서 여는 경로).
+ * 주지 않으면 등록된 리포 전부와, Conductor·Orca 가 아는 리포까지 본다.
+ */
+export function openMigrate(repoId?: string): void {
   // 분리한 패널 창에는 이 모달이 없다. 설정에서 열리는 흐름이라 그쪽에서 다시 열게 두면 된다.
   if (isPaneWindow) return
-  window.dispatchEvent(new CustomEvent(OPEN_MIGRATE_EVENT))
+  window.dispatchEvent(new CustomEvent(OPEN_MIGRATE_EVENT, { detail: repoId ?? null }))
 }

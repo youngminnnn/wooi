@@ -8,11 +8,12 @@ import { promisify } from 'node:util'
 import { agentSettingsFor, normalizePermissionMode } from '@shared/types'
 import type {
   AppState,
+  MigrationAgentSession,
   MigrationImportResult,
   MigrationImportSelection,
   MigrationRepoCandidate,
   MigrationScan,
-  MigrationSource,
+  MigrationScanArgs,
   MigrationSourceId,
   MigrationWorkspaceCandidate,
   Repo,
@@ -24,18 +25,26 @@ import { detectDefaultBranch, isGitRepo, listWorktrees } from '../git'
 import { log } from '../logger'
 import { findFreePort } from '../net'
 import { parseConductor, parseOrca, type ForeignRepo } from './parse'
+import { detectAgentSessions } from './sessions'
 
 /**
- * Conductor·Orca 에서 Wooi 로 옮겨오기.
+ * 이미 있는 git worktree 를 Wooi 워크스페이스로 들여온다.
  *
- * 세 가지 원칙 위에 서 있다.
+ * 대상은 **리포에 딸린 worktree 전부**다 — 손으로 만든 것이든, 다른 도구(Conductor·Orca)가
+ * 만든 것이든, 예전에 Wooi 가 만들었다가 상태에서 사라진 것이든 가리지 않는다. 다른 도구는
+ * 두 가지를 얹어 줄 뿐이다: 아직 등록되지 않은 리포 경로를 알려 주고, worktree 에 사람이
+ * 붙여 둔 이름과 셋업 명령을 채워 준다.
  *
- * 1. **아무것도 옮기거나 지우지 않는다.** 다른 도구가 만든 worktree 는 있던 자리 그대로 두고
- *    Wooi 워크스페이스가 그 경로를 가리키게만 한다. 디렉터리를 옮기면 그 도구가 자기 작업을
- *    잃고, 사용자는 아직 Wooi 를 써 보지도 않은 채 되돌릴 수 없는 상태가 된다.
- * 2. **git 이 판정한다.** 저쪽 DB·JSON 은 이미 지워진 worktree 도 기억한다. 그래서 후보는
- *    언제나 `git worktree list` 와의 교집합이고, 브랜치 이름도 그 목록에서 읽는다.
- * 3. **두 번 눌러도 안전하다.** 이미 등록된 리포·이미 들여온 worktree 는 후보 단계에서
+ * 네 가지 원칙 위에 서 있다.
+ *
+ * 1. **아무것도 옮기거나 지우지 않는다.** worktree 는 있던 자리 그대로 두고 Wooi 워크스페이스가
+ *    그 경로를 가리키게만 한다. 디렉터리를 옮기면 그것을 만든 도구가 자기 작업을 잃고,
+ *    사용자는 아직 Wooi 를 써 보지도 않은 채 되돌릴 수 없는 상태가 된다.
+ * 2. **git 이 판정한다.** 다른 도구의 DB·JSON 은 이미 지워진 worktree 도 기억한다. 그래서
+ *    후보는 언제나 `git worktree list` 가 내놓은 것이고, 브랜치 이름도 그 목록에서 읽는다.
+ * 3. **대화도 따라온다.** 그 디렉터리에서 돌던 CLI 세션이 있으면 id 를 이어받아 다음 턴이
+ *    맥락 위에서 시작한다([[migrate/sessions]]). 이어받을지는 항목별로 고른다.
+ * 4. **두 번 눌러도 안전하다.** 이미 등록된 리포·이미 들여온 worktree 는 후보 단계에서
  *    표시되고 들여오기에서 건너뛴다.
  */
 
@@ -54,6 +63,8 @@ export interface MigrationDeps {
   update: (mutate: (state: Pick<AppState, 'repos' | 'workspaces'>) => void) => void
   /** 리포를 새로 등록한 직후(아바타 백필 등 부수 작업 훅). */
   onRepoAdded?: (repoId: string) => void
+  /** 대화를 이어받은 워크스페이스의 트랜스크립트에 남길 안내(system 항목). */
+  noteImport?: (workspaceId: string, text: string) => void
 }
 
 /**
@@ -106,14 +117,16 @@ function firstExisting(paths: string[]): string | null {
  * sqlite DB 한 테이블을 JSON 배열로 읽는다. `sqlite3` 는 macOS 에 기본 탑재돼 있어 의존성을
  * 늘리지 않는다 — 이 기능 하나 때문에 네이티브 모듈을 붙일 이유가 없다.
  *
- * Conductor 가 실행 중이면 WAL 때문에 읽기 전용 열기가 실패할 수 있다. 그때는 DB 를 임시로
- * 복사해(사이드카 `-wal`·`-shm` 까지) 다시 읽는다 — 마이그레이션하려고 남의 앱을 먼저 끄게
- * 만들면, 정작 무엇을 옮길 수 있는지 보지도 못하고 포기하게 된다.
+ * **읽기 전용 열기는 WAL 앞에서 자주 실패한다.** Conductor 의 DB 는 WAL 모드인데, 공유 메모리
+ * 파일(`-shm`)이 없는 상태로 `-readonly` 로 열면 sqlite 가 그것을 만들지 못해 SQLITE_CANTOPEN
+ * 으로 끝난다(앱이 떠 있지 않아도 그렇다 — 실측). 그래서 실패하면 DB 를 사이드카까지 임시로
+ * 복사해 **읽기 전용 없이** 다시 읽는다. 쓰기가 일어나더라도 그건 우리 사본이고 원본은 손대지
+ * 않는다. 남의 앱을 먼저 끄게 만들면 정작 무엇을 옮길 수 있는지 보지도 못하고 포기하게 된다.
  */
 async function readTable(dbPath: string, table: string): Promise<unknown> {
   const query = `select * from ${table}`
   try {
-    return parseSqliteJson(await runSqlite(dbPath, query))
+    return parseSqliteJson(await runSqlite(dbPath, query, { readonly: true }))
   } catch (err) {
     log.warn(`sqlite 읽기 실패(${table}) — 사본으로 재시도합니다: ${String(err)}`)
   }
@@ -121,19 +134,23 @@ async function readTable(dbPath: string, table: string): Promise<unknown> {
   try {
     const copy = join(dir, basename(dbPath))
     copyFileSync(dbPath, copy)
+    // WAL 은 최근 쓰기가 사이드카에만 있을 수 있다. 함께 복사해야 사본이 같은 내용을 본다.
     for (const suffix of ['-wal', '-shm']) {
       if (existsSync(dbPath + suffix)) copyFileSync(dbPath + suffix, copy + suffix)
     }
-    return parseSqliteJson(await runSqlite(copy, query))
+    return parseSqliteJson(await runSqlite(copy, query, { readonly: false }))
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
 }
 
-async function runSqlite(dbPath: string, query: string): Promise<string> {
-  const { stdout } = await exec('sqlite3', ['-readonly', '-json', dbPath, query], {
-    maxBuffer: 1024 * 1024 * 64
-  })
+async function runSqlite(
+  dbPath: string,
+  query: string,
+  options: { readonly: boolean }
+): Promise<string> {
+  const args = options.readonly ? ['-readonly', '-json', dbPath, query] : ['-json', dbPath, query]
+  const { stdout } = await exec('sqlite3', args, { maxBuffer: 1024 * 1024 * 64 })
   return stdout
 }
 
@@ -147,6 +164,7 @@ function parseSqliteJson(stdout: string): unknown {
 // ── 스캔 ───────────────────────────────────────────────────────────────────
 
 interface SourceRead {
+  id: MigrationSourceId
   dataPath: string
   repos: ForeignRepo[]
 }
@@ -158,14 +176,14 @@ async function readConductor(env: MigrationEnv): Promise<SourceRead | null> {
     readTable(dbPath, 'repos'),
     readTable(dbPath, 'workspaces')
   ])
-  return { dataPath: dbPath, repos: parseConductor(repos, workspaces, env.home) }
+  return { id: 'conductor', dataPath: dbPath, repos: parseConductor(repos, workspaces, env.home) }
 }
 
 function readOrca(env: MigrationEnv): SourceRead | null {
   const dataPath = firstExisting(orcaDataCandidates(env))
   if (!dataPath) return null
   const raw = JSON.parse(readFileSync(dataPath, 'utf-8')) as unknown
-  return { dataPath, repos: parseOrca(raw) }
+  return { id: 'orca', dataPath, repos: parseOrca(raw) }
 }
 
 const SOURCE_LABELS: Record<MigrationSourceId, string> = {
@@ -173,27 +191,113 @@ const SOURCE_LABELS: Record<MigrationSourceId, string> = {
   orca: 'Orca'
 }
 
-export function repoKeyFor(source: MigrationSourceId, externalId: string): string {
-  return `${source}:repo:${externalId}`
+export function repoKeyFor(repoPath: string): string {
+  return `repo:${canonical(repoPath)}`
 }
 
-export function workspaceKeyFor(source: MigrationSourceId, worktreePath: string): string {
-  return `${source}:ws:${canonical(worktreePath)}`
+export function workspaceKeyFor(worktreePath: string): string {
+  return `ws:${canonical(worktreePath)}`
+}
+
+/** 스캔이 후보를 모으는 단위 — 리포 하나와, 그 리포에 대해 알아낸 부가 정보. */
+interface RepoTarget {
+  path: string
+  name: string
+  /** 이 리포를 알려 준 도구. 이미 등록된 리포를 훑는 것이면 null. */
+  source: MigrationSourceId | null
+  setupScript: string
+  archiveScript: string
+  runScripts: { name: string; command: string }[]
+  /** 그 도구가 worktree 에 붙여 둔 이름(경로 → 이름). 없으면 디렉터리 이름을 쓴다. */
+  names: Map<string, string>
 }
 
 /**
- * 옮겨올 수 있는 것을 전부 훑는다. 부작용은 없다 — 읽기만 한다.
+ * 훑을 리포 목록. **이미 등록된 리포가 1순위**다 — 이 기능의 본체는 "리포 하나의 worktree 를
+ * 워크스페이스로 들여온다" 이고, 다른 도구는 아직 등록되지 않은 리포를 추가로 알려 줄 뿐이다.
  *
- * 이미 다 옮긴 리포(등록돼 있고 남은 worktree 도 없는 것)는 목록에서 뺀다. 그래야 "결과가
- * 비어 있다 = 할 일이 없다" 가 되어, 이 스캔 하나로 안내 배너를 띄울지 결정할 수 있다.
+ * 같은 리포를 두 도구가 함께 알고 있으면 먼저 잡힌 쪽이 이긴다(경로로 중복을 없앤다).
  */
-export async function scanMigrationSources(
+async function collectTargets(
+  deps: Pick<MigrationDeps, 'env' | 'getState'>,
+  args: MigrationScanArgs,
+  warnings: string[]
+): Promise<RepoTarget[]> {
+  const state = deps.getState()
+  const byPath = new Map<string, RepoTarget>()
+
+  const registered = args.repoId
+    ? state.repos.filter((repo) => repo.id === args.repoId)
+    : state.repos
+  for (const repo of registered) {
+    byPath.set(canonical(repo.path), {
+      path: repo.path,
+      name: repo.name,
+      source: null,
+      setupScript: '',
+      archiveScript: '',
+      runScripts: [],
+      names: new Map()
+    })
+  }
+
+  // 리포 하나만 보는 호출(리포 메뉴에서 연 경우)에는 다른 도구를 뒤지지 않는다 — 사용자가
+  // 물은 것은 "이 리포에 안 들여온 worktree 가 있나" 하나다.
+  if (args.repoId) return [...byPath.values()]
+
+  const reads: SourceRead[] = []
+  try {
+    const conductor = await readConductor(deps.env)
+    if (conductor) reads.push(conductor)
+  } catch (err) {
+    warnings.push(`Could not read Conductor's data (${errorText(err)}).`)
+  }
+  try {
+    const orca = readOrca(deps.env)
+    if (orca) reads.push(orca)
+  } catch (err) {
+    warnings.push(`Could not read Orca's data (${errorText(err)}).`)
+  }
+
+  for (const read of reads) {
+    for (const foreign of read.repos) {
+      const key = canonical(foreign.path)
+      const existing = byPath.get(key)
+      const names = new Map(foreign.workspaces.map((ws) => [canonical(ws.path), ws.name]))
+      if (existing) {
+        // 이미 등록된 리포라도 이름 정보는 쓸 만하다. 설정은 덮어쓰지 않는다 — 사용자가
+        // Wooi 에서 이미 정해 둔 것이 있고, 그걸 남의 앱 값으로 되돌리면 안 된다.
+        for (const [path, name] of names) existing.names.set(path, name)
+        continue
+      }
+      byPath.set(key, {
+        path: foreign.path,
+        name: foreign.name,
+        source: read.id,
+        setupScript: foreign.setupScript,
+        archiveScript: foreign.archiveScript,
+        runScripts: foreign.runScripts,
+        names
+      })
+    }
+  }
+  return [...byPath.values()]
+}
+
+/**
+ * 들여올 수 있는 것을 전부 훑는다. 부작용은 없다 — 읽기만 한다.
+ *
+ * 남은 것이 없는 리포는 목록에서 뺀다. 그래야 "결과가 비어 있다 = 할 일이 없다" 가 되어,
+ * 이 스캔 하나로 안내 배너를 띄울지 결정할 수 있다.
+ */
+export async function scanMigration(
+  args: MigrationScanArgs,
   deps: Pick<MigrationDeps, 'env' | 'getState'>
 ): Promise<MigrationScan> {
   const state = deps.getState()
   const knownRepos = new Set(state.repos.map((repo) => canonical(repo.path)))
   const knownWorktrees = new Set(state.workspaces.map((ws) => canonical(ws.worktreePath)))
-  // 브랜치 충돌은 리포 단위로 봐야 한다 — 같은 브랜치를 두 worktree 가 체크아웃할 수 없으므로,
+  // 브랜치 충돌은 리포 단위로 본다 — 같은 브랜치를 두 worktree 가 체크아웃할 수 없으므로,
   // 이미 Wooi 가 쓰는 브랜치는 다른 경로에서 들여와도 열리지 않는다.
   const branchesByRepoPath = new Map<string, Set<string>>()
   for (const ws of state.workspaces) {
@@ -206,71 +310,60 @@ export async function scanMigrationSources(
   }
 
   const warnings: string[] = []
-  const reads: Array<{ id: MigrationSourceId; read: SourceRead | null }> = []
-  try {
-    reads.push({ id: 'conductor', read: await readConductor(deps.env) })
-  } catch (err) {
-    warnings.push(`Could not read Conductor's database (${errorText(err)}).`)
-  }
-  try {
-    reads.push({ id: 'orca', read: readOrca(deps.env) })
-  } catch (err) {
-    warnings.push(`Could not read Orca's data file (${errorText(err)}).`)
-  }
+  const targets = await collectTargets(deps, args, warnings)
 
-  const sources: MigrationSource[] = []
-  for (const { id, read } of reads) {
-    if (!read) continue
-    const repos: MigrationRepoCandidate[] = []
-    for (const foreign of read.repos) {
-      if (!existsSync(foreign.path)) continue
-      if (!(await isGitRepo(foreign.path))) continue
-      const repoPath = canonical(foreign.path)
-      const alreadyAdded = knownRepos.has(repoPath)
-      const takenBranches = branchesByRepoPath.get(repoPath) ?? new Set<string>()
+  const repos: MigrationRepoCandidate[] = []
+  const pendingPaths: string[] = []
+  for (const target of targets) {
+    if (!existsSync(target.path)) continue
+    if (!(await isGitRepo(target.path))) continue
+    const repoPath = canonical(target.path)
+    const alreadyAdded = knownRepos.has(repoPath)
+    const takenBranches = branchesByRepoPath.get(repoPath) ?? new Set<string>()
 
-      // git 이 아는 worktree 만 후보가 된다. 저쪽이 기억하는 경로 중 이미 사라진 것은 여기서 빠진다.
-      const live = new Map<string, string | null>()
-      for (const entry of await listWorktrees(foreign.path)) {
-        live.set(canonical(entry.path), entry.branch)
-      }
-
-      const workspaces: MigrationWorkspaceCandidate[] = []
-      for (const ws of foreign.workspaces) {
-        const path = canonical(ws.path)
-        if (path === repoPath) continue // 메인 체크아웃은 워크스페이스가 아니다
-        if (!live.has(path)) continue
-        const branch = live.get(path)
-        // detached HEAD 인 worktree 는 Wooi 의 모델(워크스페이스 = 브랜치 하나)에 담기지 않는다.
-        if (!branch) continue
-        workspaces.push({
-          key: workspaceKeyFor(id, path),
-          name: ws.name,
-          branch,
-          worktreePath: path,
-          alreadyImported: knownWorktrees.has(path) || takenBranches.has(branch)
-        })
-      }
-
-      // 등록도 돼 있고 남은 worktree 도 없으면 사용자가 할 일이 없다.
-      if (alreadyAdded && workspaces.every((ws) => ws.alreadyImported)) continue
-      repos.push({
-        key: repoKeyFor(id, foreign.externalId),
-        name: foreign.name,
-        path: foreign.path,
-        alreadyAdded,
-        setupScript: foreign.setupScript,
-        archiveScript: foreign.archiveScript,
-        runScripts: foreign.runScripts,
-        workspaces
+    const workspaces: MigrationWorkspaceCandidate[] = []
+    for (const entry of await listWorktrees(target.path)) {
+      const path = canonical(entry.path)
+      if (path === repoPath) continue // 메인 체크아웃은 워크스페이스가 아니다
+      // detached HEAD 인 worktree 는 Wooi 의 모델(워크스페이스 = 브랜치 하나)에 담기지 않는다.
+      if (!entry.branch) continue
+      const alreadyImported = knownWorktrees.has(path) || takenBranches.has(entry.branch)
+      if (!alreadyImported) pendingPaths.push(path)
+      workspaces.push({
+        key: workspaceKeyFor(path),
+        name: target.names.get(path) ?? basename(path),
+        branch: entry.branch,
+        worktreePath: path,
+        alreadyImported,
+        session: null
       })
     }
-    if (repos.length > 0) {
-      sources.push({ id, label: SOURCE_LABELS[id], dataPath: read.dataPath, repos })
+
+    // 등록도 돼 있고 남은 worktree 도 없으면 사용자가 할 일이 없다.
+    if (alreadyAdded && workspaces.every((ws) => ws.alreadyImported)) continue
+    repos.push({
+      key: repoKeyFor(repoPath),
+      name: target.name,
+      path: target.path,
+      alreadyAdded,
+      source: target.source,
+      sourceLabel: target.source ? SOURCE_LABELS[target.source] : null,
+      setupScript: target.setupScript,
+      archiveScript: target.archiveScript,
+      runScripts: target.runScripts,
+      workspaces
+    })
+  }
+
+  // 세션 조회는 아직 안 들여온 worktree 에 대해서만, 한 번에 모아서 한다([[migrate/sessions]]).
+  const sessions = detectAgentSessions(pendingPaths, deps.env.home)
+  for (const repo of repos) {
+    for (const ws of repo.workspaces) {
+      if (!ws.alreadyImported) ws.session = sessions.get(ws.worktreePath) ?? null
     }
   }
 
-  return { sources, warnings }
+  return { repos, warnings }
 }
 
 function errorText(err: unknown): string {
@@ -286,7 +379,7 @@ function errorText(err: unknown): string {
 /**
  * 고른 항목을 실제로 등록한다.
  *
- * 키를 받아 **다시 스캔해 대조하는** 것이 요점이다. 렌더러가 보낸 경로를 그대로 믿으면 IPC 가
+ * 키를 받아 **다시 훑어 대조하는** 것이 요점이다. 렌더러가 보낸 경로를 그대로 믿으면 IPC 가
  * 임의 디렉터리를 워크스페이스로 등록하는 통로가 된다(같은 이유로 repo:update 도 저장 시점에
  * 다시 검증한다). 재스캔 비용은 git 호출 몇 번이고, 사용자가 버튼을 누른 직후 한 번뿐이다.
  */
@@ -294,53 +387,81 @@ export async function importMigration(
   selection: MigrationImportSelection,
   deps: MigrationDeps
 ): Promise<MigrationImportResult> {
-  const scan = await scanMigrationSources(deps)
+  const scan = await scanMigration({}, deps)
   const repoKeys = new Set(selection.repoKeys)
   const workspaceKeys = new Set(selection.workspaceKeys)
+  const sessionKeys = new Set(selection.sessionKeys)
   const errors: string[] = []
   let importedRepos = 0
   let importedWorkspaces = 0
+  let importedSessions = 0
 
-  for (const source of scan.sources) {
-    for (const candidate of source.repos) {
-      const chosen = candidate.workspaces.filter(
-        (ws) => workspaceKeys.has(ws.key) && !ws.alreadyImported
-      )
-      // 워크스페이스만 고르고 리포를 안 고른 경우에도 리포는 있어야 한다.
-      if (!repoKeys.has(candidate.key) && chosen.length === 0) continue
+  for (const candidate of scan.repos) {
+    const chosen = candidate.workspaces.filter(
+      (ws) => workspaceKeys.has(ws.key) && !ws.alreadyImported
+    )
+    // 워크스페이스만 고르고 리포를 안 고른 경우에도 리포는 있어야 한다.
+    if (!repoKeys.has(candidate.key) && chosen.length === 0) continue
 
-      const existing = deps
-        .getState()
-        .repos.find((item) => canonical(item.path) === canonical(candidate.path))
-      let repo: Repo
-      if (existing) {
-        repo = existing
-      } else {
-        try {
-          repo = await createRepo(candidate)
-        } catch (err) {
-          errors.push(`${candidate.name}: ${errorText(err)}`)
-          continue
-        }
-        const created = repo
-        deps.update((state) => state.repos.push(created))
-        importedRepos++
-        deps.onRepoAdded?.(created.id)
+    const existing = deps
+      .getState()
+      .repos.find((item) => canonical(item.path) === canonical(candidate.path))
+    let repo: Repo
+    if (existing) {
+      repo = existing
+    } else {
+      try {
+        repo = await createRepo(candidate)
+      } catch (err) {
+        errors.push(`${candidate.name}: ${errorText(err)}`)
+        continue
       }
+      const created = repo
+      deps.update((state) => state.repos.push(created))
+      importedRepos++
+      deps.onRepoAdded?.(created.id)
+    }
 
-      for (const ws of chosen) {
-        try {
-          const workspace = await buildWorkspace(repo, ws, deps)
-          deps.update((state) => state.workspaces.push(workspace))
-          importedWorkspaces++
-        } catch (err) {
-          errors.push(`${ws.name}: ${errorText(err)}`)
+    for (const ws of chosen) {
+      const session = sessionKeys.has(ws.key) ? ws.session : null
+      try {
+        const workspace = await buildWorkspace(repo, ws, session, deps)
+        deps.update((state) => state.workspaces.push(workspace))
+        importedWorkspaces++
+        if (session) {
+          importedSessions++
+          deps.noteImport?.(workspace.id, importNote(ws, session))
         }
+      } catch (err) {
+        errors.push(`${ws.name}: ${errorText(err)}`)
       }
     }
   }
 
-  return { repos: importedRepos, workspaces: importedWorkspaces, errors }
+  return {
+    repos: importedRepos,
+    workspaces: importedWorkspaces,
+    sessions: importedSessions,
+    errors
+  }
+}
+
+/**
+ * 대화를 이어받은 워크스페이스의 첫 항목.
+ *
+ * 이 문장이 없으면 화면과 실제가 어긋난다 — 에이전트는 지난 맥락을 전부 기억하는데 대화창은
+ * 비어 있어서, 사용자는 자기가 하지 않은 말을 전제로 답하는 에이전트를 보게 된다.
+ */
+export function importNote(
+  candidate: Pick<MigrationWorkspaceCandidate, 'worktreePath'>,
+  session: MigrationAgentSession
+): string {
+  const tool = session.backend === 'claude' ? 'Claude Code' : 'Codex'
+  return [
+    `Imported this worktree from ${candidate.worktreePath}.`,
+    `Continuing the ${tool} conversation “${session.label}” — the agent keeps its full context,`,
+    'but the earlier messages were not written by Wooi and are not shown here.'
+  ].join(' ')
 }
 
 /** 후보를 Wooi 의 리포 레코드로 옮긴다. 기본 브랜치와 전달 목록은 Wooi 가 새로 판정한다. */
@@ -359,8 +480,8 @@ async function createRepo(candidate: MigrationRepoCandidate): Promise<Repo> {
       autoStart: false
     })),
     archiveScript: candidate.archiveScript,
-    // Conductor·Orca 에도 "새 worktree 에 딸려 보낼 무시된 파일" 개념이 있지만 저장 위치가
-    // 서로 달라, 옮기기보다 Wooi 가 리포를 직접 훑어 채우는 편이 정확하다(repo:add 와 같은 규칙).
+    // 다른 도구에도 "새 worktree 에 딸려 보낼 무시된 파일" 개념이 있지만 저장 위치가 서로 달라,
+    // 옮기기보다 Wooi 가 리포를 직접 훑어 채우는 편이 정확하다(repo:add 와 같은 규칙).
     carryItems: detectCarryItems(candidate.path),
     addedAt: Date.now()
   }
@@ -376,11 +497,14 @@ async function createRepo(candidate: MigrationRepoCandidate): Promise<Repo> {
 async function buildWorkspace(
   repo: Repo,
   candidate: MigrationWorkspaceCandidate,
+  session: MigrationAgentSession | null,
   deps: MigrationDeps
 ): Promise<Workspace> {
   const state = deps.getState()
   const settings = state.settings
-  const agentBackend = settings.defaultAgentBackend
+  // 대화를 이어받으면 백엔드도 그 대화의 것으로 정해진다 — 다른 백엔드로 열면 resume 토큰이
+  // 아무 의미가 없고, 사용자는 맥락을 잃은 채로 시작하게 된다.
+  const agentBackend = session?.backend ?? settings.defaultAgentBackend
   const permissionMode = normalizePermissionMode(
     backendMeta(agentBackend),
     agentSettingsFor(settings, agentBackend).permissionMode
@@ -404,7 +528,7 @@ async function buildWorkspace(
     // 저쪽에서 붙여 둔 이름이 디렉터리 이름과 다르면 그건 사용자가 정한 이름이다 — 표시 이름으로 산다.
     displayName: candidate.name && candidate.name !== name ? candidate.name : null,
     branch: candidate.branch,
-    // 스택 관계는 옮겨오지 않는다. 저쪽에는 대응하는 개념이 없거나(Conductor) 형태가 달라서,
+    // 스택 관계는 옮겨오지 않는다. 다른 도구에는 대응하는 개념이 없거나 형태가 달라서,
     // 짐작해 넣으면 restack·PR retarget 이 사용자가 만든 적 없는 관계 위에서 돈다.
     baseBranch: repo.defaultBranch,
     parentWorkspaceId: null,
@@ -412,10 +536,10 @@ async function buildWorkspace(
     prNumber: null,
     worktreePath: candidate.worktreePath,
     ports,
-    // 셋업은 저쪽에서 이미 돌았다(node_modules 가 그 증거다). 'idle' 로 두면 Wooi 가 아직 돌지
-    // 않은 것으로 보고 재실행을 권한다.
+    // 셋업은 이 디렉터리에서 이미 돌았다(node_modules 가 그 증거다). 'idle' 로 두면 Wooi 가
+    // 아직 돌지 않은 것으로 보고 재실행을 권한다.
     setupState: 'success',
-    sessionId: null,
+    sessionId: session?.sessionId ?? null,
     permissionMode,
     model: null,
     effort: null,

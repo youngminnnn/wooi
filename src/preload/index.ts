@@ -12,7 +12,7 @@ const api: WooiApi = {
   getState: () => ipcRenderer.invoke(IPC.appGetState),
 
   migrate: {
-    scan: () => ipcRenderer.invoke(IPC.migrateScan),
+    scan: (args) => ipcRenderer.invoke(IPC.migrateScan, args),
     run: (selection) => ipcRenderer.invoke(IPC.migrateImport, selection)
   },
 

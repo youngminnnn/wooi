@@ -14,7 +14,7 @@ import { forgetRunningAgents } from './runningAgentsCache'
 import { getTranscripts } from './transcripts'
 import { buildHandoffPrompt, estimateHandoffTokens, formatHandoffTokens } from '@shared/handoff'
 import { listDir, readFileInRoot, searchFiles } from './fsbrowse'
-import { importMigration, scanMigrationSources } from './migrate'
+import { importMigration, scanMigration } from './migrate'
 import { formatIssues } from '@shared/previewIssues'
 import { log } from './logger'
 import {
@@ -87,6 +87,7 @@ import type {
   MigrationImportResult,
   MigrationImportSelection,
   MigrationScan,
+  MigrationScanArgs,
   ReviewVerdict,
   TranscriptSearchResult
 } from '@shared/types'
@@ -668,10 +669,21 @@ export function registerIpc(ctx: IpcContext): void {
     getState: () => store.getState(),
     update: (mutate: (state: Pick<AppState, 'repos' | 'workspaces'>) => void) =>
       store.update(mutate),
-    onRepoAdded: (repoId: string) => void backfillRepoAvatar(repoId)
+    onRepoAdded: (repoId: string) => void backfillRepoAvatar(repoId),
+    // 이어받은 대화는 Wooi 가 쓴 기록이 아니라 화면에 나오지 않는다. 무슨 일이 있었는지
+    // 대화 첫 줄에 남겨, 사용자가 자기가 하지 않은 말을 전제로 답하는 에이전트를 마주하지 않게 한다.
+    noteImport: (workspaceId: string, text: string) =>
+      getTranscripts().upsert(workspaceId, {
+        id: randomUUID(),
+        type: 'system',
+        text,
+        ts: Date.now()
+      })
   }
 
-  handle(IPC.migrateScan, (): Promise<MigrationScan> => scanMigrationSources(migrationDeps))
+  handle(IPC.migrateScan, (_e, args?: MigrationScanArgs): Promise<MigrationScan> =>
+    scanMigration({ repoId: typeof args?.repoId === 'string' ? args.repoId : null }, migrationDeps)
+  )
 
   handle(
     IPC.migrateImport,
@@ -679,7 +691,11 @@ export function registerIpc(ctx: IpcContext): void {
       const keys = (value: unknown): string[] =>
         Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
       const result = await importMigration(
-        { repoKeys: keys(selection?.repoKeys), workspaceKeys: keys(selection?.workspaceKeys) },
+        {
+          repoKeys: keys(selection?.repoKeys),
+          workspaceKeys: keys(selection?.workspaceKeys),
+          sessionKeys: keys(selection?.sessionKeys)
+        },
         migrationDeps
       )
       if (result.repos > 0 || result.workspaces > 0) broadcastState()

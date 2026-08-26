@@ -25,6 +25,7 @@ import {
   GitPullRequest,
   MessagesSquare,
   Copy,
+  Download,
   Square,
   X,
   Hourglass,
@@ -206,8 +207,8 @@ export default function Sidebar({
     ordered.length > 1 &&
     !showQuickSwitchHint
 
-  // 리포가 하나도 없을 때만 다른 도구의 데이터를 찾아본다. 옮겨오기를 권할 자리는 첫 화면
-  // 하나뿐이고, 스캔은 git 을 리포마다 부르므로 상시로 돌릴 이유가 없다.
+  // 리포가 하나도 없을 때만 훑어 본다. 들여오기를 권할 자리는 첫 화면 하나뿐이고, 스캔은
+  // 리포마다 git 을 부르므로 상시로 돌릴 이유가 없다(리포가 생긴 뒤에는 + 메뉴에 항상 있다).
   const [migratable, setMigratable] = useState(false)
   const noRepos = app.repos.length === 0
   useEffect(() => {
@@ -216,7 +217,7 @@ export default function Sidebar({
     void window.api.migrate
       .scan()
       .then((scan) => {
-        if (active) setMigratable(scan.sources.length > 0)
+        if (active) setMigratable(scan.repos.length > 0)
       })
       .catch(() => undefined)
     return () => {
@@ -366,10 +367,10 @@ export default function Sidebar({
                 이미 등록해 둔 리포와 worktree 를 손으로 다시 만들게 된다. */}
             {migratable && (
               <button
-                onClick={openMigrate}
+                onClick={() => openMigrate()}
                 className="mt-3 block w-full rounded-lg border border-[var(--border-2)] px-3 py-2 text-xs text-neutral-300 hover:bg-[var(--surface-2)]"
               >
-                Import from Conductor or Orca
+                Import existing worktrees
               </button>
             )}
           </div>
@@ -1845,6 +1846,15 @@ function NewWorkspaceButton({
     label: 'Fan out one prompt…',
     icon: <Copy size={13} />,
     onSelect: () => onFanout(repoId)
+  })
+  // 이미 있는 worktree 를 워크스페이스로 앉히는 것도 "여기 무언가를 더한다" 다. 손으로 만든
+  // worktree 든 다른 도구가 만든 것이든, 이 리포에서 시작하는 유일한 메뉴 안에 함께 둔다.
+  actions.push({
+    key: 'import',
+    label: 'Import existing worktrees…',
+    icon: <Download size={13} />,
+    onSelect: () => openMigrate(repoId),
+    separatorBefore: true
   })
 
   return (

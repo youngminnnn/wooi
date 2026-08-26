@@ -67,6 +67,7 @@ import type {
   MigrationImportResult,
   MigrationImportSelection,
   MigrationScan,
+  MigrationScanArgs,
   ReviewVerdict,
   RewindActionResult,
   StackCascadeResult,
@@ -94,11 +95,11 @@ export interface WooiApi {
   getState(): Promise<AppState>
 
   /**
-   * Conductor·Orca 에서 옮겨오기. 스캔은 읽기만 하고, 들여오기는 고른 키를 main 이 **다시
-   * 훑어 대조한** 뒤에만 등록한다(경로를 렌더러에서 받아 그대로 믿지 않는다).
+   * 이미 있는 worktree 를 워크스페이스로 들여오기. 스캔은 읽기만 하고, 들여오기는 고른 키를
+   * main 이 **다시 훑어 대조한** 뒤에만 등록한다(경로를 렌더러에서 받아 그대로 믿지 않는다).
    */
   migrate: {
-    scan(): Promise<MigrationScan>
+    scan(args?: MigrationScanArgs): Promise<MigrationScan>
     run(selection: MigrationImportSelection): Promise<MigrationImportResult>
   }
 
