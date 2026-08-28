@@ -1,5 +1,5 @@
 import type { AgentBackendId, EffortSetting, Workspace } from '@shared/types'
-import { AGENT_BACKEND_IDS } from '@shared/types'
+import { AGENT_BACKEND_IDS, usableDefaultBackend } from '@shared/types'
 import { backendMeta, resolveWorkspaceAgentBackend } from '../backend'
 import { getStore } from '../../store'
 import type { AgentToolDeps } from './registry'
@@ -50,12 +50,18 @@ export async function resolveRequestedAgentOptions(
     : undefined
 
   // 모델·effort 는 백엔드마다 다른 목록으로 검증해야 한다. 그 백엔드는 생성 규칙과 **같은
-  // 답**이어야 하므로 createWorkspace 가 쓰는 함수를 그대로 부른다.
-  const backend = resolveWorkspaceAgentBackend(
-    agentBackend,
-    parent,
-    getStore().getState().settings.defaultAgentBackend
-  )
+  // 답**이어야 하므로 createWorkspace 가 쓰는 함수를 그대로 부른다. explicit 이나 부모가 있으면
+  // 그대로 쓰고, 정말 전역 기본값으로 떨어질 때만 감지 결과와 화해한다(`usableDefaultBackend`)
+  // — 저장된 기본값이 지금 못 쓰는 백엔드(CLI 제거 등)를 가리켜도 조용히 실패하지 않도록.
+  const configuredDefault = getStore().getState().settings.defaultAgentBackend
+  const fallbackDefault =
+    agentBackend || parent?.agentBackend
+      ? configuredDefault
+      : usableDefaultBackend(
+          configuredDefault,
+          (await deps.listBackends()).filter((b) => b.available).map((b) => b.id)
+        )
+  const backend = resolveWorkspaceAgentBackend(agentBackend, parent, fallbackDefault)
   return {
     ...(agentBackend ? { agentBackend } : {}),
     ...(await validateAgentRunOptions(deps, backend, args))

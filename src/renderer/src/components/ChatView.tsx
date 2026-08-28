@@ -498,6 +498,10 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
             </HeaderButton>
           </div>
           <HeaderButton
+            // work-panel 힌트의 앵커. `App.tsx` 의 data-tour="work-panel" 은 패널의 **내용물**
+            // 컨테이너라 패널이 닫혀 있으면 DOM 에 아예 없다 — 그런데 이 힌트는 정확히 "패널이
+            // 닫혀 있을 때" 뜨므로, 그때도 항상 존재하는 이 토글 버튼을 대신 가리켜야 한다.
+            dataTour="work-panel-toggle"
             title={
               workPaneDetached
                 ? 'Work panel — open in a separate window'
@@ -562,6 +566,7 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
                 // gh 미연결이면 버튼을 숨기지 않고 "Connect GitHub" 로 바꿔 기능의 존재를 알린다.
                 !prRefreshing && (
                   <HeaderChip
+                    data-tour="open-pr"
                     onClick={createPr}
                     title={
                       githubDisconnected

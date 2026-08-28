@@ -1446,13 +1446,18 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
               const accent = readOnlyish
                 ? 'text-[var(--readonly-400)]'
                 : 'text-[var(--warning-400)]'
+              // permission-mode 힌트(lib/hints.ts)의 앵커. 예전엔 data-tour="chat" 이라 채팅
+              // 컬럼 전체(수백 px)를 가리키는 셈이었다 — 힌트 카드가 실제 컨트롤 옆이 아니라
+              // 엉뚱한 빈 자리에 뜨는 원인이었다. 권한 모드를 실제로 보여주는 이 텍스트로 좁힌다.
               return footer ? (
-                <span className={accent}>
+                <span data-tour="permission-mode" className={accent}>
                   {footer.symbol} {footer.text}{' '}
                   <span className="text-neutral-600">(shift+tab to cycle)</span>
                 </span>
               ) : (
-                <span className="text-neutral-600">shift+tab to cycle permission modes</span>
+                <span data-tour="permission-mode" className="text-neutral-600">
+                  shift+tab to cycle permission modes
+                </span>
               )
             })()
           )}
