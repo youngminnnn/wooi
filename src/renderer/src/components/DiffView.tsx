@@ -9,10 +9,12 @@ import {
   MessageSquarePlus
 } from 'lucide-react'
 import type { FileDiff, WorkspaceDiff } from '@shared/types'
+import { diffRenderLimit } from '@shared/diffRenderLimit'
 import { parsePatch, rowSign, type PatchHunk, type PatchRow } from './files/diffPatch'
 import type { DiffComment, DiffCommentAnchor } from '../lib/diffComments'
 import DiffCommentBox from './diff/DiffCommentBox'
 import DiffCommentCard from './diff/DiffCommentCard'
+import { LargeDiffNotice, OmittedPatchNotice } from './diff/LargeDiffNotice'
 
 /**
  * base 브랜치 대비 변경을 파일별로 표시한다(통합 diff).
@@ -30,6 +32,7 @@ export interface DiffCommenting {
 }
 
 const NO_COMMENTS: DiffComment[] = []
+const NO_HUNKS: PatchHunk[] = []
 
 export default function DiffView({
   diff,
@@ -116,7 +119,13 @@ function FileBlock({
   commenting?: DiffCommenting
   comments: DiffComment[]
 }): React.JSX.Element {
-  const hunks = useMemo(() => parsePatch(file.patch), [file.patch])
+  // 상한 판정이 먼저다. parsePatch 는 행마다 객체를 만들므로, 그리지 않기로 한 patch 를
+  // 파싱하는 것만으로도 이미 늦는다.
+  const limit = useMemo(() => diffRenderLimit(file.patch), [file.patch])
+  const hunks = useMemo(
+    () => (limit.limited ? NO_HUNKS : parsePatch(file.patch)),
+    [file.patch, limit.limited]
+  )
   // 사용자가 직접 접거나 편 상태. 손대지 않았으면 크기와 코멘트 유무로 정한다 — 방금 단 코멘트가
   // 접힌 파일 안에 숨어 버리면 어디에 썼는지 확인할 길이 없다.
   const [openOverride, setOpenOverride] = useState<boolean | null>(null)
@@ -260,33 +269,58 @@ function FileBlock({
               ))}
             </div>
           ))}
-          {/* diff 가 바뀌어 원래 줄이 사라진 코멘트. 버리지 않고 파일 끝에 모아 둔다. */}
-          {placed.orphans.length > 0 && (
-            <div className="border-t border-[var(--border)]">
-              <p className="px-3 py-1 text-[10px] text-neutral-500 font-sans">
-                No longer matches the current diff:
-              </p>
-              {placed.orphans.map((c) => (
-                <DiffCommentCard
-                  key={c.id}
-                  comment={c}
-                  onEdit={(body) => commenting?.onEdit(c.id, body)}
-                  onRemove={() => commenting?.onRemove(c.id)}
-                />
-              ))}
-            </div>
-          )}
+          <OrphanComments comments={placed.orphans} commenting={commenting} />
+        </div>
+      )}
+
+      {/* main 이 본문을 못 실어 왔다(브랜치 diff 가 git 읽기 한도를 넘음). */}
+      {open && !file.binary && file.patchOmitted && (
+        <OmittedPatchNotice additions={file.additions} deletions={file.deletions} />
+      )}
+
+      {/* 본문은 있지만 그리면 렌더러가 멎는 크기 — 숫자로 이유를 대신한다. */}
+      {open && !file.binary && file.patch && limit.limited && (
+        <div className="bg-[var(--code-bg)]">
+          <LargeDiffNotice limit={limit} />
+          {/* hunk 가 없으니 이 파일의 코멘트는 전부 orphan 이다. 안 보인다고 버리지는 않는다. */}
+          <OrphanComments comments={placed.orphans} commenting={commenting} />
         </div>
       )}
 
       {/* hunk 를 못 뽑은 patch(모드 변경 등)는 예전처럼 통짜로 색만 입혀 보여 준다. */}
-      {open && !file.binary && file.patch && hunks.length === 0 && (
+      {open && !file.binary && file.patch && !limit.limited && hunks.length === 0 && (
         <pre className="overflow-x-auto text-xs font-mono leading-[1.45] bg-[var(--code-bg)] m-0">
           {file.patch.split('\n').map((line, i) => (
             <DiffLine key={i} line={line} />
           ))}
         </pre>
       )}
+    </div>
+  )
+}
+
+/** diff 가 바뀌어 원래 줄이 사라진 코멘트. 버리지 않고 파일 끝에 모아 둔다. */
+function OrphanComments({
+  comments,
+  commenting
+}: {
+  comments: DiffComment[]
+  commenting?: DiffCommenting
+}): React.JSX.Element | null {
+  if (comments.length === 0) return null
+  return (
+    <div className="border-t border-[var(--border)]">
+      <p className="px-3 py-1 text-[10px] text-neutral-500 font-sans">
+        No longer matches the current diff:
+      </p>
+      {comments.map((c) => (
+        <DiffCommentCard
+          key={c.id}
+          comment={c}
+          onEdit={(body) => commenting?.onEdit(c.id, body)}
+          onRemove={() => commenting?.onRemove(c.id)}
+        />
+      ))}
     </div>
   )
 }

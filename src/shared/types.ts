@@ -2712,6 +2712,14 @@ export interface FileDiff {
   /** 이 파일의 통합 diff 본문(헤더 포함). 바이너리는 빈 문자열. */
   patch: string
   binary: boolean
+  /**
+   * patch 본문을 싣지 못한 이유. 있으면 `patch` 는 비어 있지만 `additions`/`deletions` 는
+   * 여전히 믿을 수 있다 — 본문 없이 numstat 만 읽어 온 경우다(`getDiff` 참고).
+   *
+   * 없는 필드로 두는 이유: 정상 경로에서는 붙지 않아야 하고, 이 기능 이전 버전이 만든
+   * 값과도 그대로 호환된다.
+   */
+  patchOmitted?: 'too-large'
 }
 
 /** base 브랜치 대비 workspace 의 전체 변경(커밋 + 미커밋). */
