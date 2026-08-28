@@ -107,6 +107,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
   // 충돌 해결 턴은 토큰을 쓰므로 기본은 꺼짐 — 기존 사용자도 load 의 기본값 병합으로 false 가
   // 되므로 schemaVersion 을 올릴 필요가 없다.
   autoResolveConflicts: false,
+  // 수면 방지는 기본 켜짐 — 걸어두고 자리를 뜬 턴이 맥이 잠들어 멈추는 것이 이 앱에서 가장
+  // 흔한 손실이고, 화면을 켜 두지 않으므로 비용이 작다. 기존 사용자도 load 의 기본값 병합으로
+  // true 가 되므로 schemaVersion 을 올릴 필요가 없다.
+  keepAwakeWhileRunning: true,
   manualWorkspaceSetup: false,
   onboarded: false,
   // 아직 기본값을 고르지 않음 — 기존 사용자도 load 의 기본값 병합으로 false 가 되어,

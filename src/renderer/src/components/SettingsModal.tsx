@@ -109,7 +109,7 @@ const PAGES: { id: Page; label: string; icon: typeof Settings2; keywords: string
     id: 'general',
     label: 'General',
     icon: Settings2,
-    keywords: 'theme appearance panel sidebar workspace creation'
+    keywords: 'theme appearance panel sidebar workspace creation sleep awake power display'
   },
   {
     id: 'agents',
@@ -462,6 +462,18 @@ function GeneralPage({
             label="Show tips"
             checked={settings.showHints}
             onChange={(value) => save({ showHints: value })}
+          />
+        </SettingRow>
+      </SettingGroup>
+      <SettingGroup title="While agents work">
+        <SettingRow
+          title="Keep this Mac awake"
+          description="Prevents sleep only while a workspace is running, so long turns finish unattended. The display still sleeps."
+        >
+          <Switch
+            label="Keep this Mac awake"
+            checked={settings.keepAwakeWhileRunning}
+            onChange={(value) => save({ keepAwakeWhileRunning: value })}
           />
         </SettingRow>
       </SettingGroup>

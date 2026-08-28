@@ -12,6 +12,7 @@ import { rememberPrStatus } from './prStatusCache'
 import { forgetContextUsage } from './contextUsageCache'
 import { forgetWorkspaceUsage } from './usageLedger'
 import { forgetRunningAgents } from './runningAgentsCache'
+import { setSleepBlockerEnabled } from './sleepBlocker'
 import { getTranscripts } from './transcripts'
 import { buildHandoffPrompt, estimateHandoffTokens, formatHandoffTokens } from '@shared/handoff'
 import { listDir, readFileInRoot, searchFiles } from './fsbrowse'
@@ -2985,6 +2986,10 @@ export function registerIpc(ctx: IpcContext): void {
   handle(IPC.settingsUpdate, (_e, patch: Partial<AppSettings>) => {
     store.update((st) => Object.assign(st.settings, patch))
     if (patch.autoResumeAfterRateLimit === false) ctx.sessions.cancelAllRateLimitResumes()
+    // 껐으면 지금 붙잡고 있는 것을 바로 놓아야 한다 — 다음 방송까지 기다리면 도는 턴이 끝날
+    // 때까지 맥이 계속 깨어 있다.
+    if (patch.keepAwakeWhileRunning !== undefined)
+      setSleepBlockerEnabled(patch.keepAwakeWhileRunning)
     broadcastState()
   })
 
