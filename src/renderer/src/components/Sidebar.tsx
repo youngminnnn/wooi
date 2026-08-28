@@ -51,6 +51,7 @@ import {
 import { conversationForkDisabledReason } from '../lib/conversationFork'
 import { orderRowsWithPending } from '../lib/sidebarRows'
 import { useGithubDisconnected } from '../lib/github'
+import { askSummary } from '@shared/askSummary'
 import { WorkspaceAgents } from './WorkspaceAgents'
 import { WorkspaceApiRetry } from './WorkspaceApiRetry'
 import { WorkspaceGoal } from './WorkspaceGoal'
@@ -536,9 +537,12 @@ function WorkspaceRow({
   const requestDelete = useStore((s) => s.requestDeleteWorkspace)
   const requireGithub = useStore((s) => s.requireGithub)
   const githubDisconnected = useGithubDisconnected()
-  const awaitingPermission = useStore((s) =>
-    s.permissions.some((p) => p.workspaceId === workspace.id)
-  )
+  // 대기 중인 요청을 **객체째** 집는다 — 예전에는 있는지 없는지(boolean)만 봤지만, 무엇을
+  // 묻는지 한 줄로 보여 주려면 요청 자체가 필요하다. 배열 원소를 그대로 돌려주므로 참조가
+  // 유지되어 셀렉터가 매 렌더 새 값을 만들지 않는다.
+  const pendingRequest = useStore((s) => s.permissions.find((p) => p.workspaceId === workspace.id))
+  const awaitingPermission = !!pendingRequest
+  const ask = pendingRequest ? askSummary(pendingRequest) : ''
   const backgroundTasks = useStore((s) => backgroundTaskCount(s.runningAgents[workspace.id]))
   // null 이 아니면 표시 이름 인라인 편집 중. 초깃값은 현재 표시 이름으로 채운다.
   const [editingName, setEditingName] = useState<string | null>(null)
@@ -801,6 +805,7 @@ function WorkspaceRow({
           <StatusDot
             status={workspace.status}
             awaitingPermission={awaitingPermission}
+            ask={ask}
             compacting={compacting}
             stale={stale}
             runningMs={runningMs}
@@ -959,6 +964,15 @@ function WorkspaceRow({
               </span>
             ) : null}
           </div>
+          {/* 무엇을 묻고 있는지 한 줄. 방패 아이콘만으로는 "yes 만 치면 되는 것" 과 "앉아서 봐야
+              하는 설계 결정" 이 구분되지 않아, 여럿이 동시에 물으면 전부 열어 봐야 우선순위를
+              정할 수 있었다. 메타 줄에 끼워 넣지 않고 줄을 따로 쓰는 이유는 그 줄이 이미
+              브랜치·뒤처짐·시간으로 빽빽해서, 여기 붙이면 둘 다 못 읽게 되기 때문이다. */}
+          {ask && (
+            <div className="mt-0.5 truncate text-xs text-[var(--warning-400)]/90" title={ask}>
+              {ask}
+            </div>
+          )}
           {/* 액션 클러스터는 absolute 오버레이로 띄운다. 호버 전용 컨트롤이 평상시 레이아웃 폭을
             점유하지 않게 해서 제목/메타가 사이드바 폭을 온전히 쓰도록 하는 것이 핵심이다.
             display 대신 opacity 로만 감추므로 Tab 포커스 경로도 그대로 유지된다.
@@ -1472,6 +1486,7 @@ const PR_DOT: Record<PrState, { dotClass: string; label: string }> = {
 export function StatusDot({
   status,
   awaitingPermission,
+  ask,
   compacting,
   stale,
   runningMs,
@@ -1483,6 +1498,8 @@ export function StatusDot({
 }: {
   status: Workspace['status']
   awaitingPermission: boolean
+  /** 지금 무엇을 묻고 있는지 한 줄 요약. 비어 있으면 일반 문구로 물러선다. */
+  ask?: string
   compacting: boolean
   stale: boolean
   runningMs: number
@@ -1500,7 +1517,10 @@ export function StatusDot({
   // 권한 대기는 가장 행동 가능한 상태라 다른 표시보다 우선한다.
   if (awaitingPermission) {
     return (
-      <span title="Waiting for your permission" className="shrink-0 grid place-items-center">
+      <span
+        title={ask || 'Waiting for your permission'}
+        className="shrink-0 grid place-items-center"
+      >
         <ShieldQuestion size={13} className="text-[var(--warning-400)]" />
       </span>
     )

@@ -16,7 +16,14 @@ import { backgroundTaskCount, refreshAccountUsage, useStore } from '../store'
 import { useNow } from '../lib/useNow'
 import { formatCost, formatCountdown, formatDuration, formatTime } from '../lib/format'
 import { workspaceDisplayName } from '@shared/types'
-import type { AgentBackendId, RateLimitSnapshot, UsageInfo, Workspace } from '@shared/types'
+import type {
+  AgentBackendId,
+  PermissionRequest,
+  RateLimitSnapshot,
+  UsageInfo,
+  Workspace
+} from '@shared/types'
+import { askSummary } from '@shared/askSummary'
 import { isPaneWindow } from '../lib/paneWindow'
 import { headlineWindows, normalizeUtilization } from '../lib/rateLimit'
 import type { RateLimitWindow } from '../lib/rateLimit'
@@ -136,15 +143,25 @@ export default function Overview(): React.JSX.Element {
     else void selectWorkspace(id)
   }
 
-  const pendingIds = new Set(permissions.map((p) => p.workspaceId))
+  // 워크스페이스마다 대기 중인 요청 **하나**를 집어 둔다(가장 먼저 온 것). id 집합만 들고
+  // 있었을 때는 방패 아이콘밖에 그릴 수 없었지만, 요청을 들고 있으면 무엇을 묻는지도 그릴 수 있다.
+  const pendingByWorkspace = new Map<string, PermissionRequest>()
+  for (const p of permissions)
+    if (!pendingByWorkspace.has(p.workspaceId)) pendingByWorkspace.set(p.workspaceId, p)
 
   const flagsOf = (
     w: Workspace
   ): { running: boolean; attention: boolean; unread: boolean; idle: boolean } => {
     const running = w.status === 'running'
-    const attention = pendingIds.has(w.id)
+    const attention = pendingByWorkspace.has(w.id)
     const isUnread = !!unread[w.id]
     return { running, attention, unread: isUnread, idle: !running && !attention && !isUnread }
+  }
+
+  /** 입력 대기 중이면 무엇을 묻고 있는지 한 줄로. 아니면 빈 문자열. */
+  const askOf = (w: Workspace): string => {
+    const pending = pendingByWorkspace.get(w.id)
+    return pending ? askSummary(pending) : ''
   }
 
   const counts = {
@@ -286,6 +303,7 @@ export default function Overview(): React.JSX.Element {
                 workspace={w}
                 repoName={repoName(w.repoId)}
                 flags={flagsOf(w)}
+                ask={askOf(w)}
                 now={now}
                 cost={costByWorkspace[w.id] ?? 0}
                 showCost={showCardCost}
@@ -591,6 +609,7 @@ function OverviewCard({
   workspace,
   repoName,
   flags,
+  ask,
   now,
   cost,
   showCost,
@@ -599,6 +618,8 @@ function OverviewCard({
   workspace: Workspace
   repoName: string
   flags: { running: boolean; attention: boolean; unread: boolean; idle: boolean }
+  /** 입력 대기 중일 때 무엇을 묻고 있는지 한 줄. 그 외 상태에서는 빈 문자열. */
+  ask: string
   now: number
   cost: number
   showCost: boolean
@@ -645,6 +666,15 @@ function OverviewCard({
           />
         )}
       </div>
+
+      {/* 무엇을 묻고 있는지 한 줄. 카드 다섯 장이 동시에 물어볼 때 다섯 번 열어 보지 않고
+          우선순위를 정하게 하는 것이 이 줄의 존재 이유다. 제목 바로 아래에 두어 훑을 때
+          이름 다음으로 읽히게 한다. */}
+      {ask && (
+        <div className="mt-1.5 truncate text-xs text-[var(--warning-400)]/90" title={ask}>
+          {ask}
+        </div>
+      )}
 
       <div className="mt-1.5 flex items-center gap-1.5 text-xs text-neutral-500 min-w-0">
         <span className="truncate text-neutral-600">{repoName}</span>
