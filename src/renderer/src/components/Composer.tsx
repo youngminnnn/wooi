@@ -98,7 +98,7 @@ import type { WooiCommandSpec } from '@shared/wooiCommands'
 import { openSettings } from '../lib/settingsNavigation'
 import type { ExportConversationDetail } from './ExportMenu'
 import { WOOI_URLS } from '../lib/externalLinks'
-import { FOCUS_COMPOSER_EVENT } from '../lib/composerFocus'
+import { FOCUS_COMPOSER_EVENT, INSERT_INTO_COMPOSER_EVENT } from '../lib/composerFocus'
 
 /** Claude 가 받는 이미지 형식. 클립보드의 다른 형식은 붙여넣기 시 무시한다. */
 const IMAGE_TYPES: Record<string, ImageMediaType> = {
@@ -314,6 +314,31 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
     window.addEventListener(FOCUS_COMPOSER_EVENT, focus)
     return () => window.removeEventListener(FOCUS_COMPOSER_EVENT, focus)
   }, [])
+
+  // 대화 아무 데나 친 글자가 여기로 흘러 들어온다([[shouldRedirectTyping]]).
+  // 넣을 자리는 textarea 가 들고 있는 selectionStart 다 — 크로미움은 포커스를 잃어도 caret 을
+  // 기억하고, 초안을 막 복원해 한 번도 만지지 않은 입력창이면 끝을 가리킨다. 둘 다 원하는 자리다.
+  useEffect(() => {
+    const insert = (e: Event): void => {
+      const ch = (e as CustomEvent<string>).detail
+      const ta = taRef.current
+      // 압축 대기 등으로 입력이 잠긴 동안에는 초안만 몰래 늘어나므로 흘려보낸다.
+      if (typeof ch !== 'string' || ch === '' || !ta || ta.disabled) return
+      const current = useStore.getState().drafts[workspace.id] ?? ''
+      const at = Math.min(ta.selectionStart ?? current.length, current.length)
+      const next = at + ch.length
+      setDraft(workspace.id, current.slice(0, at) + ch + current.slice(at))
+      setCaret(next)
+      requestAnimationFrame(() => {
+        const el = taRef.current
+        if (!el) return
+        el.focus()
+        el.setSelectionRange(next, next)
+      })
+    }
+    window.addEventListener(INSERT_INTO_COMPOSER_EVENT, insert)
+    return () => window.removeEventListener(INSERT_INTO_COMPOSER_EVENT, insert)
+  }, [workspace.id, setDraft])
 
   // textarea 높이 자동 조절.
   useEffect(() => {

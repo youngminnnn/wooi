@@ -11,7 +11,8 @@ import { openNewWorkspaceMenu } from './lib/newWorkspaceMenu'
 import { applyTheme } from './lib/theme'
 import { finishSwitchHint } from './lib/uiFlags'
 import { OPEN_SETTINGS_EVENT } from './lib/settingsNavigation'
-import { FOCUS_COMPOSER_EVENT } from './lib/composerFocus'
+import { FOCUS_COMPOSER_EVENT, INSERT_INTO_COMPOSER_EVENT } from './lib/composerFocus'
+import { shouldFocusComposerFromEditingKey, shouldRedirectTyping } from './lib/typingRedirect'
 import TitleBar from './components/TitleBar'
 import { UpdateBanner } from './components/UpdateBanner'
 import { NoticeBanner } from './components/NoticeBanner'
@@ -47,6 +48,30 @@ import Logo from './components/Logo'
 import ClaudeLoginModal from './components/ClaudeLoginModal'
 import CodexLoginModal from './components/CodexLoginModal'
 import type { ExportConversationDetail } from './components/ExportMenu'
+
+/**
+ * 대화 입력창이 지금 화면에 닿아 있는가.
+ *
+ * 리뷰 화면·팬아웃 비교·파일 뷰어는 대화를 통째로 덮는다. 그 위에서 친 글자를 뒤쪽 textarea 에
+ * 몰래 넣으면 사용자는 자기 글이 어디로 갔는지 알 수 없다 — ⌘L 이 같은 이유로 같은 판정을 쓴다.
+ */
+function chatComposerReachable(
+  st: {
+    selectedWorkspaceId: string | null
+    activeReviewId: string | null
+    activeFanoutGroupId: string | null
+    overlayOpen: boolean
+  },
+  fileViewerVisible: boolean
+): boolean {
+  return (
+    !!st.selectedWorkspaceId &&
+    !st.activeReviewId &&
+    !st.activeFanoutGroupId &&
+    !st.overlayOpen &&
+    !fileViewerVisible
+  )
+}
 
 export default function App(): React.JSX.Element {
   const ready = useStore((s) => s.ready)
@@ -267,6 +292,22 @@ export default function App(): React.JSX.Element {
         e.preventDefault()
         st.toggleToolVerbose(st.selectedWorkspaceId)
         return
+      }
+
+      // 대화를 읽다가 지시를 이어 칠 때 손이 끊기지 않게 한다 — 아무 데나 친 글자가 그대로
+      // 입력창 caret 에 들어가고 포커스가 따라간다. ⌘L 을 "먼저" 누르는 박자를 없애는 것이지
+      // 대체하는 것은 아니다. 가려짐 판정은 ⌘L 과 같은 것을 쓴다(아래 참조).
+      // '?'·⌃O 같은 기존 단축키가 위에서 먼저 return 하므로 그 키들은 여기까지 오지 않는다.
+      if (chatComposerReachable(st, fileViewerVisible)) {
+        if (shouldFocusComposerFromEditingKey(e)) {
+          window.dispatchEvent(new CustomEvent(FOCUS_COMPOSER_EVENT))
+          return
+        }
+        if (shouldRedirectTyping(e)) {
+          e.preventDefault()
+          window.dispatchEvent(new CustomEvent(INSERT_INTO_COMPOSER_EVENT, { detail: e.key }))
+          return
+        }
       }
 
       if (!e.metaKey) return
