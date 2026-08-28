@@ -266,7 +266,11 @@ function RepoRow({
                   />
                   <GitBranch size={13} className="shrink-0 text-neutral-600" />
                   <span className="min-w-0 truncate text-sm text-neutral-300">{ws.name}</span>
-                  <span className="min-w-0 truncate text-xs text-neutral-600">{ws.branch}</span>
+                  {/* Wooi 가 만든 worktree 는 디렉터리 이름이 곧 브랜치라, 그대로 두면 같은
+                      문자열이 두 번 나온다. 다를 때만 브랜치를 덧붙인다. */}
+                  {ws.branch !== ws.name && (
+                    <span className="min-w-0 truncate text-xs text-neutral-600">{ws.branch}</span>
+                  )}
                   {ws.alreadyImported && (
                     <span className="shrink-0 text-xs text-neutral-600">already in Wooi</span>
                   )}
