@@ -14,6 +14,7 @@ import { forgetRunningAgents } from './runningAgentsCache'
 import { getTranscripts } from './transcripts'
 import { buildHandoffPrompt, estimateHandoffTokens, formatHandoffTokens } from '@shared/handoff'
 import { listDir, readFileInRoot, searchFiles } from './fsbrowse'
+import { importMigration, scanMigration } from './migrate'
 import { formatIssues } from '@shared/previewIssues'
 import { log } from './logger'
 import {
@@ -82,7 +83,14 @@ import {
 import { planMergeTrain, runMergeTrain, type TrainLayer } from './mergeTrain'
 import { ReviewManager } from './review/manager'
 import { resolveStackForPr } from './review/stackResolve'
-import type { ReviewVerdict, TranscriptSearchResult } from '@shared/types'
+import type {
+  MigrationImportResult,
+  MigrationImportSelection,
+  MigrationScan,
+  MigrationScanArgs,
+  ReviewVerdict,
+  TranscriptSearchResult
+} from '@shared/types'
 import {
   cascadeRetarget,
   cascadeRestackBranchStack,
@@ -649,6 +657,45 @@ export function registerIpc(ctx: IpcContext): void {
     if (!repo) return null
     return getPrBody(repo.path, number).catch(() => null)
   })
+
+  // ── 다른 도구에서 옮겨오기 ────────────────────────────────────────────────
+
+  /**
+   * 스캔과 들여오기가 같은 deps 를 본다. 들여오기는 이 deps 로 **다시 스캔해** 키를 대조하므로,
+   * 렌더러가 보낸 것 중 실제로 쓰이는 것은 키 문자열뿐이다(경로·이름은 전부 재확인된 값).
+   */
+  const migrationDeps = {
+    env: { home: app.getPath('home'), appData: app.getPath('appData') },
+    getState: () => store.getState(),
+    update: (mutate: (state: Pick<AppState, 'repos' | 'workspaces'>) => void) =>
+      store.update(mutate),
+    onRepoAdded: (repoId: string) => void backfillRepoAvatar(repoId),
+    // 이어받은 대화(안내 한 줄 + 다른 도구에서 옮겨 온 지난 메시지)를 트랜스크립트에 적재한다.
+    noteImport: (workspaceId: string, items: ChatItem[]) =>
+      getTranscripts().importItems(workspaceId, items)
+  }
+
+  handle(IPC.migrateScan, (_e, args?: MigrationScanArgs): Promise<MigrationScan> =>
+    scanMigration({ repoId: typeof args?.repoId === 'string' ? args.repoId : null }, migrationDeps)
+  )
+
+  handle(
+    IPC.migrateImport,
+    async (_e, selection: MigrationImportSelection): Promise<MigrationImportResult> => {
+      const keys = (value: unknown): string[] =>
+        Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
+      const result = await importMigration(
+        {
+          repoKeys: keys(selection?.repoKeys),
+          workspaceKeys: keys(selection?.workspaceKeys),
+          sessionKeys: keys(selection?.sessionKeys)
+        },
+        migrationDeps
+      )
+      if (result.repos > 0 || result.workspaces > 0) broadcastState()
+      return result
+    }
+  )
 
   // ── workspace ────────────────────────────────────────────────────────────
 

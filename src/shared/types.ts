@@ -3036,6 +3036,95 @@ export interface IssueCandidate {
  */
 export type MemoryScope = 'project' | 'user'
 
+// ── 기존 worktree 를 워크스페이스로 들여오기 ────────────────────────────────
+
+/**
+ * 후보 리포를 알려 준 다른 도구. 없으면(null) 이미 Wooi 에 등록된 리포를 훑은 것이다.
+ *
+ * 이 값의 역할은 **발견과 표시**뿐이다 — 들여오기 자체는 도구를 가리지 않고 git 이 아는
+ * worktree 를 대상으로 한다. Conductor·Orca 는 아직 등록되지 않은 리포 경로와, 사람이
+ * worktree 에 붙여 둔 이름·셋업 명령을 얹어 줄 뿐이다.
+ */
+export type MigrationSourceId = 'conductor' | 'orca'
+
+/** 이 worktree 에서 돌던 에이전트 대화. 이어받으면 다음 턴이 그 맥락 위에서 시작한다. */
+export interface MigrationAgentSession {
+  /** 이 세션을 이어받으면 워크스페이스의 백엔드도 이쪽으로 정해진다. */
+  backend: AgentBackendId
+  /** Claude Code 의 session id · Codex 의 thread id. */
+  sessionId: string
+  /** 사람이 알아볼 이름(Claude 의 대화 제목 등). 없으면 시각으로 채운다. */
+  label: string
+  /** 마지막으로 쓰인 시각(ms). 여러 개 중 가장 최근 것을 고르는 근거다. */
+  updatedAt: number
+  /**
+   * 그 CLI 가 대화를 적어 둔 파일. main 이 지난 대화를 트랜스크립트로 옮길 때만 쓴다
+   * ([[migrate/convert]]) — 렌더러는 읽지 않는다. 들여오기는 이 값을 렌더러에서 받지 않고
+   * **다시 훑어 얻은 것**만 쓰므로, 여기 실려 나가도 신뢰 경계는 그대로다.
+   */
+  sourcePath: string
+}
+
+/** 들여올 수 있는 worktree 하나. git 이 실재를 확인해 준 것만 온다. */
+export interface MigrationWorkspaceCandidate {
+  /** 선택을 main 으로 되돌려 보낼 때 쓰는 키(정규화된 경로에서 파생). */
+  key: string
+  /** 표시 이름 — 다른 도구가 붙여 둔 이름이 있으면 그것, 없으면 디렉터리 이름. */
+  name: string
+  branch: string
+  worktreePath: string
+  /** 이미 Wooi 워크스페이스가 이 worktree 나 브랜치를 쓰고 있다. */
+  alreadyImported: boolean
+  /** 이 worktree 에서 발견된 가장 최근 에이전트 세션. 없으면 null. */
+  session: MigrationAgentSession | null
+}
+
+/** 들여올 수 있는 리포 하나. */
+export interface MigrationRepoCandidate {
+  key: string
+  name: string
+  path: string
+  /** 이미 Wooi 에 등록된 리포다. 등록은 건너뛰고 worktree 만 들여온다. */
+  alreadyAdded: boolean
+  /** 이 후보를 알려 준 도구(있으면). 등록된 리포를 훑은 것이면 null. */
+  source: MigrationSourceId | null
+  sourceLabel: string | null
+  /** 함께 옮겨올 설정. 그 도구에 설정이 없었거나 출처가 없으면 빈 값이다. */
+  setupScript: string
+  archiveScript: string
+  runScripts: { name: string; command: string }[]
+  workspaces: MigrationWorkspaceCandidate[]
+}
+
+/** 무엇을 훑을지. repoId 를 주면 그 리포 하나만 본다(리포 메뉴에서 여는 경로). */
+export interface MigrationScanArgs {
+  repoId?: string | null
+}
+
+export interface MigrationScan {
+  /** 들여올 것이 남은 리포만 담는다(전부 들여왔으면 빈 배열). */
+  repos: MigrationRepoCandidate[]
+  /** 훑다가 읽지 못한 것의 사유(예: sqlite3 없음). 사용자에게 그대로 보여 준다. */
+  warnings: string[]
+}
+
+/** 사용자가 고른 것. main 은 이 키를 다시 훑어 대조한다(IPC 는 신뢰 경계다). */
+export interface MigrationImportSelection {
+  repoKeys: string[]
+  workspaceKeys: string[]
+  /** 대화까지 이어받을 worktree 의 키. workspaceKeys 의 부분집합이다. */
+  sessionKeys: string[]
+}
+
+export interface MigrationImportResult {
+  repos: number
+  workspaces: number
+  /** 그중 대화를 이어받은 수. */
+  sessions: number
+  /** 항목별 실패 사유. 전체를 멈추지 않고 나머지는 계속 들여온다. */
+  errors: string[]
+}
+
 // ── IPC 채널 이름 ────────────────────────────────────────────────────────
 
 export const IPC = {
@@ -3059,6 +3148,10 @@ export const IPC = {
   repoResolvePr: 'repo:resolvePr',
   repoGetIssueBody: 'repo:getIssueBody',
   repoGetPrBody: 'repo:getPrBody',
+  /** 다른 병렬 에이전트 도구(Conductor·Orca)가 남긴 리포·worktree 를 훑는다. */
+  migrateScan: 'migrate:scan',
+  /** 훑어 낸 것 중 사용자가 고른 리포·worktree 를 Wooi 로 들여온다. */
+  migrateImport: 'migrate:import',
   workspaceCreate: 'workspace:create',
   workspaceFork: 'workspace:fork',
   workspaceArchive: 'workspace:archive',

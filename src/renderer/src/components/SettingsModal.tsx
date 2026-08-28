@@ -20,6 +20,7 @@ import {
 } from 'lucide-react'
 import { useStore } from '../store'
 import { openRepoSettings } from '../lib/repoSettings'
+import { openMigrate } from '../lib/migrate'
 import { hasNewVersion, scheduledRestartText, updateStatusText } from '../lib/update'
 import { useNow } from '../lib/useNow'
 import { inputClass } from './Modal'
@@ -817,6 +818,27 @@ function RepositoriesPage({
           Configured only
         </button>
       </div>
+      {/* 리포를 가리지 않는 상시 입구. 사이드바 안내는 리포가 하나도 없을 때만 뜨고 + 메뉴는
+          리포 하나만 보므로, 여러 리포에 흩어진 worktree 를 한 번에 훑는 자리는 여기다. */}
+      <button
+        onClick={() => {
+          onClose()
+          openMigrate()
+        }}
+        className="flex w-full items-center gap-3 rounded-xl border border-[var(--border)] px-4 py-3 text-left hover:bg-[var(--surface-2)]"
+      >
+        <Download size={15} className="text-neutral-500" />
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm font-medium text-neutral-200">
+            Import existing worktrees
+          </span>
+          <span className="block text-xs text-neutral-600">
+            Turns worktrees that already exist — including ones Conductor or Orca made — into
+            workspaces, and can pick up the agent conversation that was running in them.
+          </span>
+        </span>
+        <ChevronRight size={15} className="text-neutral-600" />
+      </button>
       <div className="overflow-hidden rounded-xl border border-[var(--border)] divide-y divide-[var(--border)]">
         {filtered.map((repo) => (
           <button
