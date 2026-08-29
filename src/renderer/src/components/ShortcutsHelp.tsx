@@ -59,6 +59,13 @@ const GROUPS: { title: string; items: { keys: string[]; label: string }[] }[] = 
     ]
   },
   {
+    title: 'Changes',
+    items: [
+      { keys: ['F7'], label: 'Jump to the next change in the diff' },
+      { keys: ['⇧F7'], label: 'Jump to the previous change in the diff' }
+    ]
+  },
+  {
     title: 'Pull request review',
     items: [
       { keys: ['⇧⌘R'], label: 'Review a pull request' },

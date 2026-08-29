@@ -16,6 +16,8 @@ import type { DiffComment, DiffCommentAnchor } from '../lib/diffComments'
 import DiffCommentBox from './diff/DiffCommentBox'
 import DiffCommentCard from './diff/DiffCommentCard'
 import BranchLineTotalChip from './diff/BranchLineTotalChip'
+import DiffNavButtons from './diff/DiffNavButtons'
+import { DiffChangeAnchor, DiffNavProvider } from './diff/diffNav'
 import { LargeDiffNotice, OmittedPatchNotice } from './diff/LargeDiffNotice'
 
 /**
@@ -85,24 +87,28 @@ export default function DiffView({
   }
 
   return (
-    <div className="space-y-3">
-      <div className="flex items-center gap-2 text-xs text-neutral-500">
-        <span>
-          {diff.files.length} file{diff.files.length > 1 ? 's' : ''}
-        </span>
-        <span aria-hidden="true">·</span>
-        <BranchLineTotalChip total={total} />
+    <DiffNavProvider>
+      <div className="space-y-3">
+        <div className="flex items-center gap-2 text-xs text-neutral-500">
+          <span>
+            {diff.files.length} file{diff.files.length > 1 ? 's' : ''}
+          </span>
+          <span aria-hidden="true">·</span>
+          <BranchLineTotalChip total={total} />
+          <span className="flex-1" />
+          <DiffNavButtons />
+        </div>
+        {diff.files.map((f) => (
+          <FileBlock
+            key={f.path}
+            file={f}
+            onOpenFile={onOpenFile}
+            commenting={commenting}
+            comments={byPath.get(f.path) ?? NO_COMMENTS}
+          />
+        ))}
       </div>
-      {diff.files.map((f) => (
-        <FileBlock
-          key={f.path}
-          file={f}
-          onOpenFile={onOpenFile}
-          commenting={commenting}
-          comments={byPath.get(f.path) ?? NO_COMMENTS}
-        />
-      ))}
-    </div>
+    </DiffNavProvider>
   )
 }
 
@@ -232,7 +238,8 @@ function FileBlock({
       {open && !file.binary && file.patch && hunks.length > 0 && (
         <div className="bg-[var(--code-bg)] text-xs font-mono leading-[1.45]">
           {hunks.map((hunk, hi) => (
-            <div key={hi}>
+            // hunk 하나가 곧 변경 덩어리다 — F7 이 뛰어다니는 단위.
+            <DiffChangeAnchor key={hi}>
               <div className="px-3 py-1 text-[var(--diff-hunk)] bg-[var(--surface)]/40">
                 {hunk.header}
               </div>
@@ -272,7 +279,7 @@ function FileBlock({
                   ))}
                 </Row>
               ))}
-            </div>
+            </DiffChangeAnchor>
           ))}
           <OrphanComments comments={placed.orphans} commenting={commenting} />
         </div>

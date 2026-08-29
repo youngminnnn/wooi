@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, screen } from '@testing-library/react'
 import { MAX_DIFF_LINES_PER_SIDE } from '@shared/diffRenderLimit'
 import type { FileDiff, WorkspaceDiff } from '@shared/types'
@@ -150,5 +150,109 @@ describe('브랜치 총 변경 줄수 칩', () => {
       'generated: 3000 lines added, 2000 lines deleted'
     )
     expect(chip.getAttribute('aria-label')).not.toContain(',259')
+  })
+})
+
+describe('변경 지점 간 이동', () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  /** hunk 두 개짜리 patch. hunk 하나가 곧 변경 덩어리다. */
+  const TWO_HUNKS = `@@ -1,2 +1,2 @@\n a\n-b\n+c\n@@ -10,2 +10,2 @@\n d\n-e\n+f\n`
+
+  it('덩어리가 없으면 버튼을 비활성화한다', () => {
+    renderWithStore(<DiffView diff={workspaceDiff([])} loading={false} baseBranch="main" />)
+    // 변경이 없으면 DiffView 자체가 빈 화면이라 버튼도 없다.
+    expect(screen.queryByLabelText('Next change')).toBeNull()
+  })
+
+  it('그려진 덩어리가 없으면(전부 접힘) 버튼이 비활성화된다', () => {
+    renderWithStore(
+      <DiffView
+        diff={workspaceDiff([
+          // 400 줄이 넘어 기본으로 접힌다 — 접힌 파일에는 뛸 자리가 없다.
+          fileDiff({ path: 'src/a.ts', patch: TWO_HUNKS, additions: 500, deletions: 100 })
+        ])}
+        loading={false}
+        baseBranch="main"
+      />
+    )
+    expect(screen.getByLabelText('Next change')).toBeDisabled()
+    expect(screen.getByLabelText('Previous change')).toBeDisabled()
+  })
+
+  it('덩어리 수를 세어 버튼을 켠다', () => {
+    renderWithStore(
+      <DiffView
+        diff={workspaceDiff([
+          fileDiff({ path: 'src/a.ts', patch: TWO_HUNKS, additions: 2, deletions: 2 })
+        ])}
+        loading={false}
+        baseBranch="main"
+      />
+    )
+    const next = screen.getByLabelText('Next change')
+    expect(next).toBeEnabled()
+    expect(next.getAttribute('title')).toBe('Next change (F7) — 2 changes in view')
+  })
+
+  it('다음/이전으로 덩어리를 하나씩 옮겨 다닌다', () => {
+    const scrollTo = vi.spyOn(Element.prototype, 'scrollIntoView')
+    renderWithStore(
+      <DiffView
+        diff={workspaceDiff([
+          fileDiff({ path: 'src/a.ts', patch: TWO_HUNKS, additions: 2, deletions: 2 })
+        ])}
+        loading={false}
+        baseBranch="main"
+      />
+    )
+    fireEvent.click(screen.getByLabelText('Next change'))
+    expect(scrollTo).toHaveBeenCalledTimes(1)
+    const first = scrollTo.mock.instances[0] as HTMLElement
+    expect(first.textContent).toContain('@@ -1,2 +1,2 @@')
+
+    fireEvent.click(screen.getByLabelText('Next change'))
+    expect((scrollTo.mock.instances[1] as HTMLElement).textContent).toContain('@@ -10,2 +10,2 @@')
+
+    // 끝에서 다음을 누르면 처음으로 돌아온다.
+    fireEvent.click(screen.getByLabelText('Next change'))
+    expect((scrollTo.mock.instances[2] as HTMLElement).textContent).toContain('@@ -1,2 +1,2 @@')
+
+    fireEvent.click(screen.getByLabelText('Previous change'))
+    expect((scrollTo.mock.instances[3] as HTMLElement).textContent).toContain('@@ -10,2 +10,2 @@')
+  })
+
+  it('F7 과 ⇧F7 이 같은 동작을 한다', () => {
+    const scrollTo = vi.spyOn(Element.prototype, 'scrollIntoView')
+    renderWithStore(
+      <DiffView
+        diff={workspaceDiff([
+          fileDiff({ path: 'src/a.ts', patch: TWO_HUNKS, additions: 2, deletions: 2 })
+        ])}
+        loading={false}
+        baseBranch="main"
+      />
+    )
+    fireEvent.keyDown(window, { code: 'F7' })
+    expect((scrollTo.mock.instances[0] as HTMLElement).textContent).toContain('@@ -1,2 +1,2 @@')
+    fireEvent.keyDown(window, { code: 'F7', shiftKey: true })
+    expect((scrollTo.mock.instances[1] as HTMLElement).textContent).toContain('@@ -10,2 +10,2 @@')
+  })
+
+  it('수식 키가 붙은 F7 은 무시한다', () => {
+    const scrollTo = vi.spyOn(Element.prototype, 'scrollIntoView')
+    renderWithStore(
+      <DiffView
+        diff={workspaceDiff([
+          fileDiff({ path: 'src/a.ts', patch: TWO_HUNKS, additions: 2, deletions: 2 })
+        ])}
+        loading={false}
+        baseBranch="main"
+      />
+    )
+    fireEvent.keyDown(window, { code: 'F7', metaKey: true })
+    fireEvent.keyDown(window, { code: 'F7', ctrlKey: true })
+    fireEvent.keyDown(window, { code: 'F7', altKey: true })
+    expect(scrollTo).not.toHaveBeenCalled()
   })
 })
