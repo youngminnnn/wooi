@@ -585,7 +585,8 @@ function WorkspaceRow({
       title: `Archive "${displayName}"?`,
       body: 'Its worktree directory will be removed (branch & history kept). You can unarchive it later.',
       confirmLabel: 'Archive',
-      danger: true
+      danger: true,
+      skipKey: 'archiveWorkspace'
     })
     if (!ok) return
     const { archiveScriptFailure } = await archiveWorkspace(workspace.id)

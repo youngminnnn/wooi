@@ -111,6 +111,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   // 흔한 손실이고, 화면을 켜 두지 않으므로 비용이 작다. 기존 사용자도 load 의 기본값 병합으로
   // true 가 되므로 schemaVersion 을 올릴 필요가 없다.
   keepAwakeWhileRunning: true,
+  // 아무 확인도 꺼져 있지 않은 상태로 시작한다. 기존 사용자도 load 의 기본값 병합으로 빈
+  // 객체가 되므로 schemaVersion 을 올릴 필요가 없다.
+  confirmSkips: {},
   manualWorkspaceSetup: false,
   onboarded: false,
   // 아직 기본값을 고르지 않음 — 기존 사용자도 load 의 기본값 병합으로 false 가 되어,

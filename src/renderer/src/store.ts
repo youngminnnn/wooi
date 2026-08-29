@@ -28,6 +28,7 @@ import type {
   ReviewEnvelope,
   ReviewFinding,
   ReviewVerdict,
+  ConfirmSkipKey,
   ScriptStatus,
   StackCascadeResult,
   StackOpProgress,
@@ -53,6 +54,8 @@ import {
   setUiFlag
 } from './lib/uiFlags'
 import { openRepoSettings } from './lib/repoSettings'
+import { openSettings } from './lib/settingsNavigation'
+import { CONFIRM_SKIP_LABELS } from './lib/confirmSkips'
 import {
   bodyOf,
   emptyView,
@@ -163,6 +166,11 @@ export interface ConfirmOptions {
   body?: string
   confirmLabel?: string
   danger?: boolean
+  /**
+   * 주면 "Don't ask again" 체크박스가 붙고, 이미 꺼 둔 확인이면 묻지 않고 통과한다.
+   * **되돌릴 수 있는 동작에만 준다** — 판단 기준은 [[shared/types]] 의 CONFIRM_SKIP_KEYS 참고.
+   */
+  skipKey?: ConfirmSkipKey
 }
 interface ConfirmState extends ConfirmOptions {
   resolve: (ok: boolean) => void
@@ -687,7 +695,10 @@ interface UIState {
   /** setup 스크립트를 다시 실행한다(스크립트 패널을 함께 연다). 결과는 메인이 setupState 로 영속. */
   retrySetup: (workspaceId: string) => void
   confirm: (opts: ConfirmOptions) => Promise<boolean>
-  resolveConfirm: (ok: boolean) => void
+  /** `skip` 은 "다시 묻지 않기" 체크 상태. 승인(ok)일 때만 저장으로 이어진다. */
+  resolveConfirm: (ok: boolean, skip?: boolean) => void
+  /** 확인 스킵을 설정에 적고, 되돌릴 자리로 데려가는 토스트를 띄운다. */
+  rememberConfirmSkip: (key: ConfirmSkipKey) => void
 
   // ── PR 리뷰 모드 ───────────────────────────────────────────────────────
   /** 리뷰를 시작하고 전체 화면 모드로 진입한다. 실패하면 토스트만 띄우고 진입하지 않는다. */
@@ -2877,13 +2888,41 @@ export const useStore = create<UIState>((set, get) => ({
 
   confirm: (opts) =>
     new Promise<boolean>((resolve) => {
+      // 사용자가 꺼 둔 확인은 띄우지 않는다. 되돌리는 길은 끄던 순간의 토스트와 설정에 있다.
+      if (opts.skipKey && get().app?.settings.confirmSkips?.[opts.skipKey]) {
+        resolve(true)
+        return
+      }
       set({ confirmState: { ...opts, resolve } })
     }),
 
-  resolveConfirm: (ok) => {
+  resolveConfirm: (ok, skip) => {
     const cs = get().confirmState
-    if (cs) cs.resolve(ok)
     set({ confirmState: null })
+    if (!cs) return
+    // 취소하면 체크박스를 켰더라도 저장하지 않는다 — 승인한 적 없는 동작을 앞으로 자동
+    // 승인하게 만드는 셈이고, Escape 나 바깥 클릭으로 닫은 경우까지 여기로 온다.
+    if (ok && skip && cs.skipKey) get().rememberConfirmSkip(cs.skipKey)
+    cs.resolve(ok)
+  },
+
+  rememberConfirmSkip: (key) => {
+    const current = get().app?.settings.confirmSkips ?? {}
+    if (current[key]) return
+    void window.api.settings
+      .update({ confirmSkips: { ...current, [key]: true } })
+      .then(() => {
+        // 액션이 달린 토스트는 사용자가 닫을 때까지 남는다(pushToast 정책) — 되돌리는 길이
+        // 읽히기도 전에 사라지면 이 토스트를 띄우는 의미가 없다.
+        get().pushToast(
+          'success',
+          `Wooi won't ask again before ${CONFIRM_SKIP_LABELS[key].action}.`,
+          [{ label: 'Open settings', run: () => openSettings('general') }]
+        )
+      })
+      .catch(() =>
+        get().pushToast('error', 'Could not save that preference — Wooi will keep asking.')
+      )
   },
 
   // ── PR 리뷰 모드 ─────────────────────────────────────────────────────────
@@ -2964,7 +3003,8 @@ export const useStore = create<UIState>((set, get) => ({
       title: `Archive review of ${reviewTitle(session).number ? `#${reviewTitle(session).number}` : 'this pull request'}?`,
       body: 'Its worktree is removed, but the findings and conversation are kept. You can unarchive it later.',
       confirmLabel: 'Archive',
-      danger: true
+      danger: true,
+      skipKey: 'archiveReview'
     })
     if (!ok) return
     await get().archiveReview(reviewId)
