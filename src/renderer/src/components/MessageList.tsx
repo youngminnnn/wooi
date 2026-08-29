@@ -35,6 +35,7 @@ import { AGENT_BACKEND_LABELS, canSwitchAgentBackend } from '@shared/types'
 import type { ChatItem } from '@shared/types'
 import { BASH_FOLD, foldBashOutput } from '@shared/bashDisplay'
 import { SELECTABLE, unlessSelecting } from '../lib/selection'
+import SelectionCopyBubble from './SelectionCopyBubble'
 import { TOOL_VERBOSE_SHORTCUT } from '@shared/toolDisplay'
 
 /**
@@ -467,7 +468,7 @@ export default function MessageList({
         </div>
       )}
       <div ref={containerRef} onScroll={onScroll} className="h-full overflow-y-auto">
-        <div className="max-w-3xl mx-auto px-5 py-5 space-y-3">
+        <SelectionCopyBubble className="max-w-3xl mx-auto px-5 py-5 space-y-3">
           {compactWindow.boundary && (
             <button
               type="button"
@@ -512,7 +513,7 @@ export default function MessageList({
             </div>
           ))}
           <div ref={bottomRef} />
-        </div>
+        </SelectionCopyBubble>
       </div>
       {showJump && (
         <button
