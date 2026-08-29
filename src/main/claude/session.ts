@@ -106,6 +106,11 @@ export interface SessionDeps {
     model: string | null
     effort: EffortSetting | null
   }
+  /**
+   * 설정 화면에서 이 백엔드에 얹기로 한 기본 환경 변수. 메인이 위험한 키를 이미 걸러 보낸다
+   * ([[main/agentEnv]]). 없으면 자식 CLI 는 이 프로세스의 환경을 그대로 물려받는다.
+   */
+  env?: Record<string, string>
   emit: (event: ChatEvent) => void
   persist: (item: ChatItem) => void
   requestPermission: (
@@ -865,6 +870,13 @@ export class ClaudeSession {
         prompt: this.promptStream(this.input),
         options: {
           cwd: this.deps.cwd,
+          // 설정에 얹은 기본 환경 변수. SDK 의 `env` 는 자식 환경을 **병합이 아니라 통째로
+          // 교체**하므로 process.env 를 우리가 직접 펼쳐야 한다 — 빼먹으면 로그인 셸에서 복원한
+          // PATH·자격 증명이 통째로 사라진다([[main/env]]). 얹을 값이 없으면 옵션 자체를 빼서
+          // SDK 의 기본 상속 경로를 그대로 둔다.
+          ...(this.deps.env && Object.keys(this.deps.env).length
+            ? { env: { ...process.env, ...this.deps.env } }
+            : {}),
           includePartialMessages: true,
           // 매 턴 뒤 Claude Code 가 예측한 다음 프롬프트를 컴포저에 제안한다.
           promptSuggestions: true,

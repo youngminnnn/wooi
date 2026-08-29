@@ -999,6 +999,14 @@ export interface AgentSettings {
   fallbackModels: string[]
   /** 새 워크스페이스의 기본 권한 모드. null 이면 백엔드의 defaultPermissionMode. */
   permissionMode: PermissionMode | null
+  /**
+   * 이 백엔드의 에이전트 프로세스에 얹을 기본 환경 변수. 값이 비밀(API 키·토큰)일 수 있으므로
+   * **로그에는 키 이름만** 남긴다([[codex/config]] redactDebugConfig 와 같은 원칙).
+   *
+   * 이 설정 이전 버전에서 올라온 파일에는 이 키가 없다 — 옵셔널로 두어 스키마 버전을 올리지
+   * 않는다. 읽는 쪽은 언제나 `sanitizeAgentEnv` 를 거쳐 위험한 키를 떨어뜨린다.
+   */
+  env?: Record<string, string>
 }
 
 /** 백엔드별 기본값의 초기 상태(모두 "백엔드 기본을 따름"). */
@@ -1007,7 +1015,10 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   effort: null,
   permissionMode: null,
   fastMode: false,
-  fallbackModels: []
+  fallbackModels: [],
+  // 비어 있음 = 아무것도 얹지 않음. 여기 적어 두어야 설정 화면의 "Reset" 이 환경 변수까지
+  // 되돌린다(리셋은 이 객체를 그대로 덮어쓴다).
+  env: {}
 }
 
 /**
@@ -1016,6 +1027,64 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
  */
 export function agentSettingsFor(settings: AppSettings, id: AgentBackendId): AgentSettings {
   return { ...DEFAULT_AGENT_SETTINGS, ...settings.agents?.[id] }
+}
+
+// ── 에이전트 기본 환경 변수 ──────────────────────────────────────────────
+//
+// 범위는 **환경 변수뿐**이다. 명령 인자나 실행 파일 오버라이드는 두지 않는다 — Wooi 는 Claude
+// Agent SDK 와 Codex CLI 를 직접 감싸므로, 임의 인자를 끼워 넣으면 그 계약이 조용히 깨진다.
+
+/**
+ * 사용자가 덮어쓸 수 없는 환경 변수 이름.
+ *
+ * `PATH`·`HOME` 은 Wooi 가 로그인 셸에서 복원해 자식에게 물려주는 값이라([[main/env]]),
+ * 사용자가 덮으면 에이전트 CLI 가 "설치됐는데 미설치" 로 보이거나 자격 증명을 못 읽는다.
+ */
+export const AGENT_ENV_BLOCKED_KEYS = ['PATH', 'HOME'] as const
+
+/** Wooi 가 자식 프로세스에 스스로 정해 내리는 이름 공간. 덮이면 dev/설치본 격리가 무너진다. */
+export const AGENT_ENV_BLOCKED_PREFIX = 'WOOI_'
+
+/** 환경 변수 이름으로 쓸 수 있는 형태인가(POSIX 관례: 영문자·`_` 로 시작, 영숫자·`_`). */
+export function isValidAgentEnvKey(key: string): boolean {
+  return /^[A-Za-z_][A-Za-z0-9_]*$/.test(key)
+}
+
+/** 이 키를 사용자가 정할 수 있는가. 막힌 키는 조용히 무시하지 않고 UI·로그에서 알린다. */
+export function isBlockedAgentEnvKey(key: string): boolean {
+  const upper = key.toUpperCase()
+  return (
+    upper.startsWith(AGENT_ENV_BLOCKED_PREFIX) ||
+    (AGENT_ENV_BLOCKED_KEYS as readonly string[]).includes(upper)
+  )
+}
+
+/**
+ * 저장된 맵에서 실제로 주입할 것만 남긴다. 막힌 키와 형태가 어긋난 키는 이유와 함께 돌려준다 —
+ * 조용히 떨어뜨리면 "설정했는데 왜 안 먹지" 가 되고, 그건 진단할 수 없는 종류의 침묵이다.
+ *
+ * 저장 파일은 손으로 고칠 수 있으므로 값의 타입까지 여기서 좁힌다.
+ */
+export function sanitizeAgentEnv(raw: Record<string, string> | undefined): {
+  env: Record<string, string>
+  blocked: string[]
+} {
+  const env: Record<string, string> = {}
+  const blocked: string[] = []
+  for (const [key, value] of Object.entries(raw ?? {})) {
+    const name = key.trim()
+    if (!name) continue
+    if (typeof value !== 'string') {
+      blocked.push(name)
+      continue
+    }
+    if (!isValidAgentEnvKey(name) || isBlockedAgentEnvKey(name)) {
+      blocked.push(name)
+      continue
+    }
+    env[name] = value
+  }
+  return { env, blocked }
 }
 
 // ── MCP 서버 (Wooi 스코프) ────────────────────────────────────────────────

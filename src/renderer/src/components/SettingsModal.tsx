@@ -8,6 +8,8 @@ import {
   Clock,
   Compass,
   Download,
+  Eye,
+  EyeOff,
   Info,
   Laptop,
   Link2,
@@ -16,6 +18,7 @@ import {
   RotateCcw,
   Search,
   Settings2,
+  Trash2,
   X
 } from 'lucide-react'
 import { useStore } from '../store'
@@ -40,6 +43,8 @@ import {
   NOTIFICATION_CHANNEL_LABELS,
   NOTIFICATION_EVENT_LABELS,
   agentSettingsFor,
+  isBlockedAgentEnvKey,
+  isValidAgentEnvKey,
   normalizePermissionMode
 } from '@shared/types'
 import type {
@@ -694,7 +699,168 @@ function AgentsPage({
           />
         </SettingRow>
       </SettingGroup>
+
+      <AgentEnvSection
+        backendLabel={backend?.label ?? editing}
+        // codex 는 app-server 를 모든 워크스페이스가 공유하는 단일 프로세스로 띄우고 그 환경이
+        // 기동 시점에 굳는다([[codex/appServer]]). claude 는 세션마다 SDK 에 실어 보내므로 즉시다.
+        restartRequired={editing === 'codex'}
+        value={agent.env ?? {}}
+        onChange={(env) => patchAgent({ env })}
+      />
     </PageFrame>
+  )
+}
+
+/**
+ * 백엔드별 기본 환경 변수 편집기.
+ *
+ * 범위를 환경 변수로 못 박은 이유는 [[shared/types]] 에 적어 두었다 — Wooi 는 Claude Agent SDK 와
+ * Codex CLI 를 감싸므로 임의 인자 주입은 그 계약을 조용히 깬다.
+ *
+ * 편집 중에는 배열이 원본이다. `Record` 를 직접 고치면 키를 지우고 다시 치는 사이 행이 사라지고,
+ * 빈 키/중복 키를 만드는 순간 다른 행을 덮어쓴다. 저장할 때만 레코드로 접는다.
+ */
+function AgentEnvSection({
+  backendLabel,
+  restartRequired,
+  value,
+  onChange
+}: {
+  backendLabel: string
+  /** 이 백엔드가 값을 프로세스 기동 시점에 굳히는가(codex-host). 사실대로 알린다. */
+  restartRequired: boolean
+  value: Record<string, string>
+  onChange: (next: Record<string, string>) => void
+}): React.JSX.Element {
+  const [rows, setRows] = useState<Array<{ key: string; value: string }>>(() =>
+    Object.entries(value).map(([key, item]) => ({ key, value: item }))
+  )
+  const [revealed, setRevealed] = useState<Set<number>>(() => new Set())
+
+  // 백엔드 탭을 바꾸면 다른 백엔드의 값이 보여야 한다. 편집 중인 행은 그 백엔드의 것이므로 버린다.
+  const seeded = useRef(value)
+  useEffect(() => {
+    if (seeded.current === value) return
+    seeded.current = value
+    setRows(Object.entries(value).map(([key, item]) => ({ key, value: item })))
+    setRevealed(new Set())
+  }, [value])
+
+  const commit = (next: Array<{ key: string; value: string }>): void => {
+    setRows(next)
+    // 빈 키 행은 아직 쓰는 중이다 — 저장하지 않는다. 같은 키를 두 번 적으면 마지막 것이 이긴다.
+    const record: Record<string, string> = {}
+    for (const row of next) {
+      const key = row.key.trim()
+      if (key) record[key] = row.value
+    }
+    seeded.current = record
+    onChange(record)
+  }
+
+  return (
+    <SettingGroup
+      title="Environment variables"
+      action={
+        <button
+          onClick={() => commit([...rows, { key: '', value: '' }])}
+          className="text-xs text-neutral-500 hover:text-neutral-300"
+        >
+          Add variable
+        </button>
+      }
+    >
+      {rows.length === 0 ? (
+        <div className="px-4 py-3.5 text-xs leading-relaxed text-neutral-600">
+          No variables. Anything you add here is passed to every new {backendLabel} session — use it
+          for things like <code className="text-neutral-500">HTTPS_PROXY</code> or a provider token
+          your hooks need.
+        </div>
+      ) : (
+        rows.map((row, index) => {
+          const name = row.key.trim()
+          const blocked = name.length > 0 && isBlockedAgentEnvKey(name)
+          const malformed = name.length > 0 && !isValidAgentEnvKey(name)
+          const problem = blocked
+            ? `Wooi sets ${name} itself — this one is ignored.`
+            : malformed
+              ? 'Use letters, digits and underscores, starting with a letter or underscore.'
+              : null
+          return (
+            <div key={index} className="px-4 py-2.5">
+              <div className="flex items-center gap-2">
+                <input
+                  className={inputClass + ' w-52 font-mono text-xs'}
+                  placeholder="NAME"
+                  spellCheck={false}
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  aria-label="Variable name"
+                  value={row.key}
+                  onChange={(event) =>
+                    commit(
+                      rows.map((item, i) =>
+                        i === index ? { ...item, key: event.target.value } : item
+                      )
+                    )
+                  }
+                />
+                <input
+                  className={inputClass + ' min-w-0 flex-1 font-mono text-xs'}
+                  placeholder="value"
+                  spellCheck={false}
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  aria-label="Variable value"
+                  // 값은 토큰일 수 있다. 기본은 가리고, 확인이 필요할 때만 사용자가 연다.
+                  type={revealed.has(index) ? 'text' : 'password'}
+                  value={row.value}
+                  onChange={(event) =>
+                    commit(
+                      rows.map((item, i) =>
+                        i === index ? { ...item, value: event.target.value } : item
+                      )
+                    )
+                  }
+                />
+                <button
+                  aria-label={revealed.has(index) ? 'Hide value' : 'Show value'}
+                  onClick={() =>
+                    setRevealed((prev) => {
+                      const next = new Set(prev)
+                      if (next.has(index)) next.delete(index)
+                      else next.add(index)
+                      return next
+                    })
+                  }
+                  className="shrink-0 p-1 text-neutral-600 hover:text-neutral-300"
+                >
+                  {revealed.has(index) ? <EyeOff size={13} /> : <Eye size={13} />}
+                </button>
+                <button
+                  aria-label="Remove variable"
+                  onClick={() => commit(rows.filter((_, i) => i !== index))}
+                  className="shrink-0 p-1 text-neutral-600 hover:text-neutral-300"
+                >
+                  <Trash2 size={13} />
+                </button>
+              </div>
+              {problem && <p className="mt-1 text-xs text-[var(--warn-400)]">{problem}</p>}
+            </div>
+          )
+        })
+      )}
+      <div className="px-4 py-3 text-xs leading-relaxed text-neutral-600">
+        {restartRequired
+          ? `${backendLabel} reads these when it starts, so restart Wooi to apply changes.`
+          : `New ${backendLabel} turns pick these up right away.`}{' '}
+        <code className="text-neutral-500">PATH</code>,{' '}
+        <code className="text-neutral-500">HOME</code> and{' '}
+        <code className="text-neutral-500">WOOI_*</code> can’t be overridden — Wooi needs them to
+        find your agent CLI and keep workspaces apart.
+      </div>
+    </SettingGroup>
   )
 }
 

@@ -26,6 +26,7 @@ import {
 } from '@shared/types'
 import { CLAUDE_META, CLAUDE_MODELS, type AgentBackend, type TurnEndHook } from '../agent/backend'
 import { agentDefaultsFor, canLeadAgentTeam, delegateBackendsFor } from '../agent/multiAgent'
+import { agentDefaultEnv } from '../agentEnv'
 import { claudeMode, type HostCommand, type HostEvent, type SessionConfig } from './protocol'
 import { runAgentTool } from '../agent/tools'
 import { RateLimitResumeCoordinator } from '../rateLimitResume'
@@ -382,7 +383,8 @@ export class SessionManager implements AgentBackend {
       additionalDirs: ws.additionalDirs ?? [],
       delegateBackends: delegateBackendsFor(ws),
       canSwitchToAgentTeam: canLeadAgentTeam(ws),
-      agentDefaults: agentDefaultsFor(settings)
+      agentDefaults: agentDefaultsFor(settings),
+      env: agentDefaultEnv(CLAUDE_META.id)
     }
   }
 

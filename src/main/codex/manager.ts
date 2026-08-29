@@ -12,6 +12,7 @@ import {
 } from 'electron'
 import { getStore } from '../store'
 import { codexMcpServerEnv } from '../mcpSettings'
+import { agentDefaultEnv } from '../agentEnv'
 import { getTranscripts } from '../transcripts'
 import { log } from '../logger'
 import {
@@ -221,6 +222,11 @@ export class CodexSessionManager implements AgentBackend {
       // 많아 GUI 앱의 기본 PATH 로는 찾지 못한다.
       env: {
         ...process.env,
+        // 설정에 얹은 백엔드 기본 환경 변수. codex 는 app-server·exec 둘 다 `env: process.env` 로
+        // spawn 하므로, 호스트 환경에 한 번 얹으면 새 spawn 경로를 만들지 않고 양쪽에 닿는다.
+        // 아래 WOOI_* 보다 **먼저** 펼치는 것이 요점이다 — 사용자가 같은 이름을 적어도 Wooi 가
+        // 스스로 정한 값이 이긴다(agentDefaultEnv 가 이미 걸러 내지만 순서로도 못 박는다).
+        ...agentDefaultEnv(CODEX_META.id),
         WOOI_USER_DATA: app.getPath('userData'),
         WOOI_LOG_NAME: 'codex-host.log',
         // 호스트는 설정 store 를 읽을 수 없다(electron `app` 이 없다) — 메인이 계산해 넘긴다.
