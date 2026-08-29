@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { handle } from './commandRegistry'
+import { compareBaseBranch, normalizeCompareBase } from '@shared/compareBase'
 import { openInEditor } from './openInEditor'
 import { memoryFile } from './claude/memory'
 import { getStore } from './store'
@@ -1504,9 +1505,32 @@ export function registerIpc(ctx: IpcContext): void {
   })
 
   handle(IPC.gitDiff, async (_e, workspaceId: string) => {
-    const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
+    const st = store.getState()
+    const ws = st.workspaces.find((w) => w.id === workspaceId)
     if (!ws || ws.archived) return null
-    return getDiff(ws.worktreePath, ws.baseBranch).catch(() => null)
+    // 비교 기준은 **여기서만** 읽는다. PR·rebase 대상은 계속 ws.baseBranch 가 소유한다
+    // (경계의 근거는 [[compareBase]]). 리포를 못 찾으면 예전처럼 base 그대로 간다.
+    const defaultBranch = st.repos.find((r) => r.id === ws.repoId)?.defaultBranch
+    const base = defaultBranch
+      ? compareBaseBranch({
+          baseBranch: ws.baseBranch,
+          defaultBranch,
+          compareBase: ws.compareBase
+        })
+      : ws.baseBranch
+    return getDiff(ws.worktreePath, base).catch(() => null)
+  })
+
+  /**
+   * Changes 패널의 비교 기준을 바꾼다. **표시 전용** — 이 값은 IPC.gitDiff 말고 아무 데서도
+   * 읽히지 않으며, PR 대상(ipc.ts 의 PR 생성)·rebase 대상(cascade)은 손대지 않는다.
+   */
+  handle(IPC.workspaceSetCompareBase, (_e, workspaceId: string, compareBase: unknown) => {
+    store.update((st) => {
+      const w = st.workspaces.find((x) => x.id === workspaceId)
+      if (w) w.compareBase = normalizeCompareBase(compareBase)
+    })
+    broadcastState()
   })
 
   // base 브랜치를 현재 브랜치로 머지해 드리프트를 해소한다(충돌 시 워킹트리에 충돌이 남는다).

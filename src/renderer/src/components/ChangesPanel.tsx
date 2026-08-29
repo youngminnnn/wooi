@@ -10,7 +10,9 @@ import DiffFileTree, {
   DIFF_TREE_MAX_WIDTH,
   DIFF_TREE_MIN_WIDTH
 } from './diff/DiffFileTree'
+import CompareBasePicker from './diff/CompareBasePicker'
 import { isSendCommentsShortcut, type DiffComment } from '../lib/diffComments'
+import { normalizeCompareBase, offersCompareBaseChoice } from '@shared/compareBase'
 import { findDiffFileSection } from '../lib/diffFileTree'
 import {
   DIFF_FILE_TREE_OPEN,
@@ -73,6 +75,11 @@ export default function ChangesPanel({
   const backend = useWorkspaceBackend(workspace)
   const queue = workspace?.status === 'running' && !backend?.capabilities.steering
 
+  // 무엇과 견줄지. 표시 전용 값이라 PR·rebase 대상은 그대로다([[compareBase]]).
+  const repoId = workspace?.repoId
+  const repo = useStore((s) => s.app?.repos.find((r) => r.id === repoId))
+  const compareBase = normalizeCompareBase(workspace?.compareBase)
+
   useEffect(() => {
     let alive = true
     setLoading(true)
@@ -85,7 +92,7 @@ export default function ChangesPanel({
     return () => {
       alive = false
     }
-  }, [workspaceId, changedFiles])
+  }, [workspaceId, changedFiles, compareBase])
 
   /**
    * ⌘↵ 로 모아 둔 코멘트를 보낸다.
@@ -155,6 +162,17 @@ export default function ChangesPanel({
     <div className="h-full flex flex-col min-h-0">
       <PanelToolbar
         label={`vs ${diff?.baseBranch ?? baseBranch}`}
+        labelNode={
+          repo && offersCompareBaseChoice(baseBranch, repo.defaultBranch) ? (
+            <CompareBasePicker
+              label={`vs ${diff?.baseBranch ?? baseBranch}`}
+              value={compareBase}
+              parentBranch={baseBranch}
+              defaultBranch={repo.defaultBranch}
+              onChange={(next) => void window.api.git.setCompareBase(workspaceId, next)}
+            />
+          ) : undefined
+        }
         onRefresh={refresh}
         spinning={loading}
         actions={
@@ -229,11 +247,17 @@ export default function ChangesPanel({
 /** 패널 상단 공통 도구줄(라벨 + 새로고침). */
 export function PanelToolbar({
   label,
+  labelNode,
   onRefresh,
   spinning,
   actions
 }: {
   label: string
+  /**
+   * 라벨 자리를 통째로 대신할 것. 주지 않으면 `label` 을 그대로 그린다.
+   * (기본 라벨은 `truncate` 로 잘리므로, 팝오버를 여는 것은 이 자리를 직접 받아야 한다.)
+   */
+  labelNode?: React.ReactNode
   onRefresh: () => void
   spinning: boolean
   /** 새로고침 왼쪽에 놓을 이 패널만의 버튼들. 다른 패널은 주지 않으므로 선택 항목이다. */
@@ -241,7 +265,7 @@ export function PanelToolbar({
 }): React.JSX.Element {
   return (
     <div className="h-8 shrink-0 flex items-center gap-2 px-3 border-b border-[var(--border)] text-xs text-neutral-500">
-      <span className="truncate">{label}</span>
+      {labelNode ?? <span className="truncate">{label}</span>}
       <div className="flex-1" />
       {actions}
       <button
