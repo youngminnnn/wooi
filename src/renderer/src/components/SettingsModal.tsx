@@ -703,6 +703,9 @@ function AgentsPage({
       </SettingGroup>
 
       <AgentEnvSection
+        // 백엔드 탭을 바꾸면 다시 마운트해 그 백엔드의 값에서 새로 시작한다. 편집 중에는 행 배열이
+        // 원본이라(빈 키 행은 아직 저장되지 않는다) props 로 되돌리면 방금 더한 행이 사라진다.
+        key={editing}
         backendLabel={backend?.label ?? editing}
         // codex 는 app-server 를 모든 워크스페이스가 공유하는 단일 프로세스로 띄우고 그 환경이
         // 기동 시점에 굳는다([[codex/appServer]]). claude 는 세션마다 SDK 에 실어 보내므로 즉시다.
@@ -735,19 +738,11 @@ function AgentEnvSection({
   value: Record<string, string>
   onChange: (next: Record<string, string>) => void
 }): React.JSX.Element {
+  // 마운트 시 한 번만 씨를 뿌린다. 이후 원본은 이 배열이고, 저장된 레코드는 commit 이 만든다.
   const [rows, setRows] = useState<Array<{ key: string; value: string }>>(() =>
     Object.entries(value).map(([key, item]) => ({ key, value: item }))
   )
   const [revealed, setRevealed] = useState<Set<number>>(() => new Set())
-
-  // 백엔드 탭을 바꾸면 다른 백엔드의 값이 보여야 한다. 편집 중인 행은 그 백엔드의 것이므로 버린다.
-  const seeded = useRef(value)
-  useEffect(() => {
-    if (seeded.current === value) return
-    seeded.current = value
-    setRows(Object.entries(value).map(([key, item]) => ({ key, value: item })))
-    setRevealed(new Set())
-  }, [value])
 
   const commit = (next: Array<{ key: string; value: string }>): void => {
     setRows(next)
@@ -757,7 +752,6 @@ function AgentEnvSection({
       const key = row.key.trim()
       if (key) record[key] = row.value
     }
-    seeded.current = record
     onChange(record)
   }
 
@@ -792,40 +786,44 @@ function AgentEnvSection({
           return (
             <div key={index} className="px-4 py-2.5">
               <div className="flex items-center gap-2">
-                <input
-                  className={inputClass + ' w-52 font-mono text-xs'}
-                  placeholder="NAME"
-                  spellCheck={false}
-                  autoCapitalize="off"
-                  autoCorrect="off"
-                  aria-label="Variable name"
-                  value={row.key}
-                  onChange={(event) =>
-                    commit(
-                      rows.map((item, i) =>
-                        i === index ? { ...item, key: event.target.value } : item
+                <div className="w-52 shrink-0">
+                  <input
+                    className={inputClass + ' font-mono text-xs'}
+                    placeholder="NAME"
+                    spellCheck={false}
+                    autoCapitalize="off"
+                    autoCorrect="off"
+                    aria-label="Variable name"
+                    value={row.key}
+                    onChange={(event) =>
+                      commit(
+                        rows.map((item, i) =>
+                          i === index ? { ...item, key: event.target.value } : item
+                        )
                       )
-                    )
-                  }
-                />
-                <input
-                  className={inputClass + ' min-w-0 flex-1 font-mono text-xs'}
-                  placeholder="value"
-                  spellCheck={false}
-                  autoCapitalize="off"
-                  autoCorrect="off"
-                  aria-label="Variable value"
-                  // 값은 토큰일 수 있다. 기본은 가리고, 확인이 필요할 때만 사용자가 연다.
-                  type={revealed.has(index) ? 'text' : 'password'}
-                  value={row.value}
-                  onChange={(event) =>
-                    commit(
-                      rows.map((item, i) =>
-                        i === index ? { ...item, value: event.target.value } : item
+                    }
+                  />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <input
+                    className={inputClass + ' font-mono text-xs'}
+                    placeholder="value"
+                    spellCheck={false}
+                    autoCapitalize="off"
+                    autoCorrect="off"
+                    aria-label="Variable value"
+                    // 값은 토큰일 수 있다. 기본은 가리고, 확인이 필요할 때만 사용자가 연다.
+                    type={revealed.has(index) ? 'text' : 'password'}
+                    value={row.value}
+                    onChange={(event) =>
+                      commit(
+                        rows.map((item, i) =>
+                          i === index ? { ...item, value: event.target.value } : item
+                        )
                       )
-                    )
-                  }
-                />
+                    }
+                  />
+                </div>
                 <button
                   aria-label={revealed.has(index) ? 'Hide value' : 'Show value'}
                   onClick={() =>
