@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useState } from 'react'
 import { X } from 'lucide-react'
 import { orderVisibleWorkspaces } from '@shared/types'
 import { useStore } from '../store'
-import { anchorStyle, measureAnchor, type AnchorBox, type Placement } from '../lib/anchor'
+import { anchorStyle, observeAnchor, type AnchorBox, type Placement } from '../lib/anchor'
 import {
   HINTS,
   HINT_IDS,
@@ -189,7 +189,7 @@ export default function Hint({
   // 대체하지 않는다(가리킬 게 없으면 알릴 때가 아니다).
   //
   // shownThisSession 갱신도 여기서 한다 — "실제로 화면에 떴다" 를 확정할 수 있는 유일한 지점이다.
-  // 인라인 힌트(anchor 없음)는 뽑히면 곧장 뜨므로 즉시 센다. 앵커형은 measureAnchor 가 요소를
+  // 인라인 힌트(anchor 없음)는 뽑히면 곧장 뜨므로 즉시 센다. 앵커형은 observeAnchor 가 요소를
   // 찾았을 때만 센다 — 못 찾으면(그 순간 렌더되지 않으면) 카운트도 하지 않는다.
   const [rect, setRect] = useState<AnchorBox | null>(null)
   useLayoutEffect(() => {
@@ -203,15 +203,12 @@ export default function Hint({
       setShownThisSession((s) => (s.has(id) ? s : new Set(s).add(id)))
       return
     }
-    const anchor = selected.anchor
-    const measure = (): void => {
-      const found = measureAnchor(anchor)
+    // 창 크기가 그대로여도 앵커는 움직인다(헤더에 비동기로 버튼이 붙는 등) — `observeAnchor` 가
+    // 프레임마다 재고 값이 바뀔 때만 알려 준다. 자세한 이유는 `lib/anchor.ts`.
+    return observeAnchor(selected.anchor, (found) => {
       setRect(found)
       if (found) setShownThisSession((s) => (s.has(id) ? s : new Set(s).add(id)))
-    }
-    measure()
-    window.addEventListener('resize', measure)
-    return () => window.removeEventListener('resize', measure)
+    })
     // selected 를 그대로 deps 에 쓴다 — HINTS 는 모듈 최상단 상수라 같은 id 의 Hint 객체는 항상
     // 같은 참조다(selectHint 가 그 배열 원소를 그대로 돌려준다), 그러니 매 렌더 새 객체가 생겨
     // effect 가 불필요하게 도는 일은 없다. ctx 도 넣은 건 의도적이다 — 앵커 키가 그대로여도

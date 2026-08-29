@@ -21,6 +21,37 @@ export function measureAnchor(key: string): AnchorBox | null {
   return { top: r.top, left: r.left, width: r.width, height: r.height }
 }
 
+function sameBox(a: AnchorBox | null, b: AnchorBox | null): boolean {
+  if (!a || !b) return a === b
+  return a.top === b.top && a.left === b.left && a.width === b.width && a.height === b.height
+}
+
+/**
+ * 앵커가 움직이는 동안 계속 따라간다. 값이 실제로 바뀔 때만 `onChange` 를 부르고, 정리 함수를
+ * 돌려준다.
+ *
+ * `resize` 이벤트만으로는 부족하다 — 창 크기가 그대로여도 앵커는 움직인다. 실제로 그랬다:
+ * 워크스페이스를 연 직후 git 조회가 끝나면 헤더 오른쪽에 Rebase 버튼이 붙으면서 작업 패널
+ * 토글이 왼쪽으로 밀리는데, 링과 카드는 처음 잰 자리에 남아 **엉뚱한 빈 곳을 가리켰다**.
+ * 화면 좌표를 바꿀 수 있는 경로(비동기 데이터·글꼴·스크롤·애니메이션)를 일일이 구독하는 것보다
+ * 프레임마다 재는 편이 단순하고 빠짐이 없다. 힌트는 한 번에 하나만, 잠깐만 떠 있으므로
+ * 이 루프의 수명도 그만큼 짧다.
+ */
+export function observeAnchor(key: string, onChange: (box: AnchorBox | null) => void): () => void {
+  let raf = 0
+  let last: AnchorBox | null | undefined
+  const tick = (): void => {
+    const next = measureAnchor(key)
+    if (last === undefined || !sameBox(last, next)) {
+      last = next
+      onChange(next)
+    }
+    raf = requestAnimationFrame(tick)
+  }
+  tick()
+  return () => cancelAnimationFrame(raf)
+}
+
 /**
  * 앵커 박스 기준으로 카드의 고정 위치를 계산한다. 뷰포트 밖으로 넘어가지 않게 대략적으로
  * 보정한다(카드 높이는 `maxCardHeight` 로 넉넉히 잡아 계산한다 — 실측하지 않는다).

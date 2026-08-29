@@ -181,7 +181,6 @@ export default function Sidebar({
     }
   }, [noRepos])
 
-
   const addRepo = async (): Promise<void> => {
     const res = await window.api.repo.add()
     if (res.error) {
