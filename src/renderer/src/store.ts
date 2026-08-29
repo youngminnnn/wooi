@@ -939,7 +939,7 @@ export const useStore = create<UIState>((set, get) => ({
   toggleToolVerbose: (workspaceId) =>
     set((s) => ({ toolVerbose: { ...s.toolVerbose, [workspaceId]: !s.toolVerbose[workspaceId] } })),
   terminalRatio: 0.5,
-  detachedPanes: { work: false, scripts: false },
+  detachedPanes: { work: false, scripts: false, overview: false },
   fileViewer: null,
   fileViewerTreeWidth: 260,
   jumpTarget: null,

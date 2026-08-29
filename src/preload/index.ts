@@ -250,6 +250,7 @@ const api: WooiApi = {
     getState: () => ipcRenderer.invoke(IPC.paneGetState),
     setWorkspace: (workspaceId) => ipcRenderer.invoke(IPC.paneSetWorkspace, workspaceId),
     openRepoSettings: (repoId) => ipcRenderer.invoke(IPC.paneOpenRepoSettings, repoId),
+    selectWorkspace: (workspaceId) => ipcRenderer.invoke(IPC.paneSelectWorkspace, workspaceId),
     onState: (cb) => subscribe(IPC.evtPaneState, cb),
     onWorkspace: (cb) => subscribe(IPC.evtPaneWorkspace, cb)
   },

@@ -129,6 +129,7 @@ describe('원격 허용목록의 형태', () => {
       IPC.paneFocus,
       IPC.paneSetWorkspace,
       IPC.paneOpenRepoSettings,
+      IPC.paneSelectWorkspace,
       // 에이전트를 돌리고 GitHub 에 글을 쓴다
       IPC.reviewStart,
       IPC.reviewPost,

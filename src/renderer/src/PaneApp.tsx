@@ -3,6 +3,7 @@ import { ArrowLeftToLine } from 'lucide-react'
 import type { PaneKind } from '@shared/types'
 import { useStore } from './store'
 import { applyTheme } from './lib/theme'
+import Overview from './components/Overview'
 import WorkArea from './components/WorkArea'
 import ScriptPanel from './components/ScriptPanel'
 import GithubConnectModal from './components/GithubConnectModal'
@@ -13,7 +14,8 @@ import Logo from './components/Logo'
 
 const TITLE: Record<PaneKind, string> = {
   work: 'Work panel',
-  scripts: 'Project scripts'
+  scripts: 'Project scripts',
+  overview: 'Overview'
 }
 
 /**
@@ -46,7 +48,10 @@ export default function PaneApp({
   }, [theme])
 
   const workspace = app?.workspaces.find((w) => w.id === workspaceId && !w.archived) ?? null
-  const name = workspace?.displayName?.trim() || workspace?.name || null
+  // 현황판은 워크스페이스에 매이지 않는다 — 전체를 보는 창이라 제목에 세션 이름을 붙이지 않고,
+  // 메인 창이 어디에 있든(개요 화면이든 세션 안이든) 항상 그릴 수 있다.
+  const global = kind === 'overview'
+  const name = global ? null : workspace?.displayName?.trim() || workspace?.name || null
 
   return (
     <div className="h-full flex flex-col bg-[var(--bg)]">
@@ -65,7 +70,7 @@ export default function PaneApp({
           title="Move this panel back into the main window"
         >
           <ArrowLeftToLine size={13} />
-          Return to main window
+          {global ? 'Close this window' : 'Return to main window'}
         </button>
       </div>
 
@@ -77,6 +82,10 @@ export default function PaneApp({
               <span className="text-sm">Loading…</span>
             </div>
           </div>
+        ) : global ? (
+          <ErrorBoundary label={TITLE[kind]}>
+            <Overview />
+          </ErrorBoundary>
         ) : !workspace ? (
           // 메인 창이 워크스페이스를 벗어났거나(개요 화면·리뷰) 이 워크스페이스가 사라진 경우.
           <div className="h-full grid place-items-center px-8 text-center text-sm text-neutral-500">
