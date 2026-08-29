@@ -9,11 +9,13 @@ import {
   MessageSquarePlus
 } from 'lucide-react'
 import type { FileDiff, WorkspaceDiff } from '@shared/types'
+import { branchLineTotal } from '@shared/codePaths'
 import { diffRenderLimit } from '@shared/diffRenderLimit'
 import { parsePatch, rowSign, type PatchHunk, type PatchRow } from './files/diffPatch'
 import type { DiffComment, DiffCommentAnchor } from '../lib/diffComments'
 import DiffCommentBox from './diff/DiffCommentBox'
 import DiffCommentCard from './diff/DiffCommentCard'
+import BranchLineTotalChip from './diff/BranchLineTotalChip'
 import { LargeDiffNotice, OmittedPatchNotice } from './diff/LargeDiffNotice'
 
 /**
@@ -33,6 +35,7 @@ export interface DiffCommenting {
 
 const NO_COMMENTS: DiffComment[] = []
 const NO_HUNKS: PatchHunk[] = []
+const NO_FILES: FileDiff[] = []
 
 export default function DiffView({
   diff,
@@ -63,6 +66,9 @@ export default function DiffView({
     return map
   }, [commenting?.comments])
 
+  // 이른 반환(로딩·변경 없음)보다 위에 둔다 — 훅은 건너뛸 수 없다.
+  const total = useMemo(() => branchLineTotal(diff?.files ?? NO_FILES), [diff?.files])
+
   if (loading) {
     return (
       <div className="grid place-items-center py-16 text-neutral-500">
@@ -78,15 +84,14 @@ export default function DiffView({
     )
   }
 
-  const totalAdd = diff.files.reduce((n, f) => n + f.additions, 0)
-  const totalDel = diff.files.reduce((n, f) => n + f.deletions, 0)
-
   return (
     <div className="space-y-3">
-      <div className="text-xs text-neutral-500">
-        {diff.files.length} file{diff.files.length > 1 ? 's' : ''} ·{' '}
-        <span className="text-[var(--success-400)]">+{totalAdd}</span>{' '}
-        <span className="text-[var(--danger-400)]">−{totalDel}</span>
+      <div className="flex items-center gap-2 text-xs text-neutral-500">
+        <span>
+          {diff.files.length} file{diff.files.length > 1 ? 's' : ''}
+        </span>
+        <span aria-hidden="true">·</span>
+        <BranchLineTotalChip total={total} />
       </div>
       {diff.files.map((f) => (
         <FileBlock

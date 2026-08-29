@@ -89,3 +89,66 @@ describe('DiffView 대용량 폴백', () => {
     expect(screen.getByText('8,259+')).toBeTruthy()
   })
 })
+
+describe('브랜치 총 변경 줄수 칩', () => {
+  it('갈라낼 것이 없으면 합계를 그대로 보여 준다', () => {
+    renderWithStore(
+      <DiffView
+        diff={workspaceDiff([
+          fileDiff({ path: 'src/a.ts', patch: SMALL_PATCH, additions: 12, deletions: 3 })
+        ])}
+        loading={false}
+        baseBranch="main"
+      />
+    )
+    const chip = screen.getByRole('group', {
+      name: 'Branch total: 12 lines added, 3 lines deleted'
+    })
+    expect(chip.textContent).toBe('+12−3')
+  })
+
+  // lock 파일 3천 줄이 섞이면 "이 브랜치가 얼마나 썼나" 라는 숫자가 무의미해진다.
+  it('생성 코드와 테스트를 본 숫자에서 빼고 내역으로 남긴다', () => {
+    renderWithStore(
+      <DiffView
+        diff={workspaceDiff([
+          fileDiff({ path: 'src/main/git.ts', additions: 100, deletions: 10 }),
+          fileDiff({ path: 'src/main/git.test.ts', additions: 50, deletions: 5 }),
+          fileDiff({ path: 'package-lock.json', additions: 3000, deletions: 2000 })
+        ])}
+        loading={false}
+        baseBranch="main"
+      />
+    )
+    // 본 숫자는 사람이 쓴 몫만. 3,150 이 아니라 100 이다.
+    expect(screen.getByRole('group').textContent).toBe('+100−10')
+    // 갈라낸 몫과 전체 합계는 내역에 그대로 남는다 — 갈라내는 것과 숨기는 것은 다르다.
+    expect(screen.getByText('Generated')).toBeTruthy()
+    expect(screen.getByText('Branch total')).toBeTruthy()
+    expect(screen.getByText('+3,150')).toBeTruthy()
+  })
+
+  // 리더가 "8,259" 를 숫자 둘로 끊어 읽는다.
+  it('접근성 라벨은 자릿수 구분 기호 없는 원시 숫자로 만든다', () => {
+    renderWithStore(
+      <DiffView
+        diff={workspaceDiff([
+          fileDiff({ path: 'src/main/git.ts', additions: 8259, deletions: 1200 }),
+          fileDiff({ path: 'package-lock.json', additions: 3000, deletions: 2000 })
+        ])}
+        loading={false}
+        baseBranch="main"
+      />
+    )
+    // 화면에는 8,259 로 나오지만 라벨에는 8259 로 들어간다.
+    const chip = screen.getByRole('group')
+    expect(chip.textContent).toBe('+8,259−1,200')
+    expect(chip.getAttribute('aria-label')).toContain(
+      'Source: 8259 lines added, 1200 lines deleted'
+    )
+    expect(chip.getAttribute('aria-label')).toContain(
+      'generated: 3000 lines added, 2000 lines deleted'
+    )
+    expect(chip.getAttribute('aria-label')).not.toContain(',259')
+  })
+})
