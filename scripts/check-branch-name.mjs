@@ -12,46 +12,17 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { resolve } from 'node:path'
 
-// 커밋 메시지 prefix 와 동일한 타입 집합.
-export const TYPES = [
-  'feat',
-  'fix',
-  'docs',
-  'style',
-  'refactor',
-  'perf',
-  'test',
-  'build',
-  'ci',
-  'chore',
-  'revert',
-  'release'
-]
+// 규칙 자체는 branch-name-rule.mjs 에 있다. 이 파일은 그 규칙의 **CLI 계약**(exit code, 훅
+// stdin 파싱, 위반 메시지)만 맡는다 — 앱도 같은 규칙을 읽어야 하는데, 그쪽에 stdin 을 읽는
+// 코드까지 딸려 가면 안 되기 때문이다.
+import { isAllowedBranchName, PATTERN, TYPES } from './branch-name-rule.mjs'
 
-// 규칙에서 제외하는 보호/특수 브랜치.
-const EXEMPT = new Set(['main', 'HEAD'])
-
-// 봇이 브랜치 이름을 정하는 경로. 이름을 우리가 통제할 수 없으므로 규칙에서 제외한다.
-// 제외하지 않으면 해당 PR 은 CI 를 **구조적으로 통과할 수 없고**(브랜치를 바꿀 방법이
-// 없다), 의존성·보안 업데이트가 조용히 막힌다. 실제로 Dependabot PR 5건이 이 잡
-// 하나 때문에 전부 빨간불이었다.
-const EXEMPT_PREFIXES = ['dependabot/']
-
-// 예) feat/inline-login, fix/first-message-stall, chore/deps/bump-electron
-export const PATTERN = new RegExp(`^(${TYPES.join('|')})\\/[A-Za-z0-9._/-]+$`)
+export { PATTERN, TYPES }
 
 // 삭제 push 는 local_sha 가 전부 0 으로 온다.
 const ZERO_SHA = /^0+$/
 
 const HEADS = 'refs/heads/'
-
-function isAllowed(branch) {
-  return (
-    EXEMPT.has(branch) ||
-    EXEMPT_PREFIXES.some((prefix) => branch.startsWith(prefix)) ||
-    PATTERN.test(branch)
-  )
-}
 
 function reportViolation(branch) {
   const suggestion = branch.replace(/^[^A-Za-z0-9]+/, '') || 'my-change'
@@ -105,7 +76,7 @@ function checkPrePush() {
     if (ZERO_SHA.test(localSha)) continue // 브랜치 삭제 push
 
     const branch = remoteRef.slice(HEADS.length)
-    if (!isAllowed(branch)) {
+    if (!isAllowedBranchName(branch)) {
       reportViolation(branch)
       ok = false
     }
@@ -122,7 +93,7 @@ function run() {
   } else if (!arg) {
     console.error('check-branch-name: 브랜치 이름 인자가 필요합니다.')
     process.exit(2)
-  } else if (isAllowed(arg)) {
+  } else if (isAllowedBranchName(arg)) {
     process.exit(0)
   } else {
     reportViolation(arg)

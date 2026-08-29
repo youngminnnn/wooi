@@ -1,5 +1,5 @@
 // workspace 이름 자동 생성용 형용사·동물 목록. Docker 류의 친근하고 재치있는 슬러그.
-const ADJECTIVES = [
+export const ADJECTIVES = [
   // 멋짐/유능
   'swift',
   'calm',
@@ -105,7 +105,7 @@ const ADJECTIVES = [
   'serene',
   'dapple'
 ]
-const ANIMALS = [
+export const ANIMALS = [
   // 필수 + 귀여운 단골
   'capybara',
   'otter',

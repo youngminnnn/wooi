@@ -296,12 +296,23 @@ export const AGENT_TOOLS: AgentToolSpec[] = [
       '',
       'There is no base argument: Wooi targets the parent workspace’s branch when this one is',
       'stacked, and the repository’s default branch otherwise. Use this rather than `gh pr create`,',
-      'which cannot know that and silently targets the default branch.'
+      'which cannot know that and silently targets the default branch.',
+      '',
+      'If the branch still has the random name Wooi generated and the repository’s rule rejects it,',
+      'this call comes back asking you to confirm a rename with the user. Answer with',
+      '`renameBranch`; never rename the branch yourself.'
     ].join(' '),
     inputSchema: {
       title: z.string().describe('Pull request title.'),
       body: z.string().describe('Pull request description, in Markdown.'),
-      draft: z.boolean().optional().describe('Open it as a draft. Defaults to false.')
+      draft: z.boolean().optional().describe('Open it as a draft. Defaults to false.'),
+      renameBranch: z
+        .string()
+        .optional()
+        .describe(
+          'Only after Wooi asked you to confirm a branch rename: the name the user approved, ' +
+            'or an empty string to keep the current branch name. Omit it otherwise.'
+        )
     },
     annotations: { title: 'Open a pull request', readOnlyHint: false }
   },
