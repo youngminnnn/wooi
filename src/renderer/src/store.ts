@@ -69,6 +69,7 @@ import {
   type DiffComment,
   type DiffCommentAnchor
 } from './lib/diffComments'
+import { dropReopenable, nextReopenable, pushReopenable } from './lib/reopenArchived'
 import {
   forwardAfterSelect,
   navigateWorkspaceHistory,
@@ -456,6 +457,13 @@ interface UIState {
   archiveWorkspace: (
     workspaceId: string
   ) => Promise<{ archiveScriptFailure?: ArchiveScriptFailure }>
+  /**
+   * ⇧⌘T 로 다시 열 수 있는, 최근 아카이브한 워크스페이스들(오래된 것이 앞).
+   * 영구 삭제는 되살릴 수 없으므로 여기 쌓이지 않는다.
+   */
+  reopenableArchives: string[]
+  /** ⇧⌘T — 가장 최근에 아카이브한 워크스페이스를 되살려 연다. */
+  reopenLastArchivedWorkspace: () => Promise<void>
   /** 마지막 일괄 아카이브. 바로 뒤의 ⌘Z 또는 토스트 Undo 로만 한 번 복원한다. */
   undoableArchive: { workspaceIds: string[]; at: number } | null
   /** 한 리포에서 PR 이 병합된 활성 워크스페이스를 재확인 후 일괄 아카이브한다. */
@@ -962,6 +970,7 @@ export const useStore = create<UIState>((set, get) => ({
   },
   pending: [],
   archivingWorkspaces: {},
+  reopenableArchives: [],
   undoableArchive: null,
   activeReviewId: null,
   activeFanoutGroupId: null,
@@ -976,6 +985,8 @@ export const useStore = create<UIState>((set, get) => ({
     }))
     try {
       const result = await window.api.workspace.archive(workspaceId)
+      // ⇧⌘T 가 되짚을 수 있게 쌓는다. 아카이브는 worktree 만 지우므로 되돌릴 수 있다.
+      set((s) => ({ reopenableArchives: pushReopenable(s.reopenableArchives, workspaceId) }))
       // archive script 가 도는 동안 사용자가 다른 워크스페이스로 이동할 수 있다. 완료 시점에도
       // 아카이브한 워크스페이스를 보고 있을 때만 Overview 로 나가야 새 선택을 덮어쓰지 않는다.
       if (get().selectedWorkspaceId === workspaceId) void get().selectWorkspace(null)
@@ -1079,6 +1090,30 @@ export const useStore = create<UIState>((set, get) => ({
     } else {
       get().pushToast('success', `Restored ${plural(restored, 'workspace')}.`)
     }
+  },
+
+  reopenLastArchivedWorkspace: async () => {
+    const s = get()
+    // 그 사이 영구 삭제됐거나 사이드바에서 이미 되살린 것은 다시 열 대상이 아니다.
+    const reopenable = new Set((s.app?.workspaces ?? []).filter((w) => w.archived).map((w) => w.id))
+    const { target, stack } = nextReopenable(s.reopenableArchives, reopenable)
+    set({ reopenableArchives: stack })
+    if (!target) {
+      s.pushToast('info', 'No recently archived workspace to reopen.')
+      return
+    }
+    const res = await window.api.workspace
+      .unarchive(target)
+      .catch((err) => ({ error: err instanceof Error ? err.message : String(err) }) as const)
+    if ('error' in res && res.error) {
+      get().pushToast('error', `Could not reopen the workspace — ${res.error}`)
+      return
+    }
+    // 언아카이브는 worktree 를 새로 만든다 — 전달이 다시 일어나므로 실패도 다시 본다.
+    if ('carryFailures' in res) get().reportCarryFailures(res.carryFailures)
+    const repoId = get().app?.workspaces.find((w) => w.id === target)?.repoId
+    if (repoId && 'carryMissing' in res) get().reportCarryMissing(repoId, res.carryMissing)
+    await get().selectWorkspace(target)
   },
 
   undoLastWorkspaceAction: async () => {
@@ -2062,6 +2097,8 @@ export const useStore = create<UIState>((set, get) => ({
     const { archiveScriptFailure } = await window.api.workspace.remove(workspaceId, true)
     get().reportArchiveScriptFailure(archiveScriptFailure)
     if (get().undoableCreate?.workspaceId === workspaceId) set({ undoableCreate: null })
+    // 브랜치와 이력까지 지운 것은 되살릴 수 없다 — ⇧⌘T 가 시도하지 못하게 뺀다.
+    set((s) => ({ reopenableArchives: dropReopenable(s.reopenableArchives, workspaceId) }))
     if (!wasSelected) return
 
     // 보고 있던 워크스페이스가 사라졌으니 ⌘[ 와 같은 규칙으로 직전에 보던 곳으로 돌아간다.

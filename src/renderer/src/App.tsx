@@ -498,6 +498,15 @@ export default function App(): React.JSX.Element {
         }
       }
 
+      // ⇧⌘T: 방금 아카이브한 워크스페이스를 다시 연다(브라우저의 "닫은 탭 다시 열기").
+      // 아카이브 직후에는 Overview 로 빠져나와 선택이 없으므로, selId 를 요구하는 아래
+      // ⇧⌘ 블록보다 앞에 둔다. 되살리는 대상은 아카이브뿐이다 — 영구 삭제는 되돌리지 않는다.
+      if (e.shiftKey && e.code === 'KeyT' && !e.ctrlKey && !e.altKey) {
+        e.preventDefault()
+        void st.reopenLastArchivedWorkspace()
+        return
+      }
+
       // 키 판별은 e.code 로 한다 — 한글 IME 등에서 e.key 가 문자가 아닐 수 있다.
       if (selId && e.shiftKey) {
         // ⇧⌘D: dev 스크립트 실행/중지. 다른 헤더 도구 단축키와 같은 ⇧⌘ 계열로 맞췄다.
