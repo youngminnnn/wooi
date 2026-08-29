@@ -300,6 +300,9 @@ export default function App(): React.JSX.Element {
       // '?'·⌃O 같은 기존 단축키가 위에서 먼저 return 하므로 그 키들은 여기까지 오지 않는다.
       if (chatComposerReachable(st, fileViewerVisible)) {
         if (shouldFocusComposerFromEditingKey(e)) {
+          // 기본 동작까지 막아야 한다 — 막지 않으면 이 핸들러가 옮겨 놓은 포커스 위에서
+          // Backspace 가 그대로 실행돼, 보이지도 않는 초안의 마지막 글자가 지워진다.
+          e.preventDefault()
           window.dispatchEvent(new CustomEvent(FOCUS_COMPOSER_EVENT))
           return
         }
