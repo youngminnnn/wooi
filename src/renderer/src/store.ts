@@ -69,7 +69,12 @@ import {
   type DiffComment,
   type DiffCommentAnchor
 } from './lib/diffComments'
-import { popWorkspaceHistory, pushWorkspaceHistory } from './lib/workspaceHistory'
+import {
+  forwardAfterSelect,
+  navigateWorkspaceHistory,
+  popWorkspaceHistory,
+  pushWorkspaceHistory
+} from './lib/workspaceHistory'
 import {
   hasMoreTranscriptHistory,
   nextTranscriptLimit,
@@ -573,12 +578,17 @@ interface UIState {
   reportCascade: (cascade: StackCascadeResult, successMsg: string) => void
   /** 방문 순서 스택(브라우저 뒤로가기용). 현재 선택은 포함하지 않고, 오래된 것이 앞이다. */
   workspaceHistory: string[]
+  /** ⌘[ 로 떠나온 워크스페이스들. ⌘] 가 여기서 꺼내 되짚어 간다. */
+  workspaceForward: string[]
   /**
-   * @param opts.fromHistory 뒤로가기로 인한 선택 — 방문 스택에 다시 쌓지 않는다.
+   * @param opts.fromHistory 뒤/앞으로 가기로 인한 선택 — 방문 스택에 다시 쌓지 않고,
+   * 앞쪽 이력도 버리지 않는다.
    */
   selectWorkspace: (id: string | null, opts?: { fromHistory?: boolean }) => Promise<void>
   /** ⌘[ — 직전에 보던 워크스페이스로 돌아간다(브라우저 뒤로가기). */
   goBackWorkspace: () => Promise<void>
+  /** ⌘] — 뒤로 온 길을 되짚어 앞으로 간다. */
+  goForwardWorkspace: () => Promise<void>
   refreshGit: (workspaceId: string) => Promise<void>
   /** 진입 여부와 무관하게 모든(비아카이브) 워크스페이스의 git 상태를 한 번에 갱신한다. */
   refreshAllGit: () => Promise<void>
@@ -900,6 +910,7 @@ export const useStore = create<UIState>((set, get) => ({
   app: null,
   selectedWorkspaceId: null,
   workspaceHistory: [],
+  workspaceForward: [],
   transcripts: {},
   loadedTranscripts: {},
   transcriptPaging: {},
@@ -2331,14 +2342,29 @@ export const useStore = create<UIState>((set, get) => ({
         id,
         opts?.fromHistory
       )
+      // 뒤로 간 뒤 새 워크스페이스로 옮기면 앞쪽 가지는 버린다(브라우저 관례).
+      const workspaceForward = forwardAfterSelect(s.workspaceForward, !!opts?.fromHistory)
       // fan-out 비교 화면도 리뷰와 같은 자리를 쓴다 — 워크스페이스를 고르는 것은 "그 화면에서
       // 나온다" 는 뜻이다(그룹 자체는 남아 사이드바에서 다시 열 수 있다).
       const closed = { activeReviewId: null, activeFanoutGroupId: null }
       if (!id || !s.unread[id])
-        return { selectedWorkspaceId: id, ...closed, fileViewer, workspaceHistory }
+        return {
+          selectedWorkspaceId: id,
+          ...closed,
+          fileViewer,
+          workspaceHistory,
+          workspaceForward
+        }
       const unread = { ...s.unread }
       delete unread[id]
-      return { selectedWorkspaceId: id, unread, ...closed, fileViewer, workspaceHistory }
+      return {
+        selectedWorkspaceId: id,
+        unread,
+        ...closed,
+        fileViewer,
+        workspaceHistory,
+        workspaceForward
+      }
     })
 
     // 별도 창으로 떼어 둔 패널은 메인 창의 선택을 따라간다 — 보조 모니터의 작업 패널이 다른
@@ -2380,12 +2406,27 @@ export const useStore = create<UIState>((set, get) => ({
       return
     }
     const alive = new Set((s.app?.workspaces ?? []).filter((w) => !w.archived).map((w) => w.id))
-    const { target, history } = popWorkspaceHistory(
-      s.workspaceHistory,
+    const { target, back, forward } = navigateWorkspaceHistory(
+      { back: s.workspaceHistory, forward: s.workspaceForward },
       s.selectedWorkspaceId,
-      alive
+      alive,
+      'back'
     )
-    set({ workspaceHistory: history })
+    set({ workspaceHistory: back, workspaceForward: forward })
+    if (target) await get().selectWorkspace(target, { fromHistory: true })
+  },
+
+  goForwardWorkspace: async () => {
+    const s = get()
+    // 앞으로가기에는 리뷰 화면 같은 "한 겹 위" 가 없다 — ⌘[ 로 떠나온 워크스페이스만 되짚는다.
+    const alive = new Set((s.app?.workspaces ?? []).filter((w) => !w.archived).map((w) => w.id))
+    const { target, back, forward } = navigateWorkspaceHistory(
+      { back: s.workspaceHistory, forward: s.workspaceForward },
+      s.selectedWorkspaceId,
+      alive,
+      'forward'
+    )
+    set({ workspaceHistory: back, workspaceForward: forward })
     if (target) await get().selectWorkspace(target, { fromHistory: true })
   },
 
