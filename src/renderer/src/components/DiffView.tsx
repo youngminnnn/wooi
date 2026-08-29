@@ -197,7 +197,10 @@ function FileBlock({
   const selection = drag ?? draft
 
   return (
-    <div className="rounded-lg border border-[var(--border)] overflow-hidden">
+    <div
+      data-diff-file={file.path}
+      className="rounded-lg border border-[var(--border)] overflow-hidden"
+    >
       <div className="flex items-center gap-2 px-3 py-2 bg-[var(--bg-3)] hover:bg-[var(--surface)]">
         <button
           onClick={toggle}

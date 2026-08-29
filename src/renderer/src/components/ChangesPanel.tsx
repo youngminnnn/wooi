@@ -1,15 +1,32 @@
-import { useEffect, useMemo, useState } from 'react'
-import { RefreshCw } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { ListTree, RefreshCw } from 'lucide-react'
 import { useStore } from '../store'
 import { isPaneWindow } from '../lib/paneWindow'
 import { useWorkspaceBackend } from '../lib/backends'
 import DiffView, { type DiffCommenting } from './DiffView'
 import DiffCommentsBar from './diff/DiffCommentsBar'
+import DiffFileTree, {
+  DIFF_TREE_DEFAULT_WIDTH,
+  DIFF_TREE_MAX_WIDTH,
+  DIFF_TREE_MIN_WIDTH
+} from './diff/DiffFileTree'
 import { isSendCommentsShortcut, type DiffComment } from '../lib/diffComments'
-import type { WorkspaceDiff } from '@shared/types'
+import { findDiffFileSection } from '../lib/diffFileTree'
+import {
+  DIFF_FILE_TREE_OPEN,
+  DIFF_FILE_TREE_WIDTH,
+  readUiFlag,
+  readUiNumber,
+  setUiFlag,
+  setUiNumber
+} from '../lib/uiFlags'
+import type { FileDiff, WorkspaceDiff } from '@shared/types'
 
 /** 참조 동일성 유지용 — 셀렉터가 매번 새 배열을 돌려주면 무한 리렌더가 난다. */
 const NO_COMMENTS: DiffComment[] = []
+
+/** diff 가 아직 없을 때 트리에 넘길 빈 목록. 매번 새 배열을 만들면 트리가 헛돈다. */
+const NO_FILES: FileDiff[] = []
 
 /**
  * 우측 패널의 Changes 탭. base 브랜치 대비 변경을 표시한다.
@@ -27,6 +44,15 @@ export default function ChangesPanel({
 }): React.JSX.Element {
   const [diff, setDiff] = useState<WorkspaceDiff | null>(null)
   const [loading, setLoading] = useState(true)
+  // 파일 트리는 이 패널만의 화면 상태다 — 전역 설정이 아니라 localStorage 로 기억한다([[uiFlags]]).
+  const [treeOpen, setTreeOpen] = useState(() => readUiFlag(DIFF_FILE_TREE_OPEN))
+  const [treeWidth, setTreeWidth] = useState(() => {
+    const stored = readUiNumber(DIFF_FILE_TREE_WIDTH)
+    if (!stored) return DIFF_TREE_DEFAULT_WIDTH
+    return Math.min(DIFF_TREE_MAX_WIDTH, Math.max(DIFF_TREE_MIN_WIDTH, stored))
+  })
+  const [activePath, setActivePath] = useState<string | null>(null)
+  const scrollRef = useRef<HTMLDivElement | null>(null)
   // git 상태의 변경 파일 수가 바뀌면 diff 를 다시 가져오는 트리거로 쓴다.
   const changedFiles = useStore((s) => s.gitStatus[workspaceId]?.changedFiles ?? 0)
   const openFileViewer = useStore((s) => s.openFileViewer)
@@ -99,22 +125,66 @@ export default function ChangesPanel({
     [comments, workspaceId, addDiffComment, editDiffComment, removeDiffComment]
   )
 
+  /** 트리에서 고른 파일의 블록으로 스크롤한다. 접혀 있으면 머리글까지만 — 펴는 건 사용자 몫이다. */
+  const jumpTo = (path: string): void => {
+    setActivePath(path)
+    findDiffFileSection(scrollRef.current, path)?.scrollIntoView({ block: 'start' })
+  }
+
+  const toggleTree = (): void => {
+    const next = !treeOpen
+    setTreeOpen(next)
+    setUiFlag(DIFF_FILE_TREE_OPEN, next)
+  }
+
+  const resizeTree = (next: number): void => {
+    setTreeWidth(next)
+    setUiNumber(DIFF_FILE_TREE_WIDTH, next)
+  }
+
   return (
     <div className="h-full flex flex-col min-h-0">
       <PanelToolbar
         label={`vs ${diff?.baseBranch ?? baseBranch}`}
         onRefresh={refresh}
         spinning={loading}
+        actions={
+          <button
+            onClick={toggleTree}
+            title={treeOpen ? 'Hide the file tree' : 'Show the file tree'}
+            aria-label={treeOpen ? 'Hide the file tree' : 'Show the file tree'}
+            aria-pressed={treeOpen}
+            className={`grid h-5 w-5 place-items-center rounded ${
+              treeOpen
+                ? 'bg-[var(--surface-2)] text-neutral-200'
+                : 'text-neutral-600 hover:text-neutral-300'
+            }`}
+          >
+            <ListTree size={11} />
+          </button>
+        }
       />
-      <div className="flex-1 overflow-y-auto px-3 py-3">
-        <DiffView
-          diff={diff}
-          loading={loading}
-          baseBranch={diff?.baseBranch ?? baseBranch}
-          // 분리한 패널 창에는 큰 뷰어가 없다(FileBrowser 의 openViewer 주석 참고).
-          onOpenFile={isPaneWindow ? undefined : (path) => openFileViewer(workspaceId, path)}
-          commenting={commenting}
-        />
+      <div className="flex-1 min-h-0 flex">
+        {treeOpen && (
+          <DiffFileTree
+            files={diff?.files ?? NO_FILES}
+            activePath={activePath}
+            width={treeWidth}
+            onWidthChange={resizeTree}
+            onSelect={jumpTo}
+            onClose={toggleTree}
+          />
+        )}
+        <div ref={scrollRef} className="flex-1 min-w-0 overflow-y-auto px-3 py-3">
+          <DiffView
+            diff={diff}
+            loading={loading}
+            baseBranch={diff?.baseBranch ?? baseBranch}
+            // 분리한 패널 창에는 큰 뷰어가 없다(FileBrowser 의 openViewer 주석 참고).
+            onOpenFile={isPaneWindow ? undefined : (path) => openFileViewer(workspaceId, path)}
+            commenting={commenting}
+          />
+        </div>
       </div>
       <DiffCommentsBar
         comments={comments}
@@ -131,16 +201,20 @@ export default function ChangesPanel({
 export function PanelToolbar({
   label,
   onRefresh,
-  spinning
+  spinning,
+  actions
 }: {
   label: string
   onRefresh: () => void
   spinning: boolean
+  /** 새로고침 왼쪽에 놓을 이 패널만의 버튼들. 다른 패널은 주지 않으므로 선택 항목이다. */
+  actions?: React.ReactNode
 }): React.JSX.Element {
   return (
     <div className="h-8 shrink-0 flex items-center gap-2 px-3 border-b border-[var(--border)] text-xs text-neutral-500">
       <span className="truncate">{label}</span>
       <div className="flex-1" />
+      {actions}
       <button
         onClick={onRefresh}
         className="text-neutral-600 hover:text-neutral-300"
