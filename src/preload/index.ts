@@ -288,6 +288,11 @@ const api: WooiApi = {
     update: (patch) => ipcRenderer.invoke(IPC.settingsUpdate, patch)
   },
 
+  notify: {
+    setViewing: (workspaceId) => ipcRenderer.invoke(IPC.notifySetViewing, workspaceId),
+    lastSkip: () => ipcRenderer.invoke(IPC.notifyLastSkip)
+  },
+
   mcp: {
     inventory: () => ipcRenderer.invoke(IPC.mcpInventory),
     openConfig: () => ipcRenderer.invoke(IPC.mcpOpenConfig),

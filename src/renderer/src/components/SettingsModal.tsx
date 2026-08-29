@@ -42,6 +42,7 @@ import {
   DEFAULT_NOTIFICATION_SETTINGS,
   NOTIFICATION_CHANNEL_LABELS,
   NOTIFICATION_EVENT_LABELS,
+  NOTIFICATION_SKIP_LABELS,
   agentSettingsFor,
   isBlockedAgentEnvKey,
   isValidAgentEnvKey,
@@ -56,6 +57,7 @@ import type {
   NotificationChannel,
   NotificationEvent,
   NotificationSettings,
+  NotificationSkip,
   PermissionMode,
   Repo,
   ThemePreference
@@ -864,6 +866,49 @@ function AgentEnvSection({
   )
 }
 
+/**
+ * 마지막으로 건너뛴 알림 1건.
+ *
+ * 알림은 조건이 여러 겹이라(음소거 · 채널 · 포커스 · OS 권한) 안 울렸을 때 어디서 막혔는지
+ * 결과만 보고는 알 수 없다 — 특히 macOS 는 권한이 없거나 집중 모드면 **오류 없이** 삼킨다.
+ * 그 침묵을 여기서 문장으로 돌려준다.
+ *
+ * 값은 main 메모리에만 있으므로(진단값이라 디스크에 남기지 않는다) 이 페이지를 열 때 읽는다.
+ */
+function LastNotificationSkip(): React.JSX.Element {
+  const [skip, setSkip] = useState<NotificationSkip | null>(null)
+  useEffect(() => {
+    let alive = true
+    void window.api.notify
+      .lastSkip()
+      .then((value) => {
+        if (alive) setSkip(value)
+      })
+      .catch(() => {
+        // 진단 줄이 없다고 설정 화면이 망가질 이유는 없다.
+      })
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  if (!skip) {
+    return (
+      <p className="text-xs leading-relaxed text-neutral-600">
+        OS notifications appear only while Wooi is in the background. If macOS notifications are
+        disabled, allow Wooi in System Settings → Notifications.
+      </p>
+    )
+  }
+  return (
+    <p className="text-xs leading-relaxed text-neutral-600">
+      Last skipped notification: {NOTIFICATION_EVENT_LABELS[skip.event].toLowerCase()} for{' '}
+      <span className="text-neutral-400">{skip.workspaceName}</span> —{' '}
+      {NOTIFICATION_SKIP_LABELS[skip.reason]}.
+    </p>
+  )
+}
+
 function NotificationsPage({
   settings,
   save
@@ -935,10 +980,21 @@ function NotificationsPage({
           </tbody>
         </table>
       </div>
-      <p className="text-xs leading-relaxed text-neutral-600">
-        OS notifications appear only while Wooi is in the background. If macOS notifications are
-        disabled, allow Wooi in System Settings → Notifications.
-      </p>
+      <SettingGroup title="Focus">
+        <SettingRow
+          title="Stay quiet for the workspace I’m watching"
+          description="Skips the OS notification when Wooi is in front and that workspace is the one on screen. Other workspaces still notify — you can be looking at one while another finishes."
+        >
+          <Switch
+            label="Stay quiet for the workspace I’m watching"
+            checked={settings.suppressWhenFocused !== false}
+            onChange={(value) => save({ suppressWhenFocused: value })}
+          />
+        </SettingRow>
+      </SettingGroup>
+
+      <LastNotificationSkip />
+
       <button
         onClick={() => update(structuredClone(DEFAULT_NOTIFICATION_SETTINGS))}
         className="flex items-center gap-1.5 text-xs text-neutral-500 hover:text-neutral-300"

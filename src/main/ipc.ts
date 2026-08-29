@@ -7,6 +7,7 @@ import { openInEditor } from './openInEditor'
 import { memoryFile } from './claude/memory'
 import { getStore } from './store'
 import { getRemoteBridge } from './remote'
+import { lastNotificationSkip, setViewingWorkspace } from './notifications'
 import { rememberPrStatus } from './prStatusCache'
 import { forgetContextUsage } from './contextUsageCache'
 import { forgetWorkspaceUsage } from './usageLedger'
@@ -3132,6 +3133,14 @@ export function registerIpc(ctx: IpcContext): void {
     }
     getRemoteBridge().setUnread(ids)
   })
+
+  // 지금 보고 있는 워크스페이스를 기억한다. 알림을 띄울지 판정할 때 "앱은 보고 있지만 다른
+  // 워크스페이스를 보고 있는" 경우를 가르는 유일한 근거다([[main/notifications]]).
+  handle(IPC.notifySetViewing, (_e, workspaceId: unknown) => {
+    setViewingWorkspace(typeof workspaceId === 'string' ? workspaceId : null)
+  })
+  // 설정 화면의 진단 줄. 값은 메인 메모리에만 있으므로(디스크에 남기지 않는다) 열 때마다 읽는다.
+  handle(IPC.notifyLastSkip, () => lastNotificationSkip())
 
   handle(IPC.remoteClearData, async () => {
     const status = await getRemoteBridge().clearData()

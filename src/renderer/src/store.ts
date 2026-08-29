@@ -1228,11 +1228,27 @@ export const useStore = create<UIState>((set, get) => ({
       }
     }
 
+    // 지금 화면에 떠 있는 워크스페이스를 main 에 알린다. 알림을 띄우는 것은 main 인데 선택
+    // 상태는 여기에만 있어서, 올려 주지 않으면 main 은 "앱은 보고 있지만 다른 워크스페이스를
+    // 보고 있는" 경우를 가릴 수 없다([[main/notifications]]). 창이 흐려졌으면 아무것도 보고
+    // 있지 않은 것으로 친다 — 그때는 어느 워크스페이스든 알림이 울려야 한다.
+    let sentViewing: string | null | undefined
+    const pushViewing = (): void => {
+      const next = windowFocused ? get().selectedWorkspaceId : null
+      if (next === sentViewing) return
+      sentViewing = next
+      void window.api.notify.setViewing(next).catch(() => {
+        // main 이 아직 안 붙었다 — 다음 선택/포커스 변화에서 다시 보낸다.
+        sentViewing = undefined
+      })
+    }
+
     // 창이 다시 활성화되면 인증 상태를 갱신하고(Terminal 로그인 완료 자동 반영) 미확인 표시를 해제한다.
     // main 의 'focus' 이벤트가 신뢰 가능한 트리거이고, DOM 의 window 'focus' 는 보조로 함께 둔다
     // (Dock 클릭·앱 전환 시 DOM 이벤트가 누락되어 배지가 안 사라지던 문제를 막는다).
     window.api.onWindowFocus(() => {
       windowFocused = true
+      pushViewing()
       clearSelectedUnread()
       // 자리를 비운 사이 바뀌었을 수 있으니 모든 워크트리 상태를 즉시 한 번 갱신한다.
       void get().refreshAllGit()
@@ -1241,9 +1257,11 @@ export const useStore = create<UIState>((set, get) => ({
     })
     window.api.onWindowBlur(() => {
       windowFocused = false
+      pushViewing()
     })
     window.addEventListener('focus', () => {
       windowFocused = true
+      pushViewing()
       void get().refreshAuth()
       // 자리를 비운 사이 사용자가 에이전트 CLI 를 설치·제거했을 수 있으므로 가용성도 다시 본다.
       void get().refreshAgents()
@@ -1251,6 +1269,7 @@ export const useStore = create<UIState>((set, get) => ({
     })
     window.addEventListener('blur', () => {
       windowFocused = false
+      pushViewing()
     })
 
     // macOS Dock 빨간 배지 = "내 주의가 필요한" workspace 수. 미확인 완료(unread)뿐 아니라
@@ -1283,6 +1302,7 @@ export const useStore = create<UIState>((set, get) => ({
     }
 
     useStore.subscribe((state, prev) => {
+      if (state.selectedWorkspaceId !== prev.selectedWorkspaceId) pushViewing()
       // 알림 설정/음소거(app)나 unread·permissions 가 바뀌면 배지를 다시 계산한다.
       if (
         state.unread !== prev.unread ||
@@ -1295,6 +1315,7 @@ export const useStore = create<UIState>((set, get) => ({
     })
     // 시작할 때도 한 번 보내 복원한 목록과 원격 미러를 즉시 맞춘다.
     pushUnreadToRemote(useStore.getState())
+    pushViewing()
 
     window.api.onChat(({ workspaceId, event }: ChatEnvelope) => {
       const { transcripts } = get()

@@ -119,7 +119,11 @@ export const DEFAULT_SETTINGS: AppSettings = {
   // 푸시는 제3자 전달망을 지나므로 원격 접근과 별도로 명시적으로 켜야 한다.
   remotePushEnabled: false,
   // 데스크톱을 쓰는 동안은 폰을 깨우지 않는 편이 기본이다. 항상 받고 싶으면 설정에서 켠다.
-  remotePushWhileActive: false
+  remotePushWhileActive: false,
+  // 보고 있는 워크스페이스의 알림은 누른다 — 예전 동작("창이 앞에 있으면 무조건 억제")에서
+  // 워크스페이스 단위로 좁힌 것이다. 기존 사용자도 load 의 기본값 병합으로 true 가 되므로
+  // schemaVersion 을 올릴 필요가 없다([[shared/types]] suppressWhenFocused).
+  suppressWhenFocused: true
 }
 
 export const EMPTY_STATE: AppState = {
