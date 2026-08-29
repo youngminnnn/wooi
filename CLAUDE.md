@@ -21,10 +21,17 @@
 
 브랜치는 `<type>/<설명>` 형식이어야 한다(`feat`, `fix`, `docs`, `style`, `refactor`, `perf`,
 `test`, `build`, `ci`, `chore`, `revert`, `release`). 규칙의 단일 소스는
-`scripts/check-branch-name.mjs` 이고, pre-push 훅과 CI(`ci.yml`)가 이를 공유한다.
+`scripts/branch-name-rule.mjs` 이고, pre-push 훅과 CI(`ci.yml`)가 쓰는
+`scripts/check-branch-name.mjs`(CLI)와 앱(`src/main/branchNameFromWork.ts`)이 이를 공유한다.
 
 - Wooi 워크트리는 `fearless-echidna` 같은 랜덤 이름으로 브랜치를 만든다. 이 이름은 규칙에
-  어긋나므로 **origin 에 push 하기 전에 로컬 브랜치 이름부터 바꾼 뒤 push 한다.**
+  어긋나므로 **origin 에 push 하기 전에 이름을 바꿔야 한다.**
+- **`open_pull_request` 도구를 쓰면 손으로 바꿀 필요가 없다.** 아직 push 되지 않은 랜덤 이름
+  브랜치면, 도구가 push 전에 멈춰 서서 워크스페이스 이름으로 만든 이름(`feat/…`)을 제안한다.
+  사용자에게 확인받고 `renameBranch` 에 승인된 이름을 실어 다시 부르면 개명 후 push 한다
+  (빈 문자열이면 그대로 push). 이름을 짓는 별도의 모델 호출은 없다 — 재료는 이미 정해진
+  워크스페이스 이름이고, 없으면 아무것도 하지 않는다.
+- `git push` 를 직접 할 때는 여전히 손으로 바꾼다.
 
   ```sh
   git branch -m feat/inline-github-login   # 현재 브랜치를 규칙에 맞는 이름으로

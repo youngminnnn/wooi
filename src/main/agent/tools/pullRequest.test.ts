@@ -11,6 +11,7 @@ import type { Repo, Workspace } from '@shared/types'
  */
 
 const originHasBranch = vi.hoisted(() => vi.fn())
+const renameLocalBranch = vi.hoisted(() => vi.fn())
 const pushCurrentBranch = vi.hoisted(() => vi.fn())
 const countCommitsAhead = vi.hoisted(() => vi.fn())
 const createPr = vi.hoisted(() => vi.fn())
@@ -27,6 +28,12 @@ const update = vi.hoisted(() =>
 vi.mock('../../git', () => ({ originHasBranch, pushCurrentBranch, countCommitsAhead }))
 vi.mock('../../github', () => ({ createPr, findOpenPrStatus, listOpenPrs }))
 vi.mock('../../store', () => ({ getStore: () => ({ getState: () => state, update }) }))
+// 판정(proposeBranchRename)은 진짜를 쓴다 — 여기서 검증하려는 것이 그 판정과 핸들러의 결합이다.
+// git 을 실제로 부르는 부분만 갈아 끼운다.
+vi.mock('../../branchNameFromWork', async (importActual) => ({
+  ...(await importActual<typeof import('../../branchNameFromWork')>()),
+  renameLocalBranch
+}))
 
 const broadcastState = vi.fn()
 const deps = { broadcastState } as unknown as AgentToolDeps
@@ -65,6 +72,7 @@ beforeEach(() => {
   findOpenPrStatus.mockResolvedValue(null)
   listOpenPrs.mockResolvedValue([])
   originHasBranch.mockResolvedValue(true)
+  renameLocalBranch.mockResolvedValue(undefined)
   pushCurrentBranch.mockResolvedValue({ ok: true, error: '' })
   countCommitsAhead.mockResolvedValue(2)
   createPr.mockResolvedValue({ pr: { number: 42, url: 'https://github.com/o/r/pull/42' } })
@@ -206,5 +214,133 @@ describe('open_pull_request', () => {
   it('사라진 워크스페이스면 던진다', async () => {
     state.workspaces = []
     await expect(open()).rejects.toThrow(/no longer exists/)
+  })
+})
+
+/**
+ * 랜덤 브랜치 이름을 작업에 맞는 이름으로 바꾸는 경로.
+ *
+ * 이 기능에 이름을 짓는 모델 호출은 없다 — 재료는 이미 정해진 워크스페이스 이름 하나뿐이고,
+ * 재료가 없으면 아무것도 하지 않는다. 그래서 검증할 것은 "언제 손대지 **않는가**" 가 대부분이다.
+ */
+describe('open_pull_request 의 브랜치 개명', () => {
+  /** 아직 push 되지 않은, Wooi 가 지은 이름의 워크스페이스. */
+  function 랜덤이름워크스페이스(overrides: Partial<Workspace> = {}): void {
+    state.workspaces = [
+      {
+        ...parent,
+        id: 'ws-random',
+        branch: 'savvy-numbat',
+        parentWorkspaceId: null,
+        autoName: 'Branch name from work',
+        ...overrides
+      }
+    ]
+    originHasBranch.mockResolvedValue(false)
+  }
+
+  it('바로 바꾸지 않고 사용자에게 확인하라고 되돌려 보낸다', async () => {
+    랜덤이름워크스페이스()
+
+    await expect(open(ARGS, 'ws-random')).rejects.toThrow(/feat\/branch-name-from-work/)
+
+    // 확인을 받기 전에는 이름도 안 바꾸고 push 도 하지 않는다.
+    expect(renameLocalBranch).not.toHaveBeenCalled()
+    expect(pushCurrentBranch).not.toHaveBeenCalled()
+    expect(createPr).not.toHaveBeenCalled()
+  })
+
+  it('승인된 이름을 받으면 push 전에 바꾸고 store 를 맞춘다', async () => {
+    랜덤이름워크스페이스()
+
+    await expect(
+      open({ ...ARGS, renameBranch: 'feat/branch-name-from-work' }, 'ws-random')
+    ).resolves.toMatchObject({ branch: 'feat/branch-name-from-work' })
+
+    expect(renameLocalBranch).toHaveBeenCalledWith(
+      '/tmp/wt',
+      'savvy-numbat',
+      'feat/branch-name-from-work'
+    )
+    expect(state.workspaces[0].branch).toBe('feat/branch-name-from-work')
+    // push 는 개명 뒤여야 한다 — 순서가 뒤집히면 원격에 랜덤 이름이 먼저 생긴다.
+    expect(renameLocalBranch.mock.invocationCallOrder[0]).toBeLessThan(
+      pushCurrentBranch.mock.invocationCallOrder[0]
+    )
+  })
+
+  it('사용자가 고른 다른 이름을 그대로 따른다 — 우리 제안을 고집하지 않는다', async () => {
+    랜덤이름워크스페이스()
+
+    await expect(
+      open({ ...ARGS, renameBranch: 'fix/push-name-drift' }, 'ws-random')
+    ).resolves.toBeTruthy()
+
+    expect(renameLocalBranch).toHaveBeenCalledWith('/tmp/wt', 'savvy-numbat', 'fix/push-name-drift')
+  })
+
+  it('빈 문자열은 "그대로 둬라" 다 — 되돌려 보내기가 반복되지 않는다', async () => {
+    랜덤이름워크스페이스()
+
+    await expect(open({ ...ARGS, renameBranch: '' }, 'ws-random')).resolves.toMatchObject({
+      branch: 'savvy-numbat'
+    })
+
+    expect(renameLocalBranch).not.toHaveBeenCalled()
+    expect(pushCurrentBranch).toHaveBeenCalled()
+  })
+
+  it('규칙에 어긋나는 이름은 거절한다 — push 가 훅에 막힐 이름을 새기지 않는다', async () => {
+    랜덤이름워크스페이스()
+
+    await expect(open({ ...ARGS, renameBranch: 'nonsense-name' }, 'ws-random')).rejects.toThrow(
+      /branch name rule/
+    )
+
+    expect(renameLocalBranch).not.toHaveBeenCalled()
+    expect(pushCurrentBranch).not.toHaveBeenCalled()
+  })
+
+  it('이미 규칙에 맞는 브랜치는 묻지도 바꾸지도 않는다', async () => {
+    랜덤이름워크스페이스({ branch: 'feat/already-named' })
+
+    await expect(open(ARGS, 'ws-random')).resolves.toBeTruthy()
+
+    expect(renameLocalBranch).not.toHaveBeenCalled()
+  })
+
+  it('사람이 지은 이름은 규칙에 어긋나도 건드리지 않는다', async () => {
+    랜덤이름워크스페이스({ branch: 'my-hand-typed-branch' })
+
+    await expect(open(ARGS, 'ws-random')).resolves.toBeTruthy()
+
+    expect(renameLocalBranch).not.toHaveBeenCalled()
+  })
+
+  it('이미 origin 에 있으면 건드리지 않는다', async () => {
+    랜덤이름워크스페이스()
+    originHasBranch.mockResolvedValue(true)
+
+    await expect(open(ARGS, 'ws-random')).resolves.toBeTruthy()
+
+    expect(renameLocalBranch).not.toHaveBeenCalled()
+    // 이미 올라가 있으므로 push 도 다시 하지 않는다.
+    expect(pushCurrentBranch).not.toHaveBeenCalled()
+  })
+
+  it('워크스페이스 이름이 없으면 아무것도 하지 않는다', async () => {
+    // 이름을 지으려고 새 모델 호출을 만들지 않는다.
+    랜덤이름워크스페이스({ autoName: null, displayName: null })
+
+    await expect(open(ARGS, 'ws-random')).resolves.toBeTruthy()
+
+    expect(renameLocalBranch).not.toHaveBeenCalled()
+    expect(pushCurrentBranch).toHaveBeenCalled()
+  })
+
+  it('사용자가 직접 고친 이름이 에이전트 이름을 이긴다', async () => {
+    랜덤이름워크스페이스({ displayName: 'Fix push name drift' })
+
+    await expect(open(ARGS, 'ws-random')).rejects.toThrow(/fix\/push-name-drift/)
   })
 })
