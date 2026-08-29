@@ -61,7 +61,11 @@ export default function SelectionCopyBubble({
     }
   }, [bubble])
 
-  const onPointerUp = (e: React.PointerEvent<HTMLDivElement>): void => {
+  /**
+   * pointerup 이 아니라 mouseup 에서 읽는다 — 크로미움은 선택을 mouseup 에 확정하고,
+   * pointerup 은 그보다 먼저 온다. pointerup 에서 읽으면 드래그가 끝나도 버블이 뜨지 않는다.
+   */
+  const onMouseUp = (e: React.MouseEvent<HTMLDivElement>): void => {
     // 왼쪽 버튼으로 끝낸 드래그만 본다. 오른쪽 버튼은 OS 컨텍스트 메뉴의 몫이다.
     if (e.button !== 0) return
     const text = selectionTextInside(hostRef.current)
@@ -90,7 +94,7 @@ export default function SelectionCopyBubble({
   }
 
   return (
-    <div ref={hostRef} className={className} style={style} onPointerUp={onPointerUp}>
+    <div ref={hostRef} className={className} style={style} onMouseUp={onMouseUp}>
       {children}
       {bubble &&
         createPortal(
