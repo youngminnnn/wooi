@@ -189,6 +189,24 @@ export async function openRowMenuItem(win, name) {
   return item
 }
 
+/**
+ * 떠 있는 토스트를 모두 닫는다.
+ *
+ * 토스트 컨테이너는 `fixed bottom-4 right-4` 라 **모달 푸터의 저장 버튼과 같은 자리**를 덮는다.
+ * 스크래치 리포는 에이전트 CLI 도 원격도 없는 환경이라 시작하자마자 안내 토스트가 뜨고, 그것이
+ * 사라지지 않는 종류면 클릭이 영영 가로막혀 스펙은 "버튼을 못 눌렀다" 가 아니라 타임아웃으로
+ * 죽는다. 모달에서 저장하는 스펙은 누르기 전에 이걸 부른다.
+ */
+export async function dismissToasts(win) {
+  const dismiss = win.locator('[role="alert"] [aria-label="Dismiss"]')
+  // 닫는 동안 새 토스트가 뜰 수 있으므로 매번 다시 센다. 남아 있어도 여기서 실패하지는 않는다 —
+  // 정리는 이 스펙의 주제가 아니고, 정말 가로막혔다면 다음 클릭이 그 사실을 말해 준다.
+  for (let left = await dismiss.count(); left > 0; left = await dismiss.count()) {
+    await dismiss.first().click()
+    await win.waitForTimeout(50)
+  }
+}
+
 /** 수동 PNG 확인이 필요할 때만 scratch 정리 전에 창을 유지한다. */
 export async function waitForInspection(win) {
   const inspectMs = Number(process.env.WOOI_E2E_INSPECT_MS ?? 0)

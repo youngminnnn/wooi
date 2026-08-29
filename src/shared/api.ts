@@ -113,7 +113,10 @@ export interface WooiApi {
     update(
       repoId: string,
       patch: Partial<
-        Pick<Repo, 'name' | 'setupScript' | 'runScripts' | 'archiveScript' | 'carryItems'>
+        Pick<
+          Repo,
+          'name' | 'setupScript' | 'runScripts' | 'archiveScript' | 'carryItems' | 'savedPrompts'
+        >
       >
     ): Promise<{ error?: string }>
     /**

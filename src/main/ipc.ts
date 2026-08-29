@@ -190,6 +190,7 @@ import type {
   Repo,
   RestackResult,
   RewindActionResult,
+  SavedPrompt,
   StackCascadeResult,
   StackCascadeStep,
   StackOpProgress,
@@ -454,7 +455,10 @@ export function registerIpc(ctx: IpcContext): void {
       _e,
       repoId: string,
       patch: Partial<
-        Pick<Repo, 'name' | 'setupScript' | 'runScripts' | 'archiveScript' | 'carryItems'>
+        Pick<
+          Repo,
+          'name' | 'setupScript' | 'runScripts' | 'archiveScript' | 'carryItems' | 'savedPrompts'
+        >
       >
     ): Promise<{ error?: string }> => {
       // carryItems 는 그대로 복사·심링크 대상 경로가 되므로 **저장 시점에** 검증한다.
@@ -483,9 +487,31 @@ export function registerIpc(ctx: IpcContext): void {
         }
       }
 
+      // 저장된 프롬프트도 IPC 가 신뢰 경계라 여기서 다시 본다. 이름 없는 항목은 목록에서 고를
+      // 수 없고, 본문 없는 항목은 골라도 컴포저에 아무것도 채우지 못한다 — 둘 다 저장할 이유가
+      // 없으므로 거른다. 편집 중 잠깐 비워 둔 행이 그대로 남지 않게 하는 효과도 같다.
+      let prompts: SavedPrompt[] | undefined
+      if (patch.savedPrompts) {
+        prompts = patch.savedPrompts
+          .map((item) => ({ ...item, name: item.name.trim(), prompt: item.prompt.trim() }))
+          .filter((item) => item.name && item.prompt)
+        const names = new Set<string>()
+        for (const item of prompts) {
+          const key = item.name.toLowerCase()
+          if (names.has(key)) return { error: `Saved prompt name “${item.name}” is duplicated.` }
+          names.add(key)
+        }
+      }
+
       store.update((st) => {
         const repo = st.repos.find((r) => r.id === repoId)
-        if (repo) Object.assign(repo, patch, normalized ? { carryItems: normalized } : {})
+        if (repo)
+          Object.assign(
+            repo,
+            patch,
+            normalized ? { carryItems: normalized } : {},
+            prompts ? { savedPrompts: prompts } : {}
+          )
       })
       if (patch.runScripts) {
         const used = new Set(store.getState().workspaces.flatMap((w) => Object.values(w.ports)))

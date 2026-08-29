@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { CarryItem, CarryMode, RunScript } from '@shared/types'
+import type { CarryItem, CarryMode, RunScript, SavedPrompt } from '@shared/types'
 import { validateCarryPath } from '@shared/carryPath'
 import { useStore } from '../store'
 import Modal, { inputClass, labelClass, primaryBtn, ghostBtn } from './Modal'
@@ -48,6 +48,7 @@ export default function RepoConfigModal({
   const [runScripts, setRunScripts] = useState<RunScript[]>(repo?.runScripts ?? [])
   const [archiveScript, setArchive] = useState(repo?.archiveScript ?? '')
   const [carryItems, setCarryItems] = useState<CarryItem[]>(repo?.carryItems ?? [])
+  const [savedPrompts, setSavedPrompts] = useState<SavedPrompt[]>(repo?.savedPrompts ?? [])
 
   const confirm = useStore((s) => s.confirm)
   const pushToast = useStore((s) => s.pushToast)
@@ -80,13 +81,30 @@ export default function RepoConfigModal({
     return null
   })
   const hasRunError = runErrors.some(Boolean)
-  const errorCount = runErrors.filter(Boolean).length + carryErrors.filter(Boolean).length
+  // 이름·본문이 **둘 다** 빈 행은 저장할 때 버리므로 오류로 보지 않는다 — '+ Add prompt' 로 방금
+  // 만든 행이 타이핑을 시작하기도 전에 빨개지면 혼내는 꼴이 된다. 반쪽만 채운 행만 짚는다.
+  const promptNames = savedPrompts.map((item) => item.name.trim().toLowerCase())
+  const promptErrors = savedPrompts.map((item, index) => {
+    const name = item.name.trim()
+    const body = item.prompt.trim()
+    if (!name && !body) return null
+    if (!name) return 'Enter a name.'
+    if (!body) return 'Enter the prompt.'
+    if (promptNames.indexOf(promptNames[index]) !== index) return 'Use a unique name.'
+    return null
+  })
+  const hasPromptError = promptErrors.some(Boolean)
+  const errorCount =
+    runErrors.filter(Boolean).length +
+    carryErrors.filter(Boolean).length +
+    promptErrors.filter(Boolean).length
   const isDirty = repo
     ? name !== repo.name ||
       setupScript !== repo.setupScript ||
       archiveScript !== repo.archiveScript ||
       JSON.stringify(runScripts) !== JSON.stringify(repo.runScripts) ||
-      JSON.stringify(carryItems) !== JSON.stringify(repo.carryItems)
+      JSON.stringify(carryItems) !== JSON.stringify(repo.carryItems) ||
+      JSON.stringify(savedPrompts) !== JSON.stringify(repo.savedPrompts ?? [])
     : false
 
   useEffect(() => {
@@ -138,7 +156,12 @@ export default function RepoConfigModal({
       // 빈 줄은 저장하지 않는다 — 편집 중 잠깐 비워 둔 행이 그대로 남지 않도록.
       carryItems: carryItems
         .filter((i) => i.path.trim())
-        .map((i) => ({ ...i, path: i.path.trim() }))
+        .map((i) => ({ ...i, path: i.path.trim() })),
+      // 같은 이유로 빈 프롬프트 행도 버린다. main 이 다시 거르지만 여기서 먼저 정리해야
+      // 저장 뒤 다시 열었을 때 화면이 방금 본 것과 같다.
+      savedPrompts: savedPrompts
+        .map((p) => ({ ...p, name: p.name.trim(), prompt: p.prompt.trim() }))
+        .filter((p) => p.name && p.prompt)
     })
     // main 은 신뢰 경계라 같은 규칙으로 다시 검증한다. 여기까지 왔다면 렌더러 검증과 어긋난
     // 경우뿐이므로, 모달을 닫지 않고 이유를 그대로 보여 준다.
@@ -214,11 +237,18 @@ export default function RepoConfigModal({
           </button>
           <button
             className={
-              primaryBtn + (hasCarryError || hasRunError ? ' opacity-40 cursor-not-allowed' : '')
+              primaryBtn +
+              (hasCarryError || hasRunError || hasPromptError
+                ? ' opacity-40 cursor-not-allowed'
+                : '')
             }
             onClick={save}
-            disabled={hasCarryError || hasRunError}
-            title={hasCarryError || hasRunError ? 'Fix the highlighted errors first' : undefined}
+            disabled={hasCarryError || hasRunError || hasPromptError}
+            title={
+              hasCarryError || hasRunError || hasPromptError
+                ? 'Fix the highlighted errors first'
+                : undefined
+            }
           >
             Save
           </button>
@@ -396,6 +426,89 @@ export default function RepoConfigModal({
             <p className="mt-2 text-xs text-neutral-600">
               Each workspace receives a unique <span className="font-mono">$PORT</span>. For
               example: <span className="font-mono text-neutral-500">vite --port $PORT</span>.
+            </p>
+          </div>
+
+          <div className="mt-5">
+            <div className="mb-2">
+              <p className={labelClass + ' mb-0'}>Saved prompts</p>
+              <p className="mt-1 text-xs text-neutral-600">
+                Prompts you type often — a review request, a release-note draft, a test pass. Pick
+                one from the composer or the fan-out dialog.
+              </p>
+            </div>
+            {savedPrompts.length > 0 && (
+              <div className="mb-1.5 grid grid-cols-[9rem_minmax(0,1fr)_2.5rem] gap-2 px-1 text-[11px] font-medium uppercase tracking-wide text-neutral-600">
+                <span>Name</span>
+                <span>Prompt</span>
+                <span className="sr-only">Actions</span>
+              </div>
+            )}
+            <div className="space-y-1.5">
+              {savedPrompts.map((item, i) => (
+                <div key={item.id}>
+                  <div className="grid grid-cols-[9rem_minmax(0,1fr)_2.5rem] items-start gap-2">
+                    <input
+                      aria-label={`Prompt ${i + 1} name`}
+                      aria-invalid={promptErrors[i] ? true : undefined}
+                      className={carryFieldBase + ' min-w-0 px-2.5 py-2 text-sm'}
+                      value={item.name}
+                      placeholder="Review"
+                      onChange={(e) =>
+                        setSavedPrompts((items) =>
+                          items.map((x, n) => (n === i ? { ...x, name: e.target.value } : x))
+                        )
+                      }
+                    />
+                    <textarea
+                      aria-label={`Prompt ${i + 1} text`}
+                      aria-invalid={promptErrors[i] ? true : undefined}
+                      rows={2}
+                      className={
+                        carryFieldBase +
+                        ' min-w-0 resize-y px-3 py-2 text-sm leading-relaxed placeholder:text-neutral-600'
+                      }
+                      value={item.prompt}
+                      placeholder="Review the diff on this branch and list only real defects."
+                      onChange={(e) =>
+                        setSavedPrompts((items) =>
+                          items.map((x, n) => (n === i ? { ...x, prompt: e.target.value } : x))
+                        )
+                      }
+                    />
+                    <button
+                      className={carryRemoveClass}
+                      onClick={() => setSavedPrompts((items) => items.filter((_, n) => n !== i))}
+                      title="Remove"
+                      aria-label={`Remove ${item.name || `prompt ${i + 1}`}`}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  {promptErrors[i] && (
+                    <p className="mt-1 text-xs text-[var(--danger-400)]">{promptErrors[i]}</p>
+                  )}
+                </div>
+              ))}
+            </div>
+            {savedPrompts.length === 0 && (
+              <div className="rounded-lg border border-dashed border-[var(--border-2)] px-4 py-3 text-sm text-neutral-500">
+                No saved prompts yet. Add one you would otherwise retype every week.
+              </div>
+            )}
+            <button
+              className={ghostBtn + ' mt-1.5 text-xs'}
+              onClick={() =>
+                setSavedPrompts((items) => [
+                  ...items,
+                  { id: crypto.randomUUID(), name: '', prompt: '' }
+                ])
+              }
+            >
+              + Add prompt
+            </button>
+            <p className="mt-2 text-xs text-neutral-600">
+              Picking one fills the message box so you can edit it — it never sends on its own.
             </p>
           </div>
 

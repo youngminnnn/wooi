@@ -216,6 +216,20 @@ export interface Repo {
    */
   avatarDataUrl?: string
   addedAt: number
+  /**
+   * 리포에 저장해 둔 프롬프트(리뷰 요청·릴리즈 노트 초안·테스트 보강 …).
+   *
+   * 리포에 저장하는 것의 **두 번째 종류**다 — 첫 번째는 셸 스크립트(setupScript·runScripts·
+   * archiveScript)이고 이쪽은 에이전트에게 보낼 말이다. 새 저장소를 만들지 않고 Repo 안에 두는
+   * 이유가 그것이다: 같은 리포 설정 화면에서 같은 IPC 로 저장되고 같은 파일에 영속된다.
+   *
+   * 다만 runScripts 배열에 종류 필드를 얹어 섞지는 **않는다.** 그 배열은 실행 대상 목록이라
+   * autoStart·포트 배정·`run_script` 도구·Scripts 패널이 모두 그것을 프로세스로 다룬다 —
+   * 프롬프트를 그 안에 넣는 순간 셸로 spawn 될 길이 열린다. 종류가 다르면 목록도 나눈다.
+   *
+   * 옵셔널이다. 없으면 저장해 둔 프롬프트가 없다는 뜻일 뿐이라 스키마 버전을 올리지 않는다.
+   */
+  savedPrompts?: SavedPrompt[]
 }
 
 export type WorkspaceStatus = 'idle' | 'running' | 'error'
@@ -2366,6 +2380,18 @@ export interface RunScript {
   name: string
   command: string
   autoStart: boolean
+}
+
+/**
+ * 저장해 둔 프롬프트 하나. 고르면 **보내지 않고 컴포저에 채운다** — 사용자가 손볼 기회를 남기지
+ * 않으면 시키지도 않은 턴을 만드는 셈이 된다. 스코프는 리포별뿐이다(전역 목록은 두지 않는다).
+ */
+export interface SavedPrompt {
+  id: string
+  /** 목록에 뜨는 짧은 이름. */
+  name: string
+  /** 컴포저에 채워 넣을 본문. */
+  prompt: string
 }
 
 /** setup 스크립트의 마지막 실행 결과(Workspace.setupState 에 영속). */

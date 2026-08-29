@@ -159,6 +159,7 @@ function describeRepoConfig(repo: Repo): string {
   if (repo.runScripts.length) parts.push(`${repo.runScripts.length} run script(s)`)
   if (repo.archiveScript.trim()) parts.push('archive')
   if (repo.carryItems.length > 0) parts.push(`${repo.carryItems.length} carried file(s)`)
+  if (repo.savedPrompts?.length) parts.push(`${repo.savedPrompts.length} saved prompt(s)`)
   return parts.length > 0 ? parts.join(' · ') : 'Nothing configured yet'
 }
 
