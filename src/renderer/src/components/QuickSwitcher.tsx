@@ -4,7 +4,12 @@ import { backgroundTaskCount, useStore } from '../store'
 import { openRepoSettings } from '../lib/repoSettings'
 import { useNow } from '../lib/useNow'
 import { StatusDot } from './Sidebar'
-import { activeRateLimitPause, orderVisibleWorkspaces, workspaceDisplayName } from '@shared/types'
+import {
+  activeRateLimitPause,
+  orderVisibleWorkspaces,
+  wasInterrupted,
+  workspaceDisplayName
+} from '@shared/types'
 import type { Workspace } from '@shared/types'
 
 /**
@@ -226,6 +231,7 @@ export default function QuickSwitcher({ onClose }: { onClose: () => void }): Rea
                   <StatusDot
                     status={ws.status}
                     awaitingPermission={permissions.some((p) => p.workspaceId === ws.id)}
+                    interrupted={wasInterrupted(ws)}
                     compacting={compacting[ws.id] ?? false}
                     stale={false}
                     runningMs={0}

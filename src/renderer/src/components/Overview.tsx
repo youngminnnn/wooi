@@ -10,12 +10,13 @@ import {
   AlertTriangle,
   MessageSquarePlus,
   SquareArrowOutUpRight,
+  CircleStop,
   Terminal
 } from 'lucide-react'
 import { backgroundTaskCount, refreshAccountUsage, useStore } from '../store'
 import { useNow } from '../lib/useNow'
 import { formatCost, formatCountdown, formatDuration, formatTime } from '../lib/format'
-import { workspaceDisplayName } from '@shared/types'
+import { wasInterrupted, workspaceDisplayName } from '@shared/types'
 import type {
   AgentBackendId,
   PermissionRequest,
@@ -689,7 +690,11 @@ function OverviewCard({
             {formatDuration(now - runningSince)}
           </span>
         ) : (
-          <span className="text-neutral-600">{workspace.status}</span>
+          // 중단은 상태가 아니라 끝난 방식이라 status 는 idle 그대로다. 목록을 훑는 사람에게는
+          // 그 차이가 "재개할 것이 남았는가" 이므로, 글자만 사실대로 바꿔 준다.
+          <span className="text-neutral-600">
+            {wasInterrupted(workspace) ? 'interrupted' : workspace.status}
+          </span>
         )}
         {git && git.changedFiles > 0 && (
           <span className="text-[var(--warning-500)]/80" title="Changed files">
@@ -752,6 +757,12 @@ function StatusDot({
         className="text-neutral-400 shrink-0"
         aria-label="Background tasks running"
       />
+    )
+  // 사용자가 끊은 턴과 에이전트가 스스로 마친 턴을 가른다 — 둘 다 idle 이지만 하나만 재개할 것이
+  // 남아 있다(사이드바 StatusDot 과 같은 어휘).
+  if (wasInterrupted(workspace))
+    return (
+      <CircleStop size={12} className="text-neutral-400 shrink-0" aria-label="Stopped by you" />
     )
   return <span className="h-2 w-2 rounded-full shrink-0 bg-neutral-600" aria-label="Idle" />
 }

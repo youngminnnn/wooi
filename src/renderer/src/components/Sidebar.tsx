@@ -27,6 +27,7 @@ import {
   Download,
   Square,
   Hourglass,
+  CircleStop,
   Clock,
   Terminal,
   GitFork
@@ -46,6 +47,7 @@ import {
   fanoutGroupOf,
   orderVisibleWorkspaces,
   unresolvedFanoutGroups,
+  wasInterrupted,
   workspaceDisplayName
 } from '@shared/types'
 import { conversationForkDisabledReason } from '../lib/conversationFork'
@@ -543,6 +545,7 @@ function WorkspaceRow({
   const pendingRequest = useStore((s) => s.permissions.find((p) => p.workspaceId === workspace.id))
   const awaitingPermission = !!pendingRequest
   const ask = pendingRequest ? askSummary(pendingRequest) : ''
+  const interrupted = wasInterrupted(workspace)
   const backgroundTasks = useStore((s) => backgroundTaskCount(s.runningAgents[workspace.id]))
   // null 이 아니면 표시 이름 인라인 편집 중. 초깃값은 현재 표시 이름으로 채운다.
   const [editingName, setEditingName] = useState<string | null>(null)
@@ -806,6 +809,7 @@ function WorkspaceRow({
             status={workspace.status}
             awaitingPermission={awaitingPermission}
             ask={ask}
+            interrupted={interrupted}
             compacting={compacting}
             stale={stale}
             runningMs={runningMs}
@@ -1487,6 +1491,7 @@ export function StatusDot({
   status,
   awaitingPermission,
   ask,
+  interrupted = false,
   compacting,
   stale,
   runningMs,
@@ -1500,6 +1505,8 @@ export function StatusDot({
   awaitingPermission: boolean
   /** 지금 무엇을 묻고 있는지 한 줄 요약. 비어 있으면 일반 문구로 물러선다. */
   ask?: string
+  /** 마지막 턴이 사용자 중단으로 끝났는가([[wasInterrupted]]). 호출부가 판정해 넘긴다. */
+  interrupted?: boolean
   compacting: boolean
   stale: boolean
   runningMs: number
@@ -1595,6 +1602,20 @@ export function StatusDot({
         className="shrink-0 grid place-items-center"
       >
         <Terminal size={12} className="text-neutral-400" aria-label="Background tasks running" />
+      </span>
+    )
+  }
+  // 사용자가 끊은 턴은 에이전트가 스스로 마친 턴과 같은 idle 이지만, 목록을 훑는 사람에게는
+  // 전혀 다른 사실이다 — 하나는 끝났고 하나는 재개할 것이 남았다. 같은 회색 점으로 두면 그 둘을
+  // 고를 수 없어서, 아직 할 일이 남은 쪽만 다른 글리프로 뽑아낸다. PR 점보다 앞에 둔다:
+  // PR 상태는 언제 봐도 그대로지만 "내가 여기서 멈췄다" 는 지금 이어 갈지 정하는 데 쓰인다.
+  if (interrupted) {
+    return (
+      <span
+        title="Stopped by you — the turn did not finish"
+        className="shrink-0 grid place-items-center"
+      >
+        <CircleStop size={12} className="text-neutral-400" aria-label="Stopped by you" />
       </span>
     )
   }

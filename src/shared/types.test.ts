@@ -4,6 +4,7 @@ import {
   notificationSkipReason,
   sanitizeAgentEnv,
   usableDefaultBackend,
+  wasInterrupted,
   workspaceDisplayName
 } from './types'
 
@@ -182,5 +183,61 @@ describe('usableDefaultBackend', () => {
 
   it('쓸 수 있는 목록이 비어 있으면(감지 실패) 저장된 값을 건드리지 않는다', () => {
     expect(usableDefaultBackend('claude', [])).toBe('claude')
+  })
+})
+
+/**
+ * 사용자가 Esc 로 끊은 것과 에이전트가 스스로 마친 것은 둘 다 idle 로 수렴한다. 목록을 훑을 때
+ * 둘 다 같은 회색 점이면 재개할 대상을 고를 수 없다 — 이 함수가 그 둘을 가르는 자리다.
+ */
+describe('wasInterrupted', () => {
+  const interrupted = { at: 1, sessionId: 'sess-1' }
+
+  it('중단 표시가 없으면 중단이 아니다', () => {
+    expect(wasInterrupted({ status: 'idle', sessionId: 'sess-1', interruptedTurn: null })).toBe(
+      false
+    )
+    expect(wasInterrupted({ status: 'idle', sessionId: 'sess-1' })).toBe(false)
+  })
+
+  it('같은 세션에서 끊겼고 지금 쉬고 있으면 중단이다', () => {
+    expect(
+      wasInterrupted({ status: 'idle', sessionId: 'sess-1', interruptedTurn: interrupted })
+    ).toBe(true)
+  })
+
+  /**
+   * 세션을 지우고 새로 앉힌 자리에서 옛 표시가 새 대화를 중단된 것처럼 보이게 하면 안 된다.
+   * /clear 는 sessionId 를 null 로 되돌리므로 그것만으로 표시가 낡은 것이 된다.
+   */
+  it('세션이 바뀌었으면 낡은 표시라 무시한다', () => {
+    expect(
+      wasInterrupted({ status: 'idle', sessionId: 'sess-2', interruptedTurn: interrupted })
+    ).toBe(false)
+    expect(wasInterrupted({ status: 'idle', sessionId: null, interruptedTurn: interrupted })).toBe(
+      false
+    )
+  })
+
+  it('아직 세션이 없을 때 찍힌 표시는 세션이 붙기 전까지만 유효하다', () => {
+    const noSession = { at: 1, sessionId: null }
+    expect(wasInterrupted({ status: 'idle', sessionId: null, interruptedTurn: noSession })).toBe(
+      true
+    )
+    expect(
+      wasInterrupted({ status: 'idle', sessionId: 'sess-1', interruptedTurn: noSession })
+    ).toBe(false)
+  })
+
+  it('다시 돌고 있으면 지금 하는 일이 먼저다', () => {
+    expect(
+      wasInterrupted({ status: 'running', sessionId: 'sess-1', interruptedTurn: interrupted })
+    ).toBe(false)
+  })
+
+  it('에러로 끝났으면 에러가 더 급한 사실이다', () => {
+    expect(
+      wasInterrupted({ status: 'error', sessionId: 'sess-1', interruptedTurn: interrupted })
+    ).toBe(false)
   })
 })

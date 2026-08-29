@@ -235,6 +235,43 @@ export interface Repo {
 export type WorkspaceStatus = 'idle' | 'running' | 'error'
 
 /**
+ * 마지막 턴이 **사용자 중단**(Esc·Stop 버튼·`/stop`·폰의 중단)으로 끝났다는 표시.
+ *
+ * 왜 상태값을 하나 더 만들지 않았나: 중단은 상태가 아니라 **끝난 방식**이다. 중단된 워크스페이스도
+ * 여전히 idle 이고(다음 턴을 받을 수 있고), 그 위에 에러가 나면 에러가 이겨야 한다. 상태 열거에
+ * 'interrupted' 를 끼우면 세 상태를 읽는 모든 자리가 네 번째 경우를 따로 다뤄야 하는데, 그 자리
+ * 대부분은 "돌고 있나 아닌가" 만 궁금하다. 그래서 상태는 그대로 두고 표시만 곁들인다.
+ *
+ * 필드는 옵셔널이라 저장된 워크스페이스는 마이그레이션 없이 그대로 읽힌다(undefined = 중단 아님).
+ */
+export interface InterruptedTurn {
+  /** 중단한 시각. */
+  at: number
+  /**
+   * 중단된 그 세션의 id. 지금 세션이 다르면 이 표시는 남의 것이다 — 세션을 지우고 새로 앉힌
+   * 자리에서 옛 표시가 새 대화를 중단된 것처럼 보이게 하면 안 된다
+   * ([[main/rateLimitResume]] continueNow·[[main/stackedWait]] 가 같은 방식으로 낡은 예약을 거른다).
+   */
+  sessionId: string | null
+}
+
+/**
+ * 이 워크스페이스를 "중단됨" 으로 표시해야 하는가.
+ *
+ * 사용자가 Esc 로 끊은 것과 에이전트가 스스로 마친 것은 둘 다 idle 로 수렴한다. 목록을 훑을 때
+ * 둘 다 같은 회색 점이면 재개할 대상을 고를 수 없다 — 이 함수가 그 둘을 가른다.
+ *
+ * 돌고 있으면(running) 지금 하는 일이 먼저고, 에러면 에러가 더 급한 사실이라 둘 다 표시하지 않는다.
+ */
+export function wasInterrupted(
+  workspace: Pick<Workspace, 'status' | 'sessionId' | 'interruptedTurn'>
+): boolean {
+  const mark = workspace.interruptedTurn
+  if (!mark || workspace.status !== 'idle') return false
+  return mark.sessionId === workspace.sessionId
+}
+
+/**
  * 병렬 dev 서버 포트 배정의 시작점. workspace 마다 이 값부터 비어 있는 포트를 하나씩 올려
  * 배정해, 여러 workspace 의 dev 스크립트가 동시에 떠도 충돌하지 않게 한다.
  */
@@ -877,6 +914,11 @@ export interface Workspace {
   awaitingStackedWork?: PendingStackedWait | null
   permissionMode: PermissionMode
   status: WorkspaceStatus
+  /**
+   * 마지막 턴이 사용자 중단으로 끝났다는 표시. null/undefined 면 중단으로 끝나지 않았다.
+   * 읽을 때는 직접 보지 말고 [[wasInterrupted]] 를 쓴다 — 낡은 세션의 표시를 거르는 판단이 거기 있다.
+   */
+  interruptedTurn?: InterruptedTurn | null
   /** 이 workspace 전용 모델 오버라이드. null 이면 전역 설정(AppSettings.model) 을 따른다. */
   model: string | null
   /** 이 workspace 전용 reasoning effort 오버라이드. null 이면 전역 설정(AppSettings.effort) 을 따른다. */
