@@ -1249,8 +1249,10 @@ export function registerIpc(ctx: IpcContext): void {
     return costs
   })
 
-  handle(IPC.chatGetHistory, (_e, workspaceId: string) => {
-    return getTranscripts().load(workspaceId)
+  handle(IPC.chatGetHistory, (_e, workspaceId: string, limit?: number) => {
+    // limit 없이 부르면 예전처럼 전부 준다 — 부분 로딩된 창 밖으로 점프할 때 렌더러가 쓴다.
+    if (typeof limit !== 'number') return getTranscripts().load(workspaceId)
+    return getTranscripts().loadTail(workspaceId, limit)
   })
 
   // 워크스페이스를 가로지르는 대화 검색. 훑는 일은 전부 여기서 끝내고 렌더러에는 스니펫만
