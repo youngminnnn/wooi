@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ListTree, RefreshCw } from 'lucide-react'
+import { ListTree, RefreshCw, WrapText } from 'lucide-react'
 import { useStore } from '../store'
 import { isPaneWindow } from '../lib/paneWindow'
 import { useWorkspaceBackend } from '../lib/backends'
@@ -15,6 +15,7 @@ import { findDiffFileSection } from '../lib/diffFileTree'
 import {
   DIFF_FILE_TREE_OPEN,
   DIFF_FILE_TREE_WIDTH,
+  DIFF_WORD_WRAP_OFF,
   readUiFlag,
   readUiNumber,
   setUiFlag,
@@ -51,6 +52,8 @@ export default function ChangesPanel({
     if (!stored) return DIFF_TREE_DEFAULT_WIDTH
     return Math.min(DIFF_TREE_MAX_WIDTH, Math.max(DIFF_TREE_MIN_WIDTH, stored))
   })
+  // 랩은 켜짐이 기본이라 "꺼 뒀는지"를 저장한다([[uiFlags]] DIFF_WORD_WRAP_OFF).
+  const [wrap, setWrap] = useState(() => !readUiFlag(DIFF_WORD_WRAP_OFF))
   const [activePath, setActivePath] = useState<string | null>(null)
   const scrollRef = useRef<HTMLDivElement | null>(null)
   // git 상태의 변경 파일 수가 바뀌면 diff 를 다시 가져오는 트리거로 쓴다.
@@ -137,6 +140,12 @@ export default function ChangesPanel({
     setUiFlag(DIFF_FILE_TREE_OPEN, next)
   }
 
+  const toggleWrap = (): void => {
+    const next = !wrap
+    setWrap(next)
+    setUiFlag(DIFF_WORD_WRAP_OFF, !next)
+  }
+
   const resizeTree = (next: number): void => {
     setTreeWidth(next)
     setUiNumber(DIFF_FILE_TREE_WIDTH, next)
@@ -149,19 +158,38 @@ export default function ChangesPanel({
         onRefresh={refresh}
         spinning={loading}
         actions={
-          <button
-            onClick={toggleTree}
-            title={treeOpen ? 'Hide the file tree' : 'Show the file tree'}
-            aria-label={treeOpen ? 'Hide the file tree' : 'Show the file tree'}
-            aria-pressed={treeOpen}
-            className={`grid h-5 w-5 place-items-center rounded ${
-              treeOpen
-                ? 'bg-[var(--surface-2)] text-neutral-200'
-                : 'text-neutral-600 hover:text-neutral-300'
-            }`}
-          >
-            <ListTree size={11} />
-          </button>
+          <>
+            <button
+              onClick={toggleWrap}
+              title={
+                wrap
+                  ? 'Stop wrapping long lines (keeps columns aligned)'
+                  : 'Wrap long lines instead of scrolling sideways'
+              }
+              aria-label="Wrap long diff lines"
+              aria-pressed={wrap}
+              className={`grid h-5 w-5 place-items-center rounded ${
+                wrap
+                  ? 'bg-[var(--surface-2)] text-neutral-200'
+                  : 'text-neutral-600 hover:text-neutral-300'
+              }`}
+            >
+              <WrapText size={11} />
+            </button>
+            <button
+              onClick={toggleTree}
+              title={treeOpen ? 'Hide the file tree' : 'Show the file tree'}
+              aria-label={treeOpen ? 'Hide the file tree' : 'Show the file tree'}
+              aria-pressed={treeOpen}
+              className={`grid h-5 w-5 place-items-center rounded ${
+                treeOpen
+                  ? 'bg-[var(--surface-2)] text-neutral-200'
+                  : 'text-neutral-600 hover:text-neutral-300'
+              }`}
+            >
+              <ListTree size={11} />
+            </button>
+          </>
         }
       />
       <div className="flex-1 min-h-0 flex">
@@ -183,6 +211,7 @@ export default function ChangesPanel({
             // 분리한 패널 창에는 큰 뷰어가 없다(FileBrowser 의 openViewer 주석 참고).
             onOpenFile={isPaneWindow ? undefined : (path) => openFileViewer(workspaceId, path)}
             commenting={commenting}
+            wrap={wrap}
           />
         </div>
       </div>

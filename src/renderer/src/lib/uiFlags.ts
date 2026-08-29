@@ -177,3 +177,11 @@ export function hintSeenFlag(id: string): string {
  */
 export const DIFF_FILE_TREE_OPEN = 'diffFileTreeOpen'
 export const DIFF_FILE_TREE_WIDTH = 'diffFileTreeWidth'
+
+/**
+ * diff 뷰어의 워드랩을 **꺼 뒀는지**. 켜짐이 기본이라 "끔"을 저장한다 — 저장된 값이 없을 때
+ * `readUiFlag` 가 false 를 돌려주는 것이 그대로 "랩 켜짐"이 되게.
+ *
+ * 에디터의 워드랩과 묶지 않는다. 이유는 [[diffWordWrap]] 에 적어 뒀다.
+ */
+export const DIFF_WORD_WRAP_OFF = 'diffWordWrapOff'
