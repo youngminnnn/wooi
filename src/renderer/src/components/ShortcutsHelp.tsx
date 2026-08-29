@@ -79,6 +79,8 @@ const GROUPS: { title: string; items: { keys: string[]; label: string }[] }[] = 
     items: [
       { keys: ['⌘L'], label: 'Focus the message input' },
       { keys: ['⌘F'], label: 'Search the conversation' },
+      { keys: ['⌘+', '/', '⌘-'], label: 'Bigger / smaller conversation text' },
+      { keys: ['⌘0'], label: 'Reset conversation text size' },
       { keys: ['⌃O'], label: 'Expand or collapse all tool results' },
       { keys: ['⇧⌘↓'], label: 'Jump to the latest message' },
       { keys: ['↑', '/', '↓'], label: 'Recall previous messages (in the input box)' },

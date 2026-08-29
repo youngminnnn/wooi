@@ -36,6 +36,7 @@ import type { ChatItem } from '@shared/types'
 import { BASH_FOLD, foldBashOutput } from '@shared/bashDisplay'
 import { SELECTABLE, unlessSelecting } from '../lib/selection'
 import SelectionCopyBubble from './SelectionCopyBubble'
+import { useChatFontScale } from '../lib/chatFontScale'
 import { TOOL_VERBOSE_SHORTCUT } from '@shared/toolDisplay'
 
 /**
@@ -194,6 +195,10 @@ export default function MessageList({
   const jumpTarget = useStore((s) => s.jumpTarget)
   const toolVerbose = useStore((s) => !!s.toolVerbose[workspaceId])
   const toolLogStyle = useStore((s) => s.app?.settings.toolLogStyle ?? 'wooi')
+  const overlayOpen = useStore((s) => s.overlayOpen)
+  // ⌘+ / ⌘- / ⌘0 — 대화 표면에만 걸리는 배율. 앱 전체 줌을 키우면 사이드바·터미널까지 커져서
+  // 정작 읽으려던 대화가 좁아진 폭 안에 갇힌다. 오버레이가 덮고 있을 때는 키를 듣지 않는다.
+  const fontScale = useChatFontScale(!overlayOpen)
 
   const compactWindow = useMemo(() => compactHistoryWindow(items), [items])
   const historyExpanded = expandedBoundaryId === compactWindow.boundary?.id
@@ -468,7 +473,10 @@ export default function MessageList({
         </div>
       )}
       <div ref={containerRef} onScroll={onScroll} className="h-full overflow-y-auto">
-        <SelectionCopyBubble className="max-w-3xl mx-auto px-5 py-5 space-y-3">
+        <SelectionCopyBubble
+          className="max-w-3xl mx-auto px-5 py-5 space-y-3"
+          style={fontScale === 1 ? undefined : { zoom: fontScale }}
+        >
           {compactWindow.boundary && (
             <button
               type="button"
