@@ -9,6 +9,7 @@ import {
   RATE_LIMIT_CONTINUATION,
   RateLimitResumeCoordinator,
   backoffWait,
+  resetMissedResumeGrace,
   exhaustedResetTimes,
   isRateLimited,
   retryTime
@@ -656,5 +657,153 @@ describe('연결 실패 이어가기', () => {
 
     coordinator.noteConnectionLost(WORKSPACE_ID)
     expect(store.getState().workspaces[0].pendingRateLimitResume).toBeNull()
+  })
+})
+
+/**
+ * 복귀 정책의 계약: **앱이 꺼져 있던 동안 밀린 예약을 켜자마자 몰아서 보내지 않는다.**
+ * 데스크톱 앱이라 예약 시각에 프로세스가 없을 수 있고, 그때 그냥 다시 걸면 워크스페이스 수만큼의
+ * 턴이 동시에 시작된다 — 깨움 하나가 곧 사용자 토큰 하나이므로 이것이 막아야 할 최악이다.
+ */
+describe('놓친 예약의 유예(grace) 정책', () => {
+  interface Spec {
+    id: string
+    retryAt: number
+  }
+
+  function seedPending(
+    store: { update: (mutate: (state: AppState) => void) => void },
+    specs: Spec[]
+  ): void {
+    store.update((draft) => {
+      draft.workspaces = specs.map(
+        ({ id, retryAt }) =>
+          ({
+            id,
+            repoId: 'repo-1',
+            agentBackend: 'claude',
+            name: id,
+            displayName: null,
+            branch: `feat/${id}`,
+            baseBranch: 'main',
+            worktreePath: `/tmp/${id}`,
+            status: 'idle',
+            sessionId: `sess-${id}`,
+            archived: false,
+            rateLimited: null,
+            pendingRateLimitResume: {
+              backend: 'claude',
+              sessionId: `sess-${id}`,
+              detectedAt: retryAt - 60_000,
+              cause: 'rateLimit',
+              retryAt,
+              attempt: 0
+            }
+          }) as unknown as Workspace
+      )
+      draft.settings.autoResumeAfterRateLimit = true
+      draft.rateLimitsByAgent = {
+        claude: { fetchedAt: 1, available: true, subscriptionType: 'pro', windows: [] }
+      }
+    })
+  }
+
+  function coordinatorWith(continued: string[], notices: string[]): RateLimitResumeCoordinator {
+    return new RateLimitResumeCoordinator({
+      backend: 'claude',
+      refreshLimits: async () => {},
+      sendContinuation: (workspaceId) => continued.push(workspaceId),
+      emitItem: (workspaceId, item) => notices.push(`${workspaceId}:${item.type}`),
+      broadcastState: () => {}
+    })
+  }
+
+  const pendingOf = (state: AppState, id: string): unknown =>
+    state.workspaces.find((ws) => ws.id === id)?.pendingRateLimitResume
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(NOW)
+    resetMissedResumeGrace()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('밀린 예약이 여럿이어도 가장 최근 것 하나만 이어가고 나머지는 버린다', async () => {
+    const { getStore } = await import('./store')
+    seedPending(getStore(), [
+      { id: 'ws-old', retryAt: NOW - 30 * 60_000 },
+      { id: 'ws-new', retryAt: NOW - 60_000 },
+      { id: 'ws-mid', retryAt: NOW - 10 * 60_000 }
+    ])
+    const continued: string[] = []
+    const notices: string[] = []
+    coordinatorWith(continued, notices).restore()
+    await vi.advanceTimersByTimeAsync(1)
+
+    expect(continued).toEqual(['ws-new'])
+    const state = getStore().getState()
+    expect(pendingOf(state, 'ws-old')).toBeNull()
+    expect(pendingOf(state, 'ws-mid')).toBeNull()
+    // 버린 것은 조용히 알린다 — 자동으로 돌리지는 않는다.
+    expect(notices.filter((text) => text.startsWith('ws-old:'))).toHaveLength(1)
+    expect(notices.filter((text) => text.startsWith('ws-mid:'))).toHaveLength(1)
+  })
+
+  it('유예 창을 넘긴 예약은 이어가지 않고 버린다', async () => {
+    const { getStore } = await import('./store')
+    seedPending(getStore(), [{ id: 'ws-stale', retryAt: NOW - 2 * 60 * 60_000 }])
+    const continued: string[] = []
+    const notices: string[] = []
+    coordinatorWith(continued, notices).restore()
+    await vi.advanceTimersByTimeAsync(60_000)
+
+    expect(continued).toEqual([])
+    expect(pendingOf(getStore().getState(), 'ws-stale')).toBeNull()
+    expect(notices).toHaveLength(1)
+  })
+
+  it('시각이 아직 오지 않은 예약은 그대로 살려 두고 유예 예산도 쓰지 않는다', async () => {
+    const { getStore } = await import('./store')
+    seedPending(getStore(), [
+      { id: 'ws-future', retryAt: NOW + 30 * 60_000 },
+      { id: 'ws-missed', retryAt: NOW - 60_000 }
+    ])
+    const continued: string[] = []
+    const notices: string[] = []
+    coordinatorWith(continued, notices).restore()
+    await vi.advanceTimersByTimeAsync(1)
+
+    expect(continued).toEqual(['ws-missed'])
+    expect(pendingOf(getStore().getState(), 'ws-future')).not.toBeNull()
+  })
+
+  it('빗장은 백엔드 사이에서도 공유된다 — 복귀 한 번에 깨움은 하나뿐이다', async () => {
+    const { getStore } = await import('./store')
+    seedPending(getStore(), [
+      { id: 'ws-claude', retryAt: NOW - 60_000 },
+      { id: 'ws-codex', retryAt: NOW - 2 * 60_000 }
+    ])
+    getStore().update((draft) => {
+      const codex = draft.workspaces.find((ws) => ws.id === 'ws-codex')!
+      codex.agentBackend = 'codex'
+      codex.pendingRateLimitResume!.backend = 'codex'
+    })
+    const continued: string[] = []
+    const notices: string[] = []
+    coordinatorWith(continued, notices).restore()
+    new RateLimitResumeCoordinator({
+      backend: 'codex',
+      refreshLimits: async () => {},
+      sendContinuation: (workspaceId) => continued.push(workspaceId),
+      emitItem: (workspaceId, item) => notices.push(`${workspaceId}:${item.type}`),
+      broadcastState: () => {}
+    }).restore()
+    await vi.advanceTimersByTimeAsync(1)
+
+    expect(continued).toEqual(['ws-claude'])
+    expect(pendingOf(getStore().getState(), 'ws-codex')).toBeNull()
   })
 })
