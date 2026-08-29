@@ -21,6 +21,7 @@ import { isPaneWindow } from '../lib/paneWindow'
 import { headlineWindows, normalizeUtilization } from '../lib/rateLimit'
 import type { RateLimitWindow } from '../lib/rateLimit'
 import { ClaudeMark, CodexMark } from './BrandIcons'
+import CacheTimer from './CacheTimer'
 
 /** 요금제 사용률 재조회 주기. 5시간 창이 눈에 띄게 움직이는 단위가 분이라 1분이면 충분하다. */
 const USAGE_REFRESH_MS = 60_000
@@ -670,6 +671,7 @@ function OverviewCard({
             {formatCost(cost)}
           </span>
         )}
+        <CacheTimer workspace={workspace} />
         {context && context.percentage > 0 && (
           <span
             className="text-neutral-600 tabular-nums"

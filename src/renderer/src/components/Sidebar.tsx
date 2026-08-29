@@ -54,6 +54,7 @@ import { useGithubDisconnected } from '../lib/github'
 import { WorkspaceAgents } from './WorkspaceAgents'
 import { WorkspaceApiRetry } from './WorkspaceApiRetry'
 import { WorkspaceGoal } from './WorkspaceGoal'
+import CacheTimer from './CacheTimer'
 import { useNow } from '../lib/useNow'
 import { formatCountdown, formatDuration } from '../lib/format'
 import { useDragReorder, type DragReorder } from '../lib/useDragReorder'
@@ -906,6 +907,7 @@ function WorkspaceRow({
                 · {formatDuration(now - runningSince)}
               </span>
             )}
+            <CacheTimer workspace={workspace} dot />
             {workspace.pendingRateLimitResume ? (
               <span
                 className="text-[var(--warning-400)]/90 shrink-0 tabular-nums"
