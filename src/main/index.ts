@@ -28,6 +28,7 @@ import { pendingPermissions } from './remote/permissions'
 import { initStackedWaits } from './stackedWait'
 import { rememberCompacting, rememberContextUsage } from './contextUsageCache'
 import { rememberRunningAgents } from './runningAgentsCache'
+import { disposeSleepBlocker, initSleepBlocker, noteSleepBlockerEvent } from './sleepBlocker'
 import type { AppState, ChatEvent, PermissionRequest } from '@shared/types'
 import { log } from './logger'
 import { hydrateEnvFromLoginShell } from './env'
@@ -75,6 +76,8 @@ function dispatch(channel: string, payload: unknown): void {
       log.error(`dispatch failed on ${channel}`, err)
     }
   }
+  // 에이전트가 도는지도 이 방송으로만 알 수 있다 — 원격 미러와 같은 자리에서 읽는다.
+  noteSleepBlockerEvent(channel, payload)
   mirrorToRemote(channel, payload)
 }
 
@@ -317,6 +320,9 @@ app.whenReady().then(() => {
     remoteOverride || getStore().getState().settings.remoteAccessAvailable
   )
   registerIpc({ sessions, scripts, terminals, panes, dispatch, getWindow: () => mainWindow })
+  // 기동 시점에는 도는 워크스페이스가 없다(store 가 남은 'running' 을 'idle' 로 씻는다) —
+  // 설정만 물려주고, 실제 판단은 첫 방송부터 시작한다.
+  initSleepBlocker(getStore().getState().settings.keepAwakeWhileRunning)
   createWindow()
   sessions.prewarm()
   initUpdater(dispatch)
@@ -364,6 +370,8 @@ app.on('before-quit', () => {
   stopToolSocket(app.getPath('userData'))
   // 응답을 받을 창이 사라지므로 매달린 승인 요청을 거부로 확정한다.
   cancelToolPermissions()
+  // 붙잡아 둔 수면 방지를 놓아준다 — 앱이 사라진 뒤에도 남으면 맥이 이유 없이 깨어 있다.
+  disposeSleepBlocker()
   // 상태 쓰기와 트랜스크립트 fsync 는 성능을 위해 모아서 처리된다 — 프로세스가 사라지기 전에
   // 밀린 것을 마저 내려야 마지막 변경이 유실되지 않는다.
   flushStore()

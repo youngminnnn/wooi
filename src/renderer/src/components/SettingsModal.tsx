@@ -37,7 +37,9 @@ import { effortOptionsFor } from '../lib/effort'
 import { useAvailableBackends, useBackend, useModels } from '../lib/backends'
 import { applyTheme } from '../lib/theme'
 import { SETTINGS_PAGE_KEY, type SettingsPage } from '../lib/settingsNavigation'
+import { CONFIRM_SKIP_LABELS } from '../lib/confirmSkips'
 import {
+  CONFIRM_SKIP_KEYS,
   DEFAULT_AGENT_SETTINGS,
   DEFAULT_NOTIFICATION_SETTINGS,
   NOTIFICATION_CHANNEL_LABELS,
@@ -109,7 +111,8 @@ const PAGES: { id: Page; label: string; icon: typeof Settings2; keywords: string
     id: 'general',
     label: 'General',
     icon: Settings2,
-    keywords: 'theme appearance panel sidebar workspace creation'
+    keywords:
+      'theme appearance panel sidebar workspace creation sleep awake power display confirmation confirm ask again archive'
   },
   {
     id: 'agents',
@@ -464,6 +467,36 @@ function GeneralPage({
             onChange={(value) => save({ showHints: value })}
           />
         </SettingRow>
+      </SettingGroup>
+      <SettingGroup title="While agents work">
+        <SettingRow
+          title="Keep this Mac awake"
+          description="Prevents sleep only while a workspace is running, so long turns finish unattended. The display still sleeps."
+        >
+          <Switch
+            label="Keep this Mac awake"
+            checked={settings.keepAwakeWhileRunning}
+            onChange={(value) => save({ keepAwakeWhileRunning: value })}
+          />
+        </SettingRow>
+      </SettingGroup>
+      <SettingGroup title="Confirmations">
+        {CONFIRM_SKIP_KEYS.map((key) => (
+          <SettingRow
+            key={key}
+            title={CONFIRM_SKIP_LABELS[key].title}
+            description={CONFIRM_SKIP_LABELS[key].description}
+          >
+            <Switch
+              label={CONFIRM_SKIP_LABELS[key].title}
+              // 스위치가 켜짐 = 묻는다. 저장하는 값은 "건너뛴다" 이므로 뒤집어 읽고 쓴다.
+              checked={!settings.confirmSkips?.[key]}
+              onChange={(value) =>
+                save({ confirmSkips: { ...settings.confirmSkips, [key]: !value } })
+              }
+            />
+          </SettingRow>
+        ))}
       </SettingGroup>
       <SettingGroup title="Workspace creation">
         <SettingRow

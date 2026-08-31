@@ -1298,6 +1298,19 @@ export interface McpInventory {
   inherited: InheritedMcpServer[]
 }
 
+/**
+ * "다시 묻지 않기" 를 붙일 수 있는 확인 대화상자.
+ *
+ * **되돌릴 수 있는 동작에만 붙인다.** 아카이브는 워크트리만 지우고 브랜치·PR·대화를 남기므로
+ * 사이드바에서 되살릴 수 있다 — 잘못 눌러도 잃는 것이 없다. 삭제·머지·`/clear`·백엔드 전환처럼
+ * 되돌릴 수 없거나 돈이 드는 것, 그리고 도구 승인처럼 안전 장치인 것은 매번 묻는다.
+ *
+ * 확인 종류마다 따로 저장한다. "모든 확인 끄기" 하나로 두면 사용자가 아카이브 하나를 끄려다
+ * 삭제 확인까지 함께 끄게 된다.
+ */
+export const CONFIRM_SKIP_KEYS = ['archiveWorkspace', 'archiveReview'] as const
+export type ConfirmSkipKey = (typeof CONFIRM_SKIP_KEYS)[number]
+
 export interface AppSettings {
   /** 대화의 도구 로그 외형. 접기·요약 정책은 두 스타일이 공유한다. */
   toolLogStyle: 'wooi' | 'terminal'
@@ -1365,6 +1378,23 @@ export interface AppSettings {
    * 시키지도 않은 턴이고, 그 비용을 기본값으로 떠안기지 않는다.
    */
   autoResolveConflicts: boolean
+  /**
+   * 에이전트가 도는 동안 맥이 잠들지 않게 붙잡는다(기본 켜짐). 화면은 끄고 시스템만 깨워 둔다.
+   *
+   * 토글을 두는 이유는 이것이 사용자의 하드웨어에 손대는 유일한 기능이기 때문이다 — 배터리로
+   * 쓰는 사람은 긴 턴보다 남은 전력이 중요할 수 있고, 그 판단은 우리가 대신할 수 없다.
+   * 판정 자체는 설정으로 열지 않는다(항상 켬/자동 3단이 아니라 켬·끔 하나뿐이다) —
+   * "도는 동안만" 외에 합리적인 다른 정책이 없기 때문이다. [[main/sleepBlocker]] 참고.
+   */
+  keepAwakeWhileRunning: boolean
+  /**
+   * 사용자가 "다시 묻지 않기" 로 끈 확인 대화상자. 끈 것만 true 로 담긴다(없으면 묻는다).
+   *
+   * 설정 화면에 다시 켜는 자리가 있어야 하고, 끄는 순간에도 되돌리는 길을 같이 준다 —
+   * 저장 직후 뜨는 토스트의 "Open settings" 버튼이 그 자리로 데려간다. 이것이 없으면
+   * 실수로 끈 확인을 되살릴 방법을 사용자가 영영 찾지 못한다.
+   */
+  confirmSkips: Partial<Record<ConfirmSkipKey, boolean>>
   /**
    * true 면 새 workspace 생성 시 이름·베이스 브랜치를 직접 입력하는 모달을 띄운다.
    * false(기본) 면 이름을 자동 생성하고 베이스는 리포 기본 브랜치(main/origin)로 즉시 만든다.
