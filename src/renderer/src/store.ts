@@ -69,6 +69,7 @@ import {
   type DiffComment,
   type DiffCommentAnchor
 } from './lib/diffComments'
+import { archivedPreviewTarget } from './lib/archivedPreview'
 import { dropReopenable, nextReopenable, pushReopenable } from './lib/reopenArchived'
 import {
   forwardAfterSelect,
@@ -2373,14 +2374,20 @@ export const useStore = create<UIState>((set, get) => ({
       // 다른 워크스페이스로 옮기면 파일 뷰어는 닫는다 — 열린 경로가 그 worktree 전용이라
       // 그대로 두면 새 워크스페이스에서 없는 파일을 가리키게 된다.
       const fileViewer = s.fileViewer?.workspaceId === id ? s.fileViewer : null
-      const workspaceHistory = pushWorkspaceHistory(
-        s.workspaceHistory,
-        s.selectedWorkspaceId,
-        id,
-        opts?.fromHistory
-      )
+      // 아카이브된 워크스페이스는 읽기 전용으로 잠깐 들여다보는 자리다 — 방문 이력의 어느 쪽에도
+      // 남기지 않는다(들어갈 때도, 떠날 때도). ⌘[ / ⌘] 는 살아 있는 워크스페이스 사이를 오가는
+      // 축이라, 되살리지 않으면 돌아갈 수 없는 자리를 끼워 넣으면 되짚는 길만 길어진다.
+      const peeking = !!archivedPreviewTarget(s.app?.workspaces, id)
+      const from = archivedPreviewTarget(s.app?.workspaces, s.selectedWorkspaceId)
+        ? null
+        : s.selectedWorkspaceId
+      const workspaceHistory = peeking
+        ? s.workspaceHistory
+        : pushWorkspaceHistory(s.workspaceHistory, from, id, opts?.fromHistory)
       // 뒤로 간 뒤 새 워크스페이스로 옮기면 앞쪽 가지는 버린다(브라우저 관례).
-      const workspaceForward = forwardAfterSelect(s.workspaceForward, !!opts?.fromHistory)
+      const workspaceForward = peeking
+        ? s.workspaceForward
+        : forwardAfterSelect(s.workspaceForward, !!opts?.fromHistory)
       // fan-out 비교 화면도 리뷰와 같은 자리를 쓴다 — 워크스페이스를 고르는 것은 "그 화면에서
       // 나온다" 는 뜻이다(그룹 자체는 남아 사이드바에서 다시 열 수 있다).
       const closed = { activeReviewId: null, activeFanoutGroupId: null }
@@ -2871,16 +2878,10 @@ export const useStore = create<UIState>((set, get) => ({
 
   jumpToTranscriptItem: async (workspaceId, itemId) => {
     const s = get()
-    const ws = s.app?.workspaces.find((w) => w.id === workspaceId)
-    // 아카이브된 워크스페이스는 대화창이 뜨지 않는다(worktree 가 없다). 검색 결과의 스니펫으로
-    // 답이 됐을 수도 있으니 실패로 취급하지 말고, 열려면 무엇이 필요한지 알려 준다.
-    if (ws?.archived) {
-      s.pushToast(
-        'info',
-        `"${workspaceDisplayName(ws)}" is archived — unarchive it in the sidebar to open the conversation.`
-      )
-      return
-    }
+    // 아카이브된 워크스페이스도 그대로 데려간다 — 트랜스크립트는 workspace id 로 저장되므로
+    // worktree 없이도 읽히고, 도착하면 읽기 전용 미리보기가 그 대화를 그린다. 예전에는 여기서
+    // 토스트만 띄우고 멈췄는데, 그러면 ⇧⌘K 가 아카이브된 대화를 찾아 스니펫까지 보여 주고도
+    // 누르면 막다른 길이었다.
     // 목적지를 먼저 세워 둔다 — 대화창은 마운트되자마자 이 값을 보고 그 항목으로 스크롤한다.
     set((st) => ({ jumpTarget: { workspaceId, itemId, seq: (st.jumpTarget?.seq ?? 0) + 1 } }))
     await s.selectWorkspace(workspaceId)
