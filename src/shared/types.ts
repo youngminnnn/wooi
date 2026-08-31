@@ -2439,9 +2439,9 @@ export interface PreviewCaptureResult {
  * 메인 창에서 떼어 별도 창으로 띄울 수 있는 패널.
  * 듀얼 모니터에서 대화는 이쪽 화면에, 파일·터미널·스크립트 로그는 저쪽 화면에 두기 위한 것.
  */
-export type PaneKind = 'work' | 'scripts'
+export type PaneKind = 'work' | 'scripts' | 'overview'
 
-export const PANE_KINDS: readonly PaneKind[] = ['work', 'scripts'] as const
+export const PANE_KINDS: readonly PaneKind[] = ['work', 'scripts', 'overview'] as const
 
 /** 지금 별도 창으로 떠 있는 패널(main 이 소유하고 모든 창에 방송한다). */
 export type PaneState = Record<PaneKind, boolean>
@@ -3639,6 +3639,8 @@ export const IPC = {
   paneSetWorkspace: 'pane:setWorkspace',
   /** 분리한 창에서 리포 설정을 요청한다(메인 창을 앞으로 가져와 모달을 연다). */
   paneOpenRepoSettings: 'pane:openRepoSettings',
+  /** 분리한 창 전용 — 메인 창을 앞으로 가져와 그 워크스페이스를 연다. */
+  paneSelectWorkspace: 'pane:selectWorkspace',
   // Preview 패널 (워크트리의 dev 서버를 앱 안에서 보는 탭)
   /** Preview 가 마지막으로 본 주소를 워크스페이스에 영속한다(주소창 입력·내비게이션 후). */
   previewSetUrl: 'preview:setUrl',

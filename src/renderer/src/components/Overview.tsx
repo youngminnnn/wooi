@@ -9,6 +9,7 @@ import {
   Timer,
   AlertTriangle,
   MessageSquarePlus,
+  SquareArrowOutUpRight,
   Terminal
 } from 'lucide-react'
 import { backgroundTaskCount, refreshAccountUsage, useStore } from '../store'
@@ -16,9 +17,11 @@ import { useNow } from '../lib/useNow'
 import { formatCost, formatCountdown, formatDuration, formatTime } from '../lib/format'
 import { workspaceDisplayName } from '@shared/types'
 import type { AgentBackendId, RateLimitSnapshot, UsageInfo, Workspace } from '@shared/types'
+import { isPaneWindow } from '../lib/paneWindow'
 import { headlineWindows, normalizeUtilization } from '../lib/rateLimit'
 import type { RateLimitWindow } from '../lib/rateLimit'
 import { ClaudeMark, CodexMark } from './BrandIcons'
+import CacheTimer from './CacheTimer'
 
 /** 요금제 사용률 재조회 주기. 5시간 창이 눈에 띄게 움직이는 단위가 분이라 1분이면 충분하다. */
 const USAGE_REFRESH_MS = 60_000
@@ -46,6 +49,7 @@ export default function Overview(): React.JSX.Element {
   const unread = useStore((s) => s.unread)
   const permissions = useStore((s) => s.permissions)
   const selectWorkspace = useStore((s) => s.selectWorkspace)
+  const detachPane = useStore((s) => s.detachPane)
   const stopAll = useStore((s) => s.stopAll)
   const confirm = useStore((s) => s.confirm)
   const [filter, setFilter] = useState<FilterKey>('all')
@@ -126,6 +130,12 @@ export default function Overview(): React.JSX.Element {
     }
   }, [showCardCost, usageNonce])
 
+  // 분리한 현황판 창은 계속 보드로 남는다 — 카드를 누르면 메인 창을 앞으로 가져와 거기서 연다.
+  const openWorkspace = (id: string): void => {
+    if (isPaneWindow) void window.api.pane.selectWorkspace(id)
+    else void selectWorkspace(id)
+  }
+
   const pendingIds = new Set(permissions.map((p) => p.workspaceId))
 
   const flagsOf = (
@@ -195,6 +205,16 @@ export default function Overview(): React.JSX.Element {
                 ⇧⌘R
               </kbd>
             </button>
+            {!isPaneWindow && (
+              <button
+                onClick={() => detachPane('overview')}
+                aria-label="Open the overview in a separate window"
+                title="Open in a separate window — keep the board on a second monitor"
+                className="h-7 w-7 shrink-0 grid place-items-center rounded-md text-neutral-500 border border-[var(--border-2)] hover:bg-[var(--surface-2)] hover:text-neutral-200"
+              >
+                <SquareArrowOutUpRight size={13} />
+              </button>
+            )}
             {counts.running > 0 && (
               <button
                 onClick={onStopAll}
@@ -269,7 +289,7 @@ export default function Overview(): React.JSX.Element {
                 now={now}
                 cost={costByWorkspace[w.id] ?? 0}
                 showCost={showCardCost}
-                onOpen={() => void selectWorkspace(w.id)}
+                onOpen={() => openWorkspace(w.id)}
               />
             ))}
           </div>
@@ -651,6 +671,7 @@ function OverviewCard({
             {formatCost(cost)}
           </span>
         )}
+        <CacheTimer workspace={workspace} />
         {context && context.percentage > 0 && (
           <span
             className="text-neutral-600 tabular-nums"

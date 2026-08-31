@@ -1452,6 +1452,17 @@ export function registerIpc(ctx: IpcContext): void {
     win.webContents.send(IPC.evtOpenRepoSettings, repoId)
   })
 
+  // 보조 모니터의 현황판에서 카드를 눌렀다. 현황판 창 자체는 계속 보드로 남아야 하므로
+  // 선택은 메인 창에서 일어나야 한다 — 창을 앞으로 가져오고 그쪽에 선택을 넘긴다.
+  handle(IPC.paneSelectWorkspace, (_e, workspaceId: string) => {
+    const win = ctx.getWindow()
+    if (!win || win.isDestroyed()) return
+    if (win.isMinimized()) win.restore()
+    win.show()
+    win.focus()
+    win.webContents.send(IPC.evtSelectWorkspace, workspaceId)
+  })
+
   // ── git ────────────────────────────────────────────────────────────────
 
   handle(IPC.gitStatus, async (_e, workspaceId: string) => {

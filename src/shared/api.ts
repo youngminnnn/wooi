@@ -634,6 +634,8 @@ export interface WooiApi {
     setWorkspace(workspaceId: string | null): Promise<void>
     /** 분리한 창 전용 — 메인 창을 앞으로 가져와 해당 리포 설정을 연다. */
     openRepoSettings(repoId: string): Promise<void>
+    /** 분리한 창 전용 — 메인 창을 앞으로 가져와 그 워크스페이스를 연다(현황판 카드 클릭). */
+    selectWorkspace(workspaceId: string): Promise<void>
     onState(cb: (state: PaneState) => void): () => void
     onWorkspace(cb: (workspaceId: string | null) => void): () => void
   }
