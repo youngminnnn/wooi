@@ -33,6 +33,7 @@ import {
   GitFork
 } from 'lucide-react'
 import { backgroundTaskCount, REVIEW_BUSY_LABEL, useStore } from '../store'
+import { useUnarchiveWorkspace } from '../lib/unarchive'
 import RowActionsMenu, { type RowAction } from './RowActionsMenu'
 import { useAvailableBackends } from '../lib/backends'
 import { useMultiAgent } from '../lib/multiAgent'
@@ -1412,25 +1413,12 @@ function ArchivedSection({
 
 function ArchivedRow({ workspace }: { workspace: Workspace }): React.JSX.Element {
   const select = useStore((s) => s.selectWorkspace)
+  const selected = useStore((s) => s.selectedWorkspaceId === workspace.id)
   const confirm = useStore((s) => s.confirm)
-  const pushToast = useStore((s) => s.pushToast)
   const deleteWorkspaceNow = useStore((s) => s.deleteWorkspaceNow)
-  const reportCarryFailures = useStore((s) => s.reportCarryFailures)
-  const reportCarryMissing = useStore((s) => s.reportCarryMissing)
-  const suggestCarry = useStore((s) => s.suggestCarry)
+  const unarchiveWorkspace = useUnarchiveWorkspace()
 
-  const unarchive = async (): Promise<void> => {
-    const res = await window.api.workspace.unarchive(workspace.id)
-    if (res.error) pushToast('error', res.error)
-    else {
-      void select(workspace.id)
-      // 언아카이브도 worktree 를 새로 만들므로 전달이 다시 일어난다 — 실패는 동일하게 알리고,
-      // 전달 목록이 빈 리포라면 생성 경로와 똑같이 한 번 제안한다.
-      reportCarryFailures(res.carryFailures)
-      reportCarryMissing(workspace.repoId, res.carryMissing)
-      suggestCarry(workspace.repoId, workspace.id, res.carrySuggestions)
-    }
-  }
+  const unarchive = (): void => void unarchiveWorkspace(workspace)
 
   // 아카이브 시 표시 이름(PR 제목 등)을 displayName 에 보존하므로, PR 정보 없이도 같은 이름을 보여 준다.
   const displayName = workspaceDisplayName(workspace)
@@ -1447,10 +1435,21 @@ function ArchivedRow({ workspace }: { workspace: Workspace }): React.JSX.Element
   }
 
   return (
-    <div className="group/arc flex items-center gap-2 pl-6 pr-1.5 py-1 rounded-md hover:bg-[var(--surface)]">
-      <span className="flex-1 truncate text-xs text-neutral-500" title={workspace.branch}>
+    <div
+      className={`group/arc flex items-center gap-2 pl-6 pr-1.5 py-1 rounded-md ${
+        selected ? 'bg-[var(--surface-2)]' : 'hover:bg-[var(--surface)]'
+      }`}
+    >
+      {/* 행을 눌러 대화를 읽기 전용으로 연다 — 되살릴지 판단하려면 안을 봐야 한다. */}
+      <button
+        onClick={() => void select(workspace.id)}
+        title={`${displayName} — ${workspace.branch}`}
+        className={`flex-1 min-w-0 text-left truncate text-xs ${
+          selected ? 'text-neutral-200' : 'text-neutral-500 hover:text-neutral-300'
+        }`}
+      >
         {displayName}
-      </span>
+      </button>
       <button
         onClick={unarchive}
         className="opacity-0 group-hover/arc:opacity-100 h-5 w-5 grid place-items-center rounded text-neutral-500 hover:bg-[var(--surface-2)] hover:text-neutral-200"

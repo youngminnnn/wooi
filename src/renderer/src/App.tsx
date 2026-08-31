@@ -13,6 +13,7 @@ import { finishSwitchHint } from './lib/uiFlags'
 import { OPEN_SETTINGS_EVENT } from './lib/settingsNavigation'
 import { FOCUS_COMPOSER_EVENT, INSERT_INTO_COMPOSER_EVENT } from './lib/composerFocus'
 import { shouldFocusComposerFromEditingKey, shouldRedirectTyping } from './lib/typingRedirect'
+import { archivedPreviewTarget, workspaceSurfaces } from './lib/archivedPreview'
 import TitleBar from './components/TitleBar'
 import { UpdateBanner } from './components/UpdateBanner'
 import { NoticeBanner } from './components/NoticeBanner'
@@ -22,6 +23,7 @@ import FanoutCompareScreen from './components/fanout/FanoutCompareScreen'
 import { useFeatureNudge } from './lib/featureNudge'
 import PrReviewStartModal from './components/review/PrReviewStartModal'
 import ChatView from './components/ChatView'
+import ArchivedChatView from './components/ArchivedChatView'
 import FileViewerOverlay from './components/FileViewerOverlay'
 import FileQuickOpen from './components/FileQuickOpen'
 import WorkArea from './components/WorkArea'
@@ -254,6 +256,12 @@ export default function App(): React.JSX.Element {
       // 모달이나 confirm 대화상자가 떠 있으면 전역 단축키를 막는다.
       if (anyModalOpen || st.confirmState) return
 
+      // 아카이브된 워크스페이스를 읽기 전용으로 보고 있다면 worktree 가 필요한 단축키는 대상이
+      // 없다(⇧⌘E/F/D/S/O·⇧⌘⌫·⌘L·타이핑 리다이렉트). 판정은 한 곳에서 내리고 아래에서 나눠 쓴다.
+      const surfaces = workspaceSurfaces(
+        !!archivedPreviewTarget(st.app?.workspaces, st.selectedWorkspaceId)
+      )
+
       // 입력창/텍스트영역에 포커스가 있으면 글자 입력·텍스트 편집이 우선이다.
       const typing = (): boolean => {
         const el = document.activeElement as HTMLElement | null
@@ -298,7 +306,7 @@ export default function App(): React.JSX.Element {
       // 입력창 caret 에 들어가고 포커스가 따라간다. ⌘L 을 "먼저" 누르는 박자를 없애는 것이지
       // 대체하는 것은 아니다. 가려짐 판정은 ⌘L 과 같은 것을 쓴다(아래 참조).
       // '?'·⌃O 같은 기존 단축키가 위에서 먼저 return 하므로 그 키들은 여기까지 오지 않는다.
-      if (chatComposerReachable(st, fileViewerVisible)) {
+      if (surfaces.composer && chatComposerReachable(st, fileViewerVisible)) {
         if (shouldFocusComposerFromEditingKey(e)) {
           // 기본 동작까지 막아야 한다 — 막지 않으면 이 핸들러가 옮겨 놓은 포커스 위에서
           // Backspace 가 그대로 실행돼, 보이지도 않는 초안의 마지막 글자가 지워진다.
@@ -320,6 +328,7 @@ export default function App(): React.JSX.Element {
       // 대화가 다른 화면에 가려졌다면 뒤쪽 textarea 를 몰래 포커스하지 않는다.
       if (e.code === 'KeyL' && !e.shiftKey && !e.ctrlKey && !e.altKey) {
         if (
+          surfaces.composer &&
           st.selectedWorkspaceId &&
           !st.activeReviewId &&
           !st.activeFanoutGroupId &&
@@ -448,7 +457,7 @@ export default function App(): React.JSX.Element {
 
       // 우상단 헤더 도구 단축키 — 현재 선택된 workspace 를 대상으로 한다.
       // ⇧⌘ 조합이라 macOS 기본 단축키(⌘S/E/F, ⌘⌫ 등)나 앱 기존 단축키와 충돌하지 않는다.
-      const selId = st.selectedWorkspaceId
+      const selId = surfaces.worktreeTools ? st.selectedWorkspaceId : null
 
       // dev 스크립트 실행/중지 — 스크립트 패널 열림 여부와 무관하게 동작한다.
       // ⇧⌘D 와 (구) ⌃⌘R 둘 다 여기로 들어온다.
@@ -625,6 +634,9 @@ export default function App(): React.JSX.Element {
   }
 
   const selected = app.workspaces.find((w) => w.id === selectedId && !w.archived) ?? null
+  // 아카이브된 워크스페이스를 골랐으면 읽기 전용 미리보기를 연다 — 되살릴지 판단하려면 안을
+  // 봐야 하는데, 지금까지는 되살리는 것이 안을 보는 유일한 길이었다.
+  const archivedPreview = archivedPreviewTarget(app.workspaces, selectedId)
   // 에이전트가 **하나도** 연결되지 않았을 때만 경고한다 — Claude 만, 또는 Codex 만 가진 사용자도
   // 정상 사용자이므로 한쪽이 없다는 이유로 배너를 띄우면 안 된다.
   const noAgentConnected = app.settings.onboarded && authStatus !== null && !hasAnyAgent(authStatus)
@@ -747,6 +759,10 @@ export default function App(): React.JSX.Element {
                 </>
               )}
             </>
+          ) : archivedPreview ? (
+            <div className="flex-1 min-w-0">
+              <ArchivedChatView key={archivedPreview.id} workspace={archivedPreview} />
+            </div>
           ) : app.workspaces.some((w) => !w.archived) ? (
             <Overview />
           ) : (
