@@ -90,7 +90,7 @@ const api: WooiApi = {
       ipcRenderer.invoke(IPC.chatSend, workspaceId, text, images),
     interrupt: (workspaceId) => ipcRenderer.invoke(IPC.chatInterrupt, workspaceId),
     stopTask: (workspaceId, taskId) => ipcRenderer.invoke(IPC.chatStopTask, workspaceId, taskId),
-    getHistory: (workspaceId) => ipcRenderer.invoke(IPC.chatGetHistory, workspaceId),
+    getHistory: (workspaceId, limit) => ipcRenderer.invoke(IPC.chatGetHistory, workspaceId, limit),
     getCosts: () => ipcRenderer.invoke(IPC.chatGetCosts),
     sideQuestion: (workspaceId, question) =>
       ipcRenderer.invoke(IPC.chatSideQuestion, workspaceId, question),

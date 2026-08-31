@@ -267,7 +267,11 @@ export interface WooiApi {
     send(workspaceId: string, text: string, images?: ImageAttachment[]): Promise<void>
     interrupt(workspaceId: string): Promise<void>
     stopTask(workspaceId: string, taskId: string): Promise<void>
-    getHistory(workspaceId: string): Promise<ChatItem[]>
+    /**
+     * 대화 기록. `limit` 을 주면 **최근 limit 개**만 온다 — 돌아온 개수가 limit 보다 적으면
+     * 그보다 오래된 것은 없다는 뜻이다. 생략하면 전부 온다.
+     */
+    getHistory(workspaceId: string, limit?: number): Promise<ChatItem[]>
     /**
      * 활성 워크스페이스별 누적 비용(USD). backend 가 보고한 값만 담는다.
      * 대화 기록 자체를 렌더러로 끌어오지 않기 위한 통로다 — 화면에는 숫자 하나만 필요하다.

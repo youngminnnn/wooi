@@ -78,6 +78,22 @@ class TranscriptStore {
   }
 
   /**
+   * 최근 `limit` 개만 돌려준다. 며칠 이어 쓴 워크스페이스로 전환할 때 렌더러가 대화 전체를
+   * 이고 첫 페인트를 하지 않도록 만든 통로다.
+   *
+   * 파일 자체는 어차피 통째로 파싱한다 — 같은 id 의 마지막 줄이 이기는 형식이라 앞을 건너뛸 수
+   * 없다. 여기서 아끼는 것은 IPC 로 건너가는 양과 렌더러가 만드는 DOM 이고, 파싱 결과는 캐시에
+   * 남아 다음 페이지 요청이 디스크를 다시 읽지 않는다.
+   *
+   * 돌려준 개수가 `limit` 보다 적으면 그것이 곧 "더 오래된 것은 없다" 는 신호다.
+   */
+  loadTail(workspaceId: string, limit: number): ChatItem[] {
+    const all = this.load(workspaceId)
+    if (limit <= 0 || limit >= all.length) return all
+    return all.slice(-limit)
+  }
+
+  /**
    * 이 workspace 에서 backend 가 보고한 누적 비용(USD).
    *
    * 예전에는 렌더러가 트랜스크립트를 통째로 들고 와 매 토큰마다 다시 합산했다 — 워크스페이스가

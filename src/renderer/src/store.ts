@@ -67,6 +67,11 @@ import {
   type DiffCommentAnchor
 } from './lib/diffComments'
 import { popWorkspaceHistory, pushWorkspaceHistory } from './lib/workspaceHistory'
+import {
+  hasMoreTranscriptHistory,
+  nextTranscriptLimit,
+  TRANSCRIPT_INITIAL_LIMIT
+} from './lib/transcriptPagination'
 import { UNDO_CREATE_WINDOW_MS, undoCreateVerdict, type UndoableCreate } from './lib/undoCreate'
 
 export const scriptKey = (workspaceId: string, scriptId: string): string =>
@@ -295,6 +300,12 @@ interface UIState {
   selectedWorkspaceId: string | null
   transcripts: Record<string, ChatItem[]>
   loadedTranscripts: Record<string, boolean>
+  /**
+   * 대화 기록의 읽기 창 상태. 트랜스크립트는 뒤에서부터 한 페이지씩 읽는다
+   * ([[transcriptPagination]]) — 며칠 이어 쓴 워크스페이스의 첫 페인트가 대화 전체를 이고
+   * 가지 않게 하기 위해서다. 항목이 없는 워크스페이스는 아직 한 번도 읽지 않은 것이다.
+   */
+  transcriptPaging: Record<string, TranscriptPaging>
   scriptOutput: Record<string, string>
   scriptStatus: Record<string, ScriptStatus[]>
   /**
@@ -618,6 +629,8 @@ interface UIState {
   sendDiffComments: (workspaceId: string) => void
   /** /clear — 해당 workspace 의 대화 기록·컨텍스트 사용량을 화면에서 비운다(맥락 초기화). */
   resetTranscript: (workspaceId: string) => void
+  /** 위쪽으로 한 페이지 더 읽는다. 이미 읽는 중이거나 더 없으면 아무 일도 하지 않는다. */
+  loadEarlierTranscript: (workspaceId: string) => Promise<void>
   /**
    * 대화 기록은 그대로 두고 컨텍스트 사용량 표시만 비운다(/agent 교체처럼 세션만 새로 시작할 때).
    * 다음 턴이 값을 다시 보내 줄 때까지 상태줄은 "—" 로 돌아간다.
@@ -861,6 +874,16 @@ function upsertItem(items: ChatItem[], item: ChatItem): ChatItem[] {
   return next
 }
 
+/** 한 워크스페이스의 대화 읽기 창. */
+type TranscriptPaging = {
+  /** 마지막으로 요청한 개수. 다음 페이지는 여기에 한 페이지를 더해 꼬리부터 다시 읽는다. */
+  limit: number
+  /** 더 오래된 것이 남아 있을 수 있는가. 거짓이면 "더 보기" 를 감춘다. */
+  hasMore: boolean
+  /** 페이지를 읽는 중. 스크롤이 위쪽에 머무는 동안 같은 요청이 겹치지 않게 한다. */
+  loading: boolean
+}
+
 export const useStore = create<UIState>((set, get) => ({
   ready: false,
   app: null,
@@ -868,6 +891,7 @@ export const useStore = create<UIState>((set, get) => ({
   workspaceHistory: [],
   transcripts: {},
   loadedTranscripts: {},
+  transcriptPaging: {},
   scriptOutput: {},
   scriptStatus: {},
   composerAttachments: {},
@@ -2316,10 +2340,19 @@ export const useStore = create<UIState>((set, get) => ({
     if (!id) return
 
     if (!get().loadedTranscripts[id]) {
-      const history = await window.api.chat.getHistory(id)
+      // 최근 몇 턴만 먼저 읽는다. 위로 올라가면 MessageList 가 더 부른다.
+      const history = await window.api.chat.getHistory(id, TRANSCRIPT_INITIAL_LIMIT)
       set((s) => ({
         transcripts: { ...s.transcripts, [id]: history },
-        loadedTranscripts: { ...s.loadedTranscripts, [id]: true }
+        loadedTranscripts: { ...s.loadedTranscripts, [id]: true },
+        transcriptPaging: {
+          ...s.transcriptPaging,
+          [id]: {
+            limit: TRANSCRIPT_INITIAL_LIMIT,
+            hasMore: hasMoreTranscriptHistory(history.length, TRANSCRIPT_INITIAL_LIMIT),
+            loading: false
+          }
+        }
       }))
     }
     void get().refreshGit(id)
@@ -2633,11 +2666,57 @@ export const useStore = create<UIState>((set, get) => ({
       return {
         transcripts: { ...s.transcripts, [workspaceId]: [] },
         loadedTranscripts: { ...s.loadedTranscripts, [workspaceId]: true },
+        // 기록을 비웠으니 읽기 창도 처음으로 되돌린다 — 남아 있으면 빈 대화에 "더 보기" 가 뜬다.
+        transcriptPaging: {
+          ...s.transcriptPaging,
+          [workspaceId]: { limit: TRANSCRIPT_INITIAL_LIMIT, hasMore: false, loading: false }
+        },
         contextUsage,
         compacting,
         goals
       }
     }),
+
+  loadEarlierTranscript: async (workspaceId) => {
+    const paging = get().transcriptPaging[workspaceId]
+    if (!paging || !paging.hasMore || paging.loading) return
+
+    const limit = nextTranscriptLimit(paging.limit)
+    set((s) => ({
+      transcriptPaging: { ...s.transcriptPaging, [workspaceId]: { ...paging, loading: true } }
+    }))
+    let older: ChatItem[]
+    try {
+      older = await window.api.chat.getHistory(workspaceId, limit)
+    } catch {
+      // 못 읽었으면 잠금만 푼다. 다음 스크롤이나 버튼 누름이 다시 시도한다.
+      set((s) => ({
+        transcriptPaging: {
+          ...s.transcriptPaging,
+          [workspaceId]: { ...(s.transcriptPaging[workspaceId] ?? paging), loading: false }
+        }
+      }))
+      return
+    }
+
+    set((s) => {
+      // 디스크에서 다시 읽은 꼬리로 갈아 끼우되, 아직 디스크에 닿지 않은 것(스트리밍 중인 턴)은
+      // 살린다. 그것들은 언제나 가장 최신이므로 뒤에 붙이면 순서가 맞는다.
+      const known = new Set(older.map((item) => item.id))
+      const inFlight = (s.transcripts[workspaceId] ?? []).filter((item) => !known.has(item.id))
+      return {
+        transcripts: { ...s.transcripts, [workspaceId]: [...older, ...inFlight] },
+        transcriptPaging: {
+          ...s.transcriptPaging,
+          [workspaceId]: {
+            limit,
+            hasMore: hasMoreTranscriptHistory(older.length, limit),
+            loading: false
+          }
+        }
+      }
+    })
+  },
 
   resetContextUsage: (workspaceId) =>
     set((s) => {
@@ -2716,6 +2795,23 @@ export const useStore = create<UIState>((set, get) => ({
     // 목적지를 먼저 세워 둔다 — 대화창은 마운트되자마자 이 값을 보고 그 항목으로 스크롤한다.
     set((st) => ({ jumpTarget: { workspaceId, itemId, seq: (st.jumpTarget?.seq ?? 0) + 1 } }))
     await s.selectWorkspace(workspaceId)
+
+    // 대화는 뒤에서부터 한 페이지씩 읽는다. 워크스페이스를 가로지르는 검색(⇧⌘K)은 main 이
+    // 파일 전체를 훑어 찾으므로, 목적지가 그 창보다 오래됐을 수 있다 — 그러면 스크롤할 대상이
+    // DOM 에 없어 점프가 조용히 실패한다. 이 경우에만 전부 읽어 목적지를 창 안으로 들인다.
+    if ((get().transcripts[workspaceId] ?? []).some((item) => item.id === itemId)) return
+    const all = await window.api.chat.getHistory(workspaceId)
+    set((st) => {
+      const known = new Set(all.map((item) => item.id))
+      const inFlight = (st.transcripts[workspaceId] ?? []).filter((item) => !known.has(item.id))
+      return {
+        transcripts: { ...st.transcripts, [workspaceId]: [...all, ...inFlight] },
+        transcriptPaging: {
+          ...st.transcriptPaging,
+          [workspaceId]: { limit: all.length, hasMore: false, loading: false }
+        }
+      }
+    })
   },
 
   clearJumpTarget: () => set((s) => (s.jumpTarget ? { jumpTarget: null } : {})),
