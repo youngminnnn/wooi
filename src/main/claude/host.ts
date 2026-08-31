@@ -82,6 +82,7 @@ function ensure(workspaceId: string, config: SessionConfig): ClaudeSession {
     peer: config.peer,
     resumeSessionId: config.resumeSessionId,
     additionalDirs: config.additionalDirs,
+    env: config.env,
     // 워크스페이스마다 자기 것을 만든다 — 도구가 어느 워크스페이스에서 불렸는지는 이 클로저가
     // 유일한 근거다(모델이 인자로 지목할 수 없다는 뜻이기도 하다).
     wooiMcp: createWooiMcpServer(

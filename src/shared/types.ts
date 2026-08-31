@@ -999,6 +999,14 @@ export interface AgentSettings {
   fallbackModels: string[]
   /** 새 워크스페이스의 기본 권한 모드. null 이면 백엔드의 defaultPermissionMode. */
   permissionMode: PermissionMode | null
+  /**
+   * 이 백엔드의 에이전트 프로세스에 얹을 기본 환경 변수. 값이 비밀(API 키·토큰)일 수 있으므로
+   * **로그에는 키 이름만** 남긴다([[codex/config]] redactDebugConfig 와 같은 원칙).
+   *
+   * 이 설정 이전 버전에서 올라온 파일에는 이 키가 없다 — 옵셔널로 두어 스키마 버전을 올리지
+   * 않는다. 읽는 쪽은 언제나 `sanitizeAgentEnv` 를 거쳐 위험한 키를 떨어뜨린다.
+   */
+  env?: Record<string, string>
 }
 
 /** 백엔드별 기본값의 초기 상태(모두 "백엔드 기본을 따름"). */
@@ -1007,7 +1015,10 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   effort: null,
   permissionMode: null,
   fastMode: false,
-  fallbackModels: []
+  fallbackModels: [],
+  // 비어 있음 = 아무것도 얹지 않음. 여기 적어 두어야 설정 화면의 "Reset" 이 환경 변수까지
+  // 되돌린다(리셋은 이 객체를 그대로 덮어쓴다).
+  env: {}
 }
 
 /**
@@ -1016,6 +1027,64 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
  */
 export function agentSettingsFor(settings: AppSettings, id: AgentBackendId): AgentSettings {
   return { ...DEFAULT_AGENT_SETTINGS, ...settings.agents?.[id] }
+}
+
+// ── 에이전트 기본 환경 변수 ──────────────────────────────────────────────
+//
+// 범위는 **환경 변수뿐**이다. 명령 인자나 실행 파일 오버라이드는 두지 않는다 — Wooi 는 Claude
+// Agent SDK 와 Codex CLI 를 직접 감싸므로, 임의 인자를 끼워 넣으면 그 계약이 조용히 깨진다.
+
+/**
+ * 사용자가 덮어쓸 수 없는 환경 변수 이름.
+ *
+ * `PATH`·`HOME` 은 Wooi 가 로그인 셸에서 복원해 자식에게 물려주는 값이라([[main/env]]),
+ * 사용자가 덮으면 에이전트 CLI 가 "설치됐는데 미설치" 로 보이거나 자격 증명을 못 읽는다.
+ */
+export const AGENT_ENV_BLOCKED_KEYS = ['PATH', 'HOME'] as const
+
+/** Wooi 가 자식 프로세스에 스스로 정해 내리는 이름 공간. 덮이면 dev/설치본 격리가 무너진다. */
+export const AGENT_ENV_BLOCKED_PREFIX = 'WOOI_'
+
+/** 환경 변수 이름으로 쓸 수 있는 형태인가(POSIX 관례: 영문자·`_` 로 시작, 영숫자·`_`). */
+export function isValidAgentEnvKey(key: string): boolean {
+  return /^[A-Za-z_][A-Za-z0-9_]*$/.test(key)
+}
+
+/** 이 키를 사용자가 정할 수 있는가. 막힌 키는 조용히 무시하지 않고 UI·로그에서 알린다. */
+export function isBlockedAgentEnvKey(key: string): boolean {
+  const upper = key.toUpperCase()
+  return (
+    upper.startsWith(AGENT_ENV_BLOCKED_PREFIX) ||
+    (AGENT_ENV_BLOCKED_KEYS as readonly string[]).includes(upper)
+  )
+}
+
+/**
+ * 저장된 맵에서 실제로 주입할 것만 남긴다. 막힌 키와 형태가 어긋난 키는 이유와 함께 돌려준다 —
+ * 조용히 떨어뜨리면 "설정했는데 왜 안 먹지" 가 되고, 그건 진단할 수 없는 종류의 침묵이다.
+ *
+ * 저장 파일은 손으로 고칠 수 있으므로 값의 타입까지 여기서 좁힌다.
+ */
+export function sanitizeAgentEnv(raw: Record<string, string> | undefined): {
+  env: Record<string, string>
+  blocked: string[]
+} {
+  const env: Record<string, string> = {}
+  const blocked: string[] = []
+  for (const [key, value] of Object.entries(raw ?? {})) {
+    const name = key.trim()
+    if (!name) continue
+    if (typeof value !== 'string') {
+      blocked.push(name)
+      continue
+    }
+    if (!isValidAgentEnvKey(name) || isBlockedAgentEnvKey(name)) {
+      blocked.push(name)
+      continue
+    }
+    env[name] = value
+  }
+  return { env, blocked }
 }
 
 // ── MCP 서버 (Wooi 스코프) ────────────────────────────────────────────────
@@ -1331,6 +1400,103 @@ export interface AppSettings {
    * 지금 연결된 디스플레이 밖이면(모니터를 뽑은 뒤) 무시하고 기본 위치로 연다.
    */
   paneWindowBounds?: Partial<Record<PaneKind, WindowBounds>>
+  /**
+   * 지금 보고 있는 워크스페이스의 OS 알림을 누른다. 기본은 켜짐(=이전 동작).
+   *
+   * "보고 있다" 는 **앱 포커스만으로는 부족하다** — Wooi 는 워크스페이스를 여럿 띄우는 앱이라
+   * 창은 앞에 있지만 다른 워크스페이스를 보고 있는 경우가 흔하고, 그때 조용해지면 정작 알아야
+   * 할 완료를 놓친다. 그래서 앱이 포커스돼 있고 **그 워크스페이스가 화면에 떠 있을 때만** 누른다
+   * ([[shared/types]] notificationSkipReason).
+   *
+   * 이 설정이 없던 파일에서 올라오면 기본값 병합이 true 로 채운다 — 예전 동작이 "포커스면 무조건
+   * 억제" 였으므로 켜짐이 그때와 가장 가깝다.
+   */
+  suppressWhenFocused?: boolean
+}
+
+// ── 알림이 왜 안 갔는가 ──────────────────────────────────────────────────
+//
+// 원격 푸시 쪽에서 "왜 안 울렸나" 가 진단하기 어려운 문제로 이미 알려져 있다. 데스크톱 알림도
+// 조건이 여러 겹이라(음소거 · 채널 · 포커스 · OS 권한) 결과만 보고는 어디서 막혔는지 알 수 없다.
+// 그래서 판정 결과를 사유 코드로 남긴다 — 로그에 찍고, 설정 화면에서 마지막 사유를 보여 준다.
+
+/** 알림이 전달되지 않은 이유. 'delivered' 는 성공이므로 여기 없다. */
+export type NotificationSkipReason =
+  /** 워크스페이스가 음소거됨(Workspace.muted). */
+  | 'muted'
+  /** 이 이벤트의 osNotification 채널이 꺼짐. */
+  | 'channel-off'
+  /** 지금 그 워크스페이스를 보고 있음(suppressWhenFocused). */
+  | 'suppressed-focus'
+  /** OS 가 알림을 지원하지 않음(Notification.isSupported()). */
+  | 'not-supported'
+  /**
+   * 띄우라고 했는데 화면에 뜨지 않았다. macOS 가 조용히 삼키는 경우다 — 알림 권한이 거부돼
+   * 있거나 집중 모드가 켜져 있으면 Electron 은 오류 없이 성공한 것처럼 반환한다. 표시 확인
+   * ('show' 이벤트)이 제때 오지 않는 것으로만 잡아낼 수 있다.
+   */
+  | 'blocked-by-system'
+
+/** 설정 화면에 그대로 띄우는 설명. 사유 코드는 로그용, 이 문장은 사람용이다. */
+export const NOTIFICATION_SKIP_LABELS: Record<NotificationSkipReason, string> = {
+  muted: 'the workspace was muted',
+  'channel-off': 'OS notifications are turned off for that event',
+  'suppressed-focus': 'you were already looking at that workspace',
+  'not-supported': 'this system does not support notifications',
+  'blocked-by-system': 'macOS did not display it — check System Settings → Notifications'
+}
+
+/** 마지막으로 건너뛴 알림 1건. 설정 화면의 진단 줄이 읽는다. */
+export interface NotificationSkip {
+  reason: NotificationSkipReason
+  event: NotificationEvent
+  /** 표시용 워크스페이스 이름(id 는 사용자에게 의미가 없다). */
+  workspaceName: string
+  at: number
+}
+
+/** 알림 한 건을 실제로 띄울지, 아니면 어떤 사유로 건너뛸지. */
+export interface NotificationDecisionInput {
+  /** 이 워크스페이스가 음소거인가. */
+  muted: boolean
+  /** 이 이벤트의 osNotification 채널이 켜져 있는가. */
+  channelOn: boolean
+  /** Wooi 창이 지금 포커스를 갖고 있는가. */
+  appFocused: boolean
+  /** 렌더러가 마지막으로 알려 준, 지금 화면에 떠 있는 워크스페이스. 모르면 null. */
+  viewingWorkspaceId: string | null
+  /** 알림을 띄우려는 워크스페이스. */
+  workspaceId: string
+  /** 보고 있는 워크스페이스의 알림을 누를 것인가(settings.suppressWhenFocused). */
+  suppressWhenFocused: boolean
+  /** OS 가 알림을 지원하는가. */
+  supported: boolean
+}
+
+/**
+ * 알림을 띄울지 판정한다. 띄우면 null, 아니면 사유 코드.
+ *
+ * 포커스 억제가 **워크스페이스까지 본다**는 것이 요점이다. 예전에는 창이 앞에 있기만 하면
+ * 전부 눌렀는데, 워크스페이스 A 를 들여다보는 동안 B 가 끝나면 아무 소식도 오지 않았다 —
+ * 병렬로 여러 개를 돌리는 것이 이 앱의 본령이라 그 침묵이 가장 아쉬운 자리였다.
+ *
+ * 보고 있는 워크스페이스를 모르면(렌더러가 아직 알려 주지 않음) 억제하지 않는다. 알림이 한 번
+ * 더 뜨는 것이 놓치는 것보다 낫다.
+ */
+export function notificationSkipReason(
+  input: NotificationDecisionInput
+): NotificationSkipReason | null {
+  if (input.muted) return 'muted'
+  if (!input.channelOn) return 'channel-off'
+  if (
+    input.suppressWhenFocused &&
+    input.appFocused &&
+    input.viewingWorkspaceId === input.workspaceId
+  ) {
+    return 'suppressed-focus'
+  }
+  if (!input.supported) return 'not-supported'
+  return null
 }
 
 // ── fan-out (같은 프롬프트를 여러 워크스페이스에 동시에) ────────────────────
@@ -3546,7 +3712,18 @@ export const IPC = {
    * 그것을 볼 수 없다 — 폰은 무엇이 안 읽혔는지 영영 모른다. 반대 방향(`evt:remoteRead`)과
    * 짝이다.
    */
-  remoteSetUnread: 'remote:setUnread'
+  remoteSetUnread: 'remote:setUnread',
+  /**
+   * 지금 화면에 떠 있는 워크스페이스를 main 에 알린다(렌더러 → main). 창이 흐려졌거나 아무것도
+   * 열지 않았으면 null 이다.
+   *
+   * 선택 상태는 렌더러 메모리에만 있는데, 포커스 억제를 워크스페이스 단위로 하려면 알림을 띄우는
+   * main 이 그것을 알아야 한다([[shared/types]] notificationSkipReason). unread 를 올리는
+   * `remote:setUnread` 와 같은 방향·같은 이유다.
+   */
+  notifySetViewing: 'notify:setViewing',
+  /** 마지막으로 건너뛴 알림의 사유를 읽는다(설정 화면의 진단 줄). 없으면 null. */
+  notifyLastSkip: 'notify:lastSkip'
 } as const
 
 // ── IPC 페이로드 타입 ────────────────────────────────────────────────────

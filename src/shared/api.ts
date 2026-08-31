@@ -43,6 +43,7 @@ import type {
   McpServerInfo,
   ModelOption,
   MemoryScope,
+  NotificationSkip,
   PaneKind,
   PaneState,
   PermissionDecision,
@@ -664,6 +665,19 @@ export interface WooiApi {
 
   settings: {
     update(patch: Partial<AppSettings>): Promise<void>
+  }
+
+  /** 데스크톱 알림의 상태 보고. 폰에서 호출할 수는 없다(allowlist.test.ts 가 잠근다). */
+  notify: {
+    /**
+     * 지금 화면에 떠 있는 워크스페이스. 창이 흐려졌거나 아무것도 열지 않았으면 null 이다.
+     *
+     * 선택 상태는 렌더러 메모리에만 있는데, 알림을 띄우는 것은 main 이다 — 올려 주지 않으면
+     * main 은 "앱은 보고 있지만 다른 워크스페이스를 보고 있는" 경우를 가릴 수 없다.
+     */
+    setViewing(workspaceId: string | null): Promise<void>
+    /** 마지막으로 건너뛴 알림의 사유. 아직 없으면 null. */
+    lastSkip(): Promise<NotificationSkip | null>
   }
 
   /**
