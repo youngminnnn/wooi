@@ -43,6 +43,13 @@ const PROBE_PATIENCE = 5
  */
 const STREAK_WINDOW_MS = 10 * 60_000
 /**
+ * 예약 시각을 기다리는 동안 "정말 아직 제한 중인가" 를 다시 물어보는 간격.
+ *
+ * 백엔드 하나당 이 간격으로 **한 번만** 조회하고, 기다리는 워크스페이스들이 그 한 번을 같이 쓴다 —
+ * 아홉 개가 같은 제한을 기다린다고 조회를 아홉 번 할 이유는 없다(스냅샷은 계정 단위다).
+ */
+const EARLY_CHECK_MS = 5 * 60_000
+/**
  * 예약 시각을 놓친 뒤에도 이어가 볼 수 있는 유예 창.
  *
  * Wooi 는 데스크톱 앱이라 예약 시각에 프로세스가 살아 있으리라는 보장이 없다 — 앱이 꺼져 있거나
@@ -133,6 +140,11 @@ export class RateLimitResumeCoordinator {
    * (noteConnectionLost). 턴이 끝까지 가면 0 으로 되돌린다.
    */
   private offlineRetries = new Map<string, number>()
+  /**
+   * 기다리는 중에 사용량을 마지막으로 다시 물어본 시각. 백엔드 하나당 하나다 — 스냅샷은 계정
+   * 단위이므로, 같은 제한을 기다리는 워크스페이스가 몇 개든 조회는 EARLY_CHECK_MS 에 한 번이면 된다.
+   */
+  private earlyCheckAt = 0
 
   constructor(private deps: Deps) {}
 
@@ -457,7 +469,7 @@ export class RateLimitResumeCoordinator {
       return
     }
     if (before.pendingRateLimitResume!.retryAt - Date.now() > 1_000) {
-      this.arm(workspaceId, before.pendingRateLimitResume!.retryAt)
+      await this.checkLiftedEarly(workspaceId, before)
       return
     }
 
@@ -507,6 +519,62 @@ export class RateLimitResumeCoordinator {
     // 예약 당시의 세션이 그대로일 때만 이어 간다. /clear·계정 전환 등으로 바뀌었다면 과거 작업을
     // 새 맥락에 주입하지 않는다.
     this.continueNow(workspaceId, current, pending)
+  }
+
+  /**
+   * 예약 시각이 아직 오지 않았다 — 다시 재우기 전에 **정말 아직 제한 중인지** 한 번 확인한다.
+   *
+   * 우리가 아는 해제 시각은 틀릴 수 있다. 5시간 창이 막 굴러간 직후의 usage 응답이 그렇다 —
+   * 사용률은 옛 창의 100% 를 잠시 물고 있으면서 resetsAt 은 **새 창의 것**을 싣는다. 그 둘을 그대로
+   * 믿으면 십 분 뒤면 풀릴 제한을 다섯 시간 뒤로 예약하고, 그 사이 제한이 풀려도 아무 일도 일어나지
+   * 않는다. 실제로 그렇게 됐다 — 예약 하나가 22:50 으로 밀리면 18:10 에 풀린 제한을 사용자가
+   * 돌아와 손으로 이어가는 수밖에 없다.
+   *
+   * 그래서 기다리는 동안에도 사용량을 다시 보고, 스냅샷이 **적극적으로** "제한이 아니다" 라고 말하면
+   * 예약 시각을 앞당겨 곧바로 이어간다. 모르겠다는 대답(조회 실패·창 없음·available=false)은 근거로
+   * 쓰지 않는다 — 그때는 원래 예약대로 기다린다. 이 판정은 예약 시각에 쓰는 것과 같은 것이라
+   * (isRateLimited), 신뢰 수준을 새로 만들지 않고 **시점만 앞당긴다.**
+   *
+   * 다만 **해제 시각을 안다고 믿고 기다리는 예약에만** 쓴다(rateLimited.resetsAt). 시각을 모른 채
+   * 백오프로 물러선 예약에는 앞당길 근거가 없다 — 거기서는 조회가 "괜찮다" 고 말하는데도 실제 턴이
+   * 제한에 걸린 것이므로, 그 조회를 근거로 다시 보내면 물러선 의미가 사라지고 시도 예산만 몇 분 만에
+   * 태운다. 백오프 자체가 그 경우의 확인 절차다.
+   */
+  private async checkLiftedEarly(workspaceId: string, ws: Workspace): Promise<void> {
+    const pending = ws.pendingRateLimitResume!
+    const remaining = pending.retryAt - Date.now()
+    // 곧 깨어날 예약은 그냥 기다린다. 연결 대기(cause)나 턴 실패 백오프(blocked)는 제한과 무관한
+    // 이유로 물러선 것이므로, 제한이 풀렸다고 앞당길 자리가 아니다.
+    const eligible =
+      remaining > EARLY_CHECK_MS &&
+      causeOf(pending) === 'rateLimit' &&
+      !pending.blocked &&
+      Boolean(ws.rateLimited?.resetsAt)
+    if (!eligible || (this.deps.isOnline && !this.deps.isOnline())) {
+      this.arm(workspaceId, pending.retryAt)
+      return
+    }
+    if (Date.now() - this.earlyCheckAt >= EARLY_CHECK_MS) {
+      this.earlyCheckAt = Date.now()
+      await this.deps
+        .refreshLimits()
+        .catch((err) => log.info(`rate-limit resume: early usage check failed (${String(err)})`))
+    }
+    // 조회를 기다리는 사이 예약이 바뀌었을 수 있다(사용자가 보냈다·다시 걸렸다) — 다시 읽는다.
+    const current = this.pendingWorkspace(workspaceId)
+    if (!current) return
+    const now = Date.now()
+    const latest = current.pendingRateLimitResume!
+    if (latest.retryAt - now <= 1_000) return this.arm(workspaceId, latest.retryAt)
+    const snapshot = getStore().getState().rateLimitsByAgent?.[this.deps.backend]
+    if (!limitLifted(snapshot, now)) {
+      this.arm(workspaceId, latest.retryAt)
+      return
+    }
+    log.info(
+      `rate-limit resume: 예약(${new Date(latest.retryAt).toISOString()}) 보다 먼저 제한이 풀렸다 — 바로 이어간다 (${workspaceId})`
+    )
+    this.continueNow(workspaceId, current, latest)
   }
 
   /**
@@ -762,6 +830,20 @@ export function isRateLimited(snapshot: RateLimitSnapshot | undefined, now = Dat
     const resetsAt = Date.parse(window.resetsAt)
     return !Number.isFinite(resetsAt) || resetsAt > now
   })
+}
+
+/**
+ * 스냅샷이 "이제 제한이 아니다" 라고 **적극적으로** 말하는지.
+ *
+ * isRateLimited 의 반대가 아니다 — 그쪽은 "제한이라는 근거가 있는가" 를 묻고, 근거가 없으면(조회
+ * 실패로 available=false, 창을 못 받아 windows 가 빈 응답) false 를 준다. 그 false 를 "풀렸다" 로
+ * 읽으면 아무것도 모르는 상태에서 턴을 보내게 되므로, 여기서는 **최근에 성공한 조회**만 근거로 삼는다.
+ */
+export function limitLifted(snapshot: RateLimitSnapshot | undefined, now = Date.now()): boolean {
+  if (!snapshot?.available || !snapshot.windows.length) return false
+  // 조회에 실패하면 fetchedAt 은 그대로다(마지막 성공 시각). 낡은 스냅샷은 지금을 말해 주지 않는다.
+  if (now - snapshot.fetchedAt > EARLY_CHECK_MS) return false
+  return !isRateLimited(snapshot, now)
 }
 
 /** reset 시각을 모를 때 다음 확인까지 기다릴 시간. 시도마다 배로 늘려 한 시간에서 멈춘다. */
