@@ -167,3 +167,21 @@ export function hintSeenFlag(id: string): string {
   if (id === 'keyboard-switch') return SWITCH_HINT_DONE
   return `hintSeen.${id}`
 }
+
+/**
+ * Changes 패널의 파일 트리를 펴 뒀는지, 그리고 그 폭(px).
+ *
+ * 전역 설정이 아니라 여기 두는 이유는 이 파일의 원칙 그대로다 — 어느 기기의 어느 패널을 얼마나
+ * 넓게 봤는지는 main 이 알아야 할 도메인 상태가 아니다. 기본값은 "닫힘": 우측 패널은 원래 좁고,
+ * 대부분의 변경은 파일이 몇 개뿐이라 트리가 diff 에서 가로폭만 빼앗는다.
+ */
+export const DIFF_FILE_TREE_OPEN = 'diffFileTreeOpen'
+export const DIFF_FILE_TREE_WIDTH = 'diffFileTreeWidth'
+
+/**
+ * diff 뷰어의 워드랩을 **꺼 뒀는지**. 켜짐이 기본이라 "끔"을 저장한다 — 저장된 값이 없을 때
+ * `readUiFlag` 가 false 를 돌려주는 것이 그대로 "랩 켜짐"이 되게.
+ *
+ * 에디터의 워드랩과 묶지 않는다. 이유는 [[diffWordWrap]] 에 적어 뒀다.
+ */
+export const DIFF_WORD_WRAP_OFF = 'diffWordWrapOff'

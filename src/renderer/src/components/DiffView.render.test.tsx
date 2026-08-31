@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { MAX_DIFF_LINES_PER_SIDE } from '@shared/diffRenderLimit'
 import type { FileDiff, WorkspaceDiff } from '@shared/types'
 import { renderWithStore } from '../test/harness'
+import type { DiffCommentAnchor } from '../lib/diffComments'
 import DiffView from './DiffView'
 
 function fileDiff(over: Partial<FileDiff> & { path: string }): FileDiff {
@@ -254,5 +255,121 @@ describe('변경 지점 간 이동', () => {
     fireEvent.keyDown(window, { code: 'F7', ctrlKey: true })
     fireEvent.keyDown(window, { code: 'F7', altKey: true })
     expect(scrollTo).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * 워드랩 토글이 **라인 코멘트의 히트 테스트를 어긋나게 하지 않는지** 확인한다.
+ *
+ * Wooi 는 드래그로 행 범위를 골라 코멘트를 단다. 랩이 켜지면 한 줄이 여러 시각적 줄로 늘어나고,
+ * 끄면 행이 화면보다 넓어져 가로로 밀린다 — 좌표로 행을 찾는 구현이었다면 둘 다 어긋났을
+ * 자리다. 실제로는 행 `<div>` 의 `onMouseEnter` 와 배열 인덱스만 쓰므로 기하학이 개입하지
+ * 않는다. 그 사실을 고정해 둔다.
+ */
+const WRAP_PATCH = `diff --git a/src/a.ts b/src/a.ts
+index 1111111..2222222 100644
+--- a/src/a.ts
++++ b/src/a.ts
+@@ -1,3 +1,4 @@
+ const a = 1
+-const b = 2
++const b = 3
++const veryLong = '${'x'.repeat(400)}'
+ const c = 4
+`
+
+const WRAP_DIFF: WorkspaceDiff = {
+  baseBranch: 'origin/main',
+  files: [
+    {
+      path: 'src/a.ts',
+      status: 'modified',
+      additions: 2,
+      deletions: 1,
+      patch: WRAP_PATCH,
+      binary: false
+    }
+  ]
+}
+
+/** 행 0 에서 눌러 행 3 까지 끌고 놓은 뒤, 열린 상자에 코멘트를 저장한다. */
+function dragComment(fromRow: number, toRow: number): void {
+  const buttons = screen.getAllByLabelText('Comment on this line')
+  fireEvent.mouseDown(buttons[fromRow])
+  // 버튼의 조상이 행 컨테이너다 — span > div(row).
+  const target = buttons[toRow].parentElement!.parentElement!
+  fireEvent.mouseEnter(target)
+  fireEvent.mouseUp(window)
+  fireEvent.change(screen.getByRole('textbox'), { target: { value: 'fix this' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Add comment' }))
+}
+
+describe.each([
+  ['랩 켜짐', true],
+  ['랩 꺼짐', false]
+])('DiffView 라인 코멘트 (%s)', (_label, wrap) => {
+  const renderView = (
+    onAdd: (anchor: DiffCommentAnchor, body: string) => void
+  ): ReturnType<typeof render> =>
+    render(
+      <DiffView
+        diff={WRAP_DIFF}
+        loading={false}
+        baseBranch="origin/main"
+        wrap={wrap}
+        commenting={{ comments: [], onAdd, onEdit: vi.fn(), onRemove: vi.fn() }}
+      />
+    )
+
+  it('드래그로 고른 범위가 같은 줄 번호로 굳는다', () => {
+    const onAdd = vi.fn()
+    renderView(onAdd)
+
+    // 행 0(문맥 L1) → 행 3(추가 L3). 사이의 삭제 행은 새 파일에 줄 번호가 없어 건너뛴다.
+    dragComment(0, 3)
+
+    expect(onAdd).toHaveBeenCalledWith(
+      { path: 'src/a.ts', deleted: false, from: 1, to: 3 },
+      'fix this'
+    )
+  })
+
+  it('한 행만 눌러도 그 줄에 달린다', () => {
+    const onAdd = vi.fn()
+    renderView(onAdd)
+
+    dragComment(4, 4)
+
+    expect(onAdd).toHaveBeenCalledWith(
+      { path: 'src/a.ts', deleted: false, from: 4, to: 4 },
+      'fix this'
+    )
+  })
+})
+
+describe('DiffView 워드랩', () => {
+  const renderWrap = (wrap: boolean): HTMLElement => {
+    const { container } = render(
+      <DiffView diff={WRAP_DIFF} loading={false} baseBranch="origin/main" wrap={wrap} />
+    )
+    return container.querySelector('[data-diff-file="src/a.ts"]') as HTMLElement
+  }
+
+  it('랩을 켜면 접히고, 가로 스크롤을 만들지 않는다', () => {
+    const block = renderWrap(true)
+    expect(block.querySelector('.whitespace-pre-wrap')).not.toBeNull()
+    expect(block.querySelector('.overflow-x-auto')).toBeNull()
+  })
+
+  it('랩을 끄면 정렬을 지키고 가로로 민다', () => {
+    const block = renderWrap(false)
+    expect(block.querySelector('.whitespace-pre-wrap')).toBeNull()
+    expect(block.querySelector('.overflow-x-auto')).not.toBeNull()
+    // 짧은 줄에서도 행 상자가 화면 폭까지 늘어나야 hover 로 범위를 늘릴 수 있다.
+    expect(block.querySelector('.min-w-full')).not.toBeNull()
+  })
+
+  it('파일 블록에는 트리가 찾아올 표적이 달려 있다', () => {
+    expect(renderWrap(true)).not.toBeNull()
   })
 })

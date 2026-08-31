@@ -84,6 +84,7 @@ import type {
   TranscriptSearchResult,
   UpdateFromBaseResult,
   UpdateStatus,
+  WorkspaceCompareBase,
   WorkspaceDiff
 } from './types'
 import type { PreviewIssue } from './previewIssues'
@@ -349,6 +350,11 @@ export interface WooiApi {
   git: {
     status(workspaceId: string): Promise<GitStatus | null>
     diff(workspaceId: string): Promise<WorkspaceDiff | null>
+    /**
+     * Changes 탭이 무엇과 견줄지 바꾼다. **표시 전용** — PR 대상도 rebase 대상도 바뀌지 않는다
+     * ([[compareBase]]).
+     */
+    setCompareBase(workspaceId: string, compareBase: WorkspaceCompareBase): Promise<void>
     /** 리포당 합류된 fetch 로 origin tracking ref 를 갱신한다. */
     fetch(repoId: string): Promise<void>
     /** 최신 base 브랜치를 현재 브랜치로 머지한다(드리프트 해소). 충돌 시 워킹트리에 충돌이 남는다. */

@@ -3,6 +3,15 @@
  * preload 가 이 타입을 그대로 노출하므로, 채널 이름·페이로드 모양의 단일 출처(SSOT)다.
  */
 
+/**
+ * Changes 패널이 무엇과 견줄지. **표시 전용 값이다** — PR 대상도 rebase 대상도 여기서 나오지
+ * 않는다. 그 경계의 근거와 이 값을 읽어도 되는 유일한 경로는 [[compareBase]] 에 적혀 있다.
+ *
+ * (이 파일은 React Native 가 그대로 번들하므로 import 를 둘 수 없어, 헬퍼가 아니라 타입이
+ * 여기에 산다. `compareBase.ts` 가 이 타입을 받아 쓴다.)
+ */
+export type WorkspaceCompareBase = 'stack-parent' | 'default-branch'
+
 // ── 권한 모드 ───────────────────────────────────────────────────────────
 /**
  * 에이전트의 권한 모드. **백엔드마다 지원하는 값이 다르다** — 어떤 모드를 어떤 순서로 노출할지는
@@ -842,6 +851,14 @@ export interface Workspace {
    * (스택 위에서 일부러 다른 브랜치를 향하게 두는 경우가 있다).
    */
   baseMismatchDismissed?: string | null
+  /**
+   * Changes 패널이 **무엇과 견줘 보여 줄지**. 없으면 지금까지의 자동 판정 그대로다.
+   *
+   * ⚠️ 표시 전용이다 — PR 대상도 rebase 대상도 이 값에서 나오지 않는다. 실제 base 는 계속
+   * `baseBranch` / `stack[].baseBranch` / GitHub 의 `baseRefName` 만 소유한다. 판단의 근거와
+   * 경계는 [[compareBase]] 에 적어 뒀고, 읽는 곳은 `IPC.gitDiff` 하나뿐이다.
+   */
+  compareBase?: WorkspaceCompareBase | null
   /**
    * 이 워크스페이스의 PR 이 속한 **GitHub 스택** 번호(GitHub 이 서버에 들고 있는 stacked PR
    * 객체). 세 필드 모두 옵셔널이고 폴백 경로에서는 아예 없다 — Wooi 의 체인은 여전히
@@ -3526,6 +3543,10 @@ export const IPC = {
   scriptGetOutput: 'script:getOutput',
   gitStatus: 'git:status',
   gitDiff: 'git:diff',
+  /**
+   * Changes 패널의 비교 기준을 바꾼다. **표시 전용** — PR·rebase 대상은 건드리지 않는다.
+   */
+  workspaceSetCompareBase: 'workspace:setCompareBase',
   /** 리포의 origin tracking ref 를 갱신한다. 실패는 main 에서 조용히 무시한다. */
   gitFetch: 'git:fetch',
   /** base 브랜치를 현재 워크스페이스 브랜치로 머지해 드리프트를 해소한다. */

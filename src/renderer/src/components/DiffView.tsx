@@ -13,6 +13,7 @@ import { branchLineTotal } from '@shared/codePaths'
 import { diffRenderLimit } from '@shared/diffRenderLimit'
 import { parsePatch, rowSign, type PatchHunk, type PatchRow } from './files/diffPatch'
 import type { DiffComment, DiffCommentAnchor } from '../lib/diffComments'
+import { diffWrapClasses, type DiffWrapClasses } from '../lib/diffWordWrap'
 import DiffCommentBox from './diff/DiffCommentBox'
 import DiffCommentCard from './diff/DiffCommentCard'
 import BranchLineTotalChip from './diff/BranchLineTotalChip'
@@ -44,7 +45,8 @@ export default function DiffView({
   loading,
   baseBranch,
   onOpenFile,
-  commenting
+  commenting,
+  wrap = true
 }: {
   diff: WorkspaceDiff | null
   loading: boolean
@@ -56,6 +58,11 @@ export default function DiffView({
   onOpenFile?: (path: string) => void
   /** 라인 코멘트 배선. 주지 않으면 읽기 전용으로만 그린다. */
   commenting?: DiffCommenting
+  /**
+   * 긴 줄을 접을지. 끄면 정렬을 지키고 가로로 민다([[diffWordWrap]]).
+   * 에디터의 워드랩과는 별개 값이다 — 두 화면이 원하는 게 반대다.
+   */
+  wrap?: boolean
 }): React.JSX.Element {
   // 코멘트를 파일별로 갈라 둔다 — 파일 블록마다 전체 목록을 훑지 않게.
   const byPath = useMemo(() => {
@@ -105,6 +112,7 @@ export default function DiffView({
             onOpenFile={onOpenFile}
             commenting={commenting}
             comments={byPath.get(f.path) ?? NO_COMMENTS}
+            wrap={wrap}
           />
         ))}
       </div>
@@ -123,12 +131,14 @@ function FileBlock({
   file,
   onOpenFile,
   commenting,
-  comments
+  comments,
+  wrap
 }: {
   file: FileDiff
   onOpenFile?: (path: string) => void
   commenting?: DiffCommenting
   comments: DiffComment[]
+  wrap: boolean
 }): React.JSX.Element {
   // 상한 판정이 먼저다. parsePatch 는 행마다 객체를 만들므로, 그리지 않기로 한 patch 를
   // 파싱하는 것만으로도 이미 늦는다.
@@ -137,6 +147,7 @@ function FileBlock({
     () => (limit.limited ? NO_HUNKS : parsePatch(file.patch)),
     [file.patch, limit.limited]
   )
+  const cls = diffWrapClasses(wrap)
   // 사용자가 직접 접거나 편 상태. 손대지 않았으면 크기와 코멘트 유무로 정한다 — 방금 단 코멘트가
   // 접힌 파일 안에 숨어 버리면 어디에 썼는지 확인할 길이 없다.
   const [openOverride, setOpenOverride] = useState<boolean | null>(null)
@@ -197,7 +208,10 @@ function FileBlock({
   const selection = drag ?? draft
 
   return (
-    <div className="rounded-lg border border-[var(--border)] overflow-hidden">
+    <div
+      data-diff-file={file.path}
+      className="rounded-lg border border-[var(--border)] overflow-hidden"
+    >
       <div className="flex items-center gap-2 px-3 py-2 bg-[var(--bg-3)] hover:bg-[var(--surface)]">
         <button
           onClick={toggle}
@@ -236,13 +250,11 @@ function FileBlock({
       </div>
 
       {open && !file.binary && file.patch && hunks.length > 0 && (
-        <div className="bg-[var(--code-bg)] text-xs font-mono leading-[1.45]">
+        <div className={cls.body}>
           {hunks.map((hunk, hi) => (
             // hunk 하나가 곧 변경 덩어리다 — F7 이 뛰어다니는 단위.
             <DiffChangeAnchor key={hi}>
-              <div className="px-3 py-1 text-[var(--diff-hunk)] bg-[var(--surface)]/40">
-                {hunk.header}
-              </div>
+              <div className={cls.hunkHeader}>{hunk.header}</div>
               {hunk.rows.map((row, ri) => (
                 <Row
                   key={ri}
@@ -254,6 +266,7 @@ function FileBlock({
                     ri <= Math.max(selection.from, selection.to)
                   }
                   canComment={!!commenting}
+                  cls={cls}
                   onStart={() => {
                     setDraft(null)
                     setDrag({ hunk: hi, from: ri, to: ri })
@@ -341,6 +354,7 @@ function Row({
   row,
   selected,
   canComment,
+  cls,
   onStart,
   onExtend,
   children
@@ -348,6 +362,8 @@ function Row({
   row: PatchRow
   selected: boolean
   canComment: boolean
+  /** 워드랩이 만드는 클래스 차이([[diffWordWrap]]). */
+  cls: DiffWrapClasses
   onStart: () => void
   onExtend: () => void
   /** 이 줄 아래에 끼워 넣을 것(입력 상자·코멘트 카드). */
@@ -363,7 +379,7 @@ function Row({
   return (
     <>
       <div
-        className={`group/row flex ${selected ? 'bg-[var(--info-500)]/25' : tone}`}
+        className={`${cls.row} ${selected ? 'bg-[var(--info-500)]/25' : tone}`}
         onMouseEnter={onExtend}
       >
         <span className="w-10 shrink-0 select-none px-1.5 text-right text-neutral-600 tabular-nums">
@@ -390,9 +406,9 @@ function Row({
           </span>
         )}
         <span className="w-3 shrink-0 select-none text-neutral-600">{rowSign(row)}</span>
-        <span className="whitespace-pre-wrap break-all pr-3">{row.text || ' '}</span>
+        <span className={cls.code}>{row.text || ' '}</span>
       </div>
-      {children}
+      {children && <div className={cls.aside}>{children}</div>}
     </>
   )
 }

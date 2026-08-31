@@ -132,6 +132,8 @@ const api: WooiApi = {
   git: {
     status: (workspaceId) => ipcRenderer.invoke(IPC.gitStatus, workspaceId),
     diff: (workspaceId) => ipcRenderer.invoke(IPC.gitDiff, workspaceId),
+    setCompareBase: (workspaceId, compareBase) =>
+      ipcRenderer.invoke(IPC.workspaceSetCompareBase, workspaceId, compareBase),
     fetch: (repoId) => ipcRenderer.invoke(IPC.gitFetch, repoId),
     updateFromBase: (workspaceId) => ipcRenderer.invoke(IPC.gitUpdateFromBase, workspaceId),
     abortMerge: (workspaceId) => ipcRenderer.invoke(IPC.gitAbortMerge, workspaceId)
