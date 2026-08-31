@@ -11,8 +11,8 @@ import {
 import { useStore } from '../store'
 import { GithubMark } from './BrandIcons'
 import { useGithubDisconnected } from '../lib/github'
+import { useDefaultBackend } from '../lib/backends'
 import {
-  DEFAULT_AGENT_BACKEND,
   isBranchStack,
   orderByStack,
   workspaceDisplayName,
@@ -77,9 +77,7 @@ export default function StackPopover({ workspace }: { workspace: Workspace }): R
   const pushToast = useStore((s) => s.pushToast)
   const requireGithub = useStore((s) => s.requireGithub)
   const startReview = useStore((s) => s.startReview)
-  const defaultBackend = useStore(
-    (s) => s.app?.settings.defaultAgentBackend ?? DEFAULT_AGENT_BACKEND
-  )
+  const defaultBackend = useDefaultBackend()
   const githubDisconnected = useGithubDisconnected()
 
   const branchMode = isBranchStack(workspace)

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   ChevronRight,
   Brain,
@@ -35,6 +35,9 @@ import { AGENT_BACKEND_LABELS, canSwitchAgentBackend } from '@shared/types'
 import type { ChatItem } from '@shared/types'
 import { BASH_FOLD, foldBashOutput } from '@shared/bashDisplay'
 import { SELECTABLE, unlessSelecting } from '../lib/selection'
+import SelectionCopyBubble from './SelectionCopyBubble'
+import { useChatFontScale } from '../lib/chatFontScale'
+import { restoredScrollTop, TRANSCRIPT_TOP_THRESHOLD_PX } from '../lib/transcriptPagination'
 import { TOOL_VERBOSE_SHORTCUT } from '@shared/toolDisplay'
 
 /**
@@ -193,6 +196,16 @@ export default function MessageList({
   const jumpTarget = useStore((s) => s.jumpTarget)
   const toolVerbose = useStore((s) => !!s.toolVerbose[workspaceId])
   const toolLogStyle = useStore((s) => s.app?.settings.toolLogStyle ?? 'wooi')
+  const overlayOpen = useStore((s) => s.overlayOpen)
+  const hasMoreHistory = useStore((s) => !!s.transcriptPaging[workspaceId]?.hasMore)
+  const loadingEarlier = useStore((s) => !!s.transcriptPaging[workspaceId]?.loading)
+  const loadEarlier = useStore((s) => s.loadEarlierTranscript)
+  // 위쪽에 항목이 끼어들면 콘텐츠가 자란다. 붙기 직전의 스크롤 상태를 잡아 두고, 커밋된 뒤
+  // 자란 만큼 밀어 사용자가 보던 지점을 그대로 둔다 — 브라우저는 이걸 대신 해 주지 않는다.
+  const prependAnchorRef = useRef<{ scrollHeight: number; scrollTop: number } | null>(null)
+  // ⌘+ / ⌘- / ⌘0 — 대화 표면에만 걸리는 배율. 앱 전체 줌을 키우면 사이드바·터미널까지 커져서
+  // 정작 읽으려던 대화가 좁아진 폭 안에 갇힌다. 오버레이가 덮고 있을 때는 키를 듣지 않는다.
+  const fontScale = useChatFontScale(!overlayOpen)
 
   const compactWindow = useMemo(() => compactHistoryWindow(items), [items])
   const historyExpanded = expandedBoundaryId === compactWindow.boundary?.id
@@ -342,6 +355,19 @@ export default function MessageList({
     if (atBottomRef.current) bottomRef.current?.scrollIntoView({ block: 'end' })
   }, [items, workspaceId])
 
+  /** 위쪽으로 한 페이지 더 읽는다. 스크롤로도, 버튼으로도 같은 자리를 지나간다. */
+  const pageInEarlier = (): void => {
+    const el = containerRef.current
+    if (!el || !hasMoreHistory || loadingEarlier) return
+    prependAnchorRef.current = { scrollHeight: el.scrollHeight, scrollTop: el.scrollTop }
+    void loadEarlier(workspaceId)
+    // 스토어가 첫 await 전에 동기로 loading 을 세운다. 서지 않았다면 요청이 거절된 것이므로
+    // 앵커를 거둔다 — 남겨 두면 다음 스트리밍 갱신 때 엉뚱한 자리로 스크롤이 튄다.
+    if (!useStore.getState().transcriptPaging[workspaceId]?.loading) {
+      prependAnchorRef.current = null
+    }
+  }
+
   const onScroll = (): void => {
     const el = containerRef.current
     if (!el) return
@@ -349,7 +375,19 @@ export default function MessageList({
     atBottomRef.current = atBottom
     setShowJump(!atBottom)
     setScroll(workspaceId, el.scrollTop)
+    if (el.scrollTop < TRANSCRIPT_TOP_THRESHOLD_PX) pageInEarlier()
   }
+
+  // 앞에 붙은 페이지의 높이만큼 스크롤을 밀어 준다. 페인트 전에 끝나야 화면이 튀지 않으므로
+  // layout effect 다. 아래의 따라 내려가기 이펙트는 사용자가 위에 있는 동안 아무 일도 하지
+  // 않으므로(atBottomRef) 여기와 부딪히지 않는다.
+  useLayoutEffect(() => {
+    const el = containerRef.current
+    const anchor = prependAnchorRef.current
+    if (!el || !anchor) return
+    prependAnchorRef.current = null
+    el.scrollTop = restoredScrollTop(anchor, el.scrollHeight)
+  }, [items])
 
   const jumpToBottom = (): void => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
@@ -467,7 +505,25 @@ export default function MessageList({
         </div>
       )}
       <div ref={containerRef} onScroll={onScroll} className="h-full overflow-y-auto">
-        <div className="max-w-3xl mx-auto px-5 py-5 space-y-3">
+        <SelectionCopyBubble
+          className="max-w-3xl mx-auto px-5 py-5 space-y-3"
+          style={fontScale === 1 ? undefined : { zoom: fontScale }}
+        >
+          {hasMoreHistory && (
+            <button
+              type="button"
+              onClick={pageInEarlier}
+              disabled={loadingEarlier}
+              className="mx-auto flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs text-neutral-500 hover:bg-[var(--surface)] hover:text-neutral-300 disabled:opacity-50"
+            >
+              {loadingEarlier ? (
+                <Loader2 size={12} className="animate-spin" />
+              ) : (
+                <ArrowUp size={12} />
+              )}
+              {loadingEarlier ? 'Loading earlier messages…' : 'Load earlier messages'}
+            </button>
+          )}
           {compactWindow.boundary && (
             <button
               type="button"
@@ -512,7 +568,7 @@ export default function MessageList({
             </div>
           ))}
           <div ref={bottomRef} />
-        </div>
+        </SelectionCopyBubble>
       </div>
       {showJump && (
         <button

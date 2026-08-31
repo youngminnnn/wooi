@@ -7,13 +7,16 @@ import { openInEditor } from './openInEditor'
 import { memoryFile } from './claude/memory'
 import { getStore } from './store'
 import { getRemoteBridge } from './remote'
+import { lastNotificationSkip, setViewingWorkspace } from './notifications'
 import { rememberPrStatus } from './prStatusCache'
 import { forgetContextUsage } from './contextUsageCache'
 import { forgetWorkspaceUsage } from './usageLedger'
 import { forgetRunningAgents } from './runningAgentsCache'
+import { setSleepBlockerEnabled } from './sleepBlocker'
 import { getTranscripts } from './transcripts'
 import { buildHandoffPrompt, estimateHandoffTokens, formatHandoffTokens } from '@shared/handoff'
 import { listDir, readFileInRoot, searchFiles } from './fsbrowse'
+import { importMigration, scanMigration } from './migrate'
 import { formatIssues } from '@shared/previewIssues'
 import { log } from './logger'
 import {
@@ -82,7 +85,14 @@ import {
 import { planMergeTrain, runMergeTrain, type TrainLayer } from './mergeTrain'
 import { ReviewManager } from './review/manager'
 import { resolveStackForPr } from './review/stackResolve'
-import type { ReviewVerdict, TranscriptSearchResult } from '@shared/types'
+import type {
+  MigrationImportResult,
+  MigrationImportSelection,
+  MigrationScan,
+  MigrationScanArgs,
+  ReviewVerdict,
+  TranscriptSearchResult
+} from '@shared/types'
 import {
   cascadeRetarget,
   cascadeRestackBranchStack,
@@ -113,6 +123,7 @@ import {
   isBranchStack,
   normalizePermissionMode,
   reorderById,
+  usableDefaultBackend,
   workspaceStack
 } from '@shared/types'
 import {
@@ -179,6 +190,7 @@ import type {
   Repo,
   RestackResult,
   RewindActionResult,
+  SavedPrompt,
   StackCascadeResult,
   StackCascadeStep,
   StackOpProgress,
@@ -443,7 +455,10 @@ export function registerIpc(ctx: IpcContext): void {
       _e,
       repoId: string,
       patch: Partial<
-        Pick<Repo, 'name' | 'setupScript' | 'runScripts' | 'archiveScript' | 'carryItems'>
+        Pick<
+          Repo,
+          'name' | 'setupScript' | 'runScripts' | 'archiveScript' | 'carryItems' | 'savedPrompts'
+        >
       >
     ): Promise<{ error?: string }> => {
       // carryItems 는 그대로 복사·심링크 대상 경로가 되므로 **저장 시점에** 검증한다.
@@ -472,9 +487,31 @@ export function registerIpc(ctx: IpcContext): void {
         }
       }
 
+      // 저장된 프롬프트도 IPC 가 신뢰 경계라 여기서 다시 본다. 이름 없는 항목은 목록에서 고를
+      // 수 없고, 본문 없는 항목은 골라도 컴포저에 아무것도 채우지 못한다 — 둘 다 저장할 이유가
+      // 없으므로 거른다. 편집 중 잠깐 비워 둔 행이 그대로 남지 않게 하는 효과도 같다.
+      let prompts: SavedPrompt[] | undefined
+      if (patch.savedPrompts) {
+        prompts = patch.savedPrompts
+          .map((item) => ({ ...item, name: item.name.trim(), prompt: item.prompt.trim() }))
+          .filter((item) => item.name && item.prompt)
+        const names = new Set<string>()
+        for (const item of prompts) {
+          const key = item.name.toLowerCase()
+          if (names.has(key)) return { error: `Saved prompt name “${item.name}” is duplicated.` }
+          names.add(key)
+        }
+      }
+
       store.update((st) => {
         const repo = st.repos.find((r) => r.id === repoId)
-        if (repo) Object.assign(repo, patch, normalized ? { carryItems: normalized } : {})
+        if (repo)
+          Object.assign(
+            repo,
+            patch,
+            normalized ? { carryItems: normalized } : {},
+            prompts ? { savedPrompts: prompts } : {}
+          )
       })
       if (patch.runScripts) {
         const used = new Set(store.getState().workspaces.flatMap((w) => Object.values(w.ports)))
@@ -649,6 +686,45 @@ export function registerIpc(ctx: IpcContext): void {
     if (!repo) return null
     return getPrBody(repo.path, number).catch(() => null)
   })
+
+  // ── 다른 도구에서 옮겨오기 ────────────────────────────────────────────────
+
+  /**
+   * 스캔과 들여오기가 같은 deps 를 본다. 들여오기는 이 deps 로 **다시 스캔해** 키를 대조하므로,
+   * 렌더러가 보낸 것 중 실제로 쓰이는 것은 키 문자열뿐이다(경로·이름은 전부 재확인된 값).
+   */
+  const migrationDeps = {
+    env: { home: app.getPath('home'), appData: app.getPath('appData') },
+    getState: () => store.getState(),
+    update: (mutate: (state: Pick<AppState, 'repos' | 'workspaces'>) => void) =>
+      store.update(mutate),
+    onRepoAdded: (repoId: string) => void backfillRepoAvatar(repoId),
+    // 이어받은 대화(안내 한 줄 + 다른 도구에서 옮겨 온 지난 메시지)를 트랜스크립트에 적재한다.
+    noteImport: (workspaceId: string, items: ChatItem[]) =>
+      getTranscripts().importItems(workspaceId, items)
+  }
+
+  handle(IPC.migrateScan, (_e, args?: MigrationScanArgs): Promise<MigrationScan> =>
+    scanMigration({ repoId: typeof args?.repoId === 'string' ? args.repoId : null }, migrationDeps)
+  )
+
+  handle(
+    IPC.migrateImport,
+    async (_e, selection: MigrationImportSelection): Promise<MigrationImportResult> => {
+      const keys = (value: unknown): string[] =>
+        Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
+      const result = await importMigration(
+        {
+          repoKeys: keys(selection?.repoKeys),
+          workspaceKeys: keys(selection?.workspaceKeys),
+          sessionKeys: keys(selection?.sessionKeys)
+        },
+        migrationDeps
+      )
+      if (result.repos > 0 || result.workspaces > 0) broadcastState()
+      return result
+    }
+  )
 
   // ── workspace ────────────────────────────────────────────────────────────
 
@@ -1200,8 +1276,10 @@ export function registerIpc(ctx: IpcContext): void {
     return costs
   })
 
-  handle(IPC.chatGetHistory, (_e, workspaceId: string) => {
-    return getTranscripts().load(workspaceId)
+  handle(IPC.chatGetHistory, (_e, workspaceId: string, limit?: number) => {
+    // limit 없이 부르면 예전처럼 전부 준다 — 부분 로딩된 창 밖으로 점프할 때 렌더러가 쓴다.
+    if (typeof limit !== 'number') return getTranscripts().load(workspaceId)
+    return getTranscripts().loadTail(workspaceId, limit)
   })
 
   // 워크스페이스를 가로지르는 대화 검색. 훑는 일은 전부 여기서 끝내고 렌더러에는 스니펫만
@@ -1398,6 +1476,17 @@ export function registerIpc(ctx: IpcContext): void {
     win.show()
     win.focus()
     win.webContents.send(IPC.evtOpenRepoSettings, repoId)
+  })
+
+  // 보조 모니터의 현황판에서 카드를 눌렀다. 현황판 창 자체는 계속 보드로 남아야 하므로
+  // 선택은 메인 창에서 일어나야 한다 — 창을 앞으로 가져오고 그쪽에 선택을 넘긴다.
+  handle(IPC.paneSelectWorkspace, (_e, workspaceId: string) => {
+    const win = ctx.getWindow()
+    if (!win || win.isDestroyed()) return
+    if (win.isMinimized()) win.restore()
+    win.show()
+    win.focus()
+    win.webContents.send(IPC.evtSelectWorkspace, workspaceId)
   })
 
   // ── git ────────────────────────────────────────────────────────────────
@@ -2595,7 +2684,14 @@ export function registerIpc(ctx: IpcContext): void {
       const repo = repoFor(args.repoId)
       if (!repo) return { error: '리포를 찾을 수 없습니다.' }
       const settings = store.getState().settings
-      const agentBackend = args.agentBackend ?? settings.defaultAgentBackend
+      // 인자로 이미 정해졌으면 listBackends() 를 부르지 않는다 — 감지는 셸을 거쳐 CLI 를
+      // 하나씩 찔러 보는 왕복이라(`shell.ts`), 전역 기본값으로 떨어질 때만 치른다.
+      const agentBackend = args.agentBackend
+        ? args.agentBackend
+        : usableDefaultBackend(
+            settings.defaultAgentBackend,
+            (await ctx.sessions.listBackends()).filter((b) => b.available).map((b) => b.id)
+          )
       // 모델·effort 는 고른 에이전트의 전역 기본값을 따른다(백엔드마다 모델 ID 가 다르므로
       // 다른 백엔드의 값을 흘리면 CLI 가 거부한다).
       const defaults = agentSettingsFor(settings, agentBackend)
@@ -2670,7 +2766,13 @@ export function registerIpc(ctx: IpcContext): void {
     const state = store.getState()
     // 후속 턴은 리뷰를 시작한 그 에이전트로 이어진다 — 세션 id 가 그 백엔드에서만 유효하다.
     const review = state.reviews.find((r) => r.id === reviewId)
-    const backend = review?.agentBackend ?? state.settings.defaultAgentBackend
+    // 옛 리뷰라 agentBackend 기록이 없을 때만 listBackends() 를 부른다 — 있으면 그대로 쓴다.
+    const backend = review?.agentBackend
+      ? review.agentBackend
+      : usableDefaultBackend(
+          state.settings.defaultAgentBackend,
+          (await ctx.sessions.listBackends()).filter((b) => b.available).map((b) => b.id)
+        )
     const defaults = agentSettingsFor(state.settings, backend)
     // 모델·강도도 시작할 때 고른 것으로 이어 간다. 옛 레코드에는 없으므로 그때는 전역 기본값
     // (지금까지의 동작)으로 떨어진다.
@@ -2921,6 +3023,10 @@ export function registerIpc(ctx: IpcContext): void {
   handle(IPC.settingsUpdate, (_e, patch: Partial<AppSettings>) => {
     store.update((st) => Object.assign(st.settings, patch))
     if (patch.autoResumeAfterRateLimit === false) ctx.sessions.cancelAllRateLimitResumes()
+    // 껐으면 지금 붙잡고 있는 것을 바로 놓아야 한다 — 다음 방송까지 기다리면 도는 턴이 끝날
+    // 때까지 맥이 계속 깨어 있다.
+    if (patch.keepAwakeWhileRunning !== undefined)
+      setSleepBlockerEnabled(patch.keepAwakeWhileRunning)
     broadcastState()
   })
 
@@ -3085,6 +3191,14 @@ export function registerIpc(ctx: IpcContext): void {
     }
     getRemoteBridge().setUnread(ids)
   })
+
+  // 지금 보고 있는 워크스페이스를 기억한다. 알림을 띄울지 판정할 때 "앱은 보고 있지만 다른
+  // 워크스페이스를 보고 있는" 경우를 가르는 유일한 근거다([[main/notifications]]).
+  handle(IPC.notifySetViewing, (_e, workspaceId: unknown) => {
+    setViewingWorkspace(typeof workspaceId === 'string' ? workspaceId : null)
+  })
+  // 설정 화면의 진단 줄. 값은 메인 메모리에만 있으므로(디스크에 남기지 않는다) 열 때마다 읽는다.
+  handle(IPC.notifyLastSkip, () => lastNotificationSkip())
 
   handle(IPC.remoteClearData, async () => {
     const status = await getRemoteBridge().clearData()

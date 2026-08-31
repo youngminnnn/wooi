@@ -316,7 +316,13 @@ function titleFor(tool: string, args: unknown, workspace: Workspace): string {
     // base 는 모델의 인자가 아니라 앱이 정한다. 사용자가 판단하는 지점이 바로 그 값이므로
     // 핸들러와 **같은 함수**로 다시 구해 보여 준다 — 카드의 base 와 실제 base 가 갈리면
     // 승인이 승인이 아니게 된다.
-    return `The agent wants to open a ${draft}pull request from \`${workspace.branch}\` into \`${resolvePrBase(workspace)}\`.`
+    // 개명은 승인 대상의 일부다 — 이 카드를 승인하면 push 되는 브랜치 이름이 바뀐다.
+    // 사용자가 카드에서 본 이름과 실제로 올라가는 이름이 갈리면 승인이 승인이 아니게 된다.
+    const rename =
+      typeof a.renameBranch === 'string' && a.renameBranch.trim()
+        ? ` It renames the branch to \`${a.renameBranch.trim()}\` first.`
+        : ''
+    return `The agent wants to open a ${draft}pull request from \`${workspace.branch}\` into \`${resolvePrBase(workspace)}\`.${rename}`
   }
   if (tool === 'run_script' || tool === 'stop_script') {
     const name = typeof a.name === 'string' ? a.name : typeof a.kind === 'string' ? a.kind : ''

@@ -42,6 +42,36 @@ const PROBE_PATIENCE = 5
  * 그보다 오래 정상으로 돌다가 걸린 것은 새 제한이므로 시도 횟수를 처음부터 센다.
  */
 const STREAK_WINDOW_MS = 10 * 60_000
+/**
+ * 예약 시각을 놓친 뒤에도 이어가 볼 수 있는 유예 창.
+ *
+ * Wooi 는 데스크톱 앱이라 예약 시각에 프로세스가 살아 있으리라는 보장이 없다 — 앱이 꺼져 있거나
+ * 맥이 자고 있으면 그 시각은 그냥 지나간다. 늦게라도 이어가는 편이 낫지만, **아무리 늦어도**
+ * 이어간다면 그것은 예약이 아니라 "언젠가 앱을 켜면 시키지 않은 턴이 하나 뜬다" 는 뜻이 된다.
+ *
+ * 한 시간으로 잡은 근거는 MAX_FALLBACK_WAIT_MS 다. 앱이 **돌고 있을 때조차** 예약을 그보다 오래
+ * 확인 없이 두지 않으므로, 돌고 있을 때의 최대 방치 시간을 "이 예약을 아직 살아 있는 것으로 볼 수
+ * 있는" 상한으로 그대로 쓴다. 그보다 오래 지났으면 예약을 걸 때 본 사용량 그림은 이미 남의 것이고
+ * (5시간 창은 그새 리셋되고 다시 소진될 수 있다), 사용자도 그 작업을 손에 들고 있지 않다.
+ *
+ * **설정으로 만들지 않는다.** 유예 시간을 고르게 하면 사용자가 가장 모르는 때에 고르게 하는
+ * 셈이고, Wooi 는 전역 토글을 늘리지 않는 것을 원칙으로 삼는다([[types]] AppSettings 주석).
+ */
+const MISSED_RESUME_GRACE_MS = 60 * 60_000
+
+/**
+ * 이번 실행에서 놓친 재개를 이미 하나 되살렸는지.
+ *
+ * 코디네이터는 백엔드마다 하나씩 있고(claude·codex) 둘 다 시작할 때 restore() 를 부른다. 그래서
+ * 이 빗장은 인스턴스가 아니라 **모듈**에 있어야 "복귀 한 번에 깨움 하나" 가 백엔드 사이에서도
+ * 지켜진다. 프로세스는 한 번만 복귀하므로 되돌릴 자리는 없다 — 아래 reset 은 테스트 전용이다.
+ */
+let missedResumeUsed = false
+
+/** 놓친 재개 빗장을 되돌린다. 실행 하나가 한 번만 복귀하므로 **테스트에서만** 쓸 자리가 있다. */
+export function resetMissedResumeGrace(): void {
+  missedResumeUsed = false
+}
 
 export const RATE_LIMIT_CONTINUATION =
   'The previous turn stopped because the provider usage limit was reached. Inspect the current conversation and workspace state, then continue the unfinished task. Do not repeat work that is already complete.'
@@ -106,12 +136,61 @@ export class RateLimitResumeCoordinator {
 
   constructor(private deps: Deps) {}
 
+  /**
+   * 앱이 다시 떴다 — 살아 있는 예약을 타이머에 다시 건다.
+   *
+   * 아직 시각이 오지 않은 예약은 그대로 걸면 된다. 문제는 **이미 지나간** 예약이다. 그냥 다시
+   * 걸면 arm 이 곧바로 깨어나므로, 밀려 있던 예약이 켜자마자 한꺼번에 터진다 — 사용자가 치지도
+   * 않은 턴이 워크스페이스 수만큼 동시에 시작된다. 깨움 하나가 곧 사용자 토큰 하나이므로 이것이
+   * 여기서 막아야 할 최악이다.
+   *
+   * 그래서 놓친 예약에는 세 규칙을 둔다.
+   * 1. 유예 창(MISSED_RESUME_GRACE_MS) 안에 복귀했으면 이어간다.
+   * 2. 이어가는 것은 **복귀당 하나뿐이다.** 밀린 것이 여럿이어도 몰아서 보내지 않는다.
+   * 3. 나머지는 버리고 그렇게 말한다. 자동으로 돌리지 않는다 — 사용자가 한 줄 보내면 이어진다.
+   */
   restore(): void {
-    for (const ws of getStore().getState().workspaces) {
-      if (ws.pendingRateLimitResume?.backend === this.deps.backend && !ws.archived) {
-        this.arm(ws.id, ws.pendingRateLimitResume.retryAt)
-      }
+    const now = Date.now()
+    const mine = getStore()
+      .getState()
+      .workspaces.filter(
+        (ws) => ws.pendingRateLimitResume?.backend === this.deps.backend && !ws.archived
+      )
+    const missed: Workspace[] = []
+    for (const ws of mine) {
+      const { retryAt } = ws.pendingRateLimitResume!
+      if (retryAt > now) this.arm(ws.id, retryAt)
+      else missed.push(ws)
     }
+    // 놓친 것은 최신 예약부터 본다. 이어갈 하나를 고를 때 가장 덜 상한 것을 고르게 되고, 오래된
+    // 것일수록 사용자 손을 떠난 지 오래라 버려도 덜 아깝다.
+    missed.sort((a, b) => b.pendingRateLimitResume!.retryAt - a.pendingRateLimitResume!.retryAt)
+    for (const ws of missed) {
+      const { retryAt } = ws.pendingRateLimitResume!
+      if (now - retryAt > MISSED_RESUME_GRACE_MS) {
+        this.dropMissed(
+          ws.id,
+          `Wooi was not running when this task was due to continue (${formatWhen(retryAt)}), so it was not resumed. Send a message to pick it up.`
+        )
+        continue
+      }
+      if (missedResumeUsed) {
+        this.dropMissed(
+          ws.id,
+          `This task was due to continue at ${formatWhen(retryAt)}, but Wooi had already continued another one on this launch and never starts more than one unrequested turn at a time. Send a message to pick it up.`
+        )
+        continue
+      }
+      missedResumeUsed = true
+      // 시각은 이미 지났으므로 arm 은 곧바로 깨어난다. 그 뒤 판단은 평소 경로 그대로다 —
+      // 오프라인이면 기다리고, 아직 제한 중이면 물러서고, 세션이 바뀌었으면 접는다.
+      this.arm(ws.id, retryAt)
+    }
+  }
+
+  /** 놓친 예약을 버린다. 제한 표시(rateLimited)는 사실이므로 남긴다 — 스스로 만료된다. */
+  private dropMissed(workspaceId: string, text: string): void {
+    if (this.clearPending(workspaceId)) this.notice(workspaceId, text)
   }
 
   /**

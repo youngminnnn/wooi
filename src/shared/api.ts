@@ -43,6 +43,7 @@ import type {
   McpServerInfo,
   ModelOption,
   MemoryScope,
+  NotificationSkip,
   PaneKind,
   PaneState,
   PermissionDecision,
@@ -64,6 +65,10 @@ import type {
   ReviewEnvelope,
   PrCandidate,
   IssueCandidate,
+  MigrationImportResult,
+  MigrationImportSelection,
+  MigrationScan,
+  MigrationScanArgs,
   ReviewVerdict,
   RewindActionResult,
   StackCascadeResult,
@@ -90,6 +95,15 @@ import type { PreviewIssue } from './previewIssues'
 export interface WooiApi {
   getState(): Promise<AppState>
 
+  /**
+   * 이미 있는 worktree 를 워크스페이스로 들여오기. 스캔은 읽기만 하고, 들여오기는 고른 키를
+   * main 이 **다시 훑어 대조한** 뒤에만 등록한다(경로를 렌더러에서 받아 그대로 믿지 않는다).
+   */
+  migrate: {
+    scan(args?: MigrationScanArgs): Promise<MigrationScan>
+    run(selection: MigrationImportSelection): Promise<MigrationImportResult>
+  }
+
   repo: {
     add(): Promise<{ repo?: Repo; error?: string }>
     /**
@@ -99,7 +113,10 @@ export interface WooiApi {
     update(
       repoId: string,
       patch: Partial<
-        Pick<Repo, 'name' | 'setupScript' | 'runScripts' | 'archiveScript' | 'carryItems'>
+        Pick<
+          Repo,
+          'name' | 'setupScript' | 'runScripts' | 'archiveScript' | 'carryItems' | 'savedPrompts'
+        >
       >
     ): Promise<{ error?: string }>
     /**
@@ -253,7 +270,11 @@ export interface WooiApi {
     send(workspaceId: string, text: string, images?: ImageAttachment[]): Promise<void>
     interrupt(workspaceId: string): Promise<void>
     stopTask(workspaceId: string, taskId: string): Promise<void>
-    getHistory(workspaceId: string): Promise<ChatItem[]>
+    /**
+     * 대화 기록. `limit` 을 주면 **최근 limit 개**만 온다 — 돌아온 개수가 limit 보다 적으면
+     * 그보다 오래된 것은 없다는 뜻이다. 생략하면 전부 온다.
+     */
+    getHistory(workspaceId: string, limit?: number): Promise<ChatItem[]>
     /**
      * 활성 워크스페이스별 누적 비용(USD). backend 가 보고한 값만 담는다.
      * 대화 기록 자체를 렌더러로 끌어오지 않기 위한 통로다 — 화면에는 숫자 하나만 필요하다.
@@ -616,6 +637,8 @@ export interface WooiApi {
     setWorkspace(workspaceId: string | null): Promise<void>
     /** 분리한 창 전용 — 메인 창을 앞으로 가져와 해당 리포 설정을 연다. */
     openRepoSettings(repoId: string): Promise<void>
+    /** 분리한 창 전용 — 메인 창을 앞으로 가져와 그 워크스페이스를 연다(현황판 카드 클릭). */
+    selectWorkspace(workspaceId: string): Promise<void>
     onState(cb: (state: PaneState) => void): () => void
     onWorkspace(cb: (workspaceId: string | null) => void): () => void
   }
@@ -651,6 +674,19 @@ export interface WooiApi {
 
   settings: {
     update(patch: Partial<AppSettings>): Promise<void>
+  }
+
+  /** 데스크톱 알림의 상태 보고. 폰에서 호출할 수는 없다(allowlist.test.ts 가 잠근다). */
+  notify: {
+    /**
+     * 지금 화면에 떠 있는 워크스페이스. 창이 흐려졌거나 아무것도 열지 않았으면 null 이다.
+     *
+     * 선택 상태는 렌더러 메모리에만 있는데, 알림을 띄우는 것은 main 이다 — 올려 주지 않으면
+     * main 은 "앱은 보고 있지만 다른 워크스페이스를 보고 있는" 경우를 가릴 수 없다.
+     */
+    setViewing(workspaceId: string | null): Promise<void>
+    /** 마지막으로 건너뛴 알림의 사유. 아직 없으면 null. */
+    lastSkip(): Promise<NotificationSkip | null>
   }
 
   /**

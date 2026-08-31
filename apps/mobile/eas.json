@@ -55,6 +55,7 @@
         "bundleIdentifier": "com.wooi.remote"
       },
       "android": {
+        "applicationId": "com.wooi.remote",
         "track": "internal",
         "releaseStatus": "completed"
       }

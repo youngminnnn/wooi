@@ -59,6 +59,13 @@ const GROUPS: { title: string; items: { keys: string[]; label: string }[] }[] = 
     ]
   },
   {
+    title: 'Changes',
+    items: [
+      { keys: ['F7'], label: 'Jump to the next change in the diff' },
+      { keys: ['⇧F7'], label: 'Jump to the previous change in the diff' }
+    ]
+  },
+  {
     title: 'Pull request review',
     items: [
       { keys: ['⇧⌘R'], label: 'Review a pull request' },
@@ -72,6 +79,8 @@ const GROUPS: { title: string; items: { keys: string[]; label: string }[] }[] = 
     items: [
       { keys: ['⌘L'], label: 'Focus the message input' },
       { keys: ['⌘F'], label: 'Search the conversation' },
+      { keys: ['⌘+', '/', '⌘-'], label: 'Bigger / smaller conversation text' },
+      { keys: ['⌘0'], label: 'Reset conversation text size' },
       { keys: ['⌃O'], label: 'Expand or collapse all tool results' },
       { keys: ['⇧⌘↓'], label: 'Jump to the latest message' },
       { keys: ['↑', '/', '↓'], label: 'Recall previous messages (in the input box)' },

@@ -11,6 +11,11 @@ function subscribe<T>(channel: string, cb: (payload: T) => void): () => void {
 const api: WooiApi = {
   getState: () => ipcRenderer.invoke(IPC.appGetState),
 
+  migrate: {
+    scan: (args) => ipcRenderer.invoke(IPC.migrateScan, args),
+    run: (selection) => ipcRenderer.invoke(IPC.migrateImport, selection)
+  },
+
   repo: {
     add: () => ipcRenderer.invoke(IPC.repoAdd),
     update: (repoId, patch) => ipcRenderer.invoke(IPC.repoUpdate, repoId, patch),
@@ -85,7 +90,7 @@ const api: WooiApi = {
       ipcRenderer.invoke(IPC.chatSend, workspaceId, text, images),
     interrupt: (workspaceId) => ipcRenderer.invoke(IPC.chatInterrupt, workspaceId),
     stopTask: (workspaceId, taskId) => ipcRenderer.invoke(IPC.chatStopTask, workspaceId, taskId),
-    getHistory: (workspaceId) => ipcRenderer.invoke(IPC.chatGetHistory, workspaceId),
+    getHistory: (workspaceId, limit) => ipcRenderer.invoke(IPC.chatGetHistory, workspaceId, limit),
     getCosts: () => ipcRenderer.invoke(IPC.chatGetCosts),
     sideQuestion: (workspaceId, question) =>
       ipcRenderer.invoke(IPC.chatSideQuestion, workspaceId, question),
@@ -245,6 +250,7 @@ const api: WooiApi = {
     getState: () => ipcRenderer.invoke(IPC.paneGetState),
     setWorkspace: (workspaceId) => ipcRenderer.invoke(IPC.paneSetWorkspace, workspaceId),
     openRepoSettings: (repoId) => ipcRenderer.invoke(IPC.paneOpenRepoSettings, repoId),
+    selectWorkspace: (workspaceId) => ipcRenderer.invoke(IPC.paneSelectWorkspace, workspaceId),
     onState: (cb) => subscribe(IPC.evtPaneState, cb),
     onWorkspace: (cb) => subscribe(IPC.evtPaneWorkspace, cb)
   },
@@ -281,6 +287,11 @@ const api: WooiApi = {
 
   settings: {
     update: (patch) => ipcRenderer.invoke(IPC.settingsUpdate, patch)
+  },
+
+  notify: {
+    setViewing: (workspaceId) => ipcRenderer.invoke(IPC.notifySetViewing, workspaceId),
+    lastSkip: () => ipcRenderer.invoke(IPC.notifyLastSkip)
   },
 
   mcp: {

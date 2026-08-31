@@ -2,7 +2,14 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { z } from 'zod'
 import { AGENT_TOOLS } from './catalog'
 import type { AgentToolDeps } from './registry'
-import type { AppSettings, ModelOption, PermissionRequest, Repo, Workspace } from '@shared/types'
+import type {
+  AgentBackendMeta,
+  AppSettings,
+  ModelOption,
+  PermissionRequest,
+  Repo,
+  Workspace
+} from '@shared/types'
 import { DEFAULT_SETTINGS } from '../../storeSchema'
 
 /**
@@ -43,12 +50,16 @@ const postToTranscript = vi.fn()
 const broadcastState = vi.fn()
 // 모델 목록은 백엔드에 물어봐야 알 수 있다 — 빈 목록은 "알 수 없다" 라서 검증을 건너뛴다.
 const listModels = vi.fn<(backend: string) => Promise<ModelOption[]>>()
+// agentBackend 를 생략하면 전역 기본값이 지금 감지된 목록에 있는지 여기로 확인한다
+// (`usableDefaultBackend`). 둘 다 available 로 둬 기존 동작(그대로 claude)을 유지한다.
+const listBackends = vi.fn<() => Promise<AgentBackendMeta[]>>()
 const deps = {
   scripts: {},
   broadcastState,
   sendMessage,
   postToTranscript,
-  listModels
+  listModels,
+  listBackends
 } as unknown as AgentToolDeps
 
 const parent: Partial<Workspace> = {
@@ -88,6 +99,10 @@ beforeEach(async () => {
       ? [{ id: 'gpt-5-codex', label: 'GPT-5 Codex' }]
       : [{ id: 'claude-opus-5[1m]', label: 'Opus 5' }]
   )
+  listBackends.mockResolvedValue([
+    { id: 'claude', available: true } as AgentBackendMeta,
+    { id: 'codex', available: true } as AgentBackendMeta
+  ])
   summarize.mockResolvedValue(null)
   create.mockResolvedValue({ workspaceId: 'ws-new', name: 'feat/next', branch: 'feat/next' })
   permissionList.mockReturnValue([])

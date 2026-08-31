@@ -1,17 +1,19 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useState } from 'react'
 import { X } from 'lucide-react'
 import { primaryBtn, ghostBtn } from './Modal'
-import TourDemo from './TourDemo'
+import { anchorStyle, measureAnchor, type AnchorBox, type Placement } from '../lib/anchor'
 
 /**
- * 실제 UI 요소를 스포트라이트(하이라이트)하며 진행하는 기능 투어.
- * 최초 실행 온보딩의 마지막 단계이자 설정의 "Take a tour"에서 재사용한다.
+ * 실제 UI 요소를 스포트라이트(하이라이트)하며 진행하는 기능 투어. Settings → About 의
+ * "Take a tour"에서만 연다 — 예전엔 최초 실행 온보딩의 한 단계이기도 했지만, 리포도
+ * 워크스페이스도 없는 상태에서 기능을 일괄 소개하는 게 와닿지 않아 뺐다(`OnboardingModal`).
+ *
+ * 항상 실제 앱 위에서 돌기 때문에(예시 화면을 따로 두지 않는다) 8단계 전부를 그대로 보여줄 수
+ * 있다 — PR 리뷰 단계도 예외 없이 포함된다.
  *
  * 각 단계는 `data-tour="<key>"` 마커가 붙은 실제 DOM 요소를 대상으로 한다.
  * 대상이 화면에 없으면(예: 워크스페이스 미선택 상태의 채팅/작업 패널) 중앙 카드로 자연스럽게 대체된다.
  */
-
-type Placement = 'right' | 'left' | 'bottom'
 
 type Step = {
   /** data-tour 마커 키. 없으면(또는 대상이 DOM 에 없으면) 중앙 카드로 표시. */
@@ -148,79 +150,21 @@ const STEPS: Step[] = [
 const CARD_W = 340
 const PAD = 6
 
-type Box = { top: number; left: number; width: number; height: number }
-
-function tooltipStyle(rect: Box, placement: Placement): React.CSSProperties {
-  const gap = 16
-  const vw = window.innerWidth
-  const vh = window.innerHeight
-  let top: number
-  let left: number
-  if (placement === 'left') {
-    left = rect.left - gap - CARD_W
-    top = rect.top
-  } else if (placement === 'bottom') {
-    left = rect.left
-    top = rect.top + rect.height + gap
-  } else {
-    // right (default)
-    left = rect.left + rect.width + gap
-    top = rect.top
-  }
-  // 뷰포트 밖으로 넘어가지 않게 대략적으로 보정한다(카드 높이는 넉넉히 300px 가정).
-  left = Math.max(12, Math.min(left, vw - CARD_W - 12))
-  top = Math.max(12, Math.min(top, vh - 300))
-  return { position: 'fixed', top, left, width: CARD_W }
-}
-
-export default function FeatureTour({
-  onDone,
-  firstRun = false,
-  doneLabel
-}: {
-  onDone: () => void
-  /** 최초 실행(true): 하단 Skip 으로만 종료, Escape 무시. 재실행(false): ✕/Escape 로 닫기. */
-  firstRun?: boolean
-  /**
-   * 마지막 단계의 버튼 문구. 투어 뒤에 온보딩 단계가 더 남아 있을 때(기본값 고르기) 상위가
-   * 문구를 넘겨, 여기서 앱이 바로 시작되는 것처럼 보이지 않게 한다.
-   */
-  doneLabel?: string
-}): React.JSX.Element {
+export default function FeatureTour({ onDone }: { onDone: () => void }): React.JSX.Element {
   const [index, setIndex] = useState(0)
-  const [rect, setRect] = useState<Box | null>(null)
-  // 최초 실행에서는 예시(데모) 화면을 배경으로 깔고, 그 안의 마커를 대상으로 삼는다
-  // (실제 앱에도 같은 data-tour 가 있으므로 데모 subtree 로 조회 범위를 한정한다).
-  const demoRef = useRef<HTMLDivElement>(null)
-  // 첫 실행 투어에서는 PR 리뷰 단계를 뺀다 — 데모 배경에는 그 버튼이 없어 가운데 카드로
-  // 떨어지고, 아직 리포도 없는 사용자에게 남의 PR 리뷰부터 설명하는 건 순서가 맞지 않는다.
-  const steps = useMemo(
-    () => (firstRun ? STEPS.filter((s) => s.target !== 'review-pr') : STEPS),
-    [firstRun]
-  )
-  const step = steps[index]
-  const last = index === steps.length - 1
+  const [rect, setRect] = useState<AnchorBox | null>(null)
+  const step = STEPS[index]
+  const last = index === STEPS.length - 1
 
   // 현재 단계의 대상 요소 위치를 측정한다(단계 변경·창 크기 변화에 반응).
   useLayoutEffect(() => {
     const measure = (): void => {
-      const scope: ParentNode | null = firstRun ? demoRef.current : document
-      if (!step.target || !scope) {
-        setRect(null)
-        return
-      }
-      const el = scope.querySelector(`[data-tour="${step.target}"]`)
-      if (!el) {
-        setRect(null)
-        return
-      }
-      const r = el.getBoundingClientRect()
-      setRect({ top: r.top, left: r.left, width: r.width, height: r.height })
+      setRect(step.target ? measureAnchor(step.target) : null)
     }
     measure()
     window.addEventListener('resize', measure)
     return () => window.removeEventListener('resize', measure)
-  }, [index, step.target, firstRun])
+  }, [index, step.target])
 
   const next = (): void => {
     if (last) onDone()
@@ -232,11 +176,11 @@ export default function FeatureTour({
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === 'ArrowRight') next()
       else if (e.key === 'ArrowLeft') back()
-      else if (e.key === 'Escape' && !firstRun) onDone()
+      else if (e.key === 'Escape') onDone()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [index, last, firstRun])
+  }, [index, last])
 
   const Icon = <X size={15} />
 
@@ -246,21 +190,19 @@ export default function FeatureTour({
         'no-drag bg-[var(--surface)] border border-[var(--border)] rounded-xl shadow-2xl overflow-hidden' +
         (floating ? '' : ' w-[420px] max-w-[92vw]')
       }
-      style={floating && rect ? tooltipStyle(rect, step.placement ?? 'right') : undefined}
+      style={floating && rect ? anchorStyle(rect, step.placement ?? 'right', CARD_W) : undefined}
       onMouseDown={(e) => e.stopPropagation()}
     >
       <div className="relative px-5 pt-5 pb-3">
-        {!firstRun && (
-          <button
-            onClick={onDone}
-            className="absolute top-3 right-3 h-7 w-7 grid place-items-center rounded-md text-neutral-400 hover:bg-[var(--surface-2)] hover:text-neutral-100"
-            aria-label="Close"
-          >
-            {Icon}
-          </button>
-        )}
+        <button
+          onClick={onDone}
+          className="absolute top-3 right-3 h-7 w-7 grid place-items-center rounded-md text-neutral-400 hover:bg-[var(--surface-2)] hover:text-neutral-100"
+          aria-label="Close"
+        >
+          {Icon}
+        </button>
         <div className="text-xs font-medium text-[var(--info-400)] mb-1.5">
-          {index + 1} / {steps.length}
+          {index + 1} / {STEPS.length}
         </div>
         <h2 className="text-base font-semibold text-neutral-100">{step.title}</h2>
         <div className="mt-1.5 text-sm text-neutral-400 leading-relaxed">{step.body}</div>
@@ -296,14 +238,7 @@ export default function FeatureTour({
         ))}
       </div>
 
-      <div className="px-5 py-3 border-t border-[var(--border)] flex items-center justify-between">
-        <div>
-          {firstRun && !last && (
-            <button className="text-sm text-neutral-500 hover:text-neutral-300" onClick={onDone}>
-              Skip
-            </button>
-          )}
-        </div>
+      <div className="px-5 py-3 border-t border-[var(--border)] flex items-center justify-end">
         <div className="flex items-center gap-2">
           {index > 0 && (
             <button className={ghostBtn} onClick={back}>
@@ -311,7 +246,7 @@ export default function FeatureTour({
             </button>
           )}
           <button className={primaryBtn} onClick={next}>
-            {last ? (doneLabel ?? (firstRun ? 'Start using Wooi' : 'Done')) : 'Next'}
+            {last ? 'Done' : 'Next'}
           </button>
         </div>
       </div>
@@ -320,12 +255,6 @@ export default function FeatureTour({
 
   return (
     <div className="fixed inset-0 z-50">
-      {/* 최초 실행: 실제 워크스페이스가 없으므로 예시 화면을 배경으로 깔고 그 위를 스포트라이트한다. */}
-      {firstRun && (
-        <div ref={demoRef} className="absolute inset-0">
-          <TourDemo />
-        </div>
-      )}
       {rect ? (
         <>
           {/* 클릭 차단막(투어 진행 중 뒤 화면 조작 방지). 대상 구멍은 box-shadow 로 시각적으로만 판다. */}

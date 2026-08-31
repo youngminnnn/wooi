@@ -1,6 +1,7 @@
 import { log } from '../../logger'
 import type {
   AgentBackendId,
+  AgentBackendMeta,
   ChatEvent,
   ChatItem,
   ModelOption,
@@ -55,6 +56,12 @@ export interface AgentToolDeps {
    * 빈 목록이 오고(오케스트레이터가 삼킨다), 그때는 검증하지 않고 값을 그대로 받는다.
    */
   listModels: (backend: AgentBackendId) => Promise<ModelOption[]>
+  /**
+   * 등록된 모든 백엔드의 메타(가용성 포함). 워크스페이스를 만드는 도구가 기본 에이전트를
+   * 고를 때 저장값이 지금 감지된 목록에 있는지 확인하는 데 쓴다
+   * ([[agent/tools/agentOptions]] `usableDefaultBackend`).
+   */
+  listBackends: () => Promise<AgentBackendMeta[]>
   /**
    * 워크스페이스를 아카이브할 때 그 워크스페이스에 매달린 것들을 끊는다([[workspaces]]
    * archiveWorkspace 가 요구하는 것과 같은 모양).

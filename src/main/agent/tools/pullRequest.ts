@@ -1,4 +1,10 @@
-import type { Workspace } from '@shared/types'
+import { isAllowedBranchName } from '../../../../scripts/branch-name-rule.mjs'
+import { workspaceDisplayName, type Workspace } from '@shared/types'
+import {
+  proposeBranchRename,
+  renameLocalBranch,
+  type BranchRenameProposal
+} from '../../branchNameFromWork'
 import { countCommitsAhead, originHasBranch, pushCurrentBranch } from '../../git'
 import { createPr, findOpenPrStatus, listOpenPrs } from '../../github'
 import { getStore } from '../../store'
@@ -41,6 +47,35 @@ export function resolvePrBase(ws: Workspace): string {
   return repo?.defaultBranch || ws.baseBranch
 }
 
+/**
+ * 개명에 쓸 이름의 출처.
+ *
+ * 사용자가 직접 고친 이름이 있으면 그것이 이긴다 — 사용자 본인의 말이다. 없으면 에이전트가
+ * `set_workspace_name` 으로 정한 이름을 쓴다. `Workspace.name` 은 일부러 보지 않는다. 그것이
+ * 바로 지금 바꾸려는 랜덤 이름이라, 그걸로 슬러그를 만들면 `feat/savvy-numbat` 이 된다.
+ */
+function renameSourceName(ws: Workspace): string | null {
+  return ws.displayName?.trim() || ws.autoName?.trim() || null
+}
+
+/**
+ * 아직 랜덤 이름인 브랜치를 push 로 굳히기 전에 사용자에게 물을 문장.
+ *
+ * 조용히 바꾸지 않는다. 이름은 사용자 것이므로 에이전트가 제안하고 승인을 받게 한다 — 도구를
+ * 한 번 되돌려 보내면 그 확인이 지금 도는 턴 안에서 일어나고, 백엔드(Claude·Codex)와
+ * 권한 모드에 상관없이 같은 방식으로 일어난다.
+ */
+function renamePrompt(proposal: BranchRenameProposal, ws: Workspace): string {
+  return (
+    `This branch is still \`${proposal.from}\` — the random name Wooi gave the workspace, which ` +
+    "this repository's branch name rule rejects. It has not been pushed yet, so the name can " +
+    `still be changed. Wooi suggests \`${proposal.to}\`, from this workspace's name ` +
+    `(“${workspaceDisplayName(ws)}”). Ask the user whether to use it, then call this tool again ` +
+    'with `renameBranch` set to the name they approved — or to an empty string to push ' +
+    `\`${proposal.from}\` as it is. Do not rename the branch yourself.`
+  )
+}
+
 export const openPullRequest: AgentToolHandler = async (deps, workspaceId, args) => {
   const ws = workspaceOf(workspaceId)
   if (ws.archived) {
@@ -52,6 +87,8 @@ export const openPullRequest: AgentToolHandler = async (deps, workspaceId, args)
   const body = typeof args.body === 'string' ? args.body.trim() : ''
   if (!body) throw new Error('The body is empty — describe what this pull request changes.')
   const draft = args.draft === true
+  // 개명하면 아래에서 바뀐다. 결과에 실어 모델이 무엇이 push 됐는지 알게 한다.
+  let branch = ws.branch
 
   // 이미 열려 있으면 새로 만들지 않는다. GitHub 은 한 브랜치에 열린 PR 을 둘 두지 못하므로
   // 그냥 부르면 실패만 반복하는데, 있는 것을 돌려주면 모델이 그 번호로 이어서 일할 수 있다.
@@ -86,10 +123,46 @@ export const openPullRequest: AgentToolHandler = async (deps, workspaceId, args)
     )
   }
 
+  const onOrigin = await originHasBranch(ws.worktreePath, ws.branch)
+
+  // push 는 브랜치 이름을 굳히는 자리다. 여기를 지나면 원격에 그 이름이 생기고, 그 뒤에 로컬만
+  // 바꾸면 restack 의 force-push 가 엉뚱한 ref 를 겨눈다. 그래서 이름을 고칠 마지막 기회가
+  // 바로 여기이고, 작업이 끝난 지금이 그 작업의 이름을 가장 잘 아는 때이기도 하다.
+  const proposal = proposeBranchRename({
+    branch: ws.branch,
+    workspaceName: renameSourceName(ws),
+    onOrigin,
+    hasBranchStack: (ws.stack?.length ?? 0) > 1
+  })
+  const answer = typeof args.renameBranch === 'string' ? args.renameBranch.trim() : null
+  // 아직 묻지 않았으면 도구를 되돌려 보낸다. 던진 문장은 도구 오류로 모델에게 가므로, 모델이
+  // 그것을 읽고 사용자에게 물은 뒤 답을 실어 다시 부른다. 빈 문자열이 "그대로 둬라" 이므로
+  // 되돌려 보내기가 반복되지 않는다.
+  if (proposal && answer === null) throw new Error(renamePrompt(proposal, ws))
+
+  if (answer && !onOrigin && answer !== ws.branch) {
+    // 사용자가 제안을 고쳐서 줄 수 있으므로 우리 제안이 아니라 **받은 이름**을 검증한다.
+    if (!isAllowedBranchName(answer)) {
+      throw new Error(
+        `\`${answer}\` does not satisfy this repository's branch name rule, so pushing it would ` +
+          'fail. Ask the user for a name of the form `<type>/<description>`.'
+      )
+    }
+    await renameLocalBranch(ws.worktreePath, ws.branch, answer)
+    // 아래의 createPr 과 사이드바가 곧바로 새 이름을 보게 한다. Wooi 는 워크트리 HEAD 를 다시
+    // 읽어 브랜치를 맞추지만(ipc.ts), 그 갱신을 기다리면 이 턴 안에서 상태가 갈린다.
+    getStore().update((st) => {
+      const self = st.workspaces.find((w) => w.id === workspaceId)
+      if (self) self.branch = answer
+    })
+    deps.broadcastState()
+    branch = answer
+  }
+
   // 리모트에 브랜치가 없으면 gh 가 PR 을 만들 수 없다. 먼저 올리되 실패 메시지는 손대지 않고
   // 그대로 올린다 — 이 리포처럼 브랜치 이름 규칙 pre-push 훅이 있으면, 모델이 그 문장을 읽고
   // 브랜치 이름을 고쳐 다시 부르는 것이 유일한 복구 경로다.
-  if (!(await originHasBranch(ws.worktreePath, ws.branch))) {
+  if (!onOrigin) {
     const pushed = await pushCurrentBranch(ws.worktreePath)
     if (!pushed.ok) throw new Error(pushed.error)
   }
@@ -105,5 +178,5 @@ export const openPullRequest: AgentToolHandler = async (deps, workspaceId, args)
   })
   deps.broadcastState()
 
-  return { number: pr.number, url: pr.url, base, draft }
+  return { number: pr.number, url: pr.url, base, branch, draft }
 }

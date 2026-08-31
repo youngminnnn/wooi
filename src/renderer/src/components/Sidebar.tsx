@@ -21,12 +21,11 @@ import {
   MoreVertical,
   Users,
   Search,
-  ArrowUpDown,
   GitPullRequest,
   MessagesSquare,
   Copy,
+  Download,
   Square,
-  X,
   Hourglass,
   Clock,
   Terminal,
@@ -37,19 +36,9 @@ import RowActionsMenu, { type RowAction } from './RowActionsMenu'
 import { useAvailableBackends } from '../lib/backends'
 import { useMultiAgent } from '../lib/multiAgent'
 import { AgentBackendMark, GithubMark } from './BrandIcons'
-import {
-  QUICK_SWITCH_HINT_DISMISSED,
-  SWITCH_HINT_DONE,
-  SWITCH_HINT_THRESHOLD,
-  finishSwitchHint,
-  noteMouseSwitch,
-  onSwitchHintChange,
-  readUiFlag,
-  repoSettingsSeenFlag,
-  setUiFlag,
-  switchClickCount
-} from '../lib/uiFlags'
+import { noteMouseSwitch, readUiFlag, repoSettingsSeenFlag, setUiFlag } from '../lib/uiFlags'
 import { OPEN_REPO_SETTINGS_EVENT, openRepoSettings } from '../lib/repoSettings'
+import { openMigrate } from '../lib/migrate'
 import {
   AGENT_BACKEND_LABELS,
   DEFAULT_PEER_INBOUND,
@@ -65,6 +54,7 @@ import { useGithubDisconnected } from '../lib/github'
 import { WorkspaceAgents } from './WorkspaceAgents'
 import { WorkspaceApiRetry } from './WorkspaceApiRetry'
 import { WorkspaceGoal } from './WorkspaceGoal'
+import CacheTimer from './CacheTimer'
 import { useNow } from '../lib/useNow'
 import { formatCountdown, formatDuration } from '../lib/format'
 import { useDragReorder, type DragReorder } from '../lib/useDragReorder'
@@ -154,15 +144,6 @@ export default function Sidebar({
   const shortcutById = new Map<string, number>()
   ordered.slice(0, 9).forEach((w, i) => shortcutById.set(w.id, i + 1))
 
-  // ⌘K 힌트는 '실제로 번호가 모자라진 순간'에만, 한 번만 띄운다. 9개 이하로 쓰는 사용자는
-  // 평생 보지 않고, 한 번 닫으면 실행 간에 기억된다(순수 화면 상태라 localStorage 로 충분).
-  const [hintDismissed, setHintDismissed] = useState(() => readUiFlag(QUICK_SWITCH_HINT_DISMISSED))
-  const showQuickSwitchHint = ordered.length > 9 && !hintDismissed
-  const dismissHint = (): void => {
-    setUiFlag(QUICK_SWITCH_HINT_DISMISSED, true)
-    setHintDismissed(true)
-  }
-
   // 설정 모달을 한 번이라도 열어 본 리포들. 아직 안 열어 본 리포에만 톱니 옆에 안내 점을 띄운다.
   // 진입 경로가 여러 개(톱니·토스트 액션·⌘K·설정 모달)라 각각에서 표시하지 않고, 공통
   // 이벤트를 여기서 한 번 듣는다.
@@ -183,27 +164,23 @@ export default function Sidebar({
     return () => window.removeEventListener(OPEN_REPO_SETTINGS_EVENT, onOpen)
   }, [])
 
-  // ⌘↑/⌘↓ 힌트. "행을 여러 번 마우스로 눌러 전환했는데 아직 단축키는 안 써 본" 사용자에게만,
-  // 즉 실제로 손해를 보고 있는 게 증명된 순간에만 뜬다. 온보딩에서 미리 가르치지 않는 이유가
-  // 이것 — 그때는 워크스페이스가 하나뿐이라 전환할 대상 자체가 없고, 배워도 쓸 데가 없어 잊힌다.
-  // 단축키를 한 번이라도 쓰면(App.tsx) 그 즉시 영구히 사라진다.
-  const [switchHint, setSwitchHint] = useState(() => ({
-    done: readUiFlag(SWITCH_HINT_DONE),
-    clicks: switchClickCount()
-  }))
-  useEffect(
-    () =>
-      onSwitchHintChange(() =>
-        setSwitchHint({ done: readUiFlag(SWITCH_HINT_DONE), clicks: switchClickCount() })
-      ),
-    []
-  )
-  // 전환할 곳이 둘 이상일 때만 의미가 있다. ⌘K 힌트와 동시에 뜨면 잔소리가 되므로 양보한다.
-  const showSwitchHint =
-    !switchHint.done &&
-    switchHint.clicks >= SWITCH_HINT_THRESHOLD &&
-    ordered.length > 1 &&
-    !showQuickSwitchHint
+  // 리포가 하나도 없을 때만 훑어 본다. 들여오기를 권할 자리는 첫 화면 하나뿐이고, 스캔은
+  // 리포마다 git 을 부르므로 상시로 돌릴 이유가 없다(리포가 생긴 뒤에는 + 메뉴에 항상 있다).
+  const [migratable, setMigratable] = useState(false)
+  const noRepos = app.repos.length === 0
+  useEffect(() => {
+    if (!noRepos) return
+    let active = true
+    void window.api.migrate
+      .scan()
+      .then((scan) => {
+        if (active) setMigratable(scan.repos.length > 0)
+      })
+      .catch(() => undefined)
+    return () => {
+      active = false
+    }
+  }, [noRepos])
 
   const addRepo = async (): Promise<void> => {
     const res = await window.api.repo.add()
@@ -339,11 +316,21 @@ export default function Sidebar({
         </div>
 
         {app.repos.length === 0 && (
-          <p className="px-3 py-8 text-xs text-neutral-500 text-center leading-relaxed">
+          <div className="px-3 py-8 text-xs text-neutral-500 text-center leading-relaxed">
             No repositories yet.
             <br />
             Use the + button above to add a git repo.
-          </p>
+            {/* Conductor·Orca 를 쓰던 사람에게는 이 화면이 첫 화면이다. 여기서 알려주지 않으면
+                이미 등록해 둔 리포와 worktree 를 손으로 다시 만들게 된다. */}
+            {migratable && (
+              <button
+                onClick={() => openMigrate()}
+                className="mt-3 block w-full rounded-lg border border-[var(--border-2)] px-3 py-2 text-xs text-neutral-300 hover:bg-[var(--surface-2)]"
+              >
+                Import existing worktrees
+              </button>
+            )}
+          </div>
         )}
 
         {app.repos.map((repo) => {
@@ -465,48 +452,10 @@ export default function Sidebar({
           )
         })}
 
-        {/* 목록이 9개를 넘어 ⌘번호가 없는 행이 생긴 순간에만, 그 행들 바로 아래에서 이유와
-            대안을 한 줄로 알려 준다. 앱을 처음 켤 때가 아니라 실제로 한계에 부딪힌 시점에
-            띄우는 것이 핵심 — 9개 이하로 쓰는 사용자에게는 아예 존재하지 않는 UI 다. */}
-        {showQuickSwitchHint && (
-          <div className="mx-1 mb-2 flex items-start gap-2 rounded-md bg-[var(--surface)] px-2 py-1.5 text-xs text-neutral-500">
-            <Search size={12} className="mt-0.5 shrink-0" />
-            <p className="flex-1 leading-relaxed">
-              Only the top 9 rows get a ⌘number. Press{' '}
-              <kbd className="font-medium text-neutral-300">⌘K</kbd> to search the rest.
-            </p>
-            <button
-              onClick={dismissHint}
-              aria-label="Dismiss hint"
-              title="Got it"
-              className="shrink-0 -mr-0.5 h-4 w-4 grid place-items-center rounded text-neutral-600 hover:bg-[var(--surface-2)] hover:text-neutral-300"
-            >
-              <X size={11} />
-            </button>
-          </div>
-        )}
-
-        {/* ⌘↑/⌘↓ 안내. ⌘K 힌트와 같은 자리·같은 톤(작고 흐린 한 줄)이라 새로운 UI 종류를
-            늘리지 않는다. 모달·토스트·코치마크처럼 시선을 뺏는 수단을 일부러 피했다 —
-            이건 몰라도 앱을 쓰는 데 지장이 없는 정보라서, 그만큼의 방해가 정당화되지 않는다. */}
-        {showSwitchHint && (
-          <div className="mx-1 mb-2 flex items-start gap-2 rounded-md bg-[var(--surface)] px-2 py-1.5 text-xs text-neutral-500">
-            <ArrowUpDown size={12} className="mt-0.5 shrink-0" />
-            <p className="flex-1 leading-relaxed">
-              Switch workspaces without leaving the keyboard —{' '}
-              <kbd className="font-medium text-neutral-300">⌘↑</kbd>{' '}
-              <kbd className="font-medium text-neutral-300">⌘↓</kbd>
-            </p>
-            <button
-              onClick={finishSwitchHint}
-              aria-label="Dismiss hint"
-              title="Got it"
-              className="shrink-0 -mr-0.5 h-4 w-4 grid place-items-center rounded text-neutral-600 hover:bg-[var(--surface-2)] hover:text-neutral-300"
-            >
-              <X size={11} />
-            </button>
-          </div>
-        )}
+        {/* 목록이 9개를 넘었을 때의 ⌘K 안내, 마우스로만 전환하는 사용자에게 뜨는 ⌘↑/⌘↓ 안내는
+            더는 여기서 그리지 않는다 — `lib/hints.ts` 레지스트리로 옮겨 `components/Hint.tsx`
+            (App.tsx 에 하나만 마운트되는 호스트)가 대신 그린다. 이 파일은 여전히 마우스 전환
+            횟수를 세는 신호(noteMouseSwitch, 아래 WorkspaceRow)만 낸다. */}
       </div>
     </aside>
   )
@@ -637,7 +586,8 @@ function WorkspaceRow({
       title: `Archive "${displayName}"?`,
       body: 'Its worktree directory will be removed (branch & history kept). You can unarchive it later.',
       confirmLabel: 'Archive',
-      danger: true
+      danger: true,
+      skipKey: 'archiveWorkspace'
     })
     if (!ok) return
     const { archiveScriptFailure } = await archiveWorkspace(workspace.id)
@@ -957,6 +907,7 @@ function WorkspaceRow({
                 · {formatDuration(now - runningSince)}
               </span>
             )}
+            <CacheTimer workspace={workspace} dot />
             {workspace.pendingRateLimitResume ? (
               <span
                 className="text-[var(--warning-400)]/90 shrink-0 tabular-nums"
@@ -1816,6 +1767,15 @@ function NewWorkspaceButton({
     label: 'Fan out one prompt…',
     icon: <Copy size={13} />,
     onSelect: () => onFanout(repoId)
+  })
+  // 이미 있는 worktree 를 워크스페이스로 앉히는 것도 "여기 무언가를 더한다" 다. 손으로 만든
+  // worktree 든 다른 도구가 만든 것이든, 이 리포에서 시작하는 유일한 메뉴 안에 함께 둔다.
+  actions.push({
+    key: 'import',
+    label: 'Import existing worktrees…',
+    icon: <Download size={13} />,
+    onSelect: () => openMigrate(repoId),
+    separatorBefore: true
   })
 
   return (

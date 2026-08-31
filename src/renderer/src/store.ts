@@ -28,6 +28,7 @@ import type {
   ReviewEnvelope,
   ReviewFinding,
   ReviewVerdict,
+  ConfirmSkipKey,
   ScriptStatus,
   StackCascadeResult,
   StackOpProgress,
@@ -53,6 +54,8 @@ import {
   setUiFlag
 } from './lib/uiFlags'
 import { openRepoSettings } from './lib/repoSettings'
+import { openSettings } from './lib/settingsNavigation'
+import { CONFIRM_SKIP_LABELS } from './lib/confirmSkips'
 import {
   bodyOf,
   emptyView,
@@ -67,6 +70,11 @@ import {
   type DiffCommentAnchor
 } from './lib/diffComments'
 import { popWorkspaceHistory, pushWorkspaceHistory } from './lib/workspaceHistory'
+import {
+  hasMoreTranscriptHistory,
+  nextTranscriptLimit,
+  TRANSCRIPT_INITIAL_LIMIT
+} from './lib/transcriptPagination'
 import { UNDO_CREATE_WINDOW_MS, undoCreateVerdict, type UndoableCreate } from './lib/undoCreate'
 
 export const scriptKey = (workspaceId: string, scriptId: string): string =>
@@ -158,6 +166,11 @@ export interface ConfirmOptions {
   body?: string
   confirmLabel?: string
   danger?: boolean
+  /**
+   * 주면 "Don't ask again" 체크박스가 붙고, 이미 꺼 둔 확인이면 묻지 않고 통과한다.
+   * **되돌릴 수 있는 동작에만 준다** — 판단 기준은 [[shared/types]] 의 CONFIRM_SKIP_KEYS 참고.
+   */
+  skipKey?: ConfirmSkipKey
 }
 interface ConfirmState extends ConfirmOptions {
   resolve: (ok: boolean) => void
@@ -295,6 +308,12 @@ interface UIState {
   selectedWorkspaceId: string | null
   transcripts: Record<string, ChatItem[]>
   loadedTranscripts: Record<string, boolean>
+  /**
+   * 대화 기록의 읽기 창 상태. 트랜스크립트는 뒤에서부터 한 페이지씩 읽는다
+   * ([[transcriptPagination]]) — 며칠 이어 쓴 워크스페이스의 첫 페인트가 대화 전체를 이고
+   * 가지 않게 하기 위해서다. 항목이 없는 워크스페이스는 아직 한 번도 읽지 않은 것이다.
+   */
+  transcriptPaging: Record<string, TranscriptPaging>
   scriptOutput: Record<string, string>
   scriptStatus: Record<string, ScriptStatus[]>
   /**
@@ -618,6 +637,8 @@ interface UIState {
   sendDiffComments: (workspaceId: string) => void
   /** /clear — 해당 workspace 의 대화 기록·컨텍스트 사용량을 화면에서 비운다(맥락 초기화). */
   resetTranscript: (workspaceId: string) => void
+  /** 위쪽으로 한 페이지 더 읽는다. 이미 읽는 중이거나 더 없으면 아무 일도 하지 않는다. */
+  loadEarlierTranscript: (workspaceId: string) => Promise<void>
   /**
    * 대화 기록은 그대로 두고 컨텍스트 사용량 표시만 비운다(/agent 교체처럼 세션만 새로 시작할 때).
    * 다음 턴이 값을 다시 보내 줄 때까지 상태줄은 "—" 로 돌아간다.
@@ -674,7 +695,10 @@ interface UIState {
   /** setup 스크립트를 다시 실행한다(스크립트 패널을 함께 연다). 결과는 메인이 setupState 로 영속. */
   retrySetup: (workspaceId: string) => void
   confirm: (opts: ConfirmOptions) => Promise<boolean>
-  resolveConfirm: (ok: boolean) => void
+  /** `skip` 은 "다시 묻지 않기" 체크 상태. 승인(ok)일 때만 저장으로 이어진다. */
+  resolveConfirm: (ok: boolean, skip?: boolean) => void
+  /** 확인 스킵을 설정에 적고, 되돌릴 자리로 데려가는 토스트를 띄운다. */
+  rememberConfirmSkip: (key: ConfirmSkipKey) => void
 
   // ── PR 리뷰 모드 ───────────────────────────────────────────────────────
   /** 리뷰를 시작하고 전체 화면 모드로 진입한다. 실패하면 토스트만 띄우고 진입하지 않는다. */
@@ -861,6 +885,16 @@ function upsertItem(items: ChatItem[], item: ChatItem): ChatItem[] {
   return next
 }
 
+/** 한 워크스페이스의 대화 읽기 창. */
+type TranscriptPaging = {
+  /** 마지막으로 요청한 개수. 다음 페이지는 여기에 한 페이지를 더해 꼬리부터 다시 읽는다. */
+  limit: number
+  /** 더 오래된 것이 남아 있을 수 있는가. 거짓이면 "더 보기" 를 감춘다. */
+  hasMore: boolean
+  /** 페이지를 읽는 중. 스크롤이 위쪽에 머무는 동안 같은 요청이 겹치지 않게 한다. */
+  loading: boolean
+}
+
 export const useStore = create<UIState>((set, get) => ({
   ready: false,
   app: null,
@@ -868,6 +902,7 @@ export const useStore = create<UIState>((set, get) => ({
   workspaceHistory: [],
   transcripts: {},
   loadedTranscripts: {},
+  transcriptPaging: {},
   scriptOutput: {},
   scriptStatus: {},
   composerAttachments: {},
@@ -904,7 +939,7 @@ export const useStore = create<UIState>((set, get) => ({
   toggleToolVerbose: (workspaceId) =>
     set((s) => ({ toolVerbose: { ...s.toolVerbose, [workspaceId]: !s.toolVerbose[workspaceId] } })),
   terminalRatio: 0.5,
-  detachedPanes: { work: false, scripts: false },
+  detachedPanes: { work: false, scripts: false, overview: false },
   fileViewer: null,
   fileViewerTreeWidth: 260,
   jumpTarget: null,
@@ -1228,11 +1263,27 @@ export const useStore = create<UIState>((set, get) => ({
       }
     }
 
+    // 지금 화면에 떠 있는 워크스페이스를 main 에 알린다. 알림을 띄우는 것은 main 인데 선택
+    // 상태는 여기에만 있어서, 올려 주지 않으면 main 은 "앱은 보고 있지만 다른 워크스페이스를
+    // 보고 있는" 경우를 가릴 수 없다([[main/notifications]]). 창이 흐려졌으면 아무것도 보고
+    // 있지 않은 것으로 친다 — 그때는 어느 워크스페이스든 알림이 울려야 한다.
+    let sentViewing: string | null | undefined
+    const pushViewing = (): void => {
+      const next = windowFocused ? get().selectedWorkspaceId : null
+      if (next === sentViewing) return
+      sentViewing = next
+      void window.api.notify.setViewing(next).catch(() => {
+        // main 이 아직 안 붙었다 — 다음 선택/포커스 변화에서 다시 보낸다.
+        sentViewing = undefined
+      })
+    }
+
     // 창이 다시 활성화되면 인증 상태를 갱신하고(Terminal 로그인 완료 자동 반영) 미확인 표시를 해제한다.
     // main 의 'focus' 이벤트가 신뢰 가능한 트리거이고, DOM 의 window 'focus' 는 보조로 함께 둔다
     // (Dock 클릭·앱 전환 시 DOM 이벤트가 누락되어 배지가 안 사라지던 문제를 막는다).
     window.api.onWindowFocus(() => {
       windowFocused = true
+      pushViewing()
       clearSelectedUnread()
       // 자리를 비운 사이 바뀌었을 수 있으니 모든 워크트리 상태를 즉시 한 번 갱신한다.
       void get().refreshAllGit()
@@ -1241,9 +1292,11 @@ export const useStore = create<UIState>((set, get) => ({
     })
     window.api.onWindowBlur(() => {
       windowFocused = false
+      pushViewing()
     })
     window.addEventListener('focus', () => {
       windowFocused = true
+      pushViewing()
       void get().refreshAuth()
       // 자리를 비운 사이 사용자가 에이전트 CLI 를 설치·제거했을 수 있으므로 가용성도 다시 본다.
       void get().refreshAgents()
@@ -1251,6 +1304,7 @@ export const useStore = create<UIState>((set, get) => ({
     })
     window.addEventListener('blur', () => {
       windowFocused = false
+      pushViewing()
     })
 
     // macOS Dock 빨간 배지 = "내 주의가 필요한" workspace 수. 미확인 완료(unread)뿐 아니라
@@ -1283,6 +1337,7 @@ export const useStore = create<UIState>((set, get) => ({
     }
 
     useStore.subscribe((state, prev) => {
+      if (state.selectedWorkspaceId !== prev.selectedWorkspaceId) pushViewing()
       // 알림 설정/음소거(app)나 unread·permissions 가 바뀌면 배지를 다시 계산한다.
       if (
         state.unread !== prev.unread ||
@@ -1295,6 +1350,7 @@ export const useStore = create<UIState>((set, get) => ({
     })
     // 시작할 때도 한 번 보내 복원한 목록과 원격 미러를 즉시 맞춘다.
     pushUnreadToRemote(useStore.getState())
+    pushViewing()
 
     window.api.onChat(({ workspaceId, event }: ChatEnvelope) => {
       const { transcripts } = get()
@@ -2295,10 +2351,19 @@ export const useStore = create<UIState>((set, get) => ({
     if (!id) return
 
     if (!get().loadedTranscripts[id]) {
-      const history = await window.api.chat.getHistory(id)
+      // 최근 몇 턴만 먼저 읽는다. 위로 올라가면 MessageList 가 더 부른다.
+      const history = await window.api.chat.getHistory(id, TRANSCRIPT_INITIAL_LIMIT)
       set((s) => ({
         transcripts: { ...s.transcripts, [id]: history },
-        loadedTranscripts: { ...s.loadedTranscripts, [id]: true }
+        loadedTranscripts: { ...s.loadedTranscripts, [id]: true },
+        transcriptPaging: {
+          ...s.transcriptPaging,
+          [id]: {
+            limit: TRANSCRIPT_INITIAL_LIMIT,
+            hasMore: hasMoreTranscriptHistory(history.length, TRANSCRIPT_INITIAL_LIMIT),
+            loading: false
+          }
+        }
       }))
     }
     void get().refreshGit(id)
@@ -2612,11 +2677,57 @@ export const useStore = create<UIState>((set, get) => ({
       return {
         transcripts: { ...s.transcripts, [workspaceId]: [] },
         loadedTranscripts: { ...s.loadedTranscripts, [workspaceId]: true },
+        // 기록을 비웠으니 읽기 창도 처음으로 되돌린다 — 남아 있으면 빈 대화에 "더 보기" 가 뜬다.
+        transcriptPaging: {
+          ...s.transcriptPaging,
+          [workspaceId]: { limit: TRANSCRIPT_INITIAL_LIMIT, hasMore: false, loading: false }
+        },
         contextUsage,
         compacting,
         goals
       }
     }),
+
+  loadEarlierTranscript: async (workspaceId) => {
+    const paging = get().transcriptPaging[workspaceId]
+    if (!paging || !paging.hasMore || paging.loading) return
+
+    const limit = nextTranscriptLimit(paging.limit)
+    set((s) => ({
+      transcriptPaging: { ...s.transcriptPaging, [workspaceId]: { ...paging, loading: true } }
+    }))
+    let older: ChatItem[]
+    try {
+      older = await window.api.chat.getHistory(workspaceId, limit)
+    } catch {
+      // 못 읽었으면 잠금만 푼다. 다음 스크롤이나 버튼 누름이 다시 시도한다.
+      set((s) => ({
+        transcriptPaging: {
+          ...s.transcriptPaging,
+          [workspaceId]: { ...(s.transcriptPaging[workspaceId] ?? paging), loading: false }
+        }
+      }))
+      return
+    }
+
+    set((s) => {
+      // 디스크에서 다시 읽은 꼬리로 갈아 끼우되, 아직 디스크에 닿지 않은 것(스트리밍 중인 턴)은
+      // 살린다. 그것들은 언제나 가장 최신이므로 뒤에 붙이면 순서가 맞는다.
+      const known = new Set(older.map((item) => item.id))
+      const inFlight = (s.transcripts[workspaceId] ?? []).filter((item) => !known.has(item.id))
+      return {
+        transcripts: { ...s.transcripts, [workspaceId]: [...older, ...inFlight] },
+        transcriptPaging: {
+          ...s.transcriptPaging,
+          [workspaceId]: {
+            limit,
+            hasMore: hasMoreTranscriptHistory(older.length, limit),
+            loading: false
+          }
+        }
+      }
+    })
+  },
 
   resetContextUsage: (workspaceId) =>
     set((s) => {
@@ -2695,6 +2806,23 @@ export const useStore = create<UIState>((set, get) => ({
     // 목적지를 먼저 세워 둔다 — 대화창은 마운트되자마자 이 값을 보고 그 항목으로 스크롤한다.
     set((st) => ({ jumpTarget: { workspaceId, itemId, seq: (st.jumpTarget?.seq ?? 0) + 1 } }))
     await s.selectWorkspace(workspaceId)
+
+    // 대화는 뒤에서부터 한 페이지씩 읽는다. 워크스페이스를 가로지르는 검색(⇧⌘K)은 main 이
+    // 파일 전체를 훑어 찾으므로, 목적지가 그 창보다 오래됐을 수 있다 — 그러면 스크롤할 대상이
+    // DOM 에 없어 점프가 조용히 실패한다. 이 경우에만 전부 읽어 목적지를 창 안으로 들인다.
+    if ((get().transcripts[workspaceId] ?? []).some((item) => item.id === itemId)) return
+    const all = await window.api.chat.getHistory(workspaceId)
+    set((st) => {
+      const known = new Set(all.map((item) => item.id))
+      const inFlight = (st.transcripts[workspaceId] ?? []).filter((item) => !known.has(item.id))
+      return {
+        transcripts: { ...st.transcripts, [workspaceId]: [...all, ...inFlight] },
+        transcriptPaging: {
+          ...st.transcriptPaging,
+          [workspaceId]: { limit: all.length, hasMore: false, loading: false }
+        }
+      }
+    })
   },
 
   clearJumpTarget: () => set((s) => (s.jumpTarget ? { jumpTarget: null } : {})),
@@ -2760,13 +2888,41 @@ export const useStore = create<UIState>((set, get) => ({
 
   confirm: (opts) =>
     new Promise<boolean>((resolve) => {
+      // 사용자가 꺼 둔 확인은 띄우지 않는다. 되돌리는 길은 끄던 순간의 토스트와 설정에 있다.
+      if (opts.skipKey && get().app?.settings.confirmSkips?.[opts.skipKey]) {
+        resolve(true)
+        return
+      }
       set({ confirmState: { ...opts, resolve } })
     }),
 
-  resolveConfirm: (ok) => {
+  resolveConfirm: (ok, skip) => {
     const cs = get().confirmState
-    if (cs) cs.resolve(ok)
     set({ confirmState: null })
+    if (!cs) return
+    // 취소하면 체크박스를 켰더라도 저장하지 않는다 — 승인한 적 없는 동작을 앞으로 자동
+    // 승인하게 만드는 셈이고, Escape 나 바깥 클릭으로 닫은 경우까지 여기로 온다.
+    if (ok && skip && cs.skipKey) get().rememberConfirmSkip(cs.skipKey)
+    cs.resolve(ok)
+  },
+
+  rememberConfirmSkip: (key) => {
+    const current = get().app?.settings.confirmSkips ?? {}
+    if (current[key]) return
+    void window.api.settings
+      .update({ confirmSkips: { ...current, [key]: true } })
+      .then(() => {
+        // 액션이 달린 토스트는 사용자가 닫을 때까지 남는다(pushToast 정책) — 되돌리는 길이
+        // 읽히기도 전에 사라지면 이 토스트를 띄우는 의미가 없다.
+        get().pushToast(
+          'success',
+          `Wooi won't ask again before ${CONFIRM_SKIP_LABELS[key].action}.`,
+          [{ label: 'Open settings', run: () => openSettings('general') }]
+        )
+      })
+      .catch(() =>
+        get().pushToast('error', 'Could not save that preference — Wooi will keep asking.')
+      )
   },
 
   // ── PR 리뷰 모드 ─────────────────────────────────────────────────────────
@@ -2847,7 +3003,8 @@ export const useStore = create<UIState>((set, get) => ({
       title: `Archive review of ${reviewTitle(session).number ? `#${reviewTitle(session).number}` : 'this pull request'}?`,
       body: 'Its worktree is removed, but the findings and conversation are kept. You can unarchive it later.',
       confirmLabel: 'Archive',
-      danger: true
+      danger: true,
+      skipKey: 'archiveReview'
     })
     if (!ok) return
     await get().archiveReview(reviewId)

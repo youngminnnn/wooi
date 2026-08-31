@@ -46,7 +46,13 @@ export async function seedAppState(
     unreadWorkspaceIds = [],
     // "물려받았다" 를 확인하는 스펙은 기본값과 **다른** 값에서 출발해야 한다 — 기본값 그대로면
     // 상속했는지 전역 기본을 다시 읽었는지 구별되지 않는다.
-    workspace: workspaceOverrides = {}
+    workspace: workspaceOverrides = {},
+    // 이 시드는 온보딩을 건너뛰는 것이 기본이다(대부분의 스펙은 앱 안쪽을 본다). 첫 실행
+    // 온보딩 자체를 검증하는 스펙만 이것을 켜서 세 플래그를 **아예 쓰지 않는다** — false 로
+    // 적어 두는 것과 다르다. acceptedTermsVersion 은 숫자 비교라 키가 없어야 null 로 읽힌다.
+    firstRun = false,
+    // 기본값 위에 얹을 설정. 힌트처럼 "특정 설정 조합에서만 뜨는" UI 를 만들 때 쓴다.
+    settings: settingsOverrides = {}
   } = {}
 ) {
   const root = resolve(appDir)
@@ -124,9 +130,10 @@ export async function seedAppState(
         fanoutGroups: [],
         reviews: [],
         settings: {
-          onboarded: true,
-          pickedDefaults: true,
-          acceptedTermsVersion: termsVersion
+          ...(firstRun
+            ? {}
+            : { onboarded: true, pickedDefaults: true, acceptedTermsVersion: termsVersion }),
+          ...settingsOverrides
         }
       },
       null,
@@ -180,6 +187,24 @@ export async function openRowMenuItem(win, name) {
   const item = win.getByRole('menuitem', { name })
   await item.waitFor()
   return item
+}
+
+/**
+ * 떠 있는 토스트를 모두 닫는다.
+ *
+ * 토스트 컨테이너는 `fixed bottom-4 right-4` 라 **모달 푸터의 저장 버튼과 같은 자리**를 덮는다.
+ * 스크래치 리포는 에이전트 CLI 도 원격도 없는 환경이라 시작하자마자 안내 토스트가 뜨고, 그것이
+ * 사라지지 않는 종류면 클릭이 영영 가로막혀 스펙은 "버튼을 못 눌렀다" 가 아니라 타임아웃으로
+ * 죽는다. 모달에서 저장하는 스펙은 누르기 전에 이걸 부른다.
+ */
+export async function dismissToasts(win) {
+  const dismiss = win.locator('[role="alert"] [aria-label="Dismiss"]')
+  // 닫는 동안 새 토스트가 뜰 수 있으므로 매번 다시 센다. 남아 있어도 여기서 실패하지는 않는다 —
+  // 정리는 이 스펙의 주제가 아니고, 정말 가로막혔다면 다음 클릭이 그 사실을 말해 준다.
+  for (let left = await dismiss.count(); left > 0; left = await dismiss.count()) {
+    await dismiss.first().click()
+    await win.waitForTimeout(50)
+  }
 }
 
 /** 수동 PNG 확인이 필요할 때만 scratch 정리 전에 창을 유지한다. */

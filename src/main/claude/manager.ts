@@ -2,15 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { homedir } from 'node:os'
 import { statSync, type Stats } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
-import {
-  utilityProcess,
-  Notification,
-  app,
-  powerMonitor,
-  net,
-  BrowserWindow,
-  type UtilityProcess
-} from 'electron'
+import { utilityProcess, app, net, BrowserWindow, type UtilityProcess } from 'electron'
 import { getStore } from '../store'
 import { getWorkspaceUsage, recordSessionUsage } from '../usageLedger'
 import { wooiMcpSettings } from '../mcpSettings'
@@ -21,16 +13,16 @@ import {
   agentSettingsFor,
   isQuestionPermission,
   nativePeerInbound,
-  peerSessionName,
-  workspaceDisplayName
+  peerSessionName
 } from '@shared/types'
 import { CLAUDE_META, CLAUDE_MODELS, type AgentBackend, type TurnEndHook } from '../agent/backend'
 import { agentDefaultsFor, canLeadAgentTeam, delegateBackendsFor } from '../agent/multiAgent'
+import { agentDefaultEnv } from '../agentEnv'
 import { claudeMode, type HostCommand, type HostEvent, type SessionConfig } from './protocol'
 import { runAgentTool } from '../agent/tools'
 import { RateLimitResumeCoordinator } from '../rateLimitResume'
-import { notifyRemotePush } from '../remote'
-import { shouldSendRemotePush, type RemotePushKind } from '../remote/push'
+import { type RemotePushKind } from '../remote/push'
+import { showDesktopNotification } from '../notifications'
 import { nameFromPlan, shouldAutoName } from './planName'
 import type {
   AgentBackendId,
@@ -382,7 +374,8 @@ export class SessionManager implements AgentBackend {
       additionalDirs: ws.additionalDirs ?? [],
       delegateBackends: delegateBackendsFor(ws),
       canSwitchToAgentTeam: canLeadAgentTeam(ws),
-      agentDefaults: agentDefaultsFor(settings)
+      agentDefaults: agentDefaultsFor(settings),
+      env: agentDefaultEnv(CLAUDE_META.id)
     }
   }
 
@@ -1004,52 +997,23 @@ export class SessionManager implements AgentBackend {
   }
 
   /**
-   * 창이 비활성일 때 OS 알림을 띄운다. 클릭하면 창을 포커스하고 해당 workspace 를 연다.
-   * 이벤트별 osNotification 채널이 꺼져 있거나 워크스페이스가 음소거면 띄우지 않는다.
+   * OS 알림을 띄운다. 판정·전달은 [[main/notifications]] 이 맡는다 — Codex 매니저와 같은 것을
+   * 써야 사유 코드와 포커스 억제 규칙이 두 백엔드에서 갈라지지 않는다.
    */
   private notify(
     workspaceId: string,
     event: NotificationEvent,
     body: string,
     urgent: boolean,
-    /**
-     * 폰 배너의 종류. 기본은 설정 이벤트와 같지만 갈릴 수 있다 — 질문은 설정에서는
-     * 'needsInput' 채널을 따르면서도 배너에서는 승인과 다른 말을 해야 한다(remote/push.ts).
-     */
     pushKind: RemotePushKind = event
   ): void {
-    const win = this.getWindow()
-    const ws = this.getWorkspace(workspaceId)
-    if (ws?.muted) return
-    const channels = getStore().getState().settings.notifications?.[event]
-    if (!channels?.osNotification) return
-
-    const focused = win?.isFocused() === true
-    // 폰 푸시는 데스크톱을 쓰고 있지 않을 때만 보낸다(설정으로 항상 보내게 할 수 있다).
-    // 포커스는 메인 창이 아니라 Wooi 창 전체로 본다 — 분리한 패널도 데스크톱을 쓰는 중이다.
-    if (
-      shouldSendRemotePush({
-        appFocused: BrowserWindow.getFocusedWindow() !== null,
-        idleSeconds: powerMonitor.getSystemIdleTime(),
-        always: getStore().getState().settings.remotePushWhileActive === true
-      })
-    ) {
-      notifyRemotePush(workspaceId, ws ? workspaceDisplayName(ws) : 'Workspace', pushKind)
-    }
-    if (focused || !Notification.isSupported()) return
-
-    const title = ws ? `${urgent ? '⚠️ ' : ''}${workspaceDisplayName(ws)}` : 'Wooi'
-    // OS 알림 소리는 이벤트별 sound 채널을 따른다(설정에서 sound 를 끄면 무음 알림).
-    const notification = new Notification({ title, body, silent: !channels.sound })
-    notification.on('click', () => {
-      const w = this.getWindow()
-      if (w) {
-        if (w.isMinimized()) w.restore()
-        w.show()
-        w.focus()
+    showDesktopNotification(
+      { workspaceId, event, body, urgent, pushKind },
+      {
+        getWindow: this.getWindow,
+        getWorkspace: (id) => this.getWorkspace(id),
+        dispatch: (channel, payload) => this.dispatch(channel, payload)
       }
-      this.dispatch(IPC.evtSelectWorkspace, workspaceId)
-    })
-    notification.show()
+    )
   }
 }

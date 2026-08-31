@@ -5,12 +5,14 @@ import type { AgentBackendId } from '@shared/types'
 import { DEFAULT_SIDEBAR_WIDTH, useStore } from './store'
 import { nextPermissionMode } from './lib/permission'
 import { OPEN_REPO_SETTINGS_EVENT, openRepoSettings } from './lib/repoSettings'
+import { OPEN_MIGRATE_EVENT } from './lib/migrate'
 import { OPEN_FILE_QUICK_OPEN_EVENT, openFileQuickOpen } from './lib/fileViewer'
 import { openNewWorkspaceMenu } from './lib/newWorkspaceMenu'
 import { applyTheme } from './lib/theme'
 import { finishSwitchHint } from './lib/uiFlags'
 import { OPEN_SETTINGS_EVENT } from './lib/settingsNavigation'
-import { FOCUS_COMPOSER_EVENT } from './lib/composerFocus'
+import { FOCUS_COMPOSER_EVENT, INSERT_INTO_COMPOSER_EVENT } from './lib/composerFocus'
+import { shouldFocusComposerFromEditingKey, shouldRedirectTyping } from './lib/typingRedirect'
 import TitleBar from './components/TitleBar'
 import { UpdateBanner } from './components/UpdateBanner'
 import { NoticeBanner } from './components/NoticeBanner'
@@ -32,6 +34,7 @@ import NewWorkspaceModal from './components/NewWorkspaceModal'
 import NewFromIssueModal from './components/NewFromIssueModal'
 import NewFromPrModal from './components/NewFromPrModal'
 import RepoConfigModal from './components/RepoConfigModal'
+import MigrateModal from './components/MigrateModal'
 import OnboardingModal from './components/OnboardingModal'
 import ShortcutsHelp from './components/ShortcutsHelp'
 import QuickSwitcher from './components/QuickSwitcher'
@@ -40,10 +43,35 @@ import FeatureTour from './components/FeatureTour'
 import GithubConnectModal from './components/GithubConnectModal'
 import Toaster from './components/Toaster'
 import ConfirmDialog from './components/ConfirmDialog'
+import Hint from './components/Hint'
 import Logo from './components/Logo'
 import ClaudeLoginModal from './components/ClaudeLoginModal'
 import CodexLoginModal from './components/CodexLoginModal'
 import type { ExportConversationDetail } from './components/ExportMenu'
+
+/**
+ * 대화 입력창이 지금 화면에 닿아 있는가.
+ *
+ * 리뷰 화면·팬아웃 비교·파일 뷰어는 대화를 통째로 덮는다. 그 위에서 친 글자를 뒤쪽 textarea 에
+ * 몰래 넣으면 사용자는 자기 글이 어디로 갔는지 알 수 없다 — ⌘L 이 같은 이유로 같은 판정을 쓴다.
+ */
+function chatComposerReachable(
+  st: {
+    selectedWorkspaceId: string | null
+    activeReviewId: string | null
+    activeFanoutGroupId: string | null
+    overlayOpen: boolean
+  },
+  fileViewerVisible: boolean
+): boolean {
+  return (
+    !!st.selectedWorkspaceId &&
+    !st.activeReviewId &&
+    !st.activeFanoutGroupId &&
+    !st.overlayOpen &&
+    !fileViewerVisible
+  )
+}
 
 export default function App(): React.JSX.Element {
   const ready = useStore((s) => s.ready)
@@ -95,6 +123,7 @@ export default function App(): React.JSX.Element {
     fanout?: boolean
   } | null>(null)
   const [configRepoId, setConfigRepoId] = useState<string | null>(null)
+  const [migrateFor, setMigrateFor] = useState<{ repoId: string | null } | null>(null)
   // ⌘K 퀵 스위처. ⌘1–9 로 닿지 않는(10번째 이후) 워크스페이스로 이동하는 기본 경로다.
   const [quickSwitchOpen, setQuickSwitchOpen] = useState(false)
   // ⇧⌘K 대화 검색. ⌘K 가 "이름으로 이동" 이라면 이쪽은 "내용으로 찾기" 다.
@@ -158,6 +187,7 @@ export default function App(): React.JSX.Element {
     transcriptSearchOpen ||
     newWs !== null ||
     configRepoId !== null ||
+    migrateFor !== null ||
     onboardingOpen ||
     githubGateOpen ||
     tourOpen ||
@@ -208,6 +238,14 @@ export default function App(): React.JSX.Element {
     return () => window.removeEventListener(OPEN_REPO_SETTINGS_EVENT, onOpen)
   }, [])
 
+  // 옮겨오기 모달도 같은 이유로 이벤트로 받는다 — 사이드바 빈 화면과 설정 양쪽에서 연다.
+  useEffect(() => {
+    const onOpen = (e: Event): void =>
+      setMigrateFor({ repoId: (e as CustomEvent<string | null>).detail ?? null })
+    window.addEventListener(OPEN_MIGRATE_EVENT, onOpen)
+    return () => window.removeEventListener(OPEN_MIGRATE_EVENT, onOpen)
+  }, [])
+
   // 키보드: ⇧⇥ 권한 모드 순환, ⌘1–9 워크스페이스 선택, ⌘↑ / ⌘↓ 이전/다음,
   // ⌘L 메시지 입력창 포커스, ⌘[ 직전에 보던 워크스페이스로 뒤로가기, ⇧⌘R PR 리뷰 시작.
   useEffect(() => {
@@ -254,6 +292,25 @@ export default function App(): React.JSX.Element {
         e.preventDefault()
         st.toggleToolVerbose(st.selectedWorkspaceId)
         return
+      }
+
+      // 대화를 읽다가 지시를 이어 칠 때 손이 끊기지 않게 한다 — 아무 데나 친 글자가 그대로
+      // 입력창 caret 에 들어가고 포커스가 따라간다. ⌘L 을 "먼저" 누르는 박자를 없애는 것이지
+      // 대체하는 것은 아니다. 가려짐 판정은 ⌘L 과 같은 것을 쓴다(아래 참조).
+      // '?'·⌃O 같은 기존 단축키가 위에서 먼저 return 하므로 그 키들은 여기까지 오지 않는다.
+      if (chatComposerReachable(st, fileViewerVisible)) {
+        if (shouldFocusComposerFromEditingKey(e)) {
+          // 기본 동작까지 막아야 한다 — 막지 않으면 이 핸들러가 옮겨 놓은 포커스 위에서
+          // Backspace 가 그대로 실행돼, 보이지도 않는 초안의 마지막 글자가 지워진다.
+          e.preventDefault()
+          window.dispatchEvent(new CustomEvent(FOCUS_COMPOSER_EVENT))
+          return
+        }
+        if (shouldRedirectTyping(e)) {
+          e.preventDefault()
+          window.dispatchEvent(new CustomEvent(INSERT_INTO_COMPOSER_EVENT, { detail: e.key }))
+          return
+        }
       }
 
       if (!e.metaKey) return
@@ -698,6 +755,9 @@ export default function App(): React.JSX.Element {
         <NewFromIssueModal repoId={issueRepoId} onClose={() => setIssueRepoId(null)} />
       )}
       {prRepoId && <NewFromPrModal repoId={prRepoId} onClose={() => setPrRepoId(null)} />}
+      {migrateFor && (
+        <MigrateModal repoId={migrateFor.repoId} onClose={() => setMigrateFor(null)} />
+      )}
       {showSettings && (
         // 설정은 백엔드 카탈로그·인증 상태 등 바깥에서 들어오는 값을 많이 읽는다. 그중 하나가
         // 깨져도 앱 전체가 날아가지 않도록 이 서브트리만 격리한다.
@@ -732,6 +792,13 @@ export default function App(): React.JSX.Element {
       {configRepoId && (
         <RepoConfigModal repoId={configRepoId} onClose={() => setConfigRepoId(null)} />
       )}
+
+      {/* 점진적 힌트 호스트는 앱 전체에 하나만, 항상 마운트해 둔다(lib/hints.ts). 모달이 하나라도
+          떠 있으면(설정·투어·퀵스위처… 온보딩도 anyModalOpen 안에 포함된다) 뭘 가리키든 그
+          모달 뒤에 깔려 안 보이므로 렌더를 꺼야 하지만, **마운트 자체는 건드리지 않는다** —
+          Settings 를 열었다 닫을 때마다 리마운트되면 세션 카운터(이번 세션에 몇 개를 소개했는지)
+          가 그때마다 리셋된다. 대신 anyModalOpen 을 prop 으로 넘겨 Hint 내부에서 렌더만 끈다. */}
+      <Hint anyModalOpen={anyModalOpen} />
 
       <Toaster />
       <ConfirmDialog />

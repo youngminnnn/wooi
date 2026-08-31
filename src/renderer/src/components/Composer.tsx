@@ -34,6 +34,8 @@ import {
   Wrench
 } from 'lucide-react'
 import { useStore } from '../store'
+import SavedPromptPicker from './SavedPromptPicker'
+import { appendPrompt } from '../lib/savedPrompts'
 import { permissionModeFooter, permissionModesFor } from '../lib/permission'
 import { modelLabel, modelSupportsFastMode } from '../lib/models'
 import { effortLabel, effortOptionsFor } from '../lib/effort'
@@ -84,6 +86,7 @@ import type {
   PermissionsInfo,
   RateLimitSnapshot,
   RewindPoint,
+  SavedPrompt,
   SlashCommandInfo,
   SkillInfo,
   StatusInfo,
@@ -98,7 +101,7 @@ import type { WooiCommandSpec } from '@shared/wooiCommands'
 import { openSettings } from '../lib/settingsNavigation'
 import type { ExportConversationDetail } from './ExportMenu'
 import { WOOI_URLS } from '../lib/externalLinks'
-import { FOCUS_COMPOSER_EVENT } from '../lib/composerFocus'
+import { FOCUS_COMPOSER_EVENT, INSERT_INTO_COMPOSER_EVENT } from '../lib/composerFocus'
 
 /** Claude 가 받는 이미지 형식. 클립보드의 다른 형식은 붙여넣기 시 무시한다. */
 const IMAGE_TYPES: Record<string, ImageMediaType> = {
@@ -133,6 +136,10 @@ function readImage(blob: Blob): Promise<{ dataBase64: string; dataUrl: string }>
 export default function Composer({ workspace }: { workspace: Workspace }): React.JSX.Element {
   // 초안은 store 에 보관해 workspace 전환에도 살아남는다(작성 중 메시지 분실 방지).
   const text = useStore((s) => s.drafts[workspace.id] ?? '')
+  // 이 워크스페이스의 리포에 저장해 둔 프롬프트. 리포별 스코프뿐이라 전역 목록은 보지 않는다.
+  const savedPrompts =
+    useStore((s) => s.app?.repos.find((r) => r.id === workspace.repoId)?.savedPrompts) ??
+    EMPTY_PROMPTS
   const setDraft = useStore((s) => s.setDraft)
   const promptSuggestion = useStore((s) => s.promptSuggestions[workspace.id] ?? null)
   const clearPromptSuggestion = useStore((s) => s.clearPromptSuggestion)
@@ -314,6 +321,31 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
     window.addEventListener(FOCUS_COMPOSER_EVENT, focus)
     return () => window.removeEventListener(FOCUS_COMPOSER_EVENT, focus)
   }, [])
+
+  // 대화 아무 데나 친 글자가 여기로 흘러 들어온다([[shouldRedirectTyping]]).
+  // 넣을 자리는 textarea 가 들고 있는 selectionStart 다 — 크로미움은 포커스를 잃어도 caret 을
+  // 기억하고, 초안을 막 복원해 한 번도 만지지 않은 입력창이면 끝을 가리킨다. 둘 다 원하는 자리다.
+  useEffect(() => {
+    const insert = (e: Event): void => {
+      const ch = (e as CustomEvent<string>).detail
+      const ta = taRef.current
+      // 압축 대기 등으로 입력이 잠긴 동안에는 초안만 몰래 늘어나므로 흘려보낸다.
+      if (typeof ch !== 'string' || ch === '' || !ta || ta.disabled) return
+      const current = useStore.getState().drafts[workspace.id] ?? ''
+      const at = Math.min(ta.selectionStart ?? current.length, current.length)
+      const next = at + ch.length
+      setDraft(workspace.id, current.slice(0, at) + ch + current.slice(at))
+      setCaret(next)
+      requestAnimationFrame(() => {
+        const el = taRef.current
+        if (!el) return
+        el.focus()
+        el.setSelectionRange(next, next)
+      })
+    }
+    window.addEventListener(INSERT_INTO_COMPOSER_EVENT, insert)
+    return () => window.removeEventListener(INSERT_INTO_COMPOSER_EVENT, insert)
+  }, [workspace.id, setDraft])
 
   // textarea 높이 자동 조절.
   useEffect(() => {
@@ -1394,6 +1426,15 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
               }
               className="flex-1 bg-transparent resize-none outline-none text-base leading-relaxed text-neutral-200 placeholder:text-neutral-600 py-1 disabled:cursor-not-allowed"
             />
+            <SavedPromptPicker
+              prompts={savedPrompts}
+              disabled={locked}
+              // 채우기만 한다 — 여기서 보내면 사용자가 손볼 기회 없이 턴이 시작된다.
+              onPick={(prompt) => {
+                const next = appendPrompt(text, prompt)
+                setTextAt(next, next.length)
+              }}
+            />
             {running && (
               <button
                 onClick={() => void window.api.chat.interrupt(workspace.id)}
@@ -1446,13 +1487,18 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
               const accent = readOnlyish
                 ? 'text-[var(--readonly-400)]'
                 : 'text-[var(--warning-400)]'
+              // permission-mode 힌트(lib/hints.ts)의 앵커. 예전엔 data-tour="chat" 이라 채팅
+              // 컬럼 전체(수백 px)를 가리키는 셈이었다 — 힌트 카드가 실제 컨트롤 옆이 아니라
+              // 엉뚱한 빈 자리에 뜨는 원인이었다. 권한 모드를 실제로 보여주는 이 텍스트로 좁힌다.
               return footer ? (
-                <span className={accent}>
+                <span data-tour="permission-mode" className={accent}>
                   {footer.symbol} {footer.text}{' '}
                   <span className="text-neutral-600">(shift+tab to cycle)</span>
                 </span>
               ) : (
-                <span className="text-neutral-600">shift+tab to cycle permission modes</span>
+                <span data-tour="permission-mode" className="text-neutral-600">
+                  shift+tab to cycle permission modes
+                </span>
               )
             })()
           )}
@@ -3735,3 +3781,4 @@ const EMPTY_HITS: FileHit[] = []
 const EMPTY_QUEUE: import('../store').QueuedMessage[] = []
 /** 참조 동일성 유지용 — 매 렌더마다 새 배열을 만들면 하위 memo 가 헛되이 깨진다. */
 const EMPTY_COMMANDS: CommandPanelKind[] = []
+const EMPTY_PROMPTS: SavedPrompt[] = []

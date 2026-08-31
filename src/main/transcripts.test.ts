@@ -120,3 +120,41 @@ describe('TranscriptStore.copy', () => {
     expect(t.costOf('copy-stale-target')).toBeCloseTo(0.75)
   })
 })
+
+/**
+ * 렌더러는 대화를 뒤에서부터 한 페이지씩 읽는다 — 며칠 이어 쓴 워크스페이스의 첫 페인트가
+ * 대화 전체를 이고 가지 않게 하기 위해서다. 그 창을 만드는 쪽이 여기다.
+ */
+describe('TranscriptStore.loadTail', () => {
+  it('최근 limit 개만 순서 그대로 돌려준다', async () => {
+    const { getTranscripts } = await import('./transcripts')
+    const t = getTranscripts()
+    for (let i = 0; i < 10; i++) t.upsert('ws-tail', assistant(`a${i}`))
+
+    expect(t.loadTail('ws-tail', 3).map((item) => item.id)).toEqual(['a7', 'a8', 'a9'])
+  })
+
+  it('가진 것보다 많이 요청하면 전부 준다 — 이 "적게 왔다" 가 곧 더 없다는 신호다', async () => {
+    const { getTranscripts } = await import('./transcripts')
+    const t = getTranscripts()
+    for (let i = 0; i < 4; i++) t.upsert('ws-short', assistant(`a${i}`))
+
+    expect(t.loadTail('ws-short', 300)).toHaveLength(4)
+  })
+
+  it('없는 워크스페이스는 빈 배열이다', async () => {
+    const { getTranscripts } = await import('./transcripts')
+    expect(getTranscripts().loadTail('ws-none', 300)).toEqual([])
+  })
+
+  it('같은 id 가 갱신된 뒤에도 꼬리는 합쳐진 결과 기준이다', async () => {
+    const { getTranscripts } = await import('./transcripts')
+    const t = getTranscripts()
+    for (let i = 0; i < 5; i++) t.upsert('ws-merge', assistant(`a${i}`))
+    t.upsert('ws-merge', { ...assistant('a0'), text: '고쳐 쓴 내용' } as ChatItem)
+
+    // 같은 id 의 마지막 줄이 이기되 첫 등장 순서를 지키므로 개수는 그대로다.
+    expect(t.loadTail('ws-merge', 5)).toHaveLength(5)
+    expect(t.loadTail('ws-merge', 2).map((item) => item.id)).toEqual(['a3', 'a4'])
+  })
+})
