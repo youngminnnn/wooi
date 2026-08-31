@@ -8,6 +8,10 @@ import { launchWooi, withScratchRepo } from '../harness.mjs'
 const ROOT = '/tmp/wooi-e2e-status-skills-hooks'
 // shots 를 루트 밖에 둔다 — 루트는 끝나면 통째로 지워져 PNG 가 함께 사라진다.
 const SHOTS = '/tmp/wooi-shots-status-skills-hooks'
+// 유저 스코프 설정을 빈 디렉터리로 돌린다. 이게 없으면 /hooks 가 이 스펙을 돌리는 사람의 진짜
+// ~/.claude/settings.json 을 읽어, 훅을 하나라도 쓰는 개발자 머신에서는 "빈 상태" 단언이 항상
+// 깨진다. HOME 자체는 덮을 수 없다 — 하네스가 로그인 셸의 backend 감지 때문에 지켜 낸다.
+const CONFIG_DIR = '/tmp/wooi-e2e-status-skills-hooks-config'
 
 /**
  * /status·/skills·/hooks 카드. 셋 다 CLI TUI 전용(local-jsx) 명령이라 그냥 메시지로 보내면
@@ -77,7 +81,12 @@ export default async function 새_명령_카드_셋이_실제_앱에서_뜬다()
       seed: (scratch) => seedAppState(scratch, { transcript })
     },
     async (scratch) => {
-      const wooi = await launchWooi({ appDir: process.cwd(), ...scratch, shotsPath: SHOTS })
+      const wooi = await launchWooi({
+        appDir: process.cwd(),
+        ...scratch,
+        shotsPath: SHOTS,
+        env: { CLAUDE_CONFIG_DIR: CONFIG_DIR }
+      })
       try {
         await openSeededWorkspace(wooi.win)
         await wooi.win.locator('textarea[placeholder^="Message your agent"]').waitFor()
@@ -85,7 +94,8 @@ export default async function 새_명령_카드_셋이_실제_앱에서_뜬다()
         // ── /hooks — Query 를 열지 않고 settings.json 만 읽는다 ─────────────────
         {
           const { text } = await runCommandCard(wooi.win, '/hooks')
-          // 스크래치 워크트리에는 .claude/settings.json 이 없다 → 빈 상태 문구가 떠야 한다.
+          // 스크래치 워크트리에도, CLAUDE_CONFIG_DIR 로 돌린 유저 스코프에도 settings.json 이
+          // 없다 → 빈 상태 문구가 떠야 한다.
           expectIncludes(text, 'No hooks configured', '/hooks empty state')
           console.log(`[e2e] screenshot=${await wooi.shot('card-hooks')}`)
           await closeCard(wooi.win)
