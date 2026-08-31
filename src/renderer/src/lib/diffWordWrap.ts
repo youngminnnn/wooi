@@ -15,7 +15,7 @@
 export interface DiffWrapClasses {
   /** hunk 본문을 감싸는 상자. 랩을 끄면 여기가 가로 스크롤을 맡는다. */
   body: string
-  /** `@@ ... @@` 머리글. 가로로 밀어도 왼쪽에 붙어 있게 한다. */
+  /** `@@ ... @@` 머리글. */
   hunkHeader: string
   /** 한 행. 랩을 끄면 내용만큼 넓어지되 최소한 화면 폭은 채운다. */
   row: string
@@ -26,7 +26,7 @@ export interface DiffWrapClasses {
 }
 
 /**
- * 랩 켜짐 — 지금까지의 모습 그대로. 가로 스크롤이 없으므로 `sticky` 도 필요 없다.
+ * 랩 켜짐 — 지금까지의 모습 그대로. 가로 스크롤이 없다.
  *
  * `break-all` 은 공백 없는 긴 토큰(해시·base64)도 접기 위한 것이다.
  */
@@ -45,15 +45,18 @@ const WRAPPED: DiffWrapClasses = Object.freeze({
  * 끝나 버려, 그 오른쪽 빈자리에서는 hover 가 안 잡히고(=드래그로 범위를 못 늘린다) 선택 배경도
  * 중간에서 끊긴다. `min-w-full` 로 최소한 화면 폭까지 늘려 두면 두 문제가 함께 사라진다.
  *
- * 머리글과 코멘트 자리는 `sticky left-0` 로 왼쪽에 붙여 둔다 — 오른쪽으로 밀어 놓은 채 코멘트를
- * 쓰려는데 입력 상자가 화면 밖에 있으면 곤란하다.
+ * **머리글과 코멘트 자리를 `sticky left-0` 로 왼쪽에 붙여 두지 않는다.** 그렇게 써 봤지만 실제로는
+ * 붙지 않는다 — 이것들을 담은 hunk 묶음 `<div>`(F7 의 이동 단위인 DiffChangeAnchor)가 스크롤
+ * 뷰포트와 같은 폭이라, 그 안에서 sticky 가 미끄러질 여지가 0 이다. 붙게 하려면 그 묶음을 콘텐츠
+ * 폭까지 넓혀야 하는데 그건 다른 기능의 컴포넌트다. 붙는 척만 하는 클래스를 남기느니 뺀다
+ * (e2e 가 실제로 -300px 밀리는 것을 잡아냈다). 가로로 민 김에 왼쪽 것도 보고 싶으면 되돌리면 된다.
  */
 const UNWRAPPED: DiffWrapClasses = Object.freeze({
   body: 'bg-[var(--code-bg)] text-xs font-mono leading-[1.45] overflow-x-auto',
-  hunkHeader: 'sticky left-0 px-3 py-1 text-[var(--diff-hunk)] bg-[var(--surface)]/40',
+  hunkHeader: 'px-3 py-1 text-[var(--diff-hunk)] bg-[var(--surface)]/40',
   row: 'group/row flex w-max min-w-full',
   code: 'whitespace-pre pr-3',
-  aside: 'sticky left-0'
+  aside: ''
 })
 
 /** 지금 랩 설정에 맞는 클래스 묶음. 같은 입력에는 같은 참조를 돌려준다. */
