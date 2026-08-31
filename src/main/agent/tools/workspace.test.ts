@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { z } from 'zod'
 import type { AgentToolDeps } from './registry'
-import type { AppSettings, ModelOption, Repo, Workspace } from '@shared/types'
+import type { AgentBackendMeta, AppSettings, ModelOption, Repo, Workspace } from '@shared/types'
 import { DEFAULT_SETTINGS } from '../../storeSchema'
 import { AGENT_TOOLS } from './catalog'
 
@@ -36,7 +36,16 @@ const sendMessage = vi.fn()
 // 모델 목록은 백엔드에 물어봐야 알 수 있다 — 빈 목록은 "알 수 없다" 라서 검증을 건너뛴다.
 const listModels = vi.fn<(backend: string) => Promise<ModelOption[]>>()
 const broadcastState = vi.fn()
-const deps = { scripts: {}, sendMessage, listModels, broadcastState } as unknown as AgentToolDeps
+// agentBackend 를 생략하면(대부분의 경우) 전역 기본값이 지금 감지된 목록에 있는지 여기로
+// 확인한다(`usableDefaultBackend`). 둘 다 available 로 둬 기존 동작(그대로 claude)을 유지한다.
+const listBackends = vi.fn<() => Promise<AgentBackendMeta[]>>()
+const deps = {
+  scripts: {},
+  sendMessage,
+  listModels,
+  broadcastState,
+  listBackends
+} as unknown as AgentToolDeps
 
 const repo: Partial<Repo> = { id: 'repo-1', name: 'wooi', path: '/src/wooi', defaultBranch: 'main' }
 
@@ -97,6 +106,10 @@ beforeEach(() => {
   state.repos = [{ ...repo }, { ...otherRepo }]
   state.settings = { ...DEFAULT_SETTINGS }
   listModels.mockResolvedValue([{ id: 'claude-opus-5[1m]', label: 'Opus 5' }])
+  listBackends.mockResolvedValue([
+    { id: 'claude', available: true } as AgentBackendMeta,
+    { id: 'codex', available: true } as AgentBackendMeta
+  ])
   clean.mockResolvedValue(true)
   create.mockResolvedValue({ workspaceId: 'ws-new', name: 'feat/other', branch: 'feat/other' })
   // 아카이브는 결과 객체를 돌려준다 — 스크립트가 실패했을 때만 내용이 찬다.

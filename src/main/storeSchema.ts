@@ -26,7 +26,7 @@ const DEFAULT_MODEL = CLAUDE_DEFAULT_MODEL
  * 디스크 영속 형식의 현재 스키마 버전. 영속 데이터 모양이 바뀔 때마다 1 올리고,
  * MIGRATIONS 에 직전 버전 → 새 버전 변환 함수를 추가한다.
  */
-export const CURRENT_SCHEMA_VERSION = 24
+export const CURRENT_SCHEMA_VERSION = 25
 
 /**
  * v12 이하의 settings 모양. 그 시절엔 에이전트가 Claude 하나뿐이라 모델·effort·fast mode·
@@ -95,6 +95,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
   // 옵트인으로 숨겨 둘 이유가 없다. 기존 사용자도 load 의 기본값 병합으로 켜진 상태가 되므로
   // schemaVersion 을 올릴 필요가 없다.
   showRunningAgents: true,
+  // 점진적 힌트는 기본 켜짐 — 예전 일괄 투어가 하던 소개를 대신하는 것이라, 이 필드가 없던
+  // 버전에서 올라온 사용자에게도 똑같이 보여야 한다. schemaVersion 을 올려 마이그레이션에서도
+  // 명시적으로 채운다(showRunningAgents 와 달리 — plan 이 명시적인 회귀 가드를 요구했다).
+  showHints: true,
   // CLI 와 동일하게 자동 압축을 기본 켜둔다(autoCompactEnabled). 압축을 트리거하는 임계치는
   // Claude Code 가 모델별로 알려주는 값을 그대로 쓴다(session.ts 의 overAutoCompactThreshold).
   autoCompact: true,
@@ -451,7 +455,17 @@ export const MIGRATIONS: Array<(raw: Record<string, unknown>) => Record<string, 
   },
   // v23 → v24: 완료 응답의 미확인 배지를 앱 재시작 뒤에도 복원한다. 과거에는 렌더러 메모리에만
   // 살아 기존 파일에서 옮겨 올 값이 없으므로 빈 목록으로 시작한다.
-  (raw) => ({ ...raw, unreadWorkspaceIds: [] })
+  (raw) => ({ ...raw, unreadWorkspaceIds: [] }),
+
+  // v24 → v25: 점진적 온보딩 힌트를 끄는 전역 스위치(showHints) 도입. 기존 사용자도 기본
+  // 켜짐으로 시작한다 — 이 필드가 없던 버전에서 올라온 사람에게도 예전 일괄 투어를 대신하는
+  // 안내이니 똑같이 보여야 한다. settings 외에는 아무것도 건드리지 않는다(v5→v6 이 onboarded
+  // 를 실수로 초기화했던 사고를 storeSchema.test.ts 가 회귀로 걸어 둔 것과 같은 이유).
+  (raw) => {
+    const settings = { ...((raw.settings as Partial<AppSettings>) ?? {}) }
+    settings.showHints = true
+    return { ...raw, settings }
+  }
 ]
 
 /**

@@ -515,6 +515,22 @@ export const AGENT_BACKEND_IDS: AgentBackendId[] = ['claude', 'codex']
 export const DEFAULT_AGENT_BACKEND: AgentBackendId = 'claude'
 
 /**
+ * 저장된 기본 에이전트가 지금 쓸 수 있는지 보고, 아니면 쓸 수 있는 것으로 바꿔 돌려준다.
+ *
+ * `available`이 비어 있으면(감지가 실패했거나 아직 못 물어봤으면) `configured`를 그대로 돌려준다
+ * — 일시적인 감지 실패를 사용자가 저장해 둔 선택을 지우는 사고로 바꾸지 않기 위해서다.
+ * `configured`가 `available`에 있으면 그대로, 없으면(그 CLI 를 지운 등) 등록 순서상 첫 번째로
+ * 바꿔 보여준다. **저장값 자체는 건드리지 않는다** — 이 함수는 읽는 시점에만 보정한다.
+ */
+export function usableDefaultBackend(
+  configured: AgentBackendId,
+  available: AgentBackendId[]
+): AgentBackendId {
+  if (available.length === 0) return configured
+  return available.includes(configured) ? configured : available[0]
+}
+
+/**
  * 백엔드의 사람이 읽는 이름. 브랜드 마크(SVG)는 렌더러가 갖지만 이름은 도메인 메타데이터라
  * 여기 둔다(main 의 로그·알림에서도 같은 표기를 쓸 수 있다).
  *
@@ -1324,6 +1340,15 @@ export interface AppSettings {
    * 반영되고, 다시 켜면 지금 돌고 있는 것이 바로 나타난다(추적을 껐다면 다음 턴까지 빈 목록이 된다).
    */
   showRunningAgents: boolean
+  /**
+   * 점진적 온보딩 힌트(기능에 실제로 도달한 순간에 뜨는 작은 안내 카드, `lib/hints.ts`)를
+   * 보여줄지. 기본 켜짐.
+   *
+   * `uiFlags.ts` 가 아니라 여기 두는 이유는 그 파일 헤더의 구분 기준 그대로다 — 힌트 하나하나를
+   * 봤는지·닫았는지는 기기 로컬 UI 기억이지만, "힌트 자체를 원치 않는다" 는 것은 사용자가 내린
+   * 결정이라 다른 기기에서도, 재설치 후에도 이어져야 한다.
+   */
+  showHints: boolean
   /**
    * Claude Code CLI 처럼, 한 턴이 끝났을 때 컨텍스트 사용량이 임계치를 넘으면 대화를
    * 자동으로 압축(/compact)한다. 끄면 사용량만 표시하고 압축은 수동(/compact)으로만.

@@ -42,6 +42,7 @@ import FeatureTour from './components/FeatureTour'
 import GithubConnectModal from './components/GithubConnectModal'
 import Toaster from './components/Toaster'
 import ConfirmDialog from './components/ConfirmDialog'
+import Hint from './components/Hint'
 import Logo from './components/Logo'
 import ClaudeLoginModal from './components/ClaudeLoginModal'
 import CodexLoginModal from './components/CodexLoginModal'
@@ -747,6 +748,13 @@ export default function App(): React.JSX.Element {
       {configRepoId && (
         <RepoConfigModal repoId={configRepoId} onClose={() => setConfigRepoId(null)} />
       )}
+
+      {/* 점진적 힌트 호스트는 앱 전체에 하나만, 항상 마운트해 둔다(lib/hints.ts). 모달이 하나라도
+          떠 있으면(설정·투어·퀵스위처… 온보딩도 anyModalOpen 안에 포함된다) 뭘 가리키든 그
+          모달 뒤에 깔려 안 보이므로 렌더를 꺼야 하지만, **마운트 자체는 건드리지 않는다** —
+          Settings 를 열었다 닫을 때마다 리마운트되면 세션 카운터(이번 세션에 몇 개를 소개했는지)
+          가 그때마다 리셋된다. 대신 anyModalOpen 을 prop 으로 넘겨 Hint 내부에서 렌더만 끈다. */}
+      <Hint anyModalOpen={anyModalOpen} />
 
       <Toaster />
       <ConfirmDialog />

@@ -3,6 +3,7 @@ import {
   normalizeWorkspaceName,
   notificationSkipReason,
   sanitizeAgentEnv,
+  usableDefaultBackend,
   workspaceDisplayName
 } from './types'
 
@@ -167,5 +168,19 @@ describe('notificationSkipReason', () => {
   it('포커스 억제가 미지원보다 먼저다 — 어차피 안 띄울 것의 이유로는 앞이 더 정확하다', () => {
     const input = { ...base, appFocused: true, viewingWorkspaceId: 'w1', supported: false }
     expect(notificationSkipReason(input)).toBe('suppressed-focus')
+  })
+})
+
+describe('usableDefaultBackend', () => {
+  it('저장된 값이 쓸 수 있는 목록에 있으면 그대로 돌려준다', () => {
+    expect(usableDefaultBackend('codex', ['claude', 'codex'])).toBe('codex')
+  })
+
+  it('저장된 값을 쓸 수 없으면(그 CLI 를 지운 등) 쓸 수 있는 첫 번째로 바꾼다', () => {
+    expect(usableDefaultBackend('claude', ['codex'])).toBe('codex')
+  })
+
+  it('쓸 수 있는 목록이 비어 있으면(감지 실패) 저장된 값을 건드리지 않는다', () => {
+    expect(usableDefaultBackend('claude', [])).toBe('claude')
   })
 })

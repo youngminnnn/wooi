@@ -377,6 +377,34 @@ describe('v23 → v24 (미확인 워크스페이스 영속)', () => {
   })
 })
 
+describe('v24 → v25 (힌트 스위치 도입)', () => {
+  const v24File = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
+    schemaVersion: 24,
+    repos: [],
+    workspaces: [],
+    settings: {
+      onboarded: true,
+      pickedDefaults: true,
+      acceptedTermsVersion: 1
+    },
+    ...overrides
+  })
+
+  it('showHints 를 기본 켜짐으로 채운다', () => {
+    const out = migrate(v24File(), 24)
+    expect(settingsOf(out).showHints).toBe(true)
+  })
+
+  // v5 → v6 은 의도치 않게 onboarded 를 초기화했었다 — 그 사고를 반복하지 않기 위한 가드다.
+  it('기존 온보딩 상태를 건드리지 않는다', () => {
+    const out = migrate(v24File(), 24)
+    const settings = settingsOf(out)
+    expect(settings.onboarded).toBe(true)
+    expect(settings.pickedDefaults).toBe(true)
+    expect(settings.acceptedTermsVersion).toBe(1)
+  })
+})
+
 describe('레거시 파일 전체 경로', () => {
   it('v0(버전 필드 없음) 파일을 현재 스키마까지 끝까지 변환한다', () => {
     const legacy = {

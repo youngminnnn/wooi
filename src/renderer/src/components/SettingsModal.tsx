@@ -454,6 +454,16 @@ function GeneralPage({
             onChange={(value) => save({ showRunningAgents: value })}
           />
         </SettingRow>
+        <SettingRow
+          title="Show tips"
+          description="Small cards that point out a feature the moment you're about to need it (e.g. opening a pull request)."
+        >
+          <Switch
+            label="Show tips"
+            checked={settings.showHints}
+            onChange={(value) => save({ showHints: value })}
+          />
+        </SettingRow>
       </SettingGroup>
       <SettingGroup title="Workspace creation">
         <SettingRow
@@ -483,6 +493,8 @@ function AgentsPage({
 }): React.JSX.Element {
   const availableBackends = useAvailableBackends()
   const [editing, setEditing] = useState<AgentBackendId>(settings.defaultAgentBackend)
+  // 저장값이 지금 못 쓰는 백엔드를 가리킬 때(그 CLI 를 지운 등) 그 사실을 한 줄로 알리는 데 쓴다.
+  const savedDefaultMeta = useBackend(settings.defaultAgentBackend)
   // Solo/팀은 여기서 고르지 않는다. 새 워크스페이스는 언제나 Solo 로 시작하고, 팀은 필요해지는
   // 순간 그 워크스페이스에서 켠다 — 만들기도 전에 정하게 하면 사용자가 가장 모르는 때에 고르게
   // 하는 셈이다([[main/workspaces]] createWorkspace).
@@ -502,7 +514,7 @@ function AgentsPage({
       title="Agents"
       description="Defaults for new workspaces. Existing workspaces keep their current agent and can override model settings."
     >
-      {availableBackends.length > 1 && (
+      {availableBackends.length > 1 ? (
         <SettingGroup title="Default agent">
           <SettingRow
             title="Agent"
@@ -525,6 +537,26 @@ function AgentsPage({
             </select>
           </SettingRow>
         </SettingGroup>
+      ) : (
+        availableBackends.length === 1 && (
+          // 하나만 연결됐으면 고를 게 없다 — 그래도 어떤 에이전트가 기본인지는 보여준다
+          // (전엔 이 그룹 자체가 숨어서 단일 에이전트 사용자는 이 설정의 존재조차 몰랐다).
+          <SettingGroup title="Default agent">
+            <SettingRow
+              title="Agent"
+              description={
+                settings.defaultAgentBackend === availableBackends[0].id
+                  ? 'Each workspace stays with the agent it was created with.'
+                  : `Saved default was ${savedDefaultMeta?.label ?? settings.defaultAgentBackend} — using ${availableBackends[0].label} since that's the only agent connected.`
+              }
+            >
+              <span className="text-sm text-neutral-300">
+                {availableBackends[0].label}
+                <span className="text-neutral-600"> · the only agent connected</span>
+              </span>
+            </SettingRow>
+          </SettingGroup>
+        )
       )}
 
       <div className="flex items-center justify-between">

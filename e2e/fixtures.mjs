@@ -46,7 +46,13 @@ export async function seedAppState(
     unreadWorkspaceIds = [],
     // "물려받았다" 를 확인하는 스펙은 기본값과 **다른** 값에서 출발해야 한다 — 기본값 그대로면
     // 상속했는지 전역 기본을 다시 읽었는지 구별되지 않는다.
-    workspace: workspaceOverrides = {}
+    workspace: workspaceOverrides = {},
+    // 이 시드는 온보딩을 건너뛰는 것이 기본이다(대부분의 스펙은 앱 안쪽을 본다). 첫 실행
+    // 온보딩 자체를 검증하는 스펙만 이것을 켜서 세 플래그를 **아예 쓰지 않는다** — false 로
+    // 적어 두는 것과 다르다. acceptedTermsVersion 은 숫자 비교라 키가 없어야 null 로 읽힌다.
+    firstRun = false,
+    // 기본값 위에 얹을 설정. 힌트처럼 "특정 설정 조합에서만 뜨는" UI 를 만들 때 쓴다.
+    settings: settingsOverrides = {}
   } = {}
 ) {
   const root = resolve(appDir)
@@ -124,9 +130,10 @@ export async function seedAppState(
         fanoutGroups: [],
         reviews: [],
         settings: {
-          onboarded: true,
-          pickedDefaults: true,
-          acceptedTermsVersion: termsVersion
+          ...(firstRun
+            ? {}
+            : { onboarded: true, pickedDefaults: true, acceptedTermsVersion: termsVersion }),
+          ...settingsOverrides
         }
       },
       null,

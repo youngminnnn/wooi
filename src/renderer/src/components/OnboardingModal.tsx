@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import IntegrationsPanel from './IntegrationsPanel'
-import FeatureTour from './FeatureTour'
 import PreferencesStep from './PreferencesStep'
 import Logo from './Logo'
 import { primaryBtn } from './Modal'
@@ -9,11 +8,16 @@ import { CURRENT_TERMS_VERSION, hasAnyAgent } from '@shared/types'
 import type { AppSettings } from '@shared/types'
 import { WOOI_URLS } from '../lib/externalLinks'
 
-type Step = 'consent' | 'integrations' | 'features' | 'preferences'
+type Step = 'consent' | 'integrations' | 'preferences'
 
 /**
  * 최초 실행 온보딩. 첫 단계로 약관·개인정보처리방침 동의를 강제하고(미동의 시 진행 불가),
- * 동의가 끝나면 계정 연결(AI 제공자/GitHub) → 주요 기능 소개 투어 → 기본값 고르기로 이어진다.
+ * 동의가 끝나면 계정 연결(AI 제공자/GitHub) → 기본값 고르기로 이어진다.
+ *
+ * 예전엔 여기 사이에 기능을 일괄 소개하는 투어가 있었다. 리포도 워크스페이스도 없는 상태에서
+ * work panel·⌘J·PR 리뷰를 한꺼번에 듣는 건 와닿지 않아 뺐다 — 그 소개는 이제 사용자가 각
+ * 기능에 실제로 닿는 순간으로 흩어져 있다. 투어 자체는 Settings → About 에서 여전히 돌 수
+ * 있다(`FeatureTour`).
  *
  * 각 단계는 독립적으로 필요 여부를 판단한다 — 약관 버전이 올라가 재동의만 필요한 경우엔 동의만,
  * 기본값 고르기가 추가되기 전부터 쓰던 기존 사용자에게는 그 단계만 보여준다.
@@ -38,9 +42,9 @@ export default function OnboardingModal({
     else if (needsDefaults) setStep('preferences')
   }
 
-  // 투어를 마치거나 건너뛰면 기본값 고르기로. 이미 골라 둔 사용자(투어 재실행이 아닌 재동의 흐름 등)는
-  // 여기서 바로 온보딩을 끝낸다.
-  const finishTour = (): void => {
+  // 연결을 마치거나 건너뛰면 기본값 고르기로. 이미 골라 둔 사용자(재동의 흐름 등)는 여기서
+  // 바로 온보딩을 끝낸다.
+  const finishIntegrations = (): void => {
     if (needsDefaults) setStep('preferences')
     else void window.api.settings.update({ onboarded: true })
   }
@@ -52,13 +56,6 @@ export default function OnboardingModal({
 
   if (step === 'preferences') {
     return <PreferencesStep onDone={finishOnboarding} />
-  }
-
-  // 기능 투어는 실제 화면을 스포트라이트하는 전체 화면 단계라 위 모달 껍데기를 쓰지 않는다.
-  if (step === 'features') {
-    return (
-      <FeatureTour firstRun onDone={finishTour} doneLabel={needsDefaults ? 'Next' : undefined} />
-    )
   }
 
   return (
@@ -77,7 +74,7 @@ export default function OnboardingModal({
         {step === 'consent' ? (
           <ConsentStep onContinue={acceptConsent} />
         ) : (
-          <IntegrationsStep onDone={() => setStep('features')} />
+          <IntegrationsStep onDone={finishIntegrations} />
         )}
       </div>
     </div>
@@ -173,7 +170,8 @@ function IntegrationsStep({ onDone }: { onDone: () => void }): React.JSX.Element
         <p className="mb-3 text-sm text-neutral-500 text-center leading-relaxed">
           Connect a coding agent to get started — Claude Code or Codex, whichever you have. GitHub
           is optional; you only need it for pull requests and stacked branches. You can change these
-          anytime in Settings → Integrations.
+          anytime in Settings → Integrations. If you connect both, the next step lets you pick which
+          one runs by default.
         </p>
         <IntegrationsPanel />
       </div>

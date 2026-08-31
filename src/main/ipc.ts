@@ -122,6 +122,7 @@ import {
   isBranchStack,
   normalizePermissionMode,
   reorderById,
+  usableDefaultBackend,
   workspaceStack
 } from '@shared/types'
 import {
@@ -2643,7 +2644,14 @@ export function registerIpc(ctx: IpcContext): void {
       const repo = repoFor(args.repoId)
       if (!repo) return { error: '리포를 찾을 수 없습니다.' }
       const settings = store.getState().settings
-      const agentBackend = args.agentBackend ?? settings.defaultAgentBackend
+      // 인자로 이미 정해졌으면 listBackends() 를 부르지 않는다 — 감지는 셸을 거쳐 CLI 를
+      // 하나씩 찔러 보는 왕복이라(`shell.ts`), 전역 기본값으로 떨어질 때만 치른다.
+      const agentBackend = args.agentBackend
+        ? args.agentBackend
+        : usableDefaultBackend(
+            settings.defaultAgentBackend,
+            (await ctx.sessions.listBackends()).filter((b) => b.available).map((b) => b.id)
+          )
       // 모델·effort 는 고른 에이전트의 전역 기본값을 따른다(백엔드마다 모델 ID 가 다르므로
       // 다른 백엔드의 값을 흘리면 CLI 가 거부한다).
       const defaults = agentSettingsFor(settings, agentBackend)
@@ -2718,7 +2726,13 @@ export function registerIpc(ctx: IpcContext): void {
     const state = store.getState()
     // 후속 턴은 리뷰를 시작한 그 에이전트로 이어진다 — 세션 id 가 그 백엔드에서만 유효하다.
     const review = state.reviews.find((r) => r.id === reviewId)
-    const backend = review?.agentBackend ?? state.settings.defaultAgentBackend
+    // 옛 리뷰라 agentBackend 기록이 없을 때만 listBackends() 를 부른다 — 있으면 그대로 쓴다.
+    const backend = review?.agentBackend
+      ? review.agentBackend
+      : usableDefaultBackend(
+          state.settings.defaultAgentBackend,
+          (await ctx.sessions.listBackends()).filter((b) => b.available).map((b) => b.id)
+        )
     const defaults = agentSettingsFor(state.settings, backend)
     // 모델·강도도 시작할 때 고른 것으로 이어 간다. 옛 레코드에는 없으므로 그때는 전역 기본값
     // (지금까지의 동작)으로 떨어진다.
