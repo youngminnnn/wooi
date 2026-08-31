@@ -69,7 +69,13 @@ import {
   type DiffComment,
   type DiffCommentAnchor
 } from './lib/diffComments'
-import { popWorkspaceHistory, pushWorkspaceHistory } from './lib/workspaceHistory'
+import { dropReopenable, nextReopenable, pushReopenable } from './lib/reopenArchived'
+import {
+  forwardAfterSelect,
+  navigateWorkspaceHistory,
+  popWorkspaceHistory,
+  pushWorkspaceHistory
+} from './lib/workspaceHistory'
 import {
   hasMoreTranscriptHistory,
   nextTranscriptLimit,
@@ -451,6 +457,13 @@ interface UIState {
   archiveWorkspace: (
     workspaceId: string
   ) => Promise<{ archiveScriptFailure?: ArchiveScriptFailure }>
+  /**
+   * ⇧⌘T 로 다시 열 수 있는, 최근 아카이브한 워크스페이스들(오래된 것이 앞).
+   * 영구 삭제는 되살릴 수 없으므로 여기 쌓이지 않는다.
+   */
+  reopenableArchives: string[]
+  /** ⇧⌘T — 가장 최근에 아카이브한 워크스페이스를 되살려 연다. */
+  reopenLastArchivedWorkspace: () => Promise<void>
   /** 마지막 일괄 아카이브. 바로 뒤의 ⌘Z 또는 토스트 Undo 로만 한 번 복원한다. */
   undoableArchive: { workspaceIds: string[]; at: number } | null
   /** 한 리포에서 PR 이 병합된 활성 워크스페이스를 재확인 후 일괄 아카이브한다. */
@@ -573,12 +586,17 @@ interface UIState {
   reportCascade: (cascade: StackCascadeResult, successMsg: string) => void
   /** 방문 순서 스택(브라우저 뒤로가기용). 현재 선택은 포함하지 않고, 오래된 것이 앞이다. */
   workspaceHistory: string[]
+  /** ⌘[ 로 떠나온 워크스페이스들. ⌘] 가 여기서 꺼내 되짚어 간다. */
+  workspaceForward: string[]
   /**
-   * @param opts.fromHistory 뒤로가기로 인한 선택 — 방문 스택에 다시 쌓지 않는다.
+   * @param opts.fromHistory 뒤/앞으로 가기로 인한 선택 — 방문 스택에 다시 쌓지 않고,
+   * 앞쪽 이력도 버리지 않는다.
    */
   selectWorkspace: (id: string | null, opts?: { fromHistory?: boolean }) => Promise<void>
   /** ⌘[ — 직전에 보던 워크스페이스로 돌아간다(브라우저 뒤로가기). */
   goBackWorkspace: () => Promise<void>
+  /** ⌘] — 뒤로 온 길을 되짚어 앞으로 간다. */
+  goForwardWorkspace: () => Promise<void>
   refreshGit: (workspaceId: string) => Promise<void>
   /** 진입 여부와 무관하게 모든(비아카이브) 워크스페이스의 git 상태를 한 번에 갱신한다. */
   refreshAllGit: () => Promise<void>
@@ -900,6 +918,7 @@ export const useStore = create<UIState>((set, get) => ({
   app: null,
   selectedWorkspaceId: null,
   workspaceHistory: [],
+  workspaceForward: [],
   transcripts: {},
   loadedTranscripts: {},
   transcriptPaging: {},
@@ -951,6 +970,7 @@ export const useStore = create<UIState>((set, get) => ({
   },
   pending: [],
   archivingWorkspaces: {},
+  reopenableArchives: [],
   undoableArchive: null,
   activeReviewId: null,
   activeFanoutGroupId: null,
@@ -965,6 +985,8 @@ export const useStore = create<UIState>((set, get) => ({
     }))
     try {
       const result = await window.api.workspace.archive(workspaceId)
+      // ⇧⌘T 가 되짚을 수 있게 쌓는다. 아카이브는 worktree 만 지우므로 되돌릴 수 있다.
+      set((s) => ({ reopenableArchives: pushReopenable(s.reopenableArchives, workspaceId) }))
       // archive script 가 도는 동안 사용자가 다른 워크스페이스로 이동할 수 있다. 완료 시점에도
       // 아카이브한 워크스페이스를 보고 있을 때만 Overview 로 나가야 새 선택을 덮어쓰지 않는다.
       if (get().selectedWorkspaceId === workspaceId) void get().selectWorkspace(null)
@@ -1068,6 +1090,30 @@ export const useStore = create<UIState>((set, get) => ({
     } else {
       get().pushToast('success', `Restored ${plural(restored, 'workspace')}.`)
     }
+  },
+
+  reopenLastArchivedWorkspace: async () => {
+    const s = get()
+    // 그 사이 영구 삭제됐거나 사이드바에서 이미 되살린 것은 다시 열 대상이 아니다.
+    const reopenable = new Set((s.app?.workspaces ?? []).filter((w) => w.archived).map((w) => w.id))
+    const { target, stack } = nextReopenable(s.reopenableArchives, reopenable)
+    set({ reopenableArchives: stack })
+    if (!target) {
+      s.pushToast('info', 'No recently archived workspace to reopen.')
+      return
+    }
+    const res = await window.api.workspace
+      .unarchive(target)
+      .catch((err) => ({ error: err instanceof Error ? err.message : String(err) }) as const)
+    if ('error' in res && res.error) {
+      get().pushToast('error', `Could not reopen the workspace — ${res.error}`)
+      return
+    }
+    // 언아카이브는 worktree 를 새로 만든다 — 전달이 다시 일어나므로 실패도 다시 본다.
+    if ('carryFailures' in res) get().reportCarryFailures(res.carryFailures)
+    const repoId = get().app?.workspaces.find((w) => w.id === target)?.repoId
+    if (repoId && 'carryMissing' in res) get().reportCarryMissing(repoId, res.carryMissing)
+    await get().selectWorkspace(target)
   },
 
   undoLastWorkspaceAction: async () => {
@@ -2051,6 +2097,8 @@ export const useStore = create<UIState>((set, get) => ({
     const { archiveScriptFailure } = await window.api.workspace.remove(workspaceId, true)
     get().reportArchiveScriptFailure(archiveScriptFailure)
     if (get().undoableCreate?.workspaceId === workspaceId) set({ undoableCreate: null })
+    // 브랜치와 이력까지 지운 것은 되살릴 수 없다 — ⇧⌘T 가 시도하지 못하게 뺀다.
+    set((s) => ({ reopenableArchives: dropReopenable(s.reopenableArchives, workspaceId) }))
     if (!wasSelected) return
 
     // 보고 있던 워크스페이스가 사라졌으니 ⌘[ 와 같은 규칙으로 직전에 보던 곳으로 돌아간다.
@@ -2331,14 +2379,29 @@ export const useStore = create<UIState>((set, get) => ({
         id,
         opts?.fromHistory
       )
+      // 뒤로 간 뒤 새 워크스페이스로 옮기면 앞쪽 가지는 버린다(브라우저 관례).
+      const workspaceForward = forwardAfterSelect(s.workspaceForward, !!opts?.fromHistory)
       // fan-out 비교 화면도 리뷰와 같은 자리를 쓴다 — 워크스페이스를 고르는 것은 "그 화면에서
       // 나온다" 는 뜻이다(그룹 자체는 남아 사이드바에서 다시 열 수 있다).
       const closed = { activeReviewId: null, activeFanoutGroupId: null }
       if (!id || !s.unread[id])
-        return { selectedWorkspaceId: id, ...closed, fileViewer, workspaceHistory }
+        return {
+          selectedWorkspaceId: id,
+          ...closed,
+          fileViewer,
+          workspaceHistory,
+          workspaceForward
+        }
       const unread = { ...s.unread }
       delete unread[id]
-      return { selectedWorkspaceId: id, unread, ...closed, fileViewer, workspaceHistory }
+      return {
+        selectedWorkspaceId: id,
+        unread,
+        ...closed,
+        fileViewer,
+        workspaceHistory,
+        workspaceForward
+      }
     })
 
     // 별도 창으로 떼어 둔 패널은 메인 창의 선택을 따라간다 — 보조 모니터의 작업 패널이 다른
@@ -2380,12 +2443,27 @@ export const useStore = create<UIState>((set, get) => ({
       return
     }
     const alive = new Set((s.app?.workspaces ?? []).filter((w) => !w.archived).map((w) => w.id))
-    const { target, history } = popWorkspaceHistory(
-      s.workspaceHistory,
+    const { target, back, forward } = navigateWorkspaceHistory(
+      { back: s.workspaceHistory, forward: s.workspaceForward },
       s.selectedWorkspaceId,
-      alive
+      alive,
+      'back'
     )
-    set({ workspaceHistory: history })
+    set({ workspaceHistory: back, workspaceForward: forward })
+    if (target) await get().selectWorkspace(target, { fromHistory: true })
+  },
+
+  goForwardWorkspace: async () => {
+    const s = get()
+    // 앞으로가기에는 리뷰 화면 같은 "한 겹 위" 가 없다 — ⌘[ 로 떠나온 워크스페이스만 되짚는다.
+    const alive = new Set((s.app?.workspaces ?? []).filter((w) => !w.archived).map((w) => w.id))
+    const { target, back, forward } = navigateWorkspaceHistory(
+      { back: s.workspaceHistory, forward: s.workspaceForward },
+      s.selectedWorkspaceId,
+      alive,
+      'forward'
+    )
+    set({ workspaceHistory: back, workspaceForward: forward })
     if (target) await get().selectWorkspace(target, { fromHistory: true })
   },
 

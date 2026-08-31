@@ -498,6 +498,15 @@ export default function App(): React.JSX.Element {
         }
       }
 
+      // ⇧⌘T: 방금 아카이브한 워크스페이스를 다시 연다(브라우저의 "닫은 탭 다시 열기").
+      // 아카이브 직후에는 Overview 로 빠져나와 선택이 없으므로, selId 를 요구하는 아래
+      // ⇧⌘ 블록보다 앞에 둔다. 되살리는 대상은 아카이브뿐이다 — 영구 삭제는 되돌리지 않는다.
+      if (e.shiftKey && e.code === 'KeyT' && !e.ctrlKey && !e.altKey) {
+        e.preventDefault()
+        void st.reopenLastArchivedWorkspace()
+        return
+      }
+
       // 키 판별은 e.code 로 한다 — 한글 IME 등에서 e.key 가 문자가 아닐 수 있다.
       if (selId && e.shiftKey) {
         // ⇧⌘D: dev 스크립트 실행/중지. 다른 헤더 도구 단축키와 같은 ⇧⌘ 계열로 맞췄다.
@@ -567,6 +576,14 @@ export default function App(): React.JSX.Element {
         return
       }
 
+      // ⌘]: ⌘[ 로 물러난 길을 되짚어 앞으로 간다. 뒤로만 갈 수 있으면 잘못 누른 ⌘[ 를
+      // 되돌릴 방법이 없다 — 짝이 있어야 방문 기록을 오갈 수 있다.
+      if (e.key === ']' && !e.shiftKey && !e.ctrlKey && !e.altKey) {
+        e.preventDefault()
+        void st.goForwardWorkspace()
+        return
+      }
+
       // 사이드바에 보이는 순서(레포 순 → 레포 안에서는 stack 순)와 정확히 같은 목록.
       // Sidebar 의 번호 배지도 같은 함수를 쓰므로 "위에서 n번째 = ⌘n" 이 항상 성립한다.
       const list = orderVisibleWorkspaces(st.app?.repos ?? [], st.app?.workspaces ?? [])
@@ -581,7 +598,7 @@ export default function App(): React.JSX.Element {
       } else if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !e.shiftKey && !e.altKey) {
         // ⌘↑/⌘↓ 로 사이드바 순서를 위/아래로 훑는다. 세로 목록이라 방향키가 공간적으로
         // 직관적이고, 괄호 키와 달리 키보드 레이아웃을 타지 않는다. 별칭이던 ⌘[ / ⌘] 는
-        // 뺐다 — ⌘[ 는 방문 기록 뒤로가기가 됐고, 홀로 남은 ⌘] 는 짝 없는 군더더기였다.
+        // 뺐다 — 그 짝은 이제 목록 위치가 아니라 방문 기록을 오가는 뒤로/앞으로가기다.
         // (Composer 의 ↑/↓ 메시지 히스토리는 ⌘ 없는 경우만 처리하도록 막아 뒀다.)
         e.preventDefault()
         const cur = list.findIndex((w) => w.id === st.selectedWorkspaceId)
