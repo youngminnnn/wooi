@@ -34,6 +34,8 @@ import {
   Wrench
 } from 'lucide-react'
 import { useStore } from '../store'
+import SavedPromptPicker from './SavedPromptPicker'
+import { appendPrompt } from '../lib/savedPrompts'
 import { permissionModeFooter, permissionModesFor } from '../lib/permission'
 import { modelLabel, modelSupportsFastMode } from '../lib/models'
 import { effortLabel, effortOptionsFor } from '../lib/effort'
@@ -84,6 +86,7 @@ import type {
   PermissionsInfo,
   RateLimitSnapshot,
   RewindPoint,
+  SavedPrompt,
   SlashCommandInfo,
   SkillInfo,
   StatusInfo,
@@ -133,6 +136,10 @@ function readImage(blob: Blob): Promise<{ dataBase64: string; dataUrl: string }>
 export default function Composer({ workspace }: { workspace: Workspace }): React.JSX.Element {
   // 초안은 store 에 보관해 workspace 전환에도 살아남는다(작성 중 메시지 분실 방지).
   const text = useStore((s) => s.drafts[workspace.id] ?? '')
+  // 이 워크스페이스의 리포에 저장해 둔 프롬프트. 리포별 스코프뿐이라 전역 목록은 보지 않는다.
+  const savedPrompts =
+    useStore((s) => s.app?.repos.find((r) => r.id === workspace.repoId)?.savedPrompts) ??
+    EMPTY_PROMPTS
   const setDraft = useStore((s) => s.setDraft)
   const promptSuggestion = useStore((s) => s.promptSuggestions[workspace.id] ?? null)
   const clearPromptSuggestion = useStore((s) => s.clearPromptSuggestion)
@@ -1418,6 +1425,15 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
                       : 'Message your agent…  (Enter to send · @ for files · / for commands · ! for terminal)'
               }
               className="flex-1 bg-transparent resize-none outline-none text-base leading-relaxed text-neutral-200 placeholder:text-neutral-600 py-1 disabled:cursor-not-allowed"
+            />
+            <SavedPromptPicker
+              prompts={savedPrompts}
+              disabled={locked}
+              // 채우기만 한다 — 여기서 보내면 사용자가 손볼 기회 없이 턴이 시작된다.
+              onPick={(prompt) => {
+                const next = appendPrompt(text, prompt)
+                setTextAt(next, next.length)
+              }}
             />
             {running && (
               <button
@@ -3765,3 +3781,4 @@ const EMPTY_HITS: FileHit[] = []
 const EMPTY_QUEUE: import('../store').QueuedMessage[] = []
 /** 참조 동일성 유지용 — 매 렌더마다 새 배열을 만들면 하위 memo 가 헛되이 깨진다. */
 const EMPTY_COMMANDS: CommandPanelKind[] = []
+const EMPTY_PROMPTS: SavedPrompt[] = []

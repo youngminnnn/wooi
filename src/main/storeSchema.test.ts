@@ -471,6 +471,21 @@ describe('normalizeShape (구버전 빌드가 남긴 레코드 메우기)', () =
     expect((out.workspaces as Workspace[])[0].ports).toEqual({})
   })
 
+  it('savedPrompts 는 없으면 그대로 두고, 배열이 아니면 지운다', () => {
+    // 옵셔널 필드라 빈 배열로 메우지 않는다 — 메우면 스키마 버전을 올리지 않는 이유가 사라진다.
+    const untouched = normalizeShape({ repos: [{ id: 'r1', runScripts: [] }] })
+    expect('savedPrompts' in (untouched.repos as Repo[])[0]).toBe(false)
+    const kept = normalizeShape({
+      repos: [{ id: 'r1', runScripts: [], savedPrompts: [{ id: 'p1', name: 'R', prompt: 'go' }] }]
+    })
+    expect((kept.repos as Repo[])[0].savedPrompts).toHaveLength(1)
+    // 배열이 아닌 값은 지운다. 그대로 두면 목록을 그냥 순회하는 화면들이 통째로 멈춘다.
+    const cleaned = normalizeShape({
+      repos: [{ id: 'r1', runScripts: [], savedPrompts: 'nope' }]
+    })
+    expect('savedPrompts' in (cleaned.repos as Repo[])[0]).toBe(false)
+  })
+
   it('runScripts 없는 리포에 빈 배열을 채운다', () => {
     const out = normalizeShape({ repos: [{ id: 'r1', name: 'demo' }], workspaces: [] })
     expect((out.repos as Repo[])[0].runScripts).toEqual([])

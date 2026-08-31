@@ -12,6 +12,8 @@ import Modal, { inputClass, labelClass, primaryBtn, ghostBtn } from './Modal'
 import { sanitizePreview } from '../lib/format'
 import { useAvailableBackends, useDefaultBackend } from '../lib/backends'
 import { AgentBackendMark } from './BrandIcons'
+import SavedPromptPicker from './SavedPromptPicker'
+import { appendPrompt } from '../lib/savedPrompts'
 
 /** 후보 수 선택지. 하나는 fan-out 이 아니고, 다섯이면 한 화면에서 나란히 비교할 수 없다. */
 const SLOT_COUNTS = Array.from(
@@ -137,7 +139,14 @@ export default function NewWorkspaceModal({
       <div className="space-y-4">
         {fanout && (
           <div>
-            <label className={labelClass}>Prompt</label>
+            <div className="flex items-center justify-between gap-2">
+              <label className={labelClass}>Prompt</label>
+              {/* 저장해 둔 프롬프트를 여기서도 꺼낸다 — 후보 전원이 받는 말이라 손볼 기회가 더 중요하다. */}
+              <SavedPromptPicker
+                prompts={repo.savedPrompts ?? []}
+                onPick={(saved) => setPrompt((current) => appendPrompt(current, saved))}
+              />
+            </div>
             <textarea
               autoFocus
               rows={4}

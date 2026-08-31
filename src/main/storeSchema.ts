@@ -565,9 +565,16 @@ export function migrate(
  * 여기서 값을 덮으면 데이터가 손상된다. 없는 것을 채우기만 한다.
  */
 export function normalizeShape(raw: Record<string, unknown>): Record<string, unknown> {
-  const repos = ((raw.repos as Array<Record<string, unknown>>) ?? []).map((repo) =>
-    Array.isArray(repo.runScripts) ? repo : { ...repo, runScripts: [] }
-  )
+  const repos = ((raw.repos as Array<Record<string, unknown>>) ?? []).map((repo) => {
+    const withRunScripts = Array.isArray(repo.runScripts) ? repo : { ...repo, runScripts: [] }
+    // savedPrompts 는 옵셔널이라 **없으면 없는 채로 둔다** — 빈 배열로 메우면 다운그레이드한
+    // 구버전이 그 키를 그대로 다시 쓸 뿐이고, 스키마 버전을 올리지 않으려는 이유도 사라진다.
+    // 다만 배열이 아닌 값은 지운다. 목록을 그냥 순회하는 화면들이 그것 하나로 통째로 멈춘다.
+    if (!('savedPrompts' in withRunScripts) || Array.isArray(withRunScripts.savedPrompts))
+      return withRunScripts
+    const { savedPrompts: _malformed, ...rest } = withRunScripts
+    return rest
+  })
   const workspaces = ((raw.workspaces as Array<Record<string, unknown>>) ?? []).map((workspace) =>
     isRecord(workspace.ports) ? workspace : { ...workspace, ports: {} }
   )
