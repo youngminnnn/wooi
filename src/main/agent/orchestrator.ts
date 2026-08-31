@@ -429,6 +429,13 @@ export class AgentOrchestrator {
   interrupt(workspaceId: string): Promise<void> {
     // 중단은 "그만" 이다. 그 턴이 끝나자마자 Wooi 가 다음 턴을 시작하면 중단이 중단이 아니게 된다.
     this.cancelResume(workspaceId)
+    // 중단 표시는 **여기서만** 찍는다. 이 메서드가 백엔드와 무관한 유일한 중단 길목이고(IPC 의
+    // chatInterrupt 가 폰까지 포함해 전부 여기로 들어온다), 백엔드의 forceIdle 에 얹으면 /clear 와
+    // 크래시 복구까지 중단으로 물든다. 상태를 추론하지 않고 실제 중단 경로에서 세팅하는 것이 요점이다.
+    getStore().update((st) => {
+      const w = st.workspaces.find((x) => x.id === workspaceId)
+      if (w) w.interruptedTurn = { at: Date.now(), sessionId: w.sessionId }
+    })
     return this.backendFor(workspaceId).interrupt(workspaceId)
   }
 

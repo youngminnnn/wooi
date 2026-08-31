@@ -958,6 +958,10 @@ export class SessionManager implements AgentBackend {
         if (w) {
           w.status = event.status
           w.lastActiveAt = Date.now()
+          // 새 턴이 시작하면 지난 턴의 중단 표시는 더 이상 사실이 아니다. 지우는 자리를 턴 **끝**이
+          // 아니라 **시작**으로 잡은 이유가 있다 — 중단하면 이 턴의 idle 이 뒤늦게 한 번 더 올라오고,
+          // 끝에서 지우면 방금 찍은 표시를 그 신호가 바로 지워 버린다.
+          if (event.status === 'running') w.interruptedTurn = null
         }
       })
       // 창이 비활성일 때만 완료/에러를 OS 알림으로. (활성 창은 사이드바·알림음으로 충분)

@@ -1,5 +1,6 @@
 import type { AgentBackendMeta, PermissionMode, PermissionModeInfo } from '@shared/types'
 import type { PermissionRequest } from '@shared/types'
+import { PERMISSION_INPUT_TEXT_KEYS } from '@shared/askSummary'
 
 export { nextPermissionMode, normalizePermissionMode } from '@shared/types'
 
@@ -43,7 +44,7 @@ export function summarizePermission(request: PermissionRequest): string {
   const input = request.input
   if (input && typeof input === 'object') {
     const obj = input as Record<string, unknown>
-    for (const key of ['command', 'file_path', 'path', 'url', 'pattern', 'query', 'description']) {
+    for (const key of PERMISSION_INPUT_TEXT_KEYS) {
       if (typeof obj[key] === 'string' && obj[key]) return obj[key] as string
     }
     const keys = Object.keys(obj)
