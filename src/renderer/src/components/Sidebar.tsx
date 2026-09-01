@@ -25,7 +25,9 @@ import {
   Copy,
   Download,
   Square,
-  GitFork
+  GitFork,
+  Pin,
+  PinOff
 } from 'lucide-react'
 import { backgroundTaskCount, REVIEW_BUSY_LABEL, useStore } from '../store'
 import { useUnarchiveWorkspace } from '../lib/unarchive'
@@ -44,7 +46,8 @@ import {
   orderVisibleWorkspaces,
   unresolvedFanoutGroups,
   wasInterrupted,
-  workspaceDisplayName
+  workspaceDisplayName,
+  workspaceStackRootId
 } from '@shared/types'
 import { conversationForkDisabledReason } from '../lib/conversationFork'
 import { orderRowsWithPending } from '../lib/sidebarRows'
@@ -207,17 +210,23 @@ export default function Sidebar({
 
   const workspaceDnd = useDragReorder({
     mime: WORKSPACE_MIME,
-    // 사이드바는 워크스페이스를 stack 트리(orderByStack)로 그리므로, 배열 순서가 실제 화면 순서를
-    // 좌우하는 건 형제 사이뿐이다. 형제가 아닌 곳엔 드롭 표시선을 아예 띄우지 않아, 놓아도
-    // 아무 일도 일어나지 않는 자리를 유효한 것처럼 보이게 하지 않는다.
+    // 어느 행을 잡아도 stack 뿌리 전체를 옮긴다. 같은 레포·아카이브·고정 영역이 아닌 곳엔 드롭
+    // 표시선을 띄우지 않아, 놓아도 아무 일도 일어나지 않는 자리를 유효한 것처럼 보이지 않는다.
     canDrop: (draggedId, targetId) => {
       const a = app.workspaces.find((w) => w.id === draggedId)
       const b = app.workspaces.find((w) => w.id === targetId)
       if (!a || !b) return false
+      const aRoot = workspaceStackRootId(app.workspaces, a.id)
+      const bRoot = workspaceStackRootId(app.workspaces, b.id)
+      if (!aRoot || !bRoot || aRoot === bRoot) return false
+      const ar = app.workspaces.find((w) => w.id === aRoot)
+      const br = app.workspaces.find((w) => w.id === bRoot)
       return (
-        a.repoId === b.repoId &&
-        (a.parentWorkspaceId ?? null) === (b.parentWorkspaceId ?? null) &&
-        a.archived === b.archived
+        !!ar &&
+        !!br &&
+        ar.repoId === br.repoId &&
+        ar.archived === br.archived &&
+        !!ar.sidebarPinned === !!br.sidebarPinned
       )
     },
     onReorder: (workspaceId, targetId, position) =>
@@ -493,7 +502,7 @@ function WorkspaceRow({
   ) => void
   shortcut?: number
   now: number
-  /** 사이드바가 소유한 워크스페이스 재정렬 DnD 배선(형제끼리만 자리 교환). */
+  /** 사이드바가 소유한 워크스페이스 재정렬 DnD 배선(stack 단위 자리 교환). */
   dnd: DragReorder
 }): React.JSX.Element {
   const selectedId = useStore((s) => s.selectedWorkspaceId)
@@ -538,6 +547,10 @@ function WorkspaceRow({
   const [menuAlign, setMenuAlign] = useState<'left' | 'right'>('right')
 
   const active = workspace.id === selectedId
+  const stackRootId = useStore((s) => workspaceStackRootId(s.app?.workspaces ?? [], workspace.id))
+  const stackPinned = useStore(
+    (s) => s.app?.workspaces.find((w) => w.id === stackRootId)?.sidebarPinned ?? false
+  )
   // running 인 채로 오래 머무르면(상태 변화 없이) "멈춤일 수 있음" 으로 본다.
   // 계산은 runningFor 한 곳에 있다 — 소비자마다 복제하면 화면끼리 갈라진다.
   const { runningMs, stale } = runningFor(workspace, runningSince, now)
@@ -597,6 +610,12 @@ function WorkspaceRow({
   const alternateStackBackends = availableBackends.filter((b) => b.id !== workspace.agentBackend)
 
   const actions: RowAction[] = [
+    {
+      key: 'pin',
+      label: stackPinned ? 'Unpin stack from top' : 'Pin stack to top',
+      icon: stackPinned ? <PinOff size={13} /> : <Pin size={13} />,
+      onSelect: () => void window.api.workspace.setPinned(workspace.id, !stackPinned)
+    },
     {
       key: 'rename',
       label: 'Rename…',
@@ -800,6 +819,9 @@ function WorkspaceRow({
             backgroundTasks={backgroundTasks}
             pr={pr}
           />
+        )}
+        {stackPinned && depth === 0 && (
+          <Pin size={11} className="shrink-0 text-neutral-500" aria-label="Pinned to top" />
         )}
         <div className="relative flex-1 min-w-0">
           {editingName !== null ? (

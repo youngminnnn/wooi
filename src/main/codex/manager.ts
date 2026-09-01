@@ -7,7 +7,13 @@ import { codexMcpServerEnv } from '../mcpSettings'
 import { agentDefaultEnv } from '../agentEnv'
 import { getTranscripts } from '../transcripts'
 import { log } from '../logger'
-import { IPC, agentSettingsFor, isQuestionPermission, normalizePermissionMode } from '@shared/types'
+import {
+  IPC,
+  agentSettingsFor,
+  isQuestionPermission,
+  normalizePermissionMode,
+  promoteWorkspaceStack
+} from '@shared/types'
 import { CODEX_META, type AgentBackend, type TurnEndHook } from '../agent/backend'
 import { canLeadAgentTeam, delegateBackendsFor } from '../agent/multiAgent'
 import { delegateThreadInstructions, soloThreadInstructions } from '../subagent/catalog'
@@ -989,6 +995,8 @@ export class CodexSessionManager implements AgentBackend {
           // 끝에서 지우면 방금 찍은 표시를 그 신호가 바로 지워 버린다.
           if (event.status === 'running') w.interruptedTurn = null
         }
+        if (w && st.settings.autoSortWorkspacesByActivity)
+          st.workspaces = promoteWorkspaceStack(st.workspaces, workspaceId)
       })
       if (event.status === 'idle') this.notify(workspaceId, 'completed', 'Response complete', false)
       else if (event.status === 'error') this.notify(workspaceId, 'error', 'Session error', true)
@@ -1003,6 +1011,8 @@ export class CodexSessionManager implements AgentBackend {
         w.sessionId = sessionId
         w.lastActiveAt = Date.now()
       }
+      if (w && st.settings.autoSortWorkspacesByActivity)
+        st.workspaces = promoteWorkspaceStack(st.workspaces, workspaceId)
     })
   }
 

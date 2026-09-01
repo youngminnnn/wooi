@@ -512,6 +512,75 @@ export function reorderById<T extends { id: string }>(
   return next
 }
 
+/** 사이드바에서 한 덩어리로 움직이는 stack 의 살아 있는 뿌리를 찾는다. */
+export function workspaceStackRootId<
+  T extends { id: string; parentWorkspaceId: string | null; archived: boolean }
+>(workspaces: T[], workspaceId: string): string | null {
+  const byId = new Map(workspaces.map((w) => [w.id, w]))
+  let current = byId.get(workspaceId)
+  if (!current) return null
+  const seen = new Set<string>()
+  while (current.parentWorkspaceId && !seen.has(current.id)) {
+    seen.add(current.id)
+    const parent = byId.get(current.parentWorkspaceId)
+    if (!parent || parent.archived !== current.archived) break
+    current = parent
+  }
+  return current.id
+}
+
+/**
+ * dragged/target 이 stack 의 어느 행이든 각각의 뿌리 stack 전체를 형제 사이에서 옮긴다.
+ * 배열 안에서는 뿌리의 위치만 바꾸면 orderByStack 이 자손을 바로 뒤에 붙이므로 관계 필드는
+ * 건드리지 않는다.
+ */
+export function reorderWorkspaceStack<
+  T extends {
+    id: string
+    repoId: string
+    parentWorkspaceId: string | null
+    archived: boolean
+    sidebarPinned?: boolean
+  }
+>(workspaces: T[], draggedId: string, targetId: string, position: DropPosition): T[] {
+  const draggedRoot = workspaceStackRootId(workspaces, draggedId)
+  const targetRoot = workspaceStackRootId(workspaces, targetId)
+  if (!draggedRoot || !targetRoot || draggedRoot === targetRoot) return workspaces
+  const a = workspaces.find((w) => w.id === draggedRoot)
+  const b = workspaces.find((w) => w.id === targetRoot)
+  if (
+    !a ||
+    !b ||
+    a.repoId !== b.repoId ||
+    a.archived !== b.archived ||
+    !!a.sidebarPinned !== !!b.sidebarPinned
+  )
+    return workspaces
+  return reorderById(workspaces, draggedRoot, targetRoot, position)
+}
+
+/** 최근 활성화된 stack 을 고정 stack 바로 아래로 올린다. */
+export function promoteWorkspaceStack<
+  T extends {
+    id: string
+    repoId: string
+    parentWorkspaceId: string | null
+    archived: boolean
+    sidebarPinned?: boolean
+  }
+>(workspaces: T[], workspaceId: string): T[] {
+  const rootId = workspaceStackRootId(workspaces, workspaceId)
+  const root = workspaces.find((w) => w.id === rootId)
+  if (!root || root.archived || root.sidebarPinned) return workspaces
+  const roots = workspaces.filter(
+    (w) =>
+      w.repoId === root.repoId && !w.archived && workspaceStackRootId(workspaces, w.id) === w.id
+  )
+  const firstUnpinned = roots.find((w) => !w.sidebarPinned)
+  if (!firstUnpinned || firstUnpinned.id === root.id) return workspaces
+  return reorderById(workspaces, root.id, firstUnpinned.id, 'before')
+}
+
 /**
  * 사이드바에 실제로 보이는 순서(위 → 아래) 그대로 활성 워크스페이스를 평탄하게 나열한다.
  * 규칙: repos 배열 순서로 레포를 훑고, 레포 안에서는 orderByStack(부모 바로 뒤에 자식) 순서.
@@ -968,6 +1037,8 @@ export interface Workspace {
   pendingHandoffFrom?: string | null
   /** 아카이브되면 사이드바 기본 목록에서 숨기고 worktree 를 제거한다(브랜치·기록은 유지). */
   archived: boolean
+  /** 자동 최신순 정렬에서도 stack 전체를 사이드바 상단에 유지한다(뿌리에서만 읽는다). */
+  sidebarPinned?: boolean
   /** 이 워크스페이스의 모든 알림(OS 알림·소리·Dock 배지)을 음소거한다. 레거시는 undefined=false. */
   muted?: boolean
   /**
@@ -1426,6 +1497,8 @@ export interface AppSettings {
    * 반영되고, 다시 켜면 지금 돌고 있는 것이 바로 나타난다(추적을 껐다면 다음 턴까지 빈 목록이 된다).
    */
   showRunningAgents: boolean
+  /** workspace 가 활동할 때 그 stack 을 사이드바의 고정 영역 바로 아래로 올린다. */
+  autoSortWorkspacesByActivity: boolean
   /**
    * 점진적 온보딩 힌트(기능에 실제로 도달한 순간에 뜨는 작은 안내 카드, `lib/hints.ts`)를
    * 보여줄지. 기본 켜짐.
@@ -3511,6 +3584,7 @@ export const IPC = {
   workspaceRename: 'workspace:rename',
   /** 사이드바 드래그 앤 드롭으로 워크스페이스 표시 순서를 바꾼다(같은 레포·같은 stack 부모끼리만). */
   workspaceReorder: 'workspace:reorder',
+  workspaceSetPinned: 'workspace:setPinned',
   workspaceOpenInEditor: 'workspace:openInEditor',
   workspaceRevealInFinder: 'workspace:revealInFinder',
   /** /memory — worktree 의 CLAUDE.md 를 에디터로 연다(없으면 worktree 를 연다). */

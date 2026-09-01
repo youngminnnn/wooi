@@ -13,6 +13,7 @@ import {
   agentSettingsFor,
   isQuestionPermission,
   nativePeerInbound,
+  promoteWorkspaceStack,
   peerSessionName
 } from '@shared/types'
 import { CLAUDE_META, CLAUDE_MODELS, type AgentBackend, type TurnEndHook } from '../agent/backend'
@@ -963,6 +964,8 @@ export class SessionManager implements AgentBackend {
           // 끝에서 지우면 방금 찍은 표시를 그 신호가 바로 지워 버린다.
           if (event.status === 'running') w.interruptedTurn = null
         }
+        if (w && st.settings.autoSortWorkspacesByActivity)
+          st.workspaces = promoteWorkspaceStack(st.workspaces, workspaceId)
       })
       // 창이 비활성일 때만 완료/에러를 OS 알림으로. (활성 창은 사이드바·알림음으로 충분)
       if (event.status === 'idle') {
@@ -997,6 +1000,8 @@ export class SessionManager implements AgentBackend {
         w.sessionId = sessionId
         w.lastActiveAt = Date.now()
       }
+      if (w && st.settings.autoSortWorkspacesByActivity)
+        st.workspaces = promoteWorkspaceStack(st.workspaces, workspaceId)
     })
   }
 

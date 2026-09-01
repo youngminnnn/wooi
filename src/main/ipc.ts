@@ -124,7 +124,9 @@ import {
   isBranchStack,
   normalizePermissionMode,
   reorderById,
+  reorderWorkspaceStack,
   usableDefaultBackend,
+  workspaceStackRootId,
   workspaceStack
 } from '@shared/types'
 import {
@@ -623,25 +625,49 @@ export function registerIpc(ctx: IpcContext): void {
     IPC.workspaceReorder,
     (_e, workspaceId: string, targetWorkspaceId: string, position: DropPosition) => {
       const { workspaces } = store.getState()
-      const dragged = workspaces.find((w) => w.id === workspaceId)
-      const target = workspaces.find((w) => w.id === targetWorkspaceId)
+      const draggedRootId = workspaceStackRootId(workspaces, workspaceId)
+      const targetRootId = workspaceStackRootId(workspaces, targetWorkspaceId)
+      const dragged = workspaces.find((w) => w.id === draggedRootId)
+      const target = workspaces.find((w) => w.id === targetRootId)
       if (!dragged || !target) return
 
-      // 사이드바는 워크스페이스를 orderByStack 의 DFS 결과로 그리므로, 배열 순서가 실제 표시
-      // 순서를 좌우하는 범위는 "같은 부모를 둔 형제들 사이"뿐이다. 그 밖의 조합(다른 레포·다른
-      // stack 부모)은 배열만 흔들고 화면은 그대로여서 사용자에게 아무 일도 안 일어난 것처럼 보인다.
-      // 부모를 바꾸는 건 stack 의 베이스 브랜치를 갈아 끼우는 git 작업이라 드래그로 다루지 않는다.
-      // 렌더러도 같은 규칙으로 드롭을 막지만, IPC 는 신뢰 경계이므로 여기서 다시 확인한다.
+      // 어느 행을 잡아도 그 stack 의 뿌리를 찾아 DFS 묶음 전체를 옮긴다. 부모를 바꾸는 것은
+      // 베이스 브랜치를 갈아 끼우는 git 작업이라 드래그로 다루지 않는다. 렌더러도 같은 레포·
+      // 아카이브·고정 영역 규칙으로 드롭을 막지만, IPC 는 신뢰 경계이므로 여기서 다시 확인한다.
       if (dragged.repoId !== target.repoId) return
-      if ((dragged.parentWorkspaceId ?? null) !== (target.parentWorkspaceId ?? null)) return
       if (dragged.archived !== target.archived) return
+      if (!!dragged.sidebarPinned !== !!target.sidebarPinned) return
 
       store.update((st) => {
-        st.workspaces = reorderById(st.workspaces, workspaceId, targetWorkspaceId, position)
+        st.workspaces = reorderWorkspaceStack(
+          st.workspaces,
+          workspaceId,
+          targetWorkspaceId,
+          position
+        )
       })
       broadcastState()
     }
   )
+
+  handle(IPC.workspaceSetPinned, (_e, workspaceId: string, pinned: boolean) => {
+    store.update((st) => {
+      const rootId = workspaceStackRootId(st.workspaces, workspaceId)
+      const root = st.workspaces.find((w) => w.id === rootId)
+      if (!root || root.archived) return
+      root.sidebarPinned = pinned
+      if (!pinned) return
+      const firstRoot = st.workspaces.find(
+        (w) =>
+          w.repoId === root.repoId &&
+          !w.archived &&
+          workspaceStackRootId(st.workspaces, w.id) === w.id
+      )
+      if (firstRoot && firstRoot.id !== root.id)
+        st.workspaces = reorderWorkspaceStack(st.workspaces, root.id, firstRoot.id, 'before')
+    })
+    broadcastState()
+  })
 
   handle(IPC.repoListBranches, async (_e, repoId: string): Promise<string[]> => {
     const repo = repoFor(repoId)

@@ -95,6 +95,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   // 옵트인으로 숨겨 둘 이유가 없다. 기존 사용자도 load 의 기본값 병합으로 켜진 상태가 되므로
   // schemaVersion 을 올릴 필요가 없다.
   showRunningAgents: true,
+  // 최근 활동 stack 자동 승격은 기본 켜짐. 새 필드라 기본값 병합만으로 구버전도 적용된다.
+  autoSortWorkspacesByActivity: true,
   // 점진적 힌트는 기본 켜짐 — 예전 일괄 투어가 하던 소개를 대신하는 것이라, 이 필드가 없던
   // 버전에서 올라온 사용자에게도 똑같이 보여야 한다. schemaVersion 을 올려 마이그레이션에서도
   // 명시적으로 채운다(showRunningAgents 와 달리 — plan 이 명시적인 회귀 가드를 요구했다).
