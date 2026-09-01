@@ -314,6 +314,29 @@ describe('paletteSections', () => {
     expect(flattenSections(sections).map((i) => i.label)).toEqual(['alpha'])
   })
 
+  it('동점이면 실행할 수 있는 것이 참조 행보다 먼저다', () => {
+    // 팔레트를 막 열었을 때(점수 전부 0) 회색 행이 위를 차지하지 않게 하는 기준이다.
+    const mixed: PaletteItem[] = [
+      item({ key: 'r1', kind: 'action', label: 'reference', haystack: 'aaa', effect: null }),
+      item({ key: 'a1', kind: 'action', label: 'runnable', haystack: 'aaa' })
+    ]
+    expect(flattenSections(paletteSections(mixed, '')).map((i) => i.label)).toEqual([
+      'runnable',
+      'reference'
+    ])
+  })
+
+  it('그래도 점수가 먼저다 — 잘 맞은 참조 행이 엉뚱한 실행 행에 밀리지 않는다', () => {
+    const mixed: PaletteItem[] = [
+      item({ key: 'a1', kind: 'action', label: 'runnable', haystack: 'zzz archive' }),
+      item({ key: 'r1', kind: 'action', label: 'reference', haystack: 'archive zzz', effect: null })
+    ]
+    expect(flattenSections(paletteSections(mixed, 'archive')).map((i) => i.label)).toEqual([
+      'reference',
+      'runnable'
+    ])
+  })
+
   it('맞는 것이 없으면 빈 목록이다', () => {
     expect(flattenSections(paletteSections(items, 'qqqq'))).toEqual([])
   })

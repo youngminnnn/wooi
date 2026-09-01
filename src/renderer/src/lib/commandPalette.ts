@@ -329,12 +329,22 @@ export function paletteSections(
 
   const sections: PaletteSection[] = []
   for (const [k, scored] of byKind) {
-    // 워크스페이스는 넘어온 순서를 지킨다. 나머지는 점수 순으로 세우되 동점이면 원래 순서다.
+    // 워크스페이스는 넘어온 순서를 지킨다. 나머지는 점수 순으로 세우되, 동점이면 **실행할 수
+    // 있는 것**이 먼저다.
+    //
+    // 이 두 번째 기준이 없으면 팔레트를 연 순간(질의가 비어 점수가 모두 0) 카탈로그 순서가
+    // 그대로 나오는데, 단축키 목록은 Navigation 이 앞이고 그 앞머리가 하필 참조 행들이다
+    // (⌘K·⌘1–9·⌘↑↓·⌘[]). 그러면 Actions 섹션이 회색 글자 넉 줄로 시작한다 — 고를 수 없는
+    // 것이 고를 수 있는 것을 가리는 셈이다. 참조 행은 검색으로 찾으라고 둔 것이지 첫 화면을
+    // 채우라고 둔 것이 아니다. 점수를 먼저 보므로 검색했을 때의 관련도는 그대로다.
     const ordered =
       k === 'workspace'
         ? scored
         : [...scored].sort(
-            (a, b) => b.score - a.score || items.indexOf(a.item) - items.indexOf(b.item)
+            (a, b) =>
+              b.score - a.score ||
+              Number(!a.item.effect) - Number(!b.item.effect) ||
+              items.indexOf(a.item) - items.indexOf(b.item)
           )
     sections.push({
       kind: k,
