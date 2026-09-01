@@ -36,7 +36,7 @@ import { permissionModesFor } from '../lib/permission'
 import { effortOptionsFor } from '../lib/effort'
 import { useAvailableBackends, useBackend, useModels } from '../lib/backends'
 import { applyTheme } from '../lib/theme'
-import { SETTINGS_PAGE_KEY, type SettingsPage } from '../lib/settingsNavigation'
+import { SETTINGS_PAGES, SETTINGS_PAGE_KEY, type SettingsPage } from '../lib/settingsNavigation'
 import { CONFIRM_SKIP_LABELS } from '../lib/confirmSkips'
 import {
   CONFIRM_SKIP_KEYS,
@@ -106,53 +106,22 @@ function PermissionModeHelp({
     </details>
   )
 }
-const PAGES: { id: Page; label: string; icon: typeof Settings2; keywords: string }[] = [
-  {
-    id: 'general',
-    label: 'General',
-    icon: Settings2,
-    keywords:
-      'theme appearance panel sidebar workspace order activity recent sort pin creation sleep awake power display confirmation confirm ask again archive'
-  },
-  {
-    id: 'agents',
-    label: 'Agents',
-    icon: Bot,
-    keywords: 'model permission reasoning effort fast compact claude codex'
-  },
-  {
-    id: 'notifications',
-    label: 'Notifications',
-    icon: Bell,
-    keywords: 'notification sound badge completed error input'
-  },
-  {
-    id: 'integrations',
-    label: 'Integrations',
-    icon: Link2,
-    keywords: 'login account github claude codex connect'
-  },
-  {
-    id: 'mcp',
-    label: 'MCP servers',
-    icon: Plug,
-    keywords: 'mcp model context protocol server tool stdio http sse claude.json'
-  },
-  {
-    id: 'plugins',
-    label: 'Plugins',
-    icon: Blocks,
-    keywords: 'plugin marketplace codex agent skill hook extension install'
-  },
-  {
-    id: 'repositories',
-    label: 'Repositories',
-    icon: Laptop,
-    keywords: 'repo setup dev archive carry worktree'
-  },
-  { id: 'about', label: 'About', icon: Info, keywords: 'version update tour help' }
-]
+/**
+ * 좌측 목록에 붙일 아이콘. 라벨·키워드는 [[lib/settingsNavigation]] 이 들고 있다 — ⌘K 팔레트가
+ * 같은 목록을 읽어야 해서 밖으로 옮겼고, 여기 남는 것은 그리는 데만 필요한 아이콘뿐이다.
+ */
+const PAGE_ICONS: Record<Page, typeof Settings2> = {
+  general: Settings2,
+  agents: Bot,
+  notifications: Bell,
+  integrations: Link2,
+  mcp: Plug,
+  plugins: Blocks,
+  repositories: Laptop,
+  about: Info
+}
 
+const PAGES = SETTINGS_PAGES.map((p) => ({ ...p, icon: PAGE_ICONS[p.id] }))
 function describeRepoConfig(repo: Repo): string {
   const parts: string[] = []
   if (repo.setupScript.trim()) parts.push('setup')

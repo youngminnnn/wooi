@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle } from 'lucide-react'
 import { CURRENT_TERMS_VERSION, hasAnyAgent, orderVisibleWorkspaces } from '@shared/types'
 import type { AgentBackendId } from '@shared/types'
@@ -10,8 +10,15 @@ import { OPEN_FILE_QUICK_OPEN_EVENT, openFileQuickOpen } from './lib/fileViewer'
 import { openNewWorkspaceMenu } from './lib/newWorkspaceMenu'
 import { applyTheme } from './lib/theme'
 import { finishSwitchHint } from './lib/uiFlags'
-import { OPEN_SETTINGS_EVENT } from './lib/settingsNavigation'
-import { FOCUS_COMPOSER_EVENT, INSERT_INTO_COMPOSER_EVENT } from './lib/composerFocus'
+import { OPEN_SETTINGS_EVENT, openSettings } from './lib/settingsNavigation'
+import {
+  FOCUS_COMPOSER_EVENT,
+  INSERT_INTO_COMPOSER_EVENT,
+  RUN_WOOI_COMMAND_EVENT,
+  type RunWooiCommandDetail
+} from './lib/composerFocus'
+import type { PaletteActionId } from './lib/shortcutCatalog'
+import type { PaletteContext, PaletteEffect } from './lib/commandPalette'
 import { shouldFocusComposerFromEditingKey, shouldRedirectTyping } from './lib/typingRedirect'
 import { archivedPreviewTarget, workspaceSurfaces } from './lib/archivedPreview'
 import { buildStackLayers } from './lib/stackView'
@@ -59,22 +66,21 @@ import type { ExportConversationDetail } from './components/ExportMenu'
  *
  * 리뷰 화면·팬아웃 비교·파일 뷰어는 대화를 통째로 덮는다. 그 위에서 친 글자를 뒤쪽 textarea 에
  * 몰래 넣으면 사용자는 자기 글이 어디로 갔는지 알 수 없다 — ⌘L 이 같은 이유로 같은 판정을 쓴다.
+ *
+ * 열린 모달(`overlayOpen`)은 보지 않는다. 부르는 쪽 둘 다 이미 그 답을 알고 있다 — 전역
+ * keydown 은 모달이 떠 있으면 위에서 return 하고, ⌘K 팔레트는 항목을 고르는 즉시 닫힌다.
+ * 여기서 다시 보면 팔레트 자신이 모달이라는 이유로 "입력창에 닿을 수 없다" 가 되어 버린다.
  */
 function chatComposerReachable(
   st: {
     selectedWorkspaceId: string | null
     activeReviewId: string | null
     activeFanoutGroupId: string | null
-    overlayOpen: boolean
   },
   fileViewerVisible: boolean
 ): boolean {
   return (
-    !!st.selectedWorkspaceId &&
-    !st.activeReviewId &&
-    !st.activeFanoutGroupId &&
-    !st.overlayOpen &&
-    !fileViewerVisible
+    !!st.selectedWorkspaceId && !st.activeReviewId && !st.activeFanoutGroupId && !fileViewerVisible
   )
 }
 
@@ -144,6 +150,23 @@ export default function App(): React.JSX.Element {
   const activeFanoutGroupId = useStore((s) => s.activeFanoutGroupId)
   const activeStackWorkspaceId = useStore((s) => s.activeStackWorkspaceId)
   const fileViewer = useStore((s) => s.fileViewer)
+  // ⌘K 팔레트가 "승인할 게 없다" 를 이유로 쓴다. 셀렉터로 받아야 팔레트를 열어 둔 채 새 권한이
+  // 들어와도 그 행이 따라 살아난다.
+  const approvablePermissionCount = useStore((s) => s.approvablePermissionCount())
+  // 팔레트의 Rebase 행이 왜 막혔는지. 게이트를 셀렉터 안에서 돌려 문장만 꺼내 온다 — 문자열
+  // 하나라 참조가 흔들리지 않고, 뒤처짐·충돌 상태가 바뀌면 그 행도 따라 살아난다.
+  const rebaseBlockedReason = useStore((s) => {
+    const id = s.selectedWorkspaceId
+    const ws = id ? s.app?.workspaces.find((w) => w.id === id) : null
+    if (!id || !ws) return null
+    const gate = rebaseShortcutGate({
+      workspace: ws,
+      git: s.gitStatus[id],
+      progress: s.stackProgress[id],
+      prNeedsBaseUpdate: s.prStatus[id]?.needsBaseUpdate
+    })
+    return gate.ok ? null : gate.message
+  })
 
   // 업데이트로 새로 생긴 기능을 한 번만 알려 준다(신규 설치 사용자에게는 뜨지 않는다).
   useFeatureNudge()
@@ -252,6 +275,327 @@ export default function App(): React.JSX.Element {
     return () => window.removeEventListener(OPEN_MIGRATE_EVENT, onOpen)
   }, [])
 
+  /**
+   * dev 스크립트 실행/중지 — 스크립트 패널 열림 여부와 무관하게 동작한다.
+   * ⇧⌘D 와 (구) ⌃⌘R, 그리고 ⌘K 팔레트가 모두 여기로 들어온다.
+   */
+  const toggleDevScript = useCallback((id: string): void => {
+    const st = useStore.getState()
+    const ws = st.app?.workspaces.find((w) => w.id === id)
+    const primary = ws && st.app?.repos.find((r) => r.id === ws.repoId)?.runScripts[0]
+    if (!primary?.command.trim()) {
+      // 여기까지 온 사용자는 이미 "dev 명령을 쓰고 싶다"고 손을 든 상태다. 설정이 어디
+      // 있는지 말로만 알려 주고 끝내지 말고, 바로 그 화면으로 데려간다.
+      st.pushToast('info', 'Add a run script for this repository first.', [
+        { label: 'Open repository settings', run: () => ws && openRepoSettings(ws.repoId) }
+      ])
+      return
+    }
+    const devRunning = (st.scriptStatus[id] ?? []).some(
+      (sc) => sc.scriptId === primary.id && sc.state === 'running'
+    )
+    if (devRunning) {
+      void window.api.script.stop(id, primary.id).then(() => st.refreshScriptStatus(id))
+    } else {
+      // 실행 시 스크립트 패널(dev 탭)을 열어 로그·상태를 바로 볼 수 있게 한다.
+      st.setScriptPanelOpen(id, true)
+      void window.api.script.run(id, primary.id).then(() => st.refreshScriptStatus(id))
+    }
+  }, [])
+
+  /**
+   * 이름 붙은 동작 하나를 실행한다. **전역 keydown 과 ⌘K 팔레트가 같이 부르는 유일한 몸통**이다.
+   *
+   * 이 함수가 이 변경의 알맹이다. 동작 로직이 keydown 핸들러 안에 갇혀 있으면 팔레트는 그것을
+   * 베껴 쓸 수밖에 없고, 그 순간부터 "단축키로는 되는데 팔레트로는 다르게 되는" 자리가 생긴다.
+   * 키를 해석하는 일(어떤 글쇠가 무엇을 뜻하는가, ⌘Z 는 글을 쓰는 중이면 양보한다 같은 것)은
+   * keydown 에 남기고, **무엇을 하는가**만 여기로 옮겼다.
+   *
+   * 실행 가능 여부는 부르는 쪽이 이미 판정했다고 보지 않는다 — 여기서도 대상이 없으면 조용히
+   * 아무것도 하지 않는다. 팔레트는 그 전에 [[lib/commandPalette]] 의 `actionDisabledReason` 으로
+   * 같은 판정을 내려 이유를 화면에 적어 둔다.
+   */
+  const runPaletteAction = useCallback(
+    (action: PaletteActionId): void => {
+      const st = useStore.getState()
+      const surfaces = workspaceSurfaces(
+        !!archivedPreviewTarget(st.app?.workspaces, st.selectedWorkspaceId)
+      )
+      // worktree 가 있어야 성립하는 도구들의 대상. 아카이브 미리보기면 대상이 없다.
+      const selId = surfaces.worktreeTools ? st.selectedWorkspaceId : null
+
+      switch (action) {
+        case 'open-shortcuts':
+          setShowShortcuts(true)
+          return
+
+        case 'search-conversations':
+          setTranscriptSearchOpen(true)
+          return
+
+        case 'next-unread': {
+          const id = st.nextUnreadId()
+          if (id) void st.selectWorkspace(id)
+          return
+        }
+
+        case 'next-needs-input': {
+          const id = st.nextPendingPermissionId()
+          if (id) void st.selectWorkspace(id)
+          return
+        }
+
+        case 'new-workspace':
+        case 'new-workspace-choose-agent': {
+          const repoId =
+            st.app?.workspaces.find((w) => w.id === st.selectedWorkspaceId)?.repoId ??
+            st.app?.repos[0]?.id
+          if (!repoId) {
+            st.pushToast('info', 'Add a repository first.')
+            return
+          }
+          if (action === 'new-workspace-choose-agent') {
+            openNewWorkspaceMenu(repoId)
+            return
+          }
+          if (st.app?.settings.manualWorkspaceSetup) setNewWs({ repoId, parentWorkspaceId: null })
+          else void st.createWorkspace(repoId)
+          return
+        }
+
+        case 'undo-workspace-action':
+          void st.undoLastWorkspaceAction()
+          return
+
+        case 'reopen-archived':
+          void st.reopenLastArchivedWorkspace()
+          return
+
+        case 'review-pull-request':
+          // 리포가 하나도 없으면 고를 PR 도 없다 — ⌘N 과 같은 안내를 준다.
+          if (!st.app?.repos.length) {
+            st.pushToast('info', 'Add a repository first.')
+            return
+          }
+          setReviewStartOpen(true)
+          return
+
+        case 'open-settings':
+          setShowSettings(true)
+          return
+
+        case 'rebase-onto-base': {
+          // 헤더의 Rebase 칩과 같은 경로(승인·force-push 포함). 막히는 상태(충돌·이미 최신·
+          // 스택 동기화 대기)는 게이트가 이유를 말해 준다 — 팔레트는 그 문장을 행에 미리 적는다.
+          if (!selId) return
+          const ws = st.app?.workspaces.find((w) => w.id === selId)
+          if (!ws) return
+          const gate = rebaseShortcutGate({
+            workspace: ws,
+            git: st.gitStatus[selId],
+            progress: st.stackProgress[selId],
+            prNeedsBaseUpdate: st.prStatus[selId]?.needsBaseUpdate
+          })
+          if (!gate.ok) {
+            st.pushToast('info', gate.message)
+            return
+          }
+          void st.requireGithub('Restacking updates the branch and its pull request.', () =>
+            st.restackWorkspace(selId)
+          )
+          return
+        }
+
+        case 'open-stack-view': {
+          // 스택이 아니면 열 지도가 없으므로 왜 안 열리는지 말해 준다 — 조용히 무시하면
+          // 단축키가 고장 난 것처럼 보인다. 팔레트는 그 전에 같은 이유를 행에 적어 둔다.
+          const anchorId = st.selectedWorkspaceId
+          if (!anchorId) {
+            st.pushToast('info', 'Pick a workspace in a stack first.')
+            return
+          }
+          if (buildStackLayers(st.app?.workspaces ?? [], anchorId).length < 2) {
+            st.pushToast('info', 'This workspace is not stacked on anything.')
+            return
+          }
+          st.openStackView(anchorId)
+          return
+        }
+
+        case 'toggle-work-panel':
+          st.toggleRightPanel()
+          return
+
+        case 'toggle-scripts-panel':
+          // 별도 창으로 떼어 뒀다면 이미 열려 있는 셈이므로 그 창을 앞으로 가져온다(다른
+          // 모니터에 있는 창을 찾아 주는 편이 사용자가 원한 결과다).
+          if (!selId) return
+          if (st.detachedPanes.scripts) void window.api.pane.focus('scripts')
+          else st.setScriptPanelOpen(selId, !(st.scriptPanelOpen[selId] ?? false))
+          return
+
+        case 'toggle-dev-script':
+          if (selId) toggleDevScript(selId)
+          return
+
+        case 'cycle-permission-mode': {
+          const ws = st.app?.workspaces.find((w) => w.id === st.selectedWorkspaceId)
+          if (!ws) return
+          // 순환 목록은 그 워크스페이스의 백엔드가 정한다(Claude 와 Codex 는 모드가 서로 다르다).
+          // 카탈로그를 아직 못 읽었으면 바꿀 근거가 없으므로 조용히 무시한다.
+          const modes = st.backends.find((b) => b.id === ws.agentBackend)?.permissionModes
+          if (!modes?.length) return
+          void window.api.workspace.setPermissionMode(
+            ws.id,
+            nextPermissionMode(modes, ws.permissionMode)
+          )
+          return
+        }
+
+        case 'approve-all-permissions': {
+          const count = st.approvablePermissionCount()
+          if (count === 0) return
+          void st
+            .confirm({
+              title: `Approve ${count} pending permission${count > 1 ? 's' : ''}?`,
+              body: 'Allows every waiting tool request across all workspaces at once. Questions that need an answer are left untouched.',
+              confirmLabel: 'Approve all'
+            })
+            .then((ok) => {
+              if (ok) useStore.getState().approveAllPermissions()
+            })
+          return
+        }
+
+        case 'open-file':
+          if (selId) openFileQuickOpen()
+          return
+
+        case 'open-in-editor':
+          if (selId) void window.api.workspace.openInEditor(selId)
+          return
+
+        case 'reveal-in-finder':
+          if (selId) void window.api.workspace.revealInFinder(selId)
+          return
+
+        case 'export-conversation':
+          // ExportMenu 가 이벤트를 받아 드롭다운을 연다.
+          if (selId) {
+            window.dispatchEvent(
+              new CustomEvent<ExportConversationDetail>('wooi:export-conversation', {
+                detail: { workspaceId: selId }
+              })
+            )
+          }
+          return
+
+        case 'archive-workspace':
+          // 리뷰 화면이 떠 있으면 대상은 뒤에 가려진 워크스페이스가 아니라 그 리뷰다
+          // (리뷰를 열어도 selectedWorkspaceId 는 그대로 남는다).
+          if (st.activeReviewId) {
+            void st.requestArchiveReview(st.activeReviewId)
+            return
+          }
+          // ChatView 가 확인 다이얼로그와 함께 처리한다.
+          if (selId)
+            window.dispatchEvent(new CustomEvent('wooi:archive-workspace', { detail: selId }))
+          return
+
+        case 'delete-workspace':
+          // 아카이브와 한 글쇠 차이지만 결과는 되돌릴 수 없다 — 확인은 store 가 반드시 거친다.
+          // 리뷰 화면이 떠 있으면 대상이 되는 워크스페이스가 화면에 없으니 받지 않는다.
+          if (selId && !st.activeReviewId) void st.requestDeleteWorkspace(selId)
+          return
+
+        case 'focus-composer':
+          // 대화가 다른 화면에 가려졌다면 뒤쪽 textarea 를 몰래 포커스하지 않는다.
+          if (surfaces.composer && chatComposerReachable(st, fileViewerVisible)) {
+            window.dispatchEvent(new CustomEvent(FOCUS_COMPOSER_EVENT))
+          }
+          return
+
+        case 'toggle-tool-results':
+          // 설정이 아니라 그때그때의 상태라, 지금 보고 있는 워크스페이스에만 걸린다.
+          if (st.selectedWorkspaceId) st.toggleToolVerbose(st.selectedWorkspaceId)
+          return
+      }
+    },
+    [fileViewerVisible, toggleDevScript]
+  )
+
+  /** 팔레트에서 항목 하나를 고른 결과를 실행한다. 동작은 위의 러너로 넘긴다. */
+  const runPaletteEffect = useCallback(
+    (effect: PaletteEffect): void => {
+      const st = useStore.getState()
+      switch (effect.type) {
+        case 'action':
+          runPaletteAction(effect.action)
+          return
+        case 'select-workspace':
+          void st.selectWorkspace(effect.workspaceId)
+          return
+        case 'repo-settings':
+          openRepoSettings(effect.repoId)
+          return
+        case 'open-settings':
+          openSettings(effect.page)
+          return
+        case 'run-command':
+          // 실행도 결과 카드도 Composer 가 이미 하고 있다 — 입구만 빌려 준다.
+          if (st.selectedWorkspaceId) {
+            window.dispatchEvent(
+              new CustomEvent<RunWooiCommandDetail>(RUN_WOOI_COMMAND_EVENT, {
+                detail: { workspaceId: st.selectedWorkspaceId, name: effect.command.name, rest: '' }
+              })
+            )
+          }
+          return
+        case 'fill-composer':
+          // caret 에 끼워 넣는 기존 경로를 그대로 쓴다 — 쓰던 초안을 덮어쓰지 않는다.
+          window.dispatchEvent(
+            new CustomEvent<string>(INSERT_INTO_COMPOSER_EVENT, { detail: effect.text })
+          )
+          window.dispatchEvent(new CustomEvent(FOCUS_COMPOSER_EVENT))
+          return
+      }
+    },
+    [runPaletteAction]
+  )
+
+  /**
+   * 팔레트가 "이 동작이 지금 가능한가" 를 판정하는 데 쓰는 앱 상태.
+   *
+   * 팔레트가 열려 있는 동안에만 필요하므로 그때만 만든다 — 매 렌더 계산할 값이 아니다.
+   */
+  const paletteContext = useMemo<PaletteContext | null>(() => {
+    if (!quickSwitchOpen || !app) return null
+    const archived = !!archivedPreviewTarget(app.workspaces, selectedId)
+    return {
+      hasRepos: app.repos.length > 0,
+      selectedWorkspaceId: selectedId,
+      worktreeTools: workspaceSurfaces(archived).worktreeTools,
+      composerReachable: chatComposerReachable(
+        { selectedWorkspaceId: selectedId, activeReviewId, activeFanoutGroupId },
+        fileViewerVisible
+      ),
+      activeReviewId,
+      activeFanoutGroupId,
+      pendingPermissionCount: approvablePermissionCount,
+      selectionIsStacked: !!selectedId && buildStackLayers(app.workspaces, selectedId).length >= 2,
+      rebaseBlockedReason
+    }
+  }, [
+    quickSwitchOpen,
+    app,
+    selectedId,
+    activeReviewId,
+    activeFanoutGroupId,
+    fileViewerVisible,
+    approvablePermissionCount,
+    rebaseBlockedReason
+  ])
+
   // 키보드: ⇧⇥ 권한 모드 순환, ⌘1–9 워크스페이스 선택, ⌘↑ / ⌘↓ 이전/다음,
   // ⌘L 메시지 입력창 포커스, ⌘[ 직전에 보던 워크스페이스로 뒤로가기, ⇧⌘R PR 리뷰 시작.
   useEffect(() => {
@@ -274,17 +618,13 @@ export default function App(): React.JSX.Element {
 
       // ⇧⇥ 만 받는다 — ⌃⇥ 계열은 터미널 탭 전환이라 권한 모드를 건드리면 안 된다.
       if (e.key === 'Tab' && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        // 바꿀 모드가 없으면 preventDefault 도 하지 않는다 — 아무것도 못 하면서 Tab 의 기본
+        // 포커스 이동까지 삼키면, 사용자에게는 키가 죽은 것으로 보인다.
         const ws = st.app?.workspaces.find((w) => w.id === st.selectedWorkspaceId)
         if (!ws) return
-        // 순환 목록은 그 워크스페이스의 백엔드가 정한다(Claude 와 Codex 는 모드가 서로 다르다).
-        // 카탈로그를 아직 못 읽었으면 바꿀 근거가 없으므로 조용히 무시한다.
-        const modes = st.backends.find((b) => b.id === ws.agentBackend)?.permissionModes
-        if (!modes?.length) return
+        if (!st.backends.find((b) => b.id === ws.agentBackend)?.permissionModes?.length) return
         e.preventDefault()
-        void window.api.workspace.setPermissionMode(
-          ws.id,
-          nextPermissionMode(modes, ws.permissionMode)
-        )
+        runPaletteAction('cycle-permission-mode')
         return
       }
 
@@ -292,7 +632,7 @@ export default function App(): React.JSX.Element {
       if (e.key === '?' && !e.metaKey && !e.ctrlKey && !e.altKey) {
         if (!typing()) {
           e.preventDefault()
-          setShowShortcuts(true)
+          runPaletteAction('open-shortcuts')
           return
         }
       }
@@ -302,7 +642,7 @@ export default function App(): React.JSX.Element {
       if (e.code === 'KeyO' && e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
         if (typing() || !st.selectedWorkspaceId) return
         e.preventDefault()
-        st.toggleToolVerbose(st.selectedWorkspaceId)
+        runPaletteAction('toggle-tool-results')
         return
       }
 
@@ -340,7 +680,7 @@ export default function App(): React.JSX.Element {
           !fileViewerVisible
         ) {
           e.preventDefault()
-          window.dispatchEvent(new CustomEvent(FOCUS_COMPOSER_EVENT))
+          runPaletteAction('focus-composer')
         }
         return
       }
@@ -351,25 +691,14 @@ export default function App(): React.JSX.Element {
       if (e.code === 'KeyZ' && !e.shiftKey && !e.ctrlKey && !e.altKey) {
         if (typing()) return
         e.preventDefault()
-        void st.undoLastWorkspaceAction()
+        runPaletteAction('undo-workspace-action')
         return
       }
 
       // ⇧⌘A: 대기 중인 모든 권한을 한 번에 승인(병렬 세션 권한 피로 완화). 확인 후 실행.
       if (e.shiftKey && e.key.toLowerCase() === 'a') {
         e.preventDefault()
-        const count = st.approvablePermissionCount()
-        if (count > 0) {
-          void st
-            .confirm({
-              title: `Approve ${count} pending permission${count > 1 ? 's' : ''}?`,
-              body: 'Allows every waiting tool request across all workspaces at once. Questions that need an answer are left untouched.',
-              confirmLabel: 'Approve all'
-            })
-            .then((ok) => {
-              if (ok) useStore.getState().approveAllPermissions()
-            })
-        }
+        runPaletteAction('approve-all-permissions')
         return
       }
 
@@ -377,29 +706,14 @@ export default function App(): React.JSX.Element {
       // 리뷰를 보는 중에도 시작할 수 있어야 하므로 아래 selId 게이트 바깥에 둔다.
       if (e.shiftKey && e.code === 'KeyR' && !e.ctrlKey && !e.altKey) {
         e.preventDefault()
-        // 리포가 하나도 없으면 고를 PR 도 없다 — ⌘N 과 같은 안내를 준다.
-        if (!st.app?.repos.length) {
-          st.pushToast('info', 'Add a repository first.')
-          return
-        }
-        setReviewStartOpen(true)
+        runPaletteAction('review-pull-request')
         return
       }
 
-      // ⇧⌘L: 스택 화면. 고른 워크스페이스가 속한 스택을 통째로 편다. 스택이 아니면 열 지도가
-      // 없으므로 왜 안 열리는지 말해 준다 — 조용히 무시하면 단축키가 고장 난 것처럼 보인다.
+      // ⇧⌘L: 스택 화면. 고른 워크스페이스가 속한 스택을 통째로 편다.
       if (e.code === 'KeyL' && e.shiftKey && !e.ctrlKey && !e.altKey) {
         e.preventDefault()
-        const anchorId = st.selectedWorkspaceId
-        if (!anchorId) {
-          st.pushToast('info', 'Pick a workspace in a stack first.')
-          return
-        }
-        if (buildStackLayers(st.app?.workspaces ?? [], anchorId).length < 2) {
-          st.pushToast('info', 'This workspace is not stacked on anything.')
-          return
-        }
-        st.openStackView(anchorId)
+        runPaletteAction('open-stack-view')
         return
       }
 
@@ -407,7 +721,7 @@ export default function App(): React.JSX.Element {
       // 디스크를 훑는 비동기 검색이라 즉답이 생명인 퀵 스위처와 한 글쇠 차이로 갈라 뒀다.
       if (e.code === 'KeyK' && e.shiftKey && !e.ctrlKey && !e.altKey) {
         e.preventDefault()
-        setTranscriptSearchOpen(true)
+        runPaletteAction('search-conversations')
         return
       }
 
@@ -426,49 +740,35 @@ export default function App(): React.JSX.Element {
       // ⌘,: 설정 열기(macOS 표준 Preferences 단축키).
       if (e.code === 'Comma' && !e.shiftKey && !e.ctrlKey && !e.altKey) {
         e.preventDefault()
-        setShowSettings(true)
+        runPaletteAction('open-settings')
         return
       }
 
       // ⌘N: 기본 에이전트로 즉시 생성. ⇧⌘N: 같은 repo의 + 메뉴를 열어 에이전트를 고른다.
       if (e.code === 'KeyN' && !e.ctrlKey && !e.altKey) {
         e.preventDefault()
-        const repoId =
-          st.app?.workspaces.find((w) => w.id === st.selectedWorkspaceId)?.repoId ??
-          st.app?.repos[0]?.id
-        if (!repoId) {
-          st.pushToast('info', 'Add a repository first.')
-          return
-        }
-        if (e.shiftKey) {
-          openNewWorkspaceMenu(repoId)
-          return
-        }
-        if (st.app?.settings.manualWorkspaceSetup) setNewWs({ repoId, parentWorkspaceId: null })
-        else void st.createWorkspace(repoId)
+        runPaletteAction(e.shiftKey ? 'new-workspace-choose-agent' : 'new-workspace')
         return
       }
 
       // ⌘J: 우측 작업 패널 표시/숨김 토글.
       if (e.key === 'j') {
         e.preventDefault()
-        st.toggleRightPanel()
+        runPaletteAction('toggle-work-panel')
         return
       }
 
       // ⌘U: 다음 미확인(완료된 응답) 세션으로 이동.
       if (e.key.toLowerCase() === 'u') {
         e.preventDefault()
-        const id = st.nextUnreadId()
-        if (id) void st.selectWorkspace(id)
+        runPaletteAction('next-unread')
         return
       }
 
       // ⌘I: 다음 권한 대기(입력 필요) 세션으로 이동.
       if (e.key.toLowerCase() === 'i') {
         e.preventDefault()
-        const id = st.nextPendingPermissionId()
-        if (id) void st.selectWorkspace(id)
+        runPaletteAction('next-needs-input')
         return
       }
 
@@ -481,31 +781,6 @@ export default function App(): React.JSX.Element {
       // ⇧⌘ 조합이라 macOS 기본 단축키(⌘S/E/F, ⌘⌫ 등)나 앱 기존 단축키와 충돌하지 않는다.
       const selId = surfaces.worktreeTools ? st.selectedWorkspaceId : null
 
-      // dev 스크립트 실행/중지 — 스크립트 패널 열림 여부와 무관하게 동작한다.
-      // ⇧⌘D 와 (구) ⌃⌘R 둘 다 여기로 들어온다.
-      const toggleDevScript = (id: string): void => {
-        const ws = st.app?.workspaces.find((w) => w.id === id)
-        const primary = ws && st.app?.repos.find((r) => r.id === ws.repoId)?.runScripts[0]
-        if (!primary?.command.trim()) {
-          // 여기까지 온 사용자는 이미 "dev 명령을 쓰고 싶다"고 손을 든 상태다. 설정이 어디
-          // 있는지 말로만 알려 주고 끝내지 말고, 바로 그 화면으로 데려간다.
-          st.pushToast('info', 'Add a run script for this repository first.', [
-            { label: 'Open repository settings', run: () => ws && openRepoSettings(ws.repoId) }
-          ])
-          return
-        }
-        const devRunning = (st.scriptStatus[id] ?? []).some(
-          (s) => s.scriptId === primary.id && s.state === 'running'
-        )
-        if (devRunning) {
-          void window.api.script.stop(id, primary.id).then(() => st.refreshScriptStatus(id))
-        } else {
-          // 실행 시 스크립트 패널(dev 탭)을 열어 로그·상태를 바로 볼 수 있게 한다.
-          st.setScriptPanelOpen(id, true)
-          void window.api.script.run(id, primary.id).then(() => st.refreshScriptStatus(id))
-        }
-      }
-
       // 리뷰 화면이 떠 있으면 헤더 도구의 대상은 뒤에 가려진 워크스페이스가 아니라 리뷰다
       // (리뷰를 열어도 selectedWorkspaceId 는 그대로 남는다). 아카이브만 리뷰에 대응하는
       // 동작이 있고, 나머지 ⇧⌘ 도구는 엉뚱한 워크스페이스를 건드리지 않도록 여기서 끊는다.
@@ -513,7 +788,7 @@ export default function App(): React.JSX.Element {
         // ⇧⌘⌫: 리뷰 아카이브 — 사이드바의 아카이브 버튼과 같은 경로(확인 후 워크트리만 정리).
         if (e.key === 'Backspace' || e.key === 'Delete') {
           e.preventDefault()
-          void st.requestArchiveReview(st.activeReviewId)
+          runPaletteAction('archive-workspace')
         }
         return
       }
@@ -524,7 +799,7 @@ export default function App(): React.JSX.Element {
       if (selId && !st.activeReviewId && e.altKey && !e.shiftKey && !e.ctrlKey) {
         if (e.code === 'Backspace' || e.code === 'Delete') {
           e.preventDefault()
-          void st.requestDeleteWorkspace(selId)
+          runPaletteAction('delete-workspace')
           return
         }
       }
@@ -534,7 +809,7 @@ export default function App(): React.JSX.Element {
       // ⇧⌘ 블록보다 앞에 둔다. 되살리는 대상은 아카이브뿐이다 — 영구 삭제는 되돌리지 않는다.
       if (e.shiftKey && e.code === 'KeyT' && !e.ctrlKey && !e.altKey) {
         e.preventDefault()
-        void st.reopenLastArchivedWorkspace()
+        runPaletteAction('reopen-archived')
         return
       }
 
@@ -543,70 +818,50 @@ export default function App(): React.JSX.Element {
         // ⇧⌘D: dev 스크립트 실행/중지. 다른 헤더 도구 단축키와 같은 ⇧⌘ 계열로 맞췄다.
         if (e.code === 'KeyD') {
           e.preventDefault()
-          toggleDevScript(selId)
+          runPaletteAction('toggle-dev-script')
           return
         }
         // ⇧⌘S: 스크립트 패널 열기/닫기. 별도 창으로 떼어 뒀다면 이미 열려 있는 셈이므로
         // 그 창을 앞으로 가져온다(다른 모니터에 있는 창을 찾아 주는 편이 사용자가 원한 결과다).
         if (e.code === 'KeyS') {
           e.preventDefault()
-          if (st.detachedPanes.scripts) void window.api.pane.focus('scripts')
-          else st.setScriptPanelOpen(selId, !(st.scriptPanelOpen[selId] ?? false))
+          runPaletteAction('toggle-scripts-panel')
           return
         }
-        // ⇧⌘B: base 브랜치 위로 rebase — 헤더의 Rebase 칩과 같은 경로(승인·force-push 포함).
-        // 막히는 상태(충돌·이미 최신·스택 동기화 대기)는 게이트가 이유를 말해 준다.
+        // ⇧⌘B: base 브랜치 위로 rebase.
         if (e.code === 'KeyB') {
           e.preventDefault()
-          const ws = st.app?.workspaces.find((w) => w.id === selId)
-          if (!ws) return
-          const gate = rebaseShortcutGate({
-            workspace: ws,
-            git: st.gitStatus[selId],
-            progress: st.stackProgress[selId],
-            prNeedsBaseUpdate: st.prStatus[selId]?.needsBaseUpdate
-          })
-          if (!gate.ok) {
-            st.pushToast('info', gate.message)
-            return
-          }
-          void st.requireGithub('Restacking updates the branch and its pull request.', () =>
-            st.restackWorkspace(selId)
-          )
+          runPaletteAction('rebase-onto-base')
           return
         }
         // ⇧⌘E: 에디터에서 열기.
         if (e.code === 'KeyE') {
           e.preventDefault()
-          void window.api.workspace.openInEditor(selId)
+          runPaletteAction('open-in-editor')
           return
         }
         // ⇧⌘F: Finder 에서 보기.
         if (e.code === 'KeyF') {
           e.preventDefault()
-          void window.api.workspace.revealInFinder(selId)
+          runPaletteAction('reveal-in-finder')
           return
         }
         // ⇧⌘O: 파일 퀵 오픈 — 고르면 대화창 위의 큰 파일 뷰어로 열린다.
         if (e.code === 'KeyO') {
           e.preventDefault()
-          openFileQuickOpen()
+          runPaletteAction('open-file')
           return
         }
         // ⇧⌘X: 대화 내보내기 메뉴 열기(ExportMenu 가 이벤트를 받아 드롭다운을 연다).
         if (e.code === 'KeyX') {
           e.preventDefault()
-          window.dispatchEvent(
-            new CustomEvent<ExportConversationDetail>('wooi:export-conversation', {
-              detail: { workspaceId: selId }
-            })
-          )
+          runPaletteAction('export-conversation')
           return
         }
         // ⇧⌘⌫: workspace 아카이브(ChatView 가 확인 다이얼로그와 함께 처리).
         if (e.key === 'Backspace' || e.key === 'Delete') {
           e.preventDefault()
-          window.dispatchEvent(new CustomEvent('wooi:archive-workspace', { detail: selId }))
+          runPaletteAction('archive-workspace')
           return
         }
       }
@@ -615,7 +870,7 @@ export default function App(): React.JSX.Element {
       // 키 판별은 e.code('KeyR')로 한다 — 한글 IME·Control 조합에서 e.key 가 'r' 이 아닐 수 있다.
       if (selId && e.ctrlKey && e.code === 'KeyR') {
         e.preventDefault()
-        toggleDevScript(selId)
+        runPaletteAction('toggle-dev-script')
         return
       }
 
@@ -663,7 +918,7 @@ export default function App(): React.JSX.Element {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [anyModalOpen, fileViewerVisible])
+  }, [anyModalOpen, fileViewerVisible, runPaletteAction])
 
   if (!ready || !app) {
     return (
@@ -854,7 +1109,13 @@ export default function App(): React.JSX.Element {
       {loginBackend === 'claude' && <ClaudeLoginModal onClose={() => setLoginBackend(null)} />}
       {loginBackend === 'codex' && <CodexLoginModal onClose={() => setLoginBackend(null)} />}
       {showShortcuts && <ShortcutsHelp onClose={() => setShowShortcuts(false)} />}
-      {quickSwitchOpen && <QuickSwitcher onClose={() => setQuickSwitchOpen(false)} />}
+      {quickSwitchOpen && paletteContext && (
+        <QuickSwitcher
+          onClose={() => setQuickSwitchOpen(false)}
+          context={paletteContext}
+          onRun={runPaletteEffect}
+        />
+      )}
       {transcriptSearchOpen && <TranscriptSearch onClose={() => setTranscriptSearchOpen(false)} />}
       {quickOpenFile && selected && (
         <FileQuickOpen workspaceId={selected.id} onClose={() => setQuickOpenFile(false)} />
