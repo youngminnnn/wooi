@@ -25,7 +25,8 @@ const READY: PaletteContext = {
   activeReviewId: null,
   activeFanoutGroupId: null,
   pendingPermissionCount: 2,
-  selectionIsStacked: true
+  selectionIsStacked: true,
+  rebaseBlockedReason: null
 }
 
 const EMPTY: PaletteContext = {
@@ -36,7 +37,8 @@ const EMPTY: PaletteContext = {
   activeReviewId: null,
   activeFanoutGroupId: null,
   pendingPermissionCount: 0,
-  selectionIsStacked: false
+  selectionIsStacked: false,
+  rebaseBlockedReason: null
 }
 
 function item(over: Partial<PaletteItem> = {}): PaletteItem {
@@ -146,6 +148,25 @@ describe('actionDisabledReason', () => {
     expect(
       actionDisabledReason('approve-all-permissions', { ...READY, pendingPermissionCount: 0 })
     ).toBe('Nothing is waiting for permission.')
+  })
+
+  it('rebase 는 게이트가 막으면 그 문장을 그대로 이유로 쓴다', () => {
+    expect(actionDisabledReason('rebase-onto-base', READY)).toBeUndefined()
+    // 문장을 여기서 새로 쓰지 않는다 — rebaseGate 가 만든 것을 그대로 통과시킨다.
+    expect(
+      actionDisabledReason('rebase-onto-base', {
+        ...READY,
+        rebaseBlockedReason: 'Already up to date with main.'
+      })
+    ).toBe('Already up to date with main.')
+  })
+
+  it('rebase 는 워크스페이스·worktree 조건이 게이트보다 먼저다', () => {
+    // 대상이 없으면 게이트를 물어볼 것도 없다.
+    expect(actionDisabledReason('rebase-onto-base', EMPTY)).toBe('Select a workspace first.')
+    expect(actionDisabledReason('rebase-onto-base', { ...READY, worktreeTools: false })).toMatch(
+      /archived/
+    )
   })
 
   it('스택이 아니면 스택 화면이 막힌다', () => {

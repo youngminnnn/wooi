@@ -74,6 +74,12 @@ export interface PaletteContext {
   pendingPermissionCount: number
   /** 고른 워크스페이스가 스택에 속해 있는가(혼자면 펼칠 지도가 없다). */
   selectionIsStacked: boolean
+  /**
+   * rebase 가 막혀 있다면 그 이유. 문장은 [[lib/rebaseGate]] 가 만든 것을 그대로 받는다 —
+   * 충돌·이미 최신·스택 동기화 대기처럼 조건이 여럿이고, 그 판정은 헤더의 Rebase 칩과
+   * 단축키가 이미 공유하고 있다. 여기서 다시 쓰면 셋이 갈라진다.
+   */
+  rebaseBlockedReason: string | null
 }
 
 const NO_WORKSPACE = 'Select a workspace first.'
@@ -124,10 +130,13 @@ export function actionDisabledReason(
     case 'export-conversation':
     case 'open-file':
     case 'delete-workspace':
+    case 'rebase-onto-base':
       if (ctx.activeFanoutGroupId) return 'Leave the fan-out comparison first.'
       if (action === 'delete-workspace' && ctx.activeReviewId) return 'Close the review first.'
       if (!ctx.selectedWorkspaceId) return NO_WORKSPACE
-      return ctx.worktreeTools ? undefined : ARCHIVED
+      if (!ctx.worktreeTools) return ARCHIVED
+      // worktree 가 있어도 rebase 는 더 막힐 수 있다 — 게이트가 이유까지 들고 있다.
+      return action === 'rebase-onto-base' ? (ctx.rebaseBlockedReason ?? undefined) : undefined
 
     case 'cycle-permission-mode':
     case 'toggle-tool-results':

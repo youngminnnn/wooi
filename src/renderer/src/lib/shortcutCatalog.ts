@@ -27,6 +27,7 @@ export type PaletteActionId =
   | 'reopen-archived'
   | 'review-pull-request'
   | 'open-stack-view'
+  | 'rebase-onto-base'
   | 'open-settings'
   | 'toggle-work-panel'
   | 'toggle-scripts-panel'
@@ -98,7 +99,11 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
         label: 'Lay out the whole stack of the selected workspace',
         action: 'open-stack-view'
       },
-      { keys: ['⇧⌘B'], label: 'Rebase the workspace onto its base branch' },
+      {
+        keys: ['⇧⌘B'],
+        label: 'Rebase the workspace onto its base branch',
+        action: 'rebase-onto-base'
+      },
       { keys: ['⌘,'], label: 'Open settings', action: 'open-settings' },
       { keys: ['⌘J'], label: 'Toggle the work panel', action: 'toggle-work-panel' },
       { keys: ['⇧⌘S'], label: 'Toggle the scripts panel', action: 'toggle-scripts-panel' },

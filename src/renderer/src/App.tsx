@@ -153,6 +153,20 @@ export default function App(): React.JSX.Element {
   // ⌘K 팔레트가 "승인할 게 없다" 를 이유로 쓴다. 셀렉터로 받아야 팔레트를 열어 둔 채 새 권한이
   // 들어와도 그 행이 따라 살아난다.
   const approvablePermissionCount = useStore((s) => s.approvablePermissionCount())
+  // 팔레트의 Rebase 행이 왜 막혔는지. 게이트를 셀렉터 안에서 돌려 문장만 꺼내 온다 — 문자열
+  // 하나라 참조가 흔들리지 않고, 뒤처짐·충돌 상태가 바뀌면 그 행도 따라 살아난다.
+  const rebaseBlockedReason = useStore((s) => {
+    const id = s.selectedWorkspaceId
+    const ws = id ? s.app?.workspaces.find((w) => w.id === id) : null
+    if (!id || !ws) return null
+    const gate = rebaseShortcutGate({
+      workspace: ws,
+      git: s.gitStatus[id],
+      progress: s.stackProgress[id],
+      prNeedsBaseUpdate: s.prStatus[id]?.needsBaseUpdate
+    })
+    return gate.ok ? null : gate.message
+  })
 
   // 업데이트로 새로 생긴 기능을 한 번만 알려 준다(신규 설치 사용자에게는 뜨지 않는다).
   useFeatureNudge()
@@ -370,6 +384,28 @@ export default function App(): React.JSX.Element {
           setShowSettings(true)
           return
 
+        case 'rebase-onto-base': {
+          // 헤더의 Rebase 칩과 같은 경로(승인·force-push 포함). 막히는 상태(충돌·이미 최신·
+          // 스택 동기화 대기)는 게이트가 이유를 말해 준다 — 팔레트는 그 문장을 행에 미리 적는다.
+          if (!selId) return
+          const ws = st.app?.workspaces.find((w) => w.id === selId)
+          if (!ws) return
+          const gate = rebaseShortcutGate({
+            workspace: ws,
+            git: st.gitStatus[selId],
+            progress: st.stackProgress[selId],
+            prNeedsBaseUpdate: st.prStatus[selId]?.needsBaseUpdate
+          })
+          if (!gate.ok) {
+            st.pushToast('info', gate.message)
+            return
+          }
+          void st.requireGithub('Restacking updates the branch and its pull request.', () =>
+            st.restackWorkspace(selId)
+          )
+          return
+        }
+
         case 'open-stack-view': {
           // 스택이 아니면 열 지도가 없으므로 왜 안 열리는지 말해 준다 — 조용히 무시하면
           // 단축키가 고장 난 것처럼 보인다. 팔레트는 그 전에 같은 이유를 행에 적어 둔다.
@@ -546,7 +582,8 @@ export default function App(): React.JSX.Element {
       activeReviewId,
       activeFanoutGroupId,
       pendingPermissionCount: approvablePermissionCount,
-      selectionIsStacked: !!selectedId && buildStackLayers(app.workspaces, selectedId).length >= 2
+      selectionIsStacked: !!selectedId && buildStackLayers(app.workspaces, selectedId).length >= 2,
+      rebaseBlockedReason
     }
   }, [
     quickSwitchOpen,
@@ -555,7 +592,8 @@ export default function App(): React.JSX.Element {
     activeReviewId,
     activeFanoutGroupId,
     fileViewerVisible,
-    approvablePermissionCount
+    approvablePermissionCount,
+    rebaseBlockedReason
   ])
 
   // 키보드: ⇧⇥ 권한 모드 순환, ⌘1–9 워크스페이스 선택, ⌘↑ / ⌘↓ 이전/다음,
@@ -790,25 +828,10 @@ export default function App(): React.JSX.Element {
           runPaletteAction('toggle-scripts-panel')
           return
         }
-        // ⇧⌘B: base 브랜치 위로 rebase — 헤더의 Rebase 칩과 같은 경로(승인·force-push 포함).
-        // 막히는 상태(충돌·이미 최신·스택 동기화 대기)는 게이트가 이유를 말해 준다.
+        // ⇧⌘B: base 브랜치 위로 rebase.
         if (e.code === 'KeyB') {
           e.preventDefault()
-          const ws = st.app?.workspaces.find((w) => w.id === selId)
-          if (!ws) return
-          const gate = rebaseShortcutGate({
-            workspace: ws,
-            git: st.gitStatus[selId],
-            progress: st.stackProgress[selId],
-            prNeedsBaseUpdate: st.prStatus[selId]?.needsBaseUpdate
-          })
-          if (!gate.ok) {
-            st.pushToast('info', gate.message)
-            return
-          }
-          void st.requireGithub('Restacking updates the branch and its pull request.', () =>
-            st.restackWorkspace(selId)
-          )
+          runPaletteAction('rebase-onto-base')
           return
         }
         // ⇧⌘E: 에디터에서 열기.
