@@ -107,11 +107,21 @@ export default function Hint({
       const pr = prStatus[w.id]
       return !!pr && isOpenPrState(pr.state)
     })
+    // stack-work 가 보는 "같은 리포의 다른 일". app.workspaces 는 main 이 늘 밀어 주는 값이라
+    // 여기서 세는 데 추가 조회가 전혀 들지 않는다 — 파일 겹침 검사(check_related_work)를 상시로
+    // 돌리지 않기로 한 결정이 그대로 지켜진다(lib/hints.ts 의 repoSiblingCount 주석).
+    const activeInRepo = selectedWs
+      ? workspaces.filter((w) => !w.archived && w.repoId === selectedWs.repoId)
+      : []
     return {
       totalWorkspaceCount: workspaces.length,
       visibleWorkspaceCount: visible.length,
       mouseSwitchCount,
       anyOpenPr,
+      otherRunningCount: workspaces.filter(
+        (w) => !w.archived && w.status === 'running' && w.id !== selectedWs?.id
+      ).length,
+      fanoutGroupCount: app?.fanoutGroups?.length ?? 0,
       selected: selectedWs
         ? {
             ahead: gitStatus[selectedWs.id]?.ahead ?? 0,
@@ -121,7 +131,10 @@ export default function Hint({
               rightPanelOpenByWorkspace[selectedWs.id] ??
               app?.settings.defaultRightPanelOpen ??
               true,
-            awaitingPermission: permissions.some((p) => p.workspaceId === selectedWs.id)
+            awaitingPermission: permissions.some((p) => p.workspaceId === selectedWs.id),
+            repoSiblingCount: activeInRepo.filter((w) => w.id !== selectedWs.id).length,
+            isStackRoot: selectedWs.parentWorkspaceId == null,
+            hasStackedChildren: activeInRepo.some((w) => w.parentWorkspaceId === selectedWs.id)
           }
         : null
     }

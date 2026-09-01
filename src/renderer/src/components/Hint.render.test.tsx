@@ -104,3 +104,48 @@ describe('Hint — 세션당 상한은 실제로 화면에 뜬 힌트만 센다'
     fillTwoRealSlots(ws)
   })
 })
+
+/**
+ * `lib/hints.test.ts` 는 `when` 만 본다 — HintContext 를 손으로 만들어 넘기기 때문이다. 이쪽은
+ * 그 스냅샷을 **store 에서 실제로 만들어 내는 부분**(Hint.tsx 의 useMemo)을 건다. 스택 힌트가
+ * 보는 세 값(repoSiblingCount·isStackRoot·hasStackedChildren)은 전부 app.workspaces 를 세서
+ * 나오는 것이라, 그 계산이 어긋나면 유닛 테스트는 전부 초록인 채로 힌트만 조용히 안 뜬다.
+ */
+describe('Hint — 스택 힌트가 보는 값은 store 에서 만들어진다', () => {
+  /** 같은 리포에 워크스페이스 둘, 선택된 쪽은 커밋이 하나 앞서 있고 PR 은 없다. */
+  const twoInOneRepo = (extra: Partial<Parameters<typeof workspace>[0]> = {}) => {
+    const mine = workspace({ id: 'ws-mine' })
+    const theirs = workspace({ id: 'ws-theirs', name: 'other-task', ...extra })
+    return { mine, theirs }
+  }
+
+  it('같은 리포에 다른 워크스페이스가 있으면 스택 힌트가 뜬다', () => {
+    const { mine, theirs } = twoInOneRepo()
+    useStore.setState({
+      app: app([mine, theirs]),
+      selectedWorkspaceId: mine.id,
+      gitStatus: { [mine.id]: git({ ahead: 1, changedFiles: 0 }) },
+      prStatus: {}
+    })
+
+    renderWithStore(<Hint anyModalOpen={false} />)
+    // 앵커가 없는 인라인 카드라 DOM 레이아웃 없이도 그대로 뜬다.
+    expect(screen.getByText(/belongs in a stacked workspace/)).toBeInTheDocument()
+  })
+
+  it('그 다른 워크스페이스가 이미 내 위에 쌓여 있으면 안 뜬다', () => {
+    // parentWorkspaceId 로만 갈리는 상태다 — 워크스페이스 수도, git 상태도 위와 똑같다.
+    const { mine, theirs } = twoInOneRepo({ parentWorkspaceId: 'ws-mine' })
+    useStore.setState({
+      app: app([mine, theirs]),
+      selectedWorkspaceId: mine.id,
+      gitStatus: { [mine.id]: git({ ahead: 1, changedFiles: 0 }) },
+      prStatus: {}
+    })
+
+    const { container } = renderWithStore(<Hint anyModalOpen={false} />)
+    expect(screen.queryByText(/belongs in a stacked workspace/)).not.toBeInTheDocument()
+    // 다음 차례인 open-pr 은 앵커(data-tour="open-pr")가 이 셸에 없어 역시 안 뜬다.
+    expect(container).toBeEmptyDOMElement()
+  })
+})
