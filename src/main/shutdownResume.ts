@@ -21,12 +21,17 @@ export class ShutdownResumeCoordinator {
   restore(): void {
     const state = getStore().getState()
     if (!state.settings.resumeUnfinishedTurnsOnLaunch) {
-      this.cancelAll()
+      this.handleAll()
       return
     }
     const now = Date.now()
     const mine = state.workspaces
-      .filter((ws) => ws.pendingShutdownResume?.backend === this.deps.backend && !ws.archived)
+      .filter(
+        (ws) =>
+          ws.pendingShutdownResume?.backend === this.deps.backend &&
+          !ws.pendingShutdownResume.handled &&
+          !ws.archived
+      )
       .sort((a, b) => b.pendingShutdownResume!.at - a.pendingShutdownResume!.at)
 
     for (const ws of mine) {
@@ -65,6 +70,19 @@ export class ShutdownResumeCoordinator {
     if (hadPending) this.deps.broadcastState()
   }
 
+  private handleAll(): void {
+    let changed = false
+    getStore().update((draft) => {
+      for (const ws of draft.workspaces) {
+        const pending = ws.pendingShutdownResume
+        if (pending?.backend !== this.deps.backend || pending.handled) continue
+        pending.handled = true
+        changed = true
+      }
+    })
+    if (changed) this.deps.broadcastState()
+  }
+
   clearPending(workspaceId: string): boolean {
     let hadPending = false
     getStore().update((draft) => {
@@ -77,7 +95,18 @@ export class ShutdownResumeCoordinator {
   }
 
   private drop(workspaceId: string, text: string): void {
-    if (this.clearPending(workspaceId)) this.notice(workspaceId, text)
+    let changed = false
+    getStore().update((draft) => {
+      const pending = draft.workspaces.find(
+        (item) => item.id === workspaceId
+      )?.pendingShutdownResume
+      if (!pending || pending.handled) return
+      pending.handled = true
+      changed = true
+    })
+    if (!changed) return
+    this.deps.broadcastState()
+    this.notice(workspaceId, text)
   }
 
   private continueNow(

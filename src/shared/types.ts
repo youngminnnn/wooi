@@ -4115,6 +4115,8 @@ export interface PendingShutdownResume {
   sessionId: string
   at: number
   reason: 'update' | 'background' | 'quit' | 'crash'
+  /** 자동 이어가기를 하지 않기로 확정된 기록. 다음 실행에서 다시 시도하지 않고, 표시로만 남는다. */
+  handled?: boolean
 }
 
 /**

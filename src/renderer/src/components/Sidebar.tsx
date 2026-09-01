@@ -952,7 +952,7 @@ function WorkspaceRow({
                 className="text-[var(--warning-400)]/90 shrink-0"
                 title="Interrupted by shutdown"
               >
-                · continues when Wooi reopens
+                · interrupted by shutdown — send a message to continue
               </span>
             ) : workspace.pendingRateLimitResume ? (
               <span

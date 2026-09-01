@@ -66,7 +66,7 @@ export function describeWorkspaceActivity(ws: Workspace, now = Date.now()): Work
     return {
       ...base,
       state: 'idle',
-      note: 'The previous turn was interrupted by shutdown and is scheduled to continue when Wooi reopens.'
+      note: 'The previous turn was interrupted by shutdown and is waiting for a message to continue.'
     }
   }
 

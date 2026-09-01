@@ -180,7 +180,7 @@ export function describeWorkspaceStatus({
       label: 'Running'
     }
   }
-  // 종료로 끊긴 턴은 제한 대기나 일반 idle 이 아니다. 다시 열면 이어진다는 사실을 먼저 보여 준다.
+  // 종료로 끊긴 턴은 제한 대기나 일반 idle 이 아니다. 사용자가 메시지로 이어야 한다는 사실을 보여 준다.
   if (pendingShutdownResume) {
     return {
       rung: 'shutdown-interrupted',
@@ -188,7 +188,7 @@ export function describeWorkspaceStatus({
       toneClass: 'text-[var(--warning-400)]',
       size: 12,
       spin: false,
-      title: 'Will continue when Wooi reopens',
+      title: 'Interrupted when Wooi shut down — send a message to continue',
       aria: 'Interrupted by shutdown',
       label: 'Interrupted by shutdown'
     }
