@@ -208,8 +208,21 @@ function overAutoCompactThreshold(ctx: ContextUsage): boolean {
  */
 const LARGE_RESUME_NOTICE_TOKENS = 100_000
 
-/** getContextUsage 제어 요청 상한. 지연돼도 미터·자동압축 판단이 멈추지 않도록 둔다. */
-const CONTEXT_USAGE_TIMEOUT_MS = 5000
+/**
+ * getContextUsage 제어 요청 상한(1차, 턴을 붙잡은 채 기다리는 쪽).
+ *
+ * autoCompact 가 켜져 있으면 settleTurn 이 이 호출을 await 한 뒤에야 idle 을 방출한다(settleTurn).
+ * 그래서 값을 무작정 올리면 턴이 실제로 끝나고도 사이드바가 그만큼 "진행 중" 으로 남는다. 1차는
+ * 여기서 짧게 끊고, 이 안에 못 오면 아래 재시도가 턴을 붙잡지 않은 채 미터만 따로 채운다.
+ */
+const CONTEXT_USAGE_TIMEOUT_MS = 10_000
+
+/**
+ * 1차 조회가 늦어 턴을 더 붙잡을 수 없을 때, **미터만** 채우러 다시 묻는 상한.
+ * 턴은 이미 idle 로 갔으므로 여기서는 오래 기다려도 사용자를 붙잡지 않는다 —
+ * 실측상 세션 여럿이 한 호스트에 있으면 이 왕복이 20초를 넘기는 일이 흔하다.
+ */
+const CONTEXT_USAGE_RETRY_TIMEOUT_MS = 30_000
 
 /**
  * SDK 가 백그라운드 Bash 실행(`run_in_background`)에 붙이는 task_type.
@@ -332,6 +345,8 @@ export class ClaudeSession {
    * 압축 턴의 result·boundary 가 다시 임계치를 넘겨 무한 압축 루프를 도는 것을 막는다.
    */
   private autoCompactInFlight = false
+  /** retryContextUsage 재진입 가드 — 1차 실패마다 새로 쏘지 않고 진행 중인 재시도 하나만 유지한다. */
+  private contextUsageRetryInFlight = false
   /**
    * 이번 query 에서 SDK 메시지를 하나라도 받았는지(= 세션이 정상 시작됐는지). 워치독과 resume
    * 폴백 판단에 쓴다. **query 단위 상태이므로 run() 시작마다 false 로 리셋한다** — 세션 단위로
@@ -2220,10 +2235,28 @@ export class ClaudeSession {
     let ctx: ContextUsage
     try {
       ctx = await withTimeout(q.getContextUsage(), CONTEXT_USAGE_TIMEOUT_MS)
-    } catch {
+    } catch (err) {
+      // 지금까지 이 실패가 완전 무음이었다 — 상태줄이 늘 "—" 로 남는데도 원인이 안 보였다.
+      log.warn(`session: getContextUsage failed/timed out after ${CONTEXT_USAGE_TIMEOUT_MS}ms`, err)
+      this.retryContextUsage()
       return false
     }
 
+    if (!this.emitContextUsage(ctx)) return false
+
+    // 임계치를 넘었으면 다음 턴 전에 자동으로 압축한다(Claude Code CLI 의 auto-compact).
+    // 임계치는 고정 퍼센트가 아니라 Claude Code 가 알려준 값을 그대로 쓴다(overAutoCompactThreshold).
+    if (opts.allowAutoCompact && this.deps.autoCompact && overAutoCompactThreshold(ctx)) {
+      return this.triggerAutoCompact()
+    }
+    return false
+  }
+
+  /**
+   * 미터 이벤트 1건을 방출한다. 값이 쓸 수 없으면(창 크기 미상) 아무것도 하지 않는다.
+   * @returns 방출했으면 true.
+   */
+  private emitContextUsage(ctx: ContextUsage): boolean {
     const max = ctx.maxTokens || 0
     if (max <= 0) return false
 
@@ -2235,13 +2268,44 @@ export class ClaudeSession {
       maxTokens: max,
       percentage: fraction
     })
+    return true
+  }
 
-    // 임계치를 넘었으면 다음 턴 전에 자동으로 압축한다(Claude Code CLI 의 auto-compact).
-    // 임계치는 고정 퍼센트가 아니라 Claude Code 가 알려준 값을 그대로 쓴다(overAutoCompactThreshold).
-    if (opts.allowAutoCompact && this.deps.autoCompact && overAutoCompactThreshold(ctx)) {
-      return this.triggerAutoCompact()
-    }
-    return false
+  /**
+   * 1차 조회가 상한을 넘겼을 때 미터만 따로 채우는 뒤늦은 재시도.
+   *
+   * 자동 압축은 **다시 판정하지 않는다.** 이 시점엔 턴이 이미 idle 로 갔고, 그 상태에서
+   * /compact 를 입력 큐에 밀어 넣으면 렌더러가 이미 흘려보낸 대기 메시지와 순서가 엉킨다
+   * (settleTurn 이 압축 판정 전에 idle 을 방출하지 않는 이유와 같은 문제). 임계치는 다음 턴의
+   * 1차 조회가, 콜드 resume 이면 preflight 가 다시 본다.
+   */
+  private retryContextUsage(): void {
+    if (this.contextUsageRetryInFlight) return
+    this.contextUsageRetryInFlight = true
+
+    // settleTurn 과 같은 이유로 두 카운터를 함께 본다 — 응답이 오는 사이 새 턴이 열리는 길이
+    // 둘이다(사용자 메시지·재시작은 activeSeq, SDK 가 스스로 여는 턴은 outputSeq 로만 드러난다).
+    // 둘 중 하나라도 움직였으면 그 새 턴이 자기 값으로 미터를 이미 갱신했으므로, 뒤늦은 옛 값으로
+    // 덮어쓰지 않는다.
+    const seq = this.activeSeq
+    const output = this.outputSeq
+
+    void (async () => {
+      try {
+        const q = this.q
+        if (!q) return
+        const ctx = await withTimeout(q.getContextUsage(), CONTEXT_USAGE_RETRY_TIMEOUT_MS)
+        if (this.activeSeq !== seq || this.outputSeq !== output) return
+        this.emitContextUsage(ctx)
+      } catch (err) {
+        log.warn(
+          `session: getContextUsage retry failed/timed out after ${CONTEXT_USAGE_RETRY_TIMEOUT_MS}ms`,
+          err
+        )
+      } finally {
+        this.contextUsageRetryInFlight = false
+      }
+    })()
   }
 
   /**
