@@ -24,7 +24,8 @@ const READY: PaletteContext = {
   composerReachable: true,
   activeReviewId: null,
   activeFanoutGroupId: null,
-  pendingPermissionCount: 2
+  pendingPermissionCount: 2,
+  selectionIsStacked: true
 }
 
 const EMPTY: PaletteContext = {
@@ -34,7 +35,8 @@ const EMPTY: PaletteContext = {
   composerReachable: false,
   activeReviewId: null,
   activeFanoutGroupId: null,
-  pendingPermissionCount: 0
+  pendingPermissionCount: 0,
+  selectionIsStacked: false
 }
 
 function item(over: Partial<PaletteItem> = {}): PaletteItem {
@@ -144,6 +146,21 @@ describe('actionDisabledReason', () => {
     expect(
       actionDisabledReason('approve-all-permissions', { ...READY, pendingPermissionCount: 0 })
     ).toBe('Nothing is waiting for permission.')
+  })
+
+  it('스택이 아니면 스택 화면이 막힌다', () => {
+    expect(actionDisabledReason('open-stack-view', READY)).toBeUndefined()
+    expect(actionDisabledReason('open-stack-view', { ...READY, selectionIsStacked: false })).toBe(
+      'This workspace is not stacked on anything.'
+    )
+    expect(actionDisabledReason('open-stack-view', EMPTY)).toBe('Select a workspace first.')
+  })
+
+  it('아카이브 미리보기에서도 스택 화면은 열린다', () => {
+    // 스택 화면이 그리는 것은 worktree 가 아니라 브랜치 관계다.
+    expect(
+      actionDisabledReason('open-stack-view', { ...READY, worktreeTools: false })
+    ).toBeUndefined()
   })
 
   it('대화가 가려져 있으면 입력창 포커스가 막힌다', () => {

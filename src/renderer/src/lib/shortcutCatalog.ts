@@ -26,6 +26,7 @@ export type PaletteActionId =
   | 'undo-workspace-action'
   | 'reopen-archived'
   | 'review-pull-request'
+  | 'open-stack-view'
   | 'open-settings'
   | 'toggle-work-panel'
   | 'toggle-scripts-panel'
@@ -92,7 +93,11 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
         action: 'reopen-archived'
       },
       { keys: ['⇧⌘R'], label: 'Review a pull request', action: 'review-pull-request' },
-      { keys: ['⇧⌘L'], label: 'Lay out the whole stack of the selected workspace' },
+      {
+        keys: ['⇧⌘L'],
+        label: 'Lay out the whole stack of the selected workspace',
+        action: 'open-stack-view'
+      },
       { keys: ['⇧⌘B'], label: 'Rebase the workspace onto its base branch' },
       { keys: ['⌘,'], label: 'Open settings', action: 'open-settings' },
       { keys: ['⌘J'], label: 'Toggle the work panel', action: 'toggle-work-panel' },

@@ -370,6 +370,22 @@ export default function App(): React.JSX.Element {
           setShowSettings(true)
           return
 
+        case 'open-stack-view': {
+          // 스택이 아니면 열 지도가 없으므로 왜 안 열리는지 말해 준다 — 조용히 무시하면
+          // 단축키가 고장 난 것처럼 보인다. 팔레트는 그 전에 같은 이유를 행에 적어 둔다.
+          const anchorId = st.selectedWorkspaceId
+          if (!anchorId) {
+            st.pushToast('info', 'Pick a workspace in a stack first.')
+            return
+          }
+          if (buildStackLayers(st.app?.workspaces ?? [], anchorId).length < 2) {
+            st.pushToast('info', 'This workspace is not stacked on anything.')
+            return
+          }
+          st.openStackView(anchorId)
+          return
+        }
+
         case 'toggle-work-panel':
           st.toggleRightPanel()
           return
@@ -529,7 +545,8 @@ export default function App(): React.JSX.Element {
       ),
       activeReviewId,
       activeFanoutGroupId,
-      pendingPermissionCount: approvablePermissionCount
+      pendingPermissionCount: approvablePermissionCount,
+      selectionIsStacked: !!selectedId && buildStackLayers(app.workspaces, selectedId).length >= 2
     }
   }, [
     quickSwitchOpen,
@@ -655,20 +672,10 @@ export default function App(): React.JSX.Element {
         return
       }
 
-      // ⇧⌘L: 스택 화면. 고른 워크스페이스가 속한 스택을 통째로 편다. 스택이 아니면 열 지도가
-      // 없으므로 왜 안 열리는지 말해 준다 — 조용히 무시하면 단축키가 고장 난 것처럼 보인다.
+      // ⇧⌘L: 스택 화면. 고른 워크스페이스가 속한 스택을 통째로 편다.
       if (e.code === 'KeyL' && e.shiftKey && !e.ctrlKey && !e.altKey) {
         e.preventDefault()
-        const anchorId = st.selectedWorkspaceId
-        if (!anchorId) {
-          st.pushToast('info', 'Pick a workspace in a stack first.')
-          return
-        }
-        if (buildStackLayers(st.app?.workspaces ?? [], anchorId).length < 2) {
-          st.pushToast('info', 'This workspace is not stacked on anything.')
-          return
-        }
-        st.openStackView(anchorId)
+        runPaletteAction('open-stack-view')
         return
       }
 

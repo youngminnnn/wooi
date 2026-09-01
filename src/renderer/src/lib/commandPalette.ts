@@ -72,6 +72,8 @@ export interface PaletteContext {
   activeReviewId: string | null
   activeFanoutGroupId: string | null
   pendingPermissionCount: number
+  /** 고른 워크스페이스가 스택에 속해 있는가(혼자면 펼칠 지도가 없다). */
+  selectionIsStacked: boolean
 }
 
 const NO_WORKSPACE = 'Select a workspace first.'
@@ -131,6 +133,11 @@ export function actionDisabledReason(
     case 'toggle-tool-results':
     case 'toggle-work-panel':
       return ctx.selectedWorkspaceId ? undefined : NO_WORKSPACE
+
+    // 아카이브 미리보기여도 된다 — 스택 화면은 worktree 가 아니라 브랜치 관계를 그린다.
+    case 'open-stack-view':
+      if (!ctx.selectedWorkspaceId) return NO_WORKSPACE
+      return ctx.selectionIsStacked ? undefined : 'This workspace is not stacked on anything.'
 
     case 'focus-composer':
       if (!ctx.selectedWorkspaceId) return NO_WORKSPACE
