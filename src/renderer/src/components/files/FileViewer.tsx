@@ -69,19 +69,21 @@ export default function FileViewer({
     [content, editing]
   )
 
-  const { gutter, gutterWidth, editWidth } = useMemo(() => {
+  const { lineCount, editWidth } = useMemo(() => {
     const rows = text ? text.split('\n') : ['']
-    let out = '1'
-    for (let i = 2; i <= rows.length; i++) out += `\n${i}`
     // textarea 는 내용에 맞춰 늘어나지 않으므로 가장 긴 줄로 폭을 잡아 준다(등폭이라 1ch=한 글자).
     // 이 폭이 있어야 바깥 컨테이너가 가로로 스크롤되고 gutter 가 왼쪽에 붙어 따라온다.
     const longest = rows.reduce((m, r) => Math.max(m, r.length), 0)
-    return {
-      gutter: out,
-      gutterWidth: `${String(rows.length).length}ch`,
-      editWidth: Math.min(EDIT_MAX_CH, Math.max(40, longest + 2))
-    }
+    return { lineCount: rows.length, editWidth: Math.min(EDIT_MAX_CH, Math.max(40, longest + 2)) }
   }, [text])
+
+  // gutter 문자열은 **줄 수가 바뀔 때만** 다시 만든다. 편집 중에는 text 가 키 입력마다 바뀌는데,
+  // 3 만 줄짜리 파일이면 그때마다 수백 KB 짜리 문자열을 새로 잇게 되어 타이핑이 밀린다.
+  const { gutter, gutterWidth } = useMemo(() => {
+    let out = '1'
+    for (let i = 2; i <= lineCount; i++) out += `\n${i}`
+    return { gutter: out, gutterWidth: `${String(lineCount).length}ch` }
+  }, [lineCount])
 
   /**
    * 검색어를 포함한 줄 번호들(1-based). 줄 단위로만 찾는다 — 이동 대상이 줄이라서 충분하다.
@@ -249,7 +251,7 @@ export default function FileViewer({
                 fontSize,
                 lineHeight: `${lineHeight}px`,
                 // 줄 수 그대로 높이를 잡아야 gutter 의 번호와 한 줄씩 맞물린다.
-                height: (text.split('\n').length || 1) * lineHeight,
+                height: lineCount * lineHeight,
                 width: `${editWidth}ch`
               }}
             />
