@@ -47,6 +47,9 @@ export async function seedAppState(
     // "물려받았다" 를 확인하는 스펙은 기본값과 **다른** 값에서 출발해야 한다 — 기본값 그대로면
     // 상속했는지 전역 기본을 다시 읽었는지 구별되지 않는다.
     workspace: workspaceOverrides = {},
+    // 리포 쪽 설정도 덮어쓸 수 있어야 한다. run 스크립트처럼 "리포에 설정돼 있어야만 존재하는"
+    // 기능(스크립트 실행 · 프리뷰)은 이것 없이는 e2e 에서 아예 밟을 수가 없다.
+    repo: repoOverrides = {},
     // 이 시드는 온보딩을 건너뛰는 것이 기본이다(대부분의 스펙은 앱 안쪽을 본다). 첫 실행
     // 온보딩 자체를 검증하는 스펙만 이것을 켜서 세 플래그를 **아예 쓰지 않는다** — false 로
     // 적어 두는 것과 다르다. acceptedTermsVersion 은 숫자 비교라 키가 없어야 null 로 읽힌다.
@@ -75,7 +78,8 @@ export async function seedAppState(
     runScripts: [],
     archiveScript: '',
     carryItems: [],
-    addedAt: now
+    addedAt: now,
+    ...repoOverrides
   }
   const seededWorkspace = {
     id: 'ws-e2e',

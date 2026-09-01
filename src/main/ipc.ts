@@ -212,6 +212,7 @@ import type { PaneWindows } from './paneWindows'
 import {
   cancelPreviewPick,
   capturePreview,
+  forgetPreviewGuest,
   pickPreviewElement,
   previewIssues,
   watchPreviewIssues
@@ -1451,6 +1452,8 @@ export function registerIpc(ctx: IpcContext): void {
 
   handle(IPC.previewUnwatchIssues, (_e, webContentsId: number) => {
     previewIssues().unwatch(webContentsId)
+    // 에이전트 도구가 이 워크스페이스의 게스트를 찾는 표도 같은 자리에서 지운다([[main/preview]]).
+    forgetPreviewGuest(webContentsId)
   })
 
   handle(IPC.previewListIssues, (_e, workspaceId: string) => previewIssues().list(workspaceId))
