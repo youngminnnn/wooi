@@ -186,6 +186,7 @@ const TOOL_LABELS: Record<string, string> = {
   open_pull_request: 'Open a pull request',
   run_script: 'Run a repository script',
   stop_script: 'Stop a repository script',
+  open_preview: 'Open the preview',
   create_workspace: 'Create a workspace',
   archive_workspace: 'Archive a workspace',
   set_workspace_name: 'Set the workspace name',
@@ -323,6 +324,14 @@ function titleFor(tool: string, args: unknown, workspace: Workspace): string {
         ? ` It renames the branch to \`${a.renameBranch.trim()}\` first.`
         : ''
     return `The agent wants to open a ${draft}pull request from \`${workspace.branch}\` into \`${resolvePrBase(workspace)}\`.${rename}`
+  }
+  if (tool === 'open_preview') {
+    // 카드에 origin 은 적지 않는다 — 이 도구가 열 수 있는 곳은 언제나 이 워크스페이스의 dev
+    // 서버이고(핸들러가 인자로 받지 않는다), 사용자가 판단할 거리는 어느 화면을 여는가다.
+    // 읽기 전용으로 두지 않은 이유는 눈에 보이는 상태를 바꾸기 때문이다 — 사용자가 보고 있던
+    // 탭을 Preview 로 바꾸고 그 안의 페이지를 이동시킨다.
+    const path = typeof a.path === 'string' && a.path.trim() ? a.path.trim() : '/'
+    return `The agent wants to open this workspace’s dev server at \`${path}\` in the preview.`
   }
   if (tool === 'run_script' || tool === 'stop_script') {
     const name = typeof a.name === 'string' ? a.name : typeof a.kind === 'string' ? a.kind : ''

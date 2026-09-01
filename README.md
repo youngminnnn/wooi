@@ -208,6 +208,11 @@ stack them in dependency order, and pass results along the chain.
 - **Grow into a team when the work calls for it** — an agent can request a switch from a
   solo workspace to an agent team. Once approved, Wooi carries the conversation over and
   automatically continues the task after the switch.
+- **See its own change** — `open_preview` points Wooi's preview at this workspace's dev
+  server, `capture_preview` returns a screenshot as an image, and `read_preview_issues`
+  returns the console errors and failed requests from that page. The agent drives the
+  same panel you are looking at, so you can see what it is looking at. Reading only —
+  there are no click or type tools.
 - **Plus the everyday ones** — `open_pull_request` (Wooi picks the base: the parent
   branch when stacked, the default branch otherwise), `list_issues`, `archive_workspace`,
   and `run_script` / `stop_script` / `read_script_output` for the repo scripts you

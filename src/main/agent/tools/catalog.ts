@@ -354,6 +354,50 @@ export const AGENT_TOOLS: AgentToolSpec[] = [
     annotations: { title: 'Read script output', readOnlyHint: true }
   },
   {
+    name: 'open_preview',
+    description: [
+      'Open this workspace’s dev server in Wooi’s Preview panel and wait for the page to load.',
+      'Use it to check a change with your own eyes instead of asking the user what they see.',
+      '',
+      'You choose only the path — the address comes from this workspace’s running run script, and',
+      'there is no argument that points the preview anywhere else. When no dev server can be',
+      'found, the error names which of the three things is missing: no run script configured,',
+      'none of them running, or running but no address printed yet.',
+      '',
+      'This is the same panel the user is looking at, so it exists only while this workspace is',
+      'the one open on screen. If it is not, the call fails and says so rather than guessing.'
+    ].join(' '),
+    inputSchema: {
+      path: z
+        .string()
+        .optional()
+        .describe('Path on the dev server, such as "/settings". Defaults to "/".')
+    },
+    annotations: { title: 'Open the preview', readOnlyHint: false }
+  },
+  {
+    name: 'capture_preview',
+    description: [
+      'Screenshot what the preview is showing right now and return it as an image.',
+      'Call `open_preview` first — this tool never navigates, so it shows the current page.',
+      'Large screenshots are scaled down to stay within the size Wooi returns to an agent, and',
+      'the result says when that happened.'
+    ].join(' '),
+    inputSchema: {},
+    annotations: { title: 'Screenshot the preview', readOnlyHint: true }
+  },
+  {
+    name: 'read_preview_issues',
+    description: [
+      'Read the console errors and failed requests Wooi collected from the page in the preview,',
+      'errors first. Wooi drops them whenever the preview navigates, so this is the state since',
+      'the last load — reload with `open_preview` to see whether a fix cleared them.',
+      'The list is capped, and the result says when it was truncated.'
+    ].join(' '),
+    inputSchema: {},
+    annotations: { title: 'Read preview errors', readOnlyHint: true }
+  },
+  {
     name: 'check_related_work',
     description: [
       'Report whether other open workspaces are changing the same files as this one — which',

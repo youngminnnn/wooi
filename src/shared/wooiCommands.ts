@@ -299,6 +299,33 @@ export const WOOI_COMMANDS: WooiCommandSpec[] = [
     prompt: 'Call `mcp__wooi__read_script_output` and show the output for: $ARGUMENTS'
   },
   {
+    name: 'preview',
+    tool: 'open_preview',
+    mode: 'direct',
+    description: 'Open this workspace’s dev server in the preview',
+    argumentHint: '[path]',
+    prompt: 'Call `mcp__wooi__open_preview` to show this path in the preview: $ARGUMENTS'
+  },
+  {
+    // 즉시 실행이 아니라 에이전트를 거친다. 이 도구의 결과는 그림이고, 그림은 모델의 눈에
+    // 닿아야 값이 있다 — 즉시 실행 경로는 결과 JSON 을 카드에 그대로 펼치므로, 여기서는
+    // 거대한 base64 한 덩어리를 화면에 쏟는 것으로 끝난다.
+    name: 'screenshot',
+    tool: 'capture_preview',
+    mode: 'agent',
+    description: 'Screenshot what the preview is showing',
+    prompt:
+      'Call `mcp__wooi__capture_preview` to see what the preview is showing, then describe it ' +
+      'and say whether anything looks wrong.'
+  },
+  {
+    name: 'preview-errors',
+    tool: 'read_preview_issues',
+    mode: 'direct',
+    description: 'Read the preview’s console and network errors',
+    prompt: 'Call `mcp__wooi__read_preview_issues` and summarise what the page is reporting.'
+  },
+  {
     name: 'archive',
     tool: 'archive_workspace',
     mode: 'direct',
@@ -392,6 +419,14 @@ export function parseWooiCommandArgs(name: string, raw: string): WooiCommandArgs
     case 'peers':
     case 'repos':
       return { args: {} }
+
+    // 프리뷰의 문제 목록은 인자가 없다 — 무엇을 읽을지는 프리뷰가 지금 열어 둔 페이지가 정한다.
+    case 'preview-errors':
+      return { args: {} }
+
+    // 경로는 없어도 된다(기본값 "/"). 있으면 그대로 넘긴다 — 검증은 도구가 한다.
+    case 'preview':
+      return { args: rest ? { path: rest } : {} }
 
     case 'message-status':
       return { args: rest ? { messageId: rest } : {} }
