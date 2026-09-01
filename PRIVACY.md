@@ -5,7 +5,7 @@
 
 # Privacy Policy
 
-_Last updated: 2026-08-16 · Version 1_
+_Last updated: 2026-08-31 · Version 1_
 
 Wooi is a local macOS desktop application that orchestrates parallel AI coding
 agents — [Claude Code](https://claude.com/claude-code) and
@@ -157,6 +157,39 @@ Settings → Remote. Everything else on your phone keeps working.
 - Data also expires on its own: pairing codes after 5 minutes, commands after
   6 hours, notification records after 2 days, and a computer that has not
   connected for 180 days is removed entirely.
+
+## Data deletion requests
+
+Wooi has no user accounts. You never create one, there is no profile, and
+nothing on a server is keyed to your name or email. The only server‑side record
+that can exist is the one remote access creates — an anonymous row for your
+computer and one for each paired phone, identified by UUIDs that Wooi generates
+on the device. **If you have never turned remote access on, there is nothing on
+a server to delete.**
+
+**From the app, which is immediate and complete.** On your Mac, Settings →
+Remote has **Revoke a device** and **Delete all remote data**; what each one
+erases is listed under [Turning it off and deleting your data](#turning-it-off-and-deleting-your-data).
+On your phone, Settings → **Unpair this phone** ends that phone's access. Local
+files are deleted by deleting them — see
+[What is stored locally](#what-is-stored-locally).
+
+**By email, if you no longer have the app.** Write to <youngmin3306@gmail.com>
+with the subject `Data deletion request`. Say which phone was paired — its name
+and platform, for example `SM‑F741N` / `android` — and roughly when. Those are
+the only things the relay holds in plain text, so they are the only things a
+request can be matched against. Requests are answered within 30 days, at no
+charge, and you do not need an account to make one.
+
+The anonymity cuts both ways. If a request cannot be narrowed to exactly one
+computer we will not delete on a guess, because the row deleted by mistake
+would be someone else's — and we will say that rather than report a deletion
+that did not happen.
+
+Nothing is kept indefinitely in any case. Pairing codes expire after 5 minutes,
+commands after 6 hours, notification records after 2 days, and a computer that
+has not connected for 180 days is removed entirely along with its paired
+devices. An installation that is simply abandoned erases itself.
 
 ## Telemetry
 
