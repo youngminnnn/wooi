@@ -26,6 +26,7 @@ const READY: PaletteContext = {
   activeFanoutGroupId: null,
   pendingPermissionCount: 2,
   selectionIsStacked: true,
+  splitOpen: false,
   rebaseBlockedReason: null
 }
 
@@ -38,6 +39,7 @@ const EMPTY: PaletteContext = {
   activeFanoutGroupId: null,
   pendingPermissionCount: 0,
   selectionIsStacked: false,
+  splitOpen: false,
   rebaseBlockedReason: null
 }
 

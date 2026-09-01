@@ -121,6 +121,7 @@ import {
   RUN_WOOI_COMMAND_EVENT,
   type RunWooiCommandDetail
 } from '../lib/composerFocus'
+import { usePaneFocused } from '../lib/paneFocus'
 
 /** Claude 가 받는 이미지 형식. 클립보드의 다른 형식은 붙여넣기 시 무시한다. */
 const IMAGE_TYPES: Record<string, ImageMediaType> = {
@@ -171,6 +172,8 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
   const confirm = useStore((s) => s.confirm)
   const refreshAuth = useStore((s) => s.refreshAuth)
   const resetTranscript = useStore((s) => s.resetTranscript)
+  // 나란히 두 칸을 띄우면 이 컴포넌트가 다는 전역 리스너가 두 번 발동한다 — 포커스된 칸만 받는다.
+  const paneFocused = usePaneFocused()
   const taRef = useRef<HTMLTextAreaElement>(null)
   // ↑ 로 이전 사용자 메시지를 불러올 때의 커서(끝에서부터). -1 = 미사용.
   const historyIdx = useRef(-1)
@@ -336,16 +339,20 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
 
   // App 의 전역 ⌘L 단축키가 현재 대화의 실제 textarea 를 직접 알 필요가 없도록 이벤트로 잇는다.
   useEffect(() => {
-    const focus = (): void => taRef.current?.focus()
+    const focus = (): void => {
+      if (!paneFocused) return
+      taRef.current?.focus()
+    }
     window.addEventListener(FOCUS_COMPOSER_EVENT, focus)
     return () => window.removeEventListener(FOCUS_COMPOSER_EVENT, focus)
-  }, [])
+  }, [paneFocused])
 
   // 대화 아무 데나 친 글자가 여기로 흘러 들어온다([[shouldRedirectTyping]]).
   // 넣을 자리는 textarea 가 들고 있는 selectionStart 다 — 크로미움은 포커스를 잃어도 caret 을
   // 기억하고, 초안을 막 복원해 한 번도 만지지 않은 입력창이면 끝을 가리킨다. 둘 다 원하는 자리다.
   useEffect(() => {
     const insert = (e: Event): void => {
+      if (!paneFocused) return
       const ch = (e as CustomEvent<string>).detail
       const ta = taRef.current
       // 압축 대기 등으로 입력이 잠긴 동안에는 초안만 몰래 늘어나므로 흘려보낸다.
@@ -364,7 +371,7 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
     }
     window.addEventListener(INSERT_INTO_COMPOSER_EVENT, insert)
     return () => window.removeEventListener(INSERT_INTO_COMPOSER_EVENT, insert)
-  }, [workspace.id, setDraft])
+  }, [workspace.id, setDraft, paneFocused])
 
   // textarea 높이 자동 조절.
   useEffect(() => {
@@ -530,21 +537,27 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
   useEffect(() => {
     const hasFiles = (e: DragEvent): boolean => !!e.dataTransfer?.types.includes('Files')
     const onDragOver = (e: DragEvent): void => {
+      if (!paneFocused) return
       if (!hasFiles(e)) return // 텍스트 선택 드래그 등은 그대로 둔다.
       e.preventDefault()
       setDragging(true)
     }
     const onDragLeave = (e: DragEvent): void => {
+      if (!paneFocused) return
       // 창 밖으로 완전히 나갔을 때만 끈다(요소 사이를 지날 때도 dragleave 가 뜬다).
       if (!e.relatedTarget) setDragging(false)
     }
     const onDrop = (e: DragEvent): void => {
+      if (!paneFocused) return
       if (!hasFiles(e)) return
       e.preventDefault()
       setDragging(false)
       dropRef.current(Array.from(e.dataTransfer?.files ?? []))
     }
-    const onDragEnd = (): void => setDragging(false)
+    const onDragEnd = (): void => {
+      if (!paneFocused) return
+      setDragging(false)
+    }
     window.addEventListener('dragover', onDragOver)
     window.addEventListener('dragleave', onDragLeave)
     window.addEventListener('drop', onDrop)
@@ -555,7 +568,7 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
       window.removeEventListener('drop', onDrop)
       window.removeEventListener('dragend', onDragEnd)
     }
-  }, [])
+  }, [paneFocused])
 
   /** 고른 파일/디렉토리를 `@` 토큰 자리에 넣는다. */
   const acceptMention = (hit: FileHit): void => {
@@ -938,6 +951,7 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
    */
   const escHandlerRef = useRef<(e: KeyboardEvent) => void>(() => {})
   escHandlerRef.current = (e: KeyboardEvent): void => {
+    if (!paneFocused) return
     if (e.key !== 'Escape' || e.metaKey || e.ctrlKey || e.altKey) return
     const st = useStore.getState()
     if (st.overlayOpen || st.confirmState || menuOpen || mentionOpen) return

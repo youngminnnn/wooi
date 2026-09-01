@@ -531,7 +531,6 @@ function WorkspaceRow({
   /** 사이드바가 소유한 워크스페이스 재정렬 DnD 배선(stack 단위 자리 교환). */
   dnd: DragReorder
 }): React.JSX.Element {
-  const selectedId = useStore((s) => s.selectedWorkspaceId)
   const select = useStore((s) => s.selectWorkspace)
   const git = useStore((s) => s.gitStatus[workspace.id])
   const pr = useStore((s) => s.prStatus[workspace.id])
@@ -549,6 +548,7 @@ function WorkspaceRow({
   const requestDelete = useStore((s) => s.requestDeleteWorkspace)
   const requireGithub = useStore((s) => s.requireGithub)
   const openStackView = useStore((s) => s.openStackView)
+  const openSplitPane = useStore((s) => s.openSplitPane)
   // 이 행 위에 층이 더 쌓여 있는가. 모델 A 는 살아 있는 자식 워크스페이스, 모델 B 는 워크트리
   // 안의 브랜치 스택이 그 조건이다. 불리언만 돌려주므로 셀렉터가 매 렌더 새 값을 만들지 않는다.
   const isStackParent = useStore(
@@ -572,7 +572,22 @@ function WorkspaceRow({
   // 'right' = ⋯ 버튼 기준(우측 정렬), 'left' = 우클릭 커서 기준.
   const [menuAlign, setMenuAlign] = useState<'left' | 'right'>('right')
 
-  const active = workspace.id === selectedId
+  /**
+   * 이 행이 지금 화면의 어느 칸인가.
+   *
+   * 나란히 두 칸을 폈으면 둘 다 "보고 있는 것" 이다 — 한쪽만 표시하면 오른쪽 칸이 어디서
+   * 왔는지 사이드바에서 읽을 수 없다. 다만 사이드바 클릭은 **포커스된 칸**을 갈아 끼우므로,
+   * 둘을 같은 밝기로 그리면 다음 클릭이 어디로 갈지 알 수 없다. 그래서 포커스된 쪽만 진하다.
+   * 분할이 아니면 선택된 행이 곧 'focused' 라, 예전과 똑같이 그려진다.
+   */
+  const paneRole = useStore((s) => {
+    if (s.splitPane?.kind === 'workspace' && s.splitPane.workspaceId === workspace.id)
+      return s.splitFocus === 'split' ? 'focused' : 'paired'
+    if (s.selectedWorkspaceId === workspace.id)
+      return s.splitPane && s.splitFocus === 'split' ? 'paired' : 'focused'
+    return null
+  })
+  const active = paneRole !== null
   const stackRootId = useStore((s) => workspaceStackRootId(s.app?.workspaces ?? [], workspace.id))
   const stackPinned = useStore(
     (s) => s.app?.workspaces.find((w) => w.id === stackRootId)?.sidebarPinned ?? false
@@ -794,7 +809,13 @@ function WorkspaceRow({
         {...dnd.zoneProps(workspace.id)}
         // 이름 편집 중엔 드래그를 끈다 — draggable 조상 안에서는 입력 텍스트를 끌어 선택할 수 없다.
         draggable={editingName === null}
-        onClick={() => {
+        onClick={(e) => {
+          // ⌘+클릭: 지금 보고 있는 것 **옆에** 이 워크스페이스를 편다(Claude Desktop 과 같은
+          // 관용구). 짝이 성립하지 않으면 스토어가 이유를 알려 준다.
+          if (e.metaKey) {
+            openSplitPane({ kind: 'workspace', workspaceId: workspace.id })
+            return
+          }
           void select(workspace.id)
           // 마우스로만 전환하는 사용자에게만 ⌘↑/⌘↓ 힌트를 띄우기 위한 신호.
           noteMouseSwitch()
@@ -817,7 +838,10 @@ function WorkspaceRow({
           'group/ws relative w-full flex items-center gap-2 pr-1.5 py-1.5 rounded-md text-left cursor-pointer focus:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-strong)] ' +
           // 선택 행은 좌측에 파란 액센트 바를 띄워 현재 위치를 또렷하게 표시한다.
           (active
-            ? 'bg-[var(--surface-3)] before:absolute before:left-0 before:top-1.5 before:bottom-1.5 before:w-0.5 before:rounded-full before:bg-[var(--info-500)]'
+            ? 'bg-[var(--surface-3)] before:absolute before:left-0 before:top-1.5 before:bottom-1.5 before:w-0.5 before:rounded-full ' +
+              (paneRole === 'focused'
+                ? 'before:bg-[var(--info-500)]'
+                : 'before:bg-[var(--info-500)]/40')
             : // 키보드로 액션에 포커스가 들어오거나 메뉴가 열려 있으면, 오버레이 배경색과 어긋나지
               // 않게 행도 같이 밝힌다(메뉴를 띄운 뒤 커서가 행을 벗어나도 대상이 유지돼 보인다).
               'hover:bg-[var(--surface)] focus-within:bg-[var(--surface)] ' +
@@ -1160,8 +1184,13 @@ function ReviewRow({
   session: ReviewSession
   repoName: string
 }): React.JSX.Element {
-  const active = useStore((s) => s.activeReviewId === session.id)
+  const active = useStore(
+    (s) =>
+      s.activeReviewId === session.id ||
+      (s.splitPane?.kind === 'review' && s.splitPane.reviewId === session.id)
+  )
   const openReview = useStore((s) => s.openReview)
+  const openSplitPane = useStore((s) => s.openSplitPane)
   const requestCloseReview = useStore((s) => s.requestCloseReview)
   const requestArchiveReview = useStore((s) => s.requestArchiveReview)
   // 아카이브·삭제는 워크트리와 ref 를 지우느라 초 단위로 걸린다. 그동안 레코드는 그대로 방송되어
@@ -1179,7 +1208,14 @@ function ReviewRow({
     <div
       role="button"
       tabIndex={0}
-      onClick={() => openReview(id)}
+      onClick={(e) => {
+        // ⌘+클릭: 리뷰를 대화 옆에 나란히 편다 — 워크스페이스 행과 같은 관용구다.
+        if (e.metaKey) {
+          openSplitPane({ kind: 'review', reviewId: id })
+          return
+        }
+        openReview(id)
+      }}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault()
