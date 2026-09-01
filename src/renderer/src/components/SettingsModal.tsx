@@ -469,6 +469,16 @@ function GeneralPage({
             onChange={(value) => save({ resumeUnfinishedTurnsOnLaunch: value })}
           />
         </SettingRow>
+        <SettingRow
+          title="Keep working after you quit"
+          description="Quitting with work in progress closes the window and keeps it running from the menu bar. Wooi quits on its own once everything finishes."
+        >
+          <Switch
+            label="Keep working after you quit"
+            checked={settings.keepWorkingInBackground}
+            onChange={(value) => save({ keepWorkingInBackground: value })}
+          />
+        </SettingRow>
       </SettingGroup>
       <SettingGroup title="Confirmations">
         {CONFIRM_SKIP_KEYS.map((key) => (

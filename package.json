@@ -71,7 +71,9 @@
       }
     ],
     "files": [
-      "out/**/*"
+      "out/**/*",
+      "build/trayTemplate.png",
+      "build/trayTemplate@2x.png"
     ],
     "asarUnpack": [
       "**/node_modules/node-pty/**",

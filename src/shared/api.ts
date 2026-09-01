@@ -308,6 +308,8 @@ export interface WooiApi {
 
   permission: {
     respond(requestId: string, decision: PermissionDecision): Promise<void>
+    /** 지금 답을 기다리는 승인 요청 전부(창이 없던 동안 올라온 것 포함). */
+    pending(): Promise<PermissionRequest[]>
   }
 
   script: {

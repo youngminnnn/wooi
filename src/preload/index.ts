@@ -104,7 +104,9 @@ const api: WooiApi = {
   },
 
   permission: {
-    respond: (requestId, decision) => ipcRenderer.invoke(IPC.permissionRespond, requestId, decision)
+    respond: (requestId, decision) =>
+      ipcRenderer.invoke(IPC.permissionRespond, requestId, decision),
+    pending: () => ipcRenderer.invoke(IPC.permissionPending)
   },
 
   script: {
