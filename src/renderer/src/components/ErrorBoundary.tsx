@@ -1,4 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react'
+import { announce } from '../lib/announce'
 
 /**
  * 렌더 중 예외를 잡아 앱이 통째로 사라지는 것을 막는다.
@@ -31,6 +32,12 @@ export default class ErrorBoundary extends Component<Props, State> {
     // main 프로세스가 console-message 로 받아 로그 파일에 남긴다.
     console.error(
       `[${this.props.label ?? 'app'}] render error: ${error.message}\n${info.componentStack ?? ''}`
+    )
+    // 화면이 통째로 대체되는 사건인데 스토어 어디에도 남지 않는다 — 클래스 컴포넌트라 store 를
+    // 구독할 수도 없으므로, LiveRegion 이 듣고 있는 버스로 직접 밀어 넣는다(lib/announce.ts).
+    announce(
+      `Something broke${this.props.label ? ` in ${this.props.label}` : ''}. ${error.message}`,
+      'assertive'
     )
   }
 

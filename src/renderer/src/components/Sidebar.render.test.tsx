@@ -40,8 +40,33 @@ describe('사이드바 파생 상태 표시', () => {
     const indicator = screen.getByTitle(
       '1 background task still running here — the agent itself is idle'
     )
-    expect(indicator.querySelector('[aria-label="Background tasks running"]')).toBeInTheDocument()
+    // 접근 가능한 이름은 role="img" 를 가진 표시 자체에 붙는다(예전엔 안쪽 svg 에 있었다).
+    expect(indicator).toHaveAttribute('aria-label', 'Background tasks running')
     expect(indicator.querySelector('.animate-spin')).not.toBeInTheDocument()
+  })
+
+  it('색으로만 구분되던 상태에 색 아닌 이름을 붙인다', () => {
+    // 이 세 칸은 descriptor.aria 가 없어 예전에는 이름이 전혀 없었다 — 점 분기는 role 없는 빈
+    // span 이라 보조 기술이 통째로 건너뛰었고, 사용자는 색 말고 상태를 알 방법이 없었다.
+    const base = {
+      awaitingPermission: false,
+      compacting: false,
+      stale: false,
+      runningMs: 0
+    } as const
+
+    renderWithStore(
+      <>
+        <StatusDot {...base} status="idle" />
+        <StatusDot {...base} status="running" />
+        <StatusDot {...base} status="idle" pr={pr('approved')} />
+      </>
+    )
+
+    expect(screen.getByLabelText('Idle')).toBeInTheDocument()
+    expect(screen.getByLabelText('Running')).toBeInTheDocument()
+    // PR 은 짧은 라벨('Ready to merge')만으로는 무엇의 상태인지 알 수 없어 aria 를 따로 둔다.
+    expect(screen.getByLabelText('Pull request — Ready to merge')).toBeInTheDocument()
   })
 
   it('open·merged PR과 pending·failed CI를 서로 다른 점과 툴팁으로 표시한다', () => {

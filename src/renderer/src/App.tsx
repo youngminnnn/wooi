@@ -54,6 +54,7 @@ import TranscriptSearch from './components/TranscriptSearch'
 import FeatureTour from './components/FeatureTour'
 import GithubConnectModal from './components/GithubConnectModal'
 import Toaster from './components/Toaster'
+import LiveRegion from './components/LiveRegion'
 import ConfirmDialog from './components/ConfirmDialog'
 import Hint from './components/Hint'
 import Logo from './components/Logo'
@@ -1139,6 +1140,11 @@ export default function App(): React.JSX.Element {
           Settings 를 열었다 닫을 때마다 리마운트되면 세션 카운터(이번 세션에 몇 개를 소개했는지)
           가 그때마다 리셋된다. 대신 anyModalOpen 을 prop 으로 넘겨 Hint 내부에서 렌더만 끈다. */}
       <Hint anyModalOpen={anyModalOpen} />
+
+      {/* 스크린리더용 라이브 리전 호스트 — 앱 전체에 하나만, 항상 마운트해 둔다
+          (components/LiveRegion.tsx). 라이브 리전은 요소가 먼저 DOM 에 있어야 그 뒤의
+          텍스트 변경을 사건으로 인식하므로 조건부로 마운트하지 않는다. */}
+      <LiveRegion />
 
       <Toaster />
       <ConfirmDialog />
