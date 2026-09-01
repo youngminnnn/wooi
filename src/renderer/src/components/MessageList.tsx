@@ -104,6 +104,55 @@ function ConflictResolveMessage({
   )
 }
 
+/**
+ * CI auto-fix 로 Wooi 가 넣은 턴. ConflictResolveMessage 와 같은 이유로 접어서 보여 준다 —
+ * 실패 로그까지 실려 프롬프트가 길고, 펼쳐 둔 채로는 대화를 밀어낸다.
+ */
+function CiFixMessage({
+  item,
+  title
+}: {
+  item: Extract<ChatItem, { type: 'user' }>
+  title: string
+}): React.JSX.Element {
+  const [expanded, setExpanded] = useState(false)
+  const origin = item.origin
+  if (!origin || origin.kind !== 'ciFix') return <UserMessage text={item.text} title={title} />
+
+  return (
+    <div className="flex justify-end my-2" title={title}>
+      <button
+        type="button"
+        aria-expanded={expanded}
+        onClick={() => setExpanded((value) => !value)}
+        className="max-w-[min(42rem,88%)] rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2.5 py-1.5 text-left text-xs text-neutral-400 hover:border-[var(--border-strong)] hover:text-neutral-300"
+      >
+        <span className="flex items-center gap-1.5">
+          <XCircle size={12} className="shrink-0 text-neutral-500" />
+          <span className="shrink-0">Fix failing checks</span>
+          <span className="truncate font-mono text-neutral-300">
+            {origin.failedChecks.join(', ')}
+          </span>
+          {/* 자동으로 시작된 턴이라는 사실과, 몇 번째이고 어디서 멈추는지는 접힌 상태에서도
+              읽혀야 한다 — 켜 둔 채로 잊은 사람이 대화만 보고 알아챌 유일한 자리다. */}
+          <span className="shrink-0 rounded bg-[var(--surface-2)] px-1.5 py-0.5 text-2xs text-neutral-500">
+            auto {origin.attempt}/{origin.max}
+          </span>
+          <ChevronRight
+            size={12}
+            className={`ml-auto shrink-0 transition-transform ${expanded ? 'rotate-90' : ''}`}
+          />
+        </span>
+        {expanded && (
+          <span className="mt-2 block whitespace-pre-wrap break-words border-t border-[var(--border)] pt-2 text-sm leading-relaxed text-neutral-300">
+            {item.text}
+          </span>
+        )}
+      </button>
+    </div>
+  )
+}
+
 function PeerMessage({
   item,
   title
@@ -664,6 +713,7 @@ function Item({
       if (item.origin?.kind === 'peer') return <PeerMessage item={item} title={time} />
       if (item.origin?.kind === 'conflictResolve')
         return <ConflictResolveMessage item={item} title={time} />
+      if (item.origin?.kind === 'ciFix') return <CiFixMessage item={item} title={time} />
       return (
         <UserMessage text={item.text} title={time}>
           {item.attachments && item.attachments.length > 0 && (

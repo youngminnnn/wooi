@@ -220,6 +220,11 @@ export interface WooiApi {
     /** 워크스페이스별 알림 음소거를 설정한다. */
     setMuted(workspaceId: string, muted: boolean): Promise<void>
     /**
+     * CI 실패를 에이전트에게 넘기는 토글. 켜면 체크가 실패로 확정됐을 때 Wooi 가 턴을 연다.
+     * 끄면 진행 상태(시도 횟수)도 함께 지워져, 다시 켜면 상한을 처음부터 받는다.
+     */
+    setAutoFixCi(workspaceId: string, enabled: boolean): Promise<void>
+    /**
      * 멀티 에이전트 모드를 켜고 끈다(실험 기능).
      *
      * 세션이 이미 열려 있으면 다음 세션부터 반영된다 — 위임 도구는 query 를 열 때 options 에

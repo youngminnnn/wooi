@@ -65,6 +65,8 @@ const api: WooiApi = {
     setAgentBackend: (workspaceId, agentBackend, opts) =>
       ipcRenderer.invoke(IPC.workspaceSetAgentBackend, workspaceId, agentBackend, opts),
     setMuted: (workspaceId, muted) => ipcRenderer.invoke(IPC.workspaceSetMuted, workspaceId, muted),
+    setAutoFixCi: (workspaceId, enabled) =>
+      ipcRenderer.invoke(IPC.workspaceSetAutoFixCi, workspaceId, enabled),
     setMultiAgent: (workspaceId, multiAgent) =>
       ipcRenderer.invoke(IPC.workspaceSetMultiAgent, workspaceId, multiAgent),
     rename: (workspaceId, name) => ipcRenderer.invoke(IPC.workspaceRename, workspaceId, name),
