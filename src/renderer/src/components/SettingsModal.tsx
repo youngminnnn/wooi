@@ -112,7 +112,7 @@ const PAGES: { id: Page; label: string; icon: typeof Settings2; keywords: string
     label: 'General',
     icon: Settings2,
     keywords:
-      'theme appearance panel sidebar workspace creation sleep awake power display confirmation confirm ask again archive'
+      'theme appearance panel sidebar workspace order activity recent sort pin creation sleep awake power display confirmation confirm ask again archive'
   },
   {
     id: 'agents',
@@ -456,6 +456,16 @@ function GeneralPage({
             label="Running agents in sidebar"
             checked={settings.showRunningAgents}
             onChange={(value) => save({ showRunningAgents: value })}
+          />
+        </SettingRow>
+        <SettingRow
+          title="Recently active workspaces first"
+          description="Moves the active workspace stack below pinned stacks. You can still drag stacks into your preferred order."
+        >
+          <Switch
+            label="Recently active workspaces first"
+            checked={settings.autoSortWorkspacesByActivity}
+            onChange={(value) => save({ autoSortWorkspacesByActivity: value })}
           />
         </SettingRow>
         <SettingRow

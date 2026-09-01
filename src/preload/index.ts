@@ -70,6 +70,8 @@ const api: WooiApi = {
     rename: (workspaceId, name) => ipcRenderer.invoke(IPC.workspaceRename, workspaceId, name),
     reorder: (workspaceId, targetWorkspaceId, position) =>
       ipcRenderer.invoke(IPC.workspaceReorder, workspaceId, targetWorkspaceId, position),
+    setPinned: (workspaceId, pinned) =>
+      ipcRenderer.invoke(IPC.workspaceSetPinned, workspaceId, pinned),
     revealInFinder: (workspaceId) => ipcRenderer.invoke(IPC.workspaceRevealInFinder, workspaceId),
     openInEditor: (workspaceId) => ipcRenderer.invoke(IPC.workspaceOpenInEditor, workspaceId),
     openMemory: (workspaceId, scope) =>

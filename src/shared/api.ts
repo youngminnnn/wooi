@@ -229,10 +229,11 @@ export interface WooiApi {
     rename(workspaceId: string, name: string): Promise<void>
     /**
      * 사이드바에서 워크스페이스를 끌어 놓아 표시 순서를 바꾼다.
-     * 사이드바 순서는 stack 트리의 DFS 결과이므로, 형제(같은 레포 · 같은 부모 · 같은 아카이브 상태)
-     * 끼리만 자리를 바꿀 수 있다. 그 외 조합은 main 에서 조용히 무시된다.
+     * 어느 행을 잡아도 그 stack 뿌리와 자손을 함께 옮긴다. 같은 레포·아카이브·고정 영역 안에서만
+     * 자리를 바꿀 수 있고, 그 외 조합은 main 에서 조용히 무시된다.
      */
     reorder(workspaceId: string, targetWorkspaceId: string, position: DropPosition): Promise<void>
+    setPinned(workspaceId: string, pinned: boolean): Promise<void>
     revealInFinder(workspaceId: string): Promise<void>
     openInEditor(workspaceId: string): Promise<void>
     /** /memory — 선택한 스코프의 CLAUDE.md 를 에디터로 연다. */
