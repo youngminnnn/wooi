@@ -291,7 +291,7 @@ function CandidateColumn({
     <div className="flex-1 min-w-0 flex flex-col">
       <div className="shrink-0 px-3 py-2 border-b border-[var(--border)] bg-[var(--bg-2)]">
         <div className="flex items-center gap-2">
-          <span className="shrink-0 h-5 w-5 grid place-items-center rounded bg-[var(--surface-2)] text-[11px] font-medium text-neutral-400">
+          <span className="shrink-0 h-5 w-5 grid place-items-center rounded bg-[var(--surface-2)] text-xs font-medium text-neutral-400">
             {index + 1}
           </span>
           <AgentBackendMark backend={workspace.agentBackend} size={13} />
@@ -306,7 +306,7 @@ function CandidateColumn({
         </div>
 
         <div className="mt-1.5 flex items-center gap-2">
-          <span className="flex-1 min-w-0 truncate font-mono text-[11px] text-neutral-600">
+          <span className="flex-1 min-w-0 truncate font-mono text-xs text-neutral-600">
             {workspace.branch}
           </span>
           <GitSummary
@@ -409,13 +409,13 @@ function FileList({
               : 'text-neutral-400 hover:bg-[var(--surface)]')
           }
         >
-          <span className="flex-1 min-w-0 truncate font-mono text-[11px]" dir="rtl">
+          <span className="flex-1 min-w-0 truncate font-mono text-xs" dir="rtl">
             {f.path}
           </span>
           {f.binary ? (
-            <span className="shrink-0 text-[10px] text-neutral-600">bin</span>
+            <span className="shrink-0 text-2xs text-neutral-600">bin</span>
           ) : (
-            <span className="shrink-0 font-mono text-[10px]">
+            <span className="shrink-0 font-mono text-2xs">
               <span className="text-[var(--success-400)]">+{f.additions}</span>{' '}
               <span className="text-[var(--danger-400)]">−{f.deletions}</span>
             </span>
@@ -432,7 +432,7 @@ function StatusChip({ workspace }: { workspace: Workspace }): React.JSX.Element 
     return (
       <span
         title="Running"
-        className="flex items-center gap-1 shrink-0 text-[11px] text-[var(--info-400)]"
+        className="flex items-center gap-1 shrink-0 text-xs text-[var(--info-400)]"
       >
         <Loader2 size={11} className="animate-spin" />
         Running
@@ -443,14 +443,14 @@ function StatusChip({ workspace }: { workspace: Workspace }): React.JSX.Element 
     return (
       <span
         title="Last turn ended with an error"
-        className="flex items-center gap-1 shrink-0 text-[11px] text-[var(--danger-400)]"
+        className="flex items-center gap-1 shrink-0 text-xs text-[var(--danger-400)]"
       >
         <AlertTriangle size={11} />
         Error
       </span>
     )
   }
-  return <span className="shrink-0 text-[11px] text-neutral-600">Idle</span>
+  return <span className="shrink-0 text-xs text-neutral-600">Idle</span>
 }
 
 /** "3 changed · ↑2" — 사이드바 행과 같은 요약을 후보 칸에서도 그대로 쓴다. */
@@ -463,11 +463,11 @@ function GitSummary({
   ahead: number
   archived: boolean
 }): React.JSX.Element {
-  if (archived) return <span className="shrink-0 text-[11px] text-neutral-600">—</span>
+  if (archived) return <span className="shrink-0 text-xs text-neutral-600">—</span>
   if (!changedFiles && !ahead)
-    return <span className="shrink-0 text-[11px] text-neutral-600">No changes yet</span>
+    return <span className="shrink-0 text-xs text-neutral-600">No changes yet</span>
   return (
-    <span className="flex items-center gap-2 shrink-0 text-[11px] text-neutral-500">
+    <span className="flex items-center gap-2 shrink-0 text-xs text-neutral-500">
       {changedFiles > 0 && <span>{changedFiles} changed</span>}
       {ahead > 0 && (
         <span className="flex items-center gap-0.5" title={`${ahead} commits ahead of base`}>

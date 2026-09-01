@@ -224,7 +224,7 @@ function FileBlock({
         {comments.length > 0 && (
           <span
             title={`${comments.length} unsent comment${comments.length > 1 ? 's' : ''} on this file`}
-            className="shrink-0 rounded-full bg-[var(--info-500)]/20 px-2 py-0.5 text-[10px] font-medium text-[var(--info-300)]"
+            className="shrink-0 rounded-full bg-[var(--info-500)]/20 px-2 py-0.5 text-2xs font-medium text-[var(--info-300)]"
           >
             {comments.length}
           </span>
@@ -335,7 +335,7 @@ function OrphanComments({
   if (comments.length === 0) return null
   return (
     <div className="border-t border-[var(--border)]">
-      <p className="px-3 py-1 text-[10px] text-neutral-500 font-sans">
+      <p className="px-3 py-1 text-2xs text-neutral-500 font-sans">
         No longer matches the current diff:
       </p>
       {comments.map((c) => (
@@ -399,7 +399,7 @@ function Row({
               }}
               title="Comment on this line (drag to select a range)"
               aria-label="Comment on this line"
-              className="grid h-full w-full place-items-center rounded bg-[var(--info-600)] text-white opacity-0 transition-opacity group-hover/row:opacity-100"
+              className="grid h-full w-full place-items-center rounded bg-[var(--info-600)] text-white opacity-0 transition-opacity group-hover/row:opacity-100 focus-visible:opacity-100"
             >
               <MessageSquarePlus size={11} />
             </button>

@@ -347,7 +347,7 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
               {/* 편집 가능 힌트: 호버 시 연필 아이콘을 띄워 이름을 바꿀 수 있음을 알린다. */}
               <button
                 onClick={() => setEditingName(displayName)}
-                className="opacity-0 group-hover/name:opacity-100 shrink-0 grid place-items-center text-neutral-500 hover:text-neutral-200"
+                className="opacity-0 group-hover/name:opacity-100 focus-visible:opacity-100 shrink-0 grid place-items-center text-neutral-500 hover:text-neutral-200"
                 title="Rename workspace"
               >
                 <Pencil size={12} />
@@ -632,7 +632,7 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
               >
                 <CircleCheck size={13} />
                 Approve all ({approvableCount})
-                <kbd className="ml-0.5 rounded bg-white/20 px-1 py-0.5 text-[10px] leading-none font-medium tabular-nums">
+                <kbd className="ml-0.5 rounded bg-white/20 px-1 py-0.5 text-2xs leading-none font-medium tabular-nums">
                   ⇧⌘A
                 </kbd>
               </button>
@@ -648,7 +648,7 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
               >
                 <ShieldQuestion size={13} />
                 Needs input ({pendingElsewhereCount})
-                <kbd className="ml-0.5 rounded bg-black/20 px-1 py-0.5 text-[10px] leading-none font-medium tabular-nums">
+                <kbd className="ml-0.5 rounded bg-black/20 px-1 py-0.5 text-2xs leading-none font-medium tabular-nums">
                   ⌘I
                 </kbd>
               </button>
@@ -664,7 +664,7 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
               >
                 <BellDot size={13} />
                 Next unread ({unreadCount})
-                <kbd className="ml-0.5 rounded bg-white/20 px-1 py-0.5 text-[10px] leading-none font-medium tabular-nums">
+                <kbd className="ml-0.5 rounded bg-white/20 px-1 py-0.5 text-2xs leading-none font-medium tabular-nums">
                   ⌘U
                 </kbd>
               </button>

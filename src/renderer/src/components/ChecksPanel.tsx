@@ -118,9 +118,11 @@ function CheckRow({ check }: { check: PrCheck }): React.JSX.Element {
       <span className="flex-1 truncate text-sm text-neutral-200">{check.name}</span>
       <span className={'text-xs ' + stateColor(check.state)}>{check.state}</span>
       {check.url && (
+        // 아이콘 자체는 포커스를 받지 않는다 — 포커스는 감싸는 버튼(.group)이 받으므로
+        // focus-visible 이 아니라 group-focus-visible 로 그 버튼의 키보드 포커스에 반응시킨다.
         <ExternalLink
           size={11}
-          className="text-neutral-600 opacity-0 group-hover:opacity-100 shrink-0"
+          className="text-neutral-600 opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 shrink-0"
         />
       )}
     </button>

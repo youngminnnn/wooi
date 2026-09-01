@@ -59,7 +59,7 @@ export default function OnboardingModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/60">
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/50">
       <div className="no-drag w-[520px] max-w-[92vw] bg-[var(--surface)] border border-[var(--border)] rounded-xl shadow-2xl overflow-hidden">
         <div className="px-6 pt-7 pb-2 text-center">
           <div className="mb-3 flex justify-center">

@@ -106,7 +106,7 @@ export default function SelectionCopyBubble({
             <button
               type="button"
               onClick={copy}
-              className="flex h-[26px] items-center gap-1.5 rounded-[6px] px-2 text-xs text-neutral-300 hover:bg-[var(--surface-2)] hover:text-neutral-100"
+              className="flex h-[26px] items-center gap-1.5 rounded-md px-2 text-xs text-neutral-300 hover:bg-[var(--surface-2)] hover:text-neutral-100"
             >
               {copied ? (
                 <Check size={12} className="text-[var(--success-400)]" />

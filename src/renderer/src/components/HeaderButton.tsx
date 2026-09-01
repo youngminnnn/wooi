@@ -63,7 +63,7 @@ export default function HeaderButton({
         <div className="pointer-events-none absolute right-0 top-full z-50 mt-1.5 hidden items-center gap-1.5 whitespace-nowrap rounded-md border border-[var(--border)] bg-[var(--surface-2)] px-2 py-1 text-xs text-neutral-200 shadow-lg group-hover:flex">
           <span>{title}</span>
           {shortcut && (
-            <kbd className="rounded bg-[var(--surface-4)] px-1 py-0.5 text-[10px] leading-none font-medium tabular-nums text-neutral-300">
+            <kbd className="rounded bg-[var(--surface-4)] px-1 py-0.5 text-2xs leading-none font-medium tabular-nums text-neutral-300">
               {shortcut}
             </kbd>
           )}

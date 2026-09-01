@@ -3,7 +3,8 @@ import { GitBranch, LayoutDashboard, Search, Settings2 } from 'lucide-react'
 import { backgroundTaskCount, useStore } from '../store'
 import { openRepoSettings } from '../lib/repoSettings'
 import { useNow } from '../lib/useNow'
-import { StatusDot } from './Sidebar'
+import { runningFor } from '../lib/workspaceStatus'
+import { StatusDot } from './StatusDot'
 import {
   activeRateLimitPause,
   orderVisibleWorkspaces,
@@ -59,6 +60,7 @@ export default function QuickSwitcher({ onClose }: { onClose: () => void }): Rea
   const permissions = useStore((s) => s.permissions)
   const compacting = useStore((s) => s.compacting)
   const runningAgents = useStore((s) => s.runningAgents)
+  const runningSince = useStore((s) => s.runningSince)
 
   const [query, setQuery] = useState('')
   const listRef = useRef<HTMLDivElement>(null)
@@ -233,9 +235,9 @@ export default function QuickSwitcher({ onClose }: { onClose: () => void }): Rea
                     awaitingPermission={permissions.some((p) => p.workspaceId === ws.id)}
                     interrupted={wasInterrupted(ws)}
                     compacting={compacting[ws.id] ?? false}
-                    stale={false}
-                    runningMs={0}
+                    {...runningFor(ws, runningSince[ws.id], now)}
                     pendingRateLimitResume={ws.pendingRateLimitResume}
+                    awaitingStackedWork={ws.awaitingStackedWork}
                     rateLimited={activeRateLimitPause(ws.rateLimited, now)}
                     backgroundTasks={backgroundTaskCount(runningAgents[ws.id])}
                     pr={prStatus[ws.id]}

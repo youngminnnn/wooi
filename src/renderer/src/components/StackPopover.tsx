@@ -282,7 +282,7 @@ export default function StackPopover({ workspace }: { workspace: Workspace }): R
       </HeaderChip>
       {open && (
         <MenuPanel role="menu" className="absolute right-0 z-30 mt-1 w-80 overflow-hidden">
-          <div className="px-3 py-1.5 text-[11px] uppercase tracking-wider text-neutral-500">
+          <div className="px-3 py-1.5 text-xs uppercase tracking-wider text-neutral-500">
             {branchMode ? `Branch stack · ${count} branches` : `Stack · ${count} workspaces`}
             {ghStackNumber != null && (
               <span
@@ -362,7 +362,7 @@ export default function StackPopover({ workspace }: { workspace: Workspace }): R
                         <Check size={11} className="shrink-0 text-[var(--accent-400)]" />
                       )}
                     </div>
-                    <div className="flex items-center gap-1 text-[11px] text-neutral-500 min-w-0">
+                    <div className="flex items-center gap-1 text-xs text-neutral-500 min-w-0">
                       <GitBranch size={9} className="shrink-0" />
                       <span className="truncate">{r.branch}</span>
                       {r.pr && (
@@ -407,7 +407,7 @@ export default function StackPopover({ workspace }: { workspace: Workspace }): R
                     <button
                       onClick={r.onCreatePr}
                       className={
-                        'shrink-0 flex items-center gap-1 text-[11px] px-1.5 py-1 rounded hover:bg-[var(--surface-3)] ' +
+                        'shrink-0 flex items-center gap-1 text-xs px-1.5 py-1 rounded hover:bg-[var(--surface-3)] ' +
                         (githubDisconnected ? 'text-neutral-400' : 'text-[var(--accent-300)]')
                       }
                       title={

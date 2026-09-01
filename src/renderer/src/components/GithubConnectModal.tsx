@@ -41,7 +41,7 @@ export default function GithubConnectModal(): React.JSX.Element {
   }, [dismiss])
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/60">
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/50">
       <div className="no-drag relative w-[520px] max-w-[92vw] bg-[var(--surface)] border border-[var(--border)] rounded-xl shadow-2xl overflow-hidden">
         <button
           onClick={dismiss}

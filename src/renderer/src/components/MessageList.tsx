@@ -77,7 +77,7 @@ function ConflictResolveMessage({
           {/* 자동으로 시작된 턴이라는 사실은 접힌 상태에서도 읽혀야 한다 — 사용자가 누르지 않은
               턴이 왜 돌았는지 묻게 만드는 것이 바로 이 경우다. */}
           {origin.auto && (
-            <span className="shrink-0 rounded bg-[var(--surface-2)] px-1.5 py-0.5 text-[10px] text-neutral-500">
+            <span className="shrink-0 rounded bg-[var(--surface-2)] px-1.5 py-0.5 text-2xs text-neutral-500">
               auto
             </span>
           )}
@@ -134,7 +134,7 @@ function PeerMessage({
             </span>
           )}
           {messages.length === 1 && only.crossRepo && (
-            <span className="shrink-0 rounded bg-[var(--surface-2)] px-1.5 py-0.5 text-[10px] text-neutral-500">
+            <span className="shrink-0 rounded bg-[var(--surface-2)] px-1.5 py-0.5 text-2xs text-neutral-500">
               {only.fromRepoName}
             </span>
           )}
@@ -961,7 +961,7 @@ function BashBlock({
             {shown}
           </pre>
           {folded.omitted > 0 && (
-            <span className="block border-t border-[var(--border)] px-2.5 py-1 text-[11px] text-neutral-600 hover:text-neutral-400">
+            <span className="block border-t border-[var(--border)] px-2.5 py-1 text-xs text-neutral-600 hover:text-neutral-400">
               {expanded
                 ? 'Collapse output'
                 : `Show full output (${TOOL_VERBOSE_SHORTCUT} to expand)`}

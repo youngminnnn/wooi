@@ -177,7 +177,7 @@ export default function FileViewerOverlay({
           title="Back to the conversation (Esc)"
         >
           <X size={14} /> Close
-          <kbd className="rounded bg-[var(--surface-3)] px-1 py-0.5 text-[10px] leading-none text-neutral-400">
+          <kbd className="rounded bg-[var(--surface-3)] px-1 py-0.5 text-2xs leading-none text-neutral-400">
             esc
           </kbd>
         </button>

@@ -70,7 +70,7 @@ export default function DiffCommentBox({
         className="w-full resize-none rounded border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 text-xs text-neutral-100 outline-none placeholder:text-neutral-600 focus:border-[var(--info-500)]"
       />
       <div className="mt-1.5 flex items-center gap-2">
-        <span className="flex-1 text-[10px] text-neutral-600">⌘↵ to save · Esc to cancel</span>
+        <span className="flex-1 text-2xs text-neutral-600">⌘↵ to save · Esc to cancel</span>
         <button
           onClick={onCancel}
           className="rounded px-2 py-1 text-xs text-neutral-400 hover:bg-[var(--surface-2)] hover:text-neutral-100"

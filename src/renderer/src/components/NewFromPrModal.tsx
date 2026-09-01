@@ -259,12 +259,12 @@ export default function NewFromPrModal({
                     <span className="block truncate text-sm text-neutral-200">
                       {pr.title}
                       {pr.isDraft && (
-                        <span className="ml-2 rounded-full bg-[var(--surface-3)] px-1.5 py-0.5 text-[10px] text-neutral-500">
+                        <span className="ml-2 rounded-full bg-[var(--surface-3)] px-1.5 py-0.5 text-2xs text-neutral-500">
                           Draft
                         </span>
                       )}
                       {pr.state && pr.state !== 'OPEN' && (
-                        <span className="ml-2 rounded-full bg-[var(--surface-3)] px-1.5 py-0.5 text-[10px] text-neutral-400">
+                        <span className="ml-2 rounded-full bg-[var(--surface-3)] px-1.5 py-0.5 text-2xs text-neutral-400">
                           {pr.state === 'MERGED' ? 'Merged' : 'Closed'}
                         </span>
                       )}

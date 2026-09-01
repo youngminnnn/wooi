@@ -179,7 +179,7 @@ export default function StackTrainModal({
                           {dot?.label ?? 'No pull request'}
                         </span>
                         {notReached && (
-                          <span className="rounded bg-neutral-700 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-neutral-400">
+                          <span className="rounded bg-neutral-700 px-1.5 py-0.5 text-2xs uppercase tracking-wide text-neutral-400">
                             Not reached
                           </span>
                         )}

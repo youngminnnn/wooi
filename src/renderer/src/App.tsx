@@ -744,6 +744,7 @@ export default function App(): React.JSX.Element {
                 <>
                   <Splitter
                     axis="x"
+                    label="Resize work panel"
                     onStart={() => (rightBase.current = useStore.getState().rightWidth)}
                     // 분할바를 오른쪽으로 끌면(dx>0) 우측 패널이 좁아진다.
                     // 채팅이 maxRight 미만으로 줄지 않도록 드래그 폭도 함께 제한한다.

@@ -1762,11 +1762,11 @@ function MemoryCard({
             onClick={() => onPick(c.scope)}
             className="flex items-center gap-2 px-2 py-1.5 rounded-lg text-left hover:bg-[var(--surface-3)]"
           >
-            <span className="shrink-0 h-4 w-4 grid place-items-center rounded border border-[var(--border)] text-[10px] text-neutral-500">
+            <span className="shrink-0 h-4 w-4 grid place-items-center rounded border border-[var(--border)] text-2xs text-neutral-500">
               {i + 1}
             </span>
             <span className="text-xs text-neutral-200">{c.label}</span>
-            <span className="text-[11px] text-neutral-500 truncate">{c.hint}</span>
+            <span className="text-xs text-neutral-500 truncate">{c.hint}</span>
           </button>
         ))}
       </div>
@@ -2856,7 +2856,7 @@ function SkillsPanel({ skills }: { skills: SkillInfo[] }): React.JSX.Element {
                 {skill.argumentHint}
               </span>
             )}
-            <span className="text-[10px] text-neutral-500 bg-[var(--surface-3)] rounded px-1 shrink-0">
+            <span className="text-2xs text-neutral-500 bg-[var(--surface-3)] rounded px-1 shrink-0">
               {badge[skill.source]}
             </span>
           </div>
@@ -3204,7 +3204,7 @@ function StatusLine({
       </button>
       {fallbackModel && (
         <span
-          className="shrink-0 text-amber-400"
+          className="shrink-0 text-[var(--warning-400)]"
           title={`Primary model unavailable — using fallback ${modelLabel(models, fallbackModel)}`}
         >
           Fallback: {modelLabel(models, fallbackModel)}
@@ -3717,7 +3717,7 @@ function RateLimitStatus({
           <div className="mb-2 flex items-center justify-between gap-2">
             <span className="text-xs font-medium text-neutral-200">Plan usage</span>
             {snapshot.subscriptionType && (
-              <span className="text-[10px] uppercase tracking-wide text-neutral-500">
+              <span className="text-2xs uppercase tracking-wide text-neutral-500">
                 {snapshot.subscriptionType}
               </span>
             )}
@@ -3747,7 +3747,7 @@ function RateLimitStatus({
                   >
                     {wp == null ? '—' : `${wp}%`}
                   </span>
-                  <span className="w-14 shrink-0 text-right text-[10px] text-neutral-600">
+                  <span className="w-14 shrink-0 text-right text-2xs text-neutral-600">
                     {reset ? `in ${reset}` : ''}
                   </span>
                 </div>
@@ -3756,13 +3756,13 @@ function RateLimitStatus({
           </div>
 
           <div className="mt-2 flex items-center justify-between gap-2 border-t border-[var(--border)] pt-2">
-            <span className="text-[10px] text-neutral-600">
+            <span className="text-2xs text-neutral-600">
               Updated {agoLabel(now - snapshot.fetchedAt)}
             </span>
             <button
               onClick={onRefresh}
               disabled={refreshing}
-              className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-neutral-400 transition-colors hover:bg-[var(--surface-3)] hover:text-neutral-200 disabled:opacity-50"
+              className="flex items-center gap-1 rounded px-1.5 py-0.5 text-2xs text-neutral-400 transition-colors hover:bg-[var(--surface-3)] hover:text-neutral-200 disabled:opacity-50"
               title="Check plan rate limits now"
             >
               <RefreshCw size={10} className={refreshing ? 'animate-spin' : ''} />

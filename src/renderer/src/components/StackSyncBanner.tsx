@@ -81,7 +81,7 @@ export default function StackSyncBanner({
                     ? workspaces?.find((candidate) => candidate.id === done.workspaceId)
                     : undefined
                 return (
-                  <div key={affected.branch} className="flex items-center gap-1.5 text-[11px]">
+                  <div key={affected.branch} className="flex items-center gap-1.5 text-xs">
                     <span className="w-3 shrink-0 grid place-items-center">
                       {current ? (
                         <Loader2 size={11} className="animate-spin text-[var(--warning-300)]" />

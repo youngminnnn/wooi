@@ -258,7 +258,7 @@ export default function SettingsModal({
     : false
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/55" onMouseDown={onClose}>
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/50" onMouseDown={onClose}>
       <div
         role="dialog"
         aria-modal="true"
@@ -912,7 +912,7 @@ function AgentEnvSection({
                   <Trash2 size={13} />
                 </button>
               </div>
-              {problem && <p className="mt-1 text-xs text-[var(--warn-400)]">{problem}</p>}
+              {problem && <p className="mt-1 text-xs text-[var(--warning-400)]">{problem}</p>}
             </div>
           )
         })
@@ -1205,7 +1205,7 @@ function UpdatesSection(): React.JSX.Element {
         <div className="flex items-center gap-2 text-sm text-neutral-300">
           Wooi <span className="text-neutral-500">v{version || '…'}</span>
           {isNew && (
-            <span className="rounded bg-[var(--accent-500)]/20 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--accent-300)]">
+            <span className="rounded bg-[var(--accent-500)]/20 px-1.5 py-0.5 text-2xs font-semibold uppercase tracking-wide text-[var(--accent-300)]">
               New version
             </span>
           )}

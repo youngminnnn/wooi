@@ -123,7 +123,7 @@ export function WorkspaceAgents({
                   aria-label={`Stop ${isTask ? 'background task' : 'agent'}: ${agent.description}`}
                   title={`Stop ${isTask ? 'background task' : 'agent'}`}
                   onClick={() => void window.api.chat.stopTask(workspaceId, agent.taskId)}
-                  className="shrink-0 rounded p-0.5 text-neutral-500 hover:bg-[var(--surface-2)] hover:text-red-400"
+                  className="shrink-0 rounded p-0.5 text-neutral-500 hover:bg-[var(--surface-2)] hover:text-[var(--danger-400)]"
                 >
                   <Square size={9} fill="currentColor" />
                 </button>
