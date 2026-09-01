@@ -13,6 +13,13 @@ import { renderWithStore, resetStore, useStore } from '../test/harness'
  */
 beforeEach(() => resetStore())
 
+/** assertive 리전. role 을 달지 않으므로(위 주석) 전용 훅으로 집는다. */
+function alertRegion(): Element {
+  const region = document.querySelector('[data-live-region="alert"]')
+  if (!region) throw new Error('assertive 라이브 리전이 마운트되지 않았다')
+  return region
+}
+
 function setStatus(status: 'idle' | 'running' | 'error'): void {
   act(() => {
     const ws = workspace({ status })
@@ -23,8 +30,10 @@ function setStatus(status: 'idle' | 'running' | 'error'): void {
 describe('LiveRegion', () => {
   it('처음 마운트될 때는 비어 있다 — 라이브 리전은 초기 내용을 읽지 않는다', () => {
     setStatus('running')
-    renderWithStore(<LiveRegion />)
-    for (const region of screen.getAllByRole('status')) expect(region).toHaveTextContent('')
+    const { container } = renderWithStore(<LiveRegion />)
+    for (const region of container.querySelectorAll('[data-live-region]')) {
+      expect(region).toHaveTextContent('')
+    }
   })
 
   it('턴이 시작하고 끝나면 polite 리전에 문장이 들어간다', () => {
@@ -43,7 +52,7 @@ describe('LiveRegion', () => {
     renderWithStore(<LiveRegion />)
 
     setStatus('error')
-    expect(screen.getByRole('alert')).toHaveTextContent('sunny-bison stopped with an error.')
+    expect(alertRegion()).toHaveTextContent('sunny-bison stopped with an error.')
   })
 
   it('토스트 내용을 polite 로 읽는다', () => {
@@ -57,13 +66,24 @@ describe('LiveRegion', () => {
   it('스토어 밖의 사건(ErrorBoundary)도 같은 호스트로 들어온다', () => {
     renderWithStore(<LiveRegion />)
     act(() => announce('Something broke in Settings. boom', 'assertive'))
-    expect(screen.getByRole('alert')).toHaveTextContent('Something broke in Settings. boom')
+    expect(alertRegion()).toHaveTextContent('Something broke in Settings. boom')
   })
 
   it('리전은 화면에 보이지 않는다 — 시각적 변경이 없어야 한다', () => {
-    renderWithStore(<LiveRegion />)
-    const regions = [...screen.getAllByRole('status'), screen.getByRole('alert')]
-    expect(regions).toHaveLength(3)
+    const { container } = renderWithStore(<LiveRegion />)
+    const regions = [...container.querySelectorAll('[data-live-region]')]
+    expect(regions.map((r) => r.getAttribute('data-live-region'))).toEqual([
+      'turn',
+      'toast',
+      'alert'
+    ])
     for (const region of regions) expect(region).toHaveClass('sr-only')
+  })
+
+  it('ARIA role 을 달지 않는다 — 상시 떠 있는 빈 그릇을 경보로 세면 안 된다', () => {
+    // e2e 가 role="alert" 로 토스트를 세고 그것이 사라지기를 기다린다. 여기에 role 을 달면
+    // 그 기다림은 영영 끝나지 않는다(실제로 slash-commands 스펙이 이 이유로 죽었다).
+    const { container } = renderWithStore(<LiveRegion />)
+    expect(container.querySelectorAll('[role="alert"], [role="status"]')).toHaveLength(0)
   })
 })

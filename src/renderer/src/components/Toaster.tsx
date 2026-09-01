@@ -14,6 +14,9 @@ export default function Toaster(): React.JSX.Element {
       {toasts.map((t) => (
         <div
           key={t.id}
+          // e2e 가 토스트를 집는 손잡이(fixtures.mjs 의 dismissToasts). 예전에는 role="alert" 로
+          // 집었는데, ARIA 를 셀렉터로 겸용하면 접근성 결정을 바꾸는 순간 픽스처가 조용히 깨진다.
+          data-toast=""
           className="flex items-start gap-2.5 rounded-lg border bg-[var(--surface)] px-3.5 py-2.5 shadow-2xl border-[var(--border)]"
         >
           <Icon kind={t.kind} />

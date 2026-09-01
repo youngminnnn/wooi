@@ -202,7 +202,10 @@ export async function openRowMenuItem(win, name) {
  * 죽는다. 모달에서 저장하는 스펙은 누르기 전에 이걸 부른다.
  */
 export async function dismissToasts(win) {
-  const dismiss = win.locator('[role="alert"] [aria-label="Dismiss"]')
+  // `[data-toast]` 로 범위를 좁힌다 — `aria-label="Dismiss"` 는 UpdateBanner·ChatView 도 쓰고,
+  // 예전 범위였던 `[role="alert"]` 는 이제 토스트가 아니라 sr-only 라이브 리전을 가리킨다
+  // (토스트 내용은 LiveRegion 이 polite 로 읽으므로 토스트마다 붙던 role="alert" 는 뗐다).
+  const dismiss = win.locator('[data-toast] [aria-label="Dismiss"]')
   // 닫는 동안 새 토스트가 뜰 수 있으므로 매번 다시 센다. 남아 있어도 여기서 실패하지는 않는다 —
   // 정리는 이 스펙의 주제가 아니고, 정말 가로막혔다면 다음 클릭이 그 사실을 말해 준다.
   for (let left = await dismiss.count(); left > 0; left = await dismiss.count()) {

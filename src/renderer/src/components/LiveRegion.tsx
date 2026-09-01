@@ -108,15 +108,21 @@ export default function LiveRegion(): React.JSX.Element {
     []
   )
 
+  // `role="alert"`/`role="status"` 를 쓰지 않고 `aria-live` 만 둔다. 읽히는 결과는 같지만
+  // (role="alert" 는 assertive + atomic 의 준말이다), 이 리전들은 **비어 있는 채로 늘 떠
+  // 있는 그릇**이라 role 을 달면 "지금 경보가 하나 떠 있다" 로 읽힌다. 실제로 그렇게 읽는
+  // 코드가 이미 있다 — e2e 가 `getByRole('alert')` 로 토스트를 세고 그것이 사라지기를
+  // 기다린다. 상시 마운트된 빈 alert 는 영영 사라지지 않으므로 그 기다림은 반드시 죽는다.
+  // 그래서 ARIA 는 읽히는 일에만 쓰고, 가리키는 일은 전용 훅(data-live-region)에 맡긴다.
   return (
     <>
-      <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+      <div className="sr-only" data-live-region="turn" aria-live="polite" aria-atomic="true">
         {turn}
       </div>
-      <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+      <div className="sr-only" data-live-region="toast" aria-live="polite" aria-atomic="true">
         {toast}
       </div>
-      <div className="sr-only" role="alert" aria-live="assertive" aria-atomic="true">
+      <div className="sr-only" data-live-region="alert" aria-live="assertive" aria-atomic="true">
         {alert}
       </div>
     </>
