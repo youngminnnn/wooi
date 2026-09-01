@@ -34,10 +34,10 @@ export default async function 사용자가_끊은_턴은_완료와_다르게_표
 
         // 카드는 상태 글자까지 사실대로 바꾼다 — status 자체는 여전히 idle 이라 글자만 다르다.
         await wooi.win.locator(`[title="${OVERVIEW_BUTTON_TITLE}"]`).click()
-        const card = wooi.win.locator('button').filter({ hasText: 'interrupted' }).first()
+        const card = wooi.win.locator('button').filter({ hasText: 'Stopped' }).first()
         await card.waitFor()
         const cardText = await card.innerText()
-        if (!cardText.includes('interrupted')) {
+        if (!cardText.includes('Stopped')) {
           throw new Error(
             `overview card did not call the turn interrupted: ${JSON.stringify(cardText)}`
           )
