@@ -240,6 +240,12 @@ export function getStore(): Store {
   return store
 }
 
+/** Electron app API 가 없는 순수 Node 실행에서는 스토어를 만들지 않는다. */
+export function getStoreIfAvailable(): Store | null {
+  if (typeof app?.getPath !== 'function') return null
+  return getStore()
+}
+
 /**
  * 밀린 상태 변경을 즉시 디스크에 내린다(앱 종료 등). 스토어가 아직 만들어지지 않았으면 no-op.
  * 쓰기가 디바운스되므로, 프로세스가 사라지기 전에 반드시 한 번 불러야 마지막 변경이 남는다.

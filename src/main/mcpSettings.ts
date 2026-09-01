@@ -1,6 +1,6 @@
 import { CODEX_MCP_SERVERS_ENV, isValidMcpServerName, mcpSettingsOf } from '@shared/types'
 import type { CodexStdioServer, McpSettings, WooiMcpServer } from '@shared/types'
-import { getStore } from './store'
+import { getStoreIfAvailable } from './store'
 import { log } from './logger'
 
 /**
@@ -14,12 +14,15 @@ import { log } from './logger'
  * env 로(codexMcpServerEnv), agent-host 쪽은 SessionConfig.mcpSettings 로. 규칙을 지키는 것은
  * scripts/check-host-imports.mjs 다.
  *
- * 어느 쪽도 "설정을 못 읽었다" 는 이유로 세션 생성을 멈추면 안 되므로, 실패는 빈 목록으로
- * 떨어뜨리고 경고만 남긴다(스토어가 아직 없는 유닛 테스트 경로 포함).
+ * 어느 쪽도 "설정을 못 읽었다" 는 이유로 세션 생성을 멈추면 안 된다. Electron app API 자체가
+ * 없는 테스트·유틸리티 실행은 정상적인 빈 목록으로 보고, app 이 있는데도 스토어 읽기가 실패한
+ * 경우에만 빈 목록으로 떨어뜨리며 경고를 남긴다.
  */
 export function wooiMcpSettings(): McpSettings {
   try {
-    return mcpSettingsOf(getStore().getState().settings)
+    const store = getStoreIfAvailable()
+    if (!store) return { servers: [], disabledInherited: [] }
+    return mcpSettingsOf(store.getState().settings)
   } catch (err) {
     log.warn('mcp: could not read Wooi MCP settings — treating the list as empty', err)
     return { servers: [], disabledInherited: [] }
