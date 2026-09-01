@@ -40,11 +40,8 @@ export default async function 상태_변화가_스크린리더에게_소리로_�
         await alert.waitFor()
 
         const politeCount = await polite.count()
-        if (politeCount !== 2) {
-          throw new Error(
-            `polite 라이브 리전은 둘(턴·토스트)이어야 한다 — ${politeCount} 개다. ` +
-              '하나로 합치면 같은 틱의 두 사건 중 나중 것이 앞 것을 덮어써 조용히 사라진다.'
-          )
+        if (politeCount !== 1) {
+          throw new Error(`토스트용 polite 라이브 리전이 하나여야 한다 — ${politeCount} 개다.`)
         }
 
         // 켜자마자 지금 상태를 한 번 읊는 것은 변화의 통지가 아니라 잡음이다.
@@ -56,6 +53,12 @@ export default async function 상태_변화가_스크린리더에게_소리로_�
         // 여기서 워크스페이스가 선택되고, 그 시점이 기준선(첫 스냅샷)이 된다. 권한 요청은
         // **그 뒤에** 보내야 한다 — 먼저 보내면 대기 상태가 첫 스냅샷이 되어(설계대로) 침묵한다.
         await openSeededWorkspace(win)
+
+        // 턴 시작·종료는 읽지 않는다(알림음이 그 자리에 있다). 워크스페이스를 열고 상태가
+        // 오가는 동안에도 assertive 리전은 비어 있어야 한다.
+        if ((await alert.innerText()).trim() !== '') {
+          throw new Error('워크스페이스를 여는 것만으로 말을 하면 안 된다')
+        }
 
         await sendPermissionRequest(wooi.app, {
           requestId: 'req-e2e-live-region',

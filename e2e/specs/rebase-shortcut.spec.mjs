@@ -45,7 +45,7 @@ export default async function 리베이스_단축키가_칩과_같은_판정을_
         // 3. ⇧⌘B — 칩이 눌리지 않는 상태이므로 단축키도 같은 답을 내야 하고, 화면에 회색으로
         //    말할 자리가 없으므로 이유를 토스트로 말해야 한다.
         await win.keyboard.press('Meta+Shift+B')
-        await win.locator('[role="alert"]').getByText('Already up to date with main.').waitFor()
+        await win.locator('[data-toast]').getByText('Already up to date with main.').waitFor()
         console.log(`[e2e] blocked=${await wooi.shot('rebase-shortcut-up-to-date')}`)
 
         // 4. 단축키가 도움말에도 실려 있어야 한다 — 아무도 모르는 단축키는 없는 것과 같다.

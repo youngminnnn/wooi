@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { wasInterrupted, workspaceDisplayName, type Workspace } from '@shared/types'
+import { workspaceDisplayName, type Workspace } from '@shared/types'
 import { askSummary } from '@shared/askSummary'
 import type { PermissionRequest } from '@shared/types'
 import { useStore } from '../store'
@@ -30,8 +30,8 @@ import {
  * 조건부로 마운트하지 않고 언제나 빈 채로 붙어 있는다.
  */
 export default function LiveRegion(): React.JSX.Element {
-  // 턴 시작/종료(polite) · 토스트(polite) · 응답 대기와 오류(assertive).
-  const [turn, setTurn] = useState('')
+  // 응답 대기·오류(assertive) · 토스트(polite). 턴 시작/종료는 읽지 않는다 — 알림음이
+  // 이미 그 자리에 있다(lib/announce.ts 의 모듈 주석).
   const [toast, setToast] = useState('')
   const [alert, setAlert] = useState('')
 
@@ -70,7 +70,7 @@ export default function LiveRegion(): React.JSX.Element {
     // 같은 문자열을 다시 넣으면 React 가 렌더를 건너뛰어 DOM 이 그대로다 → 스크린리더도 다시
     // 읽지 않는다. announceChange 의 중복 억제와 같은 결론에 두 겹으로 도달하는 셈이라 그대로 둔다.
     if (announcement.politeness === 'assertive') setAlert(announcement.message)
-    else setTurn(announcement.message)
+    else setToast(announcement.message)
   }, [])
 
   useEffect(() => {
@@ -116,9 +116,6 @@ export default function LiveRegion(): React.JSX.Element {
   // 그래서 ARIA 는 읽히는 일에만 쓰고, 가리키는 일은 전용 훅(data-live-region)에 맡긴다.
   return (
     <>
-      <div className="sr-only" data-live-region="turn" aria-live="polite" aria-atomic="true">
-        {turn}
-      </div>
       <div className="sr-only" data-live-region="toast" aria-live="polite" aria-atomic="true">
         {toast}
       </div>
@@ -130,16 +127,15 @@ export default function LiveRegion(): React.JSX.Element {
 }
 
 /**
- * 워크스페이스 하나를 알릴 수 있는 상태로 줄인다. 우선순위는 `describeWorkspaceStatus` 의
- * 사다리와 같은 순서다 — 두 층이 서로 다른 것을 말하면 화면과 소리가 갈린다.
+ * 워크스페이스 하나를 알릴 수 있는 상태로 줄인다. 응답 대기를 오류보다 먼저 보는 것은
+ * `describeWorkspaceStatus` 의 사다리와 같은 순서다 — 두 층이 서로 다른 것을 말하면 화면과
+ * 소리가 갈린다.
  *
- * 압축 중(compacting)은 여기서 running 에 접힌다. 사이드바에서는 색으로 구분할 값어치가 있지만,
- * 소리로는 "돌고 있다" 는 같은 사실이라 두 번 알릴 이유가 없다.
+ * 나머지(실행 중·압축 중·완료·사용자 중단)는 전부 `quiet` 로 접힌다. 이 층에서 그것들은 서로
+ * 구별할 이유가 없고, 구별이 필요한 곳은 화면이다.
  */
 function announceStateOf(workspace: Workspace, pending: PermissionRequest | null): AnnounceState {
   if (pending) return { kind: 'awaiting-response', ask: askSummary(pending) || undefined }
-  if (workspace.status === 'running') return { kind: 'running' }
   if (workspace.status === 'error') return { kind: 'error' }
-  if (wasInterrupted(workspace)) return { kind: 'interrupted' }
-  return { kind: 'idle' }
+  return { kind: 'quiet' }
 }

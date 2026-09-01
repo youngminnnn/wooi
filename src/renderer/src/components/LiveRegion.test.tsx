@@ -13,11 +13,11 @@ import { renderWithStore, resetStore, useStore } from '../test/harness'
  */
 beforeEach(() => resetStore())
 
-/** assertive 리전. role 을 달지 않으므로(위 주석) 전용 훅으로 집는다. */
-function alertRegion(): Element {
-  const region = document.querySelector('[data-live-region="alert"]')
-  if (!region) throw new Error('assertive 라이브 리전이 마운트되지 않았다')
-  return region
+/** 리전은 role 을 달지 않으므로(아래 테스트 참고) 전용 훅으로 집는다. */
+function region(name: 'toast' | 'alert'): Element {
+  const found = document.querySelector(`[data-live-region="${name}"]`)
+  if (!found) throw new Error(`${name} 라이브 리전이 마운트되지 않았다`)
+  return found
 }
 
 function setStatus(status: 'idle' | 'running' | 'error'): void {
@@ -29,22 +29,23 @@ function setStatus(status: 'idle' | 'running' | 'error'): void {
 
 describe('LiveRegion', () => {
   it('처음 마운트될 때는 비어 있다 — 라이브 리전은 초기 내용을 읽지 않는다', () => {
-    setStatus('running')
+    setStatus('error')
     const { container } = renderWithStore(<LiveRegion />)
-    for (const region of container.querySelectorAll('[data-live-region]')) {
-      expect(region).toHaveTextContent('')
+    for (const node of container.querySelectorAll('[data-live-region]')) {
+      expect(node).toHaveTextContent('')
     }
   })
 
-  it('턴이 시작하고 끝나면 polite 리전에 문장이 들어간다', () => {
+  it('턴이 시작하고 끝나도 아무 말도 하지 않는다 — 알림음이 그 자리에 있다', () => {
     setStatus('idle')
-    renderWithStore(<LiveRegion />)
+    const { container } = renderWithStore(<LiveRegion />)
 
     setStatus('running')
-    expect(screen.getByText('sunny-bison started running.')).toBeInTheDocument()
-
     setStatus('idle')
-    expect(screen.getByText('sunny-bison finished.')).toBeInTheDocument()
+
+    for (const node of container.querySelectorAll('[data-live-region]')) {
+      expect(node).toHaveTextContent('')
+    }
   })
 
   it('오류는 assertive 리전으로 간다', () => {
@@ -52,7 +53,7 @@ describe('LiveRegion', () => {
     renderWithStore(<LiveRegion />)
 
     setStatus('error')
-    expect(alertRegion()).toHaveTextContent('sunny-bison stopped with an error.')
+    expect(region('alert')).toHaveTextContent('sunny-bison stopped with an error.')
   })
 
   it('토스트 내용을 polite 로 읽는다', () => {
@@ -60,24 +61,20 @@ describe('LiveRegion', () => {
     act(() => {
       useStore.getState().pushToast('error', 'Could not archive the merged workspaces.')
     })
-    expect(screen.getByText('Could not archive the merged workspaces.')).toBeInTheDocument()
+    expect(region('toast')).toHaveTextContent('Could not archive the merged workspaces.')
   })
 
   it('스토어 밖의 사건(ErrorBoundary)도 같은 호스트로 들어온다', () => {
     renderWithStore(<LiveRegion />)
     act(() => announce('Something broke in Settings. boom', 'assertive'))
-    expect(alertRegion()).toHaveTextContent('Something broke in Settings. boom')
+    expect(region('alert')).toHaveTextContent('Something broke in Settings. boom')
   })
 
-  it('리전은 화면에 보이지 않는다 — 시각적 변경이 없어야 한다', () => {
+  it('리전은 둘이고, 화면에 보이지 않는다 — 시각적 변경이 없어야 한다', () => {
     const { container } = renderWithStore(<LiveRegion />)
     const regions = [...container.querySelectorAll('[data-live-region]')]
-    expect(regions.map((r) => r.getAttribute('data-live-region'))).toEqual([
-      'turn',
-      'toast',
-      'alert'
-    ])
-    for (const region of regions) expect(region).toHaveClass('sr-only')
+    expect(regions.map((r) => r.getAttribute('data-live-region'))).toEqual(['toast', 'alert'])
+    for (const node of regions) expect(node).toHaveClass('sr-only')
   })
 
   it('ARIA role 을 달지 않는다 — 상시 떠 있는 빈 그릇을 경보로 세면 안 된다', () => {
@@ -85,5 +82,6 @@ describe('LiveRegion', () => {
     // 그 기다림은 영영 끝나지 않는다(실제로 slash-commands 스펙이 이 이유로 죽었다).
     const { container } = renderWithStore(<LiveRegion />)
     expect(container.querySelectorAll('[role="alert"], [role="status"]')).toHaveLength(0)
+    expect(screen.queryByRole('alert')).toBeNull()
   })
 })
