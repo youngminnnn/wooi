@@ -994,6 +994,7 @@ export interface Workspace {
   sessionId: string | null
   /** 계정 사용량 제한이 풀린 뒤 같은 대화를 자동으로 이어가기 위한 영속 예약. */
   pendingRateLimitResume?: PendingRateLimitResume | null
+  pendingShutdownResume?: PendingShutdownResume | null
   /** 마지막 턴이 사용량 제한으로 멈췄다는 표시(자동 이어가기 설정과 무관하게 기록·표시한다). */
   rateLimited?: RateLimitPause | null
   /** `await_stacked_work` 로 건 대기 예약. 없으면 기다리는 것이 없다. */
@@ -1536,6 +1537,7 @@ export interface AppSettings {
   autoCompact: boolean
   /** Claude/Codex 계정 사용량 제한이 풀리면 중단된 작업을 같은 세션에서 자동으로 이어간다. */
   autoResumeAfterRateLimit: boolean
+  resumeUnfinishedTurnsOnLaunch: boolean
   /**
    * restack·캐스케이드가 충돌하면 그 워크트리의 에이전트에게 해결을 맡긴다. **기본 꺼짐.**
    *
@@ -4106,6 +4108,13 @@ export interface PendingRateLimitResume {
    *   확인 간격을 늘려 가며 기다린다([[rateLimitResume]] noteConnectionLost).
    */
   cause?: 'rateLimit' | 'connection'
+}
+
+export interface PendingShutdownResume {
+  backend: AgentBackendId
+  sessionId: string
+  at: number
+  reason: 'update' | 'background' | 'quit' | 'crash'
 }
 
 /**

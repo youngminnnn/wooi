@@ -178,3 +178,87 @@ describe('Store 로드 시 schemaVersion 기록', () => {
     expect(persisted.schemaVersion).toBe(future)
   })
 })
+
+describe('Store 로드 시 중단된 턴 복구 기록', () => {
+  let dir = ''
+
+  beforeAll(() => {
+    dir = mkdtempSync(join(tmpdir(), 'wooi-store-crash-resume-'))
+  })
+
+  afterAll(() => rmSync(dir, { recursive: true, force: true }))
+  afterEach(() => vi.resetModules())
+
+  it('세션이 남은 running은 crash 재개를 찍고, 세션이 없거나 이미 기록이 있으면 건드리지 않는다', async () => {
+    userData = dir
+    vi.resetModules()
+    const { CURRENT_SCHEMA_VERSION, EMPTY_STATE } = await import('./storeSchema')
+    writeFileSync(
+      join(dir, 'wooi.json'),
+      JSON.stringify({
+        ...EMPTY_STATE,
+        schemaVersion: CURRENT_SCHEMA_VERSION,
+        workspaces: [
+          {
+            id: 'with-session',
+            repoId: 'repo',
+            agentBackend: 'claude',
+            name: 'with-session',
+            branch: 'feat/x',
+            baseBranch: 'main',
+            worktreePath: '/tmp/with-session',
+            status: 'running',
+            sessionId: 'sess-1',
+            archived: false
+          },
+          {
+            id: 'without-session',
+            repoId: 'repo',
+            agentBackend: 'codex',
+            name: 'without-session',
+            branch: 'feat/y',
+            baseBranch: 'main',
+            worktreePath: '/tmp/without-session',
+            status: 'running',
+            sessionId: null,
+            archived: false
+          },
+          {
+            id: 'already-captured',
+            repoId: 'repo',
+            agentBackend: 'claude',
+            name: 'already-captured',
+            branch: 'feat/z',
+            baseBranch: 'main',
+            worktreePath: '/tmp/already-captured',
+            status: 'running',
+            sessionId: 'sess-2',
+            archived: false,
+            pendingShutdownResume: {
+              backend: 'claude',
+              sessionId: 'sess-2',
+              at: 1,
+              reason: 'update'
+            }
+          }
+        ]
+      })
+    )
+
+    const { getStore } = await import('./store')
+    const [withSession, withoutSession, alreadyCaptured] = getStore().getState().workspaces
+    expect(withSession.status).toBe('idle')
+    expect(withSession.pendingShutdownResume).toMatchObject({
+      backend: 'claude',
+      sessionId: 'sess-1',
+      reason: 'crash'
+    })
+    expect(typeof withSession.pendingShutdownResume?.at).toBe('number')
+    expect(withoutSession.status).toBe('idle')
+    expect(withoutSession.pendingShutdownResume).toBeUndefined()
+    // 정상 종료가 남긴 기록은 크래시로 덮어쓰지 않는다 — 덮으면 재개 개수 정책이
+    // '전부 이어가기'에서 '하나만'으로 조용히 뒤집힌다.
+    expect(alreadyCaptured.status).toBe('idle')
+    expect(alreadyCaptured.pendingShutdownResume).toMatchObject({ reason: 'update', at: 1 })
+  })
+})

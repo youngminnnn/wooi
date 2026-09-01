@@ -9,11 +9,11 @@ import {
   RATE_LIMIT_CONTINUATION,
   RateLimitResumeCoordinator,
   backoffWait,
-  resetMissedResumeGrace,
   exhaustedResetTimes,
   isRateLimited,
   retryTime
 } from './rateLimitResume'
+import { resetResumeBudget } from './resumeBudget'
 
 const NOW = Date.parse('2026-08-10T00:00:00Z')
 
@@ -847,7 +847,7 @@ describe('놓친 예약의 유예(grace) 정책', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     vi.setSystemTime(NOW)
-    resetMissedResumeGrace()
+    resetResumeBudget()
   })
 
   afterEach(() => {

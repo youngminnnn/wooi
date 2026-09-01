@@ -196,6 +196,7 @@ export default function QuickSwitcher({
           compacting={compacting[ws.id] ?? false}
           {...runningFor(ws, runningSince[ws.id], now)}
           pendingRateLimitResume={ws.pendingRateLimitResume}
+          pendingShutdownResume={ws.pendingShutdownResume}
           awaitingStackedWork={ws.awaitingStackedWork}
           rateLimited={activeRateLimitPause(ws.rateLimited, now)}
           backgroundTasks={backgroundTaskCount(runningAgents[ws.id])}

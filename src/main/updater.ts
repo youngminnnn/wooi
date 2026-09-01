@@ -47,6 +47,12 @@ let lastCheckAt = 0
 /** 마지막으로 OS 알림을 띄운 대상(`상태:버전`)과 시각 — 같은 릴리스로 도배하지 않기 위한 기록. */
 let notifiedKey: string | null = null
 let notifiedAt = 0
+/** quitAndInstall 이 시작한 종료인지 before-quit 에 동기적으로 알려 주는 휘발성 표식. */
+let installing = false
+
+export function isInstallingUpdate(): boolean {
+  return installing
+}
 
 /**
  * macOS 에서 앱이 "쓸 수 없는 위치"에 있으면 Squirrel 이 업데이트를 설치할 수 없다.
@@ -190,6 +196,9 @@ export function initUpdater(dispatch: (channel: string, payload: unknown) => voi
     stopIdleWatch()
     restartWhenIdle = false
     log.info('updater: installing scheduled update now')
+    // macOS quitAndInstall 은 창을 모두 닫은 뒤 앱을 종료한다. setImmediate 앞에서 표식을 세워야
+    // before-quit 이 이 종료를 일반 quit 이 아니라 update 로 기록할 수 있다.
+    installing = true
     setImmediate(() => autoUpdater.quitAndInstall(false, true))
   }
 
@@ -241,6 +250,8 @@ export function initUpdater(dispatch: (channel: string, payload: unknown) => voi
     stopIdleWatch()
     restartWhenIdle = false
     // isSilent=false(설치 마법사 표시 안 함, mac 은 무의미), forceRunAfter=true(설치 후 재실행)
+    // macOS 네이티브 종료가 시작되기 전에 표식을 세워 before-quit 이 원인을 잃지 않게 한다.
+    installing = true
     setImmediate(() => autoUpdater.quitAndInstall(false, true))
   })
 

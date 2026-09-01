@@ -2,6 +2,7 @@ import type { AgentBackendId, ChatItem, RateLimitSnapshot, Workspace } from '@sh
 import { getStore } from './store'
 import { getTranscripts } from './transcripts'
 import { log } from './logger'
+import { takeUnrequestedTurn } from './resumeBudget'
 
 const FALLBACK_WAIT_MS = 5 * 60_000
 /**
@@ -65,20 +66,6 @@ const EARLY_CHECK_MS = 5 * 60_000
  * 셈이고, Wooi 는 전역 토글을 늘리지 않는 것을 원칙으로 삼는다([[types]] AppSettings 주석).
  */
 const MISSED_RESUME_GRACE_MS = 60 * 60_000
-
-/**
- * 이번 실행에서 놓친 재개를 이미 하나 되살렸는지.
- *
- * 코디네이터는 백엔드마다 하나씩 있고(claude·codex) 둘 다 시작할 때 restore() 를 부른다. 그래서
- * 이 빗장은 인스턴스가 아니라 **모듈**에 있어야 "복귀 한 번에 깨움 하나" 가 백엔드 사이에서도
- * 지켜진다. 프로세스는 한 번만 복귀하므로 되돌릴 자리는 없다 — 아래 reset 은 테스트 전용이다.
- */
-let missedResumeUsed = false
-
-/** 놓친 재개 빗장을 되돌린다. 실행 하나가 한 번만 복귀하므로 **테스트에서만** 쓸 자리가 있다. */
-export function resetMissedResumeGrace(): void {
-  missedResumeUsed = false
-}
 
 export const RATE_LIMIT_CONTINUATION =
   'The previous turn stopped because the provider usage limit was reached. Inspect the current conversation and workspace state, then continue the unfinished task. Do not repeat work that is already complete.'
@@ -186,14 +173,13 @@ export class RateLimitResumeCoordinator {
         )
         continue
       }
-      if (missedResumeUsed) {
+      if (!takeUnrequestedTurn()) {
         this.dropMissed(
           ws.id,
           `This task was due to continue at ${formatWhen(retryAt)}, but Wooi had already continued another one on this launch and never starts more than one unrequested turn at a time. Send a message to pick it up.`
         )
         continue
       }
-      missedResumeUsed = true
       // 시각은 이미 지났으므로 arm 은 곧바로 깨어난다. 그 뒤 판단은 평소 경로 그대로다 —
       // 오프라인이면 기다리고, 아직 제한 중이면 물러서고, 세션이 바뀌었으면 접는다.
       this.arm(ws.id, retryAt)
@@ -878,6 +864,6 @@ export function retryTime(
   return (known ?? now + backoffWait(attempt)) + RESET_GRACE_MS
 }
 
-function formatWhen(at: number): string {
+export function formatWhen(at: number): string {
   return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(at)
 }

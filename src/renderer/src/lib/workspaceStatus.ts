@@ -27,6 +27,7 @@ export type StatusRung =
   | 'compacting'
   | 'running-stale'
   | 'running'
+  | 'shutdown-interrupted'
   | 'rate-limited'
   | 'awaiting-stacked-work'
   | 'error'
@@ -46,6 +47,7 @@ export interface WorkspaceStatusInput {
   stale: boolean
   runningMs: number
   pendingRateLimitResume?: Workspace['pendingRateLimitResume']
+  pendingShutdownResume?: Workspace['pendingShutdownResume']
   awaitingStackedWork?: Workspace['awaitingStackedWork']
   /** 제한에 걸린 상태(해제 시각이 지나지 않은 것). 호출부가 activeRateLimitPause 로 걸러 넘긴다. */
   rateLimited?: RateLimitPause | null
@@ -126,6 +128,7 @@ export function describeWorkspaceStatus({
   stale,
   runningMs,
   pendingRateLimitResume,
+  pendingShutdownResume,
   awaitingStackedWork,
   rateLimited,
   backgroundTasks = 0,
@@ -175,6 +178,19 @@ export function describeWorkspaceStatus({
       spin: true,
       title: 'Running',
       label: 'Running'
+    }
+  }
+  // 종료로 끊긴 턴은 제한 대기나 일반 idle 이 아니다. 다시 열면 이어진다는 사실을 먼저 보여 준다.
+  if (pendingShutdownResume) {
+    return {
+      rung: 'shutdown-interrupted',
+      icon: 'clock',
+      toneClass: 'text-[var(--warning-400)]',
+      size: 12,
+      spin: false,
+      title: 'Will continue when Wooi reopens',
+      aria: 'Interrupted by shutdown',
+      label: 'Interrupted by shutdown'
     }
   }
   // 사용량 제한으로 멈춘 상태는 단순 idle 도, 그냥 error 도 아니다 — 시간이 지나면 스스로 풀리는

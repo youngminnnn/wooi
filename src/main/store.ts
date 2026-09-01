@@ -109,9 +109,26 @@ class Store {
 
       // 부팅 시점엔 살아 있는 Claude 세션이 하나도 없다(세션은 첫 메시지 때 lazy 생성).
       // 따라서 직전 종료/크래시 때 'running' 으로 남은 상태는 실제로는 진행되지 않는 유령
-      // 상태이므로 idle 로 되돌려, 재시작 후 사이드바가 '진행 중'에 갇히지 않게 한다.
+      // 상태다. 정상 종료는 before-quit 이 재개 기록을 남기므로, 기록 없이 running 이 남았으면
+      // 크래시·강제 종료·전원 손실로 보고 세션이 있을 때만 이어가기 기록을 함께 남긴다.
+      const now = Date.now()
       const workspaces = ((migrated.workspaces as Workspace[]) ?? []).map((w) =>
-        w.status === 'running' ? { ...w, status: 'idle' as const } : w
+        w.status === 'running'
+          ? {
+              ...w,
+              status: 'idle' as const,
+              ...(!w.pendingShutdownResume && w.sessionId
+                ? {
+                    pendingShutdownResume: {
+                      backend: w.agentBackend,
+                      sessionId: w.sessionId,
+                      at: now,
+                      reason: 'crash' as const
+                    }
+                  }
+                : {})
+            }
+          : w
       )
 
       // 리뷰도 같은 이유로 씻어낸다 — 실행 중이던 query 프로세스는 종료와 함께 사라졌으므로,
