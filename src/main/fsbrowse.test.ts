@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { execFile } from 'node:child_process'
-import { mkdtemp, mkdir, writeFile, rm, symlink } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, readFile, rm, stat, chmod, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { promisify } from 'node:util'
-import { listDir, readFileInRoot, searchFiles } from './fsbrowse'
+import { listDir, readFileInRoot, searchFiles, writeFileInRoot } from './fsbrowse'
 
 const exec = promisify(execFile)
 
@@ -172,5 +172,136 @@ describe('worktree 밖 접근 차단', () => {
     } finally {
       await rm(alias, { force: true })
     }
+  })
+})
+
+describe('writeFileInRoot', () => {
+  let root: string
+
+  beforeAll(async () => {
+    root = await mkdtemp(join(tmpdir(), 'wooi-fswrite-'))
+    await mkdir(join(root, 'src'), { recursive: true })
+    await mkdir(join(root, 'outside-target'), { recursive: true })
+  })
+  afterAll(async () => {
+    await rm(root, { recursive: true, force: true })
+  })
+
+  /** 파일을 새로 깔고 지금 내용의 sha 를 돌려준다. */
+  async function seed(rel: string, text: string): Promise<string> {
+    await writeFile(join(root, rel), text)
+    const got = await readFileInRoot(root, rel)
+    if (!got) throw new Error(`seed failed: ${rel}`)
+    return got.sha
+  }
+
+  it('열었을 때와 디스크가 같으면 저장하고 새 sha 를 돌려준다', async () => {
+    const sha = await seed('src/a.ts', 'const a = 1\n')
+    const res = await writeFileInRoot(root, 'src/a.ts', 'const a = 2\n', sha)
+
+    expect(res.ok).toBe(true)
+    if (!res.ok) return
+    expect(res.content.text).toBe('const a = 2\n')
+    // 새 baseline 이 와야 연달아 저장할 수 있다.
+    expect(res.content.sha).not.toBe(sha)
+    expect(await readFile(join(root, 'src/a.ts'), 'utf-8')).toBe('const a = 2\n')
+  })
+
+  it('그 사이 남이 고쳤으면 쓰지 않고 지금 내용을 함께 돌려준다', async () => {
+    const stale = await seed('src/b.ts', 'original\n')
+    // 에이전트가 같은 파일을 고친 상황.
+    await writeFile(join(root, 'src/b.ts'), 'agent wrote this\n')
+
+    const res = await writeFileInRoot(root, 'src/b.ts', 'my edit\n', stale)
+
+    expect(res).toMatchObject({ ok: false, reason: 'conflict', conflict: 'stale' })
+    if (res.ok || res.reason !== 'conflict') return
+    // 사용자가 덮어쓸지 버릴지 고르려면 상대편 내용을 볼 수 있어야 한다.
+    expect(res.current?.text).toBe('agent wrote this\n')
+    // 무엇보다, 디스크는 손대지 않았어야 한다.
+    expect(await readFile(join(root, 'src/b.ts'), 'utf-8')).toBe('agent wrote this\n')
+  })
+
+  it('force 면 남이 고친 내용을 덮어쓴다', async () => {
+    const stale = await seed('src/c.ts', 'original\n')
+    await writeFile(join(root, 'src/c.ts'), 'agent wrote this\n')
+
+    const res = await writeFileInRoot(root, 'src/c.ts', 'my edit\n', stale, { force: true })
+
+    expect(res.ok).toBe(true)
+    expect(await readFile(join(root, 'src/c.ts'), 'utf-8')).toBe('my edit\n')
+  })
+
+  it('파일이 사라졌으면 vanished 로 막는다', async () => {
+    const sha = await seed('src/d.ts', 'bye\n')
+    await rm(join(root, 'src/d.ts'))
+
+    const res = await writeFileInRoot(root, 'src/d.ts', 'back\n', sha)
+
+    expect(res).toMatchObject({ ok: false, reason: 'conflict', conflict: 'vanished' })
+    if (res.ok || res.reason !== 'conflict') return
+    expect(res.current).toBeNull()
+  })
+
+  it('사라진 파일도 force 면 되살린다', async () => {
+    const sha = await seed('src/e.ts', 'bye\n')
+    await rm(join(root, 'src/e.ts'))
+
+    const res = await writeFileInRoot(root, 'src/e.ts', 'back\n', sha, { force: true })
+
+    expect(res.ok).toBe(true)
+    expect(await readFile(join(root, 'src/e.ts'), 'utf-8')).toBe('back\n')
+  })
+
+  it('baseline 없이 저장하려 하면 막는다', async () => {
+    await seed('src/f.ts', 'keep\n')
+    const res = await writeFileInRoot(root, 'src/f.ts', 'clobber\n', null)
+
+    expect(res).toMatchObject({ ok: false, reason: 'conflict', conflict: 'stale' })
+    expect(await readFile(join(root, 'src/f.ts'), 'utf-8')).toBe('keep\n')
+  })
+
+  // 읽기와 같은 격리 규칙을 쓰기에도 건다 — 여기가 뚫리면 워크스페이스 격리가 무의미해진다.
+  it('worktree 밖 경로는 쓰지 않는다', async () => {
+    const res = await writeFileInRoot(root, '../escaped.txt', 'nope\n', null, { force: true })
+    expect(res).toEqual({ ok: false, reason: 'denied' })
+  })
+
+  it('밖을 가리키는 링크로도 쓰지 않는다', async () => {
+    const outside = await mkdtemp(join(tmpdir(), 'wooi-fswrite-out-'))
+    try {
+      await writeFile(join(outside, 'target.txt'), 'untouched\n')
+      await symlink(join(outside, 'target.txt'), join(root, 'link-out'))
+
+      const res = await writeFileInRoot(root, 'link-out', 'pwned\n', null, { force: true })
+
+      expect(res).toEqual({ ok: false, reason: 'denied' })
+      expect(await readFile(join(outside, 'target.txt'), 'utf-8')).toBe('untouched\n')
+    } finally {
+      await rm(outside, { recursive: true, force: true })
+    }
+  })
+
+  it('디렉토리에는 쓰지 않는다', async () => {
+    const res = await writeFileInRoot(root, 'src', 'nope\n', null, { force: true })
+    expect(res).toEqual({ ok: false, reason: 'denied' })
+  })
+
+  // 실행 비트가 떨어지면 뷰어에서 오타 하나 고친 스크립트가 CI 에서 안 돌기 시작한다.
+  it('실행 권한을 보존한다', async () => {
+    const sha = await seed('run.sh', '#!/bin/sh\necho hi\n')
+    await chmod(join(root, 'run.sh'), 0o755)
+    const fresh = await readFileInRoot(root, 'run.sh')
+
+    const res = await writeFileInRoot(root, 'run.sh', '#!/bin/sh\necho bye\n', fresh?.sha ?? sha)
+
+    expect(res.ok).toBe(true)
+    expect((await stat(join(root, 'run.sh'))).mode & 0o777).toBe(0o755)
+  })
+
+  it('임시 파일을 남기지 않는다', async () => {
+    const sha = await seed('src/g.ts', 'a\n')
+    await writeFileInRoot(root, 'src/g.ts', 'b\n', sha)
+    expect((await listDir(root, 'src')).map((e) => e.name)).not.toContain('g.ts.tmp')
   })
 })

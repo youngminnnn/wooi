@@ -16,7 +16,7 @@ import { forgetRunningAgents } from './runningAgentsCache'
 import { setSleepBlockerEnabled } from './sleepBlocker'
 import { getTranscripts } from './transcripts'
 import { buildHandoffPrompt, estimateHandoffTokens, formatHandoffTokens } from '@shared/handoff'
-import { listDir, readFileInRoot, searchFiles } from './fsbrowse'
+import { listDir, readFileInRoot, searchFiles, writeFileInRoot } from './fsbrowse'
 import { importMigration, scanMigration } from './migrate'
 import { formatIssues } from '@shared/previewIssues'
 import { log } from './logger'
@@ -87,6 +87,7 @@ import { planMergeTrain, runMergeTrain, type TrainLayer } from './mergeTrain'
 import { ReviewManager } from './review/manager'
 import { resolveStackForPr } from './review/stackResolve'
 import type {
+  FileWriteResult,
   MigrationImportResult,
   MigrationImportSelection,
   MigrationScan,
@@ -2852,6 +2853,27 @@ export function registerIpc(ctx: IpcContext): void {
     if (!ws || ws.archived) return null
     return readFileInRoot(ws.worktreePath, relPath).catch(() => null)
   })
+
+  handle(
+    IPC.fsWrite,
+    (
+      _e,
+      workspaceId: string,
+      relPath: string,
+      text: string,
+      baselineSha: string | null,
+      force?: boolean
+    ): Promise<FileWriteResult> => {
+      const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
+      // 아카이브된 워크스페이스는 읽기 전용이다(읽기와 같은 규칙).
+      if (!ws || ws.archived) return Promise.resolve({ ok: false, reason: 'denied' })
+      return writeFileInRoot(ws.worktreePath, relPath, text, baselineSha, { force }).catch((e) => ({
+        ok: false as const,
+        reason: 'error' as const,
+        message: e instanceof Error ? e.message : String(e)
+      }))
+    }
+  )
 
   handle(IPC.fsSearch, (_e, workspaceId: string, query: string) => {
     const ws = store.getState().workspaces.find((w) => w.id === workspaceId)

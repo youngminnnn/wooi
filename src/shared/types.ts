@@ -3765,6 +3765,8 @@ export const IPC = {
   // 파일 브라우저 (All files 탭)
   fsList: 'fs:list',
   fsRead: 'fs:read',
+  /** 뷰어에서 고친 파일 저장. 열었을 때의 해시를 함께 받아 동시 수정을 막는다. */
+  fsWrite: 'fs:write',
   /** 입력창 `@` 자동완성용 파일 검색(git ls-files 기반 퍼지 매칭). */
   fsSearch: 'fs:search',
   // 인터랙티브 터미널 (worktree PTY — 탭 하나당 하나)
@@ -4663,7 +4665,35 @@ export interface FileContent {
   truncated: boolean
   /** 바이너리(또는 표시 불가)면 본문 없이 true. */
   binary: boolean
+  /**
+   * 읽은 시점 **파일 전체**(잘린 앞부분이 아니라) 내용의 sha256.
+   *
+   * 뷰어에서 고친 내용을 저장할 때 낙관적 동시성 제어의 기준값으로 쓴다 — 사람이 오타를
+   * 고치는 동안 에이전트가 같은 파일을 바꿔 놨는지 이 값으로 안다. mtime 대신 해시를 쓰는
+   * 이유는, 에이전트가 1 초 안에 여러 번 쓰면 mtime 해상도로는 변경을 놓치기 때문이다.
+   */
+  sha: string
 }
+
+/** 저장을 막은 이유. 판정 규칙은 `@shared/fileEdit` 의 `classifySave` 한 곳에 있다. */
+export type FileSaveConflict =
+  /** 열었을 때와 디스크 내용이 다르다 — 다른 누군가(보통 에이전트)가 고쳤다. */
+  | 'stale'
+  /** 파일이 사라졌다 — 지워졌거나 옮겨졌다. */
+  | 'vanished'
+
+/** `fs:write` 의 결과. 실패는 사용자에게 다르게 보여야 해서 이유를 나눠 돌려준다. */
+export type FileWriteResult =
+  | { ok: true; content: FileContent }
+  /**
+   * 열었을 때와 디스크가 달라 쓰지 않았다. `current` 는 지금 디스크에 있는 내용(사라졌으면
+   * null) — 사용자가 덮어쓸지 버릴지 고르려면 상대편을 볼 수 있어야 한다.
+   */
+  | { ok: false; reason: 'conflict'; conflict: FileSaveConflict; current: FileContent | null }
+  /** 워크트리 밖 경로·아카이브된 워크스페이스·파일이 아닌 대상 — 애초에 쓸 수 없다. */
+  | { ok: false; reason: 'denied' }
+  /** 권한 없음·디스크 가득 참 등 쓰기 자체의 실패. */
+  | { ok: false; reason: 'error'; message: string }
 
 /** 입력창 `@` 자동완성 후보(worktree 상대 경로). */
 export interface FileHit {

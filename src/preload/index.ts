@@ -198,6 +198,8 @@ const api: WooiApi = {
   fs: {
     list: (workspaceId, relPath) => ipcRenderer.invoke(IPC.fsList, workspaceId, relPath),
     read: (workspaceId, relPath) => ipcRenderer.invoke(IPC.fsRead, workspaceId, relPath),
+    write: (workspaceId, relPath, text, baselineSha, force) =>
+      ipcRenderer.invoke(IPC.fsWrite, workspaceId, relPath, text, baselineSha, force),
     search: (workspaceId, query) => ipcRenderer.invoke(IPC.fsSearch, workspaceId, query)
   },
 
