@@ -4,7 +4,7 @@ import { MAX_DIFF_LINES_PER_SIDE } from '@shared/diffRenderLimit'
 import type { FileDiff, WorkspaceDiff } from '@shared/types'
 import { renderWithStore } from '../test/harness'
 import type { DiffCommentAnchor } from '../lib/diffComments'
-import DiffView from './DiffView'
+import DiffView, { type DiffDiscarding } from './DiffView'
 
 function fileDiff(over: Partial<FileDiff> & { path: string }): FileDiff {
   return {
@@ -371,5 +371,97 @@ describe('DiffView 워드랩', () => {
 
   it('파일 블록에는 트리가 찾아올 표적이 달려 있다', () => {
     expect(renderWrap(true)).not.toBeNull()
+  })
+})
+
+/**
+ * hunk 버리기는 이 앱에서 **사용자의 코드를 지우는** 몇 안 되는 버튼이다. 그래서 여기서 재는
+ * 것은 모양이 아니라 "언제 눌리면 안 되는가" 다 — 잘못 눌린 한 번이 곧 데이터 손실이다.
+ */
+describe('hunk 버리기 버튼', () => {
+  const TWO_HUNKS = `@@ -1,2 +1,2 @@\n a\n-b\n+c\n@@ -10,2 +10,2 @@\n d\n-e\n+f\n`
+
+  function discarding(over: Partial<DiffDiscarding> = {}): DiffDiscarding {
+    return { blockedReason: null, onDiscard: vi.fn(), ...over }
+  }
+
+  it('배선을 주지 않으면 버튼 자체가 없다 — 모달·PR 리뷰의 diff 는 읽기 전용이다', () => {
+    renderWithStore(
+      <DiffView
+        diff={workspaceDiff([
+          fileDiff({ path: 'src/a.ts', patch: TWO_HUNKS, additions: 2, deletions: 2 })
+        ])}
+        loading={false}
+        baseBranch="main"
+      />
+    )
+    expect(screen.queryByLabelText('Discard this hunk in src/a.ts')).toBeNull()
+  })
+
+  it('hunk 마다 하나씩 붙고, 누르면 그 hunk 만 담은 patch 를 넘긴다', () => {
+    const onDiscard = vi.fn()
+    renderWithStore(
+      <DiffView
+        diff={workspaceDiff([
+          fileDiff({ path: 'src/a.ts', patch: TWO_HUNKS, additions: 2, deletions: 2 })
+        ])}
+        loading={false}
+        baseBranch="main"
+        discarding={discarding({ onDiscard })}
+      />
+    )
+    const buttons = screen.getAllByLabelText('Discard this hunk in src/a.ts')
+    expect(buttons).toHaveLength(2)
+
+    fireEvent.click(buttons[1])
+    expect(onDiscard).toHaveBeenCalledTimes(1)
+    const [file, patch] = onDiscard.mock.calls[0]
+    expect(file.path).toBe('src/a.ts')
+    // 두 번째 hunk 만 들어 있어야 한다 — 첫 번째 것까지 딸려 가면 안 지운 줄이 사라진다.
+    expect(patch).toBe(
+      ['--- a/src/a.ts', '+++ b/src/a.ts', '@@ -10,2 +10,2 @@', ' d', '-e', '+f', ''].join('\n')
+    )
+  })
+
+  /** 턴이 도는 중. 에이전트가 방금 읽은 파일을 뒤에서 되쓰면 두 쪽이 어긋난다. */
+  it('막힌 이유가 있으면 잠기고, 그 이유를 툴팁으로 말한다', () => {
+    const onDiscard = vi.fn()
+    renderWithStore(
+      <DiffView
+        diff={workspaceDiff([
+          fileDiff({ path: 'src/a.ts', patch: TWO_HUNKS, additions: 2, deletions: 2 })
+        ])}
+        loading={false}
+        baseBranch="main"
+        discarding={discarding({ blockedReason: 'The agent is working here.', onDiscard })}
+      />
+    )
+    const button = screen.getAllByLabelText('Discard this hunk in src/a.ts')[0]
+    expect(button).toBeDisabled()
+    fireEvent.click(button)
+    expect(onDiscard).not.toHaveBeenCalled()
+    // 잠긴 버튼은 마우스 이벤트를 받지 못하므로 이유는 감싼 쪽에 달려 있어야 읽힌다.
+    expect(button.parentElement?.getAttribute('title')).toBe('The agent is working here.')
+  })
+
+  /**
+   * 상한에 걸려 본문을 안 그린 파일에는 hunk 도, 버릴 자리도 없다. 카드만 있는 화면에 버튼이
+   * 뜨면 "무엇을 버리는지 못 본 채 버리기" 가 되므로 아예 나오지 않아야 한다.
+   */
+  it('너무 커서 그리지 않은 diff 에는 붙지 않는다', () => {
+    const lines = MAX_DIFF_LINES_PER_SIDE + 1
+    renderWithStore(
+      <DiffView
+        diff={workspaceDiff([
+          fileDiff({ path: 'dist/bundle.js', patch: hugePatch(lines), additions: lines })
+        ])}
+        loading={false}
+        baseBranch="main"
+        discarding={discarding()}
+      />
+    )
+    fireEvent.click(screen.getByTitle('Expand this file'))
+    expect(screen.getByText(/too large to display safely/)).toBeTruthy()
+    expect(screen.queryByLabelText('Discard this hunk in dist/bundle.js')).toBeNull()
   })
 })

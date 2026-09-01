@@ -140,7 +140,8 @@ const api: WooiApi = {
       ipcRenderer.invoke(IPC.workspaceSetCompareBase, workspaceId, compareBase),
     fetch: (repoId) => ipcRenderer.invoke(IPC.gitFetch, repoId),
     updateFromBase: (workspaceId) => ipcRenderer.invoke(IPC.gitUpdateFromBase, workspaceId),
-    abortMerge: (workspaceId) => ipcRenderer.invoke(IPC.gitAbortMerge, workspaceId)
+    abortMerge: (workspaceId) => ipcRenderer.invoke(IPC.gitAbortMerge, workspaceId),
+    discardHunk: (workspaceId, patch) => ipcRenderer.invoke(IPC.gitDiscardHunk, workspaceId, patch)
   },
 
   pr: {

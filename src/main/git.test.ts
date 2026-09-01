@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -26,7 +26,8 @@ import {
   listCommits,
   commitInRange,
   commitChangedPaths,
-  pushForceWithLease
+  pushForceWithLease,
+  applyReversePatch
 } from './git'
 
 describe('커밋 이동 조회 원시 연산', () => {
@@ -999,5 +1000,53 @@ describe('worktree fork 기반과 변경 스냅샷', () => {
 
     expect(git(target, ['diff', '--', 'tracked.txt'])).toContain('+changed')
     expect(git(target, ['status', '--porcelain'])).toContain('tracked.txt')
+  })
+})
+
+/**
+ * hunk 버리기의 되쓰기 경로. 되돌리는 것 자체가 맞는지는 렌더러 쪽
+ * (`diffPatch.apply.test.ts`)이 patch 조립과 함께 확인하고, 여기서는 **실패를 어떻게 부르는지**
+ * 를 잰다 — 문맥이 어긋난 것은 버그가 아니라 사용자에게 설명해야 할 상태이고, 그 둘을 뭉뚱그리면
+ * "알 수 없는 오류" 라는 막다른 토스트가 뜬다.
+ */
+describe('applyReversePatch', () => {
+  let root: string
+  const git = (args: string[]): string =>
+    execFileSync('git', args, { cwd: root, encoding: 'utf-8' }).trim()
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'wooi-reverse-'))
+    git(['init', '-q', '-b', 'main'])
+    git(['config', 'user.email', 'test@example.com'])
+    git(['config', 'user.name', '테스터'])
+    writeFileSync(join(root, 'a.ts'), 'a\nb\nc\n')
+    git(['add', '-A'])
+    git(['commit', '-qm', 'base'])
+  })
+
+  afterEach(() => rmSync(root, { recursive: true, force: true }))
+
+  const PATCH = ['--- a/a.ts', '+++ b/a.ts', '@@ -1,3 +1,3 @@', ' a', '-b', '+B', ' c', ''].join(
+    '\n'
+  )
+
+  it('맞는 patch 는 되돌리고 discarded 를 돌려준다', async () => {
+    writeFileSync(join(root, 'a.ts'), 'a\nB\nc\n')
+    await expect(applyReversePatch(root, PATCH)).resolves.toEqual({ status: 'discarded' })
+    expect(readFileSync(join(root, 'a.ts'), 'utf-8')).toBe('a\nb\nc\n')
+  })
+
+  it('문맥이 어긋나면 stale 로 부르고 파일은 그대로 둔다', async () => {
+    writeFileSync(join(root, 'a.ts'), 'completely\nother\n')
+    const res = await applyReversePatch(root, PATCH)
+    expect(res.status).toBe('stale')
+    expect(res.message).toMatch(/Refresh the diff/)
+    expect(readFileSync(join(root, 'a.ts'), 'utf-8')).toBe('completely\nother\n')
+  })
+
+  it('망가진 patch 는 error 로 부르고 git 이 한 말을 그대로 싣는다', async () => {
+    const res = await applyReversePatch(root, 'not a patch at all\n')
+    expect(res.status).toBe('error')
+    expect(res.message).toBeTruthy()
   })
 })

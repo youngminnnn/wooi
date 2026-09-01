@@ -19,5 +19,11 @@ export const CONFIRM_SKIP_LABELS: Record<
     title: 'Ask before archiving a review',
     description: 'Archiving removes the worktree; the findings and conversation stay.',
     action: 'archiving a review'
+  },
+  discardHunk: {
+    title: 'Ask before discarding a hunk',
+    description:
+      'Discarding rewrites the file in the working tree. Commits are untouched, but the discarded lines are gone.',
+    action: 'discarding a hunk'
   }
 }

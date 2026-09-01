@@ -7,6 +7,7 @@ import { wooiHome } from './paths'
 import { runGh } from './github'
 import { MAX_GIT_READ_BYTES } from '@shared/diffRenderLimit'
 import type {
+  DiscardHunkResult,
   FileDiff,
   FileDiffStatus,
   GitStatus,
@@ -40,6 +41,31 @@ async function gitTry(
       stderr: (err.stderr ?? '').toString().trim()
     }
   }
+}
+
+/**
+ * stdin 으로 입력을 먹여야 하는 git(지금은 `git apply` 뿐)을 위한 변형.
+ * promisify(execFile) 은 자식 프로세스를 돌려주지 않아 stdin 을 쓸 수 없다.
+ */
+function gitWithInput(
+  cwd: string,
+  args: string[],
+  input: string
+): Promise<{ ok: boolean; stderr: string }> {
+  return new Promise((resolve) => {
+    const child = execFile(
+      'git',
+      args,
+      { cwd, maxBuffer: MAX_GIT_READ_BYTES },
+      (err, _stdout, stderr) => {
+        resolve({ ok: !err, stderr: (stderr ?? '').toString().trim() })
+      }
+    )
+    child.stdin?.on('error', () => {
+      // git 이 먼저 죽으면 EPIPE 가 난다. 종료 코드는 위 콜백이 돌려준다.
+    })
+    child.stdin?.end(input)
+  })
 }
 
 const parseGitPathList = (output: string): string[] =>
@@ -758,6 +784,36 @@ export async function updateFromBase(
 }
 
 /** 진행 중인 머지를 취소해 워크스페이스를 머지 직전 상태로 되돌린다(충돌 포기용). */
+/**
+ * patch 를 워킹 트리에 **거꾸로** 적용한다 — Changes 탭의 "이 hunk 버리기".
+ *
+ * 인덱스도 HEAD 도 건드리지 않는다(`git apply` 는 기본이 워킹 트리 전용이다). 커밋이 남긴
+ * 변경이든 아직 커밋 안 된 변경이든 상관없이 **파일의 현재 내용**에서 그 hunk 만 빼는 것이라,
+ * 결과는 언제나 "커밋되지 않은 변경"으로 남고 이력은 그대로다.
+ *
+ * `--reverse` 를 쓰고 뒤집힌 patch 를 직접 만들지 않는 이유: 개행 없는 파일 끝 표식처럼
+ * 뒤집기가 미묘한 자리가 있고, 그걸 우리가 틀리면 **사용자 코드가 지워진다**. 뒤집는 판단은
+ * git 에 맡기고 우리는 hunk 를 골라 오리기만 한다([[hunkPatch]]).
+ *
+ * `--3way` 도 `--recount` 도 주지 않는다. 문맥이 어긋나면 그냥 거절당하는 편이 맞다 —
+ * diff 를 그린 뒤 파일이 또 바뀌었다는 뜻이고, 그때 억지로 맞춰 붙이면 엉뚱한 줄이 사라진다.
+ */
+export async function applyReversePatch(
+  worktreePath: string,
+  patch: string
+): Promise<DiscardHunkResult> {
+  const { ok, stderr } = await gitWithInput(worktreePath, ['apply', '--reverse', '-'], patch)
+  if (ok) return { status: 'discarded' }
+  // git 이 문맥 불일치로 거절한 경우. 파일은 한 글자도 바뀌지 않았다(apply 는 전부 아니면 전무다).
+  if (/patch does not apply|does not match index|No such file or directory/i.test(stderr)) {
+    return {
+      status: 'stale',
+      message: 'This hunk no longer matches the file on disk. Refresh the diff and try again.'
+    }
+  }
+  return { status: 'error', message: stderr || 'git apply failed.' }
+}
+
 export async function abortMerge(worktreePath: string): Promise<void> {
   await git(worktreePath, ['merge', '--abort']).catch(() => {})
 }
