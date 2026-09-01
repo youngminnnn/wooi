@@ -37,7 +37,7 @@ export default function DiffCommentCard({
 
   return (
     <div className="group/card border-y border-[var(--border)] bg-[var(--bg-3)] px-3 py-2 font-sans">
-      <div className="flex items-center gap-1.5 text-[10px] text-neutral-500">
+      <div className="flex items-center gap-1.5 text-2xs text-neutral-500">
         <MessageSquare size={11} className="shrink-0 text-[var(--info-400)]" />
         <span className="font-mono">{range}</span>
         <span className="flex-1" />
@@ -45,7 +45,7 @@ export default function DiffCommentCard({
           onClick={() => setEditing(true)}
           title="Edit this comment"
           aria-label="Edit this comment"
-          className="grid h-5 w-5 place-items-center rounded text-neutral-600 opacity-0 transition-opacity hover:bg-[var(--surface-2)] hover:text-neutral-200 group-hover/card:opacity-100"
+          className="grid h-5 w-5 place-items-center rounded text-neutral-600 opacity-0 transition-opacity hover:bg-[var(--surface-2)] hover:text-neutral-200 group-hover/card:opacity-100 focus-visible:opacity-100"
         >
           <Pencil size={11} />
         </button>
@@ -53,7 +53,7 @@ export default function DiffCommentCard({
           onClick={onRemove}
           title="Delete this comment"
           aria-label="Delete this comment"
-          className="grid h-5 w-5 place-items-center rounded text-neutral-600 opacity-0 transition-opacity hover:bg-[var(--surface-2)] hover:text-[var(--danger-400)] group-hover/card:opacity-100"
+          className="grid h-5 w-5 place-items-center rounded text-neutral-600 opacity-0 transition-opacity hover:bg-[var(--surface-2)] hover:text-[var(--danger-400)] group-hover/card:opacity-100 focus-visible:opacity-100"
         >
           <Trash2 size={11} />
         </button>

@@ -133,9 +133,7 @@ export default function RowActionsMenu({
             </span>
             <span className="min-w-0 flex-1 truncate">{a.label}</span>
             {a.shortcut && (
-              <span className="shrink-0 text-[10px] text-neutral-600 tabular-nums">
-                {a.shortcut}
-              </span>
+              <span className="shrink-0 text-2xs text-neutral-600 tabular-nums">{a.shortcut}</span>
             )}
           </button>
         </div>

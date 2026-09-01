@@ -30,7 +30,7 @@ export default function ConfirmDialog(): React.JSX.Element | null {
 
   return (
     <div
-      className="fixed inset-0 z-[70] grid place-items-center bg-black/55"
+      className="fixed inset-0 z-[70] grid place-items-center bg-black/50"
       onMouseDown={() => resolve(false)}
     >
       <div

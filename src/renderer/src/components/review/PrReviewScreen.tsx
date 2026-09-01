@@ -282,7 +282,7 @@ export default function PrReviewScreen({ reviewId }: { reviewId: string }): Reac
               {/* 스택에서는 파일 목록도 레이어로 나눠 놓아야 한다 — 같은 경로가 여러 번 나오는데
                   구분이 없으면 어느 층의 파일인지 알 수 없다. */}
               {stacked && (
-                <div className="mt-2 flex items-center gap-1 px-1.5 pb-0.5 text-[11px] text-[var(--accent-300)]">
+                <div className="mt-2 flex items-center gap-1 px-1.5 pb-0.5 text-xs text-[var(--accent-300)]">
                   <Layers size={10} className="shrink-0" />
                   <span className="truncate" title={layerTitle(session, layer.prNumber)}>
                     #{layer.prNumber}
@@ -323,7 +323,7 @@ export default function PrReviewScreen({ reviewId }: { reviewId: string }): Reac
                       {f.path}
                     </button>
                     {count > 0 && (
-                      <span className="shrink-0 rounded-full bg-[var(--info-500)]/20 px-1.5 text-[10px] text-[var(--info-300)]">
+                      <span className="shrink-0 rounded-full bg-[var(--info-500)]/20 px-1.5 text-2xs text-[var(--info-300)]">
                         {count}
                       </span>
                     )}

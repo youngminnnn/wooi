@@ -258,7 +258,7 @@ function Snippet({ hit }: { hit: TranscriptHit }): React.JSX.Element {
   return (
     <>
       {before}
-      <mark className="bg-[var(--accent-500)]/25 text-neutral-100 rounded-sm">{match}</mark>
+      <mark className="bg-[var(--accent-500)]/25 text-neutral-100 rounded">{match}</mark>
       {after}
     </>
   )

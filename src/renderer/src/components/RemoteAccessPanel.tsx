@@ -279,7 +279,7 @@ function ConsentGate({
   onCancel: () => void
 }): React.JSX.Element {
   return (
-    <div className="rounded-md border border-[var(--border)] bg-[var(--bg-raised)] p-3 space-y-2">
+    <div className="rounded-md border border-[var(--border)] bg-[var(--surface-2)] p-3 space-y-2">
       <p className="text-xs font-semibold text-neutral-300">Before you turn this on</p>
       <ul className="space-y-1 text-xs text-neutral-500 leading-relaxed list-disc pl-4">
         <li>

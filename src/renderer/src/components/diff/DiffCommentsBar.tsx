@@ -38,16 +38,14 @@ export default function DiffCommentsBar({
           {comments.map((c) => (
             <li key={c.id} className="group flex items-start gap-2 px-3 py-1.5">
               <div className="min-w-0 flex-1">
-                <p className="truncate font-mono text-[10px] text-neutral-500">
-                  {commentLocation(c)}
-                </p>
+                <p className="truncate font-mono text-2xs text-neutral-500">{commentLocation(c)}</p>
                 <p className="truncate text-xs text-neutral-300">{c.body}</p>
               </div>
               <button
                 onClick={() => onRemove(c.id)}
                 title="Delete this comment"
                 aria-label={`Delete the comment on ${commentLocation(c)}`}
-                className="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded text-neutral-600 opacity-0 hover:bg-[var(--surface-2)] hover:text-[var(--danger-400)] group-hover:opacity-100"
+                className="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded text-neutral-600 opacity-0 hover:bg-[var(--surface-2)] hover:text-[var(--danger-400)] group-hover:opacity-100 focus-visible:opacity-100"
               >
                 <X size={12} />
               </button>

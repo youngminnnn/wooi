@@ -37,6 +37,7 @@ export default function WorkArea({ workspace }: { workspace: Workspace }): React
       </div>
       <Splitter
         axis="y"
+        label="Resize terminal"
         onStart={() => (base.current = useStore.getState().terminalRatio)}
         // 분할바를 위로 끌면(dy<0) 터미널이 커진다. 픽셀 이동을 컬럼 높이로 나눠 비율로 환산.
         onDelta={(_dx, dy) => containerH && setRatio(base.current - dy / containerH)}

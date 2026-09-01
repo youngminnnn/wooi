@@ -86,7 +86,7 @@ export default function CompareBasePicker({
             selected={value === 'default-branch'}
             onSelect={() => choose('default-branch')}
           />
-          <p className="border-t border-[var(--border)] px-2 py-1.5 text-[10px] leading-snug text-neutral-500">
+          <p className="border-t border-[var(--border)] px-2 py-1.5 text-2xs leading-snug text-neutral-500">
             Changes what this diff is measured against. Your pull request base and rebase target
             stay on <span className="font-mono text-neutral-400">{parentBranch}</span>.
           </p>
@@ -120,7 +120,7 @@ function Option({
       />
       <span className="min-w-0 flex-1">
         <span className="block truncate font-mono text-xs text-neutral-200">{branch}</span>
-        <span className="block text-[10px] text-neutral-500">{hint}</span>
+        <span className="block text-2xs text-neutral-500">{hint}</span>
       </span>
     </button>
   )

@@ -10,7 +10,6 @@ import {
   ArchiveRestore,
   Trash2,
   ChevronRight,
-  ShieldQuestion,
   Pencil,
   Bell,
   BellOff,
@@ -26,10 +25,6 @@ import {
   Copy,
   Download,
   Square,
-  Hourglass,
-  CircleStop,
-  Clock,
-  Terminal,
   GitFork
 } from 'lucide-react'
 import { backgroundTaskCount, REVIEW_BUSY_LABEL, useStore } from '../store'
@@ -65,9 +60,6 @@ import { useDragReorder, type DragReorder } from '../lib/useDragReorder'
 import type {
   AgentBackendId,
   FanoutGroup,
-  PrState,
-  PrStatus,
-  RateLimitPause,
   Repo,
   ReviewSession,
   ReviewStatus,
@@ -75,9 +67,8 @@ import type {
 } from '@shared/types'
 import { reviewTitle, STATUS_LABEL } from '../lib/review'
 import { OPEN_NEW_WORKSPACE_MENU_EVENT } from '../lib/newWorkspaceMenu'
-
-/** running 상태가 이 시간을 넘기면 사이드바에 "오래 실행 중" 힌트(멈춤일 수 있음)를 표시한다. */
-const RUNNING_STALE_MS = 5 * 60 * 1000
+import { StatusDot } from './StatusDot'
+import { resumeTitle, runningFor } from '../lib/workspaceStatus'
 
 // 리포 드래그와 워크스페이스 드래그를 구분하는 dataTransfer 타입. 워크스페이스 행은 리포 블록
 // 안에 중첩되므로, 이 타입으로 "지금 끌고 있는 게 무엇인지"를 각 드롭존이 판별한다.
@@ -484,23 +475,6 @@ function RepoIcon({ repo }: { repo: Repo }): React.JSX.Element {
   return <FolderGit2 size={14} className="text-neutral-500 shrink-0" />
 }
 
-/**
- * 자동 이어가기 예약의 툴팁. 시각 하나만 보여 주면 "그때가 됐는데 왜 안 갔지" 를 설명하지 못한다 —
- * 네트워크가 없거나 이어 보낸 턴이 실패해 다시 기다리는 중이면 그 사정까지 말한다.
- *
- * 무엇 때문에 멈췄는지도 함께 말한다 — API 에 닿지 못해 걸린 예약을 "usage limit" 이라고 부르면
- * 사용자는 있지도 않은 제한이 풀리기를 기다리게 된다.
- */
-function resumeTitle(pending: NonNullable<Workspace['pendingRateLimitResume']>): string {
-  const why =
-    pending.cause === 'connection' ? 'Paused — no connection to the API' : 'Paused by usage limit'
-  if (pending.blocked === 'offline') return `${why} — waiting for a network connection to continue`
-  const at = new Date(pending.retryAt).toLocaleString()
-  return pending.blocked === 'error'
-    ? `${why} — the last attempt to continue failed, retrying at ${at}`
-    : `${why} — scheduled to resume at ${at}`
-}
-
 function WorkspaceRow({
   workspace,
   depth,
@@ -556,11 +530,9 @@ function WorkspaceRow({
   const [menuAlign, setMenuAlign] = useState<'left' | 'right'>('right')
 
   const active = workspace.id === selectedId
-  // running 인 채로 오래 머무르면(상태 변화 없이) "멈춤일 수 있음" 으로 본다. 정확한 진입 시각은
-  // runningSince(있으면)를, 없으면 lastActiveAt 을 근사치로 쓴다.
-  const runningStart = runningSince ?? workspace.lastActiveAt
-  const runningMs = workspace.status === 'running' ? Math.max(0, now - runningStart) : 0
-  const stale = runningMs >= RUNNING_STALE_MS
+  // running 인 채로 오래 머무르면(상태 변화 없이) "멈춤일 수 있음" 으로 본다.
+  // 계산은 runningFor 한 곳에 있다 — 소비자마다 복제하면 화면끼리 갈라진다.
+  const { runningMs, stale } = runningFor(workspace, runningSince, now)
   // 사용량 제한으로 멈춘 상태. 자동 이어가기 예약(pendingRateLimitResume)이 있으면 그쪽이 더 많은
   // 것을 말해 주므로 그 표시를 쓰고, 없을 때(설정 off·예약 종료) 이 표시가 이유를 대신 알린다.
   const rateLimited = activeRateLimitPause(workspace.rateLimited, now)
@@ -1260,7 +1232,7 @@ function ArchivedReviewsSection({ reviews }: { reviews: ReviewSession[] }): Reac
         </button>
         <button
           onClick={removeAll}
-          className="opacity-0 group-hover/arcrevsec:opacity-100 mr-1.5 h-5 w-5 grid place-items-center rounded text-neutral-500 hover:bg-[var(--danger-500)]/15 hover:text-[var(--danger-400)]"
+          className="opacity-0 group-hover/arcrevsec:opacity-100 focus-visible:opacity-100 mr-1.5 h-5 w-5 grid place-items-center rounded text-neutral-500 hover:bg-[var(--danger-500)]/15 hover:text-[var(--danger-400)]"
           title="Delete all archived reviews"
         >
           <Trash2 size={12} />
@@ -1294,7 +1266,7 @@ function ArchivedReviewRow({ session }: { session: ReviewSession }): React.JSX.E
       <button
         onClick={() => void unarchiveReview(session.id)}
         disabled={!!busy}
-        className="opacity-0 group-hover/arcrev:opacity-100 h-5 w-5 grid place-items-center rounded text-neutral-500 hover:bg-[var(--surface-2)] hover:text-neutral-200 disabled:cursor-not-allowed disabled:opacity-40"
+        className="opacity-0 group-hover/arcrev:opacity-100 focus-visible:opacity-100 h-5 w-5 grid place-items-center rounded text-neutral-500 hover:bg-[var(--surface-2)] hover:text-neutral-200 disabled:cursor-not-allowed disabled:opacity-40"
         title={busy ? REVIEW_BUSY_LABEL[busy] : 'Unarchive (recreate the review worktree)'}
       >
         <ArchiveRestore size={12} />
@@ -1302,7 +1274,7 @@ function ArchivedReviewRow({ session }: { session: ReviewSession }): React.JSX.E
       <button
         onClick={() => void requestCloseReview(session.id)}
         disabled={!!busy}
-        className="opacity-0 group-hover/arcrev:opacity-100 h-5 w-5 grid place-items-center rounded text-neutral-500 hover:bg-[var(--danger-500)]/15 hover:text-[var(--danger-400)] disabled:cursor-not-allowed disabled:opacity-40"
+        className="opacity-0 group-hover/arcrev:opacity-100 focus-visible:opacity-100 h-5 w-5 grid place-items-center rounded text-neutral-500 hover:bg-[var(--danger-500)]/15 hover:text-[var(--danger-400)] disabled:cursor-not-allowed disabled:opacity-40"
         title={busy ? REVIEW_BUSY_LABEL[busy] : 'Delete permanently'}
       >
         <Trash2 size={12} />
@@ -1394,7 +1366,7 @@ function ArchivedSection({
         </button>
         <button
           onClick={removeAll}
-          className="opacity-0 group-hover/arcsec:opacity-100 mr-1.5 h-5 w-5 grid place-items-center rounded text-neutral-500 hover:bg-[var(--danger-500)]/15 hover:text-[var(--danger-400)]"
+          className="opacity-0 group-hover/arcsec:opacity-100 focus-visible:opacity-100 mr-1.5 h-5 w-5 grid place-items-center rounded text-neutral-500 hover:bg-[var(--danger-500)]/15 hover:text-[var(--danger-400)]"
           title="Delete all archived workspaces"
         >
           <Trash2 size={12} />
@@ -1452,184 +1424,19 @@ function ArchivedRow({ workspace }: { workspace: Workspace }): React.JSX.Element
       </button>
       <button
         onClick={unarchive}
-        className="opacity-0 group-hover/arc:opacity-100 h-5 w-5 grid place-items-center rounded text-neutral-500 hover:bg-[var(--surface-2)] hover:text-neutral-200"
+        className="opacity-0 group-hover/arc:opacity-100 focus-visible:opacity-100 h-5 w-5 grid place-items-center rounded text-neutral-500 hover:bg-[var(--surface-2)] hover:text-neutral-200"
         title="Unarchive (recreate worktree)"
       >
         <ArchiveRestore size={12} />
       </button>
       <button
         onClick={remove}
-        className="opacity-0 group-hover/arc:opacity-100 h-5 w-5 grid place-items-center rounded text-neutral-500 hover:bg-[var(--danger-500)]/15 hover:text-[var(--danger-400)]"
+        className="opacity-0 group-hover/arc:opacity-100 focus-visible:opacity-100 h-5 w-5 grid place-items-center rounded text-neutral-500 hover:bg-[var(--danger-500)]/15 hover:text-[var(--danger-400)]"
         title="Delete permanently"
       >
         <Trash2 size={12} />
       </button>
     </div>
-  )
-}
-
-/**
- * PR 상태별 점 색(bg) 과 라벨. Tailwind v4 는 보간한 클래스명을 스캔하지 못하므로
- * 상태마다 전체 클래스 문자열을 그대로 둔다(ChatView 의 PR_STYLE 와 색 일치).
- */
-const PR_DOT: Record<PrState, { dotClass: string; label: string }> = {
-  draft: { dotClass: 'bg-neutral-400', label: 'Draft' },
-  review_required: { dotClass: 'bg-[var(--warning-400)]', label: 'Review required' },
-  changes_requested: { dotClass: 'bg-[var(--attention-400)]', label: 'Changes requested' },
-  ci_pending: { dotClass: 'bg-[var(--warning-400)]', label: 'Checks pending' },
-  ci_failed: { dotClass: 'bg-[var(--danger-400)]', label: 'Checks failed' },
-  approved: { dotClass: 'bg-[var(--success-400)]', label: 'Ready to merge' },
-  conflict: { dotClass: 'bg-[var(--danger-400)]', label: 'Conflict' },
-  open: { dotClass: 'bg-[var(--open-400)]', label: 'Open' },
-  merged: { dotClass: 'bg-[var(--merged-400)]', label: 'Merged' },
-  closed: { dotClass: 'bg-neutral-500', label: 'Closed' }
-}
-
-/** 상태 표시 점/아이콘. 사이드바 행과 ⌘K 퀵 스위처가 같은 시각 언어를 쓰도록 공유한다. */
-export function StatusDot({
-  status,
-  awaitingPermission,
-  ask,
-  interrupted = false,
-  compacting,
-  stale,
-  runningMs,
-  pendingRateLimitResume,
-  awaitingStackedWork,
-  rateLimited,
-  backgroundTasks = 0,
-  pr
-}: {
-  status: Workspace['status']
-  awaitingPermission: boolean
-  /** 지금 무엇을 묻고 있는지 한 줄 요약. 비어 있으면 일반 문구로 물러선다. */
-  ask?: string
-  /** 마지막 턴이 사용자 중단으로 끝났는가([[wasInterrupted]]). 호출부가 판정해 넘긴다. */
-  interrupted?: boolean
-  compacting: boolean
-  stale: boolean
-  runningMs: number
-  pendingRateLimitResume?: Workspace['pendingRateLimitResume']
-  awaitingStackedWork?: Workspace['awaitingStackedWork']
-  /** 제한에 걸린 상태(해제 시각이 지나지 않은 것). 호출부가 activeRateLimitPause 로 걸러 넘긴다. */
-  rateLimited?: RateLimitPause | null
-  /**
-   * 에이전트가 두고 간, 아직 살아 있는 백그라운드 셸의 수. 상태를 running 으로 만들지는 않는다
-   * ([[claude/session]] syncStatus) — 이 표시가 그 사실을 알리는 자리다.
-   */
-  backgroundTasks?: number
-  pr?: PrStatus | null
-}): React.JSX.Element {
-  // 권한 대기는 가장 행동 가능한 상태라 다른 표시보다 우선한다.
-  if (awaitingPermission) {
-    return (
-      <span
-        title={ask || 'Waiting for your permission'}
-        className="shrink-0 grid place-items-center"
-      >
-        <ShieldQuestion size={13} className="text-[var(--warning-400)]" />
-      </span>
-    )
-  }
-  if (status === 'running') {
-    // 압축 중(보라) · 오래 실행(앰버, 멈춤일 수 있음) · 일반 실행(파랑) 을 색으로 구분한다.
-    const color = compacting
-      ? 'text-[var(--merged-400)]'
-      : stale
-        ? 'text-[var(--warning-400)]'
-        : 'text-[var(--info-400)]'
-    const title = compacting
-      ? 'Compacting conversation…'
-      : stale
-        ? `Running for ${Math.round(runningMs / 60000)}m — may be stuck`
-        : 'Running'
-    return (
-      <span title={title} className="shrink-0 grid place-items-center">
-        <Loader2 size={13} className={`${color} animate-spin`} />
-      </span>
-    )
-  }
-  // 사용량 제한으로 멈춘 상태는 단순 idle 도, 그냥 error 도 아니다 — 시간이 지나면 스스로 풀리는
-  // 대기다. PR 상태·에러보다 우선해 표시하되, 위의 권한 대기·실행 중처럼 지금 일어나고 있는
-  // 상태에는 양보한다. 자동 이어가기가 꺼져 있어도(예약 없이 표시만 있어도) 같은 아이콘을 쓴다.
-  if (pendingRateLimitResume || rateLimited) {
-    const title = pendingRateLimitResume
-      ? resumeTitle(pendingRateLimitResume)
-      : rateLimited?.resetsAt
-        ? `Stopped by usage limit — resets at ${new Date(rateLimited.resetsAt).toLocaleString()}`
-        : 'Stopped by usage limit'
-    return (
-      <span title={title} className="shrink-0 grid place-items-center">
-        <Hourglass
-          size={12}
-          className="text-[var(--warning-400)]"
-          aria-label={
-            pendingRateLimitResume?.cause === 'connection'
-              ? 'Paused — no connection to the API'
-              : 'Paused by usage limit'
-          }
-        />
-      </span>
-    )
-  }
-  if (awaitingStackedWork) {
-    return (
-      <span
-        title={`Waiting for ${awaitingStackedWork.targets.length} stacked workspaces — until ${new Date(awaitingStackedWork.deadlineAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`}
-        className="shrink-0 grid place-items-center"
-      >
-        <Clock size={12} className="text-neutral-400" aria-label="Waiting for stacked work" />
-      </span>
-    )
-  }
-  // 에러는 PR 상태보다 우선해 알린다. 색만으로 idle 과 구분되지 않도록 경고 아이콘을 쓴다.
-  if (status === 'error') {
-    return (
-      <span title="Last turn ended with an error" className="shrink-0 grid place-items-center">
-        <AlertTriangle size={12} className="text-[var(--danger-400)]" aria-label="Error" />
-      </span>
-    )
-  }
-  // 대화는 끝났는데 에이전트가 두고 간 셸이 아직 돈다. 스피너를 쓰면 "에이전트가 일하는 중" 으로
-  // 읽히므로 — 그렇게 읽히는 것이 정확히 이 표시를 만들게 된 문제다 — 돌지 않는 아이콘으로 사실만
-  // 알린다. 무엇이 도는지와 개별 중지 버튼은 바로 아래 붙는 실행 목록(WorkspaceAgents)에 있다.
-  // PR 점보다 앞에 둔다: PR 상태는 언제 봐도 그대로지만 이건 지금 이 순간에만 있는 정보다.
-  if (backgroundTasks > 0) {
-    return (
-      <span
-        title={`${backgroundTasks} background ${backgroundTasks === 1 ? 'task' : 'tasks'} still running here — the agent itself is idle`}
-        className="shrink-0 grid place-items-center"
-      >
-        <Terminal size={12} className="text-neutral-400" aria-label="Background tasks running" />
-      </span>
-    )
-  }
-  // 사용자가 끊은 턴은 에이전트가 스스로 마친 턴과 같은 idle 이지만, 목록을 훑는 사람에게는
-  // 전혀 다른 사실이다 — 하나는 끝났고 하나는 재개할 것이 남았다. 같은 회색 점으로 두면 그 둘을
-  // 고를 수 없어서, 아직 할 일이 남은 쪽만 다른 글리프로 뽑아낸다. PR 점보다 앞에 둔다:
-  // PR 상태는 언제 봐도 그대로지만 "내가 여기서 멈췄다" 는 지금 이어 갈지 정하는 데 쓰인다.
-  if (interrupted) {
-    return (
-      <span
-        title="Stopped by you — the turn did not finish"
-        className="shrink-0 grid place-items-center"
-      >
-        <CircleStop size={12} className="text-neutral-400" aria-label="Stopped by you" />
-      </span>
-    )
-  }
-  // idle 이면서 PR 이 있으면 점 색으로 PR 상태를 한눈에 보여 준다.
-  if (pr) {
-    const { dotClass, label } = PR_DOT[pr.state]
-    return (
-      <span
-        title={`PR #${pr.number} — ${label}`}
-        className={`h-2 w-2 rounded-full shrink-0 ${dotClass}`}
-      />
-    )
-  }
-  return (
-    <span title="Idle — ready for input" className="h-2 w-2 rounded-full shrink-0 bg-neutral-600" />
   )
 }
 

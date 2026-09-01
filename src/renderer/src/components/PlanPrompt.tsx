@@ -114,7 +114,7 @@ export default function PlanPrompt({ request }: { request: PermissionRequest }):
             <div className="flex items-center gap-2">
               <span className="text-sm text-neutral-100">{option.label}</span>
               {i < 9 && (
-                <span className="ml-auto shrink-0 text-[10px] text-neutral-500 tabular-nums">
+                <span className="ml-auto shrink-0 text-2xs text-neutral-500 tabular-nums">
                   {i + 1}
                 </span>
               )}
@@ -125,7 +125,7 @@ export default function PlanPrompt({ request }: { request: PermissionRequest }):
           </button>
         ))}
       </div>
-      <div className="mt-1.5 hidden shrink-0 text-[11px] text-neutral-500 sm:block">
+      <div className="mt-1.5 hidden shrink-0 text-xs text-neutral-500 sm:block">
         1–{options.length} choose · ↑↓ move · ⏎ select · Esc keep planning
       </div>
     </div>

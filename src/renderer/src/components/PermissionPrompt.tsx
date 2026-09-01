@@ -115,7 +115,7 @@ export default function PermissionPrompt({
             <span className="text-sm text-neutral-100">{heading}</span>
             {waiting && (
               <span
-                className="flex items-center gap-1 text-[11px] text-[var(--warning-300)]/80 tabular-nums"
+                className="flex items-center gap-1 text-xs text-[var(--warning-300)]/80 tabular-nums"
                 title="This request has been waiting for your response. Esc denies (skips) it."
               >
                 <Clock size={11} />
@@ -131,7 +131,7 @@ export default function PermissionPrompt({
           {request.diff && <DiffPreview diff={request.diff} />}
           {/* 좁혀진 규칙일 때만 노출한다 — 도구 이름뿐인 규칙은 "Always" 의 뜻이 이미 자명하다. */}
           {request.rule?.includes('(') && (
-            <p className="mt-1.5 text-[11px] text-neutral-500">
+            <p className="mt-1.5 text-xs text-neutral-500">
               Always applies to{' '}
               <code className="rounded bg-[var(--surface-2)] px-1 py-0.5 font-mono text-neutral-400">
                 {request.rule}

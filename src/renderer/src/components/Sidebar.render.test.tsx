@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { screen } from '@testing-library/react'
-import Sidebar, { StatusDot } from './Sidebar'
+import Sidebar from './Sidebar'
+import { StatusDot } from './StatusDot'
 import { app, pr, workspace } from '../test/fixtures'
 import { renderWithStore, resetStore, useStore } from '../test/harness'
 

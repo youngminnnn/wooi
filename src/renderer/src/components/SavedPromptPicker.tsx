@@ -76,7 +76,7 @@ export default function SavedPromptPicker({
               }}
             >
               <span className="w-full truncate font-medium text-neutral-100">{item.name}</span>
-              <span className="w-full truncate text-[11px] text-neutral-500">{item.prompt}</span>
+              <span className="w-full truncate text-xs text-neutral-500">{item.prompt}</span>
             </button>
           ))}
         </MenuPanel>

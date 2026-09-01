@@ -546,7 +546,7 @@ function IssueList({
             >
               <span
                 className={
-                  'shrink-0 mt-0.5 text-[10px] font-mono uppercase ' +
+                  'shrink-0 mt-0.5 text-2xs font-mono uppercase ' +
                   (issue.level === 'error'
                     ? 'text-[var(--danger-400)]'
                     : 'text-[var(--warning-400)]')
@@ -557,13 +557,11 @@ function IssueList({
               <div className="min-w-0 flex-1">
                 <div className="text-xs font-mono text-neutral-300 break-words">{issue.text}</div>
                 {issue.source && (
-                  <div className="text-[11px] font-mono text-neutral-600 truncate">
-                    {issue.source}
-                  </div>
+                  <div className="text-xs font-mono text-neutral-600 truncate">{issue.source}</div>
                 )}
               </div>
               {issue.count > 1 && (
-                <span className="shrink-0 text-[11px] tabular-nums text-neutral-500">
+                <span className="shrink-0 text-xs tabular-nums text-neutral-500">
                   ×{issue.count}
                 </span>
               )}
