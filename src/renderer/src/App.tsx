@@ -15,6 +15,7 @@ import { FOCUS_COMPOSER_EVENT, INSERT_INTO_COMPOSER_EVENT } from './lib/composer
 import { shouldFocusComposerFromEditingKey, shouldRedirectTyping } from './lib/typingRedirect'
 import { archivedPreviewTarget, workspaceSurfaces } from './lib/archivedPreview'
 import { buildStackLayers } from './lib/stackView'
+import { rebaseShortcutGate } from './lib/rebaseGate'
 import TitleBar from './components/TitleBar'
 import { UpdateBanner } from './components/UpdateBanner'
 import { NoticeBanner } from './components/NoticeBanner'
@@ -551,6 +552,27 @@ export default function App(): React.JSX.Element {
           e.preventDefault()
           if (st.detachedPanes.scripts) void window.api.pane.focus('scripts')
           else st.setScriptPanelOpen(selId, !(st.scriptPanelOpen[selId] ?? false))
+          return
+        }
+        // ⇧⌘B: base 브랜치 위로 rebase — 헤더의 Rebase 칩과 같은 경로(승인·force-push 포함).
+        // 막히는 상태(충돌·이미 최신·스택 동기화 대기)는 게이트가 이유를 말해 준다.
+        if (e.code === 'KeyB') {
+          e.preventDefault()
+          const ws = st.app?.workspaces.find((w) => w.id === selId)
+          if (!ws) return
+          const gate = rebaseShortcutGate({
+            workspace: ws,
+            git: st.gitStatus[selId],
+            progress: st.stackProgress[selId],
+            prNeedsBaseUpdate: st.prStatus[selId]?.needsBaseUpdate
+          })
+          if (!gate.ok) {
+            st.pushToast('info', gate.message)
+            return
+          }
+          void st.requireGithub('Restacking updates the branch and its pull request.', () =>
+            st.restackWorkspace(selId)
+          )
           return
         }
         // ⇧⌘E: 에디터에서 열기.
