@@ -23,6 +23,7 @@ const GROUPS: { title: string; items: { keys: string[]; label: string }[] }[] = 
       { keys: ['⇧⌘T'], label: 'Reopen the workspace you just archived' },
       { keys: ['⇧⌘R'], label: 'Review a pull request' },
       { keys: ['⇧⌘L'], label: 'Lay out the whole stack of the selected workspace' },
+      { keys: ['⇧⌘B'], label: 'Rebase the workspace onto its base branch' },
       { keys: ['⌘,'], label: 'Open settings' },
       { keys: ['⌘J'], label: 'Toggle the work panel' },
       { keys: ['⇧⌘S'], label: 'Toggle the scripts panel' },
