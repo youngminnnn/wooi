@@ -12,6 +12,7 @@ import { useStore } from '../store'
 import { GithubMark } from './BrandIcons'
 import { useGithubDisconnected } from '../lib/github'
 import { useDefaultBackend } from '../lib/backends'
+import { branchStackDepths } from '../lib/stackView'
 import {
   isBranchStack,
   orderByStack,
@@ -168,23 +169,13 @@ export default function StackPopover({ workspace }: { workspace: Workspace }): R
   // 두 모델을 같은 모양의 행 배열로 정규화한다.
   const rows: Row[] = useMemo(() => {
     if (branchMode) {
-      const byBranch = new Map(entries.map((e) => [e.branch, e]))
-      const depthOf = (branch: string): number => {
-        let d = 0
-        let cur = byBranch.get(branch)
-        const seen = new Set<string>()
-        while (cur && byBranch.has(cur.baseBranch) && !seen.has(cur.branch)) {
-          seen.add(cur.branch)
-          d++
-          cur = byBranch.get(cur.baseBranch)
-        }
-        return d
-      }
+      // 깊이 계산은 스택 화면과 공유한다 — 같은 스택이 두 화면에서 다르게 들여쓰이면 안 된다.
+      const depths = branchStackDepths(entries)
       return entries.map((e) => ({
         key: e.branch,
         label: e.branch,
         branch: e.branch,
-        depth: depthOf(e.branch),
+        depth: depths.get(e.branch) ?? 0,
         isCurrent: e.branch === workspace.branch,
         pr: branchPr[e.branch] ?? null,
         // 모델 B 는 워크스페이스 하나가 브랜치 전부를 들고 있어, 저장된 위치는 현재

@@ -14,12 +14,14 @@ import { OPEN_SETTINGS_EVENT } from './lib/settingsNavigation'
 import { FOCUS_COMPOSER_EVENT, INSERT_INTO_COMPOSER_EVENT } from './lib/composerFocus'
 import { shouldFocusComposerFromEditingKey, shouldRedirectTyping } from './lib/typingRedirect'
 import { archivedPreviewTarget, workspaceSurfaces } from './lib/archivedPreview'
+import { buildStackLayers } from './lib/stackView'
 import TitleBar from './components/TitleBar'
 import { UpdateBanner } from './components/UpdateBanner'
 import { NoticeBanner } from './components/NoticeBanner'
 import Sidebar from './components/Sidebar'
 import PrReviewScreen from './components/review/PrReviewScreen'
 import FanoutCompareScreen from './components/fanout/FanoutCompareScreen'
+import StackScreen from './components/stack/StackScreen'
 import { useFeatureNudge } from './lib/featureNudge'
 import PrReviewStartModal from './components/review/PrReviewStartModal'
 import ChatView from './components/ChatView'
@@ -139,6 +141,7 @@ export default function App(): React.JSX.Element {
   const [quickOpenFile, setQuickOpenFile] = useState(false)
   const activeReviewId = useStore((s) => s.activeReviewId)
   const activeFanoutGroupId = useStore((s) => s.activeFanoutGroupId)
+  const activeStackWorkspaceId = useStore((s) => s.activeStackWorkspaceId)
   const fileViewer = useStore((s) => s.fileViewer)
 
   // 업데이트로 새로 생긴 기능을 한 번만 알려 준다(신규 설치 사용자에게는 뜨지 않는다).
@@ -332,6 +335,7 @@ export default function App(): React.JSX.Element {
           st.selectedWorkspaceId &&
           !st.activeReviewId &&
           !st.activeFanoutGroupId &&
+          !st.activeStackWorkspaceId &&
           !fileViewerVisible
         ) {
           e.preventDefault()
@@ -378,6 +382,23 @@ export default function App(): React.JSX.Element {
           return
         }
         setReviewStartOpen(true)
+        return
+      }
+
+      // ⇧⌘L: 스택 화면. 고른 워크스페이스가 속한 스택을 통째로 편다. 스택이 아니면 열 지도가
+      // 없으므로 왜 안 열리는지 말해 준다 — 조용히 무시하면 단축키가 고장 난 것처럼 보인다.
+      if (e.code === 'KeyL' && e.shiftKey && !e.ctrlKey && !e.altKey) {
+        e.preventDefault()
+        const anchorId = st.selectedWorkspaceId
+        if (!anchorId) {
+          st.pushToast('info', 'Pick a workspace in a stack first.')
+          return
+        }
+        if (buildStackLayers(st.app?.workspaces ?? [], anchorId).length < 2) {
+          st.pushToast('info', 'This workspace is not stacked on anything.')
+          return
+        }
+        st.openStackView(anchorId)
         return
       }
 
@@ -735,6 +756,8 @@ export default function App(): React.JSX.Element {
             <FanoutCompareScreen key={activeFanoutGroupId} groupId={activeFanoutGroupId} />
           ) : activeReviewId ? (
             <PrReviewScreen key={activeReviewId} reviewId={activeReviewId} />
+          ) : activeStackWorkspaceId ? (
+            <StackScreen key={activeStackWorkspaceId} workspaceId={activeStackWorkspaceId} />
           ) : selected ? (
             <>
               <div data-tour="chat" className="flex-1 min-w-0">

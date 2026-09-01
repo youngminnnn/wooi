@@ -513,6 +513,14 @@ function WorkspaceRow({
   const reportArchiveScriptFailure = useStore((s) => s.reportArchiveScriptFailure)
   const requestDelete = useStore((s) => s.requestDeleteWorkspace)
   const requireGithub = useStore((s) => s.requireGithub)
+  const openStackView = useStore((s) => s.openStackView)
+  // 이 행 위에 층이 더 쌓여 있는가. 모델 A 는 살아 있는 자식 워크스페이스, 모델 B 는 워크트리
+  // 안의 브랜치 스택이 그 조건이다. 불리언만 돌려주므로 셀렉터가 매 렌더 새 값을 만들지 않는다.
+  const isStackParent = useStore(
+    (s) =>
+      (workspace.stack?.length ?? 0) > 1 ||
+      (s.app?.workspaces.some((w) => w.parentWorkspaceId === workspace.id && !w.archived) ?? false)
+  )
   const githubDisconnected = useGithubDisconnected()
   // 대기 중인 요청을 **객체째** 집는다 — 예전에는 있는지 없는지(boolean)만 봤지만, 무엇을
   // 묻는지 한 줄로 보여 주려면 요청 자체가 필요하다. 배열 원소를 그대로 돌려주므로 참조가
@@ -990,6 +998,22 @@ function WorkspaceRow({
                 }
               >
                 <RefreshCw size={12} className={restackBusy ? 'animate-spin' : ''} />
+              </button>
+            )}
+            {/* 스택의 부모 행에서만 지도를 연다 — 아래 층이 없으면 펼칠 스택이 없다.
+              들여쓰기는 "무엇이 무엇 위에 있는가" 만 말해 주므로, 어긋남·behind·트레인까지
+              한 화면에서 보려면 여기서 들어간다. */}
+            {isStackParent && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  openStackView(workspace.id)
+                }}
+                className="h-6 w-6 grid place-items-center rounded shrink-0 text-[var(--accent-400)] hover:bg-[var(--surface-2)] hover:text-[var(--accent-300)]"
+                aria-label="Show this stack"
+                title="Show this stack (⇧⌘L) — every layer, its PR, drift and merge train"
+              >
+                <Layers size={12} />
               </button>
             )}
             <button

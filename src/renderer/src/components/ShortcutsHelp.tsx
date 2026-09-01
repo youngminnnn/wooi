@@ -22,6 +22,7 @@ const GROUPS: { title: string; items: { keys: string[]; label: string }[] }[] = 
       { keys: ['⌘Z'], label: 'Undo — delete the workspace you just created' },
       { keys: ['⇧⌘T'], label: 'Reopen the workspace you just archived' },
       { keys: ['⇧⌘R'], label: 'Review a pull request' },
+      { keys: ['⇧⌘L'], label: 'Lay out the whole stack of the selected workspace' },
       { keys: ['⌘,'], label: 'Open settings' },
       { keys: ['⌘J'], label: 'Toggle the work panel' },
       { keys: ['⇧⌘S'], label: 'Toggle the scripts panel' },

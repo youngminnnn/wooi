@@ -53,6 +53,7 @@ import {
   readUiFlag,
   setUiFlag
 } from './lib/uiFlags'
+import { buildStackLayers } from './lib/stackView'
 import { openRepoSettings } from './lib/repoSettings'
 import { openSettings } from './lib/settingsNavigation'
 import { CONFIRM_SKIP_LABELS } from './lib/confirmSkips'
@@ -485,6 +486,12 @@ interface UIState {
    */
   activeFanoutGroupId: string | null
   /**
+   * 열려 있는 스택 화면의 앵커 워크스페이스 id. 리뷰·fan-out 과 같은 자리를 쓰므로 셋은
+   * 서로를 밀어낸다. 스택은 워크스페이스에 매여 있지만 **선택과는 다른 축**이다 —
+   * 화면은 앵커가 속한 스택 전체를 그리고, 선택은 그중 한 층만 가리킨다.
+   */
+  activeStackWorkspaceId: string | null
+  /**
    * reviewId → 화면 상태(사이드카에서 읽어온 diff·지적·활동 + 선택/편집).
    * 리뷰의 **메타데이터는 여기 없다** — `app.reviews` 가 권위이고 상태 방송으로 갱신된다.
    */
@@ -529,6 +536,14 @@ interface UIState {
   openFanoutCompare: (groupId: string) => void
   /** 비교 화면을 닫고 원래 보던 워크스페이스로 돌아간다. */
   closeFanoutCompare: () => void
+  /**
+   * 스택 화면을 연다(리뷰·fan-out 화면과 자리를 다투므로 그쪽은 닫는다).
+   * 앵커가 속한 스택의 모든 층에 대해 git·PR 을 한 번 새로 고친다 — 층마다 따로 열어 본 적이
+   * 없으면 behind·PR 칸이 비어 있고, 비어 있는 칸은 "문제 없음" 처럼 읽힌다.
+   */
+  openStackView: (workspaceId: string) => void
+  /** 스택 화면을 닫는다. */
+  closeStackView: () => void
   /**
    * 승자를 채택한다(확인 후). 나머지 형제는 아카이브되고 — 되살릴 수 있지만 미커밋 변경은
    * 사라지므로 — 무엇을 잃는지 먼저 센다.
@@ -975,6 +990,7 @@ export const useStore = create<UIState>((set, get) => ({
   undoableArchive: null,
   activeReviewId: null,
   activeFanoutGroupId: null,
+  activeStackWorkspaceId: null,
   adoptingFanoutWorkspaceId: null,
   reviewViews: {},
   busyReviews: {},
@@ -1934,7 +1950,7 @@ export const useStore = create<UIState>((set, get) => ({
   },
 
   openFanoutCompare: (groupId) => {
-    set({ activeFanoutGroupId: groupId, activeReviewId: null })
+    set({ activeFanoutGroupId: groupId, activeReviewId: null, activeStackWorkspaceId: null })
     // 비교 화면의 후보 카드는 git 요약(N changed · ↑ahead)을 그대로 읽어 쓴다. 진입 시 한 번
     // 새로 고쳐 두지 않으면, 아직 한 번도 연 적 없는 후보의 칸이 비어 있다.
     const group = get().app?.fanoutGroups.find((g) => g.id === groupId)
@@ -1942,6 +1958,21 @@ export const useStore = create<UIState>((set, get) => ({
   },
 
   closeFanoutCompare: () => set({ activeFanoutGroupId: null }),
+
+  openStackView: (workspaceId) => {
+    set({ activeStackWorkspaceId: workspaceId, activeReviewId: null, activeFanoutGroupId: null })
+    // 층마다 워크트리가 따로인 모델 A 는 여기서 전부 새로 고쳐야 한 화면에 같은 시점이 모인다.
+    // 모델 B 는 층이 워크스페이스 하나를 나눠 쓰므로 한 번으로 끝난다(브랜치별 PR 은 화면이 읽는다).
+    const targets = new Set(
+      buildStackLayers(get().app?.workspaces ?? [], workspaceId).map((l) => l.workspaceId)
+    )
+    for (const id of targets) {
+      void get().refreshGit(id)
+      void get().refreshPr(id)
+    }
+  },
+
+  closeStackView: () => set({ activeStackWorkspaceId: null }),
 
   requestAdoptFanoutWinner: async (groupId, workspaceId) => {
     const s = get()
@@ -2390,7 +2421,11 @@ export const useStore = create<UIState>((set, get) => ({
         : forwardAfterSelect(s.workspaceForward, !!opts?.fromHistory)
       // fan-out 비교 화면도 리뷰와 같은 자리를 쓴다 — 워크스페이스를 고르는 것은 "그 화면에서
       // 나온다" 는 뜻이다(그룹 자체는 남아 사이드바에서 다시 열 수 있다).
-      const closed = { activeReviewId: null, activeFanoutGroupId: null }
+      const closed = {
+        activeReviewId: null,
+        activeFanoutGroupId: null,
+        activeStackWorkspaceId: null
+      }
       if (!id || !s.unread[id])
         return {
           selectedWorkspaceId: id,
@@ -3025,12 +3060,16 @@ export const useStore = create<UIState>((set, get) => ({
       }
       // 레코드는 상태 방송으로 들어온다. 여기서는 화면만 전환하고 사이드카를 준비한다.
       const id = res.reviewId
-      set({ activeReviewId: id, reviewViews: { ...get().reviewViews, [id]: emptyView() } })
+      set({
+        activeReviewId: id,
+        activeStackWorkspaceId: null,
+        reviewViews: { ...get().reviewViews, [id]: emptyView() }
+      })
     })
   },
 
   openReview: (reviewId) => {
-    set({ activeReviewId: reviewId })
+    set({ activeReviewId: reviewId, activeStackWorkspaceId: null })
     void get().loadReview(reviewId)
     // 열어서 봤으므로 미확인 점을 끈다.
     void window.api.review.markSeen(reviewId)
