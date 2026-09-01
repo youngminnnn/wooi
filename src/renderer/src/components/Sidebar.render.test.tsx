@@ -87,4 +87,29 @@ describe('사이드바 파생 상태 표시', () => {
     expect(screen.getByLabelText('Paused by usage limit')).toBeInTheDocument()
     expect(screen.queryByTitle('Idle — ready for input')).not.toBeInTheDocument()
   })
+
+  it('스택 화면 진입점은 층이 더 쌓인 부모 행에만 붙는다', () => {
+    const parent = workspace({ id: 'w-parent', name: 'schema', branch: 'feat/schema' })
+    const child = workspace({
+      id: 'w-child',
+      name: 'api',
+      branch: 'feat/api',
+      baseBranch: 'feat/schema',
+      parentWorkspaceId: 'w-parent'
+    })
+    useStore.setState({ app: app([parent, child]) })
+
+    renderWithStore(<Sidebar {...sidebarProps} />)
+
+    // 부모에는 하나, 꼭대기 층에는 없다 — 펼칠 아래 층이 없으면 지도도 없다.
+    expect(screen.getAllByLabelText('Show this stack')).toHaveLength(1)
+  })
+
+  it('스택이 아닌 워크스페이스에는 스택 화면 진입점을 달지 않는다', () => {
+    useStore.setState({ app: app([workspace()]) })
+
+    renderWithStore(<Sidebar {...sidebarProps} />)
+
+    expect(screen.queryByLabelText('Show this stack')).not.toBeInTheDocument()
+  })
 })
