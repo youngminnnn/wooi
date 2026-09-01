@@ -94,14 +94,24 @@ import type {
   Workspace,
   WorkspaceUsageInfo
 } from '@shared/types'
-import { matchWooiCommand, parseWooiCommandArgs, wooiCommandName } from '@shared/wooiCommands'
+import {
+  matchWooiCommand,
+  parseWooiCommandArgs,
+  wooiCommandName,
+  WOOI_COMMANDS
+} from '@shared/wooiCommands'
 import { matchUnavailableCommand } from '@shared/unavailableCommands'
 import { conversationForkDisabledReason, parseForkCommand } from '../lib/conversationFork'
 import type { WooiCommandSpec } from '@shared/wooiCommands'
 import { openSettings } from '../lib/settingsNavigation'
 import type { ExportConversationDetail } from './ExportMenu'
 import { WOOI_URLS } from '../lib/externalLinks'
-import { FOCUS_COMPOSER_EVENT, INSERT_INTO_COMPOSER_EVENT } from '../lib/composerFocus'
+import {
+  FOCUS_COMPOSER_EVENT,
+  INSERT_INTO_COMPOSER_EVENT,
+  RUN_WOOI_COMMAND_EVENT,
+  type RunWooiCommandDetail
+} from '../lib/composerFocus'
 
 /** Claude 가 받는 이미지 형식. 클립보드의 다른 형식은 붙여넣기 시 무시한다. */
 const IMAGE_TYPES: Record<string, ImageMediaType> = {
@@ -871,6 +881,22 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
       })
     })
   }
+
+  // ⌘K 팔레트에서 고른 즉시 실행 커맨드도 여기로 들어온다 — 실행 경로와 결과 카드가 입력창에
+  // 친 것과 완전히 같아야, 어디서 불렀는지에 따라 다르게 동작하지 않는다.
+  useEffect(() => {
+    const run = (e: Event): void => {
+      const detail = (e as CustomEvent<RunWooiCommandDetail>).detail
+      // 팔레트가 열려 있는 사이에 다른 워크스페이스로 옮겨 갔을 수 있다.
+      if (!detail || detail.workspaceId !== workspace.id) return
+      const spec = WOOI_COMMANDS.find((c) => c.name === detail.name)
+      if (spec) runWooiCommand(spec, detail.rest)
+    }
+    window.addEventListener(RUN_WOOI_COMMAND_EVENT, run)
+    return () => window.removeEventListener(RUN_WOOI_COMMAND_EVENT, run)
+    // 의존성 배열을 두지 않는다 — runWooiCommand 는 매 렌더 새로 만들어지므로, 고정해 두면
+    // 팔레트가 부르는 순간 낡은 초안·낡은 카드 상태를 붙든 클로저가 돈다.
+  })
 
   /** 인터랙티브 명령을 실행하고 결과를 카드로 띄운다(사이드 답변 카드는 비켜 준다). */
   const runInteractive = (cmd: (typeof INTERACTIVE_COMMANDS)[number]): void => {
