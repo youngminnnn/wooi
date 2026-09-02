@@ -6,12 +6,13 @@ import {
   FilePen,
   FileCode,
   Maximize2,
-  MessageSquarePlus
+  MessageSquarePlus,
+  Undo2
 } from 'lucide-react'
 import type { FileDiff, WorkspaceDiff } from '@shared/types'
 import { branchLineTotal } from '@shared/codePaths'
 import { diffRenderLimit } from '@shared/diffRenderLimit'
-import { parsePatch, rowSign, type PatchHunk, type PatchRow } from './files/diffPatch'
+import { hunkPatch, parsePatch, rowSign, type PatchHunk, type PatchRow } from './files/diffPatch'
 import type { DiffComment, DiffCommentAnchor } from '../lib/diffComments'
 import { diffWrapClasses, type DiffWrapClasses } from '../lib/diffWordWrap'
 import DiffCommentBox from './diff/DiffCommentBox'
@@ -25,8 +26,13 @@ import { LargeDiffNotice, OmittedPatchNotice } from './diff/LargeDiffNotice'
  * base 브랜치 대비 변경을 파일별로 표시한다(통합 diff).
  * 변경 보기 모달([[DiffModal]])과 우측 패널의 Changes 탭이 공유한다.
  *
- * diff 는 계속 읽기 전용이다 — 여기서 스테이징하거나 커밋하지 않는다. 다만 `commenting` 을
- * 주면 줄마다 코멘트를 달 수 있고, 그 코멘트는 파일이 아니라 **에이전트에게 보낼 메시지**가 된다.
+ * 기본은 읽기 전용이다 — 여기서 스테이징하거나 커밋하지 않는다. 커밋은 계속 에이전트의 몫이다.
+ * 다만 두 가지 배선을 선택적으로 받는다:
+ *
+ * - `commenting` — 줄마다 코멘트를 달 수 있다. 그 코멘트는 파일이 아니라 **에이전트에게 보낼
+ *   메시지**가 된다.
+ * - `discarding` — hunk 하나를 워킹 트리에서 되돌린다. 코멘트가 "고쳐 달라고 부탁하는 길"이라면
+ *   이쪽은 "그냥 내가 지우는 길"이다 — 왕복 한 턴과 토큰을 쓸 필요가 없는 변경을 위한 것이다.
  */
 export interface DiffCommenting {
   /** 이 diff 에 달려 있는, 아직 보내지 않은 코멘트 전부. */
@@ -34,6 +40,22 @@ export interface DiffCommenting {
   onAdd: (anchor: DiffCommentAnchor, body: string) => void
   onEdit: (id: string, body: string) => void
   onRemove: (id: string) => void
+}
+
+/**
+ * hunk 버리기 배선. 주지 않으면 버튼 자체가 그려지지 않는다 — 지금은 워크스페이스의 Changes
+ * 패널만 준다(모달·PR 리뷰 화면의 diff 는 되돌릴 워킹 트리가 없거나, 남의 코드다).
+ */
+export interface DiffDiscarding {
+  /**
+   * 지금은 되돌릴 수 없는 이유. null 이면 되돌릴 수 있다.
+   *
+   * 이유가 있으면 버튼을 **숨기지 않고 잠근다.** 없어진 버튼은 사용자에게 "이 앱은 이걸 못
+   * 한다"로 읽히지만, 잠긴 버튼은 툴팁으로 "지금은 안 된다, 왜냐하면"까지 말할 수 있다.
+   */
+  blockedReason: string | null
+  /** `patch` 는 이 hunk 만 담은 완결된 patch 다([[hunkPatch]]). */
+  onDiscard: (file: FileDiff, patch: string) => void
 }
 
 const NO_COMMENTS: DiffComment[] = []
@@ -46,6 +68,7 @@ export default function DiffView({
   baseBranch,
   onOpenFile,
   commenting,
+  discarding,
   wrap = true
 }: {
   diff: WorkspaceDiff | null
@@ -58,6 +81,8 @@ export default function DiffView({
   onOpenFile?: (path: string) => void
   /** 라인 코멘트 배선. 주지 않으면 읽기 전용으로만 그린다. */
   commenting?: DiffCommenting
+  /** hunk 버리기 배선. 주지 않으면 버리기 버튼이 뜨지 않는다. */
+  discarding?: DiffDiscarding
   /**
    * 긴 줄을 접을지. 끄면 정렬을 지키고 가로로 민다([[diffWordWrap]]).
    * 에디터의 워드랩과는 별개 값이다 — 두 화면이 원하는 게 반대다.
@@ -111,6 +136,7 @@ export default function DiffView({
             file={f}
             onOpenFile={onOpenFile}
             commenting={commenting}
+            discarding={discarding}
             comments={byPath.get(f.path) ?? NO_COMMENTS}
             wrap={wrap}
           />
@@ -131,12 +157,14 @@ function FileBlock({
   file,
   onOpenFile,
   commenting,
+  discarding,
   comments,
   wrap
 }: {
   file: FileDiff
   onOpenFile?: (path: string) => void
   commenting?: DiffCommenting
+  discarding?: DiffDiscarding
   comments: DiffComment[]
   wrap: boolean
 }): React.JSX.Element {
@@ -254,7 +282,16 @@ function FileBlock({
           {hunks.map((hunk, hi) => (
             // hunk 하나가 곧 변경 덩어리다 — F7 이 뛰어다니는 단위.
             <DiffChangeAnchor key={hi}>
-              <div className={cls.hunkHeader}>{hunk.header}</div>
+              <div className={`${cls.hunkHeader} group/hunk flex items-center gap-2`}>
+                <span className="min-w-0 flex-1 truncate">{hunk.header}</span>
+                {discarding && (
+                  <DiscardHunkButton
+                    path={file.path}
+                    blockedReason={discarding.blockedReason}
+                    onDiscard={() => discarding.onDiscard(file, hunkPatch(file, hunk))}
+                  />
+                )}
+              </div>
               {hunk.rows.map((row, ri) => (
                 <Row
                   key={ri}
@@ -321,6 +358,39 @@ function FileBlock({
         </pre>
       )}
     </div>
+  )
+}
+
+/**
+ * hunk 머리글에 붙는 "이 hunk 버리기".
+ *
+ * 잠겼을 때 툴팁을 **감싼 span 에** 단다. 브라우저는 `disabled` 버튼에 마우스 이벤트를 주지
+ * 않아서 버튼 자신의 title 은 절대 뜨지 않는다 — 이유를 말하려고 잠근 버튼인데 그러면 아무
+ * 말도 못 하게 된다.
+ */
+function DiscardHunkButton({
+  path,
+  blockedReason,
+  onDiscard
+}: {
+  path: string
+  blockedReason: string | null
+  onDiscard: () => void
+}): React.JSX.Element {
+  return (
+    <span
+      className="shrink-0"
+      title={blockedReason ?? 'Discard this hunk — these lines go back to what they were'}
+    >
+      <button
+        onClick={onDiscard}
+        disabled={!!blockedReason}
+        aria-label={`Discard this hunk in ${path}`}
+        className="grid h-5 w-5 place-items-center rounded text-neutral-500 opacity-0 transition-opacity hover:bg-[var(--danger-500)]/20 hover:text-[var(--danger-400)] focus-visible:opacity-100 disabled:cursor-not-allowed disabled:text-neutral-700 disabled:hover:bg-transparent disabled:hover:text-neutral-700 group-hover/hunk:opacity-100"
+      >
+        <Undo2 size={11} />
+      </button>
+    </span>
   )
 }
 

@@ -683,6 +683,11 @@ interface UIState {
   clearDiffComments: (workspaceId: string) => void
   /** 모아 둔 코멘트를 한 통의 메시지로 에이전트에게 보내고 비운다. 보낼 게 없으면 아무것도 안 한다. */
   sendDiffComments: (workspaceId: string) => void
+  /**
+   * diff 의 hunk 하나를 워킹 트리에서 되돌린다. 확인을 받고, 실패는 토스트로 알린다.
+   * 되돌렸으면 true — 호출한 쪽이 그때만 diff 를 다시 읽으면 된다.
+   */
+  discardDiffHunk: (workspaceId: string, path: string, patch: string) => Promise<boolean>
   /** /clear — 해당 workspace 의 대화 기록·컨텍스트 사용량을 화면에서 비운다(맥락 초기화). */
   resetTranscript: (workspaceId: string) => void
   /** 위쪽으로 한 페이지 더 읽는다. 이미 읽는 중이거나 더 없으면 아무 일도 하지 않는다. */
@@ -2804,6 +2809,28 @@ export const useStore = create<UIState>((set, get) => ({
     } else {
       void window.api.chat.send(workspaceId, text)
     }
+  },
+
+  /**
+   * hunk 하나 버리기. 이 앱에서 **사용자의 코드를 지우는** 몇 안 되는 경로라, 실제로 되쓰는
+   * 판단(턴이 도는 중인가 · patch 가 아직 맞는가)은 전부 main 에 있다. 여기서는 확인을 받고
+   * 결과를 옮길 뿐이다.
+   */
+  discardDiffHunk: async (workspaceId, path, patch) => {
+    const ok = await get().confirm({
+      title: `Discard this change in ${path}?`,
+      body: 'These lines go back to what they were. Only the working tree changes — commits stay as they are — and Wooi cannot bring them back.',
+      confirmLabel: 'Discard',
+      danger: true,
+      skipKey: 'discardHunk'
+    })
+    if (!ok) return false
+    const res = await window.api.git.discardHunk(workspaceId, patch)
+    if (res.status === 'discarded') return true
+    // 어느 실패든 파일은 그대로다(git apply 는 전부 아니면 전무). 그래도 사용자는 자기가
+    // 누른 것이 일어나지 않았다는 사실을 알아야 하므로 자동으로 사라지지 않는 error 로 띄운다.
+    get().pushToast('error', res.message ?? `Could not discard the change in ${path}.`)
+    return false
   },
 
   resetTranscript: (workspaceId) =>

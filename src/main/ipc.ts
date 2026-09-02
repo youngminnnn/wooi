@@ -22,6 +22,7 @@ import { formatIssues } from '@shared/previewIssues'
 import { log } from './logger'
 import {
   abortMerge,
+  applyReversePatch,
   addWorktree,
   checkoutBranch,
   currentBranch,
@@ -205,6 +206,7 @@ import type {
   StackTrainPlan,
   StackTrainResult,
   UpdateFromBaseResult,
+  DiscardHunkResult,
   Workspace
 } from '@shared/types'
 import type { AgentOrchestrator } from './agent/orchestrator'
@@ -1719,6 +1721,34 @@ export function registerIpc(ctx: IpcContext): void {
     if (!ws || ws.archived) return
     await abortMerge(ws.worktreePath).catch(() => {})
   })
+
+  /**
+   * Changes 탭에서 고른 hunk 하나를 워킹 트리에서 버린다. 커밋도 스테이징도 하지 않는다.
+   *
+   * 턴이 도는 중이면 거절한다. 렌더러가 이미 버튼을 막아 두지만, 사용자가 버튼을 누른 뒤
+   * git 이 파일을 여는 사이에 에이전트가 그 파일을 쓰기 시작할 수 있다 — 판정은 실제로
+   * 되쓰기 직전인 여기서 한 번 더 해야 의미가 있다.
+   */
+  handle(
+    IPC.gitDiscardHunk,
+    async (_e, workspaceId: string, patch: string): Promise<DiscardHunkResult> => {
+      const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
+      if (!ws || ws.archived) return { status: 'error', message: 'Workspace not found.' }
+      if (ws.status === 'running') {
+        return {
+          status: 'busy',
+          message: 'The agent is working in this workspace. Wait for the turn to finish.'
+        }
+      }
+      if (typeof patch !== 'string' || !patch.includes('@@')) {
+        return { status: 'error', message: 'Nothing to discard.' }
+      }
+      return applyReversePatch(ws.worktreePath, patch).catch((err) => ({
+        status: 'error' as const,
+        message: err instanceof Error ? err.message : String(err)
+      }))
+    }
+  )
 
   /**
    * 모델 B 스택(단일 worktree · N 브랜치)을 아래→위로 순차 rebase 한다. 각 상위 브랜치를 이전

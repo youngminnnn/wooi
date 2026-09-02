@@ -1464,10 +1464,15 @@ export interface McpInventory {
  * 사이드바에서 되살릴 수 있다 — 잘못 눌러도 잃는 것이 없다. 삭제·머지·`/clear`·백엔드 전환처럼
  * 되돌릴 수 없거나 돈이 드는 것, 그리고 도구 승인처럼 안전 장치인 것은 매번 묻는다.
  *
+ * `discardHunk` 는 이 규칙의 **의도된 예외**다. 되돌릴 수 없는데도 붙어 있다 — hunk 버리기는
+ * 리뷰하다 한 화면에서 열 번도 누르는 동작이라, 매번 묻는 확인은 곧 아무도 읽지 않는 확인이
+ * 되고 그 상태가 오히려 위험하다. 대신 범위를 최소로 묶어 뒀다: 버리는 것은 워킹 트리의 변경
+ * 뿐이고 커밋된 이력은 건드리지 않으며, 끄는 순간의 토스트와 설정에서 언제든 다시 켤 수 있다.
+ *
  * 확인 종류마다 따로 저장한다. "모든 확인 끄기" 하나로 두면 사용자가 아카이브 하나를 끄려다
  * 삭제 확인까지 함께 끄게 된다.
  */
-export const CONFIRM_SKIP_KEYS = ['archiveWorkspace', 'archiveReview'] as const
+export const CONFIRM_SKIP_KEYS = ['archiveWorkspace', 'archiveReview', 'discardHunk'] as const
 export type ConfirmSkipKey = (typeof CONFIRM_SKIP_KEYS)[number]
 
 export interface AppSettings {
@@ -2689,6 +2694,18 @@ export interface UpdateFromBaseResult {
   message?: string
 }
 
+/**
+ * hunk 버리기 결과.
+ *
+ * 실패를 던지지 않고 값으로 돌려준다 — 가장 흔한 실패가 "그 사이 파일이 바뀌어 patch 가 더는
+ * 맞지 않는다" 이고, 그건 버그가 아니라 사용자에게 설명해야 할 상태다(diff 를 다시 읽으면 된다).
+ */
+export interface DiscardHunkResult {
+  status: 'discarded' | 'stale' | 'busy' | 'error'
+  /** status !== 'discarded' 일 때 사용자에게 보여 줄 사유. */
+  message?: string
+}
+
 // ── restack (stacked PR: 부모 위로 rebase) ───────────────────────────────
 
 /**
@@ -3686,6 +3703,11 @@ export const IPC = {
   stackResolveConflict: 'stack:resolveConflict',
   /** 진행 중인 머지를 취소한다(충돌 포기). */
   gitAbortMerge: 'git:abortMerge',
+  /**
+   * Changes 탭에서 고른 hunk 하나를 워킹 트리에서 되돌린다(`git apply --reverse`).
+   * 스테이징도 커밋도 하지 않는다 — 커밋은 계속 에이전트의 몫이다.
+   */
+  gitDiscardHunk: 'git:discardHunk',
   prStatus: 'pr:status',
   /** 지정한 브랜치(worktree 의 현재 브랜치가 아니어도)의 PR 상태를 조회한다. 모델 B 스택 조망용. */
   prStatusForBranch: 'pr:statusForBranch',

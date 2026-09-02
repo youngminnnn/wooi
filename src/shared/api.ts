@@ -30,6 +30,7 @@ import type {
   CreateWorkspaceArgs,
   CreateWorkspaceResult,
   DirEntry,
+  DiscardHunkResult,
   DropPosition,
   EffortSetting,
   FileContent,
@@ -368,6 +369,11 @@ export interface WooiApi {
     updateFromBase(workspaceId: string): Promise<UpdateFromBaseResult>
     /** 진행 중인 머지를 취소한다(충돌 포기). */
     abortMerge(workspaceId: string): Promise<void>
+    /**
+     * Changes 탭에서 고른 hunk 하나를 워킹 트리에서 되돌린다. `patch` 는 그 hunk 만 담은
+     * 완결된 patch 다([[hunkPatch]]). 스테이징·커밋은 하지 않는다.
+     */
+    discardHunk(workspaceId: string, patch: string): Promise<DiscardHunkResult>
   }
 
   pr: {
