@@ -33,6 +33,7 @@ import type {
   DropPosition,
   EffortSetting,
   FileContent,
+  FileWriteResult,
   FileHit,
   GitStatus,
   GithubLoginEvent,
@@ -218,6 +219,11 @@ export interface WooiApi {
     ): Promise<{ error?: string }>
     /** 워크스페이스별 알림 음소거를 설정한다. */
     setMuted(workspaceId: string, muted: boolean): Promise<void>
+    /**
+     * CI 실패를 에이전트에게 넘기는 토글. 켜면 체크가 실패로 확정됐을 때 Wooi 가 턴을 연다.
+     * 끄면 진행 상태(시도 횟수)도 함께 지워져, 다시 켜면 상한을 처음부터 받는다.
+     */
+    setAutoFixCi(workspaceId: string, enabled: boolean): Promise<void>
     /**
      * 멀티 에이전트 모드를 켜고 끈다(실험 기능).
      *
@@ -528,6 +534,18 @@ export interface WooiApi {
     list(workspaceId: string, relPath: string): Promise<DirEntry[]>
     /** worktree 내 파일 1개 읽기. 바이너리/과대 파일은 본문 없이 표시 정보만. */
     read(workspaceId: string, relPath: string): Promise<FileContent | null>
+    /**
+     * 뷰어에서 고친 파일 저장. `baselineSha` 는 `read` 로 받은 `FileContent.sha` 를 그대로
+     * 넘긴다 — 그 사이 디스크가 바뀌었으면 쓰지 않고 conflict 를 돌려준다. `force` 는
+     * 사용자가 경고를 보고 덮어쓰기를 고른 경우에만 true 로 준다.
+     */
+    write(
+      workspaceId: string,
+      relPath: string,
+      text: string,
+      baselineSha: string | null,
+      force?: boolean
+    ): Promise<FileWriteResult>
     /**
      * 입력창 `@` 자동완성용 후보 검색. 부분 경로(파일명 조각 또는 `src/co` 같은 경로 조각)를
      * 받아 점수순 후보를 돌려준다. 상위 결과에는 파일 크기가 붙는다.

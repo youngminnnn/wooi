@@ -16,7 +16,7 @@ import { forgetRunningAgents } from './runningAgentsCache'
 import { setSleepBlockerEnabled } from './sleepBlocker'
 import { getTranscripts } from './transcripts'
 import { buildHandoffPrompt, estimateHandoffTokens, formatHandoffTokens } from '@shared/handoff'
-import { listDir, readFileInRoot, searchFiles } from './fsbrowse'
+import { listDir, readFileInRoot, searchFiles, writeFileInRoot } from './fsbrowse'
 import { importMigration, scanMigration } from './migrate'
 import { formatIssues } from '@shared/previewIssues'
 import { log } from './logger'
@@ -62,6 +62,7 @@ import { findFreePort, waitForPortFree } from './net'
 import {
   getPrStatus,
   getPrChecks,
+  getCiFailureLogs,
   getPrMeta,
   getPrHeadSha,
   createPrWeb,
@@ -84,9 +85,11 @@ import {
   fetchOwnerAvatarDataUrl
 } from './github'
 import { planMergeTrain, runMergeTrain, type TrainLayer } from './mergeTrain'
+import { buildCiFixPrompt, decideCiFix, CI_FIX_MAX_ATTEMPTS } from './ciFix'
 import { ReviewManager } from './review/manager'
 import { resolveStackForPr } from './review/stackResolve'
 import type {
+  FileWriteResult,
   MigrationImportResult,
   MigrationImportSelection,
   MigrationScan,
@@ -307,6 +310,130 @@ export function registerIpc(ctx: IpcContext): void {
       return { started: true }
     } catch (err) {
       return { error: err instanceof Error ? err.message : String(err) }
+    }
+  }
+
+  /**
+   * CI 실패를 에이전트에게 넘긴다. [[conflictResolve]] 의 `startConflictResolve` 와 같은 자리다 —
+   * 토큰을 쓰기 직전의 검증과 대화 기록 정책을 한 함수에 모아 둔다.
+   *
+   * 부르는 쪽은 값싼 신호(PR 상태가 'ci_failed')만 보고 여기까지 온다. **비싼 확인은 여기서**
+   * 한다 — 롤업을 다시 읽어 정말 끝난 실패인지 보고(다른 체크가 아직 돌고 있을 수 있다),
+   * 시도 횟수 상한을 확인하고, 그 다음에야 로그를 가져온다.
+   */
+  const ciFixInFlight = new Set<string>()
+
+  const maybeStartCiFix = async (workspaceId: string): Promise<void> => {
+    const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
+    if (!ws || ws.archived || !ws.autoFixCi) return
+
+    // 이 판정은 gh 를 두 번 왕복하는 동안 armed 를 읽고 쓴다. 폴링이 겹쳐 두 번 들어오면
+    // 둘 다 잠기기 전의 armed 를 보고 턴을 두 번 열 수 있다 — 상한을 세는 기능에서 그건
+    // 그냥 버그다. 워크스페이스당 한 번에 하나만 돌게 막는다.
+    if (ciFixInFlight.has(workspaceId)) return
+    ciFixInFlight.add(workspaceId)
+    try {
+      await evaluateCiFix(ws.id, ws.worktreePath)
+    } finally {
+      ciFixInFlight.delete(workspaceId)
+    }
+  }
+
+  const evaluateCiFix = async (workspaceId: string, worktreePath: string): Promise<void> => {
+    const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
+    if (!ws) return
+
+    const checks = await getPrChecks(worktreePath).catch(() => null)
+    const decision = decideCiFix({
+      enabled: true,
+      running: ws.status === 'running',
+      checks,
+      prev: ws.autoFixCiState ?? null
+    })
+
+    /**
+     * 판정 결과를 워크스페이스에 적고, 렌더러가 보는 값이 바뀌었으면 방송한다.
+     *
+     * 값이 같으면 방송하지 않는다 — 이 함수는 폴링마다 도는데, 대부분의 폴링은 아무것도
+     * 바꾸지 않는다. 그때마다 방송하면 토글을 켠 워크스페이스 수만큼, 아무것도 바꾸지 못하는
+     * 상태 방송이 45 초마다 반복된다([[prStatusCache]] 가 같은 이유로 같은 일을 한다).
+     */
+    const persist = (): void => {
+      const before = JSON.stringify(ws.autoFixCiState ?? null)
+      store.update((st) => {
+        const w = st.workspaces.find((x) => x.id === workspaceId)
+        if (!w) return
+        if (decision.state) w.autoFixCiState = decision.state
+        else delete w.autoFixCiState
+      })
+      if (before !== JSON.stringify(decision.state ?? null)) broadcastState()
+    }
+
+    if (decision.kind === 'idle') {
+      persist()
+      return
+    }
+
+    if (decision.kind === 'stop') {
+      persist()
+      // 조용히 포기하지 않는다. 켜 두고 잊은 사람에게는 "왜 안 고쳐졌지" 보다 "여기서
+      // 멈췄다" 가 필요하고, 멈춘 자리가 곧 사람이 이어받을 자리다.
+      const item: ChatItem = {
+        id: `system:ci-fix-stop:${Date.now()}`,
+        type: 'system',
+        text: `Checks are still failing after ${CI_FIX_MAX_ATTEMPTS} automatic attempts (${decision.failed
+          .map((c) => c.name)
+          .join(
+            ', '
+          )}). Wooi stopped retrying — take it from here, or push a change to start the count over.`,
+        ts: Date.now()
+      }
+      getTranscripts().upsert(workspaceId, item)
+      dispatch(IPC.evtChat, { workspaceId, event: { type: 'item', item } })
+      return
+    }
+
+    // 로그는 정말 보낼 때만 가져온다 — `gh run view --log-failed` 는 폴링마다 부를 것이 아니다.
+    const logs = await getCiFailureLogs(ws.worktreePath, decision.failed).catch(() =>
+      decision.failed.map((c) => ({ checkName: c.name }))
+    )
+    const prompt = buildCiFixPrompt({
+      prNumber: checks?.prNumber ?? ws.prNumber ?? 0,
+      prUrl: checks?.prUrl ?? '',
+      failed: decision.failed,
+      logs,
+      attempt: decision.state.attempts,
+      max: CI_FIX_MAX_ATTEMPTS
+    })
+
+    try {
+      // 상태를 **보내기 전에** 적는다. 전송이 오래 걸리는 사이 다음 폴링이 같은 실패를 보고
+      // 또 열면, 상한을 세는 의미가 없어진다.
+      persist()
+      // conflictResolve 와 같은 정책이다 — 이 전송은 토큰을 쓰게 된 이유 그 자체라 transcript 에
+      // 남아야 하므로 silent 나 prefix 를 쓰지 않는다. origin 은 화면에서 한 줄로 접기 위한 표식이다.
+      await ctx.sessions.sendMessage(workspaceId, prompt, undefined, {
+        origin: {
+          kind: 'ciFix',
+          prNumber: checks?.prNumber ?? 0,
+          failedChecks: decision.failed.map((c) => c.name),
+          attempt: decision.state.attempts,
+          max: CI_FIX_MAX_ATTEMPTS
+        }
+      })
+    } catch {
+      // 보내지 못했으면 이 시도는 없었던 것으로 되돌린다 — 실패한 전송으로 상한을 축내면
+      // 정작 고칠 수 있었을 기회가 줄어든다.
+      store.update((st) => {
+        const w = st.workspaces.find((x) => x.id === workspaceId)
+        if (w)
+          w.autoFixCiState = {
+            ...decision.state,
+            attempts: decision.state.attempts - 1,
+            armed: true
+          }
+      })
+      broadcastState()
     }
   }
 
@@ -1163,6 +1290,18 @@ export function registerIpc(ctx: IpcContext): void {
     store.update((st) => {
       const w = st.workspaces.find((x) => x.id === workspaceId)
       if (w) w.muted = muted
+    })
+    broadcastState()
+  })
+
+  handle(IPC.workspaceSetAutoFixCi, (_e, workspaceId: string, enabled: boolean) => {
+    store.update((st) => {
+      const w = st.workspaces.find((x) => x.id === workspaceId)
+      if (!w) return
+      w.autoFixCi = enabled
+      // 끄면 진행 상태도 버린다. 다시 켜는 것은 명시적인 사용자 동작이니, 그때는 남은 시도가
+      // 0 인 채로 시작해 아무 일도 안 일어나는 대신 상한을 처음부터 받는 편이 맞다.
+      if (!enabled) delete w.autoFixCiState
     })
     broadcastState()
   })
@@ -2159,6 +2298,16 @@ export function registerIpc(ctx: IpcContext): void {
     // 이름이라 그동안 폰의 워크스페이스 이름이 낡은 채로 남는다. 폴링마다 방송하지
     // 않으므로 값이 그대로인 동안에는 비용이 없다.
     if (rememberPrStatus(workspaceId, status)) broadcastState()
+
+    // CI auto-fix 는 여기에 붙는다. main 에는 CI 타이머가 없고, 렌더러의 PR 폴링이 이미
+    // 45 초마다 돌면서 체크 결과까지 받아 오므로(stateFor 가 롤업을 읽는다) 새 폴링을
+    // 만들지 않고 이 폴링의 결과에 얹는다.
+    //
+    // 여기서 보는 것은 값싼 신호(이미 받아 둔 상태값)뿐이다. 롤업을 다시 읽고 로그를
+    // 가져오는 비싼 일은 maybeStartCiFix 안에서, 토글이 켜진 워크스페이스에 한해서만 한다.
+    if (status && (status.state === 'ci_failed' || status.state === 'ci_pending')) {
+      void maybeStartCiFix(workspaceId).catch(() => {})
+    }
     return status
   })
 
@@ -2852,6 +3001,27 @@ export function registerIpc(ctx: IpcContext): void {
     if (!ws || ws.archived) return null
     return readFileInRoot(ws.worktreePath, relPath).catch(() => null)
   })
+
+  handle(
+    IPC.fsWrite,
+    (
+      _e,
+      workspaceId: string,
+      relPath: string,
+      text: string,
+      baselineSha: string | null,
+      force?: boolean
+    ): Promise<FileWriteResult> => {
+      const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
+      // 아카이브된 워크스페이스는 읽기 전용이다(읽기와 같은 규칙).
+      if (!ws || ws.archived) return Promise.resolve({ ok: false, reason: 'denied' })
+      return writeFileInRoot(ws.worktreePath, relPath, text, baselineSha, { force }).catch((e) => ({
+        ok: false as const,
+        reason: 'error' as const,
+        message: e instanceof Error ? e.message : String(e)
+      }))
+    }
+  )
 
   handle(IPC.fsSearch, (_e, workspaceId: string, query: string) => {
     const ws = store.getState().workspaces.find((w) => w.id === workspaceId)

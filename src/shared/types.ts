@@ -1042,6 +1042,21 @@ export interface Workspace {
   /** 이 워크스페이스의 모든 알림(OS 알림·소리·Dock 배지)을 음소거한다. 레거시는 undefined=false. */
   muted?: boolean
   /**
+   * CI 체크가 실패로 확정되면 에이전트에게 턴을 하나 열어 고치게 한다. 레거시는 undefined=false.
+   *
+   * **기본값은 꺼짐이다.** 사용자가 치지 않은 턴은 토큰을 쓰고 브랜치에 커밋을 만든다 —
+   * 그 비용을 켜 본 적 없는 사람에게 떠안기지 않는다. 워크스페이스마다 따로 두는 이유는,
+   * 자동으로 밀어도 되는 브랜치인지가 작업마다 다르기 때문이다.
+   */
+  autoFixCi?: boolean
+  /**
+   * auto-fix 의 진행 상태(시도 횟수·재무장 여부). 판정은 [[ciFix]] 의 `decideCiFix` 가 한다.
+   *
+   * 영속하는 이유는 상한이 앱을 다시 켜도 유지돼야 하기 때문이다 — 메모리에만 두면 재시작이
+   * 곧 상한 초기화가 되고, 그러면 밤새 도는 고리를 막지 못한다.
+   */
+  autoFixCiState?: CiFixProgress
+  /**
    * 우하단 터미널의 탭 목록(각 탭 = 독립 PTY). 없거나 비어 있으면 첫 조회 때 탭 하나를 만들어
    * 채운다 — 레거시 워크스페이스는 마이그레이션 없이 "탭 1개" 로 읽힌다.
    *
@@ -1887,7 +1902,25 @@ export interface ConflictResolveOrigin {
   auto: boolean
 }
 
-export type ChatUserOrigin = PeerMessageOrigin | ConflictResolveOrigin
+/**
+ * Wooi 가 실패한 CI 를 맡기며 넣은 사용자 턴.
+ *
+ * ConflictResolveOrigin 과 같은 이유로 보이게 남기고 접는다 — 사용자가 치지 않은 턴이므로
+ * 무엇을 왜 시켰는지가 대화에 있어야 한다. 시도 횟수를 함께 싣는 것은, 접힌 한 줄만 보고도
+ * "이게 몇 번째이고 몇 번에서 멈추는지" 를 알 수 있어야 켜 둔 채로 잊지 않기 때문이다.
+ */
+export interface CiFixOrigin {
+  kind: 'ciFix'
+  prNumber: number
+  /** 실패한 체크 이름들 — 펼치지 않고도 무엇이 깨졌는지 알 수 있게 한다. */
+  failedChecks: string[]
+  /** 이번이 몇 번째 자동 시도인지(1-based). */
+  attempt: number
+  /** 몇 번에서 멈추는지. */
+  max: number
+}
+
+export type ChatUserOrigin = PeerMessageOrigin | ConflictResolveOrigin | CiFixOrigin
 
 /** 백엔드까지 함께 흘려 보낼 사용자 턴의 표시·모델용 옵션. */
 export interface SendMessageOptions {
@@ -3580,6 +3613,8 @@ export const IPC = {
   workspaceSetAgentBackend: 'workspace:setAgentBackend',
   /** 워크스페이스별 알림 음소거 토글. */
   workspaceSetMuted: 'workspace:setMuted',
+  /** CI 실패를 에이전트에게 넘기는 워크스페이스별 토글. */
+  workspaceSetAutoFixCi: 'workspace:setAutoFixCi',
   workspaceSetMultiAgent: 'workspace:setMultiAgent',
   workspaceRename: 'workspace:rename',
   /** 사이드바 드래그 앤 드롭으로 워크스페이스 표시 순서를 바꾼다(같은 레포·같은 stack 부모끼리만). */
@@ -3765,6 +3800,8 @@ export const IPC = {
   // 파일 브라우저 (All files 탭)
   fsList: 'fs:list',
   fsRead: 'fs:read',
+  /** 뷰어에서 고친 파일 저장. 열었을 때의 해시를 함께 받아 동시 수정을 막는다. */
+  fsWrite: 'fs:write',
   /** 입력창 `@` 자동완성용 파일 검색(git ls-files 기반 퍼지 매칭). */
   fsSearch: 'fs:search',
   // 인터랙티브 터미널 (worktree PTY — 탭 하나당 하나)
@@ -4663,7 +4700,59 @@ export interface FileContent {
   truncated: boolean
   /** 바이너리(또는 표시 불가)면 본문 없이 true. */
   binary: boolean
+  /**
+   * 읽은 시점 **파일 전체**(잘린 앞부분이 아니라) 내용의 sha256.
+   *
+   * 뷰어에서 고친 내용을 저장할 때 낙관적 동시성 제어의 기준값으로 쓴다 — 사람이 오타를
+   * 고치는 동안 에이전트가 같은 파일을 바꿔 놨는지 이 값으로 안다. mtime 대신 해시를 쓰는
+   * 이유는, 에이전트가 1 초 안에 여러 번 쓰면 mtime 해상도로는 변경을 놓치기 때문이다.
+   */
+  sha: string
 }
+
+/** 저장을 막은 이유. 판정 규칙은 `@shared/fileEdit` 의 `classifySave` 한 곳에 있다. */
+export type FileSaveConflict =
+  /** 열었을 때와 디스크 내용이 다르다 — 다른 누군가(보통 에이전트)가 고쳤다. */
+  | 'stale'
+  /** 파일이 사라졌다 — 지워졌거나 옮겨졌다. */
+  | 'vanished'
+
+/**
+ * 한 PR 에 대해 CI auto-fix 가 자동으로 열 수 있는 턴의 수.
+ *
+ * 이 상한이 auto-fix 의 안전장치다. 에이전트가 고치고 → 밀고 → 또 실패하면, 상한이 없는 한
+ * 사람이 자는 동안에도 그 고리가 계속 돈다. 3 은 "한 번 헛짚고 한 번 더 시도해 볼 여지"까지만
+ * 주는 수다 — 세 번 고쳐서 안 되는 실패는 대개 에이전트가 못 보는 것(비밀값·인프라·flaky)이
+ * 원인이라, 네 번째 시도는 토큰만 쓴다.
+ *
+ * 판정은 메인의 [[ciFix]] 가 하지만, 남은 횟수를 화면에도 적어야 해서 여기 둔다 — 상한이
+ * 보이지 않으면 "왜 이제 안 고쳐 주지" 로만 읽힌다.
+ */
+export const CI_FIX_MAX_ATTEMPTS = 3
+
+/**
+ * 워크스페이스 하나의 CI auto-fix 진행 상태. 필드의 뜻과 판정 규칙은 [[ciFix]] 에 있다.
+ * (main 의 `CiFixState` 와 같은 모양이다 — 워크스페이스 레코드에 실려 렌더러까지 간다.)
+ */
+export interface CiFixProgress {
+  prNumber: number
+  attempts: number
+  armed: boolean
+  notifiedStop: boolean
+}
+
+/** `fs:write` 의 결과. 실패는 사용자에게 다르게 보여야 해서 이유를 나눠 돌려준다. */
+export type FileWriteResult =
+  | { ok: true; content: FileContent }
+  /**
+   * 열었을 때와 디스크가 달라 쓰지 않았다. `current` 는 지금 디스크에 있는 내용(사라졌으면
+   * null) — 사용자가 덮어쓸지 버릴지 고르려면 상대편을 볼 수 있어야 한다.
+   */
+  | { ok: false; reason: 'conflict'; conflict: FileSaveConflict; current: FileContent | null }
+  /** 워크트리 밖 경로·아카이브된 워크스페이스·파일이 아닌 대상 — 애초에 쓸 수 없다. */
+  | { ok: false; reason: 'denied' }
+  /** 권한 없음·디스크 가득 참 등 쓰기 자체의 실패. */
+  | { ok: false; reason: 'error'; message: string }
 
 /** 입력창 `@` 자동완성 후보(worktree 상대 경로). */
 export interface FileHit {

@@ -65,6 +65,8 @@ const api: WooiApi = {
     setAgentBackend: (workspaceId, agentBackend, opts) =>
       ipcRenderer.invoke(IPC.workspaceSetAgentBackend, workspaceId, agentBackend, opts),
     setMuted: (workspaceId, muted) => ipcRenderer.invoke(IPC.workspaceSetMuted, workspaceId, muted),
+    setAutoFixCi: (workspaceId, enabled) =>
+      ipcRenderer.invoke(IPC.workspaceSetAutoFixCi, workspaceId, enabled),
     setMultiAgent: (workspaceId, multiAgent) =>
       ipcRenderer.invoke(IPC.workspaceSetMultiAgent, workspaceId, multiAgent),
     rename: (workspaceId, name) => ipcRenderer.invoke(IPC.workspaceRename, workspaceId, name),
@@ -198,6 +200,8 @@ const api: WooiApi = {
   fs: {
     list: (workspaceId, relPath) => ipcRenderer.invoke(IPC.fsList, workspaceId, relPath),
     read: (workspaceId, relPath) => ipcRenderer.invoke(IPC.fsRead, workspaceId, relPath),
+    write: (workspaceId, relPath, text, baselineSha, force) =>
+      ipcRenderer.invoke(IPC.fsWrite, workspaceId, relPath, text, baselineSha, force),
     search: (workspaceId, query) => ipcRenderer.invoke(IPC.fsSearch, workspaceId, query)
   },
 

@@ -6,12 +6,14 @@ import { appendMention, mentionWithRange } from '../lib/mention'
 import { isPaneWindow } from '../lib/paneWindow'
 import FileTree from './files/FileTree'
 import FileViewer from './files/FileViewer'
+import FileEditControls from './files/FileEditControls'
+import { useFileEditor } from './files/useFileEditor'
 import { selectedLineRange } from './files/lineRange'
 import type { FileContent } from '@shared/types'
 
 /**
  * 우측 패널의 All files 탭. worktree 파일을 lazy 트리로 탐색하고, 파일을 고르면
- * 읽기 전용 뷰어로 본문을 표시한다.
+ * 뷰어로 본문을 표시한다(오버레이 뷰어와 같은 규칙으로 그 자리에서 고칠 수도 있다).
  *
  * 여기는 폭이 좁아 훑어보기용이다 — 코드를 실제로 읽어야 하면 확대 버튼이나 더블클릭으로
  * 대화창 위의 큰 뷰어([[FileViewerOverlay]])로 넘긴다.
@@ -26,7 +28,15 @@ export default function FileBrowser({ workspaceId }: { workspaceId: string }): R
 
   const setDraft = useStore((s) => s.setDraft)
   const pushToast = useStore((s) => s.pushToast)
+  const confirm = useStore((s) => s.confirm)
   const openFileViewer = useStore((s) => s.openFileViewer)
+
+  const editor = useFileEditor({
+    workspaceId,
+    path: openFile,
+    content,
+    onContent: setContent
+  })
 
   /**
    * 큰 뷰어로 넘기기. 분리한 패널 창([[paneWindow]])에서는 제공하지 않는다 —
@@ -35,6 +45,24 @@ export default function FileBrowser({ workspaceId }: { workspaceId: string }): R
    * (분리한 창은 크게 늘릴 수 있어 인라인 뷰어로도 읽을 만하다).
    */
   const openViewer = isPaneWindow ? undefined : (path: string) => openFileViewer(workspaceId, path)
+
+  /**
+   * 목록으로 돌아간다. 고치던 것이 있으면 먼저 확인을 받는다 — 여기는 오버레이와 달리
+   * 초안을 들고 다닐 화면이 없어서(뒤로 가면 뷰어 자체가 사라진다) 이때가 유일한 손실 지점이다.
+   */
+  const backToTree = async (): Promise<void> => {
+    if (editor.dirtyPaths.length) {
+      const ok = await confirm({
+        title: `Discard unsaved changes to ${openFile}?`,
+        body: 'Your edits were never written to disk.',
+        confirmLabel: 'Discard',
+        danger: true
+      })
+      if (!ok) return
+      editor.discardAll()
+    }
+    setOpenFile(null)
+  }
 
   const selectFile = (path: string): void => {
     setOpenFile(path)
@@ -67,7 +95,7 @@ export default function FileBrowser({ workspaceId }: { workspaceId: string }): R
     return (
       <div className="h-full flex flex-col min-h-0">
         <div className="h-8 shrink-0 flex items-center gap-2 px-2 border-b border-[var(--border)]">
-          <button onClick={() => setOpenFile(null)} className={iconBtn}>
+          <button onClick={() => void backToTree()} className={iconBtn}>
             <ArrowLeft size={12} /> Files
           </button>
           <span className="flex-1 truncate text-xs font-mono text-neutral-300" title={openFile}>
@@ -89,8 +117,9 @@ export default function FileBrowser({ workspaceId }: { workspaceId: string }): R
           >
             <AtSign size={12} /> Mention
           </button>
+          <FileEditControls editor={editor} compact />
         </div>
-        <FileViewer content={content} loading={loadingFile} preRef={preRef} />
+        <FileViewer content={content} loading={loadingFile} preRef={preRef} editor={editor} />
       </div>
     )
   }

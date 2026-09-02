@@ -940,3 +940,20 @@ describe('연결 확인 캐시', () => {
     expect(ghCalls()).toEqual([])
   })
 })
+
+describe('runIdFromCheckUrl', () => {
+  it('GitHub Actions 잡 URL 에서 실행 id 를 뽑는다', async () => {
+    const { runIdFromCheckUrl } = await import('./github')
+    expect(runIdFromCheckUrl('https://github.com/o/r/actions/runs/123/job/456')).toBe('123')
+    expect(runIdFromCheckUrl('https://github.com/o/r/actions/runs/123')).toBe('123')
+  })
+
+  it('Actions 가 아닌 체크는 실행 id 가 없다', async () => {
+    const { runIdFromCheckUrl } = await import('./github')
+    // 외부 CI(Buildkite·CircleCI 등)는 URL 모양이 제각각이라 로그를 가져올 수 없다.
+    // 그때는 이름만 프롬프트에 실리고, 프롬프트가 "로그를 못 읽었다" 고 밝힌다.
+    expect(runIdFromCheckUrl('https://buildkite.com/acme/pipeline/builds/9')).toBeNull()
+    expect(runIdFromCheckUrl('https://github.com/o/r/actions/runs/notanumber')).toBeNull()
+    expect(runIdFromCheckUrl(undefined)).toBeNull()
+  })
+})
