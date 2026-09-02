@@ -231,6 +231,54 @@ describe('명령 실행', () => {
     expect(items(done)[0]).not.toHaveProperty('agent')
   })
 
+  it('unified exec가 실행되는 동안 사이드바 Bash task를 노출한다', () => {
+    const state = createMapperState()
+    const started = map(
+      NOTIFY.itemStarted,
+      {
+        item: {
+          id: 'c1',
+          type: 'commandExecution',
+          source: 'unifiedExecStartup',
+          processId: 'pty-1',
+          command: 'npm test'
+        }
+      },
+      state
+    )
+    expect(started.events[1]).toEqual({
+      type: 'agents',
+      agents: [
+        expect.objectContaining({
+          taskId: 'pty-1',
+          taskType: 'unified_exec',
+          agentType: 'Bash',
+          description: 'npm test'
+        })
+      ]
+    })
+
+    const done = map(
+      NOTIFY.itemCompleted,
+      { item: { id: 'c1', type: 'commandExecution', status: 'completed', exitCode: 0 } },
+      state
+    )
+    expect(done.events[1]).toEqual({ type: 'agents', agents: [] })
+  })
+
+  it('일반 agent 명령은 짧은 실행마다 사이드바를 번쩍이지 않는다', () => {
+    const state = createMapperState()
+    const started = map(
+      NOTIFY.itemStarted,
+      {
+        item: { id: 'c1', type: 'commandExecution', source: 'agent', command: 'git status' }
+      },
+      state
+    )
+    expect(started.events).toHaveLength(1)
+    expect(state.agents.size).toBe(0)
+  })
+
   it('출처 필드가 없는 옛 app-server 결과는 에이전트 명령으로 유지한다', () => {
     const r = map(NOTIFY.itemCompleted, {
       item: { id: 'c1', type: 'commandExecution', command: 'pwd', status: 'completed' }

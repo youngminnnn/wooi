@@ -92,6 +92,8 @@ export interface ThreadItem {
   command?: string
   cwd?: string
   source?: 'agent' | 'userShell' | 'unifiedExecStartup' | 'unifiedExecInteraction'
+  /** unified exec 가 오래 살아 있을 때 startup/interaction 을 같은 PTY 로 묶는 식별자. */
+  processId?: string | null
   aggregatedOutput?: string
   exitCode?: number
   durationMs?: number

@@ -1,4 +1,4 @@
-import type { ChatEvent, ChatItem, PermissionRequest } from '@shared/types'
+import type { ChatEvent, ChatItem, PermissionRequest, RunningAgent } from '@shared/types'
 import { basename, extname } from 'node:path'
 import { clampText } from '../claude/clamp'
 import { NOTIFY, type CodexDecision, type FileUpdateChange, type ThreadItem } from './wire'
@@ -52,9 +52,18 @@ export interface MapperState {
   /** codex itemId → 지금까지 누적된 명령 출력. */
   output: Map<string, string>
   /** codex itemId → 그 명령 카드의 마지막 스냅샷(출력 외 필드 보존용). */
-  command: Map<string, { command: string; cwd?: string; agent: boolean }>
-  /** 실행 중 Codex 서브에이전트. subAgentActivity 스냅샷을 sidebar 이벤트로 만든다. */
-  agents: Map<string, { taskId: string; agentType: string; description: string; startedAt: number }>
+  command: Map<
+    string,
+    {
+      command: string
+      cwd?: string
+      agent: boolean
+      source?: ThreadItem['source']
+      processId?: string | null
+    }
+  >
+  /** 실행 중 Codex 서브에이전트·unified exec. sidebar 이벤트의 전량 스냅샷 정본이다. */
+  agents: Map<string, RunningAgent>
   /** 로컬에 즉시 표시한 사용자 입력. app-server echo 를 중복 표시하지 않기 위한 서명. */
   pendingUserEchoes: string[]
   /**
@@ -640,7 +649,9 @@ function mapCommandItem(
       cwd: item.cwd ?? previous?.cwd,
       // 완료 스냅샷이 source를 생략해도 시작 때 확인한 출처를 덮지 않는다. 시작도 못 봤다면
       // 필드가 없던 app-server의 기존 의미(에이전트 명령)를 보존한다.
-      agent: item.source ? item.source !== 'userShell' : (previous?.agent ?? true)
+      agent: item.source ? item.source !== 'userShell' : (previous?.agent ?? true),
+      source: item.source ?? previous?.source,
+      processId: item.processId ?? previous?.processId
     })
   }
   const meta = state.command.get(key)
@@ -663,10 +674,33 @@ function mapCommandItem(
     ts
   }
 
+  const taskKey = meta?.processId ?? key
+  const isUnifiedExecStartup = meta?.source === 'unifiedExecStartup'
+  let agentsChanged = false
+  if (isUnifiedExecStartup && !done) {
+    const previous = state.agents.get(taskKey)
+    state.agents.set(taskKey, {
+      taskId: taskKey,
+      taskType: 'unified_exec',
+      agentType: 'Bash',
+      description: meta.command,
+      startedAt: previous?.startedAt ?? ts
+    })
+    agentsChanged = true
+  } else if (done && state.agents.delete(taskKey)) {
+    agentsChanged = true
+  }
+
   if (done) state.output.delete(key)
   if (done) state.command.delete(key)
 
-  return { events: [{ type: 'item', item: chat }], persist: done ? [chat] : [] }
+  return {
+    events: [
+      { type: 'item', item: chat },
+      ...(agentsChanged ? [{ type: 'agents' as const, agents: [...state.agents.values()] }] : [])
+    ],
+    persist: done ? [chat] : []
+  }
 }
 
 function mapCommandOutput(params: DeltaParams, state: MapperState, ts: number): Mapped {
