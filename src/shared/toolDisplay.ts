@@ -23,8 +23,12 @@ export const FOLD = {
   commandChars: 160
 } as const
 
-/** 접힌 결과를 한 번에 펼치는 단축키. 힌트 문구가 실제 바인딩과 어긋나지 않게 한곳에서만 쓴다. */
-export const TOOL_VERBOSE_SHORTCUT = '⌃O'
+/**
+ * 대화 밀도를 순환시키는 단축키(Summary → Normal → Verbose). 기본값 Normal 에서 한 번 누르면
+ * Verbose 라, 접힌 결과 옆의 "펼치기" 힌트도 이 키를 가리킨다. 힌트 문구가 실제 바인딩과
+ * 어긋나지 않게 한곳에서만 쓴다.
+ */
+export const DENSITY_SHORTCUT = '⌃O'
 
 const record = (value: unknown): Record<string, unknown> | null =>
   value != null && typeof value === 'object' ? (value as Record<string, unknown>) : null

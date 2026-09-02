@@ -182,7 +182,7 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
       { keys: ['⌘0'], label: 'Reset conversation text size' },
       {
         keys: ['⌃O'],
-        label: 'Expand or collapse all tool results',
+        label: 'Cycle density: Summary → Normal → Verbose',
         action: 'toggle-tool-results'
       },
       { keys: ['⇧⌘↓'], label: 'Jump to the latest message' },

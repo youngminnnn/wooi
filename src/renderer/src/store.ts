@@ -84,6 +84,13 @@ import {
   TRANSCRIPT_INITIAL_LIMIT
 } from './lib/transcriptPagination'
 import { UNDO_CREATE_WINDOW_MS, undoCreateVerdict, type UndoableCreate } from './lib/undoCreate'
+import {
+  DEFAULT_TRANSCRIPT_DENSITY,
+  nextTranscriptDensity,
+  readRememberedTranscriptDensities,
+  rememberTranscriptDensity,
+  type TranscriptDensity
+} from './lib/transcriptDensity'
 
 export const scriptKey = (workspaceId: string, scriptId: string): string =>
   `${workspaceId}:${scriptId}`
@@ -415,9 +422,16 @@ interface UIState {
   sidebarWidth: number
   /** workspace 별 우측 작업 패널 표시 여부. 값이 없으면 설정의 기본값을 따른다. */
   rightPanelOpen: Record<string, boolean>
-  /** 대화 하나만 잠시 전부 펼치는 workspace 별 휘발성 상태. */
-  toolVerbose: Record<string, boolean>
-  toggleToolVerbose: (workspaceId: string) => void
+  /**
+   * workspace 별 대화 밀도(Summary / Normal / Verbose). 값이 없으면 기본값(Normal).
+   *
+   * 앱 전역이 아니라 workspace 별인 이유는 [[transcriptDensity]] 에 적어 뒀다 — 훑기 모드의
+   * 쓸모 자체가 "이건 훑고 저건 자세히 본다" 라 병렬로 돌릴수록 전역 값이 방해가 된다.
+   */
+  transcriptDensity: Record<string, TranscriptDensity>
+  setTranscriptDensity: (workspaceId: string, density: TranscriptDensity) => void
+  /** ⌃O — 다음 밀도로 넘긴다. */
+  cycleTranscriptDensity: (workspaceId: string) => void
   /** 우하단 터미널이 우측 컬럼 높이에서 차지하는 비율(0~1). 기본 0.5. 가로 분할 드래그로 조절. */
   terminalRatio: number
   /**
@@ -970,9 +984,15 @@ export const useStore = create<UIState>((set, get) => ({
   rightWidth: 460,
   sidebarWidth: readRememberedSidebarWidth(),
   rightPanelOpen: {},
-  toolVerbose: {},
-  toggleToolVerbose: (workspaceId) =>
-    set((s) => ({ toolVerbose: { ...s.toolVerbose, [workspaceId]: !s.toolVerbose[workspaceId] } })),
+  transcriptDensity: readRememberedTranscriptDensities(),
+  setTranscriptDensity: (workspaceId, density) => {
+    rememberTranscriptDensity(workspaceId, density)
+    set((s) => ({ transcriptDensity: { ...s.transcriptDensity, [workspaceId]: density } }))
+  },
+  cycleTranscriptDensity: (workspaceId) => {
+    const current = get().transcriptDensity[workspaceId] ?? DEFAULT_TRANSCRIPT_DENSITY
+    get().setTranscriptDensity(workspaceId, nextTranscriptDensity(current))
+  },
   terminalRatio: 0.5,
   detachedPanes: { work: false, scripts: false, overview: false },
   fileViewer: null,

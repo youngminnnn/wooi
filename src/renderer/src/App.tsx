@@ -516,8 +516,8 @@ export default function App(): React.JSX.Element {
           return
 
         case 'toggle-tool-results':
-          // 설정이 아니라 그때그때의 상태라, 지금 보고 있는 워크스페이스에만 걸린다.
-          if (st.selectedWorkspaceId) st.toggleToolVerbose(st.selectedWorkspaceId)
+          // 워크스페이스마다 따로 기억하므로 지금 보고 있는 워크스페이스에만 걸린다.
+          if (st.selectedWorkspaceId) st.cycleTranscriptDensity(st.selectedWorkspaceId)
           return
       }
     },
@@ -637,8 +637,8 @@ export default function App(): React.JSX.Element {
         }
       }
 
-      // ⌃O — 열려 있는 대화의 도구 결과를 한꺼번에 펼치거나 접는다(Claude Code 의 ctrl+o 와 같은 키).
-      // 설정이 아니라 그때그때의 상태라, 지금 보고 있는 워크스페이스에만 걸린다.
+      // ⌃O — 대화 밀도를 Summary / Normal / Verbose 로 순환한다(Claude Code 의 ctrl+o 와 같은 키).
+      // 워크스페이스마다 따로 기억하므로 지금 보고 있는 워크스페이스에만 걸린다.
       if (e.code === 'KeyO' && e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
         if (typing() || !st.selectedWorkspaceId) return
         e.preventDefault()

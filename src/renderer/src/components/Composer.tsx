@@ -31,7 +31,8 @@ import {
   RotateCcw,
   Activity,
   BookMarked,
-  Wrench
+  Wrench,
+  ListCollapse
 } from 'lucide-react'
 import { useStore } from '../store'
 import SavedPromptPicker from './SavedPromptPicker'
@@ -40,6 +41,14 @@ import { permissionModeFooter, permissionModesFor } from '../lib/permission'
 import { modelLabel, modelSupportsFastMode } from '../lib/models'
 import { effortLabel, effortOptionsFor } from '../lib/effort'
 import { FAST_MODE_HINT, fastModeLabel, fastModeStatus } from '../lib/fastMode'
+import { DENSITY_SHORTCUT } from '@shared/toolDisplay'
+import {
+  DEFAULT_TRANSCRIPT_DENSITY,
+  TRANSCRIPT_DENSITIES,
+  TRANSCRIPT_DENSITY_HINT,
+  TRANSCRIPT_DENSITY_LABEL,
+  type TranscriptDensity
+} from '../lib/transcriptDensity'
 import {
   useAgentSettings,
   useAvailableBackends,
@@ -1887,7 +1896,7 @@ function WooiCommandCard({
 }
 
 /**
- * "/model"·"/effort"·"/fast"·"/agent"·"/plan" 이면 그 종류를 돌려준다(뒤따르는 인자는 무시하고 선택 카드를 연다).
+ * "/model"·"/effort"·"/fast"·"/agent"·"/plan"·"/density" 면 그 종류를 돌려준다(뒤따르는 인자는 무시하고 선택 카드를 연다).
  *
  * `allow.fast` 는 이 워크스페이스의 백엔드가 fast mode 를 지원하는지다 — 지원하지 않으면(Codex)
  * 가로채지 않고 일반 텍스트로 흘려보낸다. 아무 일도 안 하는 카드를 띄우는 것보다 낫다.
@@ -1895,6 +1904,8 @@ function WooiCommandCard({
  * `allow.plan` 은 권한 모드가 여럿이면서 백엔드 전용 `/plan` 카드가 없을 때만 참이다. Codex 는
  * 자체 카드로 app-server 의 plan mode 를 바꾸고, 범용 선택기는 그런 카드가 없는 Claude 를 맡는다.
  * 거짓인 명령은 에이전트에게 보내는 평범한 메시지로 둔다.
+ * `/density` 는 걸러 낼 것이 없다 — 대화를 얼마나 촘촘히 볼지는 백엔드와 무관한 화면 설정이라
+ * 어느 워크스페이스에서나 고를 수 있다.
  * 턴이 도는 중인지는 여기서 보지 않는다:
  * /model 과 마찬가지로 카드는 열리고, 잠긴 이유를 카드가 설명한다.
  */
@@ -1902,7 +1913,7 @@ export function matchPicker(
   text: string,
   allow: { fast: boolean; agent: boolean; plan: boolean }
 ): PickerKind | null {
-  const m = /^\/(model|effort|fast|agent|plan)(?:\s.*)?$/.exec(text)
+  const m = /^\/(model|effort|fast|agent|plan|density)(?:\s.*)?$/.exec(text)
   if (!m) return null
   const kind = m[1] as PickerKind
   if (kind === 'fast' && !allow.fast) return null
@@ -3180,6 +3191,7 @@ function StatusLine({
   const backend = useWorkspaceBackend(workspace)
   const models = useModels(workspace.agentBackend)
   const defaults = useAgentSettings(workspace.agentBackend)
+  const density = useStore((s) => s.transcriptDensity[workspace.id] ?? DEFAULT_TRANSCRIPT_DENSITY)
   // fast mode 는 Claude Code 전용이라, 지원하지 않는 백엔드에서는 상태줄에서도 감춘다.
   const supportsFastMode = backend?.capabilities.fastMode ?? false
   // 에이전트 칩은 **고를 것이 있을 때만** 띄운다. 어떤 에이전트가 도는지는 헤더의 브랜드 마크가
@@ -3264,6 +3276,29 @@ function StatusLine({
           <span className="truncate">{fast.text}</span>
         </button>
       )}
+      {/* 밀도 칩. 값이 기본(Normal)이 아니면 강조한다 — 훑기 모드에서 대화가 성겨 보이는 이유가
+          화면 어딘가에 늘 적혀 있어야 한다. */}
+      <button
+        onClick={() => onPick('density')}
+        className={
+          'flex items-center gap-1 min-w-0 shrink transition-colors ' +
+          (density === DEFAULT_TRANSCRIPT_DENSITY
+            ? 'hover:text-neutral-300'
+            : 'text-[var(--accent-300)] hover:text-[var(--accent-200)]')
+        }
+        title={`Conversation density: ${TRANSCRIPT_DENSITY_LABEL[density]} — ${TRANSCRIPT_DENSITY_HINT[density]}. Click, press ${DENSITY_SHORTCUT}, or type /density to change`}
+      >
+        <ListCollapse
+          size={11}
+          className={
+            'shrink-0 ' +
+            (density === DEFAULT_TRANSCRIPT_DENSITY
+              ? 'text-neutral-600'
+              : 'text-[var(--accent-400)]')
+          }
+        />
+        <span className="truncate">{TRANSCRIPT_DENSITY_LABEL[density]}</span>
+      </button>
       <ContextStatus usage={usage} compacting={compacting} />
       <RateLimitStatus backend={workspace.agentBackend} snapshot={rateLimits} />
     </div>
@@ -3280,7 +3315,7 @@ type PickerOption = {
 }
 
 /** 상태줄 클릭·슬래시 명령으로 여는 로컬 선택 카드의 종류. */
-type PickerKind = 'model' | 'effort' | 'fast' | 'agent' | 'plan'
+type PickerKind = 'model' | 'effort' | 'fast' | 'agent' | 'plan' | 'density'
 
 /**
  * 입력창 위에 뜨는 /model·/effort 선택 카드. 백엔드 왕복 없이 로컬에서 값을 고른다 —
@@ -3311,6 +3346,8 @@ function PickerCard({
   const pushToast = useStore((s) => s.pushToast)
   const confirm = useStore((s) => s.confirm)
   const resetContextUsage = useStore((s) => s.resetContextUsage)
+  const density = useStore((s) => s.transcriptDensity[workspace.id] ?? DEFAULT_TRANSCRIPT_DENSITY)
+  const setTranscriptDensity = useStore((s) => s.setTranscriptDensity)
   // 에이전트 교체는 이 카드가 유일한 경로가 아니다(main 이 같은 규칙으로 다시 판정한다).
   // 여기서는 카드가 떠 있는 동안 조건이 무너지는 경우(다른 창에서 턴이 시작됐다든지)를 본다.
   const availableAgents = useAvailableBackends()
@@ -3334,6 +3371,14 @@ function PickerCard({
         value: mode.id,
         label: mode.label,
         hint: mode.description
+      }))
+    }
+    if (kind === 'density') {
+      // 촘촘한 것부터 보여 준다 — 목록의 위아래가 화면의 길고 짧음과 같은 방향이 되게.
+      return [...TRANSCRIPT_DENSITIES].reverse().map((d) => ({
+        value: d,
+        label: TRANSCRIPT_DENSITY_LABEL[d],
+        hint: TRANSCRIPT_DENSITY_HINT[d]
       }))
     }
     if (kind === 'fast') {
@@ -3377,19 +3422,21 @@ function PickerCard({
 
   // 현재 값: fast 는 boolean|null 을 'on'/'off'/''(전역 따름) 문자열로 환산해 다른 카드와 같게 다룬다.
   const current =
-    kind === 'agent'
-      ? workspace.agentBackend
-      : kind === 'plan'
-        ? workspace.permissionMode
-        : kind === 'model'
-          ? (workspace.model ?? '')
-          : kind === 'effort'
-            ? (workspace.effort ?? '')
-            : workspace.fastMode === null
-              ? ''
-              : workspace.fastMode
-                ? 'on'
-                : 'off'
+    kind === 'density'
+      ? density
+      : kind === 'agent'
+        ? workspace.agentBackend
+        : kind === 'plan'
+          ? workspace.permissionMode
+          : kind === 'model'
+            ? (workspace.model ?? '')
+            : kind === 'effort'
+              ? (workspace.effort ?? '')
+              : workspace.fastMode === null
+                ? ''
+                : workspace.fastMode
+                  ? 'on'
+                  : 'off'
   const currentIdx = Math.max(
     0,
     options.findIndex((o) => o.value === current)
@@ -3398,7 +3445,14 @@ function PickerCard({
   const activeRef = useRef<HTMLButtonElement | null>(null)
 
   // /plan 은 Shift+Tab 처럼 턴 중에도 바꿀 수 있어 model·effort 의 세션 잠금을 따르지 않는다.
-  const locked = kind === 'agent' ? !agentSwitch.switchable : kind === 'plan' ? false : running
+  // /density 는 아예 세션 밖의 값이다 — 에이전트에게 아무것도 보내지 않는 화면 설정이라,
+  // 턴이 도는 중에 훑기 모드로 내려 다른 워크스페이스를 보러 가는 것이 오히려 이 기능의 쓸모다.
+  const locked =
+    kind === 'agent'
+      ? !agentSwitch.switchable
+      : kind === 'plan' || kind === 'density'
+        ? false
+        : running
 
   /**
    * 에이전트 교체 1건. 지난 대화를 넘겨야 하는 자리에서는 먼저 확인을 받는다 — 그 인수인계는
@@ -3435,7 +3489,8 @@ function PickerCard({
   const apply = (value: string): void => {
     if (locked) return // 잠긴 동안에는 안내만 보여 준다.
     if (value !== current) {
-      if (kind === 'agent') void switchAgent(value as AgentBackendId)
+      if (kind === 'density') setTranscriptDensity(workspace.id, value as TranscriptDensity)
+      else if (kind === 'agent') void switchAgent(value as AgentBackendId)
       else if (kind === 'plan')
         void window.api.workspace.setPermissionMode(workspace.id, value as PermissionMode)
       else if (kind === 'model') void window.api.workspace.setModel(workspace.id, value || null)
@@ -3470,31 +3525,37 @@ function PickerCard({
   }, [cursor])
 
   const title =
-    kind === 'agent'
-      ? '/agent'
-      : kind === 'plan'
-        ? '/plan'
-        : kind === 'model'
-          ? '/model'
-          : kind === 'effort'
-            ? '/effort'
-            : '/fast'
+    kind === 'density'
+      ? '/density'
+      : kind === 'agent'
+        ? '/agent'
+        : kind === 'plan'
+          ? '/plan'
+          : kind === 'model'
+            ? '/model'
+            : kind === 'effort'
+              ? '/effort'
+              : '/fast'
   const description =
-    kind === 'agent'
-      ? 'Main agent for this workspace'
-      : kind === 'plan'
-        ? 'Permissions for this workspace'
-        : kind === 'model'
-          ? 'Model for this workspace'
-          : kind === 'effort'
-            ? 'Reasoning effort for this workspace'
-            : 'Fast mode for this workspace — same model, faster output'
+    kind === 'density'
+      ? `How much of this conversation to show — ${DENSITY_SHORTCUT} cycles it`
+      : kind === 'agent'
+        ? 'Main agent for this workspace'
+        : kind === 'plan'
+          ? 'Permissions for this workspace'
+          : kind === 'model'
+            ? 'Model for this workspace'
+            : kind === 'effort'
+              ? 'Reasoning effort for this workspace'
+              : 'Fast mode for this workspace — same model, faster output'
   // /fast 카드에서만: 지금 쓰는 모델이 fast mode 를 지원하지 않으면 켜도 소용없으므로 미리 알린다.
   const effectiveModel = workspace.model ?? workspace.lastModel ?? defaults.model
   const fastUnsupported = kind === 'fast' && !modelSupportsFastMode(models, effectiveModel)
   const iconProps = { size: 13, className: 'text-[var(--accent-400)] shrink-0' }
   const icon =
-    kind === 'agent' ? (
+    kind === 'density' ? (
+      <ListCollapse {...iconProps} />
+    ) : kind === 'agent' ? (
       <Bot {...iconProps} />
     ) : kind === 'plan' ? (
       <ShieldCheck {...iconProps} />

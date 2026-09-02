@@ -38,7 +38,15 @@ import { SELECTABLE, unlessSelecting } from '../lib/selection'
 import SelectionCopyBubble from './SelectionCopyBubble'
 import { useChatFontScale } from '../lib/chatFontScale'
 import { restoredScrollTop, TRANSCRIPT_TOP_THRESHOLD_PX } from '../lib/transcriptPagination'
-import { TOOL_VERBOSE_SHORTCUT } from '@shared/toolDisplay'
+import { DENSITY_SHORTCUT } from '@shared/toolDisplay'
+import {
+  DEFAULT_TRANSCRIPT_DENSITY,
+  expandsToolOutput,
+  showsEntry,
+  showsInlineDiff,
+  transcriptEntryKind,
+  type TranscriptDensity
+} from '../lib/transcriptDensity'
 
 /**
  * Wooi 가 rebase 충돌 해결을 맡기며 넣은 사용자 턴을 한 줄로 접어 보여 준다.
@@ -194,7 +202,8 @@ export default function MessageList({
   const [activeIdx, setActiveIdx] = useState(0)
   const searchInputRef = useRef<HTMLInputElement>(null)
   const jumpTarget = useStore((s) => s.jumpTarget)
-  const toolVerbose = useStore((s) => !!s.toolVerbose[workspaceId])
+  // 대화 밀도(⌃O / 상태줄 칩). 무엇을 그릴지와 도구 출력을 펴 둘지를 모두 여기서 갈라 준다.
+  const density = useStore((s) => s.transcriptDensity[workspaceId] ?? DEFAULT_TRANSCRIPT_DENSITY)
   const toolLogStyle = useStore((s) => s.app?.settings.toolLogStyle ?? 'wooi')
   const overlayOpen = useStore((s) => s.overlayOpen)
   const hasMoreHistory = useStore((s) => !!s.transcriptPaging[workspaceId]?.hasMore)
@@ -229,41 +238,58 @@ export default function MessageList({
 
   // 할 일 도구 호출들을 체크리스트 카드로 묶는다. 카드로 대체된 도구 행·결과는 목록 단계에서
   // 걸러 내, 검색과 스크롤도 실제로 보이는 항목만 대상으로 삼게 한다.
-  const { visibleItems, resolved, results, cardByItemId, latestCardItemId, groupByItemId } =
-    useMemo(() => {
-      const { cardByItemId: cards, hiddenItemIds: taskHiddenIds } = buildTaskCards(renderedItems)
-      // 체크리스트가 가져간 자리는 도구 그룹의 연속 구간에서도 경계다. 대표 카드 항목까지 제외해야
-      // 두 시각화가 같은 원본을 서로 차지하지 않는다.
-      const taskItemIds = new Set([...taskHiddenIds, ...cards.keys()])
-      const { groupByItemId: groups, hiddenItemIds: groupHiddenIds } = buildToolGroups(
-        renderedItems,
-        taskItemIds
+  const {
+    visibleItems,
+    resolved,
+    results,
+    cardByItemId,
+    latestCardItemId,
+    groupByItemId,
+    hiddenByDensity
+  } = useMemo(() => {
+    const { cardByItemId: cards, hiddenItemIds: taskHiddenIds } = buildTaskCards(renderedItems)
+    // 체크리스트가 가져간 자리는 도구 그룹의 연속 구간에서도 경계다. 대표 카드 항목까지 제외해야
+    // 두 시각화가 같은 원본을 서로 차지하지 않는다.
+    const taskItemIds = new Set([...taskHiddenIds, ...cards.keys()])
+    const { groupByItemId: groups, hiddenItemIds: groupHiddenIds } = buildToolGroups(
+      renderedItems,
+      taskItemIds
+    )
+    const hiddenItemIds = new Set([...taskHiddenIds, ...groupHiddenIds])
+    const resolvedIds = new Set<string>()
+    for (const it of renderedItems) if (it.type === 'tool_result') resolvedIds.add(it.toolId)
+    const resultByToolId = new Map<string, Extract<ChatItem, { type: 'tool_result' }>>()
+    const uses = new Set(
+      renderedItems.filter((it) => it.type === 'tool_use').map((it) => it.toolId)
+    )
+    for (const it of renderedItems) if (it.type === 'tool_result') resultByToolId.set(it.toolId, it)
+    // 체크리스트·묶음이 흡수한 자리와, 도구 카드 안으로 들어간 결과를 뺀 "실제로 놓이는" 항목들.
+    const placed = renderedItems.filter(
+      (it) => !hiddenItemIds.has(it.id) && !(it.type === 'tool_result' && uses.has(it.toolId))
+    )
+    const visible = placed.filter((it) =>
+      showsEntry(
+        density,
+        transcriptEntryKind(it, {
+          todoCard: cards.has(it.id),
+          toolGroupHead: groups.has(it.id)
+        })
       )
-      const hiddenItemIds = new Set([...taskHiddenIds, ...groupHiddenIds])
-      const resolvedIds = new Set<string>()
-      for (const it of renderedItems) if (it.type === 'tool_result') resolvedIds.add(it.toolId)
-      const resultByToolId = new Map<string, Extract<ChatItem, { type: 'tool_result' }>>()
-      const uses = new Set(
-        renderedItems.filter((it) => it.type === 'tool_use').map((it) => it.toolId)
-      )
-      for (const it of renderedItems)
-        if (it.type === 'tool_result') resultByToolId.set(it.toolId, it)
-      return {
-        cardByItemId: cards,
-        groupByItemId: groups,
-        resolved: resolvedIds,
-        results: resultByToolId,
-        // 진행 중 스피너는 마지막 카드에만 붙인다 — 앞선 카드들은 이미 지나간 스냅샷이라,
-        // 전부 돌면 어떤 것이 지금 상태인지 알 수 없게 된다.
-        latestCardItemId: cards.size ? Array.from(cards.keys())[cards.size - 1] : undefined,
-        visibleItems: hiddenItemIds.size
-          ? renderedItems.filter(
-              (it) =>
-                !hiddenItemIds.has(it.id) && !(it.type === 'tool_result' && uses.has(it.toolId))
-            )
-          : renderedItems.filter((it) => !(it.type === 'tool_result' && uses.has(it.toolId)))
-      }
-    }, [renderedItems])
+    )
+    return {
+      cardByItemId: cards,
+      groupByItemId: groups,
+      resolved: resolvedIds,
+      results: resultByToolId,
+      // 진행 중 스피너는 마지막 카드에만 붙인다 — 앞선 카드들은 이미 지나간 스냅샷이라,
+      // 전부 돌면 어떤 것이 지금 상태인지 알 수 없게 된다.
+      latestCardItemId: cards.size ? Array.from(cards.keys())[cards.size - 1] : undefined,
+      visibleItems: visible,
+      // Summary 가 몇 걸음을 접었는지. 아무것도 안 남은 화면을 고장으로 오해하지 않도록
+      // 목록 끝에 한 줄로 알린다.
+      hiddenByDensity: placed.length - visible.length
+    }
+  }, [renderedItems, density])
 
   // ── 대화 내 검색(⌘F) ─────────────────────────────────────────────────────
   const matches = useMemo(() => {
@@ -562,11 +588,17 @@ export default function MessageList({
                 latestCardItemId={latestCardItemId}
                 result={item.type === 'tool_use' ? results.get(item.toolId) : undefined}
                 results={results}
-                toolVerbose={toolVerbose}
+                density={density}
                 toolLogStyle={toolLogStyle}
               />
             </div>
           ))}
+          {density === 'summary' && hiddenByDensity > 0 && (
+            <div className="text-center text-xs text-neutral-600">
+              Summary hides {hiddenByDensity} step{hiddenByDensity === 1 ? '' : 's'} —{' '}
+              {DENSITY_SHORTCUT} for Normal
+            </div>
+          )}
           <div ref={bottomRef} />
         </SelectionCopyBubble>
       </div>
@@ -593,7 +625,7 @@ function Item({
   latestCardItemId,
   result,
   results,
-  toolVerbose,
+  density,
   toolLogStyle
 }: {
   item: ChatItem
@@ -608,10 +640,13 @@ function Item({
   latestCardItemId?: string
   result?: Extract<ChatItem, { type: 'tool_result' }>
   results: ReadonlyMap<string, Extract<ChatItem, { type: 'tool_result' }>>
-  toolVerbose: boolean
+  density: TranscriptDensity
   toolLogStyle: 'wooi' | 'terminal'
 }): React.JSX.Element | null {
   const time = formatTime(item.ts)
+  // 밀도는 여기서 딱 두 가지로 번역된다 — 도구 출력을 펴 둘지, 인라인 diff 를 붙일지.
+  // 무엇을 아예 그리지 않을지는 이미 목록 단계에서 걸러져 여기까지 오지 않는다.
+  const toolVerbose = expandsToolOutput(density)
 
   // 할 일 도구 호출 구간은 원래의 도구 행 대신 체크리스트 카드 한 장으로 대체한다.
   const card = cardByItemId.get(item.id)
@@ -669,7 +704,7 @@ function Item({
           style={toolLogStyle}
           verbose={toolVerbose}
         >
-          {item.diff && (
+          {item.diff && showsInlineDiff(density) && (
             <pre className="ml-4 mt-1 max-h-72 overflow-auto rounded-md bg-[var(--code-bg)] py-1 text-xs font-mono leading-[1.45]">
               {item.diff.split('\n').map((line, i) => (
                 <DiffLine key={i} line={line} />
@@ -962,9 +997,7 @@ function BashBlock({
           </pre>
           {folded.omitted > 0 && (
             <span className="block border-t border-[var(--border)] px-2.5 py-1 text-xs text-neutral-600 hover:text-neutral-400">
-              {expanded
-                ? 'Collapse output'
-                : `Show full output (${TOOL_VERBOSE_SHORTCUT} to expand)`}
+              {expanded ? 'Collapse output' : `Show full output (${DENSITY_SHORTCUT} to expand)`}
             </span>
           )}
         </button>
