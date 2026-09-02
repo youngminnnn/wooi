@@ -459,6 +459,16 @@ function GeneralPage({
             onChange={(value) => save({ keepAwakeWhileRunning: value })}
           />
         </SettingRow>
+        <SettingRow
+          title="Continue unfinished turns after a restart"
+          description="Resume turns interrupted by a quit, crash, or app update when Wooi reopens."
+        >
+          <Switch
+            label="Continue unfinished turns after a restart"
+            checked={settings.resumeUnfinishedTurnsOnLaunch}
+            onChange={(value) => save({ resumeUnfinishedTurnsOnLaunch: value })}
+          />
+        </SettingRow>
       </SettingGroup>
       <SettingGroup title="Confirmations">
         {CONFIRM_SKIP_KEYS.map((key) => (

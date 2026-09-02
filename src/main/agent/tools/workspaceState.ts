@@ -62,6 +62,14 @@ export function describeWorkspaceActivity(ws: Workspace, now = Date.now()): Work
     }
   }
 
+  if (ws.pendingShutdownResume) {
+    return {
+      ...base,
+      state: 'idle',
+      note: 'The previous turn was interrupted by shutdown and is waiting for a message to continue.'
+    }
+  }
+
   const rateLimit = activeRateLimitPause(ws.rateLimited, now)
   if (ws.pendingRateLimitResume || rateLimit) {
     // 자동 재개 예약이 있으면 그쪽이 더 많은 것을 말해 준다 — 사이드바도 같은 순서로 고른다.

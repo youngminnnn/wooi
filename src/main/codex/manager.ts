@@ -22,6 +22,7 @@ import { durationLabel } from './rateLimits'
 import { CodexSkillsCache, mergeSkillCommands } from './skills'
 import type { SkillsListResponse } from './wire'
 import { RateLimitResumeCoordinator } from '../rateLimitResume'
+import { ShutdownResumeCoordinator } from '../shutdownResume'
 import { type RemotePushKind } from '../remote/push'
 import { showDesktopNotification } from '../notifications'
 import {
@@ -167,6 +168,7 @@ export class CodexSessionManager implements AgentBackend {
   >()
   private validModelIds: Set<string> | null = null
   private readonly rateLimitResume: RateLimitResumeCoordinator
+  private readonly shutdownResume: ShutdownResumeCoordinator
   /** 자동완성 hot path 는 이 캐시만 읽는다. app-server 의 skills/changed 알림만 이를 비운다. */
   private readonly skills = new CodexSkillsCache(async (cwd) => {
     const response = await this.request<SkillsListResponse>((reqId) => ({
@@ -199,7 +201,15 @@ export class CodexSessionManager implements AgentBackend {
       isOnline: () => net.isOnline(),
       broadcastState: () => this.dispatch(IPC.evtState, getStore().getState())
     })
+    this.shutdownResume = new ShutdownResumeCoordinator({
+      backend: CODEX_META.id,
+      sendContinuation: (workspaceId, text) => this.sendContinuation(workspaceId, text),
+      emitItem: (workspaceId, item) =>
+        this.dispatch(IPC.evtChat, { workspaceId, event: { type: 'item', item } }),
+      broadcastState: () => this.dispatch(IPC.evtState, getStore().getState())
+    })
     this.rateLimitResume.restore()
+    this.shutdownResume.restore()
   }
 
   // ── 호스트 프로세스 ──────────────────────────────────────────────────────
@@ -417,6 +427,7 @@ export class CodexSessionManager implements AgentBackend {
     opts?: SendMessageOptions
   ): void {
     this.rateLimitResume.cancel(workspaceId)
+    this.shutdownResume.cancel(workspaceId)
     const ws = this.getWorkspace(workspaceId)
     if (!ws) return
 
@@ -512,6 +523,7 @@ export class CodexSessionManager implements AgentBackend {
 
   async interrupt(workspaceId: string): Promise<void> {
     this.rateLimitResume.cancel(workspaceId, true)
+    this.shutdownResume.cancel(workspaceId)
     this.sendIfHost({ type: 'interrupt', workspaceId })
     // 위임 서브런은 세션이 아니라 메인에서 돈다 — 스레드 인터럽트로는 끊기지 않으므로 여기서 끊는다.
     abortSubAgents(workspaceId)
@@ -645,6 +657,7 @@ export class CodexSessionManager implements AgentBackend {
    */
   clearSession(workspaceId: string): void {
     this.rateLimitResume.cancel(workspaceId)
+    this.shutdownResume.cancel(workspaceId)
     this.dispose(workspaceId)
     getStore().update((st) => {
       const w = st.workspaces.find((x) => x.id === workspaceId)
@@ -678,6 +691,10 @@ export class CodexSessionManager implements AgentBackend {
 
   cancelAllRateLimitResumes(): void {
     this.rateLimitResume.cancelAll()
+  }
+
+  cancelAllShutdownResumes(): void {
+    this.shutdownResume.cancelAll()
   }
 
   disposeAll(): void {

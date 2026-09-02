@@ -132,6 +132,7 @@ export default function Sidebar({
       !w.archived &&
       (w.status === 'running' ||
         Boolean(w.pendingRateLimitResume) ||
+        Boolean(w.pendingShutdownResume) ||
         Boolean(w.rateLimited) ||
         Boolean(w.awaitingStackedWork))
   )
@@ -839,6 +840,7 @@ function WorkspaceRow({
             stale={stale}
             runningMs={runningMs}
             pendingRateLimitResume={workspace.pendingRateLimitResume}
+            pendingShutdownResume={workspace.pendingShutdownResume}
             awaitingStackedWork={workspace.awaitingStackedWork}
             rateLimited={rateLimited}
             backgroundTasks={backgroundTasks}
@@ -945,7 +947,14 @@ function WorkspaceRow({
               </span>
             )}
             <CacheTimer workspace={workspace} dot />
-            {workspace.pendingRateLimitResume ? (
+            {workspace.pendingShutdownResume ? (
+              <span
+                className="text-[var(--warning-400)]/90 shrink-0"
+                title="Interrupted by shutdown"
+              >
+                · interrupted by shutdown — send a message to continue
+              </span>
+            ) : workspace.pendingRateLimitResume ? (
               <span
                 className="text-[var(--warning-400)]/90 shrink-0 tabular-nums"
                 title={resumeTitle(workspace.pendingRateLimitResume)}

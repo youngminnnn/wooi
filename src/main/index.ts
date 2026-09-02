@@ -32,12 +32,17 @@ import { disposeSleepBlocker, initSleepBlocker, noteSleepBlockerEvent } from './
 import type { AppState, ChatEvent, PermissionRequest } from '@shared/types'
 import { log } from './logger'
 import { hydrateEnvFromLoginShell } from './env'
-import { initUpdater } from './updater'
+import { initUpdater, isInstallingUpdate } from './updater'
+import { captureRunningTurns } from './shutdownResume'
 import { initNotice } from './notice'
 import { initFeatures } from './features'
 import { initPreview } from './preview'
 
 let mainWindow: BrowserWindow | null = null
+
+function reasonForQuit(): 'update' | 'quit' {
+  return isInstallingUpdate() ? 'update' : 'quit'
+}
 
 // dev 실행이 설치된 앱의 설정·워크스페이스·트랜스크립트를 건드리지 않도록 userData 를 먼저
 // 옮긴다([[paths]]). 아래 WOOI_USER_DATA 캡처보다, 그리고 store/transcripts(lazy 싱글턴)가
@@ -362,6 +367,9 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   void disposeRemote()
+  // 세션을 먼저 내리면 어느 턴이 실행 중이었는지 사라진다. 또 Store.update 는 디바운스되므로
+  // 아래 flushStore 보다 반드시 먼저 기록해야 이번 종료에서 디스크까지 내려간다.
+  captureRunningTurns(reasonForQuit())
   sessions.disposeAll()
   scripts.disposeAll()
   terminals.disposeAll()

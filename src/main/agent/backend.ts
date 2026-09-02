@@ -95,6 +95,7 @@ export interface AgentBackend {
   recycleAll(): void
   /** 설정 해제·계정 변경 시 이 백엔드의 예약된 자동 재개를 모두 취소한다. */
   cancelAllRateLimitResumes?(): void
+  cancelAllShutdownResumes?(): void
   /**
    * 모델 선택지. 정적(Claude)일 수도, 백엔드에 질의(Codex 의 model/list)할 수도 있다.
    *

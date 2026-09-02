@@ -248,14 +248,21 @@ export class AgentOrchestrator {
 
   // ── 핵심 (모든 백엔드 위임) ──────────────────────────────────────────────
 
-  /** 저장된 Codex 워크스페이스가 있으면 app-server 를 백그라운드에서 미리 준비한다. */
+  /**
+   * 기동 직후의 준비 작업.
+   *
+   * 이어가기 예약(rate limit·종료 중단)을 든 워크스페이스의 백엔드를 먼저 인스턴스화한다 —
+   * 매니저 생성자가 restore() 를 부르므로, 여기서 깨우지 않으면 예약이 영원히 잠든 채 남는다.
+   * 그다음 저장된 Codex 워크스페이스가 있으면 app-server 를 백그라운드에서 미리 준비한다.
+   */
   prewarm(): void {
     const pendingBackends = new Set(
       getStore()
         .getState()
-        .workspaces.flatMap((workspace) =>
-          workspace.pendingRateLimitResume ? [workspace.pendingRateLimitResume.backend] : []
-        )
+        .workspaces.flatMap((workspace) => [
+          ...(workspace.pendingRateLimitResume ? [workspace.pendingRateLimitResume.backend] : []),
+          ...(workspace.pendingShutdownResume ? [workspace.pendingShutdownResume.backend] : [])
+        ])
     )
     for (const backend of pendingBackends) this.get(backend)
     const hasCodexWorkspace = getStore()
@@ -524,6 +531,14 @@ export class AgentOrchestrator {
     // 아직 인스턴스화되지 않은 backend의 영속 예약도 함께 제거한다.
     getStore().update((state) => {
       for (const ws of state.workspaces) ws.pendingRateLimitResume = null
+    })
+  }
+
+  cancelAllShutdownResumes(): void {
+    for (const backend of this.backends.values()) backend.cancelAllShutdownResumes?.()
+    // 아직 인스턴스화되지 않은 backend의 영속 예약도 함께 제거한다.
+    getStore().update((state) => {
+      for (const ws of state.workspaces) ws.pendingShutdownResume = null
     })
   }
 

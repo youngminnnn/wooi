@@ -648,6 +648,7 @@ function OverviewCard({
     stale,
     runningMs,
     pendingRateLimitResume: workspace.pendingRateLimitResume,
+    pendingShutdownResume: workspace.pendingShutdownResume,
     awaitingStackedWork: workspace.awaitingStackedWork,
     rateLimited,
     backgroundTasks,

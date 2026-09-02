@@ -106,6 +106,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   autoCompact: true,
   // 자동 실행은 명시적인 opt-in 이어야 한다. 출시 공지와 설정에서 사용자가 직접 켠다.
   autoResumeAfterRateLimit: false,
+  // 사용자가 이미 시작한 턴을 종료 뒤 잇는 것이므로, 새 작업을 여는 레이트리밋 자동 재개와 달리
+  // 기본으로 켠다. 옛 파일도 기본값 병합으로 이 값을 받으므로 schemaVersion 은 올리지 않는다.
+  resumeUnfinishedTurnsOnLaunch: true,
   // 충돌 해결 턴은 토큰을 쓰므로 기본은 꺼짐 — 기존 사용자도 load 의 기본값 병합으로 false 가
   // 되므로 schemaVersion 을 올릴 필요가 없다.
   autoResolveConflicts: false,

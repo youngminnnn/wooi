@@ -22,6 +22,7 @@ import { agentDefaultEnv } from '../agentEnv'
 import { claudeMode, type HostCommand, type HostEvent, type SessionConfig } from './protocol'
 import { runAgentTool } from '../agent/tools'
 import { RateLimitResumeCoordinator } from '../rateLimitResume'
+import { ShutdownResumeCoordinator } from '../shutdownResume'
 import { type RemotePushKind } from '../remote/push'
 import { showDesktopNotification } from '../notifications'
 import { nameFromPlan, shouldAutoName } from './planName'
@@ -104,6 +105,7 @@ export class SessionManager implements AgentBackend {
   private rateLimitDebounce: ReturnType<typeof setTimeout> | null = null
   private rateLimitPoll: ReturnType<typeof setInterval> | null = null
   private readonly rateLimitResume: RateLimitResumeCoordinator
+  private readonly shutdownResume: ShutdownResumeCoordinator
 
   constructor(
     private dispatch: Dispatch,
@@ -120,7 +122,15 @@ export class SessionManager implements AgentBackend {
       isOnline: () => net.isOnline(),
       broadcastState: () => this.dispatch(IPC.evtState, getStore().getState())
     })
+    this.shutdownResume = new ShutdownResumeCoordinator({
+      backend: CLAUDE_META.id,
+      sendContinuation: (workspaceId, text) => this.sendContinuation(workspaceId, text),
+      emitItem: (workspaceId, item) =>
+        this.dispatch(IPC.evtChat, { workspaceId, event: { type: 'item', item } }),
+      broadcastState: () => this.dispatch(IPC.evtState, getStore().getState())
+    })
     this.rateLimitResume.restore()
+    this.shutdownResume.restore()
   }
 
   // ── 호스트 프로세스 ──────────────────────────────────────────────────────
@@ -398,6 +408,7 @@ export class SessionManager implements AgentBackend {
     opts?: SendMessageOptions
   ): void {
     this.rateLimitResume.cancel(workspaceId)
+    this.shutdownResume.cancel(workspaceId)
     const ws = this.getWorkspace(workspaceId)
     if (!ws) return
     this.send({
@@ -495,6 +506,7 @@ export class SessionManager implements AgentBackend {
    */
   clearSession(workspaceId: string): void {
     this.rateLimitResume.cancel(workspaceId)
+    this.shutdownResume.cancel(workspaceId)
     this.dispose(workspaceId)
     getStore().update((st) => {
       const w = st.workspaces.find((x) => x.id === workspaceId)
@@ -536,6 +548,7 @@ export class SessionManager implements AgentBackend {
 
   async interrupt(workspaceId: string): Promise<void> {
     this.rateLimitResume.cancel(workspaceId, true)
+    this.shutdownResume.cancel(workspaceId)
     this.sendIfHost({ type: 'interrupt', workspaceId })
     // 세션이 없거나 끊긴 경우에도 사이드바가 '진행 중'에 갇히지 않도록 idle 로 확정한다.
     this.forceIdle(workspaceId)
@@ -684,6 +697,10 @@ export class SessionManager implements AgentBackend {
 
   cancelAllRateLimitResumes(): void {
     this.rateLimitResume.cancelAll()
+  }
+
+  cancelAllShutdownResumes(): void {
+    this.shutdownResume.cancelAll()
   }
 
   disposeAll(): void {
