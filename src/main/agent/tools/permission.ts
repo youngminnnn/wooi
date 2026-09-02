@@ -101,9 +101,10 @@ function needsApproval(workspace: Workspace, tool: string): boolean {
 export async function ensureToolApproved(
   workspace: Workspace,
   tool: string,
-  args: unknown
+  args: unknown,
+  options?: { always?: boolean }
 ): Promise<void> {
-  if (!needsApproval(workspace, tool)) return
+  if (!options?.always && !needsApproval(workspace, tool)) return
   if (!deps) throw new Error('Wooi cannot ask for permission right now.')
 
   const requestId = randomUUID()
@@ -190,7 +191,8 @@ const TOOL_LABELS: Record<string, string> = {
   create_workspace: 'Create a workspace',
   archive_workspace: 'Archive a workspace',
   set_workspace_name: 'Set the workspace name',
-  switch_to_agent_team: 'Switch to an agent team'
+  switch_to_agent_team: 'Switch to an agent team',
+  switch_workspace_agent: 'Switch the workspace agent'
 }
 
 /** 카드가 지목된 대상을 이름으로 부를 수 있게 한다. 못 찾으면 핸들러가 어차피 거절한다. */
@@ -297,6 +299,16 @@ function titleFor(tool: string, args: unknown, workspace: Workspace): string {
       'The agent wants to turn this Solo workspace into an agent team — it could then run ' +
       `subagents on other agent products, and ${workspaceDisplayName(workspace)} stays a team ` +
       `until you switch it back.${reason}`
+    )
+  }
+  if (tool === 'switch_workspace_agent') {
+    const target = typeof a.agentBackend === 'string' ? a.agentBackend : 'another agent'
+    const label = AGENT_BACKEND_LABELS[target as AgentBackendId] ?? target
+    const reason =
+      typeof a.reason === 'string' && a.reason.trim() ? ` It says: ${a.reason.trim()}` : ''
+    return (
+      `The agent wants to hand this workspace over to ${label}. The current conversation will ` +
+      `be compressed into a checkpoint and billed as input to the new agent.${reason}`
     )
   }
   if (tool === 'report_to_parent') {

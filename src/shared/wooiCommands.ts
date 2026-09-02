@@ -238,6 +238,21 @@ export const WOOI_COMMANDS: WooiCommandSpec[] = [
     ].join('\n')
   },
   {
+    name: 'agent',
+    tool: 'switch_workspace_agent',
+    mode: 'agent',
+    description: 'Hand this workspace over to another agent',
+    argumentHint: '<claude|codex> [reason]',
+    prompt: [
+      'Hand this workspace over by calling `mcp__wooi__switch_workspace_agent`.',
+      'Parse the first word below as `agentBackend` and the remainder as `reason`.',
+      'The user must approve the card. After approval, finish this turn immediately; Wooi starts',
+      'the new agent automatically with a compact checkpoint, so do not ask the user to reply.',
+      '',
+      'Requested agent and reason: $ARGUMENTS'
+    ].join('\n')
+  },
+  {
     name: 'children',
     tool: 'check_stacked_work',
     mode: 'direct',

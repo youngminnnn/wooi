@@ -1214,7 +1214,7 @@ export function registerIpc(ctx: IpcContext): void {
       if (needsHandoff && !opts?.handoff) {
         return {
           error:
-            'This conversation has already started — switching agents replays it to the new agent. Confirm the switch to continue.'
+            'This conversation has already started — switching agents sends a compact workspace checkpoint to the new agent. Confirm the switch to continue.'
         }
       }
 
@@ -1277,7 +1277,7 @@ export function registerIpc(ctx: IpcContext): void {
         const item: ChatItem = {
           id: `system:agent-switch:${Date.now()}`,
           type: 'system',
-          text: `Switched to ${target.label}. The conversation above goes with your next message (${formatHandoffTokens(estimateHandoffTokens(handoffPrompt))} tokens of input) — it can’t see any of it until then.`,
+          text: `Switched to ${target.label}. A compact workspace checkpoint goes with your next message (${formatHandoffTokens(estimateHandoffTokens(handoffPrompt))} tokens of input) — it can’t see any of it until then.`,
           ts: Date.now()
         }
         getTranscripts().upsert(workspaceId, item)
