@@ -8,6 +8,8 @@ import { openInEditor } from './openInEditor'
 import { memoryFile } from './claude/memory'
 import { getStore } from './store'
 import { getRemoteBridge } from './remote'
+import { pendingPermissions } from './remote/permissions'
+import { isStayingAlive } from './backgroundMode'
 import { lastNotificationSkip, setViewingWorkspace } from './notifications'
 import { rememberPrStatus } from './prStatusCache'
 import { forgetContextUsage } from './contextUsageCache'
@@ -193,6 +195,7 @@ import type {
   PendingPeerMessage,
   PeerInboundPolicy,
   PermissionMode,
+  PermissionRequest,
   PrMergeMethod,
   Repo,
   RestackResult,
@@ -1481,6 +1484,16 @@ export function registerIpc(ctx: IpcContext): void {
     // 대기 목록을 정리하므로(index.ts 의 mirrorToRemote), 정리 경로가 하나로 합쳐진다.
     dispatch(IPC.evtPermissionCancel, requestId)
   })
+
+  /**
+   * 지금 답을 기다리는 승인 요청 전부.
+   *
+   * 렌더러의 목록은 라이브 이벤트로만 차기 때문에(store.ts 의 onPermission), 창이 없던 동안
+   * 올라온 요청은 창을 다시 열어도 보이지 않는다 — 그 사이 호스트는 아무도 답하지 않을
+   * 프로미스에 매달린다. 목록은 폰이 쓰는 것을 그대로 재사용한다([[remote/permissions]]) —
+   * 같은 질문에 두 개의 답을 두지 않는다.
+   */
+  handle(IPC.permissionPending, (): PermissionRequest[] => pendingPermissions.list())
 
   // ── 스크립트 ───────────────────────────────────────────────────────────
 
@@ -2879,6 +2892,10 @@ export function registerIpc(ctx: IpcContext): void {
   // 앱을 닫을 때는 **워크트리만** 정리한다. 리뷰 레코드·ref·사이드카를 지우면 다음 실행에
   // 리뷰가 통째로 사라져 영속화가 무의미해진다(ref 를 남겨야 오프라인에서도 복원된다).
   app.on('before-quit', () => {
+    // 종료가 막혔으면(백그라운드 모드) 리뷰는 계속 돌아야 한다. Electron 은 preventDefault 와
+    // 무관하게 모든 before-quit 리스너를 실행하므로, 여기서 직접 물어보지 않으면 살아 있어야 할
+    // 워크트리를 지운다([[main/backgroundMode]]).
+    if (isStayingAlive()) return
     void reviewManager.disposeWorktreesOnQuit()
   })
 

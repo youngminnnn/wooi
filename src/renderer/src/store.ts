@@ -1367,6 +1367,18 @@ export const useStore = create<UIState>((set, get) => ({
     void get().refreshAuth()
     void get().refreshAgents()
 
+    // 대기 중인 승인은 라이브 이벤트로만 오므로, 창이 없던 동안(백그라운드 모드) 올라온 요청은
+    // 여기서 씨를 뿌리지 않으면 영영 보이지 않는다 — 그 턴은 아무도 답하지 않은 채 멈춰 있다.
+    // 그 사이 도착한 라이브 이벤트를 덮지 않도록 requestId 로 합친다.
+    void window.api.permission.pending().then((pending) => {
+      if (!pending.length) return
+      set((s) => {
+        const known = new Set(s.permissions.map((p) => p.requestId))
+        const missing = pending.filter((p) => !known.has(p.requestId))
+        return missing.length ? { permissions: [...s.permissions, ...missing] } : s
+      })
+    })
+
     // 최초 진입 시 모든 워크트리의 git 상태를 한 번 받아오고(진입 전에도 사이드바에 노출),
     // 이후 일정 간격으로 폴링해 백그라운드에서 변한 변경 파일 수·ahead/behind 를 최신으로 유지한다.
     void get().refreshAllGit(true)

@@ -25,5 +25,11 @@ export const CONFIRM_SKIP_LABELS: Record<
     description:
       'Discarding rewrites the file in the working tree. Commits are untouched, but the discarded lines are gone.',
     action: 'discarding a hunk'
+  },
+  keepWorkingInBackground: {
+    title: 'Ask before quitting while work is running',
+    description:
+      'Quitting with work in progress offers to keep it running from the menu bar instead.',
+    action: 'quitting while work is running'
   }
 }

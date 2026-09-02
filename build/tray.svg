@@ -1,0 +1,24 @@
+<!--
+  메뉴 막대(Tray)용 템플릿 아이콘. `icon.svg` 의 워드마크에서 배경·그라데이션을 걷어내고
+  획만 남긴 것이라, 두 아이콘은 같은 그림이다.
+
+  macOS 템플릿 이미지 규칙: 색은 전부 검정 + 알파여야 한다. 시스템이 알파만 읽어 밝은/어두운
+  메뉴 막대에 맞춰 다시 칠하므로, 여기에 색을 넣으면 다크 모드에서 보이지 않는다.
+
+  획 두께는 원본의 58 이 아니라 76 이다 — 16pt 로 줄이면 58 은 1.5px 도 되지 않아 흐려진다.
+  viewBox 는 그 굵어진 획까지 감싸는 최소 사각형이다.
+
+  렌더:
+    rsvg-convert -w 20 -h 16 build/tray.svg -o build/trayTemplate.png
+    rsvg-convert -w 40 -h 32 build/tray.svg -o build/trayTemplate@2x.png
+-->
+<svg width="736" height="589" viewBox="144 226 736 589" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- 우 -->
+  <circle cx="322" cy="366" r="102" fill="none" stroke="#000000" stroke-width="76" />
+  <path d="M182 584 H 462" fill="none" stroke="#000000" stroke-width="76" stroke-linecap="round" />
+  <path d="M322 584 V 754" fill="none" stroke="#000000" stroke-width="76" stroke-linecap="round" />
+
+  <!-- 이 -->
+  <circle cx="650" cy="562" r="102" fill="none" stroke="#000000" stroke-width="76" />
+  <path d="M842 350 V 774" fill="none" stroke="#000000" stroke-width="76" stroke-linecap="round" />
+</svg>

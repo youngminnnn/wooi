@@ -4,7 +4,7 @@ import { app, BrowserWindow, ipcMain, Notification, powerMonitor } from 'electro
 import electronUpdater from 'electron-updater'
 import { IPC, RESTART_SETTLE_MS, type UpdateStatus } from '@shared/types'
 import { log } from './logger'
-import { getStore } from './store'
+import { busyWorkCount } from './busyWork'
 
 const { autoUpdater } = electronUpdater
 
@@ -50,8 +50,35 @@ let notifiedAt = 0
 /** quitAndInstall 이 시작한 종료인지 before-quit 에 동기적으로 알려 주는 휘발성 표식. */
 let installing = false
 
+/**
+ * quitAndInstall 이 실제로 프로세스를 끝내기까지 기다리는 시간. 넘기면 표식을 되돌린다.
+ *
+ * 이 표식은 종료 가드도 함께 본다([[main/backgroundMode]]) — 업데이트 설치는 창을 다 닫은
+ * 뒤에 종료를 쏘므로 막으면 안 되기 때문이다. 그래서 설치가 실패해 프로세스가 살아남으면
+ * (읽기 전용 볼륨·서명 오류처럼 quitAndInstall 이 조용히 아무것도 안 하는 경우) 표식이 켜진
+ * 채 굳고, 그 순간부터 백그라운드 모드는 **영구히** 꺼진다.
+ *
+ * 그래서 되돌린다. 반대 위험(되돌린 직후에 뒤늦게 종료가 시작되어 백그라운드 가드가 그 종료를
+ * 막는 것)은 감수한다 — 그 경우 앱은 남고 업데이트는 다음 실행에서 autoInstallOnAppQuit 이
+ * 다시 시도하지만, 굳는 쪽은 아무도 눈치채지 못한 채 기능 하나가 통째로 사라진다.
+ */
+const INSTALL_WATCHDOG_MS = 60_000
+
 export function isInstallingUpdate(): boolean {
   return installing
+}
+
+/** 표식을 세우고 설치를 시작한다. quitAndInstall 호출 자리는 반드시 이 함수를 거친다. */
+function beginInstall(): void {
+  // macOS 네이티브 종료가 시작되기 전에 표식을 세워 before-quit 이 원인을 잃지 않게 한다.
+  installing = true
+  const watchdog = setTimeout(() => {
+    if (!installing) return
+    installing = false
+    log.warn('updater: quitAndInstall did not quit the app — clearing the installing flag')
+  }, INSTALL_WATCHDOG_MS)
+  watchdog.unref?.()
+  setImmediate(() => autoUpdater.quitAndInstall(false, true))
 }
 
 /**
@@ -82,22 +109,6 @@ function readOnlyInstallReason(): string | null {
     return `Wooi can’t update itself because its install location is read-only (${bundle}). Move Wooi.app to your Applications folder and open it from there.`
   }
   return null
-}
-
-/**
- * 지금 "끝나기를 기다려야 하는" 작업 수 — 예약 재시작의 발동 조건.
- *
- * 세는 것: 진행 중인 에이전트 턴(workspace.status === 'running')과 진행 중인 PR 리뷰.
- * 세지 않는 것: 스크립트(dev 서버)와 터미널. 사용자가 직접 띄운 장기 실행 프로세스라
- * 끝날 일이 없고, 이것까지 기다리면 예약이 영원히 발동하지 않는다.
- */
-function busyWorkCount(): number {
-  const state = getStore().getState()
-  const turns = state.workspaces.filter((w) => !w.archived && w.status === 'running').length
-  const reviews = state.reviews.filter(
-    (r) => r.status === 'running' || r.status === 'preparing'
-  ).length
-  return turns + reviews
 }
 
 /** 살아 있는 메인 창(없으면 undefined). */
@@ -196,10 +207,9 @@ export function initUpdater(dispatch: (channel: string, payload: unknown) => voi
     stopIdleWatch()
     restartWhenIdle = false
     log.info('updater: installing scheduled update now')
-    // macOS quitAndInstall 은 창을 모두 닫은 뒤 앱을 종료한다. setImmediate 앞에서 표식을 세워야
+    // macOS quitAndInstall 은 창을 모두 닫은 뒤 앱을 종료한다. 표식은 그보다 먼저 서야
     // before-quit 이 이 종료를 일반 quit 이 아니라 update 로 기록할 수 있다.
-    installing = true
-    setImmediate(() => autoUpdater.quitAndInstall(false, true))
+    beginInstall()
   }
 
   // 설치 위치 판정은 실행 중 바뀌지 않으므로 한 번만 계산해 둔다.
@@ -250,9 +260,7 @@ export function initUpdater(dispatch: (channel: string, payload: unknown) => voi
     stopIdleWatch()
     restartWhenIdle = false
     // isSilent=false(설치 마법사 표시 안 함, mac 은 무의미), forceRunAfter=true(설치 후 재실행)
-    // macOS 네이티브 종료가 시작되기 전에 표식을 세워 before-quit 이 원인을 잃지 않게 한다.
-    installing = true
-    setImmediate(() => autoUpdater.quitAndInstall(false, true))
+    beginInstall()
   })
 
   // "작업이 다 끝나면 재시작" 예약을 걸거나 해제한다. 판정은 폴링이므로 예약이 걸려 있는 동안만

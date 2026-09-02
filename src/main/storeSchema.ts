@@ -116,6 +116,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
   // 흔한 손실이고, 화면을 켜 두지 않으므로 비용이 작다. 기존 사용자도 load 의 기본값 병합으로
   // true 가 되므로 schemaVersion 을 올릴 필요가 없다.
   keepAwakeWhileRunning: true,
+  // 백그라운드 계속하기도 기본 켜짐 — ⌘Q 한 번에 도는 턴이 사라지는 것이 수면과 같은 종류의
+  // 손실이다. 실제 종료 여부는 확인 다이얼로그에서 사용자가 고르고, 기존 사용자도 load 의
+  // 기본값 병합으로 true 가 되므로 schemaVersion 을 올릴 필요가 없다.
+  keepWorkingInBackground: true,
   // 아무 확인도 꺼져 있지 않은 상태로 시작한다. 기존 사용자도 load 의 기본값 병합으로 빈
   // 객체가 되므로 schemaVersion 을 올릴 필요가 없다.
   confirmSkips: {},
