@@ -375,7 +375,8 @@ export default function Sidebar({
             >
               <div
                 {...repoDnd.handleProps(repo.id)}
-                className={`group flex items-center gap-1.5 px-2 py-1.5 rounded-md cursor-grab active:cursor-grabbing transition-colors ${
+                data-repo-header
+                className={`group scroll-mt-10 flex items-center gap-1.5 px-2 py-1.5 rounded-md cursor-grab active:cursor-grabbing transition-colors ${
                   highlightedRepoId === repo.id
                     ? 'bg-[var(--surface-2)] ring-1 ring-inset ring-[var(--info-500)]/60'
                     : ''
@@ -1648,7 +1649,7 @@ function NewWorkspaceButton({
       // 먼저 앵커를 화면 안으로 가져온 뒤 다음 프레임에서 좌표를 읽는다. 메뉴를 먼저 열면
       // RowActionsMenu 의 scroll-close 규칙 때문에 스크롤 순간 닫히고, 예전 좌표를 읽으면 메뉴가
       // 화면 가장자리에 대상과 떨어져 나타난다.
-      buttonRef.current?.scrollIntoView({ block: 'nearest' })
+      buttonRef.current?.closest('[data-repo-header]')?.scrollIntoView({ block: 'nearest' })
       if (frame !== undefined) window.cancelAnimationFrame(frame)
       frame = window.requestAnimationFrame(openMenu)
     }
