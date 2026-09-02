@@ -1,4 +1,4 @@
-import type { ChatEvent, ChatItem, PermissionRequest } from '@shared/types'
+import type { ChatEvent, ChatItem, PermissionRequest, RunningAgent } from '@shared/types'
 import { basename, extname } from 'node:path'
 import { clampText } from '../claude/clamp'
 import { NOTIFY, type CodexDecision, type FileUpdateChange, type ThreadItem } from './wire'
@@ -53,8 +53,8 @@ export interface MapperState {
   output: Map<string, string>
   /** codex itemId → 그 명령 카드의 마지막 스냅샷(출력 외 필드 보존용). */
   command: Map<string, { command: string; cwd?: string; agent: boolean }>
-  /** 실행 중 Codex 서브에이전트. subAgentActivity 스냅샷을 sidebar 이벤트로 만든다. */
-  agents: Map<string, { taskId: string; agentType: string; description: string; startedAt: number }>
+  /** 실행 중 Codex 서브에이전트와 에이전트 셀 명령. sidebar 스냅샷의 정본이다. */
+  agents: Map<string, RunningAgent>
   /** 로컬에 즉시 표시한 사용자 입력. app-server echo 를 중복 표시하지 않기 위한 서명. */
   pendingUserEchoes: string[]
   /**
@@ -633,6 +633,7 @@ function mapCommandItem(
   ts: number
 ): Mapped {
   const key = item.id ?? id
+  const activityKey = `command:${key}`
   if (item.command) {
     const previous = state.command.get(key)
     state.command.set(key, {
@@ -644,6 +645,21 @@ function mapCommandItem(
     })
   }
   const meta = state.command.get(key)
+
+  let activityChanged: boolean
+  if (done || meta?.agent === false) {
+    activityChanged = state.agents.delete(activityKey)
+  } else {
+    const previous = state.agents.get(activityKey)
+    state.agents.set(activityKey, {
+      taskId: key,
+      taskType: 'bash',
+      agentType: 'bash',
+      description: meta?.command ?? item.command ?? 'Shell command',
+      startedAt: previous?.startedAt ?? ts
+    })
+    activityChanged = true
+  }
 
   // 확정 시엔 서버가 준 전체 출력이 정본이다. 진행 중엔 델타로 쌓아 온 버퍼를 쓴다.
   const output = done
@@ -666,7 +682,13 @@ function mapCommandItem(
   if (done) state.output.delete(key)
   if (done) state.command.delete(key)
 
-  return { events: [{ type: 'item', item: chat }], persist: done ? [chat] : [] }
+  return {
+    events: [
+      { type: 'item', item: chat },
+      ...(activityChanged ? [{ type: 'agents' as const, agents: [...state.agents.values()] }] : [])
+    ],
+    persist: done ? [chat] : []
+  }
 }
 
 function mapCommandOutput(params: DeltaParams, state: MapperState, ts: number): Mapped {
