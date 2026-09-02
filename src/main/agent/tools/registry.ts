@@ -90,6 +90,8 @@ export interface AgentToolDeps {
      * 문장이 자기 말풍선으로 쌓이면 안 되기 때문이다([[agent/backend]] sendMessage 의 silent).
      */
     resumeAfterTurn: (workspaceId: string, prompt: string) => void
+    /** 현재 턴이 끝나고 도구 결과가 돌아간 뒤 메인 에이전트 백엔드를 교체한다. */
+    switchAgentAfterTurn: (workspaceId: string, target: AgentBackendId) => void
   }
   terminals: { disposeWorkspace: (workspaceId: string) => void }
 }

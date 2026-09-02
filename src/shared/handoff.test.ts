@@ -29,9 +29,74 @@ describe('buildHandoffPrompt', () => {
   it('대화를 순서대로 담고 넘겨주는 에이전트 이름을 붙인다', () => {
     const prompt = build([user('add a login button'), agent('done — edited Login.tsx')])!
     expect(prompt.indexOf('add a login button')).toBeLessThan(prompt.indexOf('done — edited'))
-    expect(prompt).toContain('## User')
-    expect(prompt).toContain('## Claude Code')
+    expect(prompt).toContain('## Goal and recent user intent')
+    expect(prompt).toContain('## Progress and decisions reported by Claude Code')
     expect(prompt).toContain('taking over this workspace from Claude Code')
+  })
+
+  it('대화 원문 대신 목표와 진행 상황을 구조화한 체크포인트를 만든다', () => {
+    const prompt = build([user('add a login button'), agent('done — edited Login.tsx')])!
+    expect(prompt).toContain('## Goal and recent user intent')
+    expect(prompt).toContain('## Progress and decisions reported by Claude Code')
+    expect(prompt).toContain('===== Workspace checkpoint =====')
+    expect(prompt).not.toContain('===== Conversation so far')
+  })
+
+  it('변경 파일과 검증 명령을 별도 섹션으로 보존한다', () => {
+    const items: ChatItem[] = [
+      {
+        id: 'edit',
+        type: 'tool_use',
+        toolId: 'edit',
+        name: 'Edit',
+        input: { file_path: 'src/Login.tsx' },
+        ts: 1
+      },
+      {
+        id: 'test',
+        type: 'bash',
+        agent: true,
+        command: 'npm test',
+        output: 'ok',
+        exitCode: 0,
+        running: false,
+        ts: 2
+      }
+    ]
+    const prompt = build(items)!
+    expect(prompt).toContain('## Files changed through agent tools')
+    expect(prompt).toContain('src/Login.tsx')
+    expect(prompt).toContain('## Verification commands')
+    expect(prompt).toContain('npm test — exit 0')
+  })
+
+  it('Claude Bash 도구 호출도 검증 명령으로 보존한다', () => {
+    const prompt = build([
+      {
+        id: 'bash',
+        type: 'tool_use',
+        toolId: 'bash',
+        name: 'Bash',
+        input: { command: 'npm run typecheck' },
+        ts: 1
+      }
+    ])!
+    expect(prompt).toContain('npm run typecheck — result not recorded')
+  })
+
+  it('Codex Apply patch 의 paths 배열도 변경 파일로 보존한다', () => {
+    const prompt = build([
+      {
+        id: 'patch',
+        type: 'tool_use',
+        toolId: 'patch',
+        name: 'Apply patch',
+        input: { paths: ['src/a.ts', 'src/b.ts'] },
+        ts: 1
+      }
+    ])!
+    expect(prompt).toContain('src/a.ts')
+    expect(prompt).toContain('src/b.ts')
   })
 
   it('지난 요청을 다시 수행하지 말라고 못박는다 — 마지막 줄은 대개 지시문이다', () => {
@@ -80,7 +145,7 @@ describe('buildHandoffPrompt', () => {
     const prompt = build(items, 500)!
     expect(prompt).toContain('-newest')
     expect(prompt).not.toContain('-oldest')
-    expect(prompt).toContain('1 earlier message(s) omitted')
+    expect(prompt).toContain('Goal and recent user intent')
   })
 
   it('항목 하나가 예산을 독점하지 못하게 각 항목을 먼저 자른다', () => {

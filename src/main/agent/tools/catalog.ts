@@ -689,6 +689,33 @@ export const AGENT_TOOLS: AgentToolSpec[] = [
     annotations: { title: 'Switch to an agent team', readOnlyHint: false }
   },
   {
+    name: 'switch_workspace_agent',
+    description: [
+      'Switch the main agent running this workspace to another installed agent product, while',
+      'keeping the same worktree and handing over a compact checkpoint of the conversation.',
+      '',
+      'Call this only when the user asks to continue this workspace with a different agent, or',
+      'after you explain why a different agent is needed and the user agrees. The call always',
+      'shows a Wooi approval card, even in an autonomous or full-access workspace.',
+      '',
+      'The switch happens after this turn ends so this tool result can return safely. Wooi then',
+      'starts the new agent automatically with the current goal, reported progress, changed-file',
+      'paths and verification commands. End the turn immediately after a successful call; do not',
+      'ask the user to repeat the task.'
+    ].join(' '),
+    inputSchema: {
+      agentBackend: z
+        .enum(AGENT_BACKEND_IDS as [AgentBackendId, ...AgentBackendId[]])
+        .describe(
+          `Agent that should take over this workspace: ${AGENT_BACKEND_IDS.map((id) => `${id} (${AGENT_BACKEND_LABELS[id]})`).join(', ')}.`
+        ),
+      reason: z
+        .string()
+        .describe('One sentence explaining the switch. The user reads it on the approval card.')
+    },
+    annotations: { title: 'Switch the workspace agent', readOnlyHint: false }
+  },
+  {
     name: 'archive_workspace',
     description: [
       'Archive a workspace you created from here, once its work is finished or abandoned, so it',
@@ -930,4 +957,22 @@ export function neverAsksWooiTool(qualifiedName: string): boolean {
   const prefix = `mcp__${WOOI_MCP_SERVER_NAME}__`
   if (!qualifiedName.startsWith(prefix)) return false
   return neverAsksToolName(qualifiedName.slice(prefix.length))
+}
+
+/**
+ * 전송 계층이 아니라 핸들러에서 직접 승인받는 도구. 양 백엔드에서 같은 카드와 반드시-묻기
+ * 계약을 보장해야 하는 좁은 경우에만 쓴다.
+ */
+const HANDLER_APPROVES = new Set(['switch_workspace_agent'])
+
+export function approvesInsideHandlerToolName(name: string): boolean {
+  return HANDLER_APPROVES.has(name)
+}
+
+export function approvesInsideHandlerWooiTool(qualifiedName: string): boolean {
+  const prefix = `mcp__${WOOI_MCP_SERVER_NAME}__`
+  return (
+    qualifiedName.startsWith(prefix) &&
+    approvesInsideHandlerToolName(qualifiedName.slice(prefix.length))
+  )
 }

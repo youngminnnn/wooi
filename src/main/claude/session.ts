@@ -19,7 +19,12 @@ import { sessionTranscriptExists } from './sessionFiles'
 import { CLAUDE_CODE_SYSTEM_PROMPT } from './systemPrompt'
 import { log } from '../logger'
 import { MCP_SETTING_SOURCES, resolveUserMcpServers } from './mcp'
-import { isReadOnlyWooiTool, neverAsksWooiTool, WOOI_MCP_SERVER_NAME } from '../agent/tools/catalog'
+import {
+  approvesInsideHandlerWooiTool,
+  isReadOnlyWooiTool,
+  neverAsksWooiTool,
+  WOOI_MCP_SERVER_NAME
+} from '../agent/tools/catalog'
 import { delegateShellAttempt, delegateShellGuidance } from '../agent/delegateShell'
 import { resolveWooiPlugin } from '../agent/plugin'
 import { WriteIsolationGuard, type WriteIsolationRoot } from './writeIsolation'
@@ -1444,6 +1449,10 @@ export class ClaudeSession {
     }
     // 상태를 바꾸지만 물을 가치가 없는 좁은 예외다 — 근거와 추가 기준은 catalog 의 별도 집합에 있다.
     if (neverAsksWooiTool(toolName)) {
+      return { behavior: 'allow', updatedInput: input }
+    }
+    // 이 도구는 공용 main 핸들러가 반드시 승인받는다. 여기서도 물으면 Claude 만 카드가 두 번 뜬다.
+    if (approvesInsideHandlerWooiTool(toolName)) {
       return { behavior: 'allow', updatedInput: input }
     }
 

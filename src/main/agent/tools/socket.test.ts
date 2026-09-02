@@ -147,6 +147,22 @@ describe('도구 소켓', () => {
     )
   })
 
+  it('에이전트 교체 승인은 공용 핸들러가 소유하므로 소켓에서 중복으로 묻지 않는다', async () => {
+    state.workspaces = [running]
+
+    await call({
+      workspaceId: 'ws-1',
+      tool: 'switch_workspace_agent',
+      args: { agentBackend: 'codex', reason: 'Use Codex.' }
+    })
+
+    expect(approve).not.toHaveBeenCalled()
+    expect(run).toHaveBeenCalledWith('ws-1', 'switch_workspace_agent', {
+      agentBackend: 'codex',
+      reason: 'Use Codex.'
+    })
+  })
+
   it('승인이 거부되면 도구를 실행하지 않는다', async () => {
     state.workspaces = [running]
     approve.mockRejectedValue(new Error('The user declined this action.'))

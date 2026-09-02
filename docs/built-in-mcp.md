@@ -16,7 +16,7 @@ Tools normally appear to the agent as `mcp__wooi__<tool-name>`. Most tool defini
 are loaded on demand, so a tool may not be visible in the model's initial context even
 though it is available through tool search.
 
-The 23 core tools are available in every workspace. `claude_subagent` and
+The 24 core tools are available in every workspace. `claude_subagent` and
 `codex_subagent` are added only when multi-agent mode is enabled and the corresponding
 backend is available for delegation.
 
@@ -36,6 +36,8 @@ backend is available for delegation.
 - Read-only tools run without an approval prompt. State-changing tools follow the
   workspace's permission mode and normally show an approval card before running. Full
   Access runs them without approval.
+- `switch_workspace_agent` is the exception: handing the conversation to another agent
+  always requires an approval card, including in Full Access.
 - `set_workspace_name` is the one state-changing tool that never shows a card. It is not
   marked read-only — it does change state — but the change is one string in Wooi's own
   store: it never leaves the machine, one context-menu click undoes it, and the result
@@ -473,6 +475,21 @@ Wooi clears what it collected whenever the preview navigates, so the result is t
 since the last load — reopening the page is how you check whether a fix cleared them.
 The list is capped at 50 entries and roughly 8 KiB, and reports when it was truncated.
 
+### `switch_workspace_agent`
+
+Hands the current workspace over to another installed agent backend without changing its
+worktree. The current turn finishes first, then Wooi closes the old session, builds a compact
+checkpoint from recent user intent, reported progress, changed-file paths, and verification
+commands, and starts the new agent automatically.
+
+| Input | Type | Required | Description |
+| --- | --- | --- | --- |
+| `agentBackend` | `claude` or `codex` | Yes | Agent product that takes over the workspace. |
+| `reason` | string | Yes | Why the handoff is needed; shown on the approval card. |
+
+The approval card is mandatory even in autonomous or Full Access modes. Declining leaves the
+current backend and session untouched.
+
 ## Agent team mode
 
 ### `switch_to_agent_team`
@@ -543,6 +560,7 @@ with your own commands: `/wooi:pr`, `/wooi:children`, and so on. The catalog is
 | `/wooi:send <what changed>` | `send_to_workspace` | agent |
 | `/wooi:message-status [message id]` | `check_message_status` | direct |
 | `/wooi:team [what to delegate]` | `switch_to_agent_team` | agent |
+| `/wooi:agent <claude\|codex> [reason]` | `switch_workspace_agent` | agent |
 | `/wooi:repos` | `list_repositories` | direct |
 | `/wooi:peers` | `list_workspace_peers` | direct |
 | `/wooi:children` | `check_stacked_work` | direct |

@@ -3466,7 +3466,7 @@ function PickerCard({
       const ok = await confirm({
         title: `Switch this workspace to ${label}?`,
         body:
-          `Agents can’t share a session, so the conversation so far rides along with your next ` +
+          `Agents can’t share a session, so a compact workspace checkpoint rides with your next ` +
           `message to ${label} — ${handoffCostLabel(handoffTokens)}, billed to your usage. ` +
           `Until you send that message it knows nothing about this workspace.`,
         confirmLabel: 'Switch and hand over',
