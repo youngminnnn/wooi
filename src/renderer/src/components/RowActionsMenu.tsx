@@ -26,12 +26,15 @@ export type RowAction = {
 export default function RowActionsMenu({
   at,
   align = 'left',
+  heading,
   actions,
   onClose
 }: {
   at: { x: number; y: number }
   /** 'right' 면 메뉴의 우측 끝을 at.x 에 맞춘다(버튼 기준 정렬). */
   align?: 'left' | 'right'
+  /** 키보드로 연 메뉴처럼 앵커의 맥락이 흐릴 때 표시하는 짧은 제목. */
+  heading?: string
   actions: RowAction[]
   onClose: () => void
 }): React.JSX.Element {
@@ -112,6 +115,11 @@ export default function RowActionsMenu({
         e.stopPropagation()
       }}
     >
+      {heading && (
+        <div className="truncate border-b border-[var(--border)] px-3 py-2 text-2xs font-medium text-neutral-500">
+          {heading}
+        </div>
+      )}
       {actions.map((a) => (
         <div key={a.key}>
           {a.separatorBefore && <div className="my-1 border-t border-[var(--border)]" />}

@@ -1,9 +1,10 @@
-import { beforeEach, describe, expect, it } from 'vitest'
-import { screen } from '@testing-library/react'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { screen, waitFor } from '@testing-library/react'
 import Sidebar from './Sidebar'
 import { StatusDot } from './StatusDot'
 import { app, pr, workspace } from '../test/fixtures'
 import { renderWithStore, resetStore, useStore } from '../test/harness'
+import { openNewWorkspaceMenu } from '../lib/newWorkspaceMenu'
 
 const sidebarProps = {
   width: 280,
@@ -136,5 +137,17 @@ describe('사이드바 파생 상태 표시', () => {
     renderWithStore(<Sidebar {...sidebarProps} />)
 
     expect(screen.queryByLabelText('Show this stack')).not.toBeInTheDocument()
+  })
+
+  it('단축키 메뉴를 열 때 대상 리포를 화면에 드러내고 이름을 표시한다', async () => {
+    useStore.setState({ app: app([workspace()]) })
+    const scrollIntoView = vi.spyOn(Element.prototype, 'scrollIntoView')
+
+    renderWithStore(<Sidebar {...sidebarProps} />)
+    openNewWorkspaceMenu('repo-1')
+
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' })
+    await waitFor(() => expect(screen.getByText('New workspace in Wooi')).toBeInTheDocument())
+    expect(screen.getByText('Wooi').closest('.group')).toHaveClass('ring-[var(--info-500)]/60')
   })
 })

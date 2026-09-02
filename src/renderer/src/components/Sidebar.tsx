@@ -151,6 +151,7 @@ export default function Sidebar({
   const [seenRepos, setSeenRepos] = useState<Set<string>>(
     () => new Set(app.repos.filter((r) => readUiFlag(repoSettingsSeenFlag(r.id))).map((r) => r.id))
   )
+  const [highlightedRepoId, setHighlightedRepoId] = useState<string | null>(null)
   useEffect(() => {
     const onOpen = (e: Event): void => {
       const repoId = (e as CustomEvent<string>).detail
@@ -160,6 +161,24 @@ export default function Sidebar({
     }
     window.addEventListener(OPEN_REPO_SETTINGS_EVENT, onOpen)
     return () => window.removeEventListener(OPEN_REPO_SETTINGS_EVENT, onOpen)
+  }, [])
+
+  // 키보드로 새 워크스페이스 메뉴를 열면 마우스 포인터가 맥락을 알려 주지 않는다. 대상 리포가
+  // 스크롤 밖에 있던 경우에도 어느 리포에서 만드는지 바로 보이도록 헤더를 잠깐 강조한다.
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const onOpen = (e: Event): void => {
+      const repoId = (e as CustomEvent<string>).detail
+      if (!repoId) return
+      setHighlightedRepoId(repoId)
+      if (timer) clearTimeout(timer)
+      timer = setTimeout(() => setHighlightedRepoId(null), 1200)
+    }
+    window.addEventListener(OPEN_NEW_WORKSPACE_MENU_EVENT, onOpen)
+    return () => {
+      window.removeEventListener(OPEN_NEW_WORKSPACE_MENU_EVENT, onOpen)
+      if (timer) clearTimeout(timer)
+    }
   }, [])
 
   // 리포가 하나도 없을 때만 훑어 본다. 들여오기를 권할 자리는 첫 화면 하나뿐이고, 스캔은
@@ -356,7 +375,11 @@ export default function Sidebar({
             >
               <div
                 {...repoDnd.handleProps(repo.id)}
-                className="group flex items-center gap-1.5 px-2 py-1.5 rounded-md cursor-grab active:cursor-grabbing"
+                className={`group flex items-center gap-1.5 px-2 py-1.5 rounded-md cursor-grab active:cursor-grabbing transition-colors ${
+                  highlightedRepoId === repo.id
+                    ? 'bg-[var(--surface-2)] ring-1 ring-inset ring-[var(--info-500)]/60'
+                    : ''
+                }`}
               >
                 <RepoIcon repo={repo} />
                 <span
@@ -411,6 +434,7 @@ export default function Sidebar({
                 </button>
                 <NewWorkspaceButton
                   repoId={repo.id}
+                  repoName={repo.name}
                   onNewWorkspace={onNewWorkspace}
                   onNewFromIssue={onNewFromIssue}
                   onNewFromPr={onNewFromPr}
@@ -1595,12 +1619,14 @@ function FanoutCandidateLine({
  */
 function NewWorkspaceButton({
   repoId,
+  repoName,
   onNewWorkspace,
   onNewFromIssue,
   onNewFromPr,
   onFanout
 }: {
   repoId: string
+  repoName: string
   onNewWorkspace: (repoId: string, agentBackend?: AgentBackendId) => void
   onNewFromIssue: (repoId: string) => void
   onNewFromPr: (repoId: string) => void
@@ -1616,11 +1642,21 @@ function NewWorkspaceButton({
   }
 
   useEffect(() => {
+    let frame: number | undefined
     const onOpen = (e: Event): void => {
-      if ((e as CustomEvent<string>).detail === repoId) openMenu()
+      if ((e as CustomEvent<string>).detail !== repoId) return
+      // 먼저 앵커를 화면 안으로 가져온 뒤 다음 프레임에서 좌표를 읽는다. 메뉴를 먼저 열면
+      // RowActionsMenu 의 scroll-close 규칙 때문에 스크롤 순간 닫히고, 예전 좌표를 읽으면 메뉴가
+      // 화면 가장자리에 대상과 떨어져 나타난다.
+      buttonRef.current?.scrollIntoView({ block: 'nearest' })
+      if (frame !== undefined) window.cancelAnimationFrame(frame)
+      frame = window.requestAnimationFrame(openMenu)
     }
     window.addEventListener(OPEN_NEW_WORKSPACE_MENU_EVENT, onOpen)
-    return () => window.removeEventListener(OPEN_NEW_WORKSPACE_MENU_EVENT, onOpen)
+    return () => {
+      window.removeEventListener(OPEN_NEW_WORKSPACE_MENU_EVENT, onOpen)
+      if (frame !== undefined) window.cancelAnimationFrame(frame)
+    }
   }, [repoId])
 
   const multi = backends.length > 1
@@ -1688,6 +1724,7 @@ function NewWorkspaceButton({
         <RowActionsMenu
           at={menuAt}
           align="right"
+          heading={`New workspace in ${repoName}`}
           actions={actions}
           onClose={() => setMenuAt(null)}
         />
