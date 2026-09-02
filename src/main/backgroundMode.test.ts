@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AppState, Workspace } from '@shared/types'
 
@@ -272,5 +273,27 @@ describe('noteWorkDrained', () => {
     noteWorkDrained()
     await vi.runAllTimersAsync()
     expect(electron.quits).toBe(0)
+  })
+})
+
+describe('tray asset', () => {
+  /**
+   * 경로 **해석**은 여기서 못 잡는다 — 앱을 어떻게 띄웠는지에 달려 있어서 실제로 띄워 보고서야
+   * 드러났다(e2e 에서 `out/main/build/...` 로 빗나가 빈 이미지가 로드됐다). 유닛 테스트가 지킬
+   * 수 있는 것은 자산 쪽이다: 파일이 사라지거나 패키징 목록에서 빠지면 Tray 는 아무 경고 없이
+   * 빈 아이콘으로 뜬다.
+   */
+  it('메뉴 막대 아이콘이 레포에 있고 비어 있지 않다', () => {
+    const icon = readFileSync(new URL('../../build/trayTemplate.png', import.meta.url))
+    expect(icon.byteLength).toBeGreaterThan(100)
+    expect(icon.subarray(1, 4).toString()).toBe('PNG')
+  })
+
+  it('패키징 목록이 두 배율을 모두 담는다', () => {
+    const pkg = JSON.parse(
+      readFileSync(new URL('../../package.json', import.meta.url), 'utf8')
+    ) as { build: { files: string[] } }
+    expect(pkg.build.files).toContain('build/trayTemplate.png')
+    expect(pkg.build.files).toContain('build/trayTemplate@2x.png')
   })
 })

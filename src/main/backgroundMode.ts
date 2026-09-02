@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { app, BrowserWindow, Menu, Notification, Tray, dialog, nativeImage } from 'electron'
 import { workspaceDisplayName } from '@shared/types'
@@ -296,8 +297,18 @@ function notifyDrained(): void {
  *
  * `build/trayTemplate.png` 는 `package.json` 의 `build.files` 로 asar 안에 함께 들어간다 —
  * 이름이 `…Template` 으로 끝나야 macOS 가 알파만 읽어 밝은/어두운 메뉴 막대에 맞춰 칠한다.
- * dev 에서는 `app.getAppPath()` 가 레포 루트라 같은 상대 경로가 그대로 맞는다.
+ *
+ * `app.getAppPath()` **하나만 믿으면 안 된다.** 그 값은 앱을 어떻게 띄웠는지에 따라 달라진다 —
+ * 패키징본과 `electron .` 은 레포/asar 루트를 주지만, 번들 진입점을 직접 실행하면
+ * (`npm run dev:sandbox` 와 e2e 하네스가 그렇게 한다) `out/main` 을 준다. 실제로 그렇게 띄워
+ * 보고서야 아이콘이 빈 이미지로 로드되는 것을 발견했다. 그래서 [[main/paths]] 의 toolShimPath
+ * 와 같은 방식으로 후보를 훑고 **존재하는 첫 경로**를 쓴다.
  */
 function trayIconPath(): string {
-  return join(app.getAppPath(), 'build', 'trayTemplate.png')
+  const candidates = [
+    join(app.getAppPath(), 'build', 'trayTemplate.png'),
+    // 번들이 out/main 에 놓이므로 레포 루트는 두 단계 위다.
+    join(import.meta.dirname, '..', '..', 'build', 'trayTemplate.png')
+  ]
+  return candidates.find((path) => existsSync(path)) ?? candidates[0]
 }
