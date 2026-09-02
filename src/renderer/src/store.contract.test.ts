@@ -12,6 +12,52 @@ beforeEach(() => {
 })
 
 describe('렌더러 스토어 계약', () => {
+  it('연속 텍스트 델타를 묶고 다음 상태 이벤트보다 먼저 반영한다', () => {
+    const ws = workspace({ status: 'running' })
+    useStore.setState({ app: app([ws]) })
+
+    dispatch('onChat', {
+      workspaceId: ws.id,
+      event: { type: 'delta', id: 'answer', itemType: 'assistant', text: 'hello ' }
+    })
+    dispatch('onChat', {
+      workspaceId: ws.id,
+      event: { type: 'delta', id: 'answer', itemType: 'assistant', text: 'world' }
+    })
+    expect(useStore.getState().transcripts[ws.id]).toBeUndefined()
+
+    dispatch('onChat', { workspaceId: ws.id, event: { type: 'status', status: 'idle' } })
+    expect(useStore.getState().transcripts[ws.id]?.[0]).toMatchObject({
+      id: 'answer',
+      text: 'hello world',
+      streaming: true
+    })
+  })
+
+  it('git 상태가 같으면 store 참조를 유지하고 전체 조회에 lightweight 힌트를 보낸다', async () => {
+    const ws = workspace()
+    const status = {
+      branch: 'main',
+      ahead: 0,
+      behind: 0,
+      changedFiles: 0,
+      conflicted: false,
+      rebasing: false
+    }
+    fakeApi.override('git.status', () => status)
+    useStore.setState({ app: app([ws]) })
+
+    await useStore.getState().refreshAllGit()
+    const first = useStore.getState().gitStatus
+    await useStore.getState().refreshAllGit()
+
+    expect(useStore.getState().gitStatus).toBe(first)
+    expect(fakeApi.called('git.status').map((call) => call.args)).toEqual([
+      [ws.id, false],
+      [ws.id, false]
+    ])
+  })
+
   it('실행 중 방송에는 대기 메시지를 보내지 않고 idle 방송에서만 순서대로 보낸다', () => {
     const ws = workspace({ status: 'running' })
     useStore.setState({ app: app([ws]), messageQueue: { [ws.id]: [{ text: 'next' }] } })

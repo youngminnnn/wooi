@@ -1662,10 +1662,10 @@ export function registerIpc(ctx: IpcContext): void {
 
   // ── git ────────────────────────────────────────────────────────────────
 
-  handle(IPC.gitStatus, async (_e, workspaceId: string) => {
+  handle(IPC.gitStatus, async (_e, workspaceId: string, force = true) => {
     const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
     if (!ws) return null
-    return getStatus(ws.worktreePath, ws.baseBranch).catch(() => null)
+    return getStatus(ws.worktreePath, ws.baseBranch, force).catch(() => null)
   })
 
   handle(IPC.gitFetch, async (_e, repoId: string) => {
