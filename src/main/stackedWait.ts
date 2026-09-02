@@ -1,4 +1,4 @@
-import type { ChatItem, PendingStackedWait, Workspace } from '@shared/types'
+import type { ChatItem, PendingStackedWait, SendMessageOptions, Workspace } from '@shared/types'
 import { workspaceDisplayName } from '@shared/types'
 import { getStore } from './store'
 import { log } from './logger'
@@ -12,7 +12,7 @@ const IDLE_GRACE_MS = 90_000
 const APPROVAL_GRACE_MS = 5 * 60_000
 
 interface Deps {
-  sendMessage: (workspaceId: string, text: string) => void
+  sendMessage: (workspaceId: string, text: string, opts?: SendMessageOptions) => void
   postToTranscript: (workspaceId: string, item: ChatItem) => void
   broadcastState: () => void
   now?: () => number
@@ -236,7 +236,10 @@ export class StackedWaitCoordinator {
           : 'The remaining stacked workspaces cannot make progress. Continuing…'
     )
     try {
-      this.deps.sendMessage(parentId, this.wakeText(reason, record, children, results))
+      // 자식들의 보고를 모아 Wooi 가 만든 깨움 턴이다 — 대화에는 남기되 접어 둔다.
+      this.deps.sendMessage(parentId, this.wakeText(reason, record, children, results), {
+        origin: { kind: 'wooi', label: 'Stacked work reported back' }
+      })
     } catch (err) {
       log.error('stacked wait: failed to wake workspace', parentId, err)
     }

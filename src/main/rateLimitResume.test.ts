@@ -6,11 +6,14 @@ import { activeRateLimitPause } from '@shared/types'
 import type { AppState, RateLimitPause, RateLimitSnapshot, Workspace } from '@shared/types'
 import {
   CONNECTION_CONTINUATION,
+  CONNECTION_CONTINUATION_LABEL,
   RATE_LIMIT_CONTINUATION,
+  RATE_LIMIT_CONTINUATION_LABEL,
   RateLimitResumeCoordinator,
   backoffWait,
   exhaustedResetTimes,
   isRateLimited,
+  likelyExhaustedResetAt,
   retryTime
 } from './rateLimitResume'
 import { resetResumeBudget } from './resumeBudget'
@@ -59,6 +62,56 @@ describe('rate-limit resume scheduling', () => {
       { label: '5-hour', utilization: 99, resetsAt: '2026-08-10T01:00:00Z' }
     ])
     expect(exhaustedResetTimes(limits, NOW)).toEqual([])
+  })
+
+  it('막 걸린 순간엔 사용률이 늦다 — 가장 많이 쓴 창의 해제 시각까지 기다린다', () => {
+    // 5시간 창을 소진했는데 CLI 가 주는 수치는 아직 99% 인, 제한 직후의 스냅샷.
+    const limits = snapshot([
+      { label: '5-hour', utilization: 99, resetsAt: '2026-08-10T04:20:00Z' },
+      { label: '7-day', utilization: 14, resetsAt: '2026-08-16T12:00:00Z' },
+      { label: '7-day (Fable)', utilization: 0, resetsAt: null }
+    ])
+    expect(likelyExhaustedResetAt(limits, NOW)).toBe(Date.parse('2026-08-10T04:20:00Z'))
+    // 눈먼 5분 백오프가 아니라 실제 해제 시각으로 예약해야 한다.
+    expect(retryTime(limits, NOW)).toBe(Date.parse('2026-08-10T04:20:15Z'))
+  })
+
+  it('주간 창을 소진했으면 5시간 창이 한가해도 주간 창까지 기다린다', () => {
+    const limits = snapshot([
+      { label: '5-hour', utilization: 20, resetsAt: '2026-08-10T02:00:00Z' },
+      { label: '7-day (Opus)', utilization: 99, resetsAt: '2026-08-13T00:00:00Z' }
+    ])
+    expect(retryTime(limits, NOW)).toBe(Date.parse('2026-08-13T00:00:15Z'))
+  })
+
+  it('100% 인 창이 있으면 그쪽이 이긴다 — 추정은 아무것도 모를 때만 쓴다', () => {
+    const limits = snapshot([
+      { label: '5-hour', utilization: 100, resetsAt: '2026-08-10T01:00:00Z' },
+      { label: '7-day', utilization: 40, resetsAt: '2026-08-16T00:00:00Z' }
+    ])
+    expect(retryTime(limits, NOW)).toBe(Date.parse('2026-08-10T01:00:15Z'))
+  })
+
+  it('한참 남은 사용률은 늦은 것이 아니라 모르는 것이다 — 추정하지 않고 백오프로 물러선다', () => {
+    // 조회는 "20% 밖에 안 썼다" 고 하는데 실제 턴은 제한에 걸리는 상태. 이 수치는 근거가 못 된다.
+    expect(
+      likelyExhaustedResetAt(
+        snapshot([{ label: '5-hour', utilization: 20, resetsAt: '2026-08-10T05:00:00Z' }]),
+        NOW
+      )
+    ).toBeNull()
+    // 창이 없거나, 해제 시각이 이미 지났거나, 시각 자체가 없는 창도 마찬가지다.
+    expect(likelyExhaustedResetAt(snapshot([]), NOW)).toBeNull()
+    expect(
+      likelyExhaustedResetAt(
+        snapshot([{ label: '5-hour', utilization: 99, resetsAt: '2026-08-09T23:00:00Z' }]),
+        NOW
+      )
+    ).toBeNull()
+    expect(
+      likelyExhaustedResetAt(snapshot([{ label: '5-hour', utilization: 99, resetsAt: null }]), NOW)
+    ).toBeNull()
+    expect(retryTime(snapshot([]), NOW)).toBe(NOW + 5 * 60_000 + 15_000)
   })
 
   it('오류가 알려 준 해제 시각을 쓴다 — 스냅샷이 비어 있어도 그때까지 기다린다', () => {
@@ -283,7 +336,11 @@ describe('RateLimitResumeCoordinator', () => {
     await coordinator.noteRateLimit(WORKSPACE_ID)
     await vi.advanceTimersByTimeAsync(5 * 60_000 + 15_000)
 
-    expect(sent).toHaveBeenCalledWith(WORKSPACE_ID, RATE_LIMIT_CONTINUATION)
+    expect(sent).toHaveBeenCalledWith(
+      WORKSPACE_ID,
+      RATE_LIMIT_CONTINUATION,
+      RATE_LIMIT_CONTINUATION_LABEL
+    )
     expect(store.getState().workspaces[0].pendingRateLimitResume).toBeNull()
     expect(store.getState().workspaces[0].rateLimited).toBeNull()
   })
@@ -322,7 +379,11 @@ describe('RateLimitResumeCoordinator', () => {
     await coordinator.noteRateLimit(WORKSPACE_ID, Date.now() + 60_000)
     await vi.advanceTimersByTimeAsync(75_000)
 
-    expect(sent).toHaveBeenCalledWith(WORKSPACE_ID, RATE_LIMIT_CONTINUATION)
+    expect(sent).toHaveBeenCalledWith(
+      WORKSPACE_ID,
+      RATE_LIMIT_CONTINUATION,
+      RATE_LIMIT_CONTINUATION_LABEL
+    )
     expect(store.getState().workspaces[0].pendingRateLimitResume).toBeNull()
     expect(store.getState().workspaces[0].rateLimited).toBeNull()
   })
@@ -376,7 +437,11 @@ describe('RateLimitResumeCoordinator', () => {
     utilization = 20
     await vi.advanceTimersByTimeAsync(6 * 60_000)
 
-    expect(sent).toHaveBeenCalledWith(WORKSPACE_ID, RATE_LIMIT_CONTINUATION)
+    expect(sent).toHaveBeenCalledWith(
+      WORKSPACE_ID,
+      RATE_LIMIT_CONTINUATION,
+      RATE_LIMIT_CONTINUATION_LABEL
+    )
     expect(store.getState().workspaces[0].pendingRateLimitResume).toBeNull()
   })
 
@@ -474,7 +539,11 @@ describe('RateLimitResumeCoordinator', () => {
 
     online = true
     await vi.advanceTimersByTimeAsync(30_000)
-    expect(sent).toHaveBeenCalledWith(WORKSPACE_ID, RATE_LIMIT_CONTINUATION)
+    expect(sent).toHaveBeenCalledWith(
+      WORKSPACE_ID,
+      RATE_LIMIT_CONTINUATION,
+      RATE_LIMIT_CONTINUATION_LABEL
+    )
     expect(store.getState().workspaces[0].pendingRateLimitResume).toBeNull()
   })
 
@@ -497,7 +566,11 @@ describe('RateLimitResumeCoordinator', () => {
     vi.setSystemTime(Date.now() + 6 * 60 * 60_000)
     await vi.advanceTimersByTimeAsync(60_000)
 
-    expect(sent).toHaveBeenCalledWith(WORKSPACE_ID, RATE_LIMIT_CONTINUATION)
+    expect(sent).toHaveBeenCalledWith(
+      WORKSPACE_ID,
+      RATE_LIMIT_CONTINUATION,
+      RATE_LIMIT_CONTINUATION_LABEL
+    )
   })
 
   it('이어 보낸 턴이 실패하면 다시 예약하고, 그래도 안 되면 예산 안에서 멈춘다', async () => {
@@ -681,7 +754,11 @@ describe('연결 실패 이어가기', () => {
     expect(store.getState().workspaces[0].rateLimited).toBeNull()
 
     await vi.advanceTimersByTimeAsync(30_000)
-    expect(sent).toHaveBeenCalledWith(WORKSPACE_ID, CONNECTION_CONTINUATION)
+    expect(sent).toHaveBeenCalledWith(
+      WORKSPACE_ID,
+      CONNECTION_CONTINUATION,
+      CONNECTION_CONTINUATION_LABEL
+    )
     expect(store.getState().workspaces[0].pendingRateLimitResume).toBeNull()
   })
 

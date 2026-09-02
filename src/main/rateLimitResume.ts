@@ -51,6 +51,13 @@ const STREAK_WINDOW_MS = 10 * 60_000
  */
 const EARLY_CHECK_MS = 5 * 60_000
 /**
+ * "이 창에 걸린 것" 으로 볼 만한 사용률의 하한(likelyExhaustedResetAt).
+ *
+ * 제한 직후의 수치는 요청 한 번어치만큼 늦으므로 99% 는 100% 로 읽어야 하지만, 20% 는 그렇지 않다.
+ * 넉넉하게 잡아도 "늦은 100%" 와 "그냥 모르는 스냅샷" 사이는 충분히 갈린다.
+ */
+const NEAR_EXHAUSTED_UTILIZATION = 90
+/**
  * 예약 시각을 놓친 뒤에도 이어가 볼 수 있는 유예 창.
  *
  * Wooi 는 데스크톱 앱이라 예약 시각에 프로세스가 살아 있으리라는 보장이 없다 — 앱이 꺼져 있거나
@@ -73,6 +80,15 @@ export const RATE_LIMIT_CONTINUATION =
 export const CONNECTION_CONTINUATION =
   'The previous turn stopped because Wooi could not reach the API. Inspect the current conversation and workspace state, then continue the unfinished task. Do not repeat work that is already complete.'
 
+/**
+ * 이어가기 턴이 대화에서 접힐 때 한 줄에 남는 이름([[shared/types]] WooiTurnOrigin).
+ *
+ * 사용자가 치지 않은 턴이므로 감추지는 않는다 — 다만 지시문 자체는 세 줄짜리 상용구라, 펼쳐 둔 채로는
+ * 정작 읽어야 할 앞뒤 대화를 밀어낸다.
+ */
+export const RATE_LIMIT_CONTINUATION_LABEL = 'Continuing after the usage limit'
+export const CONNECTION_CONTINUATION_LABEL = 'Continuing after the connection came back'
+
 /** 예약이 걸린 이유. 저장된 옛 레코드에는 없으므로 사용량 제한으로 읽는다. */
 function causeOf(pending: Workspace['pendingRateLimitResume']): 'rateLimit' | 'connection' {
   return pending?.cause ?? 'rateLimit'
@@ -81,7 +97,7 @@ function causeOf(pending: Workspace['pendingRateLimitResume']): 'rateLimit' | 'c
 interface Deps {
   backend: AgentBackendId
   refreshLimits: () => Promise<void>
-  sendContinuation: (workspaceId: string, text: string) => void
+  sendContinuation: (workspaceId: string, text: string, label: string) => void
   emitItem: (workspaceId: string, item: ChatItem) => void
   /**
    * 지금 네트워크에 닿을 수 있는지. 알 수 없는 환경(테스트 등)에서는 넘기지 않아도 되고,
@@ -610,7 +626,8 @@ export class RateLimitResumeCoordinator {
     )
     this.deps.sendContinuation(
       workspaceId,
-      connection ? CONNECTION_CONTINUATION : RATE_LIMIT_CONTINUATION
+      connection ? CONNECTION_CONTINUATION : RATE_LIMIT_CONTINUATION,
+      connection ? CONNECTION_CONTINUATION_LABEL : RATE_LIMIT_CONTINUATION_LABEL
     )
   }
 
@@ -838,8 +855,48 @@ export function backoffWait(attempt: number): number {
 }
 
 /**
+ * 제한에 걸린 것이 확실한데 100% 를 가리키는 창이 하나도 없을 때, **어느 창에 걸렸는지** 추정한다.
+ *
+ * 제한에 막 걸린 순간의 사용률은 늦다 — CLI 가 주는 수치는 마지막으로 **성공한** 응답이 실어 준
+ * 값이고, 지금 거절당한 요청은 그 수치를 올려 주지 않았기 때문이다. 그래서 걸린 바로 그때 조회하면
+ * 5시간 창이 99% 로 보이고, 몇 분 뒤에야 100% 로 올라온다. exhaustedResetTimes 만 보면 하필 예약을
+ * 거는 그 순간에만 해제 시각을 모르게 되어, 네 시간 뒤에 풀릴 제한을 **5분 뒤**로 예약했다
+ * (관측: 22:42 에 걸려 22:47 로 예약 → 22:47 에 다시 물어보고서야 03:20 으로 정정).
+ *
+ * 추정은 **사용률이 가장 높은 창**이 범인이라는 것이다. 수치가 늦을 뿐 창 사이의 순서까지 틀리지는
+ * 않으므로, 5시간 창을 막 소진했으면 그쪽이, 주간 창을 소진했으면 그쪽이 골라진다.
+ *
+ * 다만 **거의 다 쓴 창**만 근거로 삼는다(NEAR_EXHAUSTED_UTILIZATION). 늦는 폭은 요청 한 번어치이지
+ * 수십 %가 아니다 — 20% 라고 말하는 스냅샷은 늦은 것이 아니라 그냥 우리에게 아무것도 말해 주지 못하는
+ * 것이고, 그때는 지금까지처럼 눈먼 백오프로 물러서는 편이 맞다.
+ *
+ * 틀려도 손해가 작은 쪽으로 틀린다. 너무 늦게 잡았으면 기다리는 동안의 재확인(checkLiftedEarly)이
+ * 풀리자마자 앞당겨 주고, 너무 이르게 잡았으면 그 시각의 조회가 100% 를 보고 다시 물러선다
+ * (resume → isRateLimited → waitLonger). 최악이라야 지금의 5분 백오프와 같은 자리로 돌아온다.
+ */
+export function likelyExhaustedResetAt(
+  snapshot: RateLimitSnapshot | undefined,
+  now: number
+): number | null {
+  if (!snapshot?.available) return null
+  let best: { utilization: number; at: number } | null = null
+  for (const window of snapshot.windows) {
+    const utilization = window.utilization ?? 0
+    if (utilization < NEAR_EXHAUSTED_UTILIZATION) continue
+    const at = window.resetsAt ? Date.parse(window.resetsAt) : Number.NaN
+    if (!Number.isFinite(at) || at <= now) continue
+    if (!best || utilization > best.utilization) best = { utilization, at }
+  }
+  return best?.at ?? null
+}
+
+/**
  * 우리가 아는 해제 시각 — 스냅샷의 소진된 창과 오류가 알려 준 resetAt 중 가장 늦은 것.
- * 하나도 모르면 null(그때는 백오프로 다시 확인한다).
+ *
+ * 둘 다 없으면 사용률이 가장 높은 창을 범인으로 보고 그 창의 해제 시각을 쓴다
+ * (likelyExhaustedResetAt). 이 함수를 부르는 자리는 모두 "제한에 걸렸다" 를 이미 아는 곳이므로
+ * (schedule — 제한 오류를 받았다, resume — isRateLimited 가 참이다), 추정의 전제가 깨지지 않는다.
+ * 그리고도 모르면 null(그때는 백오프로 다시 확인한다).
  */
 export function knownResetAt(
   snapshot: RateLimitSnapshot | undefined,
@@ -848,7 +905,8 @@ export function knownResetAt(
 ): number | null {
   const resets = exhaustedResetTimes(snapshot, now)
   if (resetAt && Number.isFinite(resetAt) && resetAt > now) resets.push(resetAt)
-  return resets.length ? Math.max(...resets) : null
+  if (resets.length) return Math.max(...resets)
+  return likelyExhaustedResetAt(snapshot, now)
 }
 
 /**

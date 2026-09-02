@@ -489,7 +489,8 @@ export function registerIpc(ctx: IpcContext): void {
   /** fan-out 은 생성에 더해 만든 후보에게 첫 프롬프트까지 보낸다([[fanout]]). */
   const fanoutDeps: CreateFanoutDeps = {
     ...workspaceDeps,
-    sendMessage: (workspaceId, text) => ctx.sessions.sendMessage(workspaceId, text)
+    sendMessage: (workspaceId, text, opts) =>
+      ctx.sessions.sendMessage(workspaceId, text, undefined, opts)
   }
   /** 아카이브는 워크스페이스에 매달린 것들까지 끊어야 해 더 넓다([[workspaces]] archiveWorkspace). */
   const archiveDeps: ArchiveWorkspaceDeps = {

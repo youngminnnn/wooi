@@ -17,7 +17,8 @@ import {
   ListTodo,
   Layers,
   MessagesSquare,
-  GitMergeConflict
+  GitMergeConflict,
+  Sparkles
 } from 'lucide-react'
 import { useStore } from '../store'
 import { DiffLine } from './DiffView'
@@ -138,6 +139,54 @@ function CiFixMessage({
               읽혀야 한다 — 켜 둔 채로 잊은 사람이 대화만 보고 알아챌 유일한 자리다. */}
           <span className="shrink-0 rounded bg-[var(--surface-2)] px-1.5 py-0.5 text-2xs text-neutral-500">
             auto {origin.attempt}/{origin.max}
+          </span>
+          <ChevronRight
+            size={12}
+            className={`ml-auto shrink-0 transition-transform ${expanded ? 'rotate-90' : ''}`}
+          />
+        </span>
+        {expanded && (
+          <span className="mt-2 block whitespace-pre-wrap break-words border-t border-[var(--border)] pt-2 text-sm leading-relaxed text-neutral-300">
+            {item.text}
+          </span>
+        )}
+      </button>
+    </div>
+  )
+}
+
+/**
+ * Wooi 가 사용자 대신 넣은 그 밖의 턴(WooiTurnOrigin).
+ *
+ * ConflictResolveMessage·CiFixMessage 와 같은 모양이지만 접힌 줄에 쓸 재료가 이름 하나뿐이라
+ * 종류마다 컴포넌트를 새로 만들지 않고 이 하나가 전부를 받는다. 이름은 보내는 쪽이 정한다.
+ */
+function WooiTurnMessage({
+  item,
+  title
+}: {
+  item: Extract<ChatItem, { type: 'user' }>
+  title: string
+}): React.JSX.Element {
+  const [expanded, setExpanded] = useState(false)
+  const origin = item.origin
+  if (!origin || origin.kind !== 'wooi') return <UserMessage text={item.text} title={title} />
+
+  return (
+    <div className="flex justify-end my-2" title={title}>
+      <button
+        type="button"
+        aria-expanded={expanded}
+        onClick={() => setExpanded((value) => !value)}
+        className="max-w-[min(42rem,88%)] rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2.5 py-1.5 text-left text-xs text-neutral-400 hover:border-[var(--border-strong)] hover:text-neutral-300"
+      >
+        <span className="flex items-center gap-1.5">
+          <Sparkles size={12} className="shrink-0 text-neutral-500" />
+          <span className="truncate">{origin.label}</span>
+          {/* 사용자가 치지 않은 턴이라는 사실은 접힌 상태에서도 읽혀야 한다 — 대화만 보고
+              "이 턴은 왜 돌았지" 에 답할 수 있어야 하는 것이 이 카드의 존재 이유다. */}
+          <span className="shrink-0 rounded bg-[var(--surface-2)] px-1.5 py-0.5 text-2xs text-neutral-500">
+            Wooi
           </span>
           <ChevronRight
             size={12}
@@ -719,6 +768,7 @@ function Item({
       if (item.origin?.kind === 'conflictResolve')
         return <ConflictResolveMessage item={item} title={time} />
       if (item.origin?.kind === 'ciFix') return <CiFixMessage item={item} title={time} />
+      if (item.origin?.kind === 'wooi') return <WooiTurnMessage item={item} title={time} />
       return (
         <UserMessage text={item.text} title={time}>
           {item.attachments && item.attachments.length > 0 && (

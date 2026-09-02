@@ -194,7 +194,8 @@ export class CodexSessionManager implements AgentBackend {
     this.rateLimitResume = new RateLimitResumeCoordinator({
       backend: CODEX_META.id,
       refreshLimits: () => this.refreshRateLimits(true),
-      sendContinuation: (workspaceId, text) => this.sendContinuation(workspaceId, text),
+      sendContinuation: (workspaceId, text, label) =>
+        this.sendContinuation(workspaceId, text, label),
       emitItem: (workspaceId, item) =>
         this.dispatch(IPC.evtChat, { workspaceId, event: { type: 'item', item } }),
       // 맥이 자다 깼거나 와이파이가 꺼져 있으면 이어 보내 봐야 실패한다 — 보내기 전에 물어본다.
@@ -203,7 +204,8 @@ export class CodexSessionManager implements AgentBackend {
     })
     this.shutdownResume = new ShutdownResumeCoordinator({
       backend: CODEX_META.id,
-      sendContinuation: (workspaceId, text) => this.sendContinuation(workspaceId, text),
+      sendContinuation: (workspaceId, text, label) =>
+        this.sendContinuation(workspaceId, text, label),
       emitItem: (workspaceId, item) =>
         this.dispatch(IPC.evtChat, { workspaceId, event: { type: 'item', item } }),
       broadcastState: () => this.dispatch(IPC.evtState, getStore().getState())
@@ -515,10 +517,22 @@ export class CodexSessionManager implements AgentBackend {
     })
   }
 
-  private sendContinuation(workspaceId: string, text: string): void {
+  /**
+   * 사용량 제한·연결 복구 뒤 Wooi 가 대신 넣는 턴.
+   *
+   * silent 가 아니다 — 사용자가 치지 않은 턴이 토큰을 쓰므로 왜 돌았는지가 대화에 남아야 한다.
+   * 대신 origin 을 실어 화면에서는 한 줄로 접힌다([[shared/types]] WooiTurnOrigin).
+   */
+  private sendContinuation(workspaceId: string, text: string, label: string): void {
     const ws = this.getWorkspace(workspaceId)
     if (!ws) return
-    this.send({ type: 'send', workspaceId, config: this.configFor(ws), text })
+    this.send({
+      type: 'send',
+      workspaceId,
+      config: this.configFor(ws),
+      text,
+      origin: { kind: 'wooi', label }
+    })
   }
 
   async interrupt(workspaceId: string): Promise<void> {
