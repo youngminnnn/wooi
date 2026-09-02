@@ -420,6 +420,16 @@ describe('getStatus base 해석', () => {
   it('origin/base 가 없으면 로컬 base 로 폴백한다', async () => {
     await expect(getStatus(root, 'main')).resolves.toMatchObject({ behind: 0, ahead: 1 })
   })
+
+  it('전체 폴링은 ref 계산을 재사용하고 강제 조회는 새 커밋을 즉시 반영한다', async () => {
+    await expect(getStatus(root, 'main', true)).resolves.toMatchObject({ ahead: 1 })
+    writeFileSync(join(root, 'second.txt'), 'second\n')
+    git(root, ['add', '-A'])
+    git(root, ['commit', '-qm', 'second'])
+
+    await expect(getStatus(root, 'main', false)).resolves.toMatchObject({ ahead: 1 })
+    await expect(getStatus(root, 'main', true)).resolves.toMatchObject({ ahead: 2 })
+  })
 })
 
 describe('리포 fetch 합류', () => {

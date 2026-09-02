@@ -134,7 +134,7 @@ const api: WooiApi = {
   },
 
   git: {
-    status: (workspaceId) => ipcRenderer.invoke(IPC.gitStatus, workspaceId),
+    status: (workspaceId, force) => ipcRenderer.invoke(IPC.gitStatus, workspaceId, force),
     diff: (workspaceId) => ipcRenderer.invoke(IPC.gitDiff, workspaceId),
     setCompareBase: (workspaceId, compareBase) =>
       ipcRenderer.invoke(IPC.workspaceSetCompareBase, workspaceId, compareBase),

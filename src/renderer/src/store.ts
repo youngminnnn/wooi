@@ -629,7 +629,7 @@ interface UIState {
   goForwardWorkspace: () => Promise<void>
   refreshGit: (workspaceId: string) => Promise<void>
   /** 진입 여부와 무관하게 모든(비아카이브) 워크스페이스의 git 상태를 한 번에 갱신한다. */
-  refreshAllGit: () => Promise<void>
+  refreshAllGit: (force?: boolean) => Promise<void>
   /** 활성 리포를 한 번씩 fetch 한 뒤, 그 리포에 속한 워크스페이스 상태를 즉시 갱신한다. */
   fetchReposAndRefreshGit: () => Promise<void>
   refreshPr: (workspaceId: string) => Promise<void>
@@ -870,6 +870,93 @@ const AUTH_POLL_INTERVAL_MS = 30_000
 // 1분 간격이면 넉넉하다. 아카이브됐거나 아직 코멘트를 안 단 세션은 메인에서 알아서 건너뛴다.
 let reviewPollTimer: ReturnType<typeof setInterval> | null = null
 const REVIEW_POLL_INTERVAL_MS = 60_000
+
+/** 전체 git 폴링과 포커스 복귀 갱신이 겹쳐도 같은 조회를 두 번 띄우지 않는다. */
+const gitStatusInflight = new Map<string, Promise<GitStatus | null>>()
+let allGitRefreshInflight: Promise<void> | null = null
+
+function sameGitStatus(a: GitStatus | null | undefined, b: GitStatus | null): boolean {
+  return (
+    a === b ||
+    (!!a &&
+      !!b &&
+      a.branch === b.branch &&
+      a.ahead === b.ahead &&
+      a.behind === b.behind &&
+      a.changedFiles === b.changedFiles &&
+      a.conflicted === b.conflicted &&
+      a.rebasing === b.rebasing)
+  )
+}
+
+function requestGitStatus(workspaceId: string, force: boolean): Promise<GitStatus | null> {
+  const key = `${workspaceId}:${force ? 'full' : 'light'}`
+  const active = gitStatusInflight.get(key)
+  if (active) return active
+  const request = window.api.git.status(workspaceId, force).finally(() => {
+    if (gitStatusInflight.get(key) === request) gitStatusInflight.delete(key)
+  })
+  gitStatusInflight.set(key, request)
+  return request
+}
+
+type PendingDelta = {
+  workspaceId: string
+  id: string
+  itemType: 'assistant' | 'thinking'
+  text: string
+}
+const pendingDeltas = new Map<string, PendingDelta>()
+let deltaFlushTimer: ReturnType<typeof setTimeout> | null = null
+const FOREGROUND_DELTA_BATCH_MS = 60
+const BACKGROUND_DELTA_BATCH_MS = 500
+
+function applyPendingDeltas(workspaceId?: string): void {
+  const batch = [...pendingDeltas.values()].filter(
+    (delta) => workspaceId === undefined || delta.workspaceId === workspaceId
+  )
+  if (!batch.length) return
+  for (const delta of batch) pendingDeltas.delete(`${delta.workspaceId}:${delta.id}`)
+  useStore.setState((state) => {
+    const transcripts = { ...state.transcripts }
+    for (const delta of batch) {
+      const items = transcripts[delta.workspaceId] ?? []
+      const idx = items.findIndex((item) => item.id === delta.id)
+      if (idx === -1) {
+        transcripts[delta.workspaceId] = [
+          ...items,
+          {
+            id: delta.id,
+            type: delta.itemType,
+            text: delta.text,
+            ts: Date.now(),
+            streaming: true
+          }
+        ]
+      } else {
+        const next = items.slice()
+        const target = next[idx] as ChatItem & { text: string }
+        next[idx] = { ...target, text: target.text + delta.text } as ChatItem
+        transcripts[delta.workspaceId] = next
+      }
+    }
+    return { transcripts }
+  })
+}
+
+function scheduleDelta(delta: PendingDelta): void {
+  const key = `${delta.workspaceId}:${delta.id}`
+  const current = pendingDeltas.get(key)
+  pendingDeltas.set(key, current ? { ...current, text: current.text + delta.text } : delta)
+  if (deltaFlushTimer) return
+  deltaFlushTimer = setTimeout(
+    () => {
+      deltaFlushTimer = null
+      applyPendingDeltas()
+    },
+    windowFocused ? FOREGROUND_DELTA_BATCH_MS : BACKGROUND_DELTA_BATCH_MS
+  )
+}
 
 // gh 연결 모달이 닫힐 때까지 붙들어 두는, 사용자가 원래 하려던 액션. 상태에 담지 않는 이유는
 // 함수라 비교·직렬화 대상이 아니고, 렌더에 영향을 주지 않기 때문이다.
@@ -1218,7 +1305,7 @@ export const useStore = create<UIState>((set, get) => ({
 
     // 최초 진입 시 모든 워크트리의 git 상태를 한 번 받아오고(진입 전에도 사이드바에 노출),
     // 이후 일정 간격으로 폴링해 백그라운드에서 변한 변경 파일 수·ahead/behind 를 최신으로 유지한다.
-    void get().refreshAllGit()
+    void get().refreshAllGit(true)
     if (!statusPollTimer) {
       statusPollTimer = setInterval(() => {
         // 창이 가려져 사이드바가 보이지 않을 때는 폴링을 건너뛰고(불필요한 git 프로세스 방지),
@@ -1371,10 +1458,11 @@ export const useStore = create<UIState>((set, get) => ({
     // (Dock 클릭·앱 전환 시 DOM 이벤트가 누락되어 배지가 안 사라지던 문제를 막는다).
     window.api.onWindowFocus(() => {
       windowFocused = true
+      applyPendingDeltas()
       pushViewing()
       clearSelectedUnread()
       // 자리를 비운 사이 바뀌었을 수 있으니 모든 워크트리 상태를 즉시 한 번 갱신한다.
-      void get().refreshAllGit()
+      void get().refreshAllGit(true)
       void get().fetchReposAndRefreshGit()
       void get().pollReviews()
     })
@@ -1441,6 +1529,9 @@ export const useStore = create<UIState>((set, get) => ({
     pushViewing()
 
     window.api.onChat(({ workspaceId, event }: ChatEnvelope) => {
+      // 완성 항목과 상태 전이는 앞선 텍스트보다 먼저 보이면 안 된다. 해당 workspace 의 묶인
+      // 델타만 동기로 내린 뒤 권위 있는 이벤트를 적용한다.
+      if (event.type !== 'delta') applyPendingDeltas(workspaceId)
       const { transcripts } = get()
       const items = transcripts[workspaceId] ?? []
 
@@ -1471,28 +1562,7 @@ export const useStore = create<UIState>((set, get) => ({
           }
         }
       } else if (event.type === 'delta') {
-        const idx = items.findIndex((i) => i.id === event.id)
-        let next: ChatItem[]
-        if (idx === -1) {
-          next = [
-            ...items,
-            {
-              id: event.id,
-              type: event.itemType,
-              text: event.text,
-              ts: Date.now(),
-              streaming: true
-            }
-          ]
-        } else {
-          const target = items[idx]
-          next = items.slice()
-          next[idx] = {
-            ...target,
-            text: (target as { text: string }).text + event.text
-          } as ChatItem
-        }
-        set({ transcripts: { ...transcripts, [workspaceId]: next } })
+        scheduleDelta({ workspaceId, id: event.id, itemType: event.itemType, text: event.text })
       } else if (event.type === 'status' || event.type === 'session') {
         patchWorkspace(set, get, workspaceId, (w) => {
           if (event.type === 'status') {
@@ -2535,25 +2605,39 @@ export const useStore = create<UIState>((set, get) => ({
   },
 
   refreshGit: async (workspaceId) => {
-    const status = await window.api.git.status(workspaceId)
-    set((s) => ({ gitStatus: { ...s.gitStatus, [workspaceId]: status } }))
+    const status = await requestGitStatus(workspaceId, true)
+    set((s) =>
+      sameGitStatus(s.gitStatus[workspaceId], status)
+        ? {}
+        : { gitStatus: { ...s.gitStatus, [workspaceId]: status } }
+    )
   },
 
-  refreshAllGit: async () => {
-    const workspaces = get().app?.workspaces.filter((w) => !w.archived) ?? []
-    if (!workspaces.length) return
-    // 워크스페이스별로 병렬 조회하되, 결과가 모두 도착한 뒤 한 번만 반영해 리렌더를 줄인다.
-    const entries = await Promise.all(
-      workspaces.map(async (w) => {
-        const status = await window.api.git.status(w.id).catch(() => null)
-        return [w.id, status] as const
+  refreshAllGit: async (force = false) => {
+    if (!force && allGitRefreshInflight) return allGitRefreshInflight
+    const request = (async (): Promise<void> => {
+      const workspaces = get().app?.workspaces.filter((w) => !w.archived) ?? []
+      if (!workspaces.length) return
+      // 워크스페이스별로 병렬 조회하되, 결과가 모두 도착한 뒤 바뀐 항목이 있을 때만 반영한다.
+      const entries = await Promise.all(
+        workspaces.map(async (w) => {
+          const status = await requestGitStatus(w.id, force).catch(() => null)
+          return [w.id, status] as const
+        })
+      )
+      set((s) => {
+        if (entries.every(([id, status]) => sameGitStatus(s.gitStatus[id], status))) return {}
+        const gitStatus = { ...s.gitStatus }
+        for (const [id, status] of entries) gitStatus[id] = status
+        return { gitStatus }
       })
-    )
-    set((s) => {
-      const gitStatus = { ...s.gitStatus }
-      for (const [id, status] of entries) gitStatus[id] = status
-      return { gitStatus }
+    })()
+    if (force) return request
+    const tracked = request.finally(() => {
+      if (allGitRefreshInflight === tracked) allGitRefreshInflight = null
     })
+    allGitRefreshInflight = tracked
+    return allGitRefreshInflight
   },
 
   fetchReposAndRefreshGit: async () => {
@@ -2566,11 +2650,12 @@ export const useStore = create<UIState>((set, get) => ({
         const affected = workspaces.filter((w) => w.repoId === repoId)
         const entries = await Promise.all(
           affected.map(async (w) => {
-            const status = await window.api.git.status(w.id).catch(() => null)
+            const status = await requestGitStatus(w.id, true).catch(() => null)
             return [w.id, status] as const
           })
         )
         set((s) => {
+          if (entries.every(([id, status]) => sameGitStatus(s.gitStatus[id], status))) return {}
           const gitStatus = { ...s.gitStatus }
           for (const [id, status] of entries) gitStatus[id] = status
           return { gitStatus }

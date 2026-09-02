@@ -533,8 +533,30 @@ export async function deleteReviewRefs(repoPath: string, reviewId: string): Prom
 }
 
 /** 사이드바 배지용 경량 상태 (브랜치, origin/base 우선 기준의 ahead/behind, 변경 파일 수). */
-export async function getStatus(worktreePath: string, baseBranch: string): Promise<GitStatus> {
-  const branch = await git(worktreePath, ['rev-parse', '--abbrev-ref', 'HEAD']).catch(() => '?')
+const STATUS_REF_CACHE_MS = 60_000
+const statusRefCache = new Map<
+  string,
+  { at: number; baseBranch: string; branch: string; ahead: number; behind: number }
+>()
+
+/**
+ * 전체 사이드바 폴링에서는 파일 상태만 매번 읽고, 브랜치와 base 대비 커밋 수는 잠시 재사용한다.
+ * 명시적 사용자 동작·턴 완료·fetch 뒤 조회는 force=true 로 즉시 다시 계산한다.
+ */
+export async function getStatus(
+  worktreePath: string,
+  baseBranch: string,
+  force = true
+): Promise<GitStatus> {
+  const cached = statusRefCache.get(worktreePath)
+  const canReuse =
+    !force &&
+    cached !== undefined &&
+    cached.baseBranch === baseBranch &&
+    Date.now() - cached.at < STATUS_REF_CACHE_MS
+  const branch = canReuse
+    ? cached.branch
+    : await git(worktreePath, ['rev-parse', '--abbrev-ref', 'HEAD']).catch(() => '?')
 
   let changedFiles = 0
   let conflicted = false
@@ -548,25 +570,27 @@ export async function getStatus(worktreePath: string, baseBranch: string): Promi
     // 무시 — 0 으로 둔다.
   }
 
-  let ahead = 0
-  let behind = 0
-  try {
-    const remoteBase = `origin/${baseBranch.replace(/^origin\//, '')}`
-    // 15초 폴링의 공통 경로에 ref 확인 프로세스를 더하지 않는다. origin ref 로 바로 계산하고,
-    // 리모트가 없는 리포에서만 같은 명령을 로컬 base 로 한 번 더 시도한다.
-    const counts = await git(worktreePath, [
-      'rev-list',
-      '--left-right',
-      '--count',
-      `${remoteBase}...HEAD`
-    ]).catch(() =>
-      git(worktreePath, ['rev-list', '--left-right', '--count', `${baseBranch}...HEAD`])
-    )
-    const [b, a] = counts.split(/\s+/).map((n) => parseInt(n, 10))
-    behind = Number.isFinite(b) ? b : 0
-    ahead = Number.isFinite(a) ? a : 0
-  } catch {
-    // base 브랜치 ref 가 없으면 0 으로 둔다.
+  let ahead = canReuse ? cached.ahead : 0
+  let behind = canReuse ? cached.behind : 0
+  if (!canReuse) {
+    try {
+      const remoteBase = `origin/${baseBranch.replace(/^origin\//, '')}`
+      // 리모트가 없는 리포에서만 같은 명령을 로컬 base 로 한 번 더 시도한다.
+      const counts = await git(worktreePath, [
+        'rev-list',
+        '--left-right',
+        '--count',
+        `${remoteBase}...HEAD`
+      ]).catch(() =>
+        git(worktreePath, ['rev-list', '--left-right', '--count', `${baseBranch}...HEAD`])
+      )
+      const [b, a] = counts.split(/\s+/).map((n) => parseInt(n, 10))
+      behind = Number.isFinite(b) ? b : 0
+      ahead = Number.isFinite(a) ? a : 0
+    } catch {
+      // base 브랜치 ref 가 없으면 0 으로 둔다.
+    }
+    statusRefCache.set(worktreePath, { at: Date.now(), baseBranch, branch, ahead, behind })
   }
 
   return { branch, ahead, behind, changedFiles, conflicted, rebasing: isRebasing(worktreePath) }

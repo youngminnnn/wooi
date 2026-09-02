@@ -356,7 +356,8 @@ export interface WooiApi {
   }
 
   git: {
-    status(workspaceId: string): Promise<GitStatus | null>
+    /** force=false 는 짧은 전체 폴링용: 비싼 base 대비 커밋 계산을 캐시해 재사용한다. */
+    status(workspaceId: string, force?: boolean): Promise<GitStatus | null>
     diff(workspaceId: string): Promise<WorkspaceDiff | null>
     /**
      * Changes 탭이 무엇과 견줄지 바꾼다. **표시 전용** — PR 대상도 rebase 대상도 바뀌지 않는다

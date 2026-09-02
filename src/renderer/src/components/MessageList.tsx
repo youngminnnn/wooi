@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   ChevronRight,
   Brain,
@@ -627,7 +627,7 @@ export default function MessageList({
                   : undefined
               }
             >
-              <Item
+              <MemoizedItem
                 item={item}
                 running={running}
                 resolved={resolved}
@@ -811,6 +811,22 @@ function Item({
       return null
   }
 }
+
+/**
+ * 스트리밍 중에는 목록 부모가 계속 계산돼도 이미 끝난 일반 메시지는 다시 렌더하지 않는다.
+ * 도구 행은 주변 결과·그룹·실행 상태에 의존하므로 기본 비교에 맡겨 정확성을 우선한다.
+ */
+const MemoizedItem = memo(Item, (prev, next) => {
+  if (
+    prev.item !== next.item ||
+    prev.workspaceId !== next.workspaceId ||
+    prev.density !== next.density ||
+    prev.toolLogStyle !== next.toolLogStyle
+  ) {
+    return false
+  }
+  return prev.item.type !== 'tool_use'
+})
 
 function UnknownCard({
   item
