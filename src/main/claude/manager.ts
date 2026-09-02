@@ -125,7 +125,8 @@ export class SessionManager implements AgentBackend {
     })
     this.shutdownResume = new ShutdownResumeCoordinator({
       backend: CLAUDE_META.id,
-      sendContinuation: (workspaceId, text) => this.sendContinuation(workspaceId, text),
+      sendContinuation: (workspaceId, text, label) =>
+        this.sendContinuation(workspaceId, text, label),
       emitItem: (workspaceId, item) =>
         this.dispatch(IPC.evtChat, { workspaceId, event: { type: 'item', item } }),
       broadcastState: () => this.dispatch(IPC.evtState, getStore().getState())

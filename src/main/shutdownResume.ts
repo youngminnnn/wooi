@@ -8,9 +8,17 @@ export const SHUTDOWN_RESUME_GRACE_MS = 24 * 60 * 60 * 1000
 export const SHUTDOWN_CONTINUATION =
   'The previous turn stopped because Wooi shut down. Inspect the current conversation and workspace state, then continue the unfinished task. Do not repeat work that is already complete.'
 
+/**
+ * 이 턴이 대화에서 접힐 때 한 줄에 남는 이름([[shared/types]] WooiTurnOrigin).
+ *
+ * 사용자가 치지 않은 턴이므로 감추지는 않는다 — 다만 지시문 자체는 상용구라, 펼쳐 둔 채로는
+ * 정작 읽어야 할 앞뒤 대화를 밀어낸다.
+ */
+export const SHUTDOWN_CONTINUATION_LABEL = 'Continuing after Wooi restarted'
+
 interface Deps {
   backend: AgentBackendId
-  sendContinuation: (workspaceId: string, text: string) => void
+  sendContinuation: (workspaceId: string, text: string, label: string) => void
   emitItem: (workspaceId: string, item: ChatItem) => void
   broadcastState: () => void
 }
@@ -122,7 +130,7 @@ export class ShutdownResumeCoordinator {
     }
     this.clearPending(workspaceId)
     this.notice(workspaceId, 'Wooi restarted. Continuing the unfinished task…')
-    this.deps.sendContinuation(workspaceId, SHUTDOWN_CONTINUATION)
+    this.deps.sendContinuation(workspaceId, SHUTDOWN_CONTINUATION, SHUTDOWN_CONTINUATION_LABEL)
   }
 
   private notice(workspaceId: string, text: string): void {
