@@ -23,6 +23,7 @@ import { shouldFocusComposerFromEditingKey, shouldRedirectTyping } from './lib/t
 import { archivedPreviewTarget, workspaceSurfaces } from './lib/archivedPreview'
 import { buildStackLayers } from './lib/stackView'
 import { rebaseShortcutGate } from './lib/rebaseGate'
+import { focusedPane, mainPane, paneState } from './lib/splitPanes'
 import TitleBar from './components/TitleBar'
 import { UpdateBanner } from './components/UpdateBanner'
 import { NoticeBanner } from './components/NoticeBanner'
@@ -30,6 +31,7 @@ import Sidebar from './components/Sidebar'
 import PrReviewScreen from './components/review/PrReviewScreen'
 import FanoutCompareScreen from './components/fanout/FanoutCompareScreen'
 import StackScreen from './components/stack/StackScreen'
+import SplitPanes from './components/SplitPanes'
 import { useFeatureNudge } from './lib/featureNudge'
 import PrReviewStartModal from './components/review/PrReviewStartModal'
 import ChatView from './components/ChatView'
@@ -73,16 +75,17 @@ import type { ExportConversationDetail } from './components/ExportMenu'
  * 여기서 다시 보면 팔레트 자신이 모달이라는 이유로 "입력창에 닿을 수 없다" 가 되어 버린다.
  */
 function chatComposerReachable(
-  st: {
-    selectedWorkspaceId: string | null
-    activeReviewId: string | null
+  st: Parameters<typeof paneState>[0] & {
     activeFanoutGroupId: string | null
+    activeStackWorkspaceId: string | null
   },
   fileViewerVisible: boolean
 ): boolean {
-  return (
-    !!st.selectedWorkspaceId && !st.activeReviewId && !st.activeFanoutGroupId && !fileViewerVisible
-  )
+  if (fileViewerVisible) return false
+  if (st.activeFanoutGroupId || st.activeStackWorkspaceId) return false
+  // 나란히 두 칸을 띄웠으면 "닿는" 입력창은 포커스된 칸의 것 하나뿐이다. 리뷰 칸을 보는 중에
+  // 뒤쪽 대화의 입력창을 채우면, 분할이 아닐 때와 똑같이 글이 어디로 갔는지 알 수 없게 된다.
+  return focusedPane(paneState(st))?.kind === 'workspace'
 }
 
 export default function App(): React.JSX.Element {
@@ -150,6 +153,8 @@ export default function App(): React.JSX.Element {
   const activeReviewId = useStore((s) => s.activeReviewId)
   const activeFanoutGroupId = useStore((s) => s.activeFanoutGroupId)
   const activeStackWorkspaceId = useStore((s) => s.activeStackWorkspaceId)
+  const splitPane = useStore((s) => s.splitPane)
+  const splitFocus = useStore((s) => s.splitFocus)
   const fileViewer = useStore((s) => s.fileViewer)
   // ⌘K 팔레트가 "승인할 게 없다" 를 이유로 쓴다. 셀렉터로 받아야 팔레트를 열어 둔 채 새 권한이
   // 들어와도 그 행이 따라 살아난다.
@@ -157,7 +162,8 @@ export default function App(): React.JSX.Element {
   // 팔레트의 Rebase 행이 왜 막혔는지. 게이트를 셀렉터 안에서 돌려 문장만 꺼내 온다 — 문자열
   // 하나라 참조가 흔들리지 않고, 뒤처짐·충돌 상태가 바뀌면 그 행도 따라 살아난다.
   const rebaseBlockedReason = useStore((s) => {
-    const id = s.selectedWorkspaceId
+    const focused = focusedPane(paneState(s))
+    const id = focused?.kind === 'workspace' ? focused.workspaceId : null
     const ws = id ? s.app?.workspaces.find((w) => w.id === id) : null
     if (!id || !ws) return null
     const gate = rebaseShortcutGate({
@@ -227,8 +233,14 @@ export default function App(): React.JSX.Element {
     quickOpenFile
 
   // 큰 파일 뷰어가 실제로 화면에 떠 있는지 — 리뷰 화면에 들어가 있으면 가려지므로 아니다.
+  // 큰 파일 뷰어는 대화 위를 통째로 덮는 읽기 화면이라 나란히 편 두 칸과 자리를 다툰다 —
+  // 분할 중에는 띄우지 않는다(⇧⌘O 도 아래에서 그 이유를 말하고 물러난다).
   const fileViewerVisible =
-    !activeReviewId && !activeFanoutGroupId && !!fileViewer && fileViewer.workspaceId === selectedId
+    !activeReviewId &&
+    !activeFanoutGroupId &&
+    !splitPane &&
+    !!fileViewer &&
+    fileViewer.workspaceId === selectedId
 
   // 모달 상태는 여기(App)에만 있으므로, 대화 화면의 전역 키 핸들러(Composer 의 Esc 등)가
   // 볼 수 있도록 store 로 내보낸다 — 모달이 떠 있을 때 뒤쪽 단축키가 같이 발동하면 안 된다.
@@ -319,11 +331,17 @@ export default function App(): React.JSX.Element {
   const runPaletteAction = useCallback(
     (action: PaletteActionId): void => {
       const st = useStore.getState()
+      // 화면이 둘로 나뉘어 있으면 동작의 대상은 "선택된 워크스페이스" 가 아니라 **포커스된 칸**
+      // 이다 — 오른쪽 칸을 보면서 ⇧⌘⌫ 를 눌렀는데 왼쪽이 아카이브되면 안 된다. 분할이 아니면
+      // 포커스된 칸이 곧 선택된 워크스페이스라, 아래 동작은 예전과 한 글자도 다르지 않다.
+      const focused = focusedPane(paneState(st))
+      const focusedWorkspaceId = focused?.kind === 'workspace' ? focused.workspaceId : null
+      const focusedReviewId = focused?.kind === 'review' ? focused.reviewId : null
       const surfaces = workspaceSurfaces(
-        !!archivedPreviewTarget(st.app?.workspaces, st.selectedWorkspaceId)
+        !!archivedPreviewTarget(st.app?.workspaces, focusedWorkspaceId)
       )
       // worktree 가 있어야 성립하는 도구들의 대상. 아카이브 미리보기면 대상이 없다.
-      const selId = surfaces.worktreeTools ? st.selectedWorkspaceId : null
+      const selId = surfaces.worktreeTools ? focusedWorkspaceId : null
 
       switch (action) {
         case 'open-shortcuts':
@@ -349,7 +367,7 @@ export default function App(): React.JSX.Element {
         case 'new-workspace':
         case 'new-workspace-choose-agent': {
           const repoId =
-            st.app?.workspaces.find((w) => w.id === st.selectedWorkspaceId)?.repoId ??
+            st.app?.workspaces.find((w) => w.id === focusedWorkspaceId)?.repoId ??
             st.app?.repos[0]?.id
           if (!repoId) {
             st.pushToast('info', 'Add a repository first.')
@@ -410,7 +428,7 @@ export default function App(): React.JSX.Element {
         case 'open-stack-view': {
           // 스택이 아니면 열 지도가 없으므로 왜 안 열리는지 말해 준다 — 조용히 무시하면
           // 단축키가 고장 난 것처럼 보인다. 팔레트는 그 전에 같은 이유를 행에 적어 둔다.
-          const anchorId = st.selectedWorkspaceId
+          const anchorId = focusedWorkspaceId
           if (!anchorId) {
             st.pushToast('info', 'Pick a workspace in a stack first.')
             return
@@ -440,7 +458,7 @@ export default function App(): React.JSX.Element {
           return
 
         case 'cycle-permission-mode': {
-          const ws = st.app?.workspaces.find((w) => w.id === st.selectedWorkspaceId)
+          const ws = st.app?.workspaces.find((w) => w.id === focusedWorkspaceId)
           if (!ws) return
           // 순환 목록은 그 워크스페이스의 백엔드가 정한다(Claude 와 Codex 는 모드가 서로 다르다).
           // 카탈로그를 아직 못 읽었으면 바꿀 근거가 없으므로 조용히 무시한다.
@@ -469,6 +487,12 @@ export default function App(): React.JSX.Element {
         }
 
         case 'open-file':
+          // 큰 파일 뷰어는 대화를 통째로 덮는 읽기 화면이라 나란히 편 두 칸과 함께 쓸 수 없다.
+          // 조용히 무시하면 고장 난 것처럼 보이니 무엇을 먼저 해야 하는지 말해 준다.
+          if (st.splitPane) {
+            st.pushToast('info', 'Close one pane (⇧⌘W) to open the file viewer.')
+            return
+          }
           if (selId) openFileQuickOpen()
           return
 
@@ -493,9 +517,10 @@ export default function App(): React.JSX.Element {
 
         case 'archive-workspace':
           // 리뷰 화면이 떠 있으면 대상은 뒤에 가려진 워크스페이스가 아니라 그 리뷰다
-          // (리뷰를 열어도 selectedWorkspaceId 는 그대로 남는다).
-          if (st.activeReviewId) {
-            void st.requestArchiveReview(st.activeReviewId)
+          // (리뷰를 열어도 selectedWorkspaceId 는 그대로 남는다). 나란히 편 두 칸에서는
+          // 포커스된 칸이 그 답을 정한다 — 왼쪽이 리뷰여도 오른쪽 대화를 보는 중이면 대화가 대상이다.
+          if (focusedReviewId) {
+            void st.requestArchiveReview(focusedReviewId)
             return
           }
           // ChatView 가 확인 다이얼로그와 함께 처리한다.
@@ -505,8 +530,9 @@ export default function App(): React.JSX.Element {
 
         case 'delete-workspace':
           // 아카이브와 한 글쇠 차이지만 결과는 되돌릴 수 없다 — 확인은 store 가 반드시 거친다.
-          // 리뷰 화면이 떠 있으면 대상이 되는 워크스페이스가 화면에 없으니 받지 않는다.
-          if (selId && !st.activeReviewId) void st.requestDeleteWorkspace(selId)
+          // 리뷰 화면이 떠 있으면 대상이 되는 워크스페이스가 화면에 없으니 받지 않는다
+          // (그때는 포커스된 칸이 리뷰라 selId 가 비어 있다).
+          if (selId) void st.requestDeleteWorkspace(selId)
           return
 
         case 'focus-composer':
@@ -516,9 +542,17 @@ export default function App(): React.JSX.Element {
           }
           return
 
+        case 'close-focused-pane':
+          st.closeFocusedPane()
+          return
+
+        case 'toggle-split-focus':
+          st.toggleSplitFocus()
+          return
+
         case 'toggle-tool-results':
           // 워크스페이스마다 따로 기억하므로 지금 보고 있는 워크스페이스에만 걸린다.
-          if (st.selectedWorkspaceId) st.cycleTranscriptDensity(st.selectedWorkspaceId)
+          if (focusedWorkspaceId) st.cycleTranscriptDensity(focusedWorkspaceId)
           return
       }
     },
@@ -542,16 +576,19 @@ export default function App(): React.JSX.Element {
         case 'open-settings':
           openSettings(effect.page)
           return
-        case 'run-command':
-          // 실행도 결과 카드도 Composer 가 이미 하고 있다 — 입구만 빌려 준다.
-          if (st.selectedWorkspaceId) {
+        case 'run-command': {
+          // 실행도 결과 카드도 Composer 가 이미 하고 있다 — 입구만 빌려 준다. 대상은 포커스된
+          // 칸이다(Composer 는 detail 의 workspaceId 로 자기 것인지 가린다).
+          const focused = focusedPane(paneState(st))
+          if (focused?.kind === 'workspace') {
             window.dispatchEvent(
               new CustomEvent<RunWooiCommandDetail>(RUN_WOOI_COMMAND_EVENT, {
-                detail: { workspaceId: st.selectedWorkspaceId, name: effect.command.name, rest: '' }
+                detail: { workspaceId: focused.workspaceId, name: effect.command.name, rest: '' }
               })
             )
           }
           return
+        }
         case 'fill-composer':
           // caret 에 끼워 넣는 기존 경로를 그대로 쓴다 — 쓰던 초안을 덮어쓰지 않는다.
           window.dispatchEvent(
@@ -571,19 +608,30 @@ export default function App(): React.JSX.Element {
    */
   const paletteContext = useMemo<PaletteContext | null>(() => {
     if (!quickSwitchOpen || !app) return null
-    const archived = !!archivedPreviewTarget(app.workspaces, selectedId)
-    return {
-      hasRepos: app.repos.length > 0,
+    // 러너와 같은 대상을 본다 — 팔레트가 "가능하다" 고 적어 둔 행이 정작 다른 워크스페이스를
+    // 건드리면, 나란히 편 두 칸에서 팔레트는 거짓말을 하는 목록이 된다.
+    const paneAxes = {
       selectedWorkspaceId: selectedId,
-      worktreeTools: workspaceSurfaces(archived).worktreeTools,
-      composerReachable: chatComposerReachable(
-        { selectedWorkspaceId: selectedId, activeReviewId, activeFanoutGroupId },
-        fileViewerVisible
-      ),
       activeReviewId,
       activeFanoutGroupId,
+      activeStackWorkspaceId,
+      splitPane,
+      splitFocus
+    }
+    const focused = focusedPane(paneState(paneAxes))
+    const focusedWorkspaceId = focused?.kind === 'workspace' ? focused.workspaceId : null
+    const archived = !!archivedPreviewTarget(app.workspaces, focusedWorkspaceId)
+    return {
+      hasRepos: app.repos.length > 0,
+      selectedWorkspaceId: focusedWorkspaceId,
+      worktreeTools: workspaceSurfaces(archived).worktreeTools,
+      composerReachable: chatComposerReachable(paneAxes, fileViewerVisible),
+      activeReviewId: focused?.kind === 'review' ? focused.reviewId : null,
+      activeFanoutGroupId,
       pendingPermissionCount: approvablePermissionCount,
-      selectionIsStacked: !!selectedId && buildStackLayers(app.workspaces, selectedId).length >= 2,
+      selectionIsStacked:
+        !!focusedWorkspaceId && buildStackLayers(app.workspaces, focusedWorkspaceId).length >= 2,
+      splitOpen: !!splitPane,
       rebaseBlockedReason
     }
   }, [
@@ -592,6 +640,9 @@ export default function App(): React.JSX.Element {
     selectedId,
     activeReviewId,
     activeFanoutGroupId,
+    activeStackWorkspaceId,
+    splitPane,
+    splitFocus,
     fileViewerVisible,
     approvablePermissionCount,
     rebaseBlockedReason
@@ -607,8 +658,15 @@ export default function App(): React.JSX.Element {
 
       // 아카이브된 워크스페이스를 읽기 전용으로 보고 있다면 worktree 가 필요한 단축키는 대상이
       // 없다(⇧⌘E/F/D/S/O·⇧⌘⌫·⌘L·타이핑 리다이렉트). 판정은 한 곳에서 내리고 아래에서 나눠 쓴다.
+      // 화면이 둘로 나뉘어 있으면 단축키의 대상은 "선택된 워크스페이스" 가 아니라 **포커스된
+      // 칸**이다 — 오른쪽 칸을 보면서 ⇧⌘⌫ 를 눌렀는데 왼쪽이 아카이브되면 안 된다. 분할이
+      // 아니면 포커스된 칸이 곧 선택된 워크스페이스라, 아래 코드는 예전과 똑같이 동작한다.
+      const focused = focusedPane(paneState(st))
+      const focusedWorkspaceId = focused?.kind === 'workspace' ? focused.workspaceId : null
+      const focusedReviewId = focused?.kind === 'review' ? focused.reviewId : null
+
       const surfaces = workspaceSurfaces(
-        !!archivedPreviewTarget(st.app?.workspaces, st.selectedWorkspaceId)
+        !!archivedPreviewTarget(st.app?.workspaces, focusedWorkspaceId)
       )
 
       // 입력창/텍스트영역에 포커스가 있으면 글자 입력·텍스트 편집이 우선이다.
@@ -672,14 +730,7 @@ export default function App(): React.JSX.Element {
       // "입력을 시작할 곳" 역할이라 기억하기 쉽고, 기존 Wooi 단축키와도 겹치지 않는다.
       // 대화가 다른 화면에 가려졌다면 뒤쪽 textarea 를 몰래 포커스하지 않는다.
       if (e.code === 'KeyL' && !e.shiftKey && !e.ctrlKey && !e.altKey) {
-        if (
-          surfaces.composer &&
-          st.selectedWorkspaceId &&
-          !st.activeReviewId &&
-          !st.activeFanoutGroupId &&
-          !st.activeStackWorkspaceId &&
-          !fileViewerVisible
-        ) {
+        if (surfaces.composer && chatComposerReachable(st, fileViewerVisible)) {
           e.preventDefault()
           runPaletteAction('focus-composer')
         }
@@ -745,6 +796,25 @@ export default function App(): React.JSX.Element {
         return
       }
 
+      // ⇧⌘W: 나란히 편 두 칸 중 포커스된 쪽을 닫는다. 왼쪽을 닫으면 오른쪽이 그 자리로
+      // 올라온다 — 닫은 칸이 아니라 남긴 칸이 화면에 남아야 "닫았다" 는 말이 맞다.
+      // ⌘W 는 macOS 에서 창 닫기라 비워 둔다.
+      if (e.code === 'KeyW' && e.shiftKey && !e.ctrlKey && !e.altKey) {
+        if (!st.splitPane) return
+        e.preventDefault()
+        runPaletteAction('close-focused-pane')
+        return
+      }
+
+      // ⌘\\: 두 칸 사이로 포커스를 옮긴다. 사이드바 클릭이 어느 칸을 갈아 끼우는지가 포커스로
+      // 정해지므로, 손을 마우스로 옮기지 않고도 바꿀 수 있어야 한다.
+      if (e.code === 'Backslash' && !e.shiftKey && !e.ctrlKey && !e.altKey) {
+        if (!st.splitPane) return
+        e.preventDefault()
+        runPaletteAction('toggle-split-focus')
+        return
+      }
+
       // ⌘N: 기본 에이전트로 즉시 생성. ⇧⌘N: 같은 repo의 + 메뉴를 열어 에이전트를 고른다.
       if (e.code === 'KeyN' && !e.ctrlKey && !e.altKey) {
         e.preventDefault()
@@ -780,12 +850,12 @@ export default function App(): React.JSX.Element {
 
       // 우상단 헤더 도구 단축키 — 현재 선택된 workspace 를 대상으로 한다.
       // ⇧⌘ 조합이라 macOS 기본 단축키(⌘S/E/F, ⌘⌫ 등)나 앱 기존 단축키와 충돌하지 않는다.
-      const selId = surfaces.worktreeTools ? st.selectedWorkspaceId : null
+      const selId = surfaces.worktreeTools ? focusedWorkspaceId : null
 
       // 리뷰 화면이 떠 있으면 헤더 도구의 대상은 뒤에 가려진 워크스페이스가 아니라 리뷰다
       // (리뷰를 열어도 selectedWorkspaceId 는 그대로 남는다). 아카이브만 리뷰에 대응하는
       // 동작이 있고, 나머지 ⇧⌘ 도구는 엉뚱한 워크스페이스를 건드리지 않도록 여기서 끊는다.
-      if (st.activeReviewId && e.shiftKey) {
+      if (focusedReviewId && e.shiftKey) {
         // ⇧⌘⌫: 리뷰 아카이브 — 사이드바의 아카이브 버튼과 같은 경로(확인 후 워크트리만 정리).
         if (e.key === 'Backspace' || e.key === 'Delete') {
           e.preventDefault()
@@ -797,7 +867,7 @@ export default function App(): React.JSX.Element {
       // ⌥⌘⌫: workspace 영구 삭제. 아카이브(⇧⌘⌫)와 한 글쇠 차이지만 결과는 되돌릴 수 없으므로,
       // ⌥ 를 요구해 손이 미끄러져 눌리지 않게 하고 삭제 확인도 반드시 거친다(store 가 처리).
       // 리뷰 화면이 떠 있으면 대상이 되는 워크스페이스가 화면에 없으니 받지 않는다.
-      if (selId && !st.activeReviewId && e.altKey && !e.shiftKey && !e.ctrlKey) {
+      if (selId && e.altKey && !e.shiftKey && !e.ctrlKey) {
         if (e.code === 'Backspace' || e.code === 'Delete') {
           e.preventDefault()
           runPaletteAction('delete-workspace')
@@ -847,7 +917,9 @@ export default function App(): React.JSX.Element {
           runPaletteAction('reveal-in-finder')
           return
         }
-        // ⇧⌘O: 파일 퀵 오픈 — 고르면 대화창 위의 큰 파일 뷰어로 열린다.
+        // ⇧⌘O: 파일 퀵 오픈 — 고르면 대화창 위의 큰 파일 뷰어로 열린다. 그 뷰어는 대화를
+        // 통째로 덮으므로 나란히 편 두 칸과 함께 쓸 수 없다. 조용히 무시하면 단축키가 고장 난
+        // 것처럼 보이니, 무엇을 먼저 해야 하는지 말해 준다.
         if (e.code === 'KeyO') {
           e.preventDefault()
           runPaletteAction('open-file')
@@ -987,6 +1059,10 @@ export default function App(): React.JSX.Element {
     void useStore.getState().createWorkspace(repoId, { parentWorkspaceId, agentBackend })
   }
 
+  // 분할 중일 때 왼쪽 칸이 비추는 것. 리뷰가 열려 있으면 리뷰, 아니면 고른 워크스페이스다 —
+  // 판정은 스토어가 쓰는 것과 같은 함수를 그대로 쓴다.
+  const splitMain = mainPane({ activeReviewId, selectedWorkspaceId: selectedId })
+
   return (
     <div className="h-full flex flex-col bg-[var(--bg)]">
       <TitleBar onOpenSettings={() => setShowSettings(true)} />
@@ -1030,7 +1106,11 @@ export default function App(): React.JSX.Element {
           ref={contentRef}
           className="relative flex-1 min-w-0 border-l border-[var(--border)] flex"
         >
-          {activeFanoutGroupId ? (
+          {splitMain && splitPane ? (
+            // 관계 있는 두 개를 나란히 — 아래 전체 화면 축들보다 먼저 본다. 분할이 열려 있는
+            // 동안 fan-out·스택 화면은 스토어가 이미 닫아 뒀고, 리뷰는 칸 하나로 들어온다.
+            <SplitPanes main={splitMain} split={splitPane} contentWidth={contentW} />
+          ) : activeFanoutGroupId ? (
             <FanoutCompareScreen key={activeFanoutGroupId} groupId={activeFanoutGroupId} />
           ) : activeReviewId ? (
             <PrReviewScreen key={activeReviewId} reviewId={activeReviewId} />

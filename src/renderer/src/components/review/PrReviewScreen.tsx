@@ -8,6 +8,7 @@ import {
   Layers,
   Loader2,
   MessageSquarePlus,
+  PanelLeftClose,
   Play,
   Square,
   TriangleAlert,
@@ -34,6 +35,7 @@ import ReviewProgressPane from './ReviewProgressPane'
 import ReviewSubmitModal from './ReviewSubmitModal'
 import { formatCountdown, formatTime } from '../../lib/format'
 import { useNow } from '../../lib/useNow'
+import { usePaneFocus } from '../../lib/paneFocus'
 
 /**
  * PR 리뷰 화면. 사이드바 옆 본문 영역을 차지한다(대화창과 같은 자리).
@@ -55,6 +57,9 @@ export default function PrReviewScreen({ reviewId }: { reviewId: string }): Reac
   // 아카이브·삭제가 도는 동안 헤더 버튼을 잠근다 — 두 번 눌러 봐야 두 번째는 이미 사라진
   // 리뷰를 향한다.
   const busy = useStore((s) => s.busyReviews[reviewId])
+  // 나란히 두 칸을 띄우면 이 화면의 코멘트 이동 단축키가 두 번 발동한다 — 포커스된 칸만 받는다.
+  const { focused: paneFocused, split: inSplit } = usePaneFocus()
+  const closeFocusedPane = useStore((s) => s.closeFocusedPane)
   const [submitOpen, setSubmitOpen] = useState(false)
   /** 지금 지목한 코멘트. diff 가 여기로 스크롤하고 그 카드에 테두리를 준다. */
   const [focusedId, setFocusedId] = useState<string | null>(null)
@@ -109,6 +114,7 @@ export default function PrReviewScreen({ reviewId }: { reviewId: string }): Reac
    */
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
+      if (!paneFocused) return
       const st = useStore.getState()
       // 제출 모달은 이 화면이 직접 띄우므로 store 의 overlayOpen 에 잡히지 않는다.
       if (submitOpen || st.overlayOpen || st.confirmState) return
@@ -128,7 +134,7 @@ export default function PrReviewScreen({ reviewId }: { reviewId: string }): Reac
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [step, submitOpen])
+  }, [step, submitOpen, paneFocused])
 
   // 레코드는 상태 방송으로 도착한다. 리뷰를 막 시작한 직후에는 activeReviewId 가 먼저
   // 세팅될 수 있으므로, 그 짧은 틈에 본문이 빈 화면이 되지 않도록 자리를 지켜 준다.
@@ -222,6 +228,18 @@ export default function PrReviewScreen({ reviewId }: { reviewId: string }): Reac
           >
             <Square size={11} fill="currentColor" />
             Stop
+          </button>
+        )}
+        {/* 나란히 편 칸에서만 뜬다. 옆의 X 는 리뷰 자체를 닫는(워크트리를 지우는) 버튼이라
+            아예 다른 일이므로, 붙여 두지 않고 도구 묶음의 앞머리에 따로 세운다. */}
+        {inSplit && (
+          <button
+            onClick={() => closeFocusedPane()}
+            title="Close this pane (⇧⌘W) — the review stays open in the sidebar"
+            aria-label="Close this pane"
+            className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-neutral-400 hover:bg-[var(--surface-2)] hover:text-neutral-100 active:scale-90"
+          >
+            <PanelLeftClose size={15} />
           </button>
         )}
         <button

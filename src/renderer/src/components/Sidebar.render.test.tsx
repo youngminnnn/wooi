@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { screen, waitFor } from '@testing-library/react'
+import { fireEvent, screen, waitFor } from '@testing-library/react'
 import Sidebar from './Sidebar'
 import { StatusDot } from './StatusDot'
 import { app, pr, workspace } from '../test/fixtures'
@@ -149,5 +149,47 @@ describe('사이드바 파생 상태 표시', () => {
     expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' })
     await waitFor(() => expect(screen.getByText('New workspace in Wooi')).toBeInTheDocument())
     expect(screen.getByText('Wooi').closest('.group')).toHaveClass('ring-[var(--info-500)]/60')
+  })
+})
+
+describe('사이드바에서 두 칸 펴기', () => {
+  const parent = workspace({ id: 'parent', name: 'parent' })
+  const child = workspace({ id: 'child', name: 'child', parentWorkspaceId: 'parent' })
+  const loner = workspace({ id: 'loner', name: 'loner' })
+
+  /** 워크스페이스 행은 role="button" 이고 이름을 담고 있다. */
+  const row = (name: string): HTMLElement => screen.getByRole('button', { name: new RegExp(name) })
+
+  it('⌘+클릭하면 같은 스택의 층을 옆에 세운다(그냥 클릭은 예전처럼 이동한다)', () => {
+    useStore.setState({ app: app([parent, child, loner]), selectedWorkspaceId: parent.id })
+    renderWithStore(<Sidebar {...sidebarProps} />)
+
+    fireEvent.click(row('child'), { metaKey: true })
+
+    expect(useStore.getState().splitPane).toEqual({ kind: 'workspace', workspaceId: 'child' })
+    expect(useStore.getState().selectedWorkspaceId).toBe('parent')
+  })
+
+  it('스택이 다른 워크스페이스를 ⌘+클릭하면 세우지 않고 이유를 알려 준다', () => {
+    useStore.setState({ app: app([parent, child, loner]), selectedWorkspaceId: parent.id })
+    renderWithStore(<Sidebar {...sidebarProps} />)
+
+    fireEvent.click(row('loner'), { metaKey: true })
+
+    expect(useStore.getState().splitPane).toBeNull()
+    expect(useStore.getState().toasts).toHaveLength(1)
+  })
+
+  it('나란히 편 두 칸은 사이드바에서도 둘 다 표시되고, 포커스된 쪽만 진하다', () => {
+    useStore.setState({
+      app: app([parent, child, loner]),
+      selectedWorkspaceId: parent.id,
+      splitPane: { kind: 'workspace', workspaceId: 'child' },
+      splitFocus: 'split'
+    })
+    renderWithStore(<Sidebar {...sidebarProps} />)
+
+    expect(row('child').className).toContain('before:bg-[var(--info-500)]')
+    expect(row('parent').className).toContain('before:bg-[var(--info-500)]/40')
   })
 })

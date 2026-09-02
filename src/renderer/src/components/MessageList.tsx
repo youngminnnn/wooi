@@ -47,6 +47,7 @@ import {
   transcriptEntryKind,
   type TranscriptDensity
 } from '../lib/transcriptDensity'
+import { usePaneFocused } from '../lib/paneFocus'
 
 /**
  * Wooi 가 rebase 충돌 해결을 맡기며 넣은 사용자 턴을 한 줄로 접어 보여 준다.
@@ -255,6 +256,8 @@ export default function MessageList({
   const density = useStore((s) => s.transcriptDensity[workspaceId] ?? DEFAULT_TRANSCRIPT_DENSITY)
   const toolLogStyle = useStore((s) => s.app?.settings.toolLogStyle ?? 'wooi')
   const overlayOpen = useStore((s) => s.overlayOpen)
+  // 나란히 두 칸을 띄우면 이 화면이 다는 전역 리스너가 두 번 발동한다 — 포커스된 칸만 받는다.
+  const paneFocused = usePaneFocused()
   const hasMoreHistory = useStore((s) => !!s.transcriptPaging[workspaceId]?.hasMore)
   const loadingEarlier = useStore((s) => !!s.transcriptPaging[workspaceId]?.loading)
   const loadEarlier = useStore((s) => s.loadEarlierTranscript)
@@ -263,7 +266,7 @@ export default function MessageList({
   const prependAnchorRef = useRef<{ scrollHeight: number; scrollTop: number } | null>(null)
   // ⌘+ / ⌘- / ⌘0 — 대화 표면에만 걸리는 배율. 앱 전체 줌을 키우면 사이드바·터미널까지 커져서
   // 정작 읽으려던 대화가 좁아진 폭 안에 갇힌다. 오버레이가 덮고 있을 때는 키를 듣지 않는다.
-  const fontScale = useChatFontScale(!overlayOpen)
+  const fontScale = useChatFontScale(!overlayOpen && paneFocused)
 
   const compactWindow = useMemo(() => compactHistoryWindow(items), [items])
   const historyExpanded = expandedBoundaryId === compactWindow.boundary?.id
@@ -371,6 +374,7 @@ export default function MessageList({
   // ⌘F / Ctrl+F 로 검색바를 연다(입력창 등 다른 곳에 포커스가 있어도 대화 검색을 우선한다).
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
+      if (!paneFocused) return
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f') {
         // 모달·파일 뷰어가 떠 있으면 ⌘F 는 그쪽 것이다(파일 내 검색). 뒤에서 대화 검색바가
         // 같이 열리면 닫을 때까지 사용자는 그 존재를 모른다.
@@ -382,7 +386,7 @@ export default function MessageList({
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [])
+  }, [paneFocused])
 
   // 검색어 변경으로 matches 가 줄어들면 setActiveIdx(0) 이펙트가 커밋되기 전 프레임에서 activeIdx 가
   // 범위를 벗어날 수 있다 — 카운터/하이라이트/스크롤 모두 클램프한 인덱스를 쓴다.
@@ -472,6 +476,7 @@ export default function MessageList({
   // 이미 쓰이므로 Shift를 더한다. 버튼과 같은 함수를 써서 스크롤 동작을 항상 맞춘다.
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
+      if (!paneFocused) return
       if (
         e.metaKey &&
         e.shiftKey &&
@@ -486,7 +491,7 @@ export default function MessageList({
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [])
+  }, [paneFocused])
 
   if (items.length === 0) {
     // 에이전트는 나중에도 바꿀 수 있지만([[canSwitchAgentBackend]]) 공짜로 바꿀 수 있는 건 지금

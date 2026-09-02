@@ -74,6 +74,8 @@ export interface PaletteContext {
   pendingPermissionCount: number
   /** 고른 워크스페이스가 스택에 속해 있는가(혼자면 펼칠 지도가 없다). */
   selectionIsStacked: boolean
+  /** 지금 화면이 둘로 나뉘어 있는가. 칸을 닫거나 오가는 동작은 그때만 뜻이 있다. */
+  splitOpen: boolean
   /**
    * rebase 가 막혀 있다면 그 이유. 문장은 [[lib/rebaseGate]] 가 만든 것을 그대로 받는다 —
    * 충돌·이미 최신·스택 동기화 대기처럼 조건이 여럿이고, 그 판정은 헤더의 Rebase 칩과
@@ -116,6 +118,11 @@ export function actionDisabledReason(
     case 'approve-all-permissions':
       return ctx.pendingPermissionCount > 0 ? undefined : 'Nothing is waiting for permission.'
 
+    // 칸이 하나뿐이면 닫을 것도 오갈 것도 없다.
+    case 'close-focused-pane':
+    case 'toggle-split-focus':
+      return ctx.splitOpen ? undefined : 'Nothing is open side by side.'
+
     // 리뷰가 열려 있으면 아카이브의 대상은 뒤에 가려진 워크스페이스가 아니라 그 리뷰다.
     case 'archive-workspace':
       if (ctx.activeReviewId) return undefined
@@ -133,6 +140,8 @@ export function actionDisabledReason(
     case 'rebase-onto-base':
       if (ctx.activeFanoutGroupId) return 'Leave the fan-out comparison first.'
       if (action === 'delete-workspace' && ctx.activeReviewId) return 'Close the review first.'
+      // 큰 파일 뷰어는 대화를 통째로 덮으므로 나란히 편 두 칸과 함께 쓸 수 없다.
+      if (action === 'open-file' && ctx.splitOpen) return 'Close one pane (⇧⌘W) first.'
       if (!ctx.selectedWorkspaceId) return NO_WORKSPACE
       if (!ctx.worktreeTools) return ARCHIVED
       // worktree 가 있어도 rebase 는 더 막힐 수 있다 — 게이트가 이유까지 들고 있다.

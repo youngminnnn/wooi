@@ -42,6 +42,8 @@ export type PaletteActionId =
   | 'delete-workspace'
   | 'focus-composer'
   | 'toggle-tool-results'
+  | 'close-focused-pane'
+  | 'toggle-split-focus'
 
 export interface ShortcutItem {
   /** 도움말에 그리는 글쇠들. `–` 와 `/` 는 kbd 가 아니라 구분 기호로 그려진다. */
@@ -114,6 +116,18 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
         label: 'Approve all pending permissions',
         action: 'approve-all-permissions'
       }
+    ]
+  },
+  {
+    title: 'Side by side',
+    items: [
+      {
+        // 키가 아니라 마우스 관용구라 팔레트가 대신 눌러 줄 수 없다 — 참조 행으로 둔다.
+        keys: ['⌘-click'],
+        label: 'Open another layer of the same stack — or a review — beside what you have open'
+      },
+      { keys: ['⌘\\'], label: 'Move focus to the other pane', action: 'toggle-split-focus' },
+      { keys: ['⇧⌘W'], label: 'Close the focused pane', action: 'close-focused-pane' }
     ]
   },
   {

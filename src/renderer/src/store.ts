@@ -54,6 +54,21 @@ import {
   setUiFlag
 } from './lib/uiFlags'
 import { buildStackLayers } from './lib/stackView'
+import {
+  DEFAULT_SPLIT_FRACTION,
+  clampSplitFraction,
+  livePaneView,
+  mainPane,
+  openSplit,
+  paneState,
+  samePane,
+  selectIntoPanes,
+  splitPairing,
+  withFocusedPaneClosed,
+  SPLIT_INELIGIBLE_MESSAGE,
+  SPLIT_NEEDS_MAIN_MESSAGE
+} from './lib/splitPanes'
+import type { PaneSlot, PaneView } from './lib/splitPanes'
 import { openRepoSettings } from './lib/repoSettings'
 import { openSettings } from './lib/settingsNavigation'
 import { CONFIRM_SKIP_LABELS } from './lib/confirmSkips'
@@ -251,6 +266,24 @@ function joinList(parts: string[]): string {
  */
 const RIGHT_PANEL_KEY = 'wooi.rightPanelOpen'
 const SIDEBAR_WIDTH_KEY = 'wooi.sidebarWidth'
+/**
+ * 전체 화면 축(리뷰·fan-out·스택)을 열 때 함께 적용하는 조각 — 분할은 접힌다.
+ * 한 화면을 통째로 쓰는 축 옆에 칸을 세울 자리는 없다.
+ */
+const collapsedSplit = { splitPane: null, splitFocus: 'main' } as const
+
+/** 나란히 편 두 칸의 가로 비율. 창을 다시 열어도 마지막으로 맞춰 둔 비율에서 시작한다. */
+const SPLIT_FRACTION_KEY = 'wooi.splitFraction'
+
+function readRememberedSplitFraction(): number {
+  try {
+    const value = Number(localStorage.getItem(SPLIT_FRACTION_KEY))
+    if (Number.isFinite(value) && value > 0) return clampSplitFraction(value)
+  } catch {
+    /* 기억 실패는 기본 비율로 폴백한다. */
+  }
+  return DEFAULT_SPLIT_FRACTION
+}
 export const DEFAULT_SIDEBAR_WIDTH = 288
 
 function readRememberedSidebarWidth(): number {
@@ -505,6 +538,34 @@ interface UIState {
    * 화면은 앵커가 속한 스택 전체를 그리고, 선택은 그중 한 층만 가리킨다.
    */
   activeStackWorkspaceId: string | null
+  /**
+   * 나란히 편 두 번째 칸. null 이면 화면은 예전처럼 하나다.
+   *
+   * 위의 세 축(리뷰·fan-out·스택)은 서로를 밀어내는 **전체 화면**이다. 이 축만 다르다 —
+   * 주 칸 옆에 하나를 더 세운다. 무엇과 무엇이 나란히 설 수 있는지는 `lib/splitPanes` 가
+   * 혼자 판정하고, 여기서는 그 결과를 담기만 한다.
+   */
+  splitPane: PaneView | null
+  /** 사이드바 클릭·헤더 도구 단축키가 어느 칸을 향하는가. 분할이 없으면 늘 'main'. */
+  splitFocus: PaneSlot
+  /** 주 칸이 차지하는 가로 비율(0~1). 실행 간에 기억한다. */
+  splitFraction: number
+  /** ⌘+클릭 — 지금 보고 있는 것 옆에 하나를 더 편다. 짝이 성립하지 않으면 이유를 알려 준다. */
+  openSplitPane: (view: PaneView) => void
+  /** 포커스된 칸을 닫는다. 왼쪽을 닫으면 오른쪽이 그 자리로 올라온다. */
+  closeFocusedPane: () => void
+  /** 칸 안을 클릭했을 때 그 칸으로 포커스를 옮긴다. */
+  focusPane: (slot: PaneSlot) => void
+  /** 키보드만으로 두 칸을 오간다. */
+  toggleSplitFocus: () => void
+  setSplitFraction: (fraction: number) => void
+  /** 칸에 새로 들어온 것을 그릴 수 있게 채운다(대화는 트랜스크립트, 리뷰는 사이드카). */
+  hydratePaneView: (view: PaneView) => void
+  /**
+   * 워크스페이스 하나를 화면에 그릴 수 있게 만든다 — 트랜스크립트·git·PR·스크립트 상태.
+   * `selectWorkspace` 의 꼬리를 떼어 낸 것으로, 분할된 오른쪽 칸은 "선택" 없이 이것만 부른다.
+   */
+  loadWorkspaceView: (workspaceId: string) => Promise<void>
   /**
    * reviewId → 화면 상태(사이드카에서 읽어온 diff·지적·활동 + 선택/편집).
    * 리뷰의 **메타데이터는 여기 없다** — `app.reviews` 가 권위이고 상태 방송으로 갱신된다.
@@ -1103,6 +1164,9 @@ export const useStore = create<UIState>((set, get) => ({
   activeReviewId: null,
   activeFanoutGroupId: null,
   activeStackWorkspaceId: null,
+  splitPane: null,
+  splitFocus: 'main',
+  splitFraction: readRememberedSplitFraction(),
   adoptingFanoutWorkspaceId: null,
   reviewViews: {},
   busyReviews: {},
@@ -1382,7 +1446,17 @@ export const useStore = create<UIState>((set, get) => ({
         const staleRunning = Object.keys(s.runningSince).filter((id) => !live.has(id))
         const staleQueue = Object.keys(s.messageQueue).filter((id) => !live.has(id))
         const staleComments = Object.keys(s.diffComments).filter((id) => !live.has(id))
-        if (!stale.length && !staleRunning.length && !staleQueue.length && !staleComments.length) {
+        // 나란히 편 칸이 사라진 워크스페이스·리뷰를 가리키고 있으면 접는다 — 그대로 두면
+        // 그릴 것이 없는 빈 칸이 화면 절반을 차지한다(주 칸은 기존 복구 경로가 돌본다).
+        const splitPane = livePaneView(next, s.splitPane)
+        const splitCollapsed = !!s.splitPane && !splitPane
+        if (
+          !stale.length &&
+          !staleRunning.length &&
+          !staleQueue.length &&
+          !staleComments.length &&
+          !splitCollapsed
+        ) {
           return { app: next }
         }
         const unread = { ...s.unread }
@@ -1393,7 +1467,15 @@ export const useStore = create<UIState>((set, get) => ({
         for (const id of staleQueue) delete messageQueue[id]
         const diffComments = { ...s.diffComments }
         for (const id of staleComments) delete diffComments[id]
-        return { app: next, unread, runningSince, messageQueue, diffComments }
+        return {
+          app: next,
+          unread,
+          runningSince,
+          messageQueue,
+          diffComments,
+          splitPane,
+          splitFocus: splitPane ? s.splitFocus : ('main' as PaneSlot)
+        }
       })
     })
 
@@ -2045,7 +2127,12 @@ export const useStore = create<UIState>((set, get) => ({
   },
 
   openFanoutCompare: (groupId) => {
-    set({ activeFanoutGroupId: groupId, activeReviewId: null, activeStackWorkspaceId: null })
+    set({
+      activeFanoutGroupId: groupId,
+      activeReviewId: null,
+      activeStackWorkspaceId: null,
+      ...collapsedSplit
+    })
     // 비교 화면의 후보 카드는 git 요약(N changed · ↑ahead)을 그대로 읽어 쓴다. 진입 시 한 번
     // 새로 고쳐 두지 않으면, 아직 한 번도 연 적 없는 후보의 칸이 비어 있다.
     const group = get().app?.fanoutGroups.find((g) => g.id === groupId)
@@ -2055,7 +2142,12 @@ export const useStore = create<UIState>((set, get) => ({
   closeFanoutCompare: () => set({ activeFanoutGroupId: null }),
 
   openStackView: (workspaceId) => {
-    set({ activeStackWorkspaceId: workspaceId, activeReviewId: null, activeFanoutGroupId: null })
+    set({
+      activeStackWorkspaceId: workspaceId,
+      activeReviewId: null,
+      activeFanoutGroupId: null,
+      ...collapsedSplit
+    })
     // 층마다 워크트리가 따로인 모델 A 는 여기서 전부 새로 고쳐야 한 화면에 같은 시점이 모인다.
     // 모델 B 는 층이 워크스페이스 하나를 나눠 쓰므로 한 번으로 끝난다(브랜치별 PR 은 화면이 읽는다).
     const targets = new Set(
@@ -2068,6 +2160,84 @@ export const useStore = create<UIState>((set, get) => ({
   },
 
   closeStackView: () => set({ activeStackWorkspaceId: null }),
+
+  openSplitPane: (view) => {
+    const st = get()
+    const state = paneState(st)
+    if (!state.main) {
+      st.pushToast('info', SPLIT_NEEDS_MAIN_MESSAGE)
+      return
+    }
+    // 이미 보고 있는 것을 다시 ⌘+클릭한 것은 아무것도 요청하지 않은 것이다 — 조용히 넘긴다.
+    if (samePane(state.main, view)) return
+    // 아카이브된 워크스페이스는 워크트리가 없다 — 옆에 두고 대조할 것이 없고, 세워 봐야
+    // 다음 상태 방송에서 접힌다.
+    const archivedTarget =
+      view.kind === 'workspace' &&
+      !!st.app?.workspaces.find((w) => w.id === view.workspaceId)?.archived
+    if (archivedTarget || !splitPairing(st.app?.workspaces ?? [], state.main, view)) {
+      // 조용히 무시하면 ⌘+클릭이 고장 난 것처럼 보인다. 왜 안 되는지 말해 준다.
+      st.pushToast('info', SPLIT_INELIGIBLE_MESSAGE)
+      return
+    }
+    const next = openSplit(st.app?.workspaces ?? [], state, view)
+    // fan-out·스택 화면은 전체 화면이라 옆에 칸을 세울 자리가 없다 — 짝을 여는 김에 닫는다.
+    set({
+      splitPane: next.split,
+      splitFocus: next.focus,
+      activeFanoutGroupId: null,
+      activeStackWorkspaceId: null,
+      // 큰 파일 뷰어는 두 칸을 통째로 덮으므로 분할과 함께 뜨지 않는다. 열려 있던 채로 두면
+      // 나중에 칸을 닫는 순간 잊고 있던 파일이 되살아나 대화를 가린다.
+      fileViewer: null
+    })
+    get().hydratePaneView(view)
+  },
+
+  closeFocusedPane: () => {
+    const st = get()
+    if (!st.splitPane) return
+    const before = mainPane(st)
+    const next = withFocusedPaneClosed(paneState(st))
+    // 분할을 먼저 접는다 — 아래 selectWorkspace/openReview 가 "포커스된 칸을 갈아 끼우는"
+    // 경로로 빠지지 않고 주 칸을 바꾸게 하려면 이 순서여야 한다.
+    set({ splitPane: null, splitFocus: 'main' })
+    if (!next.main || samePane(next.main, before)) return
+    if (next.main.kind === 'workspace') void get().selectWorkspace(next.main.workspaceId)
+    else get().openReview(next.main.reviewId)
+  },
+
+  focusPane: (slot) => {
+    const st = get()
+    if (!st.splitPane || st.splitFocus === slot) return
+    set({ splitFocus: slot })
+  },
+
+  toggleSplitFocus: () => {
+    const st = get()
+    if (!st.splitPane) return
+    set({ splitFocus: st.splitFocus === 'main' ? 'split' : 'main' })
+  },
+
+  setSplitFraction: (fraction) => {
+    const next = clampSplitFraction(fraction)
+    try {
+      localStorage.setItem(SPLIT_FRACTION_KEY, String(next))
+    } catch {
+      /* 기억은 편의 기능이므로 저장 실패 시 현재 세션에서만 적용한다. */
+    }
+    set({ splitFraction: next })
+  },
+
+  /** 칸에 새로 들어온 것을 그릴 수 있게 채운다(대화는 트랜스크립트, 리뷰는 사이드카). */
+  hydratePaneView: (view) => {
+    if (view.kind === 'workspace') {
+      void get().loadWorkspaceView(view.workspaceId)
+      return
+    }
+    void get().loadReview(view.reviewId)
+    void window.api.review.markSeen(view.reviewId)
+  },
 
   requestAdoptFanoutWinner: async (groupId, workspaceId) => {
     const s = get()
@@ -2494,6 +2664,34 @@ export const useStore = create<UIState>((set, get) => ({
   },
 
   selectWorkspace: async (id, opts) => {
+    // 화면이 둘로 나뉘어 있으면 "고른다" 는 것은 **포커스된 칸을 갈아 끼운다** 는 뜻이다.
+    // 아래의 "고르면 전체 화면을 닫는다" 는 화면이 하나일 때의 규칙이라, 분할에 그대로
+    // 적용하면 사이드바를 한 번 누를 때마다 사용자가 방금 만든 짝이 무너진다. 판정은
+    // lib/splitPanes 한 곳에서 내리고 여기서는 그 답을 집행한다.
+    // ⌘[ / ⌘] 로 되짚는 이동은 방문 기록의 축이므로 늘 주 칸으로 간다.
+    // 아무것도 고르지 않거나(Overview) 아카이브된 워크스페이스를 읽기 전용으로 들여다보는
+    // 것은 "지금 짝지어 보던 것을 그만둔다" 는 뜻이다 — 둘 다 나란히 세울 대상이 아니다.
+    const peekingArchived = !!id && !!get().app?.workspaces.find((w) => w.id === id)?.archived
+    if (get().splitPane && (!id || peekingArchived)) set({ ...collapsedSplit })
+
+    if (id && !peekingArchived && get().splitPane && !opts?.fromHistory) {
+      const st = get()
+      const view: PaneView = { kind: 'workspace', workspaceId: id }
+      const next = selectIntoPanes(st.app?.workspaces ?? [], paneState(st), view)
+      if (samePane(next.main, mainPane(st))) {
+        // 주 칸은 그대로다 — 오른쪽 칸만 갈아 끼우고 기존 선택 경로에는 손대지 않는다.
+        set((s) => {
+          const unread = { ...s.unread }
+          delete unread[id]
+          return { splitPane: next.split, splitFocus: next.focus, unread }
+        })
+        await get().loadWorkspaceView(id)
+        return
+      }
+      // 주 칸이 바뀐다 — 분할 상태만 먼저 확정하고 나머지는 아래 기존 경로에 맡긴다.
+      set({ splitPane: next.split, splitFocus: next.focus })
+    }
+
     // 선택 시 미확인 표시 해제. 사이드바 선택은 하나의 축이므로 리뷰 화면에서도 빠져나온다
     // (리뷰 세션 자체는 남아 있어 사이드바에서 다시 고를 수 있다).
     set((s) => {
@@ -2549,7 +2747,10 @@ export const useStore = create<UIState>((set, get) => ({
     if (id && get().detachedPanes.scripts) get().setScriptPanelOpen(id, true)
 
     if (!id) return
+    await get().loadWorkspaceView(id)
+  },
 
+  loadWorkspaceView: async (id) => {
     if (!get().loadedTranscripts[id]) {
       // 최근 몇 턴만 먼저 읽는다. 위로 올라가면 MessageList 가 더 부른다.
       const history = await window.api.chat.getHistory(id, TRANSCRIPT_INITIAL_LIMIT)
@@ -3195,12 +3396,24 @@ export const useStore = create<UIState>((set, get) => ({
       set({
         activeReviewId: id,
         activeStackWorkspaceId: null,
+        ...collapsedSplit,
         reviewViews: { ...get().reviewViews, [id]: emptyView() }
       })
     })
   },
 
   openReview: (reviewId) => {
+    // 분할 중이면 리뷰도 다른 선택과 똑같이 포커스된 칸으로 들어간다(같은 판정기를 쓴다).
+    if (get().splitPane) {
+      const st = get()
+      const view: PaneView = { kind: 'review', reviewId }
+      const next = selectIntoPanes(st.app?.workspaces ?? [], paneState(st), view)
+      set({ splitPane: next.split, splitFocus: next.focus })
+      if (samePane(next.main, mainPane(st))) {
+        get().hydratePaneView(view)
+        return
+      }
+    }
     set({ activeReviewId: reviewId, activeStackWorkspaceId: null })
     void get().loadReview(reviewId)
     // 열어서 봤으므로 미확인 점을 끈다.
