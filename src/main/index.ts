@@ -183,7 +183,8 @@ initToolPermission({ dispatch: (request) => dispatch(IPC.evtPermission, request)
 const terminals = new TerminalManager(dispatch)
 
 const stackedWaits = initStackedWaits({
-  sendMessage: (workspaceId, text) => sessions.sendMessage(workspaceId, text),
+  sendMessage: (workspaceId, text, opts) =>
+    sessions.sendMessage(workspaceId, text, undefined, opts),
   postToTranscript: (workspaceId, item) => {
     getTranscripts().upsert(workspaceId, item)
     dispatch(IPC.evtChat, { workspaceId, event: { type: 'item', item } })

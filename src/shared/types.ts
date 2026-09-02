@@ -1927,7 +1927,24 @@ export interface CiFixOrigin {
   max: number
 }
 
-export type ChatUserOrigin = PeerMessageOrigin | ConflictResolveOrigin | CiFixOrigin
+/**
+ * Wooi 가 사용자 대신 넣은 그 밖의 턴 — 제한이 풀려 이어가기, fan-out 의 첫 지시, 스택 자식이
+ * 부모를 깨우는 보고, 새 워크스페이스에 넘기는 작업, 백엔드를 바꾸며 넘기는 대화.
+ *
+ * 위의 세 origin 과 이유는 같다. 사용자가 치지 않은 턴이 토큰을 쓰므로 **감추지 않고**(silent 가
+ * 아니다) 무엇을 왜 시켰는지 대화에 남기되, 프롬프트 자체는 길어 펼쳐 둔 채로는 앞뒤 대화를 밀어낸다.
+ * 그래서 접어서 한 줄만 둔다. 다른 셋과 달리 요약에 쓸 구조가 저마다라 공통분모가 이름 하나뿐이고,
+ * 그래서 **하나의 generic 한 종류**로 둔다 — 종류가 늘 때마다 화면에 컴포넌트를 하나씩 더 만드는
+ * 대신, 부르는 쪽이 접힌 줄에 쓸 이름을 정해서 넘긴다.
+ */
+export interface WooiTurnOrigin {
+  kind: 'wooi'
+  /** 접힌 한 줄에 그대로 실리는 이름. 문장이 아니라 짧은 명사구여야 한다("Continuing after usage limit"). */
+  label: string
+}
+
+export type ChatUserOrigin =
+  PeerMessageOrigin | ConflictResolveOrigin | CiFixOrigin | WooiTurnOrigin
 
 /** 백엔드까지 함께 흘려 보낼 사용자 턴의 표시·모델용 옵션. */
 export interface SendMessageOptions {

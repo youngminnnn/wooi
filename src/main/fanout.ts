@@ -8,6 +8,7 @@ import type {
   CreateFanoutResult,
   FanoutGroup,
   Repo,
+  SendMessageOptions,
   Workspace
 } from '@shared/types'
 import { log } from './logger'
@@ -30,7 +31,7 @@ import type { ArchiveWorkspaceDeps, CreateWorkspaceDeps } from './workspaces'
 
 export interface CreateFanoutDeps extends CreateWorkspaceDeps {
   /** 만들어진 후보에게 첫 프롬프트를 보낸다(chat:send 와 같은 경로). */
-  sendMessage: (workspaceId: string, text: string) => void
+  sendMessage: (workspaceId: string, text: string, opts?: SendMessageOptions) => void
 }
 
 export type AdoptFanoutDeps = ArchiveWorkspaceDeps
@@ -144,7 +145,11 @@ export async function createFanout(
   const prompt = group.prompt
   if (prompt) {
     for (const id of workspaceIds) {
-      deps.sendMessage(id, fanoutStartMessage(prompt, workspaceIds.length, repo.defaultBranch))
+      // 사용자가 친 것은 fan-out 프롬프트 한 줄이고, 여기서 나가는 것은 Wooi 가 거기에 규칙을
+      // 붙여 만든 지시문이다 — 대화에는 남기되 접어 둔다([[shared/types]] WooiTurnOrigin).
+      deps.sendMessage(id, fanoutStartMessage(prompt, workspaceIds.length, repo.defaultBranch), {
+        origin: { kind: 'wooi', label: 'Fan-out task' }
+      })
     }
   }
 
