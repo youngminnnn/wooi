@@ -59,7 +59,9 @@ export default async function 확인을_끄면_되돌릴_길이_함께_주어진
         await skipBox.check()
         await confirmButton.click()
 
-        const toast = win.getByText(SKIP_TOAST)
+        // `[data-toast]` 로 좁힌다 — 이 문구는 화면의 토스트와 sr-only 라이브 리전 양쪽에 있어
+        // (LiveRegion 이 토스트 내용을 polite 로 읽는다) 맨 텍스트로 찾으면 strict mode 위반이다.
+        const toast = win.locator('[data-toast]').filter({ hasText: SKIP_TOAST })
         await toast.waitFor()
 
         const afterConfirm = await savedSkips()

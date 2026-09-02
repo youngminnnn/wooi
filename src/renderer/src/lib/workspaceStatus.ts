@@ -267,6 +267,9 @@ export function describeWorkspaceStatus({
       size: 8,
       spin: false,
       title: `PR #${pr.number} — ${label}`,
+      // 이 칸만 aria 를 따로 둔다 — 짧은 label("Draft")만 읽어 주면 무엇이 draft 인지 알 수 없고,
+      // title 은 PR 번호까지 들어 있어 목록을 훑을 때는 길다.
+      aria: `Pull request — ${label}`,
       label
     }
   }

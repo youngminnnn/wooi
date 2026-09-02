@@ -19,16 +19,19 @@ async function sendAndReadToast(win, text) {
   await textarea.click()
   await textarea.fill(text)
   await textarea.press('Enter')
-  const alert = win.getByRole('alert').last()
-  await alert.waitFor()
-  return (await alert.innerText()).trim()
+  // 토스트는 `[data-toast]` 로 집는다 — 예전엔 role="alert" 로 집었지만, 그 속성은 떼었다
+  // (토스트 내용은 LiveRegion 이 polite 로 한 번만 읽는다). ARIA 를 셀렉터로 겸용하면
+  // 접근성 결정을 바꾸는 순간 스펙이 조용히 엉뚱한 요소를 읽는다.
+  const toast = win.locator('[data-toast]').last()
+  await toast.waitFor()
+  return (await toast.innerText()).trim()
 }
 
 /** 다음 단언이 지난 토스트를 읽지 않도록 열린 토스트를 모두 닫는다. */
 async function dismissToasts(win) {
-  const dismissButtons = win.locator('button[aria-label="Dismiss"]')
+  const dismissButtons = win.locator('[data-toast] button[aria-label="Dismiss"]')
   while ((await dismissButtons.count()) > 0) await dismissButtons.first().click()
-  await win.getByRole('alert').waitFor({ state: 'detached' })
+  await win.locator('[data-toast]').waitFor({ state: 'detached' })
 }
 
 function expectIncludes(actual, expected, subject) {

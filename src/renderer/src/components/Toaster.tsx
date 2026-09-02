@@ -8,10 +8,15 @@ export default function Toaster(): React.JSX.Element {
 
   return (
     <div className="fixed bottom-4 right-4 z-[60] flex flex-col gap-2 max-w-sm">
+      {/* role="alert" 를 여기 두지 않는다 — 토스트 내용은 LiveRegion(유일한 라이브 리전
+          호스트)이 polite 로 읽는다. 여기 다시 붙이면 같은 문장이 두 리전에서 겹쳐 읽히고,
+          방금 한 행동의 결과 보고일 뿐인 토스트가 읽던 것을 끊고 끼어든다. */}
       {toasts.map((t) => (
         <div
           key={t.id}
-          role="alert"
+          // e2e 가 토스트를 집는 손잡이(fixtures.mjs 의 dismissToasts). 예전에는 role="alert" 로
+          // 집었는데, ARIA 를 셀렉터로 겸용하면 접근성 결정을 바꾸는 순간 픽스처가 조용히 깨진다.
+          data-toast=""
           className="flex items-start gap-2.5 rounded-lg border bg-[var(--surface)] px-3.5 py-2.5 shadow-2xl border-[var(--border)]"
         >
           <Icon kind={t.kind} />
