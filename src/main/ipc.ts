@@ -300,8 +300,8 @@ export function registerIpc(ctx: IpcContext): void {
     })
     try {
       // 이 전송은 토큰을 쓰게 된 이유 그 자체라 transcript 에 남아야 한다. 그래서 silent 나 prefix 를
-      // 쓰지 않는다. running 가드도 두지 않는다 — Claude 는 SDK 입력 큐에 enqueue 하고, Codex 는
-      // 진행 중인 턴에 네이티브 steering 하므로 두 백엔드 모두 mid-turn 전송을 받아들인다.
+      // 쓰지 않는다. running 가드도 두지 않는다 — 두 백엔드 모두 진행 중인 턴에 mid-turn 전송을
+      // 받아들인다(Codex 는 네이티브 steering, Claude 는 CLI 가 툴 라운드 사이에 접어 넣는다).
       //
       // origin 은 화면에서 이 전문을 한 줄로 접기 위한 표식이다([[types]] ConflictResolveOrigin).
       // 감추는 것과는 다르다 — 본문은 그대로 기록되고 한 번 눌러 펼치면 전부 보인다.
@@ -1258,8 +1258,8 @@ export function registerIpc(ctx: IpcContext): void {
         // codex/manager 의 resumeThreadId). 비우면 새 세션이 열리고, 맥락은 아래 인수인계가 잇는다.
         w.sessionId = null
         // 인수인계는 여기서 보내지 않고 **다음 메시지에 얹어** 나간다. 여기서 한 턴을 돌리면
-        // 사용자가 시작하지도 않은 그 턴에 곧바로 입력한 명령이 끼어들어(Codex 의 steering)
-        // 엉뚱한 답이 돌아온다 — 실제로 겪은 증상이다([[shared/handoff]]).
+        // 사용자가 시작하지도 않은 그 턴에 곧바로 입력한 명령이 끼어들어(두 백엔드 모두 mid-turn
+        // 입력을 받아들인다) 엉뚱한 답이 돌아온다 — 실제로 겪은 증상이다([[shared/handoff]]).
         w.pendingHandoffFrom = handoffPrompt ? fromLabel : null
         // 모델·effort·fast mode 는 백엔드마다 값 자체가 다르다(Claude 의 모델 ID 를 Codex 에 줄 수
         // 없다). 그대로 들고 가면 조용히 무시되거나 거부되므로 새 백엔드의 기본값으로 되돌린다.

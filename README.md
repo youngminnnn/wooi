@@ -293,8 +293,7 @@ only ever shows controls that actually work there.
   Enter = Allow, Esc = Deny.
 - **Capabilities that only one side has** — `/rewind` (roll the code, the conversation, or
   both back to a message) and `/btw` (ask a side question without derailing the turn) show up where
-  the backend supports them, and mid-turn steering is used where it exists instead of
-  being queued.
+  the backend supports them.
 - **Fast mode & effort** — pick them per workspace from the status line or with `/model`,
   `/effort`, and `/fast`; options that the current model doesn't support are marked
   rather than silently ignored.
@@ -354,8 +353,9 @@ A tabbed panel on top plus an interactive terminal below (resizable split):
 - **Status line** — branch · directory · model · effort · context usage are always
   shown above the input box; long conversations **auto-compact** (toggleable), or run
   `/compact` manually.
-- **Draft preservation & message queueing** — an in-progress message survives workspace
-  switches, and you can queue follow-up messages while a turn is running.
+- **Draft preservation & mid-turn steering** — an in-progress message survives workspace
+  switches, and a follow-up you send while a turn is running reaches the agent right away
+  instead of waiting for the turn to end.
 
 ### Convenience
 

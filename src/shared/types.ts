@@ -695,7 +695,11 @@ export interface AgentCapabilities {
   interactiveCommands: CommandPanelKind[]
   /** 슬래시 명령 자동완성 */
   slashCommands: boolean
-  /** 턴이 도는 중에도 입력을 밀어 넣을 수 있는지(Codex 의 turn/steer). false 면 큐잉 후 다음 턴. */
+  /**
+   * 턴이 도는 중에도 입력을 밀어 넣을 수 있는지. 두 백엔드 모두 지원한다 — Codex 는 turn/steer 로
+   * 네이티브 반영하고, Claude(Agent SDK)는 CLI 가 툴 라운드 사이에 진행 중인 턴으로 접어
+   * 넣는다(fold). 단, 툴을 하나도 쓰지 않는 순수 텍스트 턴은 접힐 지점이 없어 다음 턴으로 밀린다.
+   */
   steering: boolean
   /** 앱 안에서 로그인/로그아웃을 끝낼 수 있는지. false 면 외부 터미널 안내. */
   inAppLogin: boolean

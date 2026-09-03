@@ -337,7 +337,16 @@ export class ClaudeSession {
    * SDK 는 streaming input 을 곧바로 끌어가 CLI stdin 으로 흘려보내므로, 프로세스가 죽는 순간
    * 그 메시지는 이미 우리 큐에서 사라진 상태다. 그래서 죽은 query 를 재시도할 때 여기 기록해 둔
    * 메시지를 되살려 다시 흘려보낸다 — 이게 없으면 재시도한 query 가 빈 입력으로 하염없이 대기한다.
-   * result 를 받은 만큼(1 메시지 = 1 result) 앞에서부터 비운다.
+   *
+   * result 를 받으면 **통째로** 비운다(clearInFlight). CLI 가 턴이 도는 중 들어온 메시지를 툴
+   * 라운드 사이에 진행 중인 턴으로 접어 넣기(fold) 때문에, result 1건이 이 턴에 실제로 소비한
+   * 입력이 몇 건인지 우리는 알 수 없다 — "1 메시지 = 1 result" 가정이 깨진다. result 가 왔다는
+   * 것 자체가 "그때까지 꺼내 간 입력은 방금 끝난 턴에 소비됐다" 는 뜻이므로, 하나씩 shift 하는
+   * 대신 전부 비워도 안전하다. 턴이 result 에 닿기 전에 죽으면 inFlight 가 그대로 남아 있어
+   * 원래 목적(죽은 턴 재생)은 유지된다. 남는 위험은 result 직후~다음 턴 시작 직전의 좁은
+   * 창에서 죽었을 때 대기 메시지 하나를 잃는 것뿐인데, 이미 실행된 지시를 중복 재전송하는
+   * 쪽보다 안전하다. 정확한 해법은 result 의 `user_message_uuids` 로 소비된 uuid 만 골라 빼는
+   * 것이지만 그 필드는 SDK 0.3.233 에 없다(번들 CLI 를 통째로 올려야 생긴다).
    */
   private inFlight: SDKUserMessage[] = []
   private q: Query | null = null
@@ -1210,6 +1219,14 @@ export class ClaudeSession {
     this.input = new AsyncQueue<SDKUserMessage>()
     for (const msg of pending) this.input.push(msg)
     if (pending.length) log.info(`session: requeued ${pending.length} unprocessed message(s)`)
+  }
+
+  /**
+   * result 가 도착해 이 턴의 입력이 전부 소비됐다고 확정됐을 때 inFlight 를 통째로 비운다.
+   * (fold 로 인해 몇 건이 이 result 에 대응하는지 알 수 없다 — inFlight 필드 doc 참고.)
+   */
+  private clearInFlight(): void {
+    this.inFlight = []
   }
 
   /** 새 턴의 시작 — 산출 여부·API 오류·보류된 실패 카드를 초기화한다. */
@@ -2221,7 +2238,7 @@ export class ClaudeSession {
       // 한 흐름으로 보여야 한다.
       this.pendingFailureItems = []
       this.beginTurn()
-      this.inFlight.shift()
+      this.clearInFlight()
       this.deps.onSessionId(msg.session_id)
       this.active = false
       this.busy = false
@@ -2240,8 +2257,8 @@ export class ClaudeSession {
     // 보류해 둔 실패 보고가 있으면(재시도하지 않기로 확정) 이제 표시하고, 턴 상태를 닫는다.
     this.flushPendingFailure()
     this.beginTurn()
-    // 이 result 가 대응하는 입력 메시지는 처리를 마쳤다 — 재시도 시 되살릴 목록에서 뺀다.
-    this.inFlight.shift()
+    // 이 result 가 끝난 턴이 그때까지 꺼내 간 입력을 전부 소비했다 — 되살릴 목록에서 통째로 뺀다.
+    this.clearInFlight()
     // 턴이 result 까지 도달했다 — 자동 재시도 예산을 되돌려 다음 턴이 다시 1회를 쓸 수 있게 한다.
     if (msg.subtype === 'success') this.autoRetried = false
     this.deps.onSessionId(msg.session_id)

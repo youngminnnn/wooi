@@ -58,18 +58,13 @@ describe('렌더러 스토어 계약', () => {
     ])
   })
 
-  it('실행 중 방송에는 대기 메시지를 보내지 않고 idle 방송에서만 순서대로 보낸다', () => {
+  it('idle 방송을 받으면 선택되지 않은 워크스페이스에 unread 를 세운다', () => {
     const ws = workspace({ status: 'running' })
-    useStore.setState({ app: app([ws]), messageQueue: { [ws.id]: [{ text: 'next' }] } })
-
-    dispatch('onChat', { workspaceId: ws.id, event: { type: 'status', status: 'running' } })
-    expect(fakeApi.called('chat.send')).toHaveLength(0)
-    expect(useStore.getState().messageQueue[ws.id]).toHaveLength(1)
+    useStore.setState({ app: app([ws]) })
 
     dispatch('onChat', { workspaceId: ws.id, event: { type: 'status', status: 'idle' } })
-    expect(fakeApi.called('chat.send').map((call) => call.args.slice(0, 2))).toEqual([
-      [ws.id, 'next']
-    ])
+
+    expect(useStore.getState().unread[ws.id]).toBe(true)
   })
 
   it('idle에서 에이전트 행만 지우고 백그라운드 셸 행은 유지한다', () => {

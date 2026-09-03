@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ListTree, RefreshCw, WrapText } from 'lucide-react'
 import { useStore } from '../store'
 import { isPaneWindow } from '../lib/paneWindow'
-import { useWorkspaceBackend } from '../lib/backends'
 import DiffView, { type DiffCommenting, type DiffDiscarding } from './DiffView'
 import DiffCommentsBar from './diff/DiffCommentsBar'
 import DiffFileTree, {
@@ -72,11 +71,7 @@ export default function ChangesPanel({
   const sendDiffComments = useStore((s) => s.sendDiffComments)
   const discardDiffHunk = useStore((s) => s.discardDiffHunk)
 
-  // 지금 보내면 바로 나가는지, 턴이 끝날 때까지 큐에 앉아 있는지 — 버튼 문구가 달라진다
-  // (판단 자체는 store 의 sendDiffComments 가 하고, 여기서는 같은 조건을 보고 말만 맞춘다).
   const workspace = useStore((s) => s.app?.workspaces.find((w) => w.id === workspaceId))
-  const backend = useWorkspaceBackend(workspace)
-  const queue = workspace?.status === 'running' && !backend?.capabilities.steering
   // 턴이 도는 중에 워킹 트리를 되쓰면 에이전트가 방금 읽은 파일과 어긋난다. main 도 같은 판정을
   // 한 번 더 하지만(누른 뒤 실제로 쓰기까지 사이가 있다), 애초에 누를 수 없게 하는 게 먼저다.
   const running = workspace?.status === 'running'
@@ -260,7 +255,6 @@ export default function ChangesPanel({
       </div>
       <DiffCommentsBar
         comments={comments}
-        queue={queue}
         onRemove={(id) => removeDiffComment(workspaceId, id)}
         onDiscardAll={() => clearDiffComments(workspaceId)}
         onSend={() => sendDiffComments(workspaceId)}
