@@ -29,6 +29,15 @@
   git push -u origin HEAD
   ```
 
+- **규칙에 막히면 멈추지 말고 이름을 바꿔 진행한다. 이름은 에이전트가 정한다 — 사용자에게
+  묻지 않는다.** 브랜치 이름은 되돌리기 쉽고(개명 뒤에도 워크트리·PR 이 그대로 따라온다)
+  재료가 이미 다 나와 있다 — 방금 쓴 커밋과 바꾼 파일이면 충분하다. 여기서 한 번 물어보는 것은
+  사용자에게 결정을 넘기는 게 아니라 이미 답이 정해진 질문으로 작업을 멈춰 세우는 것이다.
+- **이름 짓는 법** — `<type>/<설명>`. `type` 은 그 작업의 커밋 타입과 맞추고, `설명` 은
+  영어 kebab-case 2~4 단어로 *무엇을 했는지* 적는다(워크스페이스 랜덤 이름을 그대로 옮기지
+  말 것 — `feat/sleepy-dolphin` 은 규칙만 통과하고 아무것도 알려주지 않는다).
+  예: `perf/idle-battery-drain`, `fix/first-message-stall`, `refactor/split-git-module`.
+
 - `git push origin <local>:<type>/<설명>` 으로 원격 이름만 맞추지 말 것. 훅과 CI 는 통과하지만
   로컬/원격 이름이 갈라지고, Wooi 의 restack 은 현재 HEAD 이름으로
   `git push --force-with-lease origin <branch>` 하므로(`src/main/git.ts`) 이후 push 가 어긋난다.
