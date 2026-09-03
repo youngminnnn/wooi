@@ -59,6 +59,32 @@ function cardRoot(win) {
   return win.locator('div.absolute.bottom-full').first()
 }
 
+/**
+ * 카드가 붙고 **내용이 도착할 때까지** 기다린 뒤 본문을 돌려준다.
+ *
+ * 닫기 버튼만 기다리면 안 된다 — 그건 카드 껍데기가 붙었다는 신호일 뿐이고, 그 순간 본문은
+ * 아직 "Loading…" 이다. /rewind 는 살아 있는 세션의 체크포인트 목록을 메인·호스트를 거쳐 받아
+ * 오므로, 스펙 하나만 돌릴 때는 눈에 안 띄지만 스위트 전체가 돌 때는 그 왕복이 눈에 띄게 늦다.
+ */
+async function openCommandCard(win, command) {
+  const textarea = win.locator('textarea[placeholder^="Message your agent"]')
+  await textarea.click()
+  // 후행 공백이 자동완성 메뉴를 닫는다 — 메뉴가 열려 있으면 Enter 를 메뉴가 먼저 가져간다.
+  await textarea.fill(`${command} `)
+  await textarea.press('Enter')
+  await win.locator('button[title="Dismiss (Esc)"]').waitFor({ timeout: 30_000 })
+  return waitForCardBody(win)
+}
+
+/** 카드 본문에서 "Loading…" 이 사라질 때까지 기다린 뒤 텍스트를 읽는다. */
+async function waitForCardBody(win) {
+  await win
+    .getByText('Loading…', { exact: true })
+    .waitFor({ state: 'detached', timeout: 60_000 })
+    .catch(() => {})
+  return cardRoot(win).innerText()
+}
+
 async function closeCard(win) {
   await win.locator('button[title="Dismiss (Esc)"]').click()
   await win.locator('button[title="Dismiss (Esc)"]').waitFor({ state: 'detached' })
@@ -121,13 +147,7 @@ export default async function rewind_카드와_대화_자르기() {
 
         // ── 2. /rewind 카드 — 입력창 경로 ────────────────────────────────────
         {
-          await textarea.click()
-          // 후행 공백이 자동완성 메뉴를 닫는다 — 메뉴가 열려 있으면 Enter 를 메뉴가 먼저 가져간다.
-          await textarea.fill('/rewind ')
-          await textarea.press('Enter')
-          await wooi.win.locator('button[title="Dismiss (Esc)"]').waitFor({ timeout: 30_000 })
-
-          const text = await cardRoot(wooi.win).innerText()
+          const text = await openCommandCard(wooi.win, '/rewind')
           // 라이브 세션이 없으니 되돌릴 지점도 없다 — 그 사정을 말해야 한다.
           expectIncludes(text, 'No checkpoints yet', '/rewind empty state')
           console.log(`[e2e] screenshot=${await wooi.shot('rewind-card')}`)
@@ -141,7 +161,7 @@ export default async function rewind_카드와_대화_자르기() {
           await textarea.press('Escape')
           await wooi.win.locator('button[title="Dismiss (Esc)"]').waitFor({ timeout: 30_000 })
 
-          const text = await cardRoot(wooi.win).innerText()
+          const text = await waitForCardBody(wooi.win)
           expectIncludes(text, 'No checkpoints yet', 'Esc Esc opens the same card')
           console.log(`[e2e] screenshot=${await wooi.shot('rewind-card-esc-esc')}`)
           await closeCard(wooi.win)
