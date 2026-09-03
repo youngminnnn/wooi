@@ -218,8 +218,8 @@ const api: WooiApi = {
     run: (workspaceId, kind) => ipcRenderer.invoke(IPC.commandRun, workspaceId, kind),
     mcpAction: (workspaceId, serverName, action) =>
       ipcRenderer.invoke(IPC.mcpAction, workspaceId, serverName, action),
-    rewindAction: (workspaceId, userMessageId) =>
-      ipcRenderer.invoke(IPC.commandRewindAction, workspaceId, userMessageId),
+    rewindAction: (workspaceId, userMessageId, mode) =>
+      ipcRenderer.invoke(IPC.commandRewindAction, workspaceId, userMessageId, mode),
     wooiRun: (workspaceId, name, rest) =>
       ipcRenderer.invoke(IPC.wooiCommandRun, workspaceId, name, rest)
   },

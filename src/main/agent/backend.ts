@@ -21,6 +21,7 @@ import type {
   PermissionMode,
   PermissionModeInfo,
   RewindActionResult,
+  RewindMode,
   SendMessageOptions,
   SlashCommandInfo,
   Workspace
@@ -134,8 +135,12 @@ export interface AgentBackend {
   listPlugins?(cwds: string[]): Promise<CodexPluginInventory>
   /** 그중 하나가 무엇을 싣고 있는지(스킬·MCP 서버·훅). 목록 행을 펼칠 때만 부른다. */
   readPlugin?(ref: CodexPluginRef): Promise<CodexPluginDetail>
-  /** /rewind — 체크포인트로 파일 되돌리기(capabilities.rewind). */
-  rewindAction(workspaceId: string, userMessageId: string): Promise<RewindActionResult>
+  /** /rewind — 체크포인트로 파일·대화 되돌리기(capabilities.rewind). */
+  rewindAction(
+    workspaceId: string,
+    userMessageId: string,
+    mode: RewindMode
+  ): Promise<RewindActionResult>
   /** reasoning effort / ultracode 오버라이드(capabilities.effort). */
   setEffort(workspaceId: string, effort: EffortSetting | null): void
   /** fast mode(`/fast`) 오버라이드(capabilities.fastMode). null 이면 전역 설정을 따른다. */

@@ -205,7 +205,7 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
       { keys: ['⌘⏎'], label: 'Stop the current turn and send the message now' },
       { keys: ['⇧⏎'], label: 'New line' },
       { keys: ['Esc'], label: 'Stop the current turn — or close a card / deny a permission' },
-      { keys: ['Esc', 'Esc'], label: 'Rewind — restore code to an earlier message' },
+      { keys: ['Esc', 'Esc'], label: 'Rewind — roll code and/or chat back to an earlier message' },
       { keys: ['#'], label: 'Start a message with # to save it to CLAUDE.md' }
     ]
   }

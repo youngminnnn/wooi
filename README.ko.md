@@ -263,7 +263,7 @@ Wooi 는 코딩 에이전트 두 종류를 지원합니다. **Claude Code**(Clau
   Codex 는 read only·auto·full access·plan 을 제공합니다. 현재 모드는 입력창 아래에 표시됩니다.
   권한 프롬프트는 Allow/Deny 외에 **"Always allow"**(이 세션 동안 해당 도구 자동 허용)도
   제공합니다 — Enter=Allow / Esc=Deny.
-- **한쪽에만 있는 기능** — `/rewind`(파일 체크포인트로 코드 되돌리기)와 `/btw`(턴을 흐트러뜨리지
+- **한쪽에만 있는 기능** — `/rewind`(고른 메시지 지점으로 코드·대화·둘 다 되돌리기)와 `/btw`(턴을 흐트러뜨리지
   않고 곁가지 질문)는 백엔드가 지원할 때 나타납니다. 턴 중간 steering 도 되는 쪽에서는 큐잉 없이
   그대로 씁니다.
 - **fast mode 와 effort** — 상태줄에서 고르거나 `/model`·`/effort`·`/fast` 로 워크스페이스마다

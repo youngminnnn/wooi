@@ -171,6 +171,32 @@ class TranscriptStore {
   }
 
   /**
+   * `itemId` 부터(포함) 뒤의 항목을 전부 버린다 — /rewind 의 대화 되돌리기.
+   * 버려진 항목들을 순서대로 돌려준다(첫 항목이 되돌림 지점의 사용자 메시지다).
+   *
+   * append 로 굴러가는 파일을 여기서만 통째로 다시 쓴다. 되돌리기는 사용자가 직접 누르는
+   * 드문 동작이라 O(n) 재작성이 정당하고, append 로는 "지운다" 를 표현할 수 없다.
+   * `itemId` 가 없으면 아무것도 건드리지 않고 빈 배열을 돌려준다.
+   */
+  truncateFrom(workspaceId: string, itemId: string): ChatItem[] {
+    const items = this.load(workspaceId)
+    const idx = items.findIndex((i) => i.id === itemId)
+    if (idx < 0) return []
+
+    const kept = items.slice(0, idx)
+    const dropped = items.slice(idx)
+
+    writeFileAtomic(this.fileFor(workspaceId), kept.map(serializeItem).join(''))
+    this.touch(workspaceId, kept)
+
+    // 비용 집계도 같이 줄인다 — 버린 턴의 비용을 계속 더하면 사용량 표시가 실제와 어긋난다.
+    const byId = this.costs.get(workspaceId)
+    if (byId) for (const item of dropped) byId.delete(item.id)
+
+    return dropped
+  }
+
+  /**
    * 워크스페이스를 가로질러 대화를 검색한다([[searchTranscripts]]).
    *
    * 캐시를 거치지 않고 파일을 직접 흘려 읽는다 — 검색 한 번이 LRU 를 통째로 갈아 치우면

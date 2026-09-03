@@ -94,6 +94,8 @@ import type {
   PermissionMode,
   PermissionsInfo,
   RateLimitSnapshot,
+  RewindActionResult,
+  RewindMode,
   RewindPoint,
   SavedPrompt,
   SlashCommandInfo,
@@ -3022,9 +3024,34 @@ function PermissionsPanel({ info }: { info: PermissionsInfo }): React.JSX.Elemen
   )
 }
 
+/** /rewind 모드 선택지 — 라벨과, 고른 순간 화면에 뜨는 한 줄 설명. */
+const REWIND_MODES: { mode: RewindMode; label: string; hint: string }[] = [
+  {
+    mode: 'both',
+    label: 'Code + chat',
+    hint: 'Restore the files and rewind the conversation to just before this message.'
+  },
+  {
+    mode: 'files',
+    label: 'Code only',
+    hint: 'Restore the files. The agent keeps its memory of the changes it made.'
+  },
+  {
+    mode: 'conversation',
+    label: 'Chat only',
+    hint: 'Rewind the conversation. Files on disk are left as they are.'
+  }
+]
+
 /**
- * /rewind — 파일 체크포인트(보낸 메시지 지점) 목록. 하나를 고르면 그 시점으로 추적된 파일을 되돌린다.
- * 체크포인트 백업은 살아 있는 세션 안에 있으므로, 같은 세션이 떠 있을 때만 동작한다 —
+ * /rewind — 파일 체크포인트(보낸 메시지 지점) 목록. 하나를 고르면 그 지점으로 되돌린다.
+ *
+ * 무엇을 되돌릴지는 위쪽 선택으로 가른다(터미널 Claude Code 와 같은 세 갈래). 기본은 둘 다인데,
+ * 하나만 되돌리면 모델의 기억과 디스크가 어긋나기 때문이다 — 코드만 되돌리면 에이전트는 자기가
+ * 고친 것으로 알고 있는 변경이 사라진 채 다음 턴을 시작한다. 그래서 고른 갈래가 무엇을 남기는지
+ * 한 줄로 계속 보여 준다.
+ *
+ * 파일 백업은 살아 있는 세션 안에 있으므로 코드 되돌리기는 같은 세션이 떠 있을 때만 동작한다 —
  * 비어 있거나 되돌릴 수 없으면 그 사정을 안내한다.
  */
 function RewindPanel({
@@ -3034,9 +3061,11 @@ function RewindPanel({
   checkpoints: RewindPoint[]
   workspaceId: string
 }): React.JSX.Element {
+  const [mode, setMode] = useState<RewindMode>('both')
   const [busyId, setBusyId] = useState<string | null>(null)
   const [done, setDone] = useState<{ id: string; text: string; ok: boolean } | null>(null)
   const pushToast = useStore((s) => s.pushToast)
+  const setDraft = useStore((s) => s.setDraft)
 
   if (checkpoints.length === 0) {
     return (
@@ -3051,7 +3080,7 @@ function RewindPanel({
     setBusyId(cp.userMessageId)
     setDone(null)
     void window.api.commands
-      .rewindAction(workspaceId, cp.userMessageId)
+      .rewindAction(workspaceId, cp.userMessageId, mode)
       .then(({ result, error }) => {
         setBusyId(null)
         if (error || !result) {
@@ -3062,20 +3091,36 @@ function RewindPanel({
           setDone({ id: cp.userMessageId, text: result.error || 'Nothing to restore.', ok: false })
           return
         }
-        const n = result.filesChanged?.length ?? 0
-        const detail =
-          typeof result.insertions === 'number' || typeof result.deletions === 'number'
-            ? ` (+${result.insertions ?? 0} −${result.deletions ?? 0})`
-            : ''
-        const summary = `Restored ${n} file${n === 1 ? '' : 's'}${detail}.`
+        const summary = rewindSummary(result)
         setDone({ id: cp.userMessageId, text: summary, ok: true })
         pushToast('success', summary)
+        // 대화를 되돌렸다면 그 메시지를 입력창에 되돌려 놓는다 — 고쳐서 다시 보내라는 것이
+        // 이 동작의 요점이라, 사용자가 방금 지운 말을 다시 타이핑하게 두지 않는다.
+        if (result.conversationRewound && result.prefill) setDraft(workspaceId, result.prefill)
       })
   }
 
+  const hint = REWIND_MODES.find((m) => m.mode === mode)?.hint
+
   return (
     <div className="space-y-1.5">
-      <div className="text-xs text-neutral-600">Restore tracked files to a message:</div>
+      <div className="flex items-center gap-1">
+        {REWIND_MODES.map((m) => (
+          <button
+            key={m.mode}
+            onClick={() => setMode(m.mode)}
+            disabled={busyId !== null}
+            className={`rounded-md px-1.5 py-0.5 text-xs transition-colors disabled:opacity-50 ${
+              m.mode === mode
+                ? 'bg-[var(--surface-3)] text-neutral-200'
+                : 'text-neutral-500 hover:text-neutral-300'
+            }`}
+          >
+            {m.label}
+          </button>
+        ))}
+      </div>
+      <div className="text-xs text-neutral-600">{hint}</div>
       <ul className="space-y-0.5">
         {checkpoints.map((cp) => {
           const busy = busyId === cp.userMessageId
@@ -3109,6 +3154,38 @@ function RewindPanel({
       </ul>
     </div>
   )
+}
+
+/**
+ * 되돌리기 결과를 한 문장으로. 파일 통계(filesChanged·insertions·deletions)는 CLI 에 따라
+ * **오지 않는다** — 그때 0 으로 적으면 성공을 "아무것도 안 됐다" 로 읽히게 하므로, 숫자가 있을
+ * 때만 숫자를 말하고 없으면 되돌렸다는 사실만 말한다. 링크 안전 검사로 건너뛴 파일은 조용히
+ * 넘기지 않는다 — 사용자가 되돌아갔다고 믿는 파일이 그대로 남아 있다는 뜻이기 때문이다.
+ */
+function rewindSummary(result: RewindActionResult): string {
+  const parts: string[] = []
+
+  if (result.filesChanged) {
+    const n = result.filesChanged.length
+    const detail =
+      typeof result.insertions === 'number' || typeof result.deletions === 'number'
+        ? ` (+${result.insertions ?? 0} −${result.deletions ?? 0})`
+        : ''
+    parts.push(`Restored ${n} file${n === 1 ? '' : 's'}${detail}.`)
+  } else if (!result.conversationRewound) {
+    parts.push('Restored tracked files.')
+  }
+
+  if (result.skippedLinks) {
+    const n = result.skippedLinks
+    parts.push(
+      `Skipped ${n} file${n === 1 ? '' : 's'} that a symlink or hard link was in the way of.`
+    )
+  }
+
+  if (result.conversationRewound) parts.push('Rewound the conversation to this message.')
+
+  return parts.join(' ')
 }
 
 function Empty({ children }: { children: React.ReactNode }): React.JSX.Element {

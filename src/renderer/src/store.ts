@@ -1655,6 +1655,23 @@ export const useStore = create<UIState>((set, get) => ({
             set({ unread: { ...s.unread, [workspaceId]: true } })
           }
         }
+      } else if (event.type === 'truncate') {
+        // /rewind 대화 되돌리기 — 이 항목부터 뒤를 버린다. 메인이 트랜스크립트 파일에 같은 절단을
+        // 이미 적용했으므로, 여기서 잘라 둔 결과가 다음 로드와 어긋나지 않는다. 지점을 못 찾으면
+        // (이미 잘렸거나 아직 안 실린 워크스페이스) 아무것도 하지 않는다 — 통째로 비우면 안 된다.
+        const cut = items.findIndex((i) => i.id === event.fromItemId)
+        if (cut >= 0) {
+          set({ transcripts: { ...transcripts, [workspaceId]: items.slice(0, cut) } })
+        }
+        // 잘라 낸 턴들의 컨텍스트 사용량·목표·다음 프롬프트 제안은 더 이상 이 대화의 것이 아니다.
+        // 새 값은 다음 턴의 result 가 실어 온다.
+        set((st) => {
+          const contextUsage = { ...st.contextUsage }
+          delete contextUsage[workspaceId]
+          const promptSuggestions = { ...st.promptSuggestions }
+          delete promptSuggestions[workspaceId]
+          return { contextUsage, promptSuggestions }
+        })
       } else if (event.type === 'delta') {
         scheduleDelta({ workspaceId, id: event.id, itemType: event.itemType, text: event.text })
       } else if (event.type === 'status' || event.type === 'session') {

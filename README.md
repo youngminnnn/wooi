@@ -291,8 +291,8 @@ only ever shows controls that actually work there.
   is shown below the input box. Permission prompts offer **"Always allow"**
   (auto-approve that tool for the rest of the session) alongside Allow/Deny —
   Enter = Allow, Esc = Deny.
-- **Capabilities that only one side has** — `/rewind` (roll code back to a file
-  checkpoint) and `/btw` (ask a side question without derailing the turn) show up where
+- **Capabilities that only one side has** — `/rewind` (roll the code, the conversation, or
+  both back to a message) and `/btw` (ask a side question without derailing the turn) show up where
   the backend supports them, and mid-turn steering is used where it exists instead of
   being queued.
 - **Fast mode & effort** — pick them per workspace from the status line or with `/model`,

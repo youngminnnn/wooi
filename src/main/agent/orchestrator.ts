@@ -22,6 +22,7 @@ import {
   type PermissionDecision,
   type PermissionMode,
   type RewindActionResult,
+  type RewindMode,
   type SendMessageOptions,
   type SlashCommandInfo
 } from '@shared/types'
@@ -751,12 +752,16 @@ export class AgentOrchestrator {
     return backend.mcpAction(workspaceId, serverName, action)
   }
 
-  rewindAction(workspaceId: string, userMessageId: string): Promise<RewindActionResult> {
+  rewindAction(
+    workspaceId: string,
+    userMessageId: string,
+    mode: RewindMode
+  ): Promise<RewindActionResult> {
     const backend = this.backendFor(workspaceId)
     if (!backend.meta.capabilities.rewind) {
       throw new Error(`${backend.meta.label} does not support rewind.`)
     }
-    return backend.rewindAction(workspaceId, userMessageId)
+    return backend.rewindAction(workspaceId, userMessageId, mode)
   }
 
   /** 워크스페이스 백엔드로 라우팅해 슬래시 명령 목록을 조회한다. 미지원이면 빈 목록. */

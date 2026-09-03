@@ -2402,6 +2402,13 @@ export type WorkspaceGoal =
 export type ChatEvent =
   /** id 기준 append-or-replace. 권위 있는 완성 항목. */
   | { type: 'item'; item: ChatItem }
+  /**
+   * 이 항목부터(포함) 뒤를 전부 버린다 — /rewind 의 대화 되돌리기.
+   *
+   * 통째로 다시 실어 보내지 않는 이유는 긴 대화에서 IPC 한 번에 트랜스크립트 전체가 실리기
+   * 때문이다. 자를 지점만 알려 주면 렌더러와 메인이 같은 규칙으로 같은 결과에 도달한다.
+   */
+  | { type: 'truncate'; fromItemId: string }
   /** assistant/thinking 버블(id)에 텍스트 조각을 이어붙임. */
   | { type: 'delta'; id: string; itemType: 'assistant' | 'thinking'; text: string }
   /** workspace 실행 상태 변화. */
@@ -4638,22 +4645,54 @@ export interface ReloadResult {
   errorCount?: number
 }
 
+/**
+ * /rewind — 무엇을 되돌릴지. 터미널 Claude Code 의 세 갈래와 같은 의미다.
+ *
+ * - `files` — 추적된 파일만 그 시점으로(SDK rewindFiles). 대화는 그대로 남는다.
+ * - `conversation` — 대화만 그 지점 직전까지 자른다(SDK resumeSessionAt). 파일은 그대로다.
+ * - `both` — 둘 다. 파일을 먼저 되돌린 뒤 대화를 자른다.
+ *
+ * 하나만 되돌리면 모델의 기억과 디스크가 어긋난다는 점을 UI 가 알려 줘야 한다 — 예컨대 파일만
+ * 되돌리면 모델은 "내가 방금 고쳤다" 고 알고 있는데 그 변경이 디스크에 없다.
+ */
+export type RewindMode = 'files' | 'conversation' | 'both'
+
 /** /rewind — 되돌릴 수 있는 체크포인트 1개(사용자 메시지 기준). */
 export interface RewindPoint {
   /** SDK 가 부여한 사용자 메시지 UUID. rewindFiles 에 그대로 넘긴다. */
   userMessageId: string
+  /** 같은 메시지의 Wooi ChatItem id. 화면 트랜스크립트를 어디서부터 자를지 가리킨다. */
+  itemId: string
+  /**
+   * 이 메시지 **직전** 체인 항목(assistant/user)의 UUID. 대화를 되돌릴 때 resumeSessionAt 으로
+   * 넘겨, 여기까지만 불러오게 한다. null 이면 앞에 아무것도 없다 — 대화 되돌리기는 곧 새 세션이다.
+   */
+  forkAt: string | null
   /** 그 메시지의 첫 줄(표시용). */
   text: string
   ts: number
 }
 
-/** /rewind 실행 결과(SDK rewindFiles 응답을 표시용으로 추린 것). */
+/** /rewind 실행 결과(SDK rewindFiles 응답 + 대화 절단 결과를 표시용으로 추린 것). */
 export interface RewindActionResult {
   canRewind: boolean
   error?: string
+  /**
+   * 되돌린 파일 목록과 증감. **오지 않을 수 있다** — 설치된 CLI 에 따라 성공 응답이
+   * `{canRewind, skippedLinks}` 뿐인 경우가 있다. 없음과 0 을 구분해서 표시해야 한다.
+   */
   filesChanged?: string[]
   insertions?: number
   deletions?: number
+  /**
+   * 링크 안전 검사에 걸려 복원하지 않은 추적 파일 수(심볼릭/하드링크가 놓여 있거나 백업을
+   * 안전하게 읽지 못한 경우). 0 이거나 없으면 그런 파일은 없었다.
+   */
+  skippedLinks?: number
+  /** 대화를 실제로 잘랐는지. mode 에 conversation 이 포함됐을 때만 의미가 있다. */
+  conversationRewound?: boolean
+  /** 되돌린 지점의 사용자 메시지 원문. 입력창에 채워 넣어 고쳐 보낼 수 있게 한다. */
+  prefill?: string
 }
 
 /** /permissions — 현재 권한 모드 + 설정 파일에서 모은 도구 규칙(읽기 전용). */

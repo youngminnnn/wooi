@@ -30,6 +30,7 @@ import { resolveWooiPlugin } from '../agent/plugin'
 import { WriteIsolationGuard, type WriteIsolationRoot } from './writeIsolation'
 import { fastModeReasonText, planApprovalMode, planOptions, unknownItemId } from '@shared/types'
 import { supportsAutoMode } from '../agent/backend'
+import type { RewindHostResult } from './protocol'
 import { RATE_LIMIT_ERROR, rateLimitResetAt } from '../rateLimitText'
 import { isConnectionError } from '../connectionError'
 import { asClaudeMode, claudeEffort, claudeMode, type ClaudePermissionMode } from './protocol'
@@ -46,11 +47,19 @@ import type {
   PermissionRequest,
   PermissionDecision,
   RewindPoint,
-  RewindActionResult,
+  RewindMode,
   RunningAgent,
   SendMessageOptions,
   UsageTotals
 } from '@shared/types'
+
+/**
+ * 세션이 들고 있는 체크포인트. `echoed` 가 false 면 아직 CLI 가 그 메시지를 처리하지 않았다는
+ * 뜻이라(대기 큐에 있음) 되돌릴 지점으로 내놓지 않는다 — forkAt 도 아직 정해지지 않았다.
+ */
+interface TrackedCheckpoint extends RewindPoint {
+  echoed: boolean
+}
 
 export interface SessionDeps {
   cwd: string
@@ -468,15 +477,25 @@ export class ClaudeSession {
   /** preflight 가 끝날 때까지 잡아 두는 사용자 메시지(끝나면 입력 큐로 흘려보낸다). */
   private bufferedMessages: SDKUserMessage[] = []
   /**
-   * /rewind 용 체크포인트(되돌릴 수 있는 사용자 메시지 지점). 보낸 메시지의 첫 줄을
-   * pendingUserTexts 에 모았다가, SDK 가 그 메시지를 echo 하며 부여한 uuid 와 짝지어 쌓는다.
-   * 파일 체크포인팅(enableFileCheckpointing)이 켜진 살아 있는 세션에서만 의미가 있다.
+   * /rewind 용 체크포인트(되돌릴 수 있는 사용자 메시지 지점). 파일 체크포인팅
+   * (enableFileCheckpointing)이 켜진 살아 있는 세션에서만 의미가 있다.
    *
-   * `null` 은 화면에 남지 않는 전송(silent)의 자리표다 — 체크포인트는 만들지 않되 echo 와의 짝은
-   * 한 칸도 밀리지 않게 한다(handleUser 참고).
+   * uuid 는 **우리가 붙인다** — SDKUserMessage.uuid 로 실어 보내면 CLI 가 그 값을 그대로 트랜스크립트
+   * 항목의 uuid 로 쓰고, echo 와 rewindFiles 모두 같은 값을 받아들인다(실측 확인). 예전처럼 "보낸
+   * 순서대로 echo 를 받아 짝짓는" 방식이면 우리가 send() 를 거치지 않고 밀어 넣는 메시지 하나에
+   * 짝이 통째로 밀린다 — 자동 /compact 주입이 정확히 그런 경우고, 그러면 되돌리기가 엉뚱한 지점을
+   * 가리킨다. uuid 로 맞추면 그런 주입은 짝이 없어 자연히 무시된다.
    */
-  private pendingUserTexts: (string | null)[] = []
-  private checkpoints: RewindPoint[] = []
+  private checkpoints: TrackedCheckpoint[] = []
+  /**
+   * 마지막으로 본 체인 항목(assistant/user)의 uuid. 체크포인트를 확정할 때 "이 메시지 직전"
+   * 지점으로 함께 박아 둔다 — 대화를 되돌릴 때 resumeSessionAt 은 **버릴 메시지가 아니라 남길
+   * 마지막 항목**을 가리켜야 하는데, CLI 가 echo 에 parentUuid 를 실어 주지 않아 우리가 센다.
+   * system(init·thinking_tokens 등)은 체인 항목이 아니므로 세지 않는다.
+   */
+  private lastChainUuid: string | null = null
+  /** 다음 query 를 여기까지만 불러오도록 자른다(/rewind 대화 되돌리기). 소진되면 비워진다. */
+  private resumeAtOnce: string | null = null
 
   constructor(private deps: SessionDeps) {
     this.writeIsolation = new WriteIsolationGuard(
@@ -488,38 +507,109 @@ export class ClaudeSession {
     this.preflightPending = Boolean(deps.resumeSessionId) && deps.autoCompact
   }
 
-  /** /rewind 패널용: 최근이 위로 오도록 뒤집은 체크포인트 목록. */
+  /**
+   * /rewind 패널용: 최근이 위로 오도록 뒤집은 체크포인트 목록.
+   *
+   * 아직 echo 를 못 받은 것(대기 큐에 남아 CLI 가 처리하지 않은 메시지)은 빼고 준다 — 되돌릴
+   * 지점으로 고를 수 있으려면 그 메시지가 이미 대화에 들어가 있어야 하고, forkAt 도 그때 정해진다.
+   */
   getCheckpoints(): RewindPoint[] {
-    return [...this.checkpoints].reverse()
+    return this.checkpoints
+      .filter((c) => c.echoed)
+      .map(({ echoed: _echoed, ...point }) => point)
+      .reverse()
   }
 
   /**
-   * 고른 체크포인트(사용자 메시지 uuid)로 추적된 파일을 되돌린다.
-   * 체크포인트 백업 blob 은 살아 있는 query 안에 있으므로, 같은 세션이 떠 있을 때만 동작한다 —
-   * 세션이 없으면(앱 재시작·dispose 후) canRewind=false 로 안내한다(warm up 으로 새 query 를
-   * 열어도 과거 편집의 백업이 없어 되돌릴 수 없다).
+   * 고른 체크포인트(사용자 메시지 uuid)로 되돌린다. `mode` 가 무엇을 되돌릴지 가른다.
+   *
+   * **파일**(files·both)은 살아 있는 query 를 요구한다 — 체크포인트 백업 blob 이 그 안에 있어서,
+   * 세션이 없으면(앱 재시작·dispose 후) warm up 으로 새 query 를 열어도 과거 편집의 백업이 없다.
+   *
+   * **대화**(conversation·both)는 라이브 query 가 없어도 된다. 되돌림 지점은 세션 객체가 들고 있는
+   * 체크포인트 목록이고, 실제 절단은 다음 query 를 `resumeSessionAt` 으로 여는 순간 일어난다.
+   *
+   * both 에서 파일 되돌리기가 실패하면 대화는 건드리지 않는다 — 반만 되돌아간 상태가 제일 나쁘다.
    */
-  async rewind(userMessageId: string): Promise<RewindActionResult> {
-    const q = this.q
-    if (!q) {
+  async rewind(userMessageId: string, mode: RewindMode): Promise<RewindHostResult> {
+    const checkpoint = this.checkpoints.find((c) => c.userMessageId === userMessageId)
+    if (!checkpoint) {
       return {
         canRewind: false,
-        error:
-          'No live session to rewind. Send a message first, then rewind within the same session.'
+        error: 'That restore point is no longer available in this session.'
       }
     }
-    try {
-      const r = await q.rewindFiles(userMessageId)
-      return {
-        canRewind: r.canRewind,
-        error: r.error,
-        filesChanged: r.filesChanged,
-        insertions: r.insertions,
-        deletions: r.deletions
+
+    const result: RewindHostResult = { canRewind: true, prefill: checkpoint.text }
+
+    if (mode === 'files' || mode === 'both') {
+      const q = this.q
+      if (!q) {
+        return {
+          canRewind: false,
+          error:
+            'No live session to restore files from. Send a message first, then rewind within the same session.'
+        }
       }
-    } catch (err) {
-      return { canRewind: false, error: err instanceof Error ? err.message : String(err) }
+      try {
+        const r = await q.rewindFiles(userMessageId)
+        if (!r.canRewind) return { canRewind: false, error: r.error ?? 'Nothing to restore.' }
+        // filesChanged·insertions·deletions 는 CLI 에 따라 오지 않는다 — 있는 것만 싣는다.
+        // 없는 값을 0 으로 채우면 "0개 복원" 처럼 보여 성공을 실패로 읽게 만든다.
+        if (r.filesChanged) result.filesChanged = r.filesChanged
+        if (typeof r.insertions === 'number') result.insertions = r.insertions
+        if (typeof r.deletions === 'number') result.deletions = r.deletions
+        if (r.skippedLinks) result.skippedLinks = r.skippedLinks
+      } catch (err) {
+        return { canRewind: false, error: err instanceof Error ? err.message : String(err) }
+      }
     }
+
+    if (mode === 'conversation' || mode === 'both') {
+      this.rewindConversation(checkpoint)
+      result.conversationRewound = true
+      result.truncateFromItemId = checkpoint.itemId
+      if (checkpoint.forkAt === null) result.sessionReset = true
+    }
+
+    return result
+  }
+
+  /**
+   * 대화를 이 체크포인트 **직전** 까지로 되돌린다.
+   *
+   * CLI 는 `resume` + `resumeSessionAt` 으로 열릴 때 세션 파일 자체를 그 지점까지로 잘라 둔다 —
+   * 그래서 한 번 자르면 이후 평범한 resume 만으로도 잘린 상태가 유지된다(실측 확인). 다만 지금
+   * 떠 있는 query 는 이미 전체 맥락을 메모리에 들고 있으므로, 프로세스를 갈아 끼워야 실제로 반영된다.
+   *
+   * 되돌릴 지점 앞에 아무것도 없으면(첫 메시지) 남길 것이 없다 — 맥락을 통째로 버리고 새 세션으로
+   * 시작한다. `/clear` 와 같은 자리에 도달하지만, 트랜스크립트 정리는 메인이 맡는다(sessionReset).
+   */
+  private rewindConversation(checkpoint: RewindPoint): void {
+    // 이 지점부터의 체크포인트는 더 이상 존재하지 않는 대화를 가리킨다 — 함께 버린다.
+    const idx = this.checkpoints.findIndex((c) => c.userMessageId === checkpoint.userMessageId)
+    // 뒤에 남은 것에는 아직 echo 를 못 받은(대기 큐의) 메시지도 섞여 있다 — 그것들 역시 잘려 나간
+    // 구간에 속하므로 함께 버린다.
+    if (idx >= 0) this.checkpoints.length = idx
+    this.lastChainUuid = checkpoint.forkAt
+
+    if (checkpoint.forkAt === null) {
+      this.deps.resumeSessionId = null
+      this.currentSessionId = null
+      this.resumeAtOnce = null
+    } else {
+      // 이 프로세스에서 처음 만들어진 세션이라도 resume 대상으로 승격한다(requestRestart 와 같은 이유).
+      if (this.currentSessionId) this.deps.resumeSessionId = this.currentSessionId
+      this.resumeAtOnce = checkpoint.forkAt
+    }
+
+    // 라이브 query 가 없으면 다음 send() 가 새 옵션으로 열어 준다 — 지금 할 일이 없다.
+    if (!this.q) return
+    // 있으면 실패 재시도와 같은 경로로 프로세스를 갈아 끼운다. restartRequested 를 세워 두면
+    // handleQueryDeath 가 오류 카드 없이 곧바로 새 query 를 연다.
+    this.restartRequested = true
+    this.abort?.abort()
+    void this.q.interrupt().catch(() => {})
   }
 
   /**
@@ -558,6 +648,8 @@ export class ClaudeSession {
   send(text: string, images?: ImageAttachment[], opts?: SendMessageOptions): void {
     const imgs = images ?? []
     const prompt = opts?.prefix ? `${opts.prefix}\n\n${text}` : text
+    // 화면에 남는 전송이면 그 ChatItem id 를 체크포인트에 함께 박는다(대화 되돌리기의 절단 지점).
+    let itemId: string | null = null
     if (!opts?.silent) {
       const item: ChatItem = {
         // 큐에 쌓인 N개를 한 번에 보내면 같은 ms 안에서 여러 번 호출된다 — 시간 기반 id 는
@@ -572,6 +664,7 @@ export class ClaudeSession {
           ? { attachments: imgs.map((i) => ({ name: i.name, mediaType: i.mediaType })) }
           : {})
       }
+      itemId = item.id
       this.deps.persist(item)
       this.deps.emit({ type: 'item', item })
     }
@@ -590,12 +683,22 @@ export class ClaudeSession {
     this.interrupted = false
     this.markActive()
 
-    // /rewind 체크포인트 라벨용으로 이 메시지의 첫 줄을 큐에 둔다 — SDK 가 이 사용자 메시지를
-    // echo 하며 부여하는 uuid 와 handleUser 에서 짝지어 체크포인트로 확정한다. silent 전송은
-    // 체크포인트를 만들지 않지만 echo 는 오므로, 빈 자리(null)를 넣어 짝을 맞춘다.
-    this.pendingUserTexts.push(
-      opts?.silent ? null : firstLine(text || (imgs.length ? `${imgs.length} image(s)` : ''))
-    )
+    // /rewind 체크포인트. 우리가 uuid 를 정해 메시지에 실어 보내므로 여기서 바로 만들 수 있다 —
+    // CLI 가 그 메시지를 실제로 처리하며 echo 를 돌려주면 그때 확정된다(echoed·forkAt).
+    // 화면에 남지 않는 전송(silent)은 되돌아갈 지점으로 고를 수 없으니 아예 만들지 않는다.
+    const messageUuid = randomUUID()
+    if (itemId) {
+      this.checkpoints.push({
+        userMessageId: messageUuid,
+        itemId,
+        forkAt: null,
+        text: firstLine(text || (imgs.length ? `${imgs.length} image(s)` : '')),
+        ts: Date.now(),
+        echoed: false
+      })
+      // 메모리 상한 — 아주 긴 세션에서도 목록이 무한정 커지지 않게 한다(최근 100개 유지).
+      if (this.checkpoints.length > 100) this.checkpoints.shift()
+    }
 
     // 이미지가 있으면 멀티모달 content 배열로(텍스트 블록 + base64 이미지 블록), 없으면 문자열.
     const content = imgs.length
@@ -611,7 +714,8 @@ export class ClaudeSession {
     this.enqueue({
       type: 'user',
       message: { role: 'user', content },
-      parent_tool_use_id: null
+      parent_tool_use_id: null,
+      uuid: messageUuid
     })
 
     if (!this.q) this.run()
@@ -950,7 +1054,13 @@ export class ClaudeSession {
           },
           // 사용자의 다른 터미널 세션이 `/list-agents` 에서 보는 이름. 지정하지 않으면 CLI 가
           // 작업 디렉터리 이름으로 짓는데, Wooi 워크트리는 전부 랜덤 이름이라 목록이 읽히지 않는다.
-          extraArgs: { name: this.deps.peer.name },
+          // `name` — 사용자의 다른 터미널 세션이 `/list-agents` 에서 보는 이름.
+          // `replay-user-messages` — 보낸 사용자 메시지를 CLI 가 uuid 를 붙여 되돌려 보내게 한다.
+          //   /rewind 체크포인트는 그 uuid 로만 만들 수 있는데(rewindFiles 인자), SDK 는 이 플래그를
+          //   자체 옵션으로 노출하지 않고 넘기지도 않는다. 없으면 echo 가 아예 오지 않아 체크포인트가
+          //   영영 0개고, /rewind 패널은 늘 비어 있다. 되돌아온 메시지는 content 가 문자열이라
+          //   handleUser 의 배열 검사에서 그대로 빠져나가므로 화면에 두 번 쌓이지 않는다.
+          extraArgs: { name: this.deps.peer.name, 'replay-user-messages': null },
           // /add-dir 로 더한 작업 루트. query 시작 시점에 고정되므로 목록이 바뀌면 매니저가
           // 세션을 새로 연다(resume 으로 대화 맥락은 이어진다).
           ...(this.deps.additionalDirs.length
@@ -970,13 +1080,21 @@ export class ClaudeSession {
           ...(sdkEffort ? { effort: sdkEffort } : {}),
           // 이전 세션 ID 가 있으면 디스크에서 대화 맥락을 복원한다(과거 메시지는 재방출되지 않음).
           ...(this.deps.resumeSessionId ? { resume: this.deps.resumeSessionId } : {}),
+          // /rewind 로 대화를 되돌렸다면 이번 한 번만 여기까지로 잘라서 불러온다. CLI 는 이때
+          // 세션 파일 자체를 잘라 두므로, 다음부터는 평범한 resume 만으로도 잘린 상태가 유지된다.
+          ...(this.resumeAtOnce ? { resumeSessionAt: this.resumeAtOnce } : {}),
           abortController: abort,
           canUseTool: this.canUseTool
         }
       })
 
+      // 1회용이다 — 소진하지 않으면 이후 재시작마다 같은 지점으로 계속 되감긴다.
+      const rewoundTo = this.resumeAtOnce
+      this.resumeAtOnce = null
+
       log.info(
         `session: query created (resume=${this.deps.resumeSessionId ? 'yes' : 'no'}, ` +
+          `${rewoundTo ? `rewoundTo=${rewoundTo}, ` : ''}` +
           `mcp=${Object.keys(mcpServers).length}, preflight=${this.preflightPending}) — awaiting first message…`
       )
 
@@ -1281,6 +1399,10 @@ export class ClaudeSession {
     log.warn(`session: giving up resume (${reason}) — falling back to a fresh session`, err)
     this.resumeRetried = true
     this.deps.resumeSessionId = null
+    // 맥락을 버렸으니 되돌릴 지점도 남지 않는다 — 옛 세션의 uuid 로 되돌리려 하면 CLI 가 거절한다.
+    this.resumeAtOnce = null
+    this.checkpoints = []
+    this.lastChainUuid = null
     this.emitItem({
       id: `system:resume-fallback:${Date.now()}`,
       type: 'system',
@@ -1544,6 +1666,8 @@ export class ClaudeSession {
         this.handleStreamEvent(msg)
         break
       case 'assistant':
+        // 대화 트랜스크립트의 체인 항목이다 — /rewind 가 "여기까지 남긴다" 로 가리킬 수 있는 지점.
+        if (msg.uuid) this.lastChainUuid = msg.uuid
         this.handleAssistant(msg)
         break
       case 'user':
@@ -2010,23 +2134,20 @@ export class ClaudeSession {
   private handleUser(msg: Extract<SDKMessage, { type: 'user' }>): void {
     const content = (msg.message as { content?: unknown }).content
 
-    // 프롬프트 echo(문자열이거나 tool_result 가 아닌 블록들)면 /rewind 체크포인트로 기록한다.
-    // tool_result 가 섞인 user 메시지(도구 응답)는 제외하고, 우리가 보낸 실제 사용자 메시지
-    // (pendingUserTexts 에 라벨을 미리 넣어 둔 것)만 uuid 와 짝지어 확정한다 — 자동 /compact
-    // 주입은 pendingUserTexts 에 라벨이 없으므로 자연히 걸러진다.
     const uuid = (msg as { uuid?: string }).uuid
-    const isToolResult =
-      Array.isArray(content) && content.some((b) => (b as Block).type === 'tool_result')
-    if (uuid && !isToolResult && this.pendingUserTexts.length > 0) {
-      const text = this.pendingUserTexts.shift()
-      // null 은 silent 전송의 자리표다 — 화면에 없는 메시지로 되돌아갈 수는 없으니 체크포인트를
-      // 만들지 않는다. 그래도 **자리는 차지해야** 한다: 빼 버리면 그 echo 가 뒤따라오는 진짜
-      // 사용자 메시지의 라벨을 가져가, 라벨과 되돌아갈 지점이 한 칸씩 어긋난다.
-      if (text != null) {
-        this.checkpoints.push({ userMessageId: uuid, text, ts: Date.now() })
-        // 메모리 상한 — 아주 긴 세션에서도 목록이 무한정 커지지 않게 한다(최근 100개 유지).
-        if (this.checkpoints.length > 100) this.checkpoints.shift()
+    // 우리가 보낸 사용자 메시지가 되돌아왔다(replay echo) — 이제 이 메시지는 대화에 들어가 있다.
+    // 우리가 붙인 uuid 로 맞추므로, 우리가 만들지 않은 주입(자동 /compact 등)은 짝이 없어 지나간다.
+    // 도구 응답(tool_result)도 uuid 를 갖지만 체크포인트와 짝지어질 일은 없다.
+    if (uuid) {
+      const checkpoint = this.checkpoints.find((c) => c.userMessageId === uuid && !c.echoed)
+      if (checkpoint) {
+        // forkAt 은 이 메시지 **직전** 항목이다 — 아래에서 lastChainUuid 를 갱신하기 전에 읽는다.
+        // send() 시점이 아니라 여기서 정하는 것이 중요하다: 대기 큐에 걸려 있던 메시지는 앞 턴이
+        // 다 끝난 뒤에야 처리되므로, 보낸 순간의 체인 위치는 한참 앞을 가리킨다.
+        checkpoint.forkAt = this.lastChainUuid
+        checkpoint.echoed = true
       }
+      this.lastChainUuid = uuid
     }
 
     // 다른 Claude Code 세션이 보낸 메시지(네이티브 cross-session messaging). CLI 는 이것을

@@ -12,6 +12,8 @@ import type {
   PermissionDecision,
   PermissionMode,
   PermissionRequest,
+  RewindActionResult,
+  RewindMode,
   SendMessageOptions,
   UsageTotals
 } from '@shared/types'
@@ -200,6 +202,7 @@ export type HostCommand =
       workspaceId: string
       config: SessionConfig
       userMessageId: string
+      mode: RewindMode
     }
   /**
    * 계정 레이트리밋 조회. 대상 워크스페이스를 메인이 고르지 않는 것이 핵심이다 —
@@ -274,3 +277,15 @@ export type HostEvent =
    * 지목할 방법이 없다.
    */
   | { type: 'toolCall'; callId: string; workspaceId: string; tool: string; args: unknown }
+
+/**
+ * 호스트가 돌려주는 되돌리기 결과. 사용자에게 보이는 필드(RewindActionResult) 위에, 메인만
+ * 처리할 수 있는 뒷정리 지시를 얹는다 — 트랜스크립트 파일과 워크스페이스 store 는 메인 소유라
+ * 호스트가 직접 건드릴 수 없기 때문이다. 메인은 이 두 필드를 처리한 뒤 떼고 렌더러로 넘긴다.
+ */
+export type RewindHostResult = RewindActionResult & {
+  /** 이 항목부터(포함) 트랜스크립트에서 잘라 낸다. */
+  truncateFromItemId?: string
+  /** 세션 맥락을 통째로 버렸다 — store 의 sessionId 를 비워 다음 메시지가 새 세션으로 시작하게 한다. */
+  sessionReset?: boolean
+}
