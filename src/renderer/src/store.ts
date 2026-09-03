@@ -86,6 +86,7 @@ import {
   type DiffCommentAnchor
 } from './lib/diffComments'
 import { archivedPreviewTarget } from './lib/archivedPreview'
+import { returnedFromIdle, shouldPoll } from './lib/pollingGate'
 import { dropReopenable, nextReopenable, pushReopenable } from './lib/reopenArchived'
 import {
   forwardAfterSelect,
@@ -908,6 +909,30 @@ let initialized = false
 // 전환 시 신뢰할 수 없어, main 의 권위 있는 focus/blur 이벤트로 갱신한다. 시작 시 포커스 가정.
 let windowFocused = true
 
+/**
+ * 마지막으로 사용자가 이 창에 입력을 준 시각. 폴링을 멈출지 판단하는 데만 쓴다.
+ *
+ * **포커스만으로는 "자리에 있다" 를 판정할 수 없다.** 창을 앞에 띄워 둔 채 자리를 뜨면 blur 가
+ * 오지 않으므로, 예전 게이트(`windowFocused` 하나)는 밤새 git·gh 를 돌렸다. 창이 앞에 있는
+ * 동안에는 사용자의 입력이 전부 이 창으로 들어오므로, 입력이 끊긴 시간이 곧 자리를 비운 시간이다.
+ */
+let lastUserActivityAt = Date.now()
+
+/** 문서가 지금 화면에 그려지고 있는가(최소화·다른 Space·숨김이면 false). */
+function documentVisible(): boolean {
+  return document.visibilityState === 'visible'
+}
+
+/** 지금 주기 폴링을 돌려야 하는가. 판정 규칙과 그 근거는 [[lib/pollingGate]] 에 있다. */
+function pollingAwake(): boolean {
+  return shouldPoll({
+    focused: windowFocused,
+    visible: documentVisible(),
+    lastUserActivityAt,
+    now: Date.now()
+  })
+}
+
 // 모든 워크트리의 git 상태를 주기적으로 갱신하기 위한 타이머. 진입하지 않은 워크스페이스도
 // 사이드바 배지(변경 파일 수·ahead/behind·충돌)가 최신으로 보이도록 백그라운드에서 폴링한다.
 let statusPollTimer: ReturnType<typeof setInterval> | null = null
@@ -919,6 +944,21 @@ const STATUS_POLL_INTERVAL_MS = 15_000
 // 네트워크 비용이 그대로 늘어나지는 않는다.
 let prPollTimer: ReturnType<typeof setInterval> | null = null
 const PR_POLL_INTERVAL_MS = 45_000
+
+/**
+ * `git fetch origin --prune` 을 도는 주기. **PR 틱과 분리한 이유가 있다.**
+ *
+ * 예전에는 이 fetch 가 45초 PR 틱에 얹혀 있었다. 그런데 fetch 는 이 틱에서 유일하게 *원격과
+ * 실제로 협상하는* 작업이다 — 리포마다 git 프로세스를 띄우고 TLS 왕복을 하고, 끝나면 영향받는
+ * 모든 워크스페이스에 캐시를 무시한 git status 를 다시 돌린다. 아무 세션도 돌지 않는 유휴
+ * 상태에서도 시간당 80번씩 그 짓을 하면서 45초마다 Wi-Fi 라디오를 깨웠다.
+ *
+ * 이 값이 늦어져서 낡는 것은 ahead/behind 배지 하나뿐이고, 그마저도 포커스 복귀·유휴 복귀
+ * 때마다 즉시 따라잡는다(catchUpPolling). 반면 45초 틱에 남은 refreshPr 은 리포별 10초 캐시를
+ * 거치는 gh 호출이라 성격이 다르다 — 같은 주기로 묶을 이유가 없었다.
+ */
+let remoteFetchTimer: ReturnType<typeof setInterval> | null = null
+const REMOTE_FETCH_INTERVAL_MS = 5 * 60_000
 
 // gh 가 미연결로 보이는 동안에만 도는 인증 상태 폴링. 예전 하드 게이트가 3초마다 돌던 폴링을
 // 대체한다 — 게이트가 사라졌다고 폴링까지 없애면, `gh auth status` 가 일시적으로 실패했을 때
@@ -1384,38 +1424,43 @@ export const useStore = create<UIState>((set, get) => ({
     void get().refreshAllGit(true)
     if (!statusPollTimer) {
       statusPollTimer = setInterval(() => {
-        // 창이 가려져 사이드바가 보이지 않을 때는 폴링을 건너뛰고(불필요한 git 프로세스 방지),
-        // 다시 포커스되는 순간 onWindowFocus 에서 즉시 한 번 갱신한다.
-        if (windowFocused) void get().refreshAllGit()
+        // 사이드바를 아무도 보고 있지 않을 때는 폴링을 건너뛰고(불필요한 git 프로세스 방지),
+        // 다시 볼 수 있게 되는 순간 catchUpPolling 이 즉시 한 번 갱신한다.
+        if (pollingAwake()) void get().refreshAllGit()
       }, STATUS_POLL_INTERVAL_MS)
     }
 
     if (!prPollTimer) {
       prPollTimer = setInterval(() => {
-        if (!windowFocused) return
-        // 네트워크 git 작업은 더 느린 PR 틱에 얹고, 15초 로컬 상태 폴링과는 분리한다.
-        void get().fetchReposAndRefreshGit()
+        if (!pollingAwake()) return
         for (const workspace of get().app?.workspaces ?? []) {
           if (!workspace.archived) void get().refreshPr(workspace.id)
         }
       }, PR_POLL_INTERVAL_MS)
     }
 
+    // 원격과 실제로 협상하는 유일한 주기 작업이라 훨씬 느리게 돈다(REMOTE_FETCH_INTERVAL_MS 참고).
+    if (!remoteFetchTimer) {
+      remoteFetchTimer = setInterval(() => {
+        if (pollingAwake()) void get().fetchReposAndRefreshGit()
+      }, REMOTE_FETCH_INTERVAL_MS)
+    }
+
     // gh 미연결로 보이는 동안에만 인증 상태를 다시 확인한다. 앱 밖(터미널)에서 로그인한 경우와
     // `gh auth status` 가 일시적으로 실패했다가 회복된 경우를 모두 스스로 따라잡는다.
     if (!authPollTimer) {
       authPollTimer = setInterval(() => {
-        if (!windowFocused) return
+        if (!pollingAwake()) return
         if (githubConnected(get().authStatus)) return
         void get().refreshAuth()
       }, AUTH_POLL_INTERVAL_MS)
     }
 
-    // 리뷰 답글 폴링. git 상태 폴링과 같은 규칙 — 창이 가려져 있으면 건너뛰고, 포커스가
-    // 돌아오는 순간 한 번 따라잡는다(onWindowFocus 참고).
+    // 리뷰 답글 폴링. git 상태 폴링과 같은 규칙 — 아무도 안 보고 있으면 건너뛰고, 돌아오는
+    // 순간 한 번 따라잡는다(catchUpPolling 참고).
     if (!reviewPollTimer) {
       reviewPollTimer = setInterval(() => {
-        if (windowFocused) void get().pollReviews()
+        if (pollingAwake()) void get().pollReviews()
       }, REVIEW_POLL_INTERVAL_MS)
     }
     void get().pollReviews()
@@ -1547,18 +1592,49 @@ export const useStore = create<UIState>((set, get) => ({
       })
     }
 
+    // 폴링이 멈춰 있던 동안 밀린 것을 한 번에 따라잡는다. 폴링을 멈추는 조건이 세 가지이므로
+    // (pollingAwake) 되살아나는 경로도 세 가지다 — 포커스 복귀·다시 보이기·입력 재개. 셋 다
+    // 같은 일을 해야 하니 여기 한 곳에 모은다. 어느 경로로 깨어나든 화면은 즉시 최신이 된다.
+    const catchUpPolling = (): void => {
+      void get().refreshAllGit(true)
+      void get().fetchReposAndRefreshGit()
+      void get().pollReviews()
+    }
+
+    // 사용자가 돌아왔다. 자리를 비운 것으로 보고 폴링을 끊어 뒀다면 여기서 되살린다.
+    // 입력 이벤트는 초당 수십 번 들어오므로 이 경로는 숫자 비교 하나로 끝나야 한다.
+    const noteUserActivity = (): void => {
+      const now = Date.now()
+      const wasAway = returnedFromIdle(lastUserActivityAt, now)
+      lastUserActivityAt = now
+      if (wasAway && windowFocused && documentVisible()) catchUpPolling()
+    }
+    for (const type of ['pointerdown', 'pointermove', 'keydown', 'wheel'] as const) {
+      window.addEventListener(type, noteUserActivity, { passive: true })
+    }
+
+    // 최소화·다른 Space 로 가려짐 — 포커스는 그대로인데 화면에는 아무것도 안 그려지는 구간이다.
+    document.addEventListener('visibilitychange', () => {
+      if (!documentVisible()) return
+      // 다시 보이게 된 것 자체가 사용자의 행동이다. 입력 시각을 먼저 갱신하지 않으면 5분 넘게
+      // 가려져 있던 창이 되살아나자마자 "자리 비움"으로 판정돼 폴링이 안 켜진다.
+      lastUserActivityAt = Date.now()
+      if (windowFocused) catchUpPolling()
+    })
+
     // 창이 다시 활성화되면 인증 상태를 갱신하고(Terminal 로그인 완료 자동 반영) 미확인 표시를 해제한다.
     // main 의 'focus' 이벤트가 신뢰 가능한 트리거이고, DOM 의 window 'focus' 는 보조로 함께 둔다
     // (Dock 클릭·앱 전환 시 DOM 이벤트가 누락되어 배지가 안 사라지던 문제를 막는다).
     window.api.onWindowFocus(() => {
       windowFocused = true
+      // 앱을 앞으로 가져온 것도 사용자의 행동이다 — 자리 비움 판정을 여기서 풀어 주지 않으면
+      // 마우스를 움직이기 전까지 폴링이 죽어 있다.
+      lastUserActivityAt = Date.now()
       applyPendingDeltas()
       pushViewing()
       clearSelectedUnread()
       // 자리를 비운 사이 바뀌었을 수 있으니 모든 워크트리 상태를 즉시 한 번 갱신한다.
-      void get().refreshAllGit(true)
-      void get().fetchReposAndRefreshGit()
-      void get().pollReviews()
+      catchUpPolling()
     })
     window.api.onWindowBlur(() => {
       windowFocused = false
@@ -1566,6 +1642,7 @@ export const useStore = create<UIState>((set, get) => ({
     })
     window.addEventListener('focus', () => {
       windowFocused = true
+      lastUserActivityAt = Date.now()
       pushViewing()
       void get().refreshAuth()
       // 자리를 비운 사이 사용자가 에이전트 CLI 를 설치·제거했을 수 있으므로 가용성도 다시 본다.
@@ -1996,7 +2073,19 @@ export const useStore = create<UIState>((set, get) => ({
     refresh()
     // 이 창만 보고 있는 동안에도 변경 파일 수·PR 상태가 늙지 않도록 주기적으로 따라잡는다.
     // 메인 창의 전체 폴링과 달리 지금 보고 있는 워크스페이스 하나만 본다.
-    if (!statusPollTimer) statusPollTimer = setInterval(refresh, STATUS_POLL_INTERVAL_MS)
+    //
+    // 게이트는 visibility 하나만 건다 — 메인 창의 자리 비움 판정(pollingAwake)을 여기 그대로
+    // 쓰면, 두 번째 모니터에 띄워 두고 눈으로만 보는 패널이 5분 뒤 굳어 버린다. 그 창에는
+    // 입력이 들어올 이유가 없기 때문이다. 최소화·가려짐만 막아도 "안 보이는데 gh 를 띄우는"
+    // 경우는 사라진다.
+    if (!statusPollTimer) {
+      statusPollTimer = setInterval(() => {
+        if (documentVisible()) refresh()
+      }, STATUS_POLL_INTERVAL_MS)
+    }
+    document.addEventListener('visibilitychange', () => {
+      if (documentVisible()) refresh()
+    })
   },
 
   setPaneWorkspace: (workspaceId) => {
