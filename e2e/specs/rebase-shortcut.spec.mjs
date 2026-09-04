@@ -51,9 +51,11 @@ export default async function 리베이스_단축키가_칩과_같은_판정을_
         // 4. 단축키가 도움말에도 실려 있어야 한다 — 아무도 모르는 단축키는 없는 것과 같다.
         await dismissToasts(win)
         await win.keyboard.press('?')
-        const help = win.getByText('Keyboard shortcuts', { exact: false })
+        // 도움말은 **대화상자로** 잡는다. 이 모달은 자기 자신을 여는 단축키까지 목록에 실어서
+        // ("Show keyboard shortcuts"), 글자로 찾으면 제목과 그 행 둘 다에 걸린다.
+        const help = win.getByRole('dialog', { name: 'Keyboard shortcuts' })
         await help.waitFor()
-        const row = win
+        const row = help
           .locator('div')
           .filter({ hasText: /^Rebase the workspace onto its base branch/ })
           .last()
