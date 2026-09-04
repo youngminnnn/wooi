@@ -174,7 +174,7 @@ export default async function 대화_밀도는_세_단계를_돌고_재시작과
 
         // ── 전역 기본값은 "아직 고르지 않은" 워크스페이스에만 닿는다 ─────────
         // 이 워크스페이스는 Summary 를 골라 뒀으므로 전역을 Verbose 로 바꿔도 꿈쩍하지 않는다.
-        await setDefaultDensity(restarted.win, 'verbose')
+        await setDefaultDensity(restarted, 'verbose', 'transcript-density-setting')
         await expectDensity(restarted.win, 'Summary', { quietAt: 'Verbose' })
         await expectGone(restarted.win, 'think-1', 'the thinking card')
 
@@ -194,7 +194,7 @@ export default async function 대화_밀도는_세_단계를_돌고_재시작과
 
         // 지워 뒀기 때문에, 설정을 다시 바꾸면 재시작 없이 따라온다. 이것이 새 워크스페이스가
         // 고른 밀도로 시작하는 것과 같은 배선이다.
-        await setDefaultDensity(restarted.win, 'summary')
+        await setDefaultDensity(restarted, 'summary')
         await expectDensity(restarted.win, 'Summary', { quietAt: 'Summary' })
         await expectGone(restarted.win, 'think-1', 'the thinking card')
         console.log(`[e2e] screenshot=${await restarted.shot('transcript-density-global-default')}`)
@@ -216,13 +216,19 @@ function densityChip(win) {
  * 설정의 전역 기본 밀도를 바꾼다. 새 워크스페이스가 어디서 시작할지를 정하는 값이라, 밟을 길이
  * 설정 화면뿐이다.
  */
-async function setDefaultDensity(win, density) {
+async function setDefaultDensity(app, density, shotName) {
+  const win = app.win
   await win.evaluate(() =>
     globalThis.dispatchEvent(
       new globalThis.CustomEvent('wooi:open-settings', { detail: 'general' })
     )
   )
-  await win.locator(`[data-default-density="${density}"]`).click()
+  const option = win.locator(`[data-default-density="${density}"]`)
+  await option.click()
+  // 저장은 main 왕복이라 클릭 직후의 화면은 아직 옛 값이다. 눌린 상태로 반영을 기다린다 —
+  // 여기서 기다리지 않으면 뒤따르는 밀도 확인이 무엇을 재는지 알 수 없어진다.
+  await option.and(win.locator('[aria-pressed="true"]')).waitFor()
+  if (shotName) console.log(`[e2e] screenshot=${await app.shot(shotName)}`)
   await win.getByRole('button', { name: 'Close settings' }).click()
   const saved = await win.evaluate(async () => (await globalThis.api.getState()).settings)
   if (saved.defaultTranscriptDensity !== density) {

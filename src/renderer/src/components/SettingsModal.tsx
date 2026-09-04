@@ -422,6 +422,9 @@ function GeneralPage({
               <button
                 key={density}
                 data-default-density={density}
+                // 저장이 main 왕복이라 클릭과 반영 사이에 한 박자가 있다. 눌린 상태를 읽을 수
+                // 있어야 그 사이를 화면 밖에서도(스크린리더·e2e) 구별할 수 있다.
+                aria-pressed={settings.defaultTranscriptDensity === density}
                 onClick={() => save({ defaultTranscriptDensity: density })}
                 title={TRANSCRIPT_DENSITY_HINT[density]}
                 className={`rounded-md px-3 py-1 text-xs ${settings.defaultTranscriptDensity === density ? 'bg-[var(--surface-2)] text-neutral-100 shadow-sm' : 'text-neutral-500 hover:text-neutral-300'}`}
