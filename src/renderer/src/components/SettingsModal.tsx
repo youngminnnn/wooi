@@ -421,6 +421,7 @@ function GeneralPage({
             {TRANSCRIPT_DENSITIES.map((density) => (
               <button
                 key={density}
+                data-default-density={density}
                 onClick={() => save({ defaultTranscriptDensity: density })}
                 title={TRANSCRIPT_DENSITY_HINT[density]}
                 className={`rounded-md px-3 py-1 text-xs ${settings.defaultTranscriptDensity === density ? 'bg-[var(--surface-2)] text-neutral-100 shadow-sm' : 'text-neutral-500 hover:text-neutral-300'}`}
