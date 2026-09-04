@@ -292,8 +292,15 @@ export interface WooiApi {
     getCosts(): Promise<Record<string, number>>
     /** /btw 사이드 질문을 띄운다. 답변은 onSideQuestion 으로 스트리밍되며 기록에 남지 않는다. */
     sideQuestion(workspaceId: string, question: string): Promise<void>
-    /** /clear — 대화 기록을 비우고 세션을 새로 시작한다(맥락 초기화, 워크스페이스는 유지). */
-    clear(workspaceId: string): Promise<void>
+    /**
+     * /clear — 대화 기록을 비우고 세션을 새로 시작한다(맥락 초기화, 워크스페이스는 유지).
+     *
+     * `keepTranscript` 를 주면 **기록은 남기고 맥락만 끊는다.** 다음 턴은 여전히 빈 맥락의 새
+     * 세션이지만(sessionId 를 비우므로), 지금까지의 대화는 화면에 그대로 남는다. PR 이 병합된
+     * 뒤에도 같은 워크스페이스에서 이어 갈 때 쓰는 모드다 — 거기서 원하는 것은 "다음 작업이
+     * 앞 작업의 맥락을 이고 가지 않는 것" 이지 기록을 잃는 것이 아니다.
+     */
+    clear(workspaceId: string, opts?: { keepTranscript?: boolean }): Promise<void>
     /** 현재 세션의 목표를 지운다. 직접 clear RPC가 있는 백엔드에서만 UI가 노출한다. */
     clearGoal(workspaceId: string): Promise<void>
     /**
