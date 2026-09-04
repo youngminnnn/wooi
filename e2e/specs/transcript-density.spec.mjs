@@ -182,12 +182,26 @@ function densityChip(win) {
   return win.locator('[title^="Conversation density: "]')
 }
 
+/**
+ * 값은 제목에서 읽는다. 상태줄은 **기본값일 때 글자를 적지 않기 때문이다** — 폭을 아끼려고
+ * 아이콘만 남기므로(`status-line-fit`), 보이는 글자로 값을 물으면 Normal 을 빈 문자열로 읽는다.
+ * 글자로 말하는지 아닌지는 그 자체가 계약이라 함께 확인한다.
+ */
 async function expectDensity(win, label) {
   const chip = densityChip(win)
   await chip.waitFor()
+  const title = (await chip.getAttribute('title')) ?? ''
+  const said = title.slice('Conversation density: '.length).split(' — ')[0]
+  if (said !== label) {
+    throw new Error(`the status line said the density was ${said}, expected ${label}`)
+  }
   const text = (await chip.innerText()).trim()
-  if (text !== label) {
-    throw new Error(`the status line said the density was ${text}, expected ${label}`)
+  const shouldSpeak = label !== 'Normal'
+  if (shouldSpeak !== (text === label)) {
+    throw new Error(
+      `${label} density ${shouldSpeak ? 'should be' : 'should not be'} spelled out, ` +
+        `but the chip read ${JSON.stringify(text)}`
+    )
   }
 }
 
