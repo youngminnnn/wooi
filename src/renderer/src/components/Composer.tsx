@@ -37,7 +37,7 @@ import { useStore } from '../store'
 import SavedPromptPicker from './SavedPromptPicker'
 import { appendPrompt } from '../lib/savedPrompts'
 import { permissionModeFooter, permissionModesFor } from '../lib/permission'
-import { modelLabel, modelSupportsFastMode } from '../lib/models'
+import { compactModelLabel, modelLabel, modelSupportsFastMode } from '../lib/models'
 import { effortLabel, effortOptionsFor } from '../lib/effort'
 import { FAST_MODE_HINT, fastModeLabel, fastModeStatus } from '../lib/fastMode'
 import { DENSITY_SHORTCUT } from '@shared/toolDisplay'
@@ -3226,10 +3226,110 @@ function useHandoffEstimate(workspace: Workspace, enabled: boolean): number {
 }
 
 /**
+ * 상태줄이 좁아질 때 라벨을 접는 차례. 숫자가 큰 것부터 사라지고, **아이콘과 클릭 대상은 남는다.**
+ *
+ * 폭은 창이 아니라 상태줄 자신을 재는 컨테이너 쿼리로 본다 — 같은 창이라도 사이드바나 차이
+ * 패널을 여닫으면 이 줄의 폭이 바뀌므로, 창 브레이크포인트로 재면 접혀야 할 때 안 접히고
+ * 멀쩡한데 접힌다.
+ *
+ * 차례는 "없어도 그 값을 다른 것이 말해 주는가" 로 정했다 — 디렉터리는 헤더가, 에이전트는
+ * 브랜드 마크가, 밀도·fast 는 강조색이 대신 말한다. 모델이 맨 마지막인 것도 같은 이유다:
+ * 이 줄에서 대신 말해 주는 것이 아무 데도 없는 유일한 값이라, 접을 것이 더 없을 때만 접는다.
+ *
+ * 라벨을 하나씩 버리는 이유는, 전부 `truncate` 로 두면 좁아질 때 다 같이 뭉개져
+ * `Opu… Hig… Sta…` 가 되기 때문이다. 하나를 통째로 포기하는 편이 남은 것을 읽히게 한다.
+ *
+ * 숫자는 실측에서 잡았다(e2e `status-line-fit`). 이 줄의 폭 상한은 `max-w-3xl` 인 768px 이지만
+ * **실제로는 그보다 훨씬 좁다** — 오른쪽 패널을 연 채로 쓰면 채팅 pane 이 그만큼 깎여서,
+ * 1100px 창에서는 이 줄이 317px 까지 내려간다. 그 폭이 예외가 아니라 기본 배치다.
+ *
+ * 기본값만 있는 줄의 내용 폭은 약 410px(에이전트 칩 포함), 라벨이 전부 나오면 약 510px 이다.
+ * 그래서 첫 접기가 520px 이고, 거기서부터 한 칸씩 내려간다.
+ */
+const HIDE_DIR_LABEL = '@max-[520px]:hidden'
+const HIDE_AGENT_LABEL = '@max-[480px]:hidden'
+const HIDE_DENSITY_LABEL = '@max-[440px]:hidden'
+const HIDE_FAST_LABEL = '@max-[400px]:hidden'
+const HIDE_EFFORT_LABEL = '@max-[370px]:hidden'
+
+/**
+ * 라벨을 다 접고도 모자라는 폭. 여기서는 **칩을 통째로 버린다** — 아이콘만 남겨 봐야 다섯 개가
+ * 줄을 넘겨 서로 겹칠 뿐이라, 자리를 지키는 것이 오히려 읽기를 방해한다.
+ *
+ * 버리는 것은 이 줄 말고 **다른 데서도 볼 수 있는 값**이다 — 디렉터리와 에이전트는 헤더가,
+ * 플랜 사용량은 계정 단위 값이라 Overview 가 같은 것을 보여 준다. 게이지 막대도 여기서 접는다
+ * (퍼센트가 본체고 막대는 보조다). 남는 것은 이 줄에만 있는 값들 — 모델·effort·fast·밀도의
+ * 아이콘과 컨텍스트 퍼센트다. 모델 라벨도 이때만 접는다.
+ */
+const HIDE_IN_SLIVER = '@max-[340px]:hidden'
+
+/**
+ * 상태줄 칩 하나. 폭이 모자라면 **아이콘은 남기고 라벨만** 버린다 — 칩이 하는 두 가지 일 중
+ * "지금 값이 무엇인가" 는 hover(title)로 물러설 수 있지만 "눌러서 바꾼다" 는 물러설 곳이 없다.
+ * 강조색도 아이콘에 남으므로, 라벨이 접혀도 평소와 다른 값이라는 사실은 계속 보인다.
+ */
+function StatusChip({
+  icon,
+  label,
+  title,
+  onClick,
+  tone,
+  quiet,
+  hideLabelAt,
+  hideAt
+}: {
+  icon: React.ReactNode
+  label: string
+  title: string
+  /** 없으면 누를 수 없는 표시 전용 칩(디렉터리). */
+  onClick?: () => void
+  /** 칩 전체의 색·hover. 기본은 상태줄 색에 hover 만. */
+  tone?: string
+  /**
+   * 값이 기본값이라 라벨이 아무것도 말해 주지 않는다 — 폭과 상관없이 아이콘만 남긴다.
+   * "Standard"·"Normal"·"Model default" 는 매 순간 자리만 차지하면서 정보량은 0 이다.
+   */
+  quiet?: boolean
+  /** 이 폭보다 좁아지면 라벨을 접는 컨테이너 쿼리 클래스. */
+  hideLabelAt?: string
+  /** 이 폭보다 좁아지면 칩 자체를 버리는 컨테이너 쿼리 클래스. */
+  hideAt?: string
+}): React.JSX.Element {
+  const body = (
+    <>
+      {icon}
+      {!quiet && <span className={'truncate ' + (hideLabelAt ?? '')}>{label}</span>}
+    </>
+  )
+  const cls = 'flex items-center gap-1 min-w-0 shrink transition-colors ' + (hideAt ?? '') + ' '
+  if (!onClick) {
+    return (
+      <span className={cls + (tone ?? '')} title={title}>
+        {body}
+      </span>
+    )
+  }
+  return (
+    <button
+      onClick={onClick}
+      className={cls + (tone ?? 'hover:text-neutral-300')}
+      title={title}
+      aria-label={title}
+    >
+      {body}
+    </button>
+  )
+}
+
+/**
  * 입력창 바로 위에 항상 노출되는 상태줄.
  * worktree 디렉토리명 · 컨텍스트 사용량을 한 줄로 보여 준다(옵셔널/토글 없음).
  * 컨텍스트는 Claude Code CLI 의 컨텍스트 게이지에 대응 — 막대 + 퍼센트로 표시하고,
  * 자동 압축이 도는 동안에는 진행 표시로, 사용량 데이터가 아직 없으면(첫 턴 전) "—" 로 바뀐다.
+ *
+ * 칩이 늘어난 만큼(모델·effort·fast·밀도·에이전트) 한 줄에 다 들어가지 않는 폭이 생긴다.
+ * 그때 무엇을 먼저 버리는지는 [[StatusChip]] 과 위의 `HIDE_*` 가 정한다 — 요지는 **값이
+ * 기본값이면 라벨을 아예 안 그리고, 좁아지면 정해진 차례로 라벨만 접는다** 이다.
  */
 function StatusLine({
   workspace,
@@ -3264,8 +3364,12 @@ function StatusLine({
   const dirName = workspace.worktreePath.split('/').filter(Boolean).pop() ?? workspace.worktreePath
 
   // 표시는 "유효 값" 기준: workspace 오버라이드 → (모델은 init 으로 확정된 lastModel) → 전역 설정.
-  const modelText = modelLabel(models, workspace.model ?? workspace.lastModel ?? defaults.model)
-  const effortText = effortLabel(backend, workspace.effort ?? defaults.effort)
+  const modelId = workspace.model ?? workspace.lastModel ?? defaults.model
+  // 줄에 적는 것은 짧은 쪽, hover 로 보여 주는 것은 온전한 쪽이다.
+  const modelText = compactModelLabel(models, modelId)
+  const modelFull = modelLabel(models, modelId)
+  const effortValue = workspace.effort ?? defaults.effort
+  const effortText = effortLabel(backend, effortValue)
   // fast mode 는 "설정" 보다 세션이 보고한 "실제 상태" 를 우선해 보여 준다(쿨다운·미지원 모델 등).
   const fast = fastModeStatus(
     workspace.fastMode ?? defaults.fastMode,
@@ -3273,92 +3377,99 @@ function StatusLine({
     workspace.fastModeReason
   )
 
+  const isDefaultDensity = density === DEFAULT_TRANSCRIPT_DENSITY
+
   return (
-    <div className="flex items-center gap-3 mb-1.5 px-1 text-xs text-neutral-500">
-      <span
-        className="flex items-center gap-1 min-w-0 shrink"
+    <div
+      data-status-line=""
+      className="@container flex items-center gap-3 @max-[440px]:gap-2 mb-1.5 px-1 text-xs text-neutral-500"
+    >
+      <StatusChip
+        icon={<Folder size={11} className="shrink-0 text-neutral-600" />}
+        label={dirName}
         title={`Directory: ${workspace.worktreePath}`}
-      >
-        <Folder size={11} className="shrink-0 text-neutral-600" />
-        <span className="truncate">{dirName}</span>
-      </span>
+        hideLabelAt={HIDE_DIR_LABEL}
+        hideAt={HIDE_IN_SLIVER}
+      />
       {agentSwitch.offered && (
-        <button
-          onClick={() => onPick('agent')}
-          className="flex items-center gap-1 min-w-0 shrink hover:text-neutral-300 transition-colors"
+        <StatusChip
+          icon={<AgentBackendMark backend={workspace.agentBackend} size={11} />}
+          label={agentLabel}
           title={`Agent: ${agentLabel} — click or type /agent to switch`}
-        >
-          <AgentBackendMark backend={workspace.agentBackend} size={11} />
-          <span className="truncate">{agentLabel}</span>
-        </button>
+          onClick={() => onPick('agent')}
+          hideLabelAt={HIDE_AGENT_LABEL}
+          hideAt={HIDE_IN_SLIVER}
+        />
       )}
-      <button
+      <StatusChip
+        icon={<Cpu size={11} className="shrink-0 text-neutral-600" />}
+        label={modelText}
+        title={`Model: ${modelFull} — click or type /model to change`}
         onClick={() => onPick('model')}
-        className="flex items-center gap-1 min-w-0 shrink hover:text-neutral-300 transition-colors"
-        title={`Model: ${modelText} — click or type /model to change`}
-      >
-        <Cpu size={11} className="shrink-0 text-neutral-600" />
-        <span className="truncate">{modelText}</span>
-      </button>
+        hideLabelAt={HIDE_IN_SLIVER}
+      />
       {fallbackModel && (
         <span
-          className="shrink-0 text-[var(--warning-400)]"
+          className="min-w-0 shrink truncate text-[var(--warning-400)]"
           title={`Primary model unavailable — using fallback ${modelLabel(models, fallbackModel)}`}
         >
-          Fallback: {modelLabel(models, fallbackModel)}
+          Fallback: {compactModelLabel(models, fallbackModel)}
         </span>
       )}
-      <button
-        onClick={() => onPick('effort')}
-        className="flex items-center gap-1 min-w-0 shrink hover:text-neutral-300 transition-colors"
+      {/* effort 를 지정하지 않았으면 라벨("Model default")이 곧 "아무것도 안 정했다" 라, 글자
+          없이 아이콘만 남긴다 — 눌러서 정하는 길은 그대로다. */}
+      <StatusChip
+        icon={<Zap size={11} className="shrink-0 text-neutral-600" />}
+        label={effortText}
         title={`Reasoning effort: ${effortText} — click or type /effort to change`}
-      >
-        <Zap size={11} className="shrink-0 text-neutral-600" />
-        <span className="truncate">{effortText}</span>
-      </button>
+        onClick={() => onPick('effort')}
+        quiet={!effortValue}
+        hideLabelAt={HIDE_EFFORT_LABEL}
+      />
       {supportsFastMode && (
-        <button
-          onClick={() => onPick('fast')}
-          className={
-            'flex items-center gap-1 min-w-0 shrink transition-colors ' +
-            (fast.active
-              ? 'text-[var(--accent-300)] hover:text-[var(--accent-200)]'
-              : 'hover:text-neutral-300')
+        <StatusChip
+          icon={
+            <Rabbit
+              size={11}
+              className={
+                'shrink-0 ' + (fast.active ? 'text-[var(--accent-400)]' : 'text-neutral-600')
+              }
+            />
           }
+          label={fast.text}
           title={`${fast.title} — click or type /fast to change`}
-        >
-          <Rabbit
-            size={11}
-            className={
-              'shrink-0 ' + (fast.active ? 'text-[var(--accent-400)]' : 'text-neutral-600')
-            }
-          />
-          <span className="truncate">{fast.text}</span>
-        </button>
+          onClick={() => onPick('fast')}
+          tone={
+            fast.active
+              ? 'text-[var(--accent-300)] hover:text-[var(--accent-200)]'
+              : 'hover:text-neutral-300'
+          }
+          quiet={!fast.notable}
+          hideLabelAt={HIDE_FAST_LABEL}
+        />
       )}
       {/* 밀도 칩. 값이 기본(Normal)이 아니면 강조한다 — 훑기 모드에서 대화가 성겨 보이는 이유가
-          화면 어딘가에 늘 적혀 있어야 한다. */}
-      <button
-        onClick={() => onPick('density')}
-        className={
-          'flex items-center gap-1 min-w-0 shrink transition-colors ' +
-          (density === DEFAULT_TRANSCRIPT_DENSITY
-            ? 'hover:text-neutral-300'
-            : 'text-[var(--accent-300)] hover:text-[var(--accent-200)]')
+          화면 어딘가에 늘 적혀 있어야 한다. 반대로 기본값이면 그 이유가 없으므로 아이콘만 둔다. */}
+      <StatusChip
+        icon={
+          <ListCollapse
+            size={11}
+            className={
+              'shrink-0 ' + (isDefaultDensity ? 'text-neutral-600' : 'text-[var(--accent-400)]')
+            }
+          />
         }
+        label={TRANSCRIPT_DENSITY_LABEL[density]}
         title={`Conversation density: ${TRANSCRIPT_DENSITY_LABEL[density]} — ${TRANSCRIPT_DENSITY_HINT[density]}. Click, press ${DENSITY_SHORTCUT}, or type /density to change`}
-      >
-        <ListCollapse
-          size={11}
-          className={
-            'shrink-0 ' +
-            (density === DEFAULT_TRANSCRIPT_DENSITY
-              ? 'text-neutral-600'
-              : 'text-[var(--accent-400)]')
-          }
-        />
-        <span className="truncate">{TRANSCRIPT_DENSITY_LABEL[density]}</span>
-      </button>
+        onClick={() => onPick('density')}
+        tone={
+          isDefaultDensity
+            ? 'hover:text-neutral-300'
+            : 'text-[var(--accent-300)] hover:text-[var(--accent-200)]'
+        }
+        quiet={isDefaultDensity}
+        hideLabelAt={HIDE_DENSITY_LABEL}
+      />
       <ContextStatus usage={usage} compacting={compacting} />
       <RateLimitStatus backend={workspace.agentBackend} snapshot={rateLimits} />
     </div>
@@ -3760,7 +3871,9 @@ function ContextStatus({
       title={`Context: ${usage.usedTokens.toLocaleString()} / ${usage.maxTokens.toLocaleString()} tokens (${pct}%)`}
     >
       <Gauge size={11} className="shrink-0" />
-      <span className="h-1 w-16 rounded-full bg-[var(--surface-3)] overflow-hidden">
+      <span
+        className={'h-1 w-10 rounded-full bg-[var(--surface-3)] overflow-hidden ' + HIDE_IN_SLIVER}
+      >
         <span className={'block h-full rounded-full ' + barTone} style={{ width: `${pct}%` }} />
       </span>
       {pct}%
@@ -3837,7 +3950,8 @@ function RateLimitStatus({
   }
 
   return (
-    <div className="relative shrink-0" ref={ref}>
+    // 가장 좁을 때는 통째로 접는다 — 계정 단위 값이라 Overview 가 같은 것을 보여 준다.
+    <div className={'relative shrink-0 ' + HIDE_IN_SLIVER} ref={ref}>
       <button
         onClick={() => setOpen((v) => !v)}
         className={
@@ -3853,7 +3967,11 @@ function RateLimitStatus({
         }
       >
         <Activity size={11} className="shrink-0" />
-        <span className="h-1 w-16 rounded-full bg-[var(--surface-3)] overflow-hidden">
+        <span
+          className={
+            'h-1 w-10 rounded-full bg-[var(--surface-3)] overflow-hidden ' + HIDE_IN_SLIVER
+          }
+        >
           <span className={'block h-full rounded-full ' + barTone} style={{ width: `${pct}%` }} />
         </span>
         {pct}%

@@ -199,7 +199,8 @@ describe('대화 밀도 3단계', () => {
     })
     renderWithStore(<ChatView workspace={ws} />)
 
-    await user.click(screen.getByText('Normal'))
+    // 기본값(Normal)일 때 칩은 아이콘만 남는다 — 글자가 아니라 칩 자체를 눌러 연다.
+    await user.click(screen.getByRole('button', { name: /Conversation density: Normal/ }))
     await user.click(screen.getByText('Summary'))
 
     expect(useStore.getState().transcriptDensity[ws.id]).toBe('summary')
