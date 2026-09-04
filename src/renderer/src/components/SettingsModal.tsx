@@ -39,6 +39,12 @@ import { applyTheme } from '../lib/theme'
 import { SETTINGS_PAGES, SETTINGS_PAGE_KEY, type SettingsPage } from '../lib/settingsNavigation'
 import { CONFIRM_SKIP_LABELS } from '../lib/confirmSkips'
 import {
+  TRANSCRIPT_DENSITIES,
+  TRANSCRIPT_DENSITY_HINT,
+  TRANSCRIPT_DENSITY_LABEL
+} from '../lib/transcriptDensity'
+import { DENSITY_SHORTCUT } from '@shared/toolDisplay'
+import {
   CONFIRM_SKIP_KEYS,
   DEFAULT_AGENT_SETTINGS,
   DEFAULT_NOTIFICATION_SETTINGS,
@@ -403,6 +409,23 @@ function GeneralPage({
                 className={`rounded-md px-3 py-1 text-xs capitalize ${settings.toolLogStyle === style ? 'bg-[var(--surface-2)] text-neutral-100 shadow-sm' : 'text-neutral-500 hover:text-neutral-300'}`}
               >
                 {style}
+              </button>
+            ))}
+          </div>
+        </SettingRow>
+        <SettingRow
+          title="Conversation density"
+          description={`Where a new workspace starts. ${DENSITY_SHORTCUT} changes it for one workspace, and that choice wins over this one.`}
+        >
+          <div className="flex gap-1 rounded-lg bg-[var(--bg-2)] p-1">
+            {TRANSCRIPT_DENSITIES.map((density) => (
+              <button
+                key={density}
+                onClick={() => save({ defaultTranscriptDensity: density })}
+                title={TRANSCRIPT_DENSITY_HINT[density]}
+                className={`rounded-md px-3 py-1 text-xs ${settings.defaultTranscriptDensity === density ? 'bg-[var(--surface-2)] text-neutral-100 shadow-sm' : 'text-neutral-500 hover:text-neutral-300'}`}
+              >
+                {TRANSCRIPT_DENSITY_LABEL[density]}
               </button>
             ))}
           </div>

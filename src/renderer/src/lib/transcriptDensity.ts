@@ -1,5 +1,5 @@
 import { isFileEditTool } from '@shared/toolGroups'
-import type { ChatItem } from '@shared/types'
+import type { ChatItem, TranscriptDensity } from '@shared/types'
 
 /**
  * 대화를 얼마나 촘촘히 볼지. ⌃O 로 순환하고, 워크스페이스마다 따로 기억한다.
@@ -10,14 +10,24 @@ import type { ChatItem } from '@shared/types'
  * 워크스페이스별인 것이 요점이다. 훑기 모드의 쓸모 자체가 "이건 훑고 저건 자세히 본다" 이므로
  * 앱 전역 값으로 두면 병렬로 돌리는 워크스페이스마다 매번 다시 맞춰야 한다.
  *
+ * 전역에 있는 것은 **시작점 하나**뿐이다(`settings.defaultTranscriptDensity`) — 늘 Summary 로
+ * 보는 사람이 워크스페이스를 만들 때마다 ⌃O 를 누르지 않게. 워크스페이스에서 고른 값은 언제나
+ * 그 시작점을 덮는다.
+ *
  * 저장 위치가 localStorage 인 이유는 [[uiFlags]]·[[chatFontScale]] 와 같다 — 이건 이 기기에서
  * 지금 화면을 어떻게 보고 있는지일 뿐, main 이 알아야 할 도메인 상태가 아니다.
  */
-export type TranscriptDensity = 'summary' | 'normal' | 'verbose'
+export type { TranscriptDensity }
 
 /** 성긴 것부터 촘촘한 것 순서. ⌃O 순환도 이 순서를 그대로 돈다. */
 export const TRANSCRIPT_DENSITIES = ['summary', 'normal', 'verbose'] as const
 
+/**
+ * 아무것도 정해지지 않았을 때의 밀도.
+ *
+ * 실제로 적용되는 기본값은 전역 설정(`settings.defaultTranscriptDensity`)이고, 이 상수는 설정이
+ * 아직 로드되기 전에 쓰는 폴백이자 그 설정의 출고값이다 — 두 값을 맞춰 둔다.
+ */
 export const DEFAULT_TRANSCRIPT_DENSITY: TranscriptDensity = 'normal'
 
 export const TRANSCRIPT_DENSITY_LABEL: Record<TranscriptDensity, string> = {
@@ -157,11 +167,20 @@ export function readRememberedTranscriptDensities(): Record<string, TranscriptDe
   return out
 }
 
-/** 기본값은 지운다 — 손대지 않은 워크스페이스가 저장소에 쌓이지 않게. */
-export function rememberTranscriptDensity(workspaceId: string, density: TranscriptDensity): void {
+/**
+ * 기본값은 지운다 — 손대지 않은 워크스페이스가 저장소에 쌓이지 않게.
+ *
+ * `fallback` 은 지금 유효한 전역 기본값이다. 상수가 아니라 인자인 것이 요점이다: 기본값과 같은
+ * 밀도를 "고른" 워크스페이스를 저장해 두면 나중에 전역 설정을 바꿔도 그 워크스페이스만 옛 값에
+ * 남는다. 지워 두면 설정을 따라온다.
+ */
+export function rememberTranscriptDensity(
+  workspaceId: string,
+  density: TranscriptDensity,
+  fallback: TranscriptDensity
+): void {
   try {
-    if (density === DEFAULT_TRANSCRIPT_DENSITY)
-      localStorage.removeItem(STORAGE_PREFIX + workspaceId)
+    if (density === fallback) localStorage.removeItem(STORAGE_PREFIX + workspaceId)
     else localStorage.setItem(STORAGE_PREFIX + workspaceId, density)
   } catch {
     /* 기억하지 못해도 이번 실행 동안은 밀도가 유지된다. */

@@ -443,10 +443,12 @@ interface UIState {
   /** workspace 별 우측 작업 패널 표시 여부. 값이 없으면 설정의 기본값을 따른다. */
   rightPanelOpen: Record<string, boolean>
   /**
-   * workspace 별 대화 밀도(Summary / Normal / Verbose). 값이 없으면 기본값(Normal).
+   * workspace 별 대화 밀도(Summary / Normal / Verbose). 값이 없으면 전역 설정의 기본값을 따른다
+   * — 읽을 때는 `transcriptDensityOf` 를 쓴다.
    *
    * 앱 전역이 아니라 workspace 별인 이유는 [[transcriptDensity]] 에 적어 뒀다 — 훑기 모드의
-   * 쓸모 자체가 "이건 훑고 저건 자세히 본다" 라 병렬로 돌릴수록 전역 값이 방해가 된다.
+   * 쓸모 자체가 "이건 훑고 저건 자세히 본다" 라 병렬로 돌릴수록 전역 값이 방해가 된다. 전역에
+   * 있는 것은 아직 고르지 않은 워크스페이스의 시작점 하나뿐이다.
    */
   transcriptDensity: Record<string, TranscriptDensity>
   setTranscriptDensity: (workspaceId: string, density: TranscriptDensity) => void
@@ -1118,6 +1120,20 @@ type TranscriptPaging = {
   loading: boolean
 }
 
+/**
+ * 아직 아무 워크스페이스도 손대지 않았을 때의 밀도 — 전역 설정 값이다.
+ *
+ * 설정이 로드되기 전(첫 프레임)에는 상수로 폴백한다. 두 값은 `DEFAULT_SETTINGS` 에서 맞춰 뒀다.
+ */
+export function defaultTranscriptDensity(s: UIState): TranscriptDensity {
+  return s.app?.settings.defaultTranscriptDensity ?? DEFAULT_TRANSCRIPT_DENSITY
+}
+
+/** 이 워크스페이스에 지금 적용되는 밀도. 손으로 고른 값이 있으면 그것, 없으면 전역 기본값. */
+export function transcriptDensityOf(s: UIState, workspaceId: string): TranscriptDensity {
+  return s.transcriptDensity[workspaceId] ?? defaultTranscriptDensity(s)
+}
+
 export const useStore = create<UIState>((set, get) => ({
   ready: false,
   app: null,
@@ -1160,12 +1176,22 @@ export const useStore = create<UIState>((set, get) => ({
   rightPanelOpen: {},
   transcriptDensity: readRememberedTranscriptDensities(),
   setTranscriptDensity: (workspaceId, density) => {
-    rememberTranscriptDensity(workspaceId, density)
-    set((s) => ({ transcriptDensity: { ...s.transcriptDensity, [workspaceId]: density } }))
+    const fallback = defaultTranscriptDensity(get())
+    rememberTranscriptDensity(workspaceId, density, fallback)
+    // 전역 기본값과 같은 값을 고른 것은 "안 고름" 이다 — 저장소와 같은 판정을 메모리에도 적용해
+    // 둬야 나중에 설정을 바꿨을 때 이 워크스페이스가 재시작 없이 따라온다.
+    set((s) => {
+      const next = { ...s.transcriptDensity }
+      if (density === fallback) delete next[workspaceId]
+      else next[workspaceId] = density
+      return { transcriptDensity: next }
+    })
   },
   cycleTranscriptDensity: (workspaceId) => {
-    const current = get().transcriptDensity[workspaceId] ?? DEFAULT_TRANSCRIPT_DENSITY
-    get().setTranscriptDensity(workspaceId, nextTranscriptDensity(current))
+    get().setTranscriptDensity(
+      workspaceId,
+      nextTranscriptDensity(transcriptDensityOf(get(), workspaceId))
+    )
   },
   terminalRatio: 0.5,
   detachedPanes: { work: false, scripts: false, overview: false },

@@ -131,17 +131,27 @@ describe('워크스페이스별 기억', () => {
   beforeEach(() => localStorage.clear())
 
   it('워크스페이스마다 따로 기억한다 — 훑기 모드의 쓸모가 바로 그것이다', () => {
-    rememberTranscriptDensity('ws-a', 'summary')
-    rememberTranscriptDensity('ws-b', 'verbose')
+    rememberTranscriptDensity('ws-a', 'summary', 'normal')
+    rememberTranscriptDensity('ws-b', 'verbose', 'normal')
 
     expect(readRememberedTranscriptDensities()).toEqual({ 'ws-a': 'summary', 'ws-b': 'verbose' })
   })
 
   it('기본값으로 돌아오면 저장하지 않는다 — 손대지 않은 워크스페이스가 쌓이지 않게', () => {
-    rememberTranscriptDensity('ws-a', 'summary')
-    rememberTranscriptDensity('ws-a', 'normal')
+    rememberTranscriptDensity('ws-a', 'summary', 'normal')
+    rememberTranscriptDensity('ws-a', 'normal', 'normal')
 
     expect(readRememberedTranscriptDensities()).toEqual({})
+  })
+
+  it('상수가 아니라 전역 설정의 기본값과 같을 때 지운다 — 설정을 바꾸면 따라오게', () => {
+    // 전역 기본값이 Summary 인 사용자가 Summary 를 고르면 아무것도 남지 않는다.
+    rememberTranscriptDensity('ws-a', 'summary', 'summary')
+    expect(readRememberedTranscriptDensities()).toEqual({})
+
+    // 반대로 상수와 같은 Normal 이라도, 전역 기본값이 다르면 그것은 그 워크스페이스의 선택이다.
+    rememberTranscriptDensity('ws-b', 'normal', 'summary')
+    expect(readRememberedTranscriptDensities()).toEqual({ 'ws-b': 'normal' })
   })
 
   it('남의 키와 깨진 값은 건너뛴다', () => {

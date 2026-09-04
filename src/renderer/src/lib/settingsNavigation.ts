@@ -23,7 +23,7 @@ export const SETTINGS_PAGES: { id: SettingsPage; label: string; keywords: string
     id: 'general',
     label: 'General',
     keywords:
-      'theme appearance panel sidebar workspace order activity recent sort pin creation sleep awake power display confirmation confirm ask again archive'
+      'theme appearance panel sidebar workspace order activity recent sort pin creation sleep awake power display confirmation confirm ask again archive density summary verbose transcript conversation'
   },
   {
     id: 'agents',
