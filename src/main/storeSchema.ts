@@ -69,6 +69,7 @@ function normalizeMode(mode: unknown): PermissionMode {
 
 export const DEFAULT_SETTINGS: AppSettings = {
   toolLogStyle: 'wooi',
+  defaultTranscriptDensity: 'normal',
   defaultAgentBackend: DEFAULT_AGENT_BACKEND,
   agents: {
     // Claude 는 검증된 기본 모델을 지정한다(1M 윈도를 잡는 `[1m]` 접미사 포함).

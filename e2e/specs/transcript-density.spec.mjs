@@ -13,6 +13,8 @@ import { launchWooi, withScratchRepo } from '../harness.mjs'
  * - 상태줄 칩 → 선택 카드 → 값 적용의 클릭 경로가 이어지는가.
  * - 밀도가 **앱을 껐다 켜도** 그 워크스페이스에 남는가. 스토어 초기값이 localStorage 를 한 번에
  *   읽는 구조라, 이건 실제로 두 번 띄워 봐야만 증명된다.
+ * - 설정의 전역 기본값이 **아직 고르지 않은 워크스페이스**에 닿는가. 값이 main 의 설정과 renderer
+ *   의 localStorage 두 곳에 나뉘어 살아서, 이 둘을 잇는 배선은 여기서만 확인된다.
  */
 const AGENT_REPLY = 'Parser is strict now.'
 const READ_TAIL = 'read-output-tail-line'
@@ -28,7 +30,7 @@ const READ_OUTPUT = [
   READ_TAIL
 ].join('\n')
 
-export default async function 대화_밀도는_세_단계를_돌고_재시작을_넘어_남는다() {
+export default async function 대화_밀도는_세_단계를_돌고_재시작과_전역_기본값을_넘어_남는다() {
   const now = Date.now()
   const transcript = [
     { id: 'user-1', type: 'user', text: 'make the parser strict', ts: now - 8 },
@@ -169,6 +171,34 @@ export default async function 대화_밀도는_세_단계를_돌고_재시작을
           )
         }
         console.log(`[e2e] screenshot=${await restarted.shot('transcript-density-after-restart')}`)
+
+        // ── 전역 기본값은 "아직 고르지 않은" 워크스페이스에만 닿는다 ─────────
+        // 이 워크스페이스는 Summary 를 골라 뒀으므로 전역을 Verbose 로 바꿔도 꿈쩍하지 않는다.
+        await setDefaultDensity(restarted, 'verbose', 'transcript-density-setting')
+        await expectDensity(restarted.win, 'Summary', { quietAt: 'Verbose' })
+        await expectGone(restarted.win, 'think-1', 'the thinking card')
+
+        // 전역 기본값과 **같은** 값을 고르는 것은 "안 고름" 이다 — 기억해 둔 값을 지운다.
+        await blurComposer(restarted.win)
+        await restarted.win.keyboard.press('Control+o') // Summary → Normal
+        await restarted.win.keyboard.press('Control+o') // Normal → Verbose
+        await expectDensity(restarted.win, 'Verbose', { quietAt: 'Verbose' })
+        const cleared = await restarted.win.evaluate(() =>
+          globalThis.localStorage.getItem('wooi.transcriptDensity.ws-e2e')
+        )
+        if (cleared !== null) {
+          throw new Error(
+            `choosing the global default should clear the per-workspace value, but it kept ${JSON.stringify(cleared)}`
+          )
+        }
+
+        // 지워 뒀기 때문에, 설정을 다시 바꾸면 재시작 없이 따라온다. 이것이 새 워크스페이스가
+        // 고른 밀도로 시작하는 것과 같은 배선이다.
+        await setDefaultDensity(restarted, 'summary')
+        await expectDensity(restarted.win, 'Summary', { quietAt: 'Summary' })
+        await expectGone(restarted.win, 'think-1', 'the thinking card')
+        console.log(`[e2e] screenshot=${await restarted.shot('transcript-density-global-default')}`)
+
         await waitForInspection(restarted.win)
       } finally {
         await restarted.close()
@@ -183,11 +213,40 @@ function densityChip(win) {
 }
 
 /**
- * 값은 제목에서 읽는다. 상태줄은 **기본값일 때 글자를 적지 않기 때문이다** — 폭을 아끼려고
- * 아이콘만 남기므로(`status-line-fit`), 보이는 글자로 값을 물으면 Normal 을 빈 문자열로 읽는다.
- * 글자로 말하는지 아닌지는 그 자체가 계약이라 함께 확인한다.
+ * 설정의 전역 기본 밀도를 바꾼다. 새 워크스페이스가 어디서 시작할지를 정하는 값이라, 밟을 길이
+ * 설정 화면뿐이다.
  */
-async function expectDensity(win, label) {
+async function setDefaultDensity(app, density, shotName) {
+  const win = app.win
+  await win.evaluate(() =>
+    globalThis.dispatchEvent(
+      new globalThis.CustomEvent('wooi:open-settings', { detail: 'general' })
+    )
+  )
+  const option = win.locator(`[data-default-density="${density}"]`)
+  await option.click()
+  // 저장은 main 왕복이라 클릭 직후의 화면은 아직 옛 값이다. 눌린 상태로 반영을 기다린다 —
+  // 여기서 기다리지 않으면 뒤따르는 밀도 확인이 무엇을 재는지 알 수 없어진다.
+  await option.and(win.locator('[aria-pressed="true"]')).waitFor()
+  if (shotName) console.log(`[e2e] screenshot=${await app.shot(shotName)}`)
+  await win.getByRole('button', { name: 'Close settings' }).click()
+  const saved = await win.evaluate(async () => (await globalThis.api.getState()).settings)
+  if (saved.defaultTranscriptDensity !== density) {
+    throw new Error(
+      `the default density was not persisted through main: ${JSON.stringify(saved.defaultTranscriptDensity)}`
+    )
+  }
+}
+
+/**
+ * 값은 제목에서 읽는다. 상태줄은 **기본값일 때 글자를 적지 않기 때문이다** — 폭을 아끼려고
+ * 아이콘만 남기므로(`status-line-fit`), 보이는 글자로 값을 물으면 기본값을 빈 문자열로 읽는다.
+ * 글자로 말하는지 아닌지는 그 자체가 계약이라 함께 확인한다.
+ *
+ * 그 "조용한 값" 은 상수가 아니라 설정의 전역 기본값이다 — `quietAt` 으로 지금 무엇이 기본인지
+ * 일러 준다. 상태줄이 강조하는 것은 "Normal 이 아님" 이 아니라 "내가 정한 기본에서 벗어남" 이다.
+ */
+async function expectDensity(win, label, { quietAt = 'Normal' } = {}) {
   const chip = densityChip(win)
   await chip.waitFor()
   const title = (await chip.getAttribute('title')) ?? ''
@@ -196,7 +255,7 @@ async function expectDensity(win, label) {
     throw new Error(`the status line said the density was ${said}, expected ${label}`)
   }
   const text = (await chip.innerText()).trim()
-  const shouldSpeak = label !== 'Normal'
+  const shouldSpeak = label !== quietAt
   if (shouldSpeak !== (text === label)) {
     throw new Error(
       `${label} density ${shouldSpeak ? 'should be' : 'should not be'} spelled out, ` +

@@ -33,7 +33,7 @@ import {
   Wrench,
   ListCollapse
 } from 'lucide-react'
-import { useStore } from '../store'
+import { defaultTranscriptDensity, transcriptDensityOf, useStore } from '../store'
 import SavedPromptPicker from './SavedPromptPicker'
 import { appendPrompt } from '../lib/savedPrompts'
 import { permissionModeFooter, permissionModesFor } from '../lib/permission'
@@ -42,7 +42,6 @@ import { effortLabel, effortOptionsFor } from '../lib/effort'
 import { FAST_MODE_HINT, fastModeLabel, fastModeStatus } from '../lib/fastMode'
 import { DENSITY_SHORTCUT } from '@shared/toolDisplay'
 import {
-  DEFAULT_TRANSCRIPT_DENSITY,
   TRANSCRIPT_DENSITIES,
   TRANSCRIPT_DENSITY_HINT,
   TRANSCRIPT_DENSITY_LABEL,
@@ -3351,7 +3350,7 @@ function StatusLine({
   const backend = useWorkspaceBackend(workspace)
   const models = useModels(workspace.agentBackend)
   const defaults = useAgentSettings(workspace.agentBackend)
-  const density = useStore((s) => s.transcriptDensity[workspace.id] ?? DEFAULT_TRANSCRIPT_DENSITY)
+  const density = useStore((s) => transcriptDensityOf(s, workspace.id))
   // fast mode 는 Claude Code 전용이라, 지원하지 않는 백엔드에서는 상태줄에서도 감춘다.
   const supportsFastMode = backend?.capabilities.fastMode ?? false
   // 에이전트 칩은 **고를 것이 있을 때만** 띄운다. 어떤 에이전트가 도는지는 헤더의 브랜드 마크가
@@ -3377,7 +3376,9 @@ function StatusLine({
     workspace.fastModeReason
   )
 
-  const isDefaultDensity = density === DEFAULT_TRANSCRIPT_DENSITY
+  // 강조는 "전역 기본값에서 벗어났는가" 기준이다 — 상수가 아니라 사용자가 고른 기본값에서.
+  const globalDensity = useStore(defaultTranscriptDensity)
+  const isDefaultDensity = density === globalDensity
 
   return (
     <div
@@ -3517,7 +3518,7 @@ function PickerCard({
   const pushToast = useStore((s) => s.pushToast)
   const confirm = useStore((s) => s.confirm)
   const resetContextUsage = useStore((s) => s.resetContextUsage)
-  const density = useStore((s) => s.transcriptDensity[workspace.id] ?? DEFAULT_TRANSCRIPT_DENSITY)
+  const density = useStore((s) => transcriptDensityOf(s, workspace.id))
   const setTranscriptDensity = useStore((s) => s.setTranscriptDensity)
   // 에이전트 교체는 이 카드가 유일한 경로가 아니다(main 이 같은 규칙으로 다시 판정한다).
   // 여기서는 카드가 떠 있는 동안 조건이 무너지는 경우(다른 창에서 턴이 시작됐다든지)를 본다.

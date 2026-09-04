@@ -20,7 +20,7 @@ import {
   GitMergeConflict,
   Sparkles
 } from 'lucide-react'
-import { useStore } from '../store'
+import { transcriptDensityOf, useStore } from '../store'
 import { DiffLine } from './DiffView'
 import { AgentMessage, ErrorRow, UserMessage } from './ChatPrimitives'
 import { ToolCard } from './tools/ToolCard'
@@ -41,7 +41,6 @@ import { useChatFontScale } from '../lib/chatFontScale'
 import { restoredScrollTop, TRANSCRIPT_TOP_THRESHOLD_PX } from '../lib/transcriptPagination'
 import { DENSITY_SHORTCUT } from '@shared/toolDisplay'
 import {
-  DEFAULT_TRANSCRIPT_DENSITY,
   expandsToolOutput,
   showsEntry,
   showsInlineDiff,
@@ -302,7 +301,7 @@ export default function MessageList({
   const searchInputRef = useRef<HTMLInputElement>(null)
   const jumpTarget = useStore((s) => s.jumpTarget)
   // 대화 밀도(⌃O / 상태줄 칩). 무엇을 그릴지와 도구 출력을 펴 둘지를 모두 여기서 갈라 준다.
-  const density = useStore((s) => s.transcriptDensity[workspaceId] ?? DEFAULT_TRANSCRIPT_DENSITY)
+  const density = useStore((s) => transcriptDensityOf(s, workspaceId))
   const toolLogStyle = useStore((s) => s.app?.settings.toolLogStyle ?? 'wooi')
   const overlayOpen = useStore((s) => s.overlayOpen)
   // 나란히 두 칸을 띄우면 이 화면이 다는 전역 리스너가 두 번 발동한다 — 포커스된 칸만 받는다.

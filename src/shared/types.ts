@@ -1485,9 +1485,21 @@ export const CONFIRM_SKIP_KEYS = [
 ] as const
 export type ConfirmSkipKey = (typeof CONFIRM_SKIP_KEYS)[number]
 
+/**
+ * 대화를 얼마나 촘촘히 볼지. 세 단계의 뜻과 워크스페이스별로 기억하는 이유는
+ * [[transcriptDensity]] 에 적어 뒀다 — 여기 있는 것은 그 타입뿐이다(전역 기본값이
+ * AppSettings 에 살아야 하므로 main 도 알아야 하는 타입이 됐다).
+ */
+export type TranscriptDensity = 'summary' | 'normal' | 'verbose'
+
 export interface AppSettings {
   /** 대화의 도구 로그 외형. 접기·요약 정책은 두 스타일이 공유한다. */
   toolLogStyle: 'wooi' | 'terminal'
+  /**
+   * 아직 밀도를 고르지 않은 워크스페이스가 따르는 기본값. ⌃O 로 고른 워크스페이스별 값이 늘
+   * 이기므로, 이 설정은 "새로 만드는 워크스페이스가 어디서 시작하는가" 를 정한다.
+   */
+  defaultTranscriptDensity: TranscriptDensity
   /**
    * 새 워크스페이스가 기본으로 쓸 에이전트 백엔드. 사용자가 두 에이전트를 모두 보유했을 때만
    * 의미가 있으며, 하나뿐이면 그 하나로 자동 해석된다.

@@ -39,6 +39,12 @@ import { applyTheme } from '../lib/theme'
 import { SETTINGS_PAGES, SETTINGS_PAGE_KEY, type SettingsPage } from '../lib/settingsNavigation'
 import { CONFIRM_SKIP_LABELS } from '../lib/confirmSkips'
 import {
+  TRANSCRIPT_DENSITIES,
+  TRANSCRIPT_DENSITY_HINT,
+  TRANSCRIPT_DENSITY_LABEL
+} from '../lib/transcriptDensity'
+import { DENSITY_SHORTCUT } from '@shared/toolDisplay'
+import {
   CONFIRM_SKIP_KEYS,
   DEFAULT_AGENT_SETTINGS,
   DEFAULT_NOTIFICATION_SETTINGS,
@@ -403,6 +409,27 @@ function GeneralPage({
                 className={`rounded-md px-3 py-1 text-xs capitalize ${settings.toolLogStyle === style ? 'bg-[var(--surface-2)] text-neutral-100 shadow-sm' : 'text-neutral-500 hover:text-neutral-300'}`}
               >
                 {style}
+              </button>
+            ))}
+          </div>
+        </SettingRow>
+        <SettingRow
+          title="Conversation density"
+          description={`Where a new workspace starts. ${DENSITY_SHORTCUT} changes it for one workspace, and that choice wins over this one.`}
+        >
+          <div className="flex gap-1 rounded-lg bg-[var(--bg-2)] p-1">
+            {TRANSCRIPT_DENSITIES.map((density) => (
+              <button
+                key={density}
+                data-default-density={density}
+                // 저장이 main 왕복이라 클릭과 반영 사이에 한 박자가 있다. 눌린 상태를 읽을 수
+                // 있어야 그 사이를 화면 밖에서도(스크린리더·e2e) 구별할 수 있다.
+                aria-pressed={settings.defaultTranscriptDensity === density}
+                onClick={() => save({ defaultTranscriptDensity: density })}
+                title={TRANSCRIPT_DENSITY_HINT[density]}
+                className={`rounded-md px-3 py-1 text-xs ${settings.defaultTranscriptDensity === density ? 'bg-[var(--surface-2)] text-neutral-100 shadow-sm' : 'text-neutral-500 hover:text-neutral-300'}`}
+              >
+                {TRANSCRIPT_DENSITY_LABEL[density]}
               </button>
             ))}
           </div>
