@@ -10,8 +10,10 @@ import type { AgentBackendId, FanoutSlot } from '@shared/types'
 import { useStore } from '../store'
 import Modal, { inputClass, labelClass, primaryBtn, ghostBtn } from './Modal'
 import { sanitizePreview } from '../lib/format'
-import { useAvailableBackends } from '../lib/backends'
+import { useAvailableBackends, useDefaultBackend } from '../lib/backends'
 import { AgentBackendMark } from './BrandIcons'
+import SavedPromptPicker from './SavedPromptPicker'
+import { appendPrompt } from '../lib/savedPrompts'
 
 /** 후보 수 선택지. 하나는 fan-out 이 아니고, 다섯이면 한 화면에서 나란히 비교할 수 없다. */
 const SLOT_COUNTS = Array.from(
@@ -49,15 +51,14 @@ export default function NewWorkspaceModal({
   // 에이전트는 생성 시 정해져 **세션 내내 고정**된다. 쓸 수 있는 에이전트가 하나뿐이면
   // 물어볼 이유가 없으므로 피커를 감추고 그 하나로 만든다.
   const available = useAvailableBackends()
+  // 기본값은 이미 쓸 수 있는 것으로 보정된 값이라(useDefaultBackend), explicit·parent 도
+  // 대개 그렇다는 전제 위에서 이 셋을 그대로 순서대로 고른다 — 더 이상 available 로 따로
+  // 되돌릴 필요가 없다.
+  const defaultBackend = useDefaultBackend()
   const [agentBackend, setAgentBackend] = useState<AgentBackendId>(
-    () => initialAgentBackend ?? parent?.agentBackend ?? app.settings.defaultAgentBackend
+    () => initialAgentBackend ?? parent?.agentBackend ?? defaultBackend
   )
   const showPicker = available.length > 1
-  // 기본 백엔드를 쓸 수 없으면(CLI 제거 등) 쓸 수 있는 것으로 대체한다.
-  const effectiveBackend =
-    available.some((b) => b.id === agentBackend) || available.length === 0
-      ? agentBackend
-      : available[0].id
 
   // Solo/팀은 여기서 묻지 않는다. 팀은 워크스페이스의 **종류**가 아니라 언제든 켤 수 있는
   // 능력이고, 무엇을 위임할 만한지는 만드는 순간이 아니라 대화 중에 드러난다 — 가장 모르는
@@ -75,7 +76,7 @@ export default function NewWorkspaceModal({
   const [slotBackends, setSlotBackends] = useState<(AgentBackendId | null)[]>(() =>
     Array.from({ length: FANOUT_MAX_SLOTS }, () => null)
   )
-  const backendForSlot = (i: number): AgentBackendId => slotBackends[i] ?? effectiveBackend
+  const backendForSlot = (i: number): AgentBackendId => slotBackends[i] ?? agentBackend
 
   const nameHint = name.trim() ? sanitizePreview(name) : ''
 
@@ -89,7 +90,7 @@ export default function NewWorkspaceModal({
         // 자동 설정에서는 이름을 비워 main 의 고유 이름 생성기를 그대로 사용한다.
         ...(manualSetup ? { name: trimmed } : {}),
         parentWorkspaceId,
-        agentBackend: effectiveBackend
+        agentBackend
         // multiAgent 는 넘기지 않는다 — main 이 Solo 로 만든다.
       },
       manualSetup ? trimmed : undefined
@@ -138,7 +139,14 @@ export default function NewWorkspaceModal({
       <div className="space-y-4">
         {fanout && (
           <div>
-            <label className={labelClass}>Prompt</label>
+            <div className="flex items-center justify-between gap-2">
+              <label className={labelClass}>Prompt</label>
+              {/* 저장해 둔 프롬프트를 여기서도 꺼낸다 — 후보 전원이 받는 말이라 손볼 기회가 더 중요하다. */}
+              <SavedPromptPicker
+                prompts={repo.savedPrompts ?? []}
+                onPick={(saved) => setPrompt((current) => appendPrompt(current, saved))}
+              />
+            </div>
             <textarea
               autoFocus
               rows={4}
@@ -276,7 +284,7 @@ export default function NewWorkspaceModal({
                   onClick={() => setAgentBackend(b.id)}
                   className={
                     'flex-1 flex items-center justify-center gap-2 text-sm px-3 py-2 rounded-lg border transition-colors ' +
-                    (effectiveBackend === b.id
+                    (agentBackend === b.id
                       ? 'border-[var(--info-500)] bg-[var(--info-600)]/15 text-neutral-100'
                       : 'border-[var(--border)] text-neutral-300 hover:bg-[var(--surface-2)]')
                   }
@@ -284,7 +292,7 @@ export default function NewWorkspaceModal({
                   <AgentBackendMark backend={b.id} size={15} />
                   {b.label}
                   {parent?.agentBackend === b.id && (
-                    <span className="text-[10px] text-neutral-500">Inherited</span>
+                    <span className="text-2xs text-neutral-500">Inherited</span>
                   )}
                 </button>
               ))}

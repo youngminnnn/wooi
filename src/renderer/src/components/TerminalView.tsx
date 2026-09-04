@@ -73,7 +73,8 @@ export default function TerminalView({
       fontSize: 12,
       fontFamily: "'SF Mono', ui-monospace, 'JetBrains Mono', Menlo, monospace",
       lineHeight: 1.2,
-      cursorBlink: true,
+      // 깜빡임은 이 터미널에 커서가 있고 창도 앞에 있을 때만 켠다(아래 syncBlink 참고).
+      cursorBlink: false,
       theme: terminalTheme()
     })
     const fit = new FitAddon()
@@ -134,6 +135,42 @@ export default function TerminalView({
       attributeFilter: ['data-theme']
     })
 
+    // 커서 깜빡임은 무한 CSS 애니메이션이라, 켜 두면 아무도 타이핑하지 않는 동안에도 합성기가
+    // 계속 프레임을 만든다 — 터미널 탭 하나를 열어 둔 것만으로 유휴 상태의 GPU 가 안 쉰다.
+    // 깜빡임이 실제로 쓸모 있는 때는 "여기에 입력하면 여기로 들어간다" 를 알릴 때뿐이므로,
+    // 이 터미널에 커서가 있고 창도 앞에 있을 때만 켠다. 둘 중 하나라도 아니면 커서는 그 자리에
+    // 그대로 보이고(모양만 고정) 애니메이션만 멈춘다.
+    let termFocused = false
+    let windowFocused = document.hasFocus()
+    const syncBlink = (): void => {
+      const next = termFocused && windowFocused
+      if (term.options.cursorBlink !== next) term.options.cursorBlink = next
+    }
+    const onFocusIn = (): void => {
+      termFocused = true
+      syncBlink()
+    }
+    const onFocusOut = (): void => {
+      termFocused = false
+      syncBlink()
+    }
+    // 창 전환은 DOM 포커스를 옮기지 않는다 — focusout 이 오지 않으므로 따로 듣는다.
+    const onWindowFocus = (): void => {
+      windowFocused = true
+      syncBlink()
+    }
+    const onWindowBlur = (): void => {
+      windowFocused = false
+      syncBlink()
+    }
+    host.addEventListener('focusin', onFocusIn)
+    host.addEventListener('focusout', onFocusOut)
+    window.addEventListener('focus', onWindowFocus)
+    window.addEventListener('blur', onWindowBlur)
+    // 탭을 옮겼다 돌아오면 xterm 이 스스로 포커스를 되찾은 채로 마운트될 수 있다.
+    termFocused = host.contains(document.activeElement)
+    syncBlink()
+
     return () => {
       cancelAnimationFrame(raf)
       inputSub.dispose()
@@ -141,6 +178,10 @@ export default function TerminalView({
       offExit()
       ro.disconnect()
       themeObs.disconnect()
+      host.removeEventListener('focusin', onFocusIn)
+      host.removeEventListener('focusout', onFocusOut)
+      window.removeEventListener('focus', onWindowFocus)
+      window.removeEventListener('blur', onWindowBlur)
       term.dispose()
       termRef.current = null
       fitRef.current = null

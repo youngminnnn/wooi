@@ -111,7 +111,10 @@ export const createIndependentWorkspace: AgentToolHandler = async (deps, workspa
   // 작업을 넘기면 새 워크스페이스는 **즉시 돌기 시작한다**. 사용자는 방금 이 도구 호출을
   // 승인하면서 그 작업 문장까지 카드에서 봤으므로, 여기서 다시 묻지 않는다.
   const task = typeof args.task === 'string' ? args.task.trim() : ''
-  if (task) deps.sendMessage(newId, startMessage(task, repo.defaultBranch, otherRepo))
+  if (task)
+    deps.sendMessage(newId, startMessage(task, repo.defaultBranch, otherRepo), {
+      origin: { kind: 'wooi', label: 'Task from the agent that created this workspace' }
+    })
 
   // 전달 실패는 생성을 막지 않지만 조용히 넘기면 안 된다 — 새 워크스페이스의 에이전트가
   // 프로젝트 지침(CLAUDE.local.md 등)을 못 읽은 채 다르게 동작한다.

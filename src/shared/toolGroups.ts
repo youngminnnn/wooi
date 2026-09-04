@@ -35,6 +35,14 @@ const AGENT_TOOLS = new Set([
 ])
 const MCP_NAME = /^mcp__(.+?)__/
 
+/**
+ * 이 도구가 파일을 바꾸는가. 묶임 판정(아래)과 대화 밀도의 "실제로 바꾼 것" 판정이 같은 목록을
+ * 봐야 하므로 집합을 여기 한 곳에 두고 내보낸다.
+ */
+export function isFileEditTool(name: string): boolean {
+  return EDIT_TOOLS.has(name)
+}
+
 /** 이 도구가 "조회하고 훑는 일" 인가. 묶임의 단일 판정 지점. */
 export function toolKind(name: string, input: unknown): ToolKind {
   if (EDIT_TOOLS.has(name)) {

@@ -100,6 +100,21 @@ describe('ensureToolApproved', () => {
     await expect(pending).resolves.toBeUndefined()
   })
 
+  // 개명은 승인 대상의 일부다 — 승인하면 원격에 생기는 브랜치 이름이 달라진다.
+  it('개명을 함께 하는 PR 이면 카드가 바뀔 이름을 말한다', async () => {
+    const pending = ensureToolApproved(workspace(), 'open_pull_request', {
+      title: 't',
+      body: 'b',
+      renameBranch: 'feat/branch-name-from-work'
+    })
+    await vi.waitFor(() => expect(cards).toHaveLength(1))
+
+    expect(cards[0].title).toContain('`feat/branch-name-from-work`')
+
+    answer('allow')
+    await expect(pending).resolves.toBeUndefined()
+  })
+
   it('스택이 아니면 카드에도 리포 기본 브랜치가 뜬다', async () => {
     const pending = ensureToolApproved(workspace(), 'open_pull_request', { title: 't', body: 'b' })
     await vi.waitFor(() => expect(cards).toHaveLength(1))
@@ -188,6 +203,20 @@ describe('ensureToolApproved', () => {
       )
     ).resolves.toBeUndefined()
     expect(cards).toHaveLength(0)
+  })
+
+  it('에이전트 교체의 always 옵션은 fullAccess 에서도 승인 카드를 띄운다', async () => {
+    const pending = ensureToolApproved(
+      workspace({ permissionMode: 'fullAccess' }),
+      'switch_workspace_agent',
+      { agentBackend: 'codex', reason: 'Continue with Codex.' },
+      { always: true }
+    )
+    await vi.waitFor(() => expect(cards).toHaveLength(1))
+    expect(cards[0].title).toMatch(/hand this workspace over to Codex/)
+    expect(cards[0].title).toMatch(/billed as input/)
+    answer('allow')
+    await expect(pending).resolves.toBeUndefined()
   })
 
   /**

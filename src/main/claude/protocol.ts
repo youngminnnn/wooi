@@ -12,6 +12,8 @@ import type {
   PermissionDecision,
   PermissionMode,
   PermissionRequest,
+  RewindActionResult,
+  RewindMode,
   SendMessageOptions,
   UsageTotals
 } from '@shared/types'
@@ -129,6 +131,14 @@ export interface SessionConfig {
   agentDefaults: Partial<
     Record<AgentBackendId, { model: string | null; effort: EffortSetting | null }>
   >
+  /**
+   * 설정 화면의 "Environment variables" 로 이 백엔드에 얹을 값. 메인이 이미 위험한 키를 걸러
+   * 보내므로([[main/agentEnv]]) 호스트는 그대로 SDK 에 넘기기만 한다 — 호스트에는 store 가 없다.
+   *
+   * 세션 단위로 싣는 이유는 그래야 **다음 턴부터 바로** 반영되기 때문이다. 호스트 fork env 에
+   * 실으면 값이 fork 시점에 굳어 앱을 다시 켜야 한다.
+   */
+  env?: Record<string, string>
 }
 
 /** /btw 사이드 질문 진행 상황(호스트 → 메인 → 렌더러). 'start' 는 메인이 직접 보낸다. */
@@ -192,6 +202,7 @@ export type HostCommand =
       workspaceId: string
       config: SessionConfig
       userMessageId: string
+      mode: RewindMode
     }
   /**
    * 계정 레이트리밋 조회. 대상 워크스페이스를 메인이 고르지 않는 것이 핵심이다 —
@@ -266,3 +277,15 @@ export type HostEvent =
    * 지목할 방법이 없다.
    */
   | { type: 'toolCall'; callId: string; workspaceId: string; tool: string; args: unknown }
+
+/**
+ * 호스트가 돌려주는 되돌리기 결과. 사용자에게 보이는 필드(RewindActionResult) 위에, 메인만
+ * 처리할 수 있는 뒷정리 지시를 얹는다 — 트랜스크립트 파일과 워크스페이스 store 는 메인 소유라
+ * 호스트가 직접 건드릴 수 없기 때문이다. 메인은 이 두 필드를 처리한 뒤 떼고 렌더러로 넘긴다.
+ */
+export type RewindHostResult = RewindActionResult & {
+  /** 이 항목부터(포함) 트랜스크립트에서 잘라 낸다. */
+  truncateFromItemId?: string
+  /** 세션 맥락을 통째로 버렸다 — store 의 sessionId 를 비워 다음 메시지가 새 세션으로 시작하게 한다. */
+  sessionReset?: boolean
+}

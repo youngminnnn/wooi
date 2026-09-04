@@ -16,7 +16,6 @@ import type {
   EffortSetting,
   FanoutSlot,
   GitStatus,
-  ImageAttachment,
   ModelOption,
   PaneKind,
   PaneState,
@@ -28,6 +27,7 @@ import type {
   ReviewEnvelope,
   ReviewFinding,
   ReviewVerdict,
+  ConfirmSkipKey,
   ScriptStatus,
   StackCascadeResult,
   StackOpProgress,
@@ -38,7 +38,6 @@ import type {
 import type { NotificationChannel, NotificationEvent } from '@shared/types'
 import {
   AGENT_BACKEND_IDS,
-  DEFAULT_AGENT_BACKEND,
   cascadeProblems,
   fanoutSlotName,
   workspaceDisplayName
@@ -52,7 +51,25 @@ import {
   readUiFlag,
   setUiFlag
 } from './lib/uiFlags'
+import { buildStackLayers } from './lib/stackView'
+import {
+  DEFAULT_SPLIT_FRACTION,
+  clampSplitFraction,
+  livePaneView,
+  mainPane,
+  openSplit,
+  paneState,
+  samePane,
+  selectIntoPanes,
+  splitPairing,
+  withFocusedPaneClosed,
+  SPLIT_INELIGIBLE_MESSAGE,
+  SPLIT_NEEDS_MAIN_MESSAGE
+} from './lib/splitPanes'
+import type { PaneSlot, PaneView } from './lib/splitPanes'
 import { openRepoSettings } from './lib/repoSettings'
+import { openSettings } from './lib/settingsNavigation'
+import { CONFIRM_SKIP_LABELS } from './lib/confirmSkips'
 import {
   bodyOf,
   emptyView,
@@ -66,8 +83,28 @@ import {
   type DiffComment,
   type DiffCommentAnchor
 } from './lib/diffComments'
-import { popWorkspaceHistory, pushWorkspaceHistory } from './lib/workspaceHistory'
+import { archivedPreviewTarget } from './lib/archivedPreview'
+import { returnedFromIdle, shouldPoll } from './lib/pollingGate'
+import { dropReopenable, nextReopenable, pushReopenable } from './lib/reopenArchived'
+import {
+  forwardAfterSelect,
+  navigateWorkspaceHistory,
+  popWorkspaceHistory,
+  pushWorkspaceHistory
+} from './lib/workspaceHistory'
+import {
+  hasMoreTranscriptHistory,
+  nextTranscriptLimit,
+  TRANSCRIPT_INITIAL_LIMIT
+} from './lib/transcriptPagination'
 import { UNDO_CREATE_WINDOW_MS, undoCreateVerdict, type UndoableCreate } from './lib/undoCreate'
+import {
+  DEFAULT_TRANSCRIPT_DENSITY,
+  nextTranscriptDensity,
+  readRememberedTranscriptDensities,
+  rememberTranscriptDensity,
+  type TranscriptDensity
+} from './lib/transcriptDensity'
 
 export const scriptKey = (workspaceId: string, scriptId: string): string =>
   `${workspaceId}:${scriptId}`
@@ -116,12 +153,6 @@ function notifyEnabled(
 /** diff 라인 코멘트의 id 카운터. 창 수명 안에서만 유일하면 되므로 단조 증가로 충분하다. */
 let diffCommentSeq = 0
 
-/** 실행 중 대기 큐에 보관되는 후속 메시지(텍스트 + 선택적 이미지 첨부). */
-export interface QueuedMessage {
-  text: string
-  images?: ImageAttachment[]
-}
-
 /** 컨텍스트 윈도 사용량 스냅샷(마지막 턴). percentage 는 0~1. */
 export interface ContextUsage {
   usedTokens: number
@@ -158,6 +189,11 @@ export interface ConfirmOptions {
   body?: string
   confirmLabel?: string
   danger?: boolean
+  /**
+   * 주면 "Don't ask again" 체크박스가 붙고, 이미 꺼 둔 확인이면 묻지 않고 통과한다.
+   * **되돌릴 수 있는 동작에만 준다** — 판단 기준은 [[shared/types]] 의 CONFIRM_SKIP_KEYS 참고.
+   */
+  skipKey?: ConfirmSkipKey
 }
 interface ConfirmState extends ConfirmOptions {
   resolve: (ok: boolean) => void
@@ -223,6 +259,24 @@ function joinList(parts: string[]): string {
  */
 const RIGHT_PANEL_KEY = 'wooi.rightPanelOpen'
 const SIDEBAR_WIDTH_KEY = 'wooi.sidebarWidth'
+/**
+ * 전체 화면 축(리뷰·fan-out·스택)을 열 때 함께 적용하는 조각 — 분할은 접힌다.
+ * 한 화면을 통째로 쓰는 축 옆에 칸을 세울 자리는 없다.
+ */
+const collapsedSplit = { splitPane: null, splitFocus: 'main' } as const
+
+/** 나란히 편 두 칸의 가로 비율. 창을 다시 열어도 마지막으로 맞춰 둔 비율에서 시작한다. */
+const SPLIT_FRACTION_KEY = 'wooi.splitFraction'
+
+function readRememberedSplitFraction(): number {
+  try {
+    const value = Number(localStorage.getItem(SPLIT_FRACTION_KEY))
+    if (Number.isFinite(value) && value > 0) return clampSplitFraction(value)
+  } catch {
+    /* 기억 실패는 기본 비율로 폴백한다. */
+  }
+  return DEFAULT_SPLIT_FRACTION
+}
 export const DEFAULT_SIDEBAR_WIDTH = 288
 
 function readRememberedSidebarWidth(): number {
@@ -295,6 +349,12 @@ interface UIState {
   selectedWorkspaceId: string | null
   transcripts: Record<string, ChatItem[]>
   loadedTranscripts: Record<string, boolean>
+  /**
+   * 대화 기록의 읽기 창 상태. 트랜스크립트는 뒤에서부터 한 페이지씩 읽는다
+   * ([[transcriptPagination]]) — 며칠 이어 쓴 워크스페이스의 첫 페인트가 대화 전체를 이고
+   * 가지 않게 하기 위해서다. 항목이 없는 워크스페이스는 아직 한 번도 읽지 않은 것이다.
+   */
+  transcriptPaging: Record<string, TranscriptPaging>
   scriptOutput: Record<string, string>
   scriptStatus: Record<string, ScriptStatus[]>
   /**
@@ -366,12 +426,6 @@ interface UIState {
   /** workspace 전환에도 살아남아야 하는 입력창 초안. */
   drafts: Record<string, string>
   /**
-   * 현재 턴이 실행 중일 때 보낸 후속 메시지의 대기 큐(workspace 별, 순서 유지).
-   * 백엔드로 즉시 보내지 않고 여기 모았다가, 턴이 끝나면(idle) 순서대로 전송한다.
-   * 전송 전이므로 사용자가 취소/수정할 수 있다.
-   */
-  messageQueue: Record<string, QueuedMessage[]>
-  /**
    * Changes 탭 diff 에 달아 둔, 아직 보내지 않은 라인 코멘트(workspace 별, 작성 순서).
    *
    * 초안과 같은 성격이라 workspace 를 오가도 살아남지만 디스크에는 남기지 않는다 — 보내는 순간
@@ -388,9 +442,16 @@ interface UIState {
   sidebarWidth: number
   /** workspace 별 우측 작업 패널 표시 여부. 값이 없으면 설정의 기본값을 따른다. */
   rightPanelOpen: Record<string, boolean>
-  /** 대화 하나만 잠시 전부 펼치는 workspace 별 휘발성 상태. */
-  toolVerbose: Record<string, boolean>
-  toggleToolVerbose: (workspaceId: string) => void
+  /**
+   * workspace 별 대화 밀도(Summary / Normal / Verbose). 값이 없으면 기본값(Normal).
+   *
+   * 앱 전역이 아니라 workspace 별인 이유는 [[transcriptDensity]] 에 적어 뒀다 — 훑기 모드의
+   * 쓸모 자체가 "이건 훑고 저건 자세히 본다" 라 병렬로 돌릴수록 전역 값이 방해가 된다.
+   */
+  transcriptDensity: Record<string, TranscriptDensity>
+  setTranscriptDensity: (workspaceId: string, density: TranscriptDensity) => void
+  /** ⌃O — 다음 밀도로 넘긴다. */
+  cycleTranscriptDensity: (workspaceId: string) => void
   /** 우하단 터미널이 우측 컬럼 높이에서 차지하는 비율(0~1). 기본 0.5. 가로 분할 드래그로 조절. */
   terminalRatio: number
   /**
@@ -432,6 +493,13 @@ interface UIState {
   archiveWorkspace: (
     workspaceId: string
   ) => Promise<{ archiveScriptFailure?: ArchiveScriptFailure }>
+  /**
+   * ⇧⌘T 로 다시 열 수 있는, 최근 아카이브한 워크스페이스들(오래된 것이 앞).
+   * 영구 삭제는 되살릴 수 없으므로 여기 쌓이지 않는다.
+   */
+  reopenableArchives: string[]
+  /** ⇧⌘T — 가장 최근에 아카이브한 워크스페이스를 되살려 연다. */
+  reopenLastArchivedWorkspace: () => Promise<void>
   /** 마지막 일괄 아카이브. 바로 뒤의 ⌘Z 또는 토스트 Undo 로만 한 번 복원한다. */
   undoableArchive: { workspaceIds: string[]; at: number } | null
   /** 한 리포에서 PR 이 병합된 활성 워크스페이스를 재확인 후 일괄 아카이브한다. */
@@ -451,6 +519,40 @@ interface UIState {
    * 밀어낸다 — 워크스페이스를 고르면 둘 다 닫힌다.
    */
   activeFanoutGroupId: string | null
+  /**
+   * 열려 있는 스택 화면의 앵커 워크스페이스 id. 리뷰·fan-out 과 같은 자리를 쓰므로 셋은
+   * 서로를 밀어낸다. 스택은 워크스페이스에 매여 있지만 **선택과는 다른 축**이다 —
+   * 화면은 앵커가 속한 스택 전체를 그리고, 선택은 그중 한 층만 가리킨다.
+   */
+  activeStackWorkspaceId: string | null
+  /**
+   * 나란히 편 두 번째 칸. null 이면 화면은 예전처럼 하나다.
+   *
+   * 위의 세 축(리뷰·fan-out·스택)은 서로를 밀어내는 **전체 화면**이다. 이 축만 다르다 —
+   * 주 칸 옆에 하나를 더 세운다. 무엇과 무엇이 나란히 설 수 있는지는 `lib/splitPanes` 가
+   * 혼자 판정하고, 여기서는 그 결과를 담기만 한다.
+   */
+  splitPane: PaneView | null
+  /** 사이드바 클릭·헤더 도구 단축키가 어느 칸을 향하는가. 분할이 없으면 늘 'main'. */
+  splitFocus: PaneSlot
+  /** 주 칸이 차지하는 가로 비율(0~1). 실행 간에 기억한다. */
+  splitFraction: number
+  /** ⌘+클릭 — 지금 보고 있는 것 옆에 하나를 더 편다. 짝이 성립하지 않으면 이유를 알려 준다. */
+  openSplitPane: (view: PaneView) => void
+  /** 포커스된 칸을 닫는다. 왼쪽을 닫으면 오른쪽이 그 자리로 올라온다. */
+  closeFocusedPane: () => void
+  /** 칸 안을 클릭했을 때 그 칸으로 포커스를 옮긴다. */
+  focusPane: (slot: PaneSlot) => void
+  /** 키보드만으로 두 칸을 오간다. */
+  toggleSplitFocus: () => void
+  setSplitFraction: (fraction: number) => void
+  /** 칸에 새로 들어온 것을 그릴 수 있게 채운다(대화는 트랜스크립트, 리뷰는 사이드카). */
+  hydratePaneView: (view: PaneView) => void
+  /**
+   * 워크스페이스 하나를 화면에 그릴 수 있게 만든다 — 트랜스크립트·git·PR·스크립트 상태.
+   * `selectWorkspace` 의 꼬리를 떼어 낸 것으로, 분할된 오른쪽 칸은 "선택" 없이 이것만 부른다.
+   */
+  loadWorkspaceView: (workspaceId: string) => Promise<void>
   /**
    * reviewId → 화면 상태(사이드카에서 읽어온 diff·지적·활동 + 선택/편집).
    * 리뷰의 **메타데이터는 여기 없다** — `app.reviews` 가 권위이고 상태 방송으로 갱신된다.
@@ -496,6 +598,14 @@ interface UIState {
   openFanoutCompare: (groupId: string) => void
   /** 비교 화면을 닫고 원래 보던 워크스페이스로 돌아간다. */
   closeFanoutCompare: () => void
+  /**
+   * 스택 화면을 연다(리뷰·fan-out 화면과 자리를 다투므로 그쪽은 닫는다).
+   * 앵커가 속한 스택의 모든 층에 대해 git·PR 을 한 번 새로 고친다 — 층마다 따로 열어 본 적이
+   * 없으면 behind·PR 칸이 비어 있고, 비어 있는 칸은 "문제 없음" 처럼 읽힌다.
+   */
+  openStackView: (workspaceId: string) => void
+  /** 스택 화면을 닫는다. */
+  closeStackView: () => void
   /**
    * 승자를 채택한다(확인 후). 나머지 형제는 아카이브되고 — 되살릴 수 있지만 미커밋 변경은
    * 사라지므로 — 무엇을 잃는지 먼저 센다.
@@ -554,15 +664,20 @@ interface UIState {
   reportCascade: (cascade: StackCascadeResult, successMsg: string) => void
   /** 방문 순서 스택(브라우저 뒤로가기용). 현재 선택은 포함하지 않고, 오래된 것이 앞이다. */
   workspaceHistory: string[]
+  /** ⌘[ 로 떠나온 워크스페이스들. ⌘] 가 여기서 꺼내 되짚어 간다. */
+  workspaceForward: string[]
   /**
-   * @param opts.fromHistory 뒤로가기로 인한 선택 — 방문 스택에 다시 쌓지 않는다.
+   * @param opts.fromHistory 뒤/앞으로 가기로 인한 선택 — 방문 스택에 다시 쌓지 않고,
+   * 앞쪽 이력도 버리지 않는다.
    */
   selectWorkspace: (id: string | null, opts?: { fromHistory?: boolean }) => Promise<void>
   /** ⌘[ — 직전에 보던 워크스페이스로 돌아간다(브라우저 뒤로가기). */
   goBackWorkspace: () => Promise<void>
+  /** ⌘] — 뒤로 온 길을 되짚어 앞으로 간다. */
+  goForwardWorkspace: () => Promise<void>
   refreshGit: (workspaceId: string) => Promise<void>
   /** 진입 여부와 무관하게 모든(비아카이브) 워크스페이스의 git 상태를 한 번에 갱신한다. */
-  refreshAllGit: () => Promise<void>
+  refreshAllGit: (force?: boolean) => Promise<void>
   /** 활성 리포를 한 번씩 fetch 한 뒤, 그 리포에 속한 워크스페이스 상태를 즉시 갱신한다. */
   fetchReposAndRefreshGit: () => Promise<void>
   refreshPr: (workspaceId: string) => Promise<void>
@@ -602,10 +717,6 @@ interface UIState {
   nextPendingPermissionId: () => string | null
   /** 실행 중인 모든 workspace 의 현재 턴을 중단한다(폭주 시 일괄 정지). */
   stopAll: () => Promise<void>
-  /** 실행 중일 때 후속 메시지를 대기 큐에 넣는다(턴 종료 시 자동 전송). */
-  enqueueMessage: (workspaceId: string, text: string, images?: ImageAttachment[]) => void
-  /** 대기 큐에서 index 번째 메시지를 취소(제거)한다. */
-  removeQueued: (workspaceId: string, index: number) => void
   setDraft: (workspaceId: string, text: string) => void
   clearPromptSuggestion: (workspaceId: string) => void
   /** diff 라인 코멘트를 하나 추가한다. 만들어진 id 를 돌려준다(방금 만든 카드를 지목하는 용도). */
@@ -616,8 +727,15 @@ interface UIState {
   clearDiffComments: (workspaceId: string) => void
   /** 모아 둔 코멘트를 한 통의 메시지로 에이전트에게 보내고 비운다. 보낼 게 없으면 아무것도 안 한다. */
   sendDiffComments: (workspaceId: string) => void
+  /**
+   * diff 의 hunk 하나를 워킹 트리에서 되돌린다. 확인을 받고, 실패는 토스트로 알린다.
+   * 되돌렸으면 true — 호출한 쪽이 그때만 diff 를 다시 읽으면 된다.
+   */
+  discardDiffHunk: (workspaceId: string, path: string, patch: string) => Promise<boolean>
   /** /clear — 해당 workspace 의 대화 기록·컨텍스트 사용량을 화면에서 비운다(맥락 초기화). */
   resetTranscript: (workspaceId: string) => void
+  /** 위쪽으로 한 페이지 더 읽는다. 이미 읽는 중이거나 더 없으면 아무 일도 하지 않는다. */
+  loadEarlierTranscript: (workspaceId: string) => Promise<void>
   /**
    * 대화 기록은 그대로 두고 컨텍스트 사용량 표시만 비운다(/agent 교체처럼 세션만 새로 시작할 때).
    * 다음 턴이 값을 다시 보내 줄 때까지 상태줄은 "—" 로 돌아간다.
@@ -674,7 +792,10 @@ interface UIState {
   /** setup 스크립트를 다시 실행한다(스크립트 패널을 함께 연다). 결과는 메인이 setupState 로 영속. */
   retrySetup: (workspaceId: string) => void
   confirm: (opts: ConfirmOptions) => Promise<boolean>
-  resolveConfirm: (ok: boolean) => void
+  /** `skip` 은 "다시 묻지 않기" 체크 상태. 승인(ok)일 때만 저장으로 이어진다. */
+  resolveConfirm: (ok: boolean, skip?: boolean) => void
+  /** 확인 스킵을 설정에 적고, 되돌릴 자리로 데려가는 토스트를 띄운다. */
+  rememberConfirmSkip: (key: ConfirmSkipKey) => void
 
   // ── PR 리뷰 모드 ───────────────────────────────────────────────────────
   /** 리뷰를 시작하고 전체 화면 모드로 진입한다. 실패하면 토스트만 띄우고 진입하지 않는다. */
@@ -770,6 +891,30 @@ let initialized = false
 // 전환 시 신뢰할 수 없어, main 의 권위 있는 focus/blur 이벤트로 갱신한다. 시작 시 포커스 가정.
 let windowFocused = true
 
+/**
+ * 마지막으로 사용자가 이 창에 입력을 준 시각. 폴링을 멈출지 판단하는 데만 쓴다.
+ *
+ * **포커스만으로는 "자리에 있다" 를 판정할 수 없다.** 창을 앞에 띄워 둔 채 자리를 뜨면 blur 가
+ * 오지 않으므로, 예전 게이트(`windowFocused` 하나)는 밤새 git·gh 를 돌렸다. 창이 앞에 있는
+ * 동안에는 사용자의 입력이 전부 이 창으로 들어오므로, 입력이 끊긴 시간이 곧 자리를 비운 시간이다.
+ */
+let lastUserActivityAt = Date.now()
+
+/** 문서가 지금 화면에 그려지고 있는가(최소화·다른 Space·숨김이면 false). */
+function documentVisible(): boolean {
+  return document.visibilityState === 'visible'
+}
+
+/** 지금 주기 폴링을 돌려야 하는가. 판정 규칙과 그 근거는 [[lib/pollingGate]] 에 있다. */
+function pollingAwake(): boolean {
+  return shouldPoll({
+    focused: windowFocused,
+    visible: documentVisible(),
+    lastUserActivityAt,
+    now: Date.now()
+  })
+}
+
 // 모든 워크트리의 git 상태를 주기적으로 갱신하기 위한 타이머. 진입하지 않은 워크스페이스도
 // 사이드바 배지(변경 파일 수·ahead/behind·충돌)가 최신으로 보이도록 백그라운드에서 폴링한다.
 let statusPollTimer: ReturnType<typeof setInterval> | null = null
@@ -782,6 +927,21 @@ const STATUS_POLL_INTERVAL_MS = 15_000
 let prPollTimer: ReturnType<typeof setInterval> | null = null
 const PR_POLL_INTERVAL_MS = 45_000
 
+/**
+ * `git fetch origin --prune` 을 도는 주기. **PR 틱과 분리한 이유가 있다.**
+ *
+ * 예전에는 이 fetch 가 45초 PR 틱에 얹혀 있었다. 그런데 fetch 는 이 틱에서 유일하게 *원격과
+ * 실제로 협상하는* 작업이다 — 리포마다 git 프로세스를 띄우고 TLS 왕복을 하고, 끝나면 영향받는
+ * 모든 워크스페이스에 캐시를 무시한 git status 를 다시 돌린다. 아무 세션도 돌지 않는 유휴
+ * 상태에서도 시간당 80번씩 그 짓을 하면서 45초마다 Wi-Fi 라디오를 깨웠다.
+ *
+ * 이 값이 늦어져서 낡는 것은 ahead/behind 배지 하나뿐이고, 그마저도 포커스 복귀·유휴 복귀
+ * 때마다 즉시 따라잡는다(catchUpPolling). 반면 45초 틱에 남은 refreshPr 은 리포별 10초 캐시를
+ * 거치는 gh 호출이라 성격이 다르다 — 같은 주기로 묶을 이유가 없었다.
+ */
+let remoteFetchTimer: ReturnType<typeof setInterval> | null = null
+const REMOTE_FETCH_INTERVAL_MS = 5 * 60_000
+
 // gh 가 미연결로 보이는 동안에만 도는 인증 상태 폴링. 예전 하드 게이트가 3초마다 돌던 폴링을
 // 대체한다 — 게이트가 사라졌다고 폴링까지 없애면, `gh auth status` 가 일시적으로 실패했을 때
 // (네트워크 순단·SSO 재인증) PR 조회가 조용히 멈춘 채 창 포커스가 바뀔 때까지 회복되지 않는다.
@@ -793,6 +953,93 @@ const AUTH_POLL_INTERVAL_MS = 30_000
 // 1분 간격이면 넉넉하다. 아카이브됐거나 아직 코멘트를 안 단 세션은 메인에서 알아서 건너뛴다.
 let reviewPollTimer: ReturnType<typeof setInterval> | null = null
 const REVIEW_POLL_INTERVAL_MS = 60_000
+
+/** 전체 git 폴링과 포커스 복귀 갱신이 겹쳐도 같은 조회를 두 번 띄우지 않는다. */
+const gitStatusInflight = new Map<string, Promise<GitStatus | null>>()
+let allGitRefreshInflight: Promise<void> | null = null
+
+function sameGitStatus(a: GitStatus | null | undefined, b: GitStatus | null): boolean {
+  return (
+    a === b ||
+    (!!a &&
+      !!b &&
+      a.branch === b.branch &&
+      a.ahead === b.ahead &&
+      a.behind === b.behind &&
+      a.changedFiles === b.changedFiles &&
+      a.conflicted === b.conflicted &&
+      a.rebasing === b.rebasing)
+  )
+}
+
+function requestGitStatus(workspaceId: string, force: boolean): Promise<GitStatus | null> {
+  const key = `${workspaceId}:${force ? 'full' : 'light'}`
+  const active = gitStatusInflight.get(key)
+  if (active) return active
+  const request = window.api.git.status(workspaceId, force).finally(() => {
+    if (gitStatusInflight.get(key) === request) gitStatusInflight.delete(key)
+  })
+  gitStatusInflight.set(key, request)
+  return request
+}
+
+type PendingDelta = {
+  workspaceId: string
+  id: string
+  itemType: 'assistant' | 'thinking'
+  text: string
+}
+const pendingDeltas = new Map<string, PendingDelta>()
+let deltaFlushTimer: ReturnType<typeof setTimeout> | null = null
+const FOREGROUND_DELTA_BATCH_MS = 60
+const BACKGROUND_DELTA_BATCH_MS = 500
+
+function applyPendingDeltas(workspaceId?: string): void {
+  const batch = [...pendingDeltas.values()].filter(
+    (delta) => workspaceId === undefined || delta.workspaceId === workspaceId
+  )
+  if (!batch.length) return
+  for (const delta of batch) pendingDeltas.delete(`${delta.workspaceId}:${delta.id}`)
+  useStore.setState((state) => {
+    const transcripts = { ...state.transcripts }
+    for (const delta of batch) {
+      const items = transcripts[delta.workspaceId] ?? []
+      const idx = items.findIndex((item) => item.id === delta.id)
+      if (idx === -1) {
+        transcripts[delta.workspaceId] = [
+          ...items,
+          {
+            id: delta.id,
+            type: delta.itemType,
+            text: delta.text,
+            ts: Date.now(),
+            streaming: true
+          }
+        ]
+      } else {
+        const next = items.slice()
+        const target = next[idx] as ChatItem & { text: string }
+        next[idx] = { ...target, text: target.text + delta.text } as ChatItem
+        transcripts[delta.workspaceId] = next
+      }
+    }
+    return { transcripts }
+  })
+}
+
+function scheduleDelta(delta: PendingDelta): void {
+  const key = `${delta.workspaceId}:${delta.id}`
+  const current = pendingDeltas.get(key)
+  pendingDeltas.set(key, current ? { ...current, text: current.text + delta.text } : delta)
+  if (deltaFlushTimer) return
+  deltaFlushTimer = setTimeout(
+    () => {
+      deltaFlushTimer = null
+      applyPendingDeltas()
+    },
+    windowFocused ? FOREGROUND_DELTA_BATCH_MS : BACKGROUND_DELTA_BATCH_MS
+  )
+}
 
 // gh 연결 모달이 닫힐 때까지 붙들어 두는, 사용자가 원래 하려던 액션. 상태에 담지 않는 이유는
 // 함수라 비교·직렬화 대상이 아니고, 렌더에 영향을 주지 않기 때문이다.
@@ -861,13 +1108,25 @@ function upsertItem(items: ChatItem[], item: ChatItem): ChatItem[] {
   return next
 }
 
+/** 한 워크스페이스의 대화 읽기 창. */
+type TranscriptPaging = {
+  /** 마지막으로 요청한 개수. 다음 페이지는 여기에 한 페이지를 더해 꼬리부터 다시 읽는다. */
+  limit: number
+  /** 더 오래된 것이 남아 있을 수 있는가. 거짓이면 "더 보기" 를 감춘다. */
+  hasMore: boolean
+  /** 페이지를 읽는 중. 스크롤이 위쪽에 머무는 동안 같은 요청이 겹치지 않게 한다. */
+  loading: boolean
+}
+
 export const useStore = create<UIState>((set, get) => ({
   ready: false,
   app: null,
   selectedWorkspaceId: null,
   workspaceHistory: [],
+  workspaceForward: [],
   transcripts: {},
   loadedTranscripts: {},
+  transcriptPaging: {},
   scriptOutput: {},
   scriptStatus: {},
   composerAttachments: {},
@@ -893,18 +1152,23 @@ export const useStore = create<UIState>((set, get) => ({
   promptSuggestions: {},
   agentsCollapsed: {},
   drafts: {},
-  messageQueue: {},
   diffComments: {},
   scrollPositions: {},
   scriptPanelOpen: {},
   rightWidth: 460,
   sidebarWidth: readRememberedSidebarWidth(),
   rightPanelOpen: {},
-  toolVerbose: {},
-  toggleToolVerbose: (workspaceId) =>
-    set((s) => ({ toolVerbose: { ...s.toolVerbose, [workspaceId]: !s.toolVerbose[workspaceId] } })),
+  transcriptDensity: readRememberedTranscriptDensities(),
+  setTranscriptDensity: (workspaceId, density) => {
+    rememberTranscriptDensity(workspaceId, density)
+    set((s) => ({ transcriptDensity: { ...s.transcriptDensity, [workspaceId]: density } }))
+  },
+  cycleTranscriptDensity: (workspaceId) => {
+    const current = get().transcriptDensity[workspaceId] ?? DEFAULT_TRANSCRIPT_DENSITY
+    get().setTranscriptDensity(workspaceId, nextTranscriptDensity(current))
+  },
   terminalRatio: 0.5,
-  detachedPanes: { work: false, scripts: false },
+  detachedPanes: { work: false, scripts: false, overview: false },
   fileViewer: null,
   fileViewerTreeWidth: 260,
   jumpTarget: null,
@@ -916,9 +1180,14 @@ export const useStore = create<UIState>((set, get) => ({
   },
   pending: [],
   archivingWorkspaces: {},
+  reopenableArchives: [],
   undoableArchive: null,
   activeReviewId: null,
   activeFanoutGroupId: null,
+  activeStackWorkspaceId: null,
+  splitPane: null,
+  splitFocus: 'main',
+  splitFraction: readRememberedSplitFraction(),
   adoptingFanoutWorkspaceId: null,
   reviewViews: {},
   busyReviews: {},
@@ -930,6 +1199,8 @@ export const useStore = create<UIState>((set, get) => ({
     }))
     try {
       const result = await window.api.workspace.archive(workspaceId)
+      // ⇧⌘T 가 되짚을 수 있게 쌓는다. 아카이브는 worktree 만 지우므로 되돌릴 수 있다.
+      set((s) => ({ reopenableArchives: pushReopenable(s.reopenableArchives, workspaceId) }))
       // archive script 가 도는 동안 사용자가 다른 워크스페이스로 이동할 수 있다. 완료 시점에도
       // 아카이브한 워크스페이스를 보고 있을 때만 Overview 로 나가야 새 선택을 덮어쓰지 않는다.
       if (get().selectedWorkspaceId === workspaceId) void get().selectWorkspace(null)
@@ -1035,6 +1306,30 @@ export const useStore = create<UIState>((set, get) => ({
     }
   },
 
+  reopenLastArchivedWorkspace: async () => {
+    const s = get()
+    // 그 사이 영구 삭제됐거나 사이드바에서 이미 되살린 것은 다시 열 대상이 아니다.
+    const reopenable = new Set((s.app?.workspaces ?? []).filter((w) => w.archived).map((w) => w.id))
+    const { target, stack } = nextReopenable(s.reopenableArchives, reopenable)
+    set({ reopenableArchives: stack })
+    if (!target) {
+      s.pushToast('info', 'No recently archived workspace to reopen.')
+      return
+    }
+    const res = await window.api.workspace
+      .unarchive(target)
+      .catch((err) => ({ error: err instanceof Error ? err.message : String(err) }) as const)
+    if ('error' in res && res.error) {
+      get().pushToast('error', `Could not reopen the workspace — ${res.error}`)
+      return
+    }
+    // 언아카이브는 worktree 를 새로 만든다 — 전달이 다시 일어나므로 실패도 다시 본다.
+    if ('carryFailures' in res) get().reportCarryFailures(res.carryFailures)
+    const repoId = get().app?.workspaces.find((w) => w.id === target)?.repoId
+    if (repoId && 'carryMissing' in res) get().reportCarryMissing(repoId, res.carryMissing)
+    await get().selectWorkspace(target)
+  },
+
   undoLastWorkspaceAction: async () => {
     const s = get()
     const archiveAt =
@@ -1093,43 +1388,60 @@ export const useStore = create<UIState>((set, get) => ({
     void get().refreshAuth()
     void get().refreshAgents()
 
+    // 대기 중인 승인은 라이브 이벤트로만 오므로, 창이 없던 동안(백그라운드 모드) 올라온 요청은
+    // 여기서 씨를 뿌리지 않으면 영영 보이지 않는다 — 그 턴은 아무도 답하지 않은 채 멈춰 있다.
+    // 그 사이 도착한 라이브 이벤트를 덮지 않도록 requestId 로 합친다.
+    void window.api.permission.pending().then((pending) => {
+      if (!pending.length) return
+      set((s) => {
+        const known = new Set(s.permissions.map((p) => p.requestId))
+        const missing = pending.filter((p) => !known.has(p.requestId))
+        return missing.length ? { permissions: [...s.permissions, ...missing] } : s
+      })
+    })
+
     // 최초 진입 시 모든 워크트리의 git 상태를 한 번 받아오고(진입 전에도 사이드바에 노출),
     // 이후 일정 간격으로 폴링해 백그라운드에서 변한 변경 파일 수·ahead/behind 를 최신으로 유지한다.
-    void get().refreshAllGit()
+    void get().refreshAllGit(true)
     if (!statusPollTimer) {
       statusPollTimer = setInterval(() => {
-        // 창이 가려져 사이드바가 보이지 않을 때는 폴링을 건너뛰고(불필요한 git 프로세스 방지),
-        // 다시 포커스되는 순간 onWindowFocus 에서 즉시 한 번 갱신한다.
-        if (windowFocused) void get().refreshAllGit()
+        // 사이드바를 아무도 보고 있지 않을 때는 폴링을 건너뛰고(불필요한 git 프로세스 방지),
+        // 다시 볼 수 있게 되는 순간 catchUpPolling 이 즉시 한 번 갱신한다.
+        if (pollingAwake()) void get().refreshAllGit()
       }, STATUS_POLL_INTERVAL_MS)
     }
 
     if (!prPollTimer) {
       prPollTimer = setInterval(() => {
-        if (!windowFocused) return
-        // 네트워크 git 작업은 더 느린 PR 틱에 얹고, 15초 로컬 상태 폴링과는 분리한다.
-        void get().fetchReposAndRefreshGit()
+        if (!pollingAwake()) return
         for (const workspace of get().app?.workspaces ?? []) {
           if (!workspace.archived) void get().refreshPr(workspace.id)
         }
       }, PR_POLL_INTERVAL_MS)
     }
 
+    // 원격과 실제로 협상하는 유일한 주기 작업이라 훨씬 느리게 돈다(REMOTE_FETCH_INTERVAL_MS 참고).
+    if (!remoteFetchTimer) {
+      remoteFetchTimer = setInterval(() => {
+        if (pollingAwake()) void get().fetchReposAndRefreshGit()
+      }, REMOTE_FETCH_INTERVAL_MS)
+    }
+
     // gh 미연결로 보이는 동안에만 인증 상태를 다시 확인한다. 앱 밖(터미널)에서 로그인한 경우와
     // `gh auth status` 가 일시적으로 실패했다가 회복된 경우를 모두 스스로 따라잡는다.
     if (!authPollTimer) {
       authPollTimer = setInterval(() => {
-        if (!windowFocused) return
+        if (!pollingAwake()) return
         if (githubConnected(get().authStatus)) return
         void get().refreshAuth()
       }, AUTH_POLL_INTERVAL_MS)
     }
 
-    // 리뷰 답글 폴링. git 상태 폴링과 같은 규칙 — 창이 가려져 있으면 건너뛰고, 포커스가
-    // 돌아오는 순간 한 번 따라잡는다(onWindowFocus 참고).
+    // 리뷰 답글 폴링. git 상태 폴링과 같은 규칙 — 아무도 안 보고 있으면 건너뛰고, 돌아오는
+    // 순간 한 번 따라잡는다(catchUpPolling 참고).
     if (!reviewPollTimer) {
       reviewPollTimer = setInterval(() => {
-        if (windowFocused) void get().pollReviews()
+        if (pollingAwake()) void get().pollReviews()
       }, REVIEW_POLL_INTERVAL_MS)
     }
     void get().pollReviews()
@@ -1170,20 +1482,28 @@ export const useStore = create<UIState>((set, get) => ({
         const live = new Set(next.workspaces.filter((w) => !w.archived).map((w) => w.id))
         const stale = Object.keys(s.unread).filter((id) => s.unread[id] && !live.has(id))
         const staleRunning = Object.keys(s.runningSince).filter((id) => !live.has(id))
-        const staleQueue = Object.keys(s.messageQueue).filter((id) => !live.has(id))
         const staleComments = Object.keys(s.diffComments).filter((id) => !live.has(id))
-        if (!stale.length && !staleRunning.length && !staleQueue.length && !staleComments.length) {
+        // 나란히 편 칸이 사라진 워크스페이스·리뷰를 가리키고 있으면 접는다 — 그대로 두면
+        // 그릴 것이 없는 빈 칸이 화면 절반을 차지한다(주 칸은 기존 복구 경로가 돌본다).
+        const splitPane = livePaneView(next, s.splitPane)
+        const splitCollapsed = !!s.splitPane && !splitPane
+        if (!stale.length && !staleRunning.length && !staleComments.length && !splitCollapsed) {
           return { app: next }
         }
         const unread = { ...s.unread }
         for (const id of stale) delete unread[id]
         const runningSince = { ...s.runningSince }
         for (const id of staleRunning) delete runningSince[id]
-        const messageQueue = { ...s.messageQueue }
-        for (const id of staleQueue) delete messageQueue[id]
         const diffComments = { ...s.diffComments }
         for (const id of staleComments) delete diffComments[id]
-        return { app: next, unread, runningSince, messageQueue, diffComments }
+        return {
+          app: next,
+          unread,
+          runningSince,
+          diffComments,
+          splitPane,
+          splitFocus: splitPane ? s.splitFocus : ('main' as PaneSlot)
+        }
       })
     })
 
@@ -1228,22 +1548,73 @@ export const useStore = create<UIState>((set, get) => ({
       }
     }
 
+    // 지금 화면에 떠 있는 워크스페이스를 main 에 알린다. 알림을 띄우는 것은 main 인데 선택
+    // 상태는 여기에만 있어서, 올려 주지 않으면 main 은 "앱은 보고 있지만 다른 워크스페이스를
+    // 보고 있는" 경우를 가릴 수 없다([[main/notifications]]). 창이 흐려졌으면 아무것도 보고
+    // 있지 않은 것으로 친다 — 그때는 어느 워크스페이스든 알림이 울려야 한다.
+    let sentViewing: string | null | undefined
+    const pushViewing = (): void => {
+      const next = windowFocused ? get().selectedWorkspaceId : null
+      if (next === sentViewing) return
+      sentViewing = next
+      void window.api.notify.setViewing(next).catch(() => {
+        // main 이 아직 안 붙었다 — 다음 선택/포커스 변화에서 다시 보낸다.
+        sentViewing = undefined
+      })
+    }
+
+    // 폴링이 멈춰 있던 동안 밀린 것을 한 번에 따라잡는다. 폴링을 멈추는 조건이 세 가지이므로
+    // (pollingAwake) 되살아나는 경로도 세 가지다 — 포커스 복귀·다시 보이기·입력 재개. 셋 다
+    // 같은 일을 해야 하니 여기 한 곳에 모은다. 어느 경로로 깨어나든 화면은 즉시 최신이 된다.
+    const catchUpPolling = (): void => {
+      void get().refreshAllGit(true)
+      void get().fetchReposAndRefreshGit()
+      void get().pollReviews()
+    }
+
+    // 사용자가 돌아왔다. 자리를 비운 것으로 보고 폴링을 끊어 뒀다면 여기서 되살린다.
+    // 입력 이벤트는 초당 수십 번 들어오므로 이 경로는 숫자 비교 하나로 끝나야 한다.
+    const noteUserActivity = (): void => {
+      const now = Date.now()
+      const wasAway = returnedFromIdle(lastUserActivityAt, now)
+      lastUserActivityAt = now
+      if (wasAway && windowFocused && documentVisible()) catchUpPolling()
+    }
+    for (const type of ['pointerdown', 'pointermove', 'keydown', 'wheel'] as const) {
+      window.addEventListener(type, noteUserActivity, { passive: true })
+    }
+
+    // 최소화·다른 Space 로 가려짐 — 포커스는 그대로인데 화면에는 아무것도 안 그려지는 구간이다.
+    document.addEventListener('visibilitychange', () => {
+      if (!documentVisible()) return
+      // 다시 보이게 된 것 자체가 사용자의 행동이다. 입력 시각을 먼저 갱신하지 않으면 5분 넘게
+      // 가려져 있던 창이 되살아나자마자 "자리 비움"으로 판정돼 폴링이 안 켜진다.
+      lastUserActivityAt = Date.now()
+      if (windowFocused) catchUpPolling()
+    })
+
     // 창이 다시 활성화되면 인증 상태를 갱신하고(Terminal 로그인 완료 자동 반영) 미확인 표시를 해제한다.
     // main 의 'focus' 이벤트가 신뢰 가능한 트리거이고, DOM 의 window 'focus' 는 보조로 함께 둔다
     // (Dock 클릭·앱 전환 시 DOM 이벤트가 누락되어 배지가 안 사라지던 문제를 막는다).
     window.api.onWindowFocus(() => {
       windowFocused = true
+      // 앱을 앞으로 가져온 것도 사용자의 행동이다 — 자리 비움 판정을 여기서 풀어 주지 않으면
+      // 마우스를 움직이기 전까지 폴링이 죽어 있다.
+      lastUserActivityAt = Date.now()
+      applyPendingDeltas()
+      pushViewing()
       clearSelectedUnread()
       // 자리를 비운 사이 바뀌었을 수 있으니 모든 워크트리 상태를 즉시 한 번 갱신한다.
-      void get().refreshAllGit()
-      void get().fetchReposAndRefreshGit()
-      void get().pollReviews()
+      catchUpPolling()
     })
     window.api.onWindowBlur(() => {
       windowFocused = false
+      pushViewing()
     })
     window.addEventListener('focus', () => {
       windowFocused = true
+      lastUserActivityAt = Date.now()
+      pushViewing()
       void get().refreshAuth()
       // 자리를 비운 사이 사용자가 에이전트 CLI 를 설치·제거했을 수 있으므로 가용성도 다시 본다.
       void get().refreshAgents()
@@ -1251,6 +1622,7 @@ export const useStore = create<UIState>((set, get) => ({
     })
     window.addEventListener('blur', () => {
       windowFocused = false
+      pushViewing()
     })
 
     // macOS Dock 빨간 배지 = "내 주의가 필요한" workspace 수. 미확인 완료(unread)뿐 아니라
@@ -1283,6 +1655,7 @@ export const useStore = create<UIState>((set, get) => ({
     }
 
     useStore.subscribe((state, prev) => {
+      if (state.selectedWorkspaceId !== prev.selectedWorkspaceId) pushViewing()
       // 알림 설정/음소거(app)나 unread·permissions 가 바뀌면 배지를 다시 계산한다.
       if (
         state.unread !== prev.unread ||
@@ -1295,8 +1668,12 @@ export const useStore = create<UIState>((set, get) => ({
     })
     // 시작할 때도 한 번 보내 복원한 목록과 원격 미러를 즉시 맞춘다.
     pushUnreadToRemote(useStore.getState())
+    pushViewing()
 
     window.api.onChat(({ workspaceId, event }: ChatEnvelope) => {
+      // 완성 항목과 상태 전이는 앞선 텍스트보다 먼저 보이면 안 된다. 해당 workspace 의 묶인
+      // 델타만 동기로 내린 뒤 권위 있는 이벤트를 적용한다.
+      if (event.type !== 'delta') applyPendingDeltas(workspaceId)
       const { transcripts } = get()
       const items = transcripts[workspaceId] ?? []
 
@@ -1326,29 +1703,25 @@ export const useStore = create<UIState>((set, get) => ({
             set({ unread: { ...s.unread, [workspaceId]: true } })
           }
         }
-      } else if (event.type === 'delta') {
-        const idx = items.findIndex((i) => i.id === event.id)
-        let next: ChatItem[]
-        if (idx === -1) {
-          next = [
-            ...items,
-            {
-              id: event.id,
-              type: event.itemType,
-              text: event.text,
-              ts: Date.now(),
-              streaming: true
-            }
-          ]
-        } else {
-          const target = items[idx]
-          next = items.slice()
-          next[idx] = {
-            ...target,
-            text: (target as { text: string }).text + event.text
-          } as ChatItem
+      } else if (event.type === 'truncate') {
+        // /rewind 대화 되돌리기 — 이 항목부터 뒤를 버린다. 메인이 트랜스크립트 파일에 같은 절단을
+        // 이미 적용했으므로, 여기서 잘라 둔 결과가 다음 로드와 어긋나지 않는다. 지점을 못 찾으면
+        // (이미 잘렸거나 아직 안 실린 워크스페이스) 아무것도 하지 않는다 — 통째로 비우면 안 된다.
+        const cut = items.findIndex((i) => i.id === event.fromItemId)
+        if (cut >= 0) {
+          set({ transcripts: { ...transcripts, [workspaceId]: items.slice(0, cut) } })
         }
-        set({ transcripts: { ...transcripts, [workspaceId]: next } })
+        // 잘라 낸 턴들의 컨텍스트 사용량·목표·다음 프롬프트 제안은 더 이상 이 대화의 것이 아니다.
+        // 새 값은 다음 턴의 result 가 실어 온다.
+        set((st) => {
+          const contextUsage = { ...st.contextUsage }
+          delete contextUsage[workspaceId]
+          const promptSuggestions = { ...st.promptSuggestions }
+          delete promptSuggestions[workspaceId]
+          return { contextUsage, promptSuggestions }
+        })
+      } else if (event.type === 'delta') {
+        scheduleDelta({ workspaceId, id: event.id, itemType: event.itemType, text: event.text })
       } else if (event.type === 'status' || event.type === 'session') {
         patchWorkspace(set, get, workspaceId, (w) => {
           if (event.type === 'status') {
@@ -1427,26 +1800,12 @@ export const useStore = create<UIState>((set, get) => ({
             return { runningAgents }
           })
         }
-        // 턴이 정상 종료되면 대기 큐에 쌓인 후속 메시지를 순서대로 전송한다(취소 기회는 여기서 끝).
-        // 에러 종료 시에는 자동 전송하지 않고 큐를 남겨, 사용자가 검토/취소하도록 둔다.
+        // 턴이 완전히 끝났다. 다른 workspace 의 완료, 또는 창이 비활성일 때 본 workspace 의
+        // 완료를 Dock 배지·점프 버튼으로 알린다.
         if (event.type === 'status' && event.status === 'idle') {
-          const queued = get().messageQueue[workspaceId]
-          if (queued && queued.length) {
-            // 아직 처리할 메시지가 남았으니 곧 다시 running 이 된다 — 여기서는 unread 로 표시하지
-            // 않는다(작업이 이어지는데 Next unread 가 뜨면 안 된다).
-            set((s) => {
-              const messageQueue = { ...s.messageQueue }
-              delete messageQueue[workspaceId]
-              return { messageQueue }
-            })
-            for (const m of queued) void window.api.chat.send(workspaceId, m.text, m.images)
-          } else {
-            // 큐가 비어 턴이 완전히 끝났다. 이제서야 미확인으로 표시한다 — 다른 workspace 의 완료,
-            // 또는 창이 비활성일 때 본 workspace 의 완료를 Dock 배지·점프 버튼으로 알린다.
-            const s = get()
-            if (workspaceId !== s.selectedWorkspaceId || !windowFocused) {
-              set({ unread: { ...s.unread, [workspaceId]: true } })
-            }
+          const s = get()
+          if (workspaceId !== s.selectedWorkspaceId || !windowFocused) {
+            set({ unread: { ...s.unread, [workspaceId]: true } })
           }
         }
         // 백그라운드 세션이 에러로 끝나면 미확인으로 표시(빨간 점 + 점프 대상).
@@ -1671,7 +2030,19 @@ export const useStore = create<UIState>((set, get) => ({
     refresh()
     // 이 창만 보고 있는 동안에도 변경 파일 수·PR 상태가 늙지 않도록 주기적으로 따라잡는다.
     // 메인 창의 전체 폴링과 달리 지금 보고 있는 워크스페이스 하나만 본다.
-    if (!statusPollTimer) statusPollTimer = setInterval(refresh, STATUS_POLL_INTERVAL_MS)
+    //
+    // 게이트는 visibility 하나만 건다 — 메인 창의 자리 비움 판정(pollingAwake)을 여기 그대로
+    // 쓰면, 두 번째 모니터에 띄워 두고 눈으로만 보는 패널이 5분 뒤 굳어 버린다. 그 창에는
+    // 입력이 들어올 이유가 없기 때문이다. 최소화·가려짐만 막아도 "안 보이는데 gh 를 띄우는"
+    // 경우는 사라진다.
+    if (!statusPollTimer) {
+      statusPollTimer = setInterval(() => {
+        if (documentVisible()) refresh()
+      }, STATUS_POLL_INTERVAL_MS)
+    }
+    document.addEventListener('visibilitychange', () => {
+      if (documentVisible()) refresh()
+    })
   },
 
   setPaneWorkspace: (workspaceId) => {
@@ -1831,7 +2202,12 @@ export const useStore = create<UIState>((set, get) => ({
   },
 
   openFanoutCompare: (groupId) => {
-    set({ activeFanoutGroupId: groupId, activeReviewId: null })
+    set({
+      activeFanoutGroupId: groupId,
+      activeReviewId: null,
+      activeStackWorkspaceId: null,
+      ...collapsedSplit
+    })
     // 비교 화면의 후보 카드는 git 요약(N changed · ↑ahead)을 그대로 읽어 쓴다. 진입 시 한 번
     // 새로 고쳐 두지 않으면, 아직 한 번도 연 적 없는 후보의 칸이 비어 있다.
     const group = get().app?.fanoutGroups.find((g) => g.id === groupId)
@@ -1839,6 +2215,104 @@ export const useStore = create<UIState>((set, get) => ({
   },
 
   closeFanoutCompare: () => set({ activeFanoutGroupId: null }),
+
+  openStackView: (workspaceId) => {
+    set({
+      activeStackWorkspaceId: workspaceId,
+      activeReviewId: null,
+      activeFanoutGroupId: null,
+      ...collapsedSplit
+    })
+    // 층마다 워크트리가 따로인 모델 A 는 여기서 전부 새로 고쳐야 한 화면에 같은 시점이 모인다.
+    // 모델 B 는 층이 워크스페이스 하나를 나눠 쓰므로 한 번으로 끝난다(브랜치별 PR 은 화면이 읽는다).
+    const targets = new Set(
+      buildStackLayers(get().app?.workspaces ?? [], workspaceId).map((l) => l.workspaceId)
+    )
+    for (const id of targets) {
+      void get().refreshGit(id)
+      void get().refreshPr(id)
+    }
+  },
+
+  closeStackView: () => set({ activeStackWorkspaceId: null }),
+
+  openSplitPane: (view) => {
+    const st = get()
+    const state = paneState(st)
+    if (!state.main) {
+      st.pushToast('info', SPLIT_NEEDS_MAIN_MESSAGE)
+      return
+    }
+    // 이미 보고 있는 것을 다시 ⌘+클릭한 것은 아무것도 요청하지 않은 것이다 — 조용히 넘긴다.
+    if (samePane(state.main, view)) return
+    // 아카이브된 워크스페이스는 워크트리가 없다 — 옆에 두고 대조할 것이 없고, 세워 봐야
+    // 다음 상태 방송에서 접힌다.
+    const archivedTarget =
+      view.kind === 'workspace' &&
+      !!st.app?.workspaces.find((w) => w.id === view.workspaceId)?.archived
+    if (archivedTarget || !splitPairing(st.app?.workspaces ?? [], state.main, view)) {
+      // 조용히 무시하면 ⌘+클릭이 고장 난 것처럼 보인다. 왜 안 되는지 말해 준다.
+      st.pushToast('info', SPLIT_INELIGIBLE_MESSAGE)
+      return
+    }
+    const next = openSplit(st.app?.workspaces ?? [], state, view)
+    // fan-out·스택 화면은 전체 화면이라 옆에 칸을 세울 자리가 없다 — 짝을 여는 김에 닫는다.
+    set({
+      splitPane: next.split,
+      splitFocus: next.focus,
+      activeFanoutGroupId: null,
+      activeStackWorkspaceId: null,
+      // 큰 파일 뷰어는 두 칸을 통째로 덮으므로 분할과 함께 뜨지 않는다. 열려 있던 채로 두면
+      // 나중에 칸을 닫는 순간 잊고 있던 파일이 되살아나 대화를 가린다.
+      fileViewer: null
+    })
+    get().hydratePaneView(view)
+  },
+
+  closeFocusedPane: () => {
+    const st = get()
+    if (!st.splitPane) return
+    const before = mainPane(st)
+    const next = withFocusedPaneClosed(paneState(st))
+    // 분할을 먼저 접는다 — 아래 selectWorkspace/openReview 가 "포커스된 칸을 갈아 끼우는"
+    // 경로로 빠지지 않고 주 칸을 바꾸게 하려면 이 순서여야 한다.
+    set({ splitPane: null, splitFocus: 'main' })
+    if (!next.main || samePane(next.main, before)) return
+    if (next.main.kind === 'workspace') void get().selectWorkspace(next.main.workspaceId)
+    else get().openReview(next.main.reviewId)
+  },
+
+  focusPane: (slot) => {
+    const st = get()
+    if (!st.splitPane || st.splitFocus === slot) return
+    set({ splitFocus: slot })
+  },
+
+  toggleSplitFocus: () => {
+    const st = get()
+    if (!st.splitPane) return
+    set({ splitFocus: st.splitFocus === 'main' ? 'split' : 'main' })
+  },
+
+  setSplitFraction: (fraction) => {
+    const next = clampSplitFraction(fraction)
+    try {
+      localStorage.setItem(SPLIT_FRACTION_KEY, String(next))
+    } catch {
+      /* 기억은 편의 기능이므로 저장 실패 시 현재 세션에서만 적용한다. */
+    }
+    set({ splitFraction: next })
+  },
+
+  /** 칸에 새로 들어온 것을 그릴 수 있게 채운다(대화는 트랜스크립트, 리뷰는 사이드카). */
+  hydratePaneView: (view) => {
+    if (view.kind === 'workspace') {
+      void get().loadWorkspaceView(view.workspaceId)
+      return
+    }
+    void get().loadReview(view.reviewId)
+    void window.api.review.markSeen(view.reviewId)
+  },
 
   requestAdoptFanoutWinner: async (groupId, workspaceId) => {
     const s = get()
@@ -1995,6 +2469,8 @@ export const useStore = create<UIState>((set, get) => ({
     const { archiveScriptFailure } = await window.api.workspace.remove(workspaceId, true)
     get().reportArchiveScriptFailure(archiveScriptFailure)
     if (get().undoableCreate?.workspaceId === workspaceId) set({ undoableCreate: null })
+    // 브랜치와 이력까지 지운 것은 되살릴 수 없다 — ⇧⌘T 가 시도하지 못하게 뺀다.
+    set((s) => ({ reopenableArchives: dropReopenable(s.reopenableArchives, workspaceId) }))
     if (!wasSelected) return
 
     // 보고 있던 워크스페이스가 사라졌으니 ⌘[ 와 같은 규칙으로 직전에 보던 곳으로 돌아간다.
@@ -2263,26 +2739,79 @@ export const useStore = create<UIState>((set, get) => ({
   },
 
   selectWorkspace: async (id, opts) => {
+    // 화면이 둘로 나뉘어 있으면 "고른다" 는 것은 **포커스된 칸을 갈아 끼운다** 는 뜻이다.
+    // 아래의 "고르면 전체 화면을 닫는다" 는 화면이 하나일 때의 규칙이라, 분할에 그대로
+    // 적용하면 사이드바를 한 번 누를 때마다 사용자가 방금 만든 짝이 무너진다. 판정은
+    // lib/splitPanes 한 곳에서 내리고 여기서는 그 답을 집행한다.
+    // ⌘[ / ⌘] 로 되짚는 이동은 방문 기록의 축이므로 늘 주 칸으로 간다.
+    // 아무것도 고르지 않거나(Overview) 아카이브된 워크스페이스를 읽기 전용으로 들여다보는
+    // 것은 "지금 짝지어 보던 것을 그만둔다" 는 뜻이다 — 둘 다 나란히 세울 대상이 아니다.
+    const peekingArchived = !!id && !!get().app?.workspaces.find((w) => w.id === id)?.archived
+    if (get().splitPane && (!id || peekingArchived)) set({ ...collapsedSplit })
+
+    if (id && !peekingArchived && get().splitPane && !opts?.fromHistory) {
+      const st = get()
+      const view: PaneView = { kind: 'workspace', workspaceId: id }
+      const next = selectIntoPanes(st.app?.workspaces ?? [], paneState(st), view)
+      if (samePane(next.main, mainPane(st))) {
+        // 주 칸은 그대로다 — 오른쪽 칸만 갈아 끼우고 기존 선택 경로에는 손대지 않는다.
+        set((s) => {
+          const unread = { ...s.unread }
+          delete unread[id]
+          return { splitPane: next.split, splitFocus: next.focus, unread }
+        })
+        await get().loadWorkspaceView(id)
+        return
+      }
+      // 주 칸이 바뀐다 — 분할 상태만 먼저 확정하고 나머지는 아래 기존 경로에 맡긴다.
+      set({ splitPane: next.split, splitFocus: next.focus })
+    }
+
     // 선택 시 미확인 표시 해제. 사이드바 선택은 하나의 축이므로 리뷰 화면에서도 빠져나온다
     // (리뷰 세션 자체는 남아 있어 사이드바에서 다시 고를 수 있다).
     set((s) => {
       // 다른 워크스페이스로 옮기면 파일 뷰어는 닫는다 — 열린 경로가 그 worktree 전용이라
       // 그대로 두면 새 워크스페이스에서 없는 파일을 가리키게 된다.
       const fileViewer = s.fileViewer?.workspaceId === id ? s.fileViewer : null
-      const workspaceHistory = pushWorkspaceHistory(
-        s.workspaceHistory,
-        s.selectedWorkspaceId,
-        id,
-        opts?.fromHistory
-      )
+      // 아카이브된 워크스페이스는 읽기 전용으로 잠깐 들여다보는 자리다 — 방문 이력의 어느 쪽에도
+      // 남기지 않는다(들어갈 때도, 떠날 때도). ⌘[ / ⌘] 는 살아 있는 워크스페이스 사이를 오가는
+      // 축이라, 되살리지 않으면 돌아갈 수 없는 자리를 끼워 넣으면 되짚는 길만 길어진다.
+      const peeking = !!archivedPreviewTarget(s.app?.workspaces, id)
+      const from = archivedPreviewTarget(s.app?.workspaces, s.selectedWorkspaceId)
+        ? null
+        : s.selectedWorkspaceId
+      const workspaceHistory = peeking
+        ? s.workspaceHistory
+        : pushWorkspaceHistory(s.workspaceHistory, from, id, opts?.fromHistory)
+      // 뒤로 간 뒤 새 워크스페이스로 옮기면 앞쪽 가지는 버린다(브라우저 관례).
+      const workspaceForward = peeking
+        ? s.workspaceForward
+        : forwardAfterSelect(s.workspaceForward, !!opts?.fromHistory)
       // fan-out 비교 화면도 리뷰와 같은 자리를 쓴다 — 워크스페이스를 고르는 것은 "그 화면에서
       // 나온다" 는 뜻이다(그룹 자체는 남아 사이드바에서 다시 열 수 있다).
-      const closed = { activeReviewId: null, activeFanoutGroupId: null }
+      const closed = {
+        activeReviewId: null,
+        activeFanoutGroupId: null,
+        activeStackWorkspaceId: null
+      }
       if (!id || !s.unread[id])
-        return { selectedWorkspaceId: id, ...closed, fileViewer, workspaceHistory }
+        return {
+          selectedWorkspaceId: id,
+          ...closed,
+          fileViewer,
+          workspaceHistory,
+          workspaceForward
+        }
       const unread = { ...s.unread }
       delete unread[id]
-      return { selectedWorkspaceId: id, unread, ...closed, fileViewer, workspaceHistory }
+      return {
+        selectedWorkspaceId: id,
+        unread,
+        ...closed,
+        fileViewer,
+        workspaceHistory,
+        workspaceForward
+      }
     })
 
     // 별도 창으로 떼어 둔 패널은 메인 창의 선택을 따라간다 — 보조 모니터의 작업 패널이 다른
@@ -2293,12 +2822,24 @@ export const useStore = create<UIState>((set, get) => ({
     if (id && get().detachedPanes.scripts) get().setScriptPanelOpen(id, true)
 
     if (!id) return
+    await get().loadWorkspaceView(id)
+  },
 
+  loadWorkspaceView: async (id) => {
     if (!get().loadedTranscripts[id]) {
-      const history = await window.api.chat.getHistory(id)
+      // 최근 몇 턴만 먼저 읽는다. 위로 올라가면 MessageList 가 더 부른다.
+      const history = await window.api.chat.getHistory(id, TRANSCRIPT_INITIAL_LIMIT)
       set((s) => ({
         transcripts: { ...s.transcripts, [id]: history },
-        loadedTranscripts: { ...s.loadedTranscripts, [id]: true }
+        loadedTranscripts: { ...s.loadedTranscripts, [id]: true },
+        transcriptPaging: {
+          ...s.transcriptPaging,
+          [id]: {
+            limit: TRANSCRIPT_INITIAL_LIMIT,
+            hasMore: hasMoreTranscriptHistory(history.length, TRANSCRIPT_INITIAL_LIMIT),
+            loading: false
+          }
+        }
       }))
     }
     void get().refreshGit(id)
@@ -2315,35 +2856,64 @@ export const useStore = create<UIState>((set, get) => ({
       return
     }
     const alive = new Set((s.app?.workspaces ?? []).filter((w) => !w.archived).map((w) => w.id))
-    const { target, history } = popWorkspaceHistory(
-      s.workspaceHistory,
+    const { target, back, forward } = navigateWorkspaceHistory(
+      { back: s.workspaceHistory, forward: s.workspaceForward },
       s.selectedWorkspaceId,
-      alive
+      alive,
+      'back'
     )
-    set({ workspaceHistory: history })
+    set({ workspaceHistory: back, workspaceForward: forward })
+    if (target) await get().selectWorkspace(target, { fromHistory: true })
+  },
+
+  goForwardWorkspace: async () => {
+    const s = get()
+    // 앞으로가기에는 리뷰 화면 같은 "한 겹 위" 가 없다 — ⌘[ 로 떠나온 워크스페이스만 되짚는다.
+    const alive = new Set((s.app?.workspaces ?? []).filter((w) => !w.archived).map((w) => w.id))
+    const { target, back, forward } = navigateWorkspaceHistory(
+      { back: s.workspaceHistory, forward: s.workspaceForward },
+      s.selectedWorkspaceId,
+      alive,
+      'forward'
+    )
+    set({ workspaceHistory: back, workspaceForward: forward })
     if (target) await get().selectWorkspace(target, { fromHistory: true })
   },
 
   refreshGit: async (workspaceId) => {
-    const status = await window.api.git.status(workspaceId)
-    set((s) => ({ gitStatus: { ...s.gitStatus, [workspaceId]: status } }))
+    const status = await requestGitStatus(workspaceId, true)
+    set((s) =>
+      sameGitStatus(s.gitStatus[workspaceId], status)
+        ? {}
+        : { gitStatus: { ...s.gitStatus, [workspaceId]: status } }
+    )
   },
 
-  refreshAllGit: async () => {
-    const workspaces = get().app?.workspaces.filter((w) => !w.archived) ?? []
-    if (!workspaces.length) return
-    // 워크스페이스별로 병렬 조회하되, 결과가 모두 도착한 뒤 한 번만 반영해 리렌더를 줄인다.
-    const entries = await Promise.all(
-      workspaces.map(async (w) => {
-        const status = await window.api.git.status(w.id).catch(() => null)
-        return [w.id, status] as const
+  refreshAllGit: async (force = false) => {
+    if (!force && allGitRefreshInflight) return allGitRefreshInflight
+    const request = (async (): Promise<void> => {
+      const workspaces = get().app?.workspaces.filter((w) => !w.archived) ?? []
+      if (!workspaces.length) return
+      // 워크스페이스별로 병렬 조회하되, 결과가 모두 도착한 뒤 바뀐 항목이 있을 때만 반영한다.
+      const entries = await Promise.all(
+        workspaces.map(async (w) => {
+          const status = await requestGitStatus(w.id, force).catch(() => null)
+          return [w.id, status] as const
+        })
+      )
+      set((s) => {
+        if (entries.every(([id, status]) => sameGitStatus(s.gitStatus[id], status))) return {}
+        const gitStatus = { ...s.gitStatus }
+        for (const [id, status] of entries) gitStatus[id] = status
+        return { gitStatus }
       })
-    )
-    set((s) => {
-      const gitStatus = { ...s.gitStatus }
-      for (const [id, status] of entries) gitStatus[id] = status
-      return { gitStatus }
+    })()
+    if (force) return request
+    const tracked = request.finally(() => {
+      if (allGitRefreshInflight === tracked) allGitRefreshInflight = null
     })
+    allGitRefreshInflight = tracked
+    return allGitRefreshInflight
   },
 
   fetchReposAndRefreshGit: async () => {
@@ -2356,11 +2926,12 @@ export const useStore = create<UIState>((set, get) => ({
         const affected = workspaces.filter((w) => w.repoId === repoId)
         const entries = await Promise.all(
           affected.map(async (w) => {
-            const status = await window.api.git.status(w.id).catch(() => null)
+            const status = await requestGitStatus(w.id, true).catch(() => null)
             return [w.id, status] as const
           })
         )
         set((s) => {
+          if (entries.every(([id, status]) => sameGitStatus(s.gitStatus[id], status))) return {}
           const gitStatus = { ...s.gitStatus }
           for (const [id, status] of entries) gitStatus[id] = status
           return { gitStatus }
@@ -2508,25 +3079,6 @@ export const useStore = create<UIState>((set, get) => ({
     await Promise.all(running.map((w) => window.api.chat.interrupt(w.id).catch(() => {})))
   },
 
-  enqueueMessage: (workspaceId, text, images) =>
-    set((s) => ({
-      messageQueue: {
-        ...s.messageQueue,
-        [workspaceId]: [...(s.messageQueue[workspaceId] ?? []), { text, images }]
-      }
-    })),
-
-  removeQueued: (workspaceId, index) =>
-    set((s) => {
-      const cur = s.messageQueue[workspaceId]
-      if (!cur) return {}
-      const next = cur.filter((_, i) => i !== index)
-      const messageQueue = { ...s.messageQueue }
-      if (next.length) messageQueue[workspaceId] = next
-      else delete messageQueue[workspaceId]
-      return { messageQueue }
-    }),
-
   setDraft: (workspaceId, text) => set((s) => ({ drafts: { ...s.drafts, [workspaceId]: text } })),
 
   clearPromptSuggestion: (workspaceId) =>
@@ -2579,26 +3131,38 @@ export const useStore = create<UIState>((set, get) => ({
       return { diffComments }
     }),
 
-  /**
-   * 전송 분기는 Composer 의 그것과 같아야 한다 — steering 을 못 하는 백엔드에 실행 중 메시지를
-   * 그냥 밀어 넣으면 현재 턴과 뒤엉키므로, 그럴 때는 대기 큐에 넣어 턴이 끝나면 나가게 한다.
-   */
   sendDiffComments: (workspaceId) => {
     const s = get()
     const comments = s.diffComments[workspaceId]
     if (!comments?.length) return
-    const ws = s.app?.workspaces.find((w) => w.id === workspaceId)
-    const backend = s.backends.find((b) => b.id === (ws?.agentBackend ?? DEFAULT_AGENT_BACKEND))
     const text = composeDiffCommentsMessage(comments)
 
     // 비우는 것이 먼저다. 전송 실패로 코멘트가 되살아나는 것보다, 보낸 뒤 남은 카드가 다시
     // 보내지는 쪽이 사용자에게 더 나쁘다(같은 지시가 두 번 나간다).
     get().clearDiffComments(workspaceId)
-    if (ws?.status === 'running' && !backend?.capabilities.steering) {
-      get().enqueueMessage(workspaceId, text)
-    } else {
-      void window.api.chat.send(workspaceId, text)
-    }
+    void window.api.chat.send(workspaceId, text)
+  },
+
+  /**
+   * hunk 하나 버리기. 이 앱에서 **사용자의 코드를 지우는** 몇 안 되는 경로라, 실제로 되쓰는
+   * 판단(턴이 도는 중인가 · patch 가 아직 맞는가)은 전부 main 에 있다. 여기서는 확인을 받고
+   * 결과를 옮길 뿐이다.
+   */
+  discardDiffHunk: async (workspaceId, path, patch) => {
+    const ok = await get().confirm({
+      title: `Discard this change in ${path}?`,
+      body: 'These lines go back to what they were. Only the working tree changes — commits stay as they are — and Wooi cannot bring them back.',
+      confirmLabel: 'Discard',
+      danger: true,
+      skipKey: 'discardHunk'
+    })
+    if (!ok) return false
+    const res = await window.api.git.discardHunk(workspaceId, patch)
+    if (res.status === 'discarded') return true
+    // 어느 실패든 파일은 그대로다(git apply 는 전부 아니면 전무). 그래도 사용자는 자기가
+    // 누른 것이 일어나지 않았다는 사실을 알아야 하므로 자동으로 사라지지 않는 error 로 띄운다.
+    get().pushToast('error', res.message ?? `Could not discard the change in ${path}.`)
+    return false
   },
 
   resetTranscript: (workspaceId) =>
@@ -2612,11 +3176,57 @@ export const useStore = create<UIState>((set, get) => ({
       return {
         transcripts: { ...s.transcripts, [workspaceId]: [] },
         loadedTranscripts: { ...s.loadedTranscripts, [workspaceId]: true },
+        // 기록을 비웠으니 읽기 창도 처음으로 되돌린다 — 남아 있으면 빈 대화에 "더 보기" 가 뜬다.
+        transcriptPaging: {
+          ...s.transcriptPaging,
+          [workspaceId]: { limit: TRANSCRIPT_INITIAL_LIMIT, hasMore: false, loading: false }
+        },
         contextUsage,
         compacting,
         goals
       }
     }),
+
+  loadEarlierTranscript: async (workspaceId) => {
+    const paging = get().transcriptPaging[workspaceId]
+    if (!paging || !paging.hasMore || paging.loading) return
+
+    const limit = nextTranscriptLimit(paging.limit)
+    set((s) => ({
+      transcriptPaging: { ...s.transcriptPaging, [workspaceId]: { ...paging, loading: true } }
+    }))
+    let older: ChatItem[]
+    try {
+      older = await window.api.chat.getHistory(workspaceId, limit)
+    } catch {
+      // 못 읽었으면 잠금만 푼다. 다음 스크롤이나 버튼 누름이 다시 시도한다.
+      set((s) => ({
+        transcriptPaging: {
+          ...s.transcriptPaging,
+          [workspaceId]: { ...(s.transcriptPaging[workspaceId] ?? paging), loading: false }
+        }
+      }))
+      return
+    }
+
+    set((s) => {
+      // 디스크에서 다시 읽은 꼬리로 갈아 끼우되, 아직 디스크에 닿지 않은 것(스트리밍 중인 턴)은
+      // 살린다. 그것들은 언제나 가장 최신이므로 뒤에 붙이면 순서가 맞는다.
+      const known = new Set(older.map((item) => item.id))
+      const inFlight = (s.transcripts[workspaceId] ?? []).filter((item) => !known.has(item.id))
+      return {
+        transcripts: { ...s.transcripts, [workspaceId]: [...older, ...inFlight] },
+        transcriptPaging: {
+          ...s.transcriptPaging,
+          [workspaceId]: {
+            limit,
+            hasMore: hasMoreTranscriptHistory(older.length, limit),
+            loading: false
+          }
+        }
+      }
+    })
+  },
 
   resetContextUsage: (workspaceId) =>
     set((s) => {
@@ -2682,19 +3292,30 @@ export const useStore = create<UIState>((set, get) => ({
 
   jumpToTranscriptItem: async (workspaceId, itemId) => {
     const s = get()
-    const ws = s.app?.workspaces.find((w) => w.id === workspaceId)
-    // 아카이브된 워크스페이스는 대화창이 뜨지 않는다(worktree 가 없다). 검색 결과의 스니펫으로
-    // 답이 됐을 수도 있으니 실패로 취급하지 말고, 열려면 무엇이 필요한지 알려 준다.
-    if (ws?.archived) {
-      s.pushToast(
-        'info',
-        `"${workspaceDisplayName(ws)}" is archived — unarchive it in the sidebar to open the conversation.`
-      )
-      return
-    }
+    // 아카이브된 워크스페이스도 그대로 데려간다 — 트랜스크립트는 workspace id 로 저장되므로
+    // worktree 없이도 읽히고, 도착하면 읽기 전용 미리보기가 그 대화를 그린다. 예전에는 여기서
+    // 토스트만 띄우고 멈췄는데, 그러면 ⇧⌘K 가 아카이브된 대화를 찾아 스니펫까지 보여 주고도
+    // 누르면 막다른 길이었다.
     // 목적지를 먼저 세워 둔다 — 대화창은 마운트되자마자 이 값을 보고 그 항목으로 스크롤한다.
     set((st) => ({ jumpTarget: { workspaceId, itemId, seq: (st.jumpTarget?.seq ?? 0) + 1 } }))
     await s.selectWorkspace(workspaceId)
+
+    // 대화는 뒤에서부터 한 페이지씩 읽는다. 워크스페이스를 가로지르는 검색(⇧⌘K)은 main 이
+    // 파일 전체를 훑어 찾으므로, 목적지가 그 창보다 오래됐을 수 있다 — 그러면 스크롤할 대상이
+    // DOM 에 없어 점프가 조용히 실패한다. 이 경우에만 전부 읽어 목적지를 창 안으로 들인다.
+    if ((get().transcripts[workspaceId] ?? []).some((item) => item.id === itemId)) return
+    const all = await window.api.chat.getHistory(workspaceId)
+    set((st) => {
+      const known = new Set(all.map((item) => item.id))
+      const inFlight = (st.transcripts[workspaceId] ?? []).filter((item) => !known.has(item.id))
+      return {
+        transcripts: { ...st.transcripts, [workspaceId]: [...all, ...inFlight] },
+        transcriptPaging: {
+          ...st.transcriptPaging,
+          [workspaceId]: { limit: all.length, hasMore: false, loading: false }
+        }
+      }
+    })
   },
 
   clearJumpTarget: () => set((s) => (s.jumpTarget ? { jumpTarget: null } : {})),
@@ -2760,13 +3381,41 @@ export const useStore = create<UIState>((set, get) => ({
 
   confirm: (opts) =>
     new Promise<boolean>((resolve) => {
+      // 사용자가 꺼 둔 확인은 띄우지 않는다. 되돌리는 길은 끄던 순간의 토스트와 설정에 있다.
+      if (opts.skipKey && get().app?.settings.confirmSkips?.[opts.skipKey]) {
+        resolve(true)
+        return
+      }
       set({ confirmState: { ...opts, resolve } })
     }),
 
-  resolveConfirm: (ok) => {
+  resolveConfirm: (ok, skip) => {
     const cs = get().confirmState
-    if (cs) cs.resolve(ok)
     set({ confirmState: null })
+    if (!cs) return
+    // 취소하면 체크박스를 켰더라도 저장하지 않는다 — 승인한 적 없는 동작을 앞으로 자동
+    // 승인하게 만드는 셈이고, Escape 나 바깥 클릭으로 닫은 경우까지 여기로 온다.
+    if (ok && skip && cs.skipKey) get().rememberConfirmSkip(cs.skipKey)
+    cs.resolve(ok)
+  },
+
+  rememberConfirmSkip: (key) => {
+    const current = get().app?.settings.confirmSkips ?? {}
+    if (current[key]) return
+    void window.api.settings
+      .update({ confirmSkips: { ...current, [key]: true } })
+      .then(() => {
+        // 액션이 달린 토스트는 사용자가 닫을 때까지 남는다(pushToast 정책) — 되돌리는 길이
+        // 읽히기도 전에 사라지면 이 토스트를 띄우는 의미가 없다.
+        get().pushToast(
+          'success',
+          `Wooi won't ask again before ${CONFIRM_SKIP_LABELS[key].action}.`,
+          [{ label: 'Open settings', run: () => openSettings('general') }]
+        )
+      })
+      .catch(() =>
+        get().pushToast('error', 'Could not save that preference — Wooi will keep asking.')
+      )
   },
 
   // ── PR 리뷰 모드 ─────────────────────────────────────────────────────────
@@ -2790,12 +3439,28 @@ export const useStore = create<UIState>((set, get) => ({
       }
       // 레코드는 상태 방송으로 들어온다. 여기서는 화면만 전환하고 사이드카를 준비한다.
       const id = res.reviewId
-      set({ activeReviewId: id, reviewViews: { ...get().reviewViews, [id]: emptyView() } })
+      set({
+        activeReviewId: id,
+        activeStackWorkspaceId: null,
+        ...collapsedSplit,
+        reviewViews: { ...get().reviewViews, [id]: emptyView() }
+      })
     })
   },
 
   openReview: (reviewId) => {
-    set({ activeReviewId: reviewId })
+    // 분할 중이면 리뷰도 다른 선택과 똑같이 포커스된 칸으로 들어간다(같은 판정기를 쓴다).
+    if (get().splitPane) {
+      const st = get()
+      const view: PaneView = { kind: 'review', reviewId }
+      const next = selectIntoPanes(st.app?.workspaces ?? [], paneState(st), view)
+      set({ splitPane: next.split, splitFocus: next.focus })
+      if (samePane(next.main, mainPane(st))) {
+        get().hydratePaneView(view)
+        return
+      }
+    }
+    set({ activeReviewId: reviewId, activeStackWorkspaceId: null })
     void get().loadReview(reviewId)
     // 열어서 봤으므로 미확인 점을 끈다.
     void window.api.review.markSeen(reviewId)
@@ -2847,7 +3512,8 @@ export const useStore = create<UIState>((set, get) => ({
       title: `Archive review of ${reviewTitle(session).number ? `#${reviewTitle(session).number}` : 'this pull request'}?`,
       body: 'Its worktree is removed, but the findings and conversation are kept. You can unarchive it later.',
       confirmLabel: 'Archive',
-      danger: true
+      danger: true,
+      skipKey: 'archiveReview'
     })
     if (!ok) return
     await get().archiveReview(reviewId)

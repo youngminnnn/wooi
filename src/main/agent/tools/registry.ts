@@ -1,6 +1,7 @@
 import { log } from '../../logger'
 import type {
   AgentBackendId,
+  AgentBackendMeta,
   ChatEvent,
   ChatItem,
   ModelOption,
@@ -56,6 +57,12 @@ export interface AgentToolDeps {
    */
   listModels: (backend: AgentBackendId) => Promise<ModelOption[]>
   /**
+   * 등록된 모든 백엔드의 메타(가용성 포함). 워크스페이스를 만드는 도구가 기본 에이전트를
+   * 고를 때 저장값이 지금 감지된 목록에 있는지 확인하는 데 쓴다
+   * ([[agent/tools/agentOptions]] `usableDefaultBackend`).
+   */
+  listBackends: () => Promise<AgentBackendMeta[]>
+  /**
    * 워크스페이스를 아카이브할 때 그 워크스페이스에 매달린 것들을 끊는다([[workspaces]]
    * archiveWorkspace 가 요구하는 것과 같은 모양).
    *
@@ -83,6 +90,8 @@ export interface AgentToolDeps {
      * 문장이 자기 말풍선으로 쌓이면 안 되기 때문이다([[agent/backend]] sendMessage 의 silent).
      */
     resumeAfterTurn: (workspaceId: string, prompt: string) => void
+    /** 현재 턴이 끝나고 도구 결과가 돌아간 뒤 메인 에이전트 백엔드를 교체한다. */
+    switchAgentAfterTurn: (workspaceId: string, target: AgentBackendId) => void
   }
   terminals: { disposeWorkspace: (workspaceId: string) => void }
 }

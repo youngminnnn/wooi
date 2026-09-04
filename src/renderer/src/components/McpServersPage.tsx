@@ -361,7 +361,7 @@ function summarize(server: WooiMcpServer): string {
 
 function TransportBadge({ transport }: { transport: string }): React.JSX.Element {
   return (
-    <span className="rounded bg-[var(--surface-2)] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-neutral-500">
+    <span className="rounded bg-[var(--surface-2)] px-1.5 py-0.5 text-2xs font-semibold uppercase tracking-wide text-neutral-500">
       {transport}
     </span>
   )
@@ -388,7 +388,7 @@ function WooiServerRow({
             {server.name.trim() || 'Unnamed server'}
           </span>
           <TransportBadge transport={server.transport} />
-          <span className="rounded bg-[var(--info-600)]/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--info-400)]">
+          <span className="rounded bg-[var(--info-600)]/15 px-1.5 py-0.5 text-2xs font-semibold uppercase tracking-wide text-[var(--info-400)]">
             Wooi
           </span>
         </div>
@@ -440,7 +440,7 @@ function InheritedServerRow({
         <div className="flex items-center gap-2">
           <span className="truncate text-sm font-medium text-neutral-200">{server.name}</span>
           <TransportBadge transport={server.transport} />
-          <span className="rounded bg-[var(--surface-2)] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-neutral-400">
+          <span className="rounded bg-[var(--surface-2)] px-1.5 py-0.5 text-2xs font-semibold uppercase tracking-wide text-neutral-400">
             {server.origin}
           </span>
         </div>
@@ -481,7 +481,7 @@ function CodexServerRow({
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <span className="truncate text-sm font-medium text-neutral-200">{server.name}</span>
-          <span className="rounded bg-[var(--surface-2)] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-neutral-400">
+          <span className="rounded bg-[var(--surface-2)] px-1.5 py-0.5 text-2xs font-semibold uppercase tracking-wide text-neutral-400">
             codex
           </span>
         </div>

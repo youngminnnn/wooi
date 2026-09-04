@@ -167,7 +167,7 @@ export default function TerminalPane({ workspaceId }: { workspaceId: string }): 
           // 탭이 하나뿐일 때는 평소에 감춰 예전 화면 그대로 보이게 하고, 패널에 마우스를 올리거나
           // 키보드로 짚었을 때만 드러낸다.
           className={`shrink-0 rounded p-0.5 text-neutral-600 hover:bg-[var(--surface-2)] hover:text-neutral-300 focus-visible:opacity-100 ${
-            multi ? '' : 'opacity-0 group-hover:opacity-100'
+            multi ? '' : 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100'
           }`}
           title="New terminal tab (⌃⇧T)"
           aria-label="New terminal tab"
@@ -240,7 +240,7 @@ function TabChip({
           e.stopPropagation()
           onClose()
         }}
-        className="rounded p-0.5 text-neutral-600 opacity-0 group-hover/tab:opacity-100 hover:bg-[var(--surface-3)] hover:text-neutral-200"
+        className="rounded p-0.5 text-neutral-600 opacity-0 group-hover/tab:opacity-100 focus-visible:opacity-100 hover:bg-[var(--surface-3)] hover:text-neutral-200"
         title="Close tab (⌃⇧W)"
         aria-label={`Close ${label}`}
       >

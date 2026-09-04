@@ -5,7 +5,6 @@ import {
   Terminal as TerminalIcon,
   MessageCircleQuestion,
   X,
-  Clock,
   ImageIcon,
   Loader2,
   Plug,
@@ -31,13 +30,24 @@ import {
   RotateCcw,
   Activity,
   BookMarked,
-  Wrench
+  Wrench,
+  ListCollapse
 } from 'lucide-react'
 import { useStore } from '../store'
+import SavedPromptPicker from './SavedPromptPicker'
+import { appendPrompt } from '../lib/savedPrompts'
 import { permissionModeFooter, permissionModesFor } from '../lib/permission'
-import { modelLabel, modelSupportsFastMode } from '../lib/models'
+import { compactModelLabel, modelLabel, modelSupportsFastMode } from '../lib/models'
 import { effortLabel, effortOptionsFor } from '../lib/effort'
 import { FAST_MODE_HINT, fastModeLabel, fastModeStatus } from '../lib/fastMode'
+import { DENSITY_SHORTCUT } from '@shared/toolDisplay'
+import {
+  DEFAULT_TRANSCRIPT_DENSITY,
+  TRANSCRIPT_DENSITIES,
+  TRANSCRIPT_DENSITY_HINT,
+  TRANSCRIPT_DENSITY_LABEL,
+  type TranscriptDensity
+} from '../lib/transcriptDensity'
 import {
   useAgentSettings,
   useAvailableBackends,
@@ -83,7 +93,10 @@ import type {
   PermissionMode,
   PermissionsInfo,
   RateLimitSnapshot,
+  RewindActionResult,
+  RewindMode,
   RewindPoint,
+  SavedPrompt,
   SlashCommandInfo,
   SkillInfo,
   StatusInfo,
@@ -91,14 +104,25 @@ import type {
   Workspace,
   WorkspaceUsageInfo
 } from '@shared/types'
-import { matchWooiCommand, parseWooiCommandArgs, wooiCommandName } from '@shared/wooiCommands'
+import {
+  matchWooiCommand,
+  parseWooiCommandArgs,
+  wooiCommandName,
+  WOOI_COMMANDS
+} from '@shared/wooiCommands'
 import { matchUnavailableCommand } from '@shared/unavailableCommands'
 import { conversationForkDisabledReason, parseForkCommand } from '../lib/conversationFork'
 import type { WooiCommandSpec } from '@shared/wooiCommands'
 import { openSettings } from '../lib/settingsNavigation'
 import type { ExportConversationDetail } from './ExportMenu'
 import { WOOI_URLS } from '../lib/externalLinks'
-import { FOCUS_COMPOSER_EVENT } from '../lib/composerFocus'
+import {
+  FOCUS_COMPOSER_EVENT,
+  INSERT_INTO_COMPOSER_EVENT,
+  RUN_WOOI_COMMAND_EVENT,
+  type RunWooiCommandDetail
+} from '../lib/composerFocus'
+import { usePaneFocused } from '../lib/paneFocus'
 
 /** Claude 가 받는 이미지 형식. 클립보드의 다른 형식은 붙여넣기 시 무시한다. */
 const IMAGE_TYPES: Record<string, ImageMediaType> = {
@@ -133,18 +157,20 @@ function readImage(blob: Blob): Promise<{ dataBase64: string; dataUrl: string }>
 export default function Composer({ workspace }: { workspace: Workspace }): React.JSX.Element {
   // 초안은 store 에 보관해 workspace 전환에도 살아남는다(작성 중 메시지 분실 방지).
   const text = useStore((s) => s.drafts[workspace.id] ?? '')
+  // 이 워크스페이스의 리포에 저장해 둔 프롬프트. 리포별 스코프뿐이라 전역 목록은 보지 않는다.
+  const savedPrompts =
+    useStore((s) => s.app?.repos.find((r) => r.id === workspace.repoId)?.savedPrompts) ??
+    EMPTY_PROMPTS
   const setDraft = useStore((s) => s.setDraft)
   const promptSuggestion = useStore((s) => s.promptSuggestions[workspace.id] ?? null)
   const clearPromptSuggestion = useStore((s) => s.clearPromptSuggestion)
   const items = useStore((s) => s.transcripts[workspace.id]) ?? EMPTY
-  // 실행 중 보낸 후속 메시지의 대기 큐(전송 전이라 취소 가능, 턴 종료 시 자동 전송).
-  const queue = useStore((s) => s.messageQueue[workspace.id]) ?? EMPTY_QUEUE
-  const enqueueMessage = useStore((s) => s.enqueueMessage)
-  const removeQueued = useStore((s) => s.removeQueued)
   const pushToast = useStore((s) => s.pushToast)
   const confirm = useStore((s) => s.confirm)
   const refreshAuth = useStore((s) => s.refreshAuth)
   const resetTranscript = useStore((s) => s.resetTranscript)
+  // 나란히 두 칸을 띄우면 이 컴포넌트가 다는 전역 리스너가 두 번 발동한다 — 포커스된 칸만 받는다.
+  const paneFocused = usePaneFocused()
   const taRef = useRef<HTMLTextAreaElement>(null)
   // ↑ 로 이전 사용자 메시지를 불러올 때의 커서(끝에서부터). -1 = 미사용.
   const historyIdx = useRef(-1)
@@ -310,10 +336,39 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
 
   // App 의 전역 ⌘L 단축키가 현재 대화의 실제 textarea 를 직접 알 필요가 없도록 이벤트로 잇는다.
   useEffect(() => {
-    const focus = (): void => taRef.current?.focus()
+    const focus = (): void => {
+      if (!paneFocused) return
+      taRef.current?.focus()
+    }
     window.addEventListener(FOCUS_COMPOSER_EVENT, focus)
     return () => window.removeEventListener(FOCUS_COMPOSER_EVENT, focus)
-  }, [])
+  }, [paneFocused])
+
+  // 대화 아무 데나 친 글자가 여기로 흘러 들어온다([[shouldRedirectTyping]]).
+  // 넣을 자리는 textarea 가 들고 있는 selectionStart 다 — 크로미움은 포커스를 잃어도 caret 을
+  // 기억하고, 초안을 막 복원해 한 번도 만지지 않은 입력창이면 끝을 가리킨다. 둘 다 원하는 자리다.
+  useEffect(() => {
+    const insert = (e: Event): void => {
+      if (!paneFocused) return
+      const ch = (e as CustomEvent<string>).detail
+      const ta = taRef.current
+      // 압축 대기 등으로 입력이 잠긴 동안에는 초안만 몰래 늘어나므로 흘려보낸다.
+      if (typeof ch !== 'string' || ch === '' || !ta || ta.disabled) return
+      const current = useStore.getState().drafts[workspace.id] ?? ''
+      const at = Math.min(ta.selectionStart ?? current.length, current.length)
+      const next = at + ch.length
+      setDraft(workspace.id, current.slice(0, at) + ch + current.slice(at))
+      setCaret(next)
+      requestAnimationFrame(() => {
+        const el = taRef.current
+        if (!el) return
+        el.focus()
+        el.setSelectionRange(next, next)
+      })
+    }
+    window.addEventListener(INSERT_INTO_COMPOSER_EVENT, insert)
+    return () => window.removeEventListener(INSERT_INTO_COMPOSER_EVENT, insert)
+  }, [workspace.id, setDraft, paneFocused])
 
   // textarea 높이 자동 조절.
   useEffect(() => {
@@ -479,21 +534,27 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
   useEffect(() => {
     const hasFiles = (e: DragEvent): boolean => !!e.dataTransfer?.types.includes('Files')
     const onDragOver = (e: DragEvent): void => {
+      if (!paneFocused) return
       if (!hasFiles(e)) return // 텍스트 선택 드래그 등은 그대로 둔다.
       e.preventDefault()
       setDragging(true)
     }
     const onDragLeave = (e: DragEvent): void => {
+      if (!paneFocused) return
       // 창 밖으로 완전히 나갔을 때만 끈다(요소 사이를 지날 때도 dragleave 가 뜬다).
       if (!e.relatedTarget) setDragging(false)
     }
     const onDrop = (e: DragEvent): void => {
+      if (!paneFocused) return
       if (!hasFiles(e)) return
       e.preventDefault()
       setDragging(false)
       dropRef.current(Array.from(e.dataTransfer?.files ?? []))
     }
-    const onDragEnd = (): void => setDragging(false)
+    const onDragEnd = (): void => {
+      if (!paneFocused) return
+      setDragging(false)
+    }
     window.addEventListener('dragover', onDragOver)
     window.addEventListener('dragleave', onDragLeave)
     window.addEventListener('drop', onDrop)
@@ -504,7 +565,7 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
       window.removeEventListener('drop', onDrop)
       window.removeEventListener('dragend', onDragEnd)
     }
-  }, [])
+  }, [paneFocused])
 
   /** 고른 파일/디렉토리를 `@` 토큰 자리에 넣는다. */
   const acceptMention = (hit: FileHit): void => {
@@ -537,28 +598,26 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
   }
 
   /**
-   * 메시지를 실제로 백엔드에 넘긴다. steering 을 못 하는 백엔드만 실행 중 메시지를 대기 큐에
-   * 넣는다(Codex 처럼 지원하면 즉시 보내 현재 턴에 반영한다). /subtask 가 렌더러에서 만들어 낸
-   * 프롬프트도 이 길을 타야 큐잉·중단 규칙이 입구마다 갈라지지 않는다.
+   * 메시지를 실제로 백엔드에 넘긴다. 항상 즉시 전송한다(모든 백엔드가 steering 을 지원). /subtask
+   * 가 렌더러에서 만들어 낸 프롬프트도 이 길을 타야 중단 규칙이 입구마다 갈라지지 않는다.
    */
-  const deliver = (body: string, payload?: ImageAttachment[], stopFirst?: boolean): void => {
+  const deliver = async (
+    body: string,
+    payload?: ImageAttachment[],
+    stopFirst?: boolean
+  ): Promise<void> => {
     setPickerCard(null)
     clearPromptSuggestion(workspace.id)
-    if (running && !backend?.capabilities.steering) {
-      enqueueMessage(workspace.id, body, payload?.length ? payload : undefined)
-      // 큐에 넣은 뒤 중단한다 — 순서가 반대면 턴이 먼저 끝나 플러시가 이 메시지를 놓친다.
-      if (stopFirst) void window.api.chat.interrupt(workspace.id)
-    } else {
-      void window.api.chat.send(workspace.id, body, payload?.length ? payload : undefined)
-    }
+    // interrupt 를 먼저 await 해야 그 중단이 방금 보낸 메시지까지 삼키지 않는다.
+    if (stopFirst) await window.api.chat.interrupt(workspace.id)
+    void window.api.chat.send(workspace.id, body, payload?.length ? payload : undefined)
   }
 
   /**
    * 입력창 내용을 보낸다.
    *
    * stopFirst 는 "지금 하던 걸 멈추고 이거부터" — 터미널에서 Esc 로 끊고 다시 치는 조작을 한 번에
-   * 한다. 메시지를 큐에 넣고 턴을 중단하면, 턴이 idle 로 끝나는 순간 store 의 큐 플러시가 그대로
-   * 이어서 보낸다(중단이 에러로 끝나면 메시지는 큐에 남아 사용자가 확인·취소할 수 있다).
+   * 한다. 현재 턴을 먼저 중단하고, 그 직후 이 메시지를 곧바로 보낸다.
    */
   const send = (opts?: { stopFirst?: boolean }): void => {
     // 압축 중에는 전송(및 로컬 명령·bash)을 모두 막는다 — 초안은 그대로 두고, 압축이 끝나면
@@ -707,7 +766,7 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
         taRef.current?.focus()
         return
       }
-      deliver(subtaskPrompt(workspace.agentBackend, subtask.task))
+      void deliver(subtaskPrompt(workspace.agentBackend, subtask.task))
       setText('')
       historyIdx.current = -1
       return
@@ -743,8 +802,9 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
       return
     }
 
-    // /btw 는 사이드 질문으로 분기한다 — 일반 메시지로 보내면 현재 턴 뒤에 큐잉되어 메인 대화에
-    // 쌓이므로(=오염), 맥락만 공유하는 임시 질의로 처리하고 답변은 별도 카드로 보여 준다.
+    // /btw 는 사이드 질문으로 분기한다 — 일반 메시지로 보내면 진행 중인 턴에 끼어들어 메인 대화를
+    // 흔들고 기록에도 쌓이므로(=오염), 맥락만 공유하는 임시 질의로 처리하고 답변은 별도 카드로
+    // 보여 준다.
     // (사이드 질문은 텍스트 전용 — 첨부가 있으면 일반 메시지로 보낸다.)
     const sideQ = images.length ? null : matchSideQuestion(trimmed, supportsSideQuestion)
     if (sideQ) {
@@ -777,7 +837,7 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
       mediaType,
       dataBase64
     }))
-    deliver(trimmed, payload, opts?.stopFirst)
+    void deliver(trimmed, payload, opts?.stopFirst)
     setText('')
     setImages([])
     historyIdx.current = -1
@@ -840,6 +900,22 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
     })
   }
 
+  // ⌘K 팔레트에서 고른 즉시 실행 커맨드도 여기로 들어온다 — 실행 경로와 결과 카드가 입력창에
+  // 친 것과 완전히 같아야, 어디서 불렀는지에 따라 다르게 동작하지 않는다.
+  useEffect(() => {
+    const run = (e: Event): void => {
+      const detail = (e as CustomEvent<RunWooiCommandDetail>).detail
+      // 팔레트가 열려 있는 사이에 다른 워크스페이스로 옮겨 갔을 수 있다.
+      if (!detail || detail.workspaceId !== workspace.id) return
+      const spec = WOOI_COMMANDS.find((c) => c.name === detail.name)
+      if (spec) runWooiCommand(spec, detail.rest)
+    }
+    window.addEventListener(RUN_WOOI_COMMAND_EVENT, run)
+    return () => window.removeEventListener(RUN_WOOI_COMMAND_EVENT, run)
+    // 의존성 배열을 두지 않는다 — runWooiCommand 는 매 렌더 새로 만들어지므로, 고정해 두면
+    // 팔레트가 부르는 순간 낡은 초안·낡은 카드 상태를 붙든 클로저가 돈다.
+  })
+
   /** 인터랙티브 명령을 실행하고 결과를 카드로 띄운다(사이드 답변 카드는 비켜 준다). */
   const runInteractive = (cmd: (typeof INTERACTIVE_COMMANDS)[number]): void => {
     setSideAnswer(null)
@@ -871,6 +947,7 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
    */
   const escHandlerRef = useRef<(e: KeyboardEvent) => void>(() => {})
   escHandlerRef.current = (e: KeyboardEvent): void => {
+    if (!paneFocused) return
     if (e.key !== 'Escape' || e.metaKey || e.ctrlKey || e.altKey) return
     const st = useStore.getState()
     if (st.overlayOpen || st.confirmState || menuOpen || mentionOpen) return
@@ -1144,8 +1221,9 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
       .map((i) => i.text)
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
-    // ⌘⏎ = 진행 중인 턴을 멈추고 방금 쓴 메시지를 바로 보낸다. 턴이 길어질 때 방향을 트는
-    // 조작이라 대기 큐(Enter)와 별도 키가 필요하다.
+    // ⌘⏎ = 진행 중인 턴을 멈추고 방금 쓴 메시지를 바로 보낸다. 그냥 Enter 로 보내도 메시지는
+    // 진행 중인 턴에 반영되지만(steering), 그때는 돌던 도구가 끝까지 돈다 — "지금 하던 것부터
+    // 멈춰라" 는 그것과 다른 조작이라 별도 키가 필요하다.
     if (e.metaKey && e.key === 'Enter' && !e.nativeEvent.isComposing) {
       e.preventDefault()
       send({ stopFirst: true })
@@ -1323,32 +1401,6 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
         )}
         {/* 입력창 위 상태줄: 디렉토리 · (교체 가능하면 에이전트) · 모델 · effort · 컨텍스트 사용량. */}
         <StatusLine workspace={workspace} onPick={openPicker} />
-        {queue.length > 0 && (
-          <div className="mb-2 space-y-1">
-            {queue.map((m, i) => (
-              <div
-                key={i}
-                className="flex items-center gap-2 bg-[var(--warning-500)]/5 border border-[var(--warning-500)]/20 rounded-lg pl-2.5 pr-1.5 py-1.5"
-              >
-                <Clock size={12} className="text-[var(--warning-400)]/80 shrink-0" />
-                <span className="flex-1 min-w-0 truncate text-sm text-neutral-300" title={m.text}>
-                  {m.text || (m.images?.length ? `${m.images.length} image(s)` : '')}
-                </span>
-                {m.images && m.images.length > 0 && (
-                  <span className="text-xs text-neutral-600 shrink-0">📎{m.images.length}</span>
-                )}
-                <span className="text-xs text-neutral-600 shrink-0">queued</span>
-                <button
-                  onClick={() => removeQueued(workspace.id, i)}
-                  title="Cancel this queued message"
-                  className="shrink-0 h-5 w-5 grid place-items-center rounded text-neutral-500 hover:bg-[var(--surface-2)] hover:text-neutral-200"
-                >
-                  <X size={12} />
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
         {/* 드롭은 window 리스너가 창 전체에서 받는다. 여기서는 어디에 담기는지 보이도록 테두리만 켠다. */}
         <div
           className={
@@ -1387,12 +1439,21 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
                 locked
                   ? 'Compacting the conversation…  (input resumes when it finishes)'
                   : running
-                    ? 'Queue a follow-up…  (Enter to queue · ⌘Enter to stop the turn and send now)'
+                    ? 'Steer the agent while it works…  (Enter to send · ⌘Enter to stop the turn and send now)'
                     : text === '' && promptSuggestion
                       ? `⇥ ${promptSuggestion}`
                       : 'Message your agent…  (Enter to send · @ for files · / for commands · ! for terminal)'
               }
               className="flex-1 bg-transparent resize-none outline-none text-base leading-relaxed text-neutral-200 placeholder:text-neutral-600 py-1 disabled:cursor-not-allowed"
+            />
+            <SavedPromptPicker
+              prompts={savedPrompts}
+              disabled={locked}
+              // 채우기만 한다 — 여기서 보내면 사용자가 손볼 기회 없이 턴이 시작된다.
+              onPick={(prompt) => {
+                const next = appendPrompt(text, prompt)
+                setTextAt(next, next.length)
+              }}
             />
             {running && (
               <button
@@ -1412,7 +1473,7 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
                   : bashMode
                     ? 'Run in terminal'
                     : running
-                      ? 'Queue message — ⌘Enter stops the current turn and sends now'
+                      ? 'Send now — ⌘Enter stops the current turn first'
                       : 'Send'
               }
               className={
@@ -1446,13 +1507,18 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
               const accent = readOnlyish
                 ? 'text-[var(--readonly-400)]'
                 : 'text-[var(--warning-400)]'
+              // permission-mode 힌트(lib/hints.ts)의 앵커. 예전엔 data-tour="chat" 이라 채팅
+              // 컬럼 전체(수백 px)를 가리키는 셈이었다 — 힌트 카드가 실제 컨트롤 옆이 아니라
+              // 엉뚱한 빈 자리에 뜨는 원인이었다. 권한 모드를 실제로 보여주는 이 텍스트로 좁힌다.
               return footer ? (
-                <span className={accent}>
+                <span data-tour="permission-mode" className={accent}>
                   {footer.symbol} {footer.text}{' '}
                   <span className="text-neutral-600">(shift+tab to cycle)</span>
                 </span>
               ) : (
-                <span className="text-neutral-600">shift+tab to cycle permission modes</span>
+                <span data-tour="permission-mode" className="text-neutral-600">
+                  shift+tab to cycle permission modes
+                </span>
               )
             })()
           )}
@@ -1716,11 +1782,11 @@ function MemoryCard({
             onClick={() => onPick(c.scope)}
             className="flex items-center gap-2 px-2 py-1.5 rounded-lg text-left hover:bg-[var(--surface-3)]"
           >
-            <span className="shrink-0 h-4 w-4 grid place-items-center rounded border border-[var(--border)] text-[10px] text-neutral-500">
+            <span className="shrink-0 h-4 w-4 grid place-items-center rounded border border-[var(--border)] text-2xs text-neutral-500">
               {i + 1}
             </span>
             <span className="text-xs text-neutral-200">{c.label}</span>
-            <span className="text-[11px] text-neutral-500 truncate">{c.hint}</span>
+            <span className="text-xs text-neutral-500 truncate">{c.hint}</span>
           </button>
         ))}
       </div>
@@ -1815,7 +1881,7 @@ function WooiCommandCard({
 }
 
 /**
- * "/model"·"/effort"·"/fast"·"/agent"·"/plan" 이면 그 종류를 돌려준다(뒤따르는 인자는 무시하고 선택 카드를 연다).
+ * "/model"·"/effort"·"/fast"·"/agent"·"/plan"·"/density" 면 그 종류를 돌려준다(뒤따르는 인자는 무시하고 선택 카드를 연다).
  *
  * `allow.fast` 는 이 워크스페이스의 백엔드가 fast mode 를 지원하는지다 — 지원하지 않으면(Codex)
  * 가로채지 않고 일반 텍스트로 흘려보낸다. 아무 일도 안 하는 카드를 띄우는 것보다 낫다.
@@ -1823,6 +1889,8 @@ function WooiCommandCard({
  * `allow.plan` 은 권한 모드가 여럿이면서 백엔드 전용 `/plan` 카드가 없을 때만 참이다. Codex 는
  * 자체 카드로 app-server 의 plan mode 를 바꾸고, 범용 선택기는 그런 카드가 없는 Claude 를 맡는다.
  * 거짓인 명령은 에이전트에게 보내는 평범한 메시지로 둔다.
+ * `/density` 는 걸러 낼 것이 없다 — 대화를 얼마나 촘촘히 볼지는 백엔드와 무관한 화면 설정이라
+ * 어느 워크스페이스에서나 고를 수 있다.
  * 턴이 도는 중인지는 여기서 보지 않는다:
  * /model 과 마찬가지로 카드는 열리고, 잠긴 이유를 카드가 설명한다.
  */
@@ -1830,7 +1898,7 @@ export function matchPicker(
   text: string,
   allow: { fast: boolean; agent: boolean; plan: boolean }
 ): PickerKind | null {
-  const m = /^\/(model|effort|fast|agent|plan)(?:\s.*)?$/.exec(text)
+  const m = /^\/(model|effort|fast|agent|plan|density)(?:\s.*)?$/.exec(text)
   if (!m) return null
   const kind = m[1] as PickerKind
   if (kind === 'fast' && !allow.fast) return null
@@ -2810,7 +2878,7 @@ function SkillsPanel({ skills }: { skills: SkillInfo[] }): React.JSX.Element {
                 {skill.argumentHint}
               </span>
             )}
-            <span className="text-[10px] text-neutral-500 bg-[var(--surface-3)] rounded px-1 shrink-0">
+            <span className="text-2xs text-neutral-500 bg-[var(--surface-3)] rounded px-1 shrink-0">
               {badge[skill.source]}
             </span>
           </div>
@@ -2925,9 +2993,34 @@ function PermissionsPanel({ info }: { info: PermissionsInfo }): React.JSX.Elemen
   )
 }
 
+/** /rewind 모드 선택지 — 라벨과, 고른 순간 화면에 뜨는 한 줄 설명. */
+const REWIND_MODES: { mode: RewindMode; label: string; hint: string }[] = [
+  {
+    mode: 'both',
+    label: 'Code + chat',
+    hint: 'Restore the files and rewind the conversation to just before this message.'
+  },
+  {
+    mode: 'files',
+    label: 'Code only',
+    hint: 'Restore the files. The agent keeps its memory of the changes it made.'
+  },
+  {
+    mode: 'conversation',
+    label: 'Chat only',
+    hint: 'Rewind the conversation. Files on disk are left as they are.'
+  }
+]
+
 /**
- * /rewind — 파일 체크포인트(보낸 메시지 지점) 목록. 하나를 고르면 그 시점으로 추적된 파일을 되돌린다.
- * 체크포인트 백업은 살아 있는 세션 안에 있으므로, 같은 세션이 떠 있을 때만 동작한다 —
+ * /rewind — 파일 체크포인트(보낸 메시지 지점) 목록. 하나를 고르면 그 지점으로 되돌린다.
+ *
+ * 무엇을 되돌릴지는 위쪽 선택으로 가른다(터미널 Claude Code 와 같은 세 갈래). 기본은 둘 다인데,
+ * 하나만 되돌리면 모델의 기억과 디스크가 어긋나기 때문이다 — 코드만 되돌리면 에이전트는 자기가
+ * 고친 것으로 알고 있는 변경이 사라진 채 다음 턴을 시작한다. 그래서 고른 갈래가 무엇을 남기는지
+ * 한 줄로 계속 보여 준다.
+ *
+ * 파일 백업은 살아 있는 세션 안에 있으므로 코드 되돌리기는 같은 세션이 떠 있을 때만 동작한다 —
  * 비어 있거나 되돌릴 수 없으면 그 사정을 안내한다.
  */
 function RewindPanel({
@@ -2937,9 +3030,11 @@ function RewindPanel({
   checkpoints: RewindPoint[]
   workspaceId: string
 }): React.JSX.Element {
+  const [mode, setMode] = useState<RewindMode>('both')
   const [busyId, setBusyId] = useState<string | null>(null)
   const [done, setDone] = useState<{ id: string; text: string; ok: boolean } | null>(null)
   const pushToast = useStore((s) => s.pushToast)
+  const setDraft = useStore((s) => s.setDraft)
 
   if (checkpoints.length === 0) {
     return (
@@ -2954,7 +3049,7 @@ function RewindPanel({
     setBusyId(cp.userMessageId)
     setDone(null)
     void window.api.commands
-      .rewindAction(workspaceId, cp.userMessageId)
+      .rewindAction(workspaceId, cp.userMessageId, mode)
       .then(({ result, error }) => {
         setBusyId(null)
         if (error || !result) {
@@ -2965,20 +3060,36 @@ function RewindPanel({
           setDone({ id: cp.userMessageId, text: result.error || 'Nothing to restore.', ok: false })
           return
         }
-        const n = result.filesChanged?.length ?? 0
-        const detail =
-          typeof result.insertions === 'number' || typeof result.deletions === 'number'
-            ? ` (+${result.insertions ?? 0} −${result.deletions ?? 0})`
-            : ''
-        const summary = `Restored ${n} file${n === 1 ? '' : 's'}${detail}.`
+        const summary = rewindSummary(result)
         setDone({ id: cp.userMessageId, text: summary, ok: true })
         pushToast('success', summary)
+        // 대화를 되돌렸다면 그 메시지를 입력창에 되돌려 놓는다 — 고쳐서 다시 보내라는 것이
+        // 이 동작의 요점이라, 사용자가 방금 지운 말을 다시 타이핑하게 두지 않는다.
+        if (result.conversationRewound && result.prefill) setDraft(workspaceId, result.prefill)
       })
   }
 
+  const hint = REWIND_MODES.find((m) => m.mode === mode)?.hint
+
   return (
     <div className="space-y-1.5">
-      <div className="text-xs text-neutral-600">Restore tracked files to a message:</div>
+      <div className="flex items-center gap-1">
+        {REWIND_MODES.map((m) => (
+          <button
+            key={m.mode}
+            onClick={() => setMode(m.mode)}
+            disabled={busyId !== null}
+            className={`rounded-md px-1.5 py-0.5 text-xs transition-colors disabled:opacity-50 ${
+              m.mode === mode
+                ? 'bg-[var(--surface-3)] text-neutral-200'
+                : 'text-neutral-500 hover:text-neutral-300'
+            }`}
+          >
+            {m.label}
+          </button>
+        ))}
+      </div>
+      <div className="text-xs text-neutral-600">{hint}</div>
       <ul className="space-y-0.5">
         {checkpoints.map((cp) => {
           const busy = busyId === cp.userMessageId
@@ -3012,6 +3123,38 @@ function RewindPanel({
       </ul>
     </div>
   )
+}
+
+/**
+ * 되돌리기 결과를 한 문장으로. 파일 통계(filesChanged·insertions·deletions)는 CLI 에 따라
+ * **오지 않는다** — 그때 0 으로 적으면 성공을 "아무것도 안 됐다" 로 읽히게 하므로, 숫자가 있을
+ * 때만 숫자를 말하고 없으면 되돌렸다는 사실만 말한다. 링크 안전 검사로 건너뛴 파일은 조용히
+ * 넘기지 않는다 — 사용자가 되돌아갔다고 믿는 파일이 그대로 남아 있다는 뜻이기 때문이다.
+ */
+function rewindSummary(result: RewindActionResult): string {
+  const parts: string[] = []
+
+  if (result.filesChanged) {
+    const n = result.filesChanged.length
+    const detail =
+      typeof result.insertions === 'number' || typeof result.deletions === 'number'
+        ? ` (+${result.insertions ?? 0} −${result.deletions ?? 0})`
+        : ''
+    parts.push(`Restored ${n} file${n === 1 ? '' : 's'}${detail}.`)
+  } else if (!result.conversationRewound) {
+    parts.push('Restored tracked files.')
+  }
+
+  if (result.skippedLinks) {
+    const n = result.skippedLinks
+    parts.push(
+      `Skipped ${n} file${n === 1 ? '' : 's'} that a symlink or hard link was in the way of.`
+    )
+  }
+
+  if (result.conversationRewound) parts.push('Rewound the conversation to this message.')
+
+  return parts.join(' ')
 }
 
 function Empty({ children }: { children: React.ReactNode }): React.JSX.Element {
@@ -3083,10 +3226,110 @@ function useHandoffEstimate(workspace: Workspace, enabled: boolean): number {
 }
 
 /**
+ * 상태줄이 좁아질 때 라벨을 접는 차례. 숫자가 큰 것부터 사라지고, **아이콘과 클릭 대상은 남는다.**
+ *
+ * 폭은 창이 아니라 상태줄 자신을 재는 컨테이너 쿼리로 본다 — 같은 창이라도 사이드바나 차이
+ * 패널을 여닫으면 이 줄의 폭이 바뀌므로, 창 브레이크포인트로 재면 접혀야 할 때 안 접히고
+ * 멀쩡한데 접힌다.
+ *
+ * 차례는 "없어도 그 값을 다른 것이 말해 주는가" 로 정했다 — 디렉터리는 헤더가, 에이전트는
+ * 브랜드 마크가, 밀도·fast 는 강조색이 대신 말한다. 모델이 맨 마지막인 것도 같은 이유다:
+ * 이 줄에서 대신 말해 주는 것이 아무 데도 없는 유일한 값이라, 접을 것이 더 없을 때만 접는다.
+ *
+ * 라벨을 하나씩 버리는 이유는, 전부 `truncate` 로 두면 좁아질 때 다 같이 뭉개져
+ * `Opu… Hig… Sta…` 가 되기 때문이다. 하나를 통째로 포기하는 편이 남은 것을 읽히게 한다.
+ *
+ * 숫자는 실측에서 잡았다(e2e `status-line-fit`). 이 줄의 폭 상한은 `max-w-3xl` 인 768px 이지만
+ * **실제로는 그보다 훨씬 좁다** — 오른쪽 패널을 연 채로 쓰면 채팅 pane 이 그만큼 깎여서,
+ * 1100px 창에서는 이 줄이 317px 까지 내려간다. 그 폭이 예외가 아니라 기본 배치다.
+ *
+ * 기본값만 있는 줄의 내용 폭은 약 410px(에이전트 칩 포함), 라벨이 전부 나오면 약 510px 이다.
+ * 그래서 첫 접기가 520px 이고, 거기서부터 한 칸씩 내려간다.
+ */
+const HIDE_DIR_LABEL = '@max-[520px]:hidden'
+const HIDE_AGENT_LABEL = '@max-[480px]:hidden'
+const HIDE_DENSITY_LABEL = '@max-[440px]:hidden'
+const HIDE_FAST_LABEL = '@max-[400px]:hidden'
+const HIDE_EFFORT_LABEL = '@max-[370px]:hidden'
+
+/**
+ * 라벨을 다 접고도 모자라는 폭. 여기서는 **칩을 통째로 버린다** — 아이콘만 남겨 봐야 다섯 개가
+ * 줄을 넘겨 서로 겹칠 뿐이라, 자리를 지키는 것이 오히려 읽기를 방해한다.
+ *
+ * 버리는 것은 이 줄 말고 **다른 데서도 볼 수 있는 값**이다 — 디렉터리와 에이전트는 헤더가,
+ * 플랜 사용량은 계정 단위 값이라 Overview 가 같은 것을 보여 준다. 게이지 막대도 여기서 접는다
+ * (퍼센트가 본체고 막대는 보조다). 남는 것은 이 줄에만 있는 값들 — 모델·effort·fast·밀도의
+ * 아이콘과 컨텍스트 퍼센트다. 모델 라벨도 이때만 접는다.
+ */
+const HIDE_IN_SLIVER = '@max-[340px]:hidden'
+
+/**
+ * 상태줄 칩 하나. 폭이 모자라면 **아이콘은 남기고 라벨만** 버린다 — 칩이 하는 두 가지 일 중
+ * "지금 값이 무엇인가" 는 hover(title)로 물러설 수 있지만 "눌러서 바꾼다" 는 물러설 곳이 없다.
+ * 강조색도 아이콘에 남으므로, 라벨이 접혀도 평소와 다른 값이라는 사실은 계속 보인다.
+ */
+function StatusChip({
+  icon,
+  label,
+  title,
+  onClick,
+  tone,
+  quiet,
+  hideLabelAt,
+  hideAt
+}: {
+  icon: React.ReactNode
+  label: string
+  title: string
+  /** 없으면 누를 수 없는 표시 전용 칩(디렉터리). */
+  onClick?: () => void
+  /** 칩 전체의 색·hover. 기본은 상태줄 색에 hover 만. */
+  tone?: string
+  /**
+   * 값이 기본값이라 라벨이 아무것도 말해 주지 않는다 — 폭과 상관없이 아이콘만 남긴다.
+   * "Standard"·"Normal"·"Model default" 는 매 순간 자리만 차지하면서 정보량은 0 이다.
+   */
+  quiet?: boolean
+  /** 이 폭보다 좁아지면 라벨을 접는 컨테이너 쿼리 클래스. */
+  hideLabelAt?: string
+  /** 이 폭보다 좁아지면 칩 자체를 버리는 컨테이너 쿼리 클래스. */
+  hideAt?: string
+}): React.JSX.Element {
+  const body = (
+    <>
+      {icon}
+      {!quiet && <span className={'truncate ' + (hideLabelAt ?? '')}>{label}</span>}
+    </>
+  )
+  const cls = 'flex items-center gap-1 min-w-0 shrink transition-colors ' + (hideAt ?? '') + ' '
+  if (!onClick) {
+    return (
+      <span className={cls + (tone ?? '')} title={title}>
+        {body}
+      </span>
+    )
+  }
+  return (
+    <button
+      onClick={onClick}
+      className={cls + (tone ?? 'hover:text-neutral-300')}
+      title={title}
+      aria-label={title}
+    >
+      {body}
+    </button>
+  )
+}
+
+/**
  * 입력창 바로 위에 항상 노출되는 상태줄.
  * worktree 디렉토리명 · 컨텍스트 사용량을 한 줄로 보여 준다(옵셔널/토글 없음).
  * 컨텍스트는 Claude Code CLI 의 컨텍스트 게이지에 대응 — 막대 + 퍼센트로 표시하고,
  * 자동 압축이 도는 동안에는 진행 표시로, 사용량 데이터가 아직 없으면(첫 턴 전) "—" 로 바뀐다.
+ *
+ * 칩이 늘어난 만큼(모델·effort·fast·밀도·에이전트) 한 줄에 다 들어가지 않는 폭이 생긴다.
+ * 그때 무엇을 먼저 버리는지는 [[StatusChip]] 과 위의 `HIDE_*` 가 정한다 — 요지는 **값이
+ * 기본값이면 라벨을 아예 안 그리고, 좁아지면 정해진 차례로 라벨만 접는다** 이다.
  */
 function StatusLine({
   workspace,
@@ -3108,6 +3351,7 @@ function StatusLine({
   const backend = useWorkspaceBackend(workspace)
   const models = useModels(workspace.agentBackend)
   const defaults = useAgentSettings(workspace.agentBackend)
+  const density = useStore((s) => s.transcriptDensity[workspace.id] ?? DEFAULT_TRANSCRIPT_DENSITY)
   // fast mode 는 Claude Code 전용이라, 지원하지 않는 백엔드에서는 상태줄에서도 감춘다.
   const supportsFastMode = backend?.capabilities.fastMode ?? false
   // 에이전트 칩은 **고를 것이 있을 때만** 띄운다. 어떤 에이전트가 도는지는 헤더의 브랜드 마크가
@@ -3120,8 +3364,12 @@ function StatusLine({
   const dirName = workspace.worktreePath.split('/').filter(Boolean).pop() ?? workspace.worktreePath
 
   // 표시는 "유효 값" 기준: workspace 오버라이드 → (모델은 init 으로 확정된 lastModel) → 전역 설정.
-  const modelText = modelLabel(models, workspace.model ?? workspace.lastModel ?? defaults.model)
-  const effortText = effortLabel(backend, workspace.effort ?? defaults.effort)
+  const modelId = workspace.model ?? workspace.lastModel ?? defaults.model
+  // 줄에 적는 것은 짧은 쪽, hover 로 보여 주는 것은 온전한 쪽이다.
+  const modelText = compactModelLabel(models, modelId)
+  const modelFull = modelLabel(models, modelId)
+  const effortValue = workspace.effort ?? defaults.effort
+  const effortText = effortLabel(backend, effortValue)
   // fast mode 는 "설정" 보다 세션이 보고한 "실제 상태" 를 우선해 보여 준다(쿨다운·미지원 모델 등).
   const fast = fastModeStatus(
     workspace.fastMode ?? defaults.fastMode,
@@ -3129,69 +3377,99 @@ function StatusLine({
     workspace.fastModeReason
   )
 
+  const isDefaultDensity = density === DEFAULT_TRANSCRIPT_DENSITY
+
   return (
-    <div className="flex items-center gap-3 mb-1.5 px-1 text-xs text-neutral-500">
-      <span
-        className="flex items-center gap-1 min-w-0 shrink"
+    <div
+      data-status-line=""
+      className="@container flex items-center gap-3 @max-[440px]:gap-2 mb-1.5 px-1 text-xs text-neutral-500"
+    >
+      <StatusChip
+        icon={<Folder size={11} className="shrink-0 text-neutral-600" />}
+        label={dirName}
         title={`Directory: ${workspace.worktreePath}`}
-      >
-        <Folder size={11} className="shrink-0 text-neutral-600" />
-        <span className="truncate">{dirName}</span>
-      </span>
+        hideLabelAt={HIDE_DIR_LABEL}
+        hideAt={HIDE_IN_SLIVER}
+      />
       {agentSwitch.offered && (
-        <button
-          onClick={() => onPick('agent')}
-          className="flex items-center gap-1 min-w-0 shrink hover:text-neutral-300 transition-colors"
+        <StatusChip
+          icon={<AgentBackendMark backend={workspace.agentBackend} size={11} />}
+          label={agentLabel}
           title={`Agent: ${agentLabel} — click or type /agent to switch`}
-        >
-          <AgentBackendMark backend={workspace.agentBackend} size={11} />
-          <span className="truncate">{agentLabel}</span>
-        </button>
+          onClick={() => onPick('agent')}
+          hideLabelAt={HIDE_AGENT_LABEL}
+          hideAt={HIDE_IN_SLIVER}
+        />
       )}
-      <button
+      <StatusChip
+        icon={<Cpu size={11} className="shrink-0 text-neutral-600" />}
+        label={modelText}
+        title={`Model: ${modelFull} — click or type /model to change`}
         onClick={() => onPick('model')}
-        className="flex items-center gap-1 min-w-0 shrink hover:text-neutral-300 transition-colors"
-        title={`Model: ${modelText} — click or type /model to change`}
-      >
-        <Cpu size={11} className="shrink-0 text-neutral-600" />
-        <span className="truncate">{modelText}</span>
-      </button>
+        hideLabelAt={HIDE_IN_SLIVER}
+      />
       {fallbackModel && (
         <span
-          className="shrink-0 text-amber-400"
+          className="min-w-0 shrink truncate text-[var(--warning-400)]"
           title={`Primary model unavailable — using fallback ${modelLabel(models, fallbackModel)}`}
         >
-          Fallback: {modelLabel(models, fallbackModel)}
+          Fallback: {compactModelLabel(models, fallbackModel)}
         </span>
       )}
-      <button
-        onClick={() => onPick('effort')}
-        className="flex items-center gap-1 min-w-0 shrink hover:text-neutral-300 transition-colors"
+      {/* effort 를 지정하지 않았으면 라벨("Model default")이 곧 "아무것도 안 정했다" 라, 글자
+          없이 아이콘만 남긴다 — 눌러서 정하는 길은 그대로다. */}
+      <StatusChip
+        icon={<Zap size={11} className="shrink-0 text-neutral-600" />}
+        label={effortText}
         title={`Reasoning effort: ${effortText} — click or type /effort to change`}
-      >
-        <Zap size={11} className="shrink-0 text-neutral-600" />
-        <span className="truncate">{effortText}</span>
-      </button>
+        onClick={() => onPick('effort')}
+        quiet={!effortValue}
+        hideLabelAt={HIDE_EFFORT_LABEL}
+      />
       {supportsFastMode && (
-        <button
-          onClick={() => onPick('fast')}
-          className={
-            'flex items-center gap-1 min-w-0 shrink transition-colors ' +
-            (fast.active
-              ? 'text-[var(--accent-300)] hover:text-[var(--accent-200)]'
-              : 'hover:text-neutral-300')
+        <StatusChip
+          icon={
+            <Rabbit
+              size={11}
+              className={
+                'shrink-0 ' + (fast.active ? 'text-[var(--accent-400)]' : 'text-neutral-600')
+              }
+            />
           }
+          label={fast.text}
           title={`${fast.title} — click or type /fast to change`}
-        >
-          <Rabbit
+          onClick={() => onPick('fast')}
+          tone={
+            fast.active
+              ? 'text-[var(--accent-300)] hover:text-[var(--accent-200)]'
+              : 'hover:text-neutral-300'
+          }
+          quiet={!fast.notable}
+          hideLabelAt={HIDE_FAST_LABEL}
+        />
+      )}
+      {/* 밀도 칩. 값이 기본(Normal)이 아니면 강조한다 — 훑기 모드에서 대화가 성겨 보이는 이유가
+          화면 어딘가에 늘 적혀 있어야 한다. 반대로 기본값이면 그 이유가 없으므로 아이콘만 둔다. */}
+      <StatusChip
+        icon={
+          <ListCollapse
             size={11}
             className={
-              'shrink-0 ' + (fast.active ? 'text-[var(--accent-400)]' : 'text-neutral-600')
+              'shrink-0 ' + (isDefaultDensity ? 'text-neutral-600' : 'text-[var(--accent-400)]')
             }
           />
-          <span className="truncate">{fast.text}</span>
-        </button>
-      )}
+        }
+        label={TRANSCRIPT_DENSITY_LABEL[density]}
+        title={`Conversation density: ${TRANSCRIPT_DENSITY_LABEL[density]} — ${TRANSCRIPT_DENSITY_HINT[density]}. Click, press ${DENSITY_SHORTCUT}, or type /density to change`}
+        onClick={() => onPick('density')}
+        tone={
+          isDefaultDensity
+            ? 'hover:text-neutral-300'
+            : 'text-[var(--accent-300)] hover:text-[var(--accent-200)]'
+        }
+        quiet={isDefaultDensity}
+        hideLabelAt={HIDE_DENSITY_LABEL}
+      />
       <ContextStatus usage={usage} compacting={compacting} />
       <RateLimitStatus backend={workspace.agentBackend} snapshot={rateLimits} />
     </div>
@@ -3208,7 +3486,7 @@ type PickerOption = {
 }
 
 /** 상태줄 클릭·슬래시 명령으로 여는 로컬 선택 카드의 종류. */
-type PickerKind = 'model' | 'effort' | 'fast' | 'agent' | 'plan'
+type PickerKind = 'model' | 'effort' | 'fast' | 'agent' | 'plan' | 'density'
 
 /**
  * 입력창 위에 뜨는 /model·/effort 선택 카드. 백엔드 왕복 없이 로컬에서 값을 고른다 —
@@ -3239,6 +3517,8 @@ function PickerCard({
   const pushToast = useStore((s) => s.pushToast)
   const confirm = useStore((s) => s.confirm)
   const resetContextUsage = useStore((s) => s.resetContextUsage)
+  const density = useStore((s) => s.transcriptDensity[workspace.id] ?? DEFAULT_TRANSCRIPT_DENSITY)
+  const setTranscriptDensity = useStore((s) => s.setTranscriptDensity)
   // 에이전트 교체는 이 카드가 유일한 경로가 아니다(main 이 같은 규칙으로 다시 판정한다).
   // 여기서는 카드가 떠 있는 동안 조건이 무너지는 경우(다른 창에서 턴이 시작됐다든지)를 본다.
   const availableAgents = useAvailableBackends()
@@ -3262,6 +3542,14 @@ function PickerCard({
         value: mode.id,
         label: mode.label,
         hint: mode.description
+      }))
+    }
+    if (kind === 'density') {
+      // 촘촘한 것부터 보여 준다 — 목록의 위아래가 화면의 길고 짧음과 같은 방향이 되게.
+      return [...TRANSCRIPT_DENSITIES].reverse().map((d) => ({
+        value: d,
+        label: TRANSCRIPT_DENSITY_LABEL[d],
+        hint: TRANSCRIPT_DENSITY_HINT[d]
       }))
     }
     if (kind === 'fast') {
@@ -3305,19 +3593,21 @@ function PickerCard({
 
   // 현재 값: fast 는 boolean|null 을 'on'/'off'/''(전역 따름) 문자열로 환산해 다른 카드와 같게 다룬다.
   const current =
-    kind === 'agent'
-      ? workspace.agentBackend
-      : kind === 'plan'
-        ? workspace.permissionMode
-        : kind === 'model'
-          ? (workspace.model ?? '')
-          : kind === 'effort'
-            ? (workspace.effort ?? '')
-            : workspace.fastMode === null
-              ? ''
-              : workspace.fastMode
-                ? 'on'
-                : 'off'
+    kind === 'density'
+      ? density
+      : kind === 'agent'
+        ? workspace.agentBackend
+        : kind === 'plan'
+          ? workspace.permissionMode
+          : kind === 'model'
+            ? (workspace.model ?? '')
+            : kind === 'effort'
+              ? (workspace.effort ?? '')
+              : workspace.fastMode === null
+                ? ''
+                : workspace.fastMode
+                  ? 'on'
+                  : 'off'
   const currentIdx = Math.max(
     0,
     options.findIndex((o) => o.value === current)
@@ -3326,7 +3616,14 @@ function PickerCard({
   const activeRef = useRef<HTMLButtonElement | null>(null)
 
   // /plan 은 Shift+Tab 처럼 턴 중에도 바꿀 수 있어 model·effort 의 세션 잠금을 따르지 않는다.
-  const locked = kind === 'agent' ? !agentSwitch.switchable : kind === 'plan' ? false : running
+  // /density 는 아예 세션 밖의 값이다 — 에이전트에게 아무것도 보내지 않는 화면 설정이라,
+  // 턴이 도는 중에 훑기 모드로 내려 다른 워크스페이스를 보러 가는 것이 오히려 이 기능의 쓸모다.
+  const locked =
+    kind === 'agent'
+      ? !agentSwitch.switchable
+      : kind === 'plan' || kind === 'density'
+        ? false
+        : running
 
   /**
    * 에이전트 교체 1건. 지난 대화를 넘겨야 하는 자리에서는 먼저 확인을 받는다 — 그 인수인계는
@@ -3340,7 +3637,7 @@ function PickerCard({
       const ok = await confirm({
         title: `Switch this workspace to ${label}?`,
         body:
-          `Agents can’t share a session, so the conversation so far rides along with your next ` +
+          `Agents can’t share a session, so a compact workspace checkpoint rides with your next ` +
           `message to ${label} — ${handoffCostLabel(handoffTokens)}, billed to your usage. ` +
           `Until you send that message it knows nothing about this workspace.`,
         confirmLabel: 'Switch and hand over',
@@ -3363,7 +3660,8 @@ function PickerCard({
   const apply = (value: string): void => {
     if (locked) return // 잠긴 동안에는 안내만 보여 준다.
     if (value !== current) {
-      if (kind === 'agent') void switchAgent(value as AgentBackendId)
+      if (kind === 'density') setTranscriptDensity(workspace.id, value as TranscriptDensity)
+      else if (kind === 'agent') void switchAgent(value as AgentBackendId)
       else if (kind === 'plan')
         void window.api.workspace.setPermissionMode(workspace.id, value as PermissionMode)
       else if (kind === 'model') void window.api.workspace.setModel(workspace.id, value || null)
@@ -3398,31 +3696,37 @@ function PickerCard({
   }, [cursor])
 
   const title =
-    kind === 'agent'
-      ? '/agent'
-      : kind === 'plan'
-        ? '/plan'
-        : kind === 'model'
-          ? '/model'
-          : kind === 'effort'
-            ? '/effort'
-            : '/fast'
+    kind === 'density'
+      ? '/density'
+      : kind === 'agent'
+        ? '/agent'
+        : kind === 'plan'
+          ? '/plan'
+          : kind === 'model'
+            ? '/model'
+            : kind === 'effort'
+              ? '/effort'
+              : '/fast'
   const description =
-    kind === 'agent'
-      ? 'Main agent for this workspace'
-      : kind === 'plan'
-        ? 'Permissions for this workspace'
-        : kind === 'model'
-          ? 'Model for this workspace'
-          : kind === 'effort'
-            ? 'Reasoning effort for this workspace'
-            : 'Fast mode for this workspace — same model, faster output'
+    kind === 'density'
+      ? `How much of this conversation to show — ${DENSITY_SHORTCUT} cycles it`
+      : kind === 'agent'
+        ? 'Main agent for this workspace'
+        : kind === 'plan'
+          ? 'Permissions for this workspace'
+          : kind === 'model'
+            ? 'Model for this workspace'
+            : kind === 'effort'
+              ? 'Reasoning effort for this workspace'
+              : 'Fast mode for this workspace — same model, faster output'
   // /fast 카드에서만: 지금 쓰는 모델이 fast mode 를 지원하지 않으면 켜도 소용없으므로 미리 알린다.
   const effectiveModel = workspace.model ?? workspace.lastModel ?? defaults.model
   const fastUnsupported = kind === 'fast' && !modelSupportsFastMode(models, effectiveModel)
   const iconProps = { size: 13, className: 'text-[var(--accent-400)] shrink-0' }
   const icon =
-    kind === 'agent' ? (
+    kind === 'density' ? (
+      <ListCollapse {...iconProps} />
+    ) : kind === 'agent' ? (
       <Bot {...iconProps} />
     ) : kind === 'plan' ? (
       <ShieldCheck {...iconProps} />
@@ -3567,7 +3871,9 @@ function ContextStatus({
       title={`Context: ${usage.usedTokens.toLocaleString()} / ${usage.maxTokens.toLocaleString()} tokens (${pct}%)`}
     >
       <Gauge size={11} className="shrink-0" />
-      <span className="h-1 w-16 rounded-full bg-[var(--surface-3)] overflow-hidden">
+      <span
+        className={'h-1 w-10 rounded-full bg-[var(--surface-3)] overflow-hidden ' + HIDE_IN_SLIVER}
+      >
         <span className={'block h-full rounded-full ' + barTone} style={{ width: `${pct}%` }} />
       </span>
       {pct}%
@@ -3644,7 +3950,8 @@ function RateLimitStatus({
   }
 
   return (
-    <div className="relative shrink-0" ref={ref}>
+    // 가장 좁을 때는 통째로 접는다 — 계정 단위 값이라 Overview 가 같은 것을 보여 준다.
+    <div className={'relative shrink-0 ' + HIDE_IN_SLIVER} ref={ref}>
       <button
         onClick={() => setOpen((v) => !v)}
         className={
@@ -3660,7 +3967,11 @@ function RateLimitStatus({
         }
       >
         <Activity size={11} className="shrink-0" />
-        <span className="h-1 w-16 rounded-full bg-[var(--surface-3)] overflow-hidden">
+        <span
+          className={
+            'h-1 w-10 rounded-full bg-[var(--surface-3)] overflow-hidden ' + HIDE_IN_SLIVER
+          }
+        >
           <span className={'block h-full rounded-full ' + barTone} style={{ width: `${pct}%` }} />
         </span>
         {pct}%
@@ -3671,7 +3982,7 @@ function RateLimitStatus({
           <div className="mb-2 flex items-center justify-between gap-2">
             <span className="text-xs font-medium text-neutral-200">Plan usage</span>
             {snapshot.subscriptionType && (
-              <span className="text-[10px] uppercase tracking-wide text-neutral-500">
+              <span className="text-2xs uppercase tracking-wide text-neutral-500">
                 {snapshot.subscriptionType}
               </span>
             )}
@@ -3701,7 +4012,7 @@ function RateLimitStatus({
                   >
                     {wp == null ? '—' : `${wp}%`}
                   </span>
-                  <span className="w-14 shrink-0 text-right text-[10px] text-neutral-600">
+                  <span className="w-14 shrink-0 text-right text-2xs text-neutral-600">
                     {reset ? `in ${reset}` : ''}
                   </span>
                 </div>
@@ -3710,13 +4021,13 @@ function RateLimitStatus({
           </div>
 
           <div className="mt-2 flex items-center justify-between gap-2 border-t border-[var(--border)] pt-2">
-            <span className="text-[10px] text-neutral-600">
+            <span className="text-2xs text-neutral-600">
               Updated {agoLabel(now - snapshot.fetchedAt)}
             </span>
             <button
               onClick={onRefresh}
               disabled={refreshing}
-              className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-neutral-400 transition-colors hover:bg-[var(--surface-3)] hover:text-neutral-200 disabled:opacity-50"
+              className="flex items-center gap-1 rounded px-1.5 py-0.5 text-2xs text-neutral-400 transition-colors hover:bg-[var(--surface-3)] hover:text-neutral-200 disabled:opacity-50"
               title="Check plan rate limits now"
             >
               <RefreshCw size={10} className={refreshing ? 'animate-spin' : ''} />
@@ -3732,6 +4043,6 @@ function RateLimitStatus({
 const EMPTY: ChatItem[] = []
 /** 멘션 후보가 없을 때 돌려주는 고정 배열(매 렌더 새 배열을 만들지 않도록). */
 const EMPTY_HITS: FileHit[] = []
-const EMPTY_QUEUE: import('../store').QueuedMessage[] = []
 /** 참조 동일성 유지용 — 매 렌더마다 새 배열을 만들면 하위 memo 가 헛되이 깨진다. */
 const EMPTY_COMMANDS: CommandPanelKind[] = []
+const EMPTY_PROMPTS: SavedPrompt[] = []

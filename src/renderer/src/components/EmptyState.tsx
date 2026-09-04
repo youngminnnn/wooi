@@ -20,7 +20,7 @@ export default function EmptyState(): React.JSX.Element {
         }}
       />
       <div className="relative max-w-md flex flex-col items-center">
-        <div className="mb-5 grid h-20 w-20 place-items-center rounded-2xl bg-[var(--surface)] border border-[var(--border-2)] shadow-xl">
+        <div className="mb-5 grid h-20 w-20 place-items-center rounded-xl bg-[var(--surface)] border border-[var(--border-2)] shadow-xl">
           <Logo size={44} />
         </div>
         <h2 className="text-lg font-semibold tracking-tight text-neutral-100 mb-2">Wooi</h2>

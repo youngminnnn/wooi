@@ -30,6 +30,7 @@ import {
   type LucideIcon
 } from 'lucide-react'
 import { useStore } from '../store'
+import { usePaneFocus } from '../lib/paneFocus'
 import MessageList from './MessageList'
 import Composer from './Composer'
 import ScriptPanel from './ScriptPanel'
@@ -138,6 +139,10 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
   )
   const toggleRightPanel = useStore((s) => s.toggleRightPanel)
   const workPaneDetached = useStore((s) => s.detachedPanes.work)
+  // 나란히 두 칸을 편 상태인가. 그렇다면 이 헤더는 화면 절반 안에 들어가고, 작업 패널은
+  // 세 번째 열이 되므로 아예 그리지 않는다 — 자리를 두고 다투는 도구는 여기서 접는다.
+  const { split: inSplit } = usePaneFocus()
+  const closeFocusedPane = useStore((s) => s.closeFocusedPane)
   const [showDiff, setShowDiff] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
 
@@ -236,7 +241,8 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
       title: `Archive "${displayName}"?`,
       body: 'Its worktree directory will be removed (branch & history kept). You can unarchive it later.',
       confirmLabel: 'Archive',
-      danger: true
+      danger: true,
+      skipKey: 'archiveWorkspace'
     })
     if (!ok) return
     const { archiveScriptFailure } = await runArchiveWorkspace(workspace.id)
@@ -346,7 +352,7 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
               {/* 편집 가능 힌트: 호버 시 연필 아이콘을 띄워 이름을 바꿀 수 있음을 알린다. */}
               <button
                 onClick={() => setEditingName(displayName)}
-                className="opacity-0 group-hover/name:opacity-100 shrink-0 grid place-items-center text-neutral-500 hover:text-neutral-200"
+                className="opacity-0 group-hover/name:opacity-100 focus-visible:opacity-100 shrink-0 grid place-items-center text-neutral-500 hover:text-neutral-200"
                 title="Rename workspace"
               >
                 <Pencil size={12} />
@@ -459,13 +465,16 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
             >
               <Terminal size={15} />
             </HeaderButton>
-            <HeaderButton
-              title="Open a file in the big viewer"
-              shortcut="⇧⌘O"
-              onClick={openFileQuickOpen}
-            >
-              <FileSearch size={15} />
-            </HeaderButton>
+            {/* 큰 파일 뷰어는 대화를 통째로 덮는 화면이라 나란히 편 두 칸과 함께 쓸 수 없다. */}
+            {!inSplit && (
+              <HeaderButton
+                title="Open a file in the big viewer"
+                shortcut="⇧⌘O"
+                onClick={openFileQuickOpen}
+              >
+                <FileSearch size={15} />
+              </HeaderButton>
+            )}
             <HeaderButton
               title="Open in editor"
               shortcut="⇧⌘E"
@@ -497,20 +506,32 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
               <Archive size={15} />
             </HeaderButton>
           </div>
-          <HeaderButton
-            title={
-              workPaneDetached
-                ? 'Work panel — open in a separate window'
-                : rightPanelOpen
-                  ? 'Hide work panel'
-                  : 'Show work panel'
-            }
-            shortcut="⌘J"
-            onClick={toggleRightPanel}
-            active={rightPanelOpen || workPaneDetached}
-          >
-            <PanelRight size={15} />
-          </HeaderButton>
+          {inSplit ? (
+            // 분할 중에는 이 자리에 "이 칸을 닫는다" 를 둔다. 작업 패널 토글은 그릴 패널이
+            // 없어 눌러도 아무 일도 일어나지 않으므로, 지금 뜻이 있는 동작으로 바꿔 준다.
+            <HeaderButton title="Close this pane" shortcut="⇧⌘W" onClick={() => closeFocusedPane()}>
+              <X size={15} />
+            </HeaderButton>
+          ) : (
+            <HeaderButton
+              // work-panel 힌트의 앵커. `App.tsx` 의 data-tour="work-panel" 은 패널의 **내용물**
+              // 컨테이너라 패널이 닫혀 있으면 DOM 에 아예 없다 — 그런데 이 힌트는 정확히 "패널이
+              // 닫혀 있을 때" 뜨므로, 그때도 항상 존재하는 이 토글 버튼을 대신 가리켜야 한다.
+              dataTour="work-panel-toggle"
+              title={
+                workPaneDetached
+                  ? 'Work panel — open in a separate window'
+                  : rightPanelOpen
+                    ? 'Hide work panel'
+                    : 'Show work panel'
+              }
+              shortcut="⌘J"
+              onClick={toggleRightPanel}
+              active={rightPanelOpen || workPaneDetached}
+            >
+              <PanelRight size={15} />
+            </HeaderButton>
+          )}
 
           <div className="workspace-header-basesync flex items-center gap-1.5 pl-2 ml-0.5 border-l border-[var(--border)] empty:hidden empty:border-l-0 empty:pl-0">
             {git && (
@@ -562,6 +583,7 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
                 // gh 미연결이면 버튼을 숨기지 않고 "Connect GitHub" 로 바꿔 기능의 존재를 알린다.
                 !prRefreshing && (
                   <HeaderChip
+                    data-tour="open-pr"
                     onClick={createPr}
                     title={
                       githubDisconnected
@@ -626,7 +648,7 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
               >
                 <CircleCheck size={13} />
                 Approve all ({approvableCount})
-                <kbd className="ml-0.5 rounded bg-white/20 px-1 py-0.5 text-[10px] leading-none font-medium tabular-nums">
+                <kbd className="ml-0.5 rounded bg-white/20 px-1 py-0.5 text-2xs leading-none font-medium tabular-nums">
                   ⇧⌘A
                 </kbd>
               </button>
@@ -642,7 +664,7 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
               >
                 <ShieldQuestion size={13} />
                 Needs input ({pendingElsewhereCount})
-                <kbd className="ml-0.5 rounded bg-black/20 px-1 py-0.5 text-[10px] leading-none font-medium tabular-nums">
+                <kbd className="ml-0.5 rounded bg-black/20 px-1 py-0.5 text-2xs leading-none font-medium tabular-nums">
                   ⌘I
                 </kbd>
               </button>
@@ -658,7 +680,7 @@ export default function ChatView({ workspace }: { workspace: Workspace }): React
               >
                 <BellDot size={13} />
                 Next unread ({unreadCount})
-                <kbd className="ml-0.5 rounded bg-white/20 px-1 py-0.5 text-[10px] leading-none font-medium tabular-nums">
+                <kbd className="ml-0.5 rounded bg-white/20 px-1 py-0.5 text-2xs leading-none font-medium tabular-nums">
                   ⌘U
                 </kbd>
               </button>

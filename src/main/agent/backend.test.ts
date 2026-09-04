@@ -118,9 +118,9 @@ describe('백엔드 간 관계', () => {
     expect(CODEX_META.capabilities.rateLimits).toBe(true)
   })
 
-  it('Codex 만 턴 중 steering 을 지원한다', () => {
+  it('두 백엔드 모두 턴 중 steering 을 지원한다', () => {
     expect(CODEX_META.capabilities.steering).toBe(true)
-    expect(CLAUDE_META.capabilities.steering).toBe(false)
+    expect(CLAUDE_META.capabilities.steering).toBe(true)
   })
 })
 

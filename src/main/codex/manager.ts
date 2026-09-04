@@ -1,17 +1,10 @@
 import { randomUUID } from 'node:crypto'
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import {
-  utilityProcess,
-  Notification,
-  app,
-  powerMonitor,
-  net,
-  BrowserWindow,
-  type UtilityProcess
-} from 'electron'
+import { utilityProcess, app, net, BrowserWindow, type UtilityProcess } from 'electron'
 import { getStore } from '../store'
 import { codexMcpServerEnv } from '../mcpSettings'
+import { agentDefaultEnv } from '../agentEnv'
 import { getTranscripts } from '../transcripts'
 import { log } from '../logger'
 import {
@@ -19,7 +12,7 @@ import {
   agentSettingsFor,
   isQuestionPermission,
   normalizePermissionMode,
-  workspaceDisplayName
+  promoteWorkspaceStack
 } from '@shared/types'
 import { CODEX_META, type AgentBackend, type TurnEndHook } from '../agent/backend'
 import { canLeadAgentTeam, delegateBackendsFor } from '../agent/multiAgent'
@@ -29,8 +22,9 @@ import { durationLabel } from './rateLimits'
 import { CodexSkillsCache, mergeSkillCommands } from './skills'
 import type { SkillsListResponse } from './wire'
 import { RateLimitResumeCoordinator } from '../rateLimitResume'
-import { notifyRemotePush } from '../remote'
-import { shouldSendRemotePush, type RemotePushKind } from '../remote/push'
+import { ShutdownResumeCoordinator } from '../shutdownResume'
+import { type RemotePushKind } from '../remote/push'
+import { showDesktopNotification } from '../notifications'
 import {
   expandWooiCommand,
   matchWooiCommand,
@@ -174,6 +168,7 @@ export class CodexSessionManager implements AgentBackend {
   >()
   private validModelIds: Set<string> | null = null
   private readonly rateLimitResume: RateLimitResumeCoordinator
+  private readonly shutdownResume: ShutdownResumeCoordinator
   /** 자동완성 hot path 는 이 캐시만 읽는다. app-server 의 skills/changed 알림만 이를 비운다. */
   private readonly skills = new CodexSkillsCache(async (cwd) => {
     const response = await this.request<SkillsListResponse>((reqId) => ({
@@ -199,14 +194,24 @@ export class CodexSessionManager implements AgentBackend {
     this.rateLimitResume = new RateLimitResumeCoordinator({
       backend: CODEX_META.id,
       refreshLimits: () => this.refreshRateLimits(true),
-      sendContinuation: (workspaceId, text) => this.sendContinuation(workspaceId, text),
+      sendContinuation: (workspaceId, text, label) =>
+        this.sendContinuation(workspaceId, text, label),
       emitItem: (workspaceId, item) =>
         this.dispatch(IPC.evtChat, { workspaceId, event: { type: 'item', item } }),
       // 맥이 자다 깼거나 와이파이가 꺼져 있으면 이어 보내 봐야 실패한다 — 보내기 전에 물어본다.
       isOnline: () => net.isOnline(),
       broadcastState: () => this.dispatch(IPC.evtState, getStore().getState())
     })
+    this.shutdownResume = new ShutdownResumeCoordinator({
+      backend: CODEX_META.id,
+      sendContinuation: (workspaceId, text, label) =>
+        this.sendContinuation(workspaceId, text, label),
+      emitItem: (workspaceId, item) =>
+        this.dispatch(IPC.evtChat, { workspaceId, event: { type: 'item', item } }),
+      broadcastState: () => this.dispatch(IPC.evtState, getStore().getState())
+    })
     this.rateLimitResume.restore()
+    this.shutdownResume.restore()
   }
 
   // ── 호스트 프로세스 ──────────────────────────────────────────────────────
@@ -221,6 +226,11 @@ export class CodexSessionManager implements AgentBackend {
       // 많아 GUI 앱의 기본 PATH 로는 찾지 못한다.
       env: {
         ...process.env,
+        // 설정에 얹은 백엔드 기본 환경 변수. codex 는 app-server·exec 둘 다 `env: process.env` 로
+        // spawn 하므로, 호스트 환경에 한 번 얹으면 새 spawn 경로를 만들지 않고 양쪽에 닿는다.
+        // 아래 WOOI_* 보다 **먼저** 펼치는 것이 요점이다 — 사용자가 같은 이름을 적어도 Wooi 가
+        // 스스로 정한 값이 이긴다(agentDefaultEnv 가 이미 걸러 내지만 순서로도 못 박는다).
+        ...agentDefaultEnv(CODEX_META.id),
         WOOI_USER_DATA: app.getPath('userData'),
         WOOI_LOG_NAME: 'codex-host.log',
         // 호스트는 설정 store 를 읽을 수 없다(electron `app` 이 없다) — 메인이 계산해 넘긴다.
@@ -419,6 +429,7 @@ export class CodexSessionManager implements AgentBackend {
     opts?: SendMessageOptions
   ): void {
     this.rateLimitResume.cancel(workspaceId)
+    this.shutdownResume.cancel(workspaceId)
     const ws = this.getWorkspace(workspaceId)
     if (!ws) return
 
@@ -506,14 +517,27 @@ export class CodexSessionManager implements AgentBackend {
     })
   }
 
-  private sendContinuation(workspaceId: string, text: string): void {
+  /**
+   * 사용량 제한·연결 복구 뒤 Wooi 가 대신 넣는 턴.
+   *
+   * silent 가 아니다 — 사용자가 치지 않은 턴이 토큰을 쓰므로 왜 돌았는지가 대화에 남아야 한다.
+   * 대신 origin 을 실어 화면에서는 한 줄로 접힌다([[shared/types]] WooiTurnOrigin).
+   */
+  private sendContinuation(workspaceId: string, text: string, label: string): void {
     const ws = this.getWorkspace(workspaceId)
     if (!ws) return
-    this.send({ type: 'send', workspaceId, config: this.configFor(ws), text })
+    this.send({
+      type: 'send',
+      workspaceId,
+      config: this.configFor(ws),
+      text,
+      origin: { kind: 'wooi', label }
+    })
   }
 
   async interrupt(workspaceId: string): Promise<void> {
     this.rateLimitResume.cancel(workspaceId, true)
+    this.shutdownResume.cancel(workspaceId)
     this.sendIfHost({ type: 'interrupt', workspaceId })
     // 위임 서브런은 세션이 아니라 메인에서 돈다 — 스레드 인터럽트로는 끊기지 않으므로 여기서 끊는다.
     abortSubAgents(workspaceId)
@@ -647,6 +671,7 @@ export class CodexSessionManager implements AgentBackend {
    */
   clearSession(workspaceId: string): void {
     this.rateLimitResume.cancel(workspaceId)
+    this.shutdownResume.cancel(workspaceId)
     this.dispose(workspaceId)
     getStore().update((st) => {
       const w = st.workspaces.find((x) => x.id === workspaceId)
@@ -680,6 +705,10 @@ export class CodexSessionManager implements AgentBackend {
 
   cancelAllRateLimitResumes(): void {
     this.rateLimitResume.cancelAll()
+  }
+
+  cancelAllShutdownResumes(): void {
+    this.shutdownResume.cancelAll()
   }
 
   disposeAll(): void {
@@ -992,7 +1021,13 @@ export class CodexSessionManager implements AgentBackend {
         if (w) {
           w.status = event.status
           w.lastActiveAt = Date.now()
+          // 새 턴이 시작하면 지난 턴의 중단 표시는 더 이상 사실이 아니다. 지우는 자리를 턴 **끝**이
+          // 아니라 **시작**으로 잡은 이유가 있다 — 중단하면 이 턴의 idle 이 뒤늦게 한 번 더 올라오고,
+          // 끝에서 지우면 방금 찍은 표시를 그 신호가 바로 지워 버린다.
+          if (event.status === 'running') w.interruptedTurn = null
         }
+        if (w && st.settings.autoSortWorkspacesByActivity)
+          st.workspaces = promoteWorkspaceStack(st.workspaces, workspaceId)
       })
       if (event.status === 'idle') this.notify(workspaceId, 'completed', 'Response complete', false)
       else if (event.status === 'error') this.notify(workspaceId, 'error', 'Session error', true)
@@ -1007,53 +1042,30 @@ export class CodexSessionManager implements AgentBackend {
         w.sessionId = sessionId
         w.lastActiveAt = Date.now()
       }
+      if (w && st.settings.autoSortWorkspacesByActivity)
+        st.workspaces = promoteWorkspaceStack(st.workspaces, workspaceId)
     })
   }
 
-  /** 창이 비활성일 때 OS 알림을 띄운다. 클릭하면 창을 포커스하고 해당 workspace 를 연다. */
+  /**
+   * OS 알림을 띄운다. 판정·전달은 [[main/notifications]] 이 맡는다 — Codex 매니저와 같은 것을
+   * 써야 사유 코드와 포커스 억제 규칙이 두 백엔드에서 갈라지지 않는다.
+   */
   private notify(
     workspaceId: string,
     event: NotificationEvent,
     body: string,
     urgent: boolean,
-    /**
-     * 폰 배너의 종류. 기본은 설정 이벤트와 같지만 갈릴 수 있다 — 질문은 설정에서는
-     * 'needsInput' 채널을 따르면서도 배너에서는 승인과 다른 말을 해야 한다(remote/push.ts).
-     */
     pushKind: RemotePushKind = event
   ): void {
-    const win = this.getWindow()
-    const ws = this.getWorkspace(workspaceId)
-    if (ws?.muted) return
-    const channels = getStore().getState().settings.notifications?.[event]
-    if (!channels?.osNotification) return
-
-    const focused = win?.isFocused() === true
-    // 폰 푸시는 데스크톱을 쓰고 있지 않을 때만 보낸다(설정으로 항상 보내게 할 수 있다).
-    // 포커스는 메인 창이 아니라 Wooi 창 전체로 본다 — 분리한 패널도 데스크톱을 쓰는 중이다.
-    if (
-      shouldSendRemotePush({
-        appFocused: BrowserWindow.getFocusedWindow() !== null,
-        idleSeconds: powerMonitor.getSystemIdleTime(),
-        always: getStore().getState().settings.remotePushWhileActive === true
-      })
-    ) {
-      notifyRemotePush(workspaceId, ws ? workspaceDisplayName(ws) : 'Workspace', pushKind)
-    }
-    if (focused || !Notification.isSupported()) return
-
-    const title = ws ? `${urgent ? '⚠️ ' : ''}${workspaceDisplayName(ws)}` : 'Wooi'
-    const notification = new Notification({ title, body, silent: !channels.sound })
-    notification.on('click', () => {
-      const w = this.getWindow()
-      if (w) {
-        if (w.isMinimized()) w.restore()
-        w.show()
-        w.focus()
+    showDesktopNotification(
+      { workspaceId, event, body, urgent, pushKind },
+      {
+        getWindow: this.getWindow,
+        getWorkspace: (id) => this.getWorkspace(id),
+        dispatch: (channel, payload) => this.dispatch(channel, payload)
       }
-      this.dispatch(IPC.evtSelectWorkspace, workspaceId)
-    })
-    notification.show()
+    )
   }
 }
 export const CODEX_ACCOUNT_CONFIG_COMMANDS: SlashCommandInfo[] = [

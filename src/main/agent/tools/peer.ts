@@ -68,7 +68,8 @@ const recentSends = new Map<string, number>()
  *
  * 정상 경로는 [[agent/orchestrator]] 의 TurnEndHook 이 즉시 비운다. 30초는 보통 도구 호출 하나보다
  * 길어 짧은 턴의 묶기 효과를 얻으면서도, 아주 긴 턴이나 유실된 status 이벤트 때문에 협업 소식이
- * 영영 갇히지 않게 하는 절충이다. 상한에서 보내도 백엔드 입력 큐가 현재 턴 뒤에 한 건으로 놓는다.
+ * 영영 갇히지 않게 하는 절충이다. 상한에서 보내도 진행 중인 턴에 접혀 들어가므로(두 백엔드 모두
+ * mid-turn 입력을 받아들인다), 묶어서 한 번에 주는 효과는 여전히 유효하다.
  */
 const PEER_BATCH_MAX_WAIT_MS = 30_000
 

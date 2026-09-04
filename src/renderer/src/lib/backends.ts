@@ -6,7 +6,12 @@ import type {
   ModelOption,
   Workspace
 } from '@shared/types'
-import { DEFAULT_AGENT_BACKEND, DEFAULT_AGENT_SETTINGS, agentSettingsFor } from '@shared/types'
+import {
+  DEFAULT_AGENT_BACKEND,
+  DEFAULT_AGENT_SETTINGS,
+  agentSettingsFor,
+  usableDefaultBackend
+} from '@shared/types'
 import { useStore } from '../store'
 
 /**
@@ -61,4 +66,20 @@ export function useAgentSettings(id: AgentBackendId | undefined): AgentSettings 
 export function useAvailableBackends(): AgentBackendMeta[] {
   const backends = useStore((s) => s.backends)
   return useMemo(() => backends.filter((b) => b.available), [backends])
+}
+
+/**
+ * 지금 실제로 쓸 수 있는 기본 에이전트.
+ *
+ * 저장된 `defaultAgentBackend`가 감지된 백엔드 목록에 없으면(그 CLI 를 지운 등) 화면에서만 쓸 수
+ * 있는 것으로 바꿔 보여준다 — 저장값 자체는 건드리지 않는다(`usableDefaultBackend`). 반환값이
+ * 원시 문자열이라 `useAvailableBackends`와 달리 참조 동일성 문제(React #185)는 없다.
+ */
+export function useDefaultBackend(): AgentBackendId {
+  const configured = useStore((s) => s.app?.settings.defaultAgentBackend ?? DEFAULT_AGENT_BACKEND)
+  const available = useAvailableBackends()
+  return usableDefaultBackend(
+    configured,
+    available.map((b) => b.id)
+  )
 }

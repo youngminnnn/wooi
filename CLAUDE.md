@@ -21,10 +21,24 @@
 
 브랜치는 `<type>/<설명>` 형식이어야 한다(`feat`, `fix`, `docs`, `style`, `refactor`, `perf`,
 `test`, `build`, `ci`, `chore`, `revert`, `release`). 규칙의 단일 소스는
-`scripts/check-branch-name.mjs` 이고, pre-push 훅과 CI(`ci.yml`)가 이를 공유한다.
+`scripts/branch-name-rule.mjs` 이고, pre-push 훅과 CI(`ci.yml`)가 쓰는
+`scripts/check-branch-name.mjs`(CLI)와 앱(`src/main/branchNameFromWork.ts`)이 이를 공유한다.
 
 - Wooi 워크트리는 `fearless-echidna` 같은 랜덤 이름으로 브랜치를 만든다. 이 이름은 규칙에
-  어긋나므로 **origin 에 push 하기 전에 로컬 브랜치 이름부터 바꾼 뒤 push 한다.**
+  어긋나므로 **origin 에 push 하기 전에 이름을 바꿔야 한다.**
+- **규칙에 막히면 멈추지 말고 이름을 바꿔 진행한다. 이름은 에이전트가 정한다 — 사용자에게
+  묻지 않는다.** 브랜치 이름은 되돌리기 쉽고(개명 뒤에도 워크트리·PR 이 그대로 따라온다)
+  재료가 이미 다 나와 있다 — 방금 쓴 커밋과 바꾼 파일이면 충분하다. 여기서 한 번 물어보는 것은
+  사용자에게 결정을 넘기는 게 아니라 이미 답이 정해진 질문으로 작업을 멈춰 세우는 것이다.
+- **이름 짓는 법** — `<type>/<설명>`. `type` 은 그 작업의 커밋 타입과 맞추고, `설명` 은
+  영어 kebab-case 2~4 단어로 *무엇을 했는지* 적는다(워크스페이스 랜덤 이름을 그대로 옮기지
+  말 것 — `feat/sleepy-dolphin` 은 규칙만 통과하고 아무것도 알려주지 않는다).
+  예: `perf/idle-battery-drain`, `fix/first-message-stall`, `refactor/split-git-module`.
+- **`open_pull_request` 도구를 쓰면 손으로 바꿀 필요가 없다.** 아직 push 되지 않은 랜덤 이름
+  브랜치면 도구가 push 전에 멈춰 선다(이름을 제안할 때도, 규칙 위반만 알릴 때도 있다).
+  어느 쪽이든 위 규칙대로 이름을 정해 `renameBranch` 에 실어 곧바로 다시 부르면 개명 후
+  push 한다(빈 문자열이면 그대로 push). 이름을 짓는 별도의 모델 호출은 없다.
+- `git push` 를 직접 할 때는 여전히 손으로 바꾼다.
 
   ```sh
   git branch -m feat/inline-github-login   # 현재 브랜치를 규칙에 맞는 이름으로

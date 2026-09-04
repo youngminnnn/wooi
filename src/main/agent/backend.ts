@@ -21,6 +21,7 @@ import type {
   PermissionMode,
   PermissionModeInfo,
   RewindActionResult,
+  RewindMode,
   SendMessageOptions,
   SlashCommandInfo,
   Workspace
@@ -95,6 +96,7 @@ export interface AgentBackend {
   recycleAll(): void
   /** 설정 해제·계정 변경 시 이 백엔드의 예약된 자동 재개를 모두 취소한다. */
   cancelAllRateLimitResumes?(): void
+  cancelAllShutdownResumes?(): void
   /**
    * 모델 선택지. 정적(Claude)일 수도, 백엔드에 질의(Codex 의 model/list)할 수도 있다.
    *
@@ -133,8 +135,12 @@ export interface AgentBackend {
   listPlugins?(cwds: string[]): Promise<CodexPluginInventory>
   /** 그중 하나가 무엇을 싣고 있는지(스킬·MCP 서버·훅). 목록 행을 펼칠 때만 부른다. */
   readPlugin?(ref: CodexPluginRef): Promise<CodexPluginDetail>
-  /** /rewind — 체크포인트로 파일 되돌리기(capabilities.rewind). */
-  rewindAction(workspaceId: string, userMessageId: string): Promise<RewindActionResult>
+  /** /rewind — 체크포인트로 파일·대화 되돌리기(capabilities.rewind). */
+  rewindAction(
+    workspaceId: string,
+    userMessageId: string,
+    mode: RewindMode
+  ): Promise<RewindActionResult>
   /** reasoning effort / ultracode 오버라이드(capabilities.effort). */
   setEffort(workspaceId: string, effort: EffortSetting | null): void
   /** fast mode(`/fast`) 오버라이드(capabilities.fastMode). null 이면 전역 설정을 따른다. */
@@ -317,8 +323,10 @@ export const CLAUDE_META: AgentBackendMeta = {
       'hooks'
     ],
     slashCommands: true,
-    // Agent SDK 는 스트리밍 입력 큐를 쓰지만 턴이 도는 중의 입력은 다음 턴으로 넘어간다.
-    steering: false,
+    // 실측(SDK 0.3.233 / 번들 CLI 2.1.233): 턴이 도는 중 스트리밍 입력 큐에 메시지를 밀어 넣으면
+    // CLI 가 툴 라운드 사이에 진행 중인 턴으로 접어 넣는다(fold). 단, 툴을 하나도 쓰지 않는 순수
+    // 텍스트 턴은 접힐 지점이 없어 다음 턴으로 밀린다.
+    steering: true,
     inAppLogin: true,
     rateLimits: true,
     // SDK 의 additionalDirectories 로 worktree 밖 디렉토리를 작업 루트에 더할 수 있다.

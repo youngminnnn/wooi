@@ -19,7 +19,7 @@ export function WorkspaceApiRetry({
   return (
     <div
       style={{ paddingLeft: 12 + depth * 14 + 16 }}
-      className="flex items-center gap-1.5 pr-2 py-0.5 text-xs text-amber-400"
+      className="flex items-center gap-1.5 pr-2 py-0.5 text-xs text-[var(--warning-400)]"
       title={text}
       role="status"
     >

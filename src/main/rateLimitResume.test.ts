@@ -6,13 +6,17 @@ import { activeRateLimitPause } from '@shared/types'
 import type { AppState, RateLimitPause, RateLimitSnapshot, Workspace } from '@shared/types'
 import {
   CONNECTION_CONTINUATION,
+  CONNECTION_CONTINUATION_LABEL,
   RATE_LIMIT_CONTINUATION,
+  RATE_LIMIT_CONTINUATION_LABEL,
   RateLimitResumeCoordinator,
   backoffWait,
   exhaustedResetTimes,
   isRateLimited,
+  likelyExhaustedResetAt,
   retryTime
 } from './rateLimitResume'
+import { resetResumeBudget } from './resumeBudget'
 
 const NOW = Date.parse('2026-08-10T00:00:00Z')
 
@@ -58,6 +62,56 @@ describe('rate-limit resume scheduling', () => {
       { label: '5-hour', utilization: 99, resetsAt: '2026-08-10T01:00:00Z' }
     ])
     expect(exhaustedResetTimes(limits, NOW)).toEqual([])
+  })
+
+  it('막 걸린 순간엔 사용률이 늦다 — 가장 많이 쓴 창의 해제 시각까지 기다린다', () => {
+    // 5시간 창을 소진했는데 CLI 가 주는 수치는 아직 99% 인, 제한 직후의 스냅샷.
+    const limits = snapshot([
+      { label: '5-hour', utilization: 99, resetsAt: '2026-08-10T04:20:00Z' },
+      { label: '7-day', utilization: 14, resetsAt: '2026-08-16T12:00:00Z' },
+      { label: '7-day (Fable)', utilization: 0, resetsAt: null }
+    ])
+    expect(likelyExhaustedResetAt(limits, NOW)).toBe(Date.parse('2026-08-10T04:20:00Z'))
+    // 눈먼 5분 백오프가 아니라 실제 해제 시각으로 예약해야 한다.
+    expect(retryTime(limits, NOW)).toBe(Date.parse('2026-08-10T04:20:15Z'))
+  })
+
+  it('주간 창을 소진했으면 5시간 창이 한가해도 주간 창까지 기다린다', () => {
+    const limits = snapshot([
+      { label: '5-hour', utilization: 20, resetsAt: '2026-08-10T02:00:00Z' },
+      { label: '7-day (Opus)', utilization: 99, resetsAt: '2026-08-13T00:00:00Z' }
+    ])
+    expect(retryTime(limits, NOW)).toBe(Date.parse('2026-08-13T00:00:15Z'))
+  })
+
+  it('100% 인 창이 있으면 그쪽이 이긴다 — 추정은 아무것도 모를 때만 쓴다', () => {
+    const limits = snapshot([
+      { label: '5-hour', utilization: 100, resetsAt: '2026-08-10T01:00:00Z' },
+      { label: '7-day', utilization: 40, resetsAt: '2026-08-16T00:00:00Z' }
+    ])
+    expect(retryTime(limits, NOW)).toBe(Date.parse('2026-08-10T01:00:15Z'))
+  })
+
+  it('한참 남은 사용률은 늦은 것이 아니라 모르는 것이다 — 추정하지 않고 백오프로 물러선다', () => {
+    // 조회는 "20% 밖에 안 썼다" 고 하는데 실제 턴은 제한에 걸리는 상태. 이 수치는 근거가 못 된다.
+    expect(
+      likelyExhaustedResetAt(
+        snapshot([{ label: '5-hour', utilization: 20, resetsAt: '2026-08-10T05:00:00Z' }]),
+        NOW
+      )
+    ).toBeNull()
+    // 창이 없거나, 해제 시각이 이미 지났거나, 시각 자체가 없는 창도 마찬가지다.
+    expect(likelyExhaustedResetAt(snapshot([]), NOW)).toBeNull()
+    expect(
+      likelyExhaustedResetAt(
+        snapshot([{ label: '5-hour', utilization: 99, resetsAt: '2026-08-09T23:00:00Z' }]),
+        NOW
+      )
+    ).toBeNull()
+    expect(
+      likelyExhaustedResetAt(snapshot([{ label: '5-hour', utilization: 99, resetsAt: null }]), NOW)
+    ).toBeNull()
+    expect(retryTime(snapshot([]), NOW)).toBe(NOW + 5 * 60_000 + 15_000)
   })
 
   it('오류가 알려 준 해제 시각을 쓴다 — 스냅샷이 비어 있어도 그때까지 기다린다', () => {
@@ -282,7 +336,11 @@ describe('RateLimitResumeCoordinator', () => {
     await coordinator.noteRateLimit(WORKSPACE_ID)
     await vi.advanceTimersByTimeAsync(5 * 60_000 + 15_000)
 
-    expect(sent).toHaveBeenCalledWith(WORKSPACE_ID, RATE_LIMIT_CONTINUATION)
+    expect(sent).toHaveBeenCalledWith(
+      WORKSPACE_ID,
+      RATE_LIMIT_CONTINUATION,
+      RATE_LIMIT_CONTINUATION_LABEL
+    )
     expect(store.getState().workspaces[0].pendingRateLimitResume).toBeNull()
     expect(store.getState().workspaces[0].rateLimited).toBeNull()
   })
@@ -321,9 +379,140 @@ describe('RateLimitResumeCoordinator', () => {
     await coordinator.noteRateLimit(WORKSPACE_ID, Date.now() + 60_000)
     await vi.advanceTimersByTimeAsync(75_000)
 
-    expect(sent).toHaveBeenCalledWith(WORKSPACE_ID, RATE_LIMIT_CONTINUATION)
+    expect(sent).toHaveBeenCalledWith(
+      WORKSPACE_ID,
+      RATE_LIMIT_CONTINUATION,
+      RATE_LIMIT_CONTINUATION_LABEL
+    )
     expect(store.getState().workspaces[0].pendingRateLimitResume).toBeNull()
     expect(store.getState().workspaces[0].rateLimited).toBeNull()
+  })
+
+  /** 5시간 창이 막 굴러간 직후의 usage 응답 — 사용률은 옛 창의 100%, resetsAt 은 새 창의 것. */
+  function windows(utilization: number, resetsInMs: number): RateLimitSnapshot['windows'] {
+    return [
+      {
+        label: '5-hour',
+        utilization,
+        resetsAt: new Date(Date.now() + resetsInMs).toISOString()
+      }
+    ]
+  }
+
+  it('예약이 다섯 시간 뒤로 밀렸어도 그 전에 제한이 풀리면 기다리지 않고 이어간다', async () => {
+    const { getStore } = await import('./store')
+    const store = getStore()
+    seedWorkspace(store)
+    const sent = vi.fn()
+    let utilization = 100
+    const coordinator = new RateLimitResumeCoordinator({
+      backend: 'claude',
+      refreshLimits: async () => {
+        store.update((state) => {
+          state.rateLimitsByAgent = {
+            ...state.rateLimitsByAgent,
+            claude: {
+              fetchedAt: Date.now(),
+              available: true,
+              subscriptionType: 'pro',
+              windows: windows(utilization, 5 * 60 * 60_000)
+            }
+          }
+        })
+      },
+      sendContinuation: sent,
+      emitItem: () => {},
+      broadcastState: () => {}
+    })
+
+    await coordinator.noteRateLimit(WORKSPACE_ID)
+    // 스냅샷을 그대로 믿어 다섯 시간 뒤로 예약했다.
+    const pending = store.getState().workspaces[0].pendingRateLimitResume
+    expect(pending?.retryAt).toBeGreaterThan(Date.now() + 4 * 60 * 60_000)
+
+    await vi.advanceTimersByTimeAsync(6 * 60_000)
+    expect(sent).not.toHaveBeenCalled()
+
+    // 실제로는 십 분 만에 풀렸다 — 예약 시각을 기다리지 않고 그것을 알아채야 한다.
+    utilization = 20
+    await vi.advanceTimersByTimeAsync(6 * 60_000)
+
+    expect(sent).toHaveBeenCalledWith(
+      WORKSPACE_ID,
+      RATE_LIMIT_CONTINUATION,
+      RATE_LIMIT_CONTINUATION_LABEL
+    )
+    expect(store.getState().workspaces[0].pendingRateLimitResume).toBeNull()
+  })
+
+  it('낡은 스냅샷은 제한이 풀렸다는 근거가 되지 않는다 — 조회가 실패하면 예약대로 기다린다', async () => {
+    const { getStore } = await import('./store')
+    const store = getStore()
+    seedWorkspace(store)
+    store.update((state) => {
+      // 제한에 걸리기 한참 전에 성공한 조회. 그 뒤로는 조회가 계속 실패해 이 값이 그대로 남아 있다.
+      state.rateLimitsByAgent = {
+        ...state.rateLimitsByAgent,
+        claude: {
+          fetchedAt: Date.now() - 60 * 60_000,
+          available: true,
+          subscriptionType: 'pro',
+          windows: windows(20, 5 * 60 * 60_000)
+        }
+      }
+    })
+    const sent = vi.fn()
+    const coordinator = new RateLimitResumeCoordinator({
+      backend: 'claude',
+      refreshLimits: async () => {},
+      sendContinuation: sent,
+      emitItem: () => {},
+      broadcastState: () => {}
+    })
+
+    await coordinator.noteRateLimit(WORKSPACE_ID, Date.now() + 5 * 60 * 60_000)
+    await vi.advanceTimersByTimeAsync(30 * 60_000)
+
+    expect(sent).not.toHaveBeenCalled()
+    expect(store.getState().workspaces[0].pendingRateLimitResume).not.toBeNull()
+  })
+
+  it('해제 시각을 모른 채 백오프로 물러선 예약은 앞당기지 않는다 — 시도 예산이 몇 분 만에 타 버린다', async () => {
+    const { getStore } = await import('./store')
+    const store = getStore()
+    seedWorkspace(store)
+    const sent = vi.fn()
+    const coordinator = new RateLimitResumeCoordinator({
+      backend: 'claude',
+      // 조회는 "괜찮다" 고 말하는데 실제 턴은 제한에 걸리는 상태. 물러선 시간을 지켜야 한다.
+      refreshLimits: async () => {
+        store.update((state) => {
+          state.rateLimitsByAgent = {
+            ...state.rateLimitsByAgent,
+            claude: {
+              fetchedAt: Date.now(),
+              available: true,
+              subscriptionType: 'pro',
+              windows: windows(20, 5 * 60 * 60_000)
+            }
+          }
+        })
+      },
+      sendContinuation: sent,
+      emitItem: () => {},
+      broadcastState: () => {}
+    })
+
+    await coordinator.noteRateLimit(WORKSPACE_ID)
+    await vi.advanceTimersByTimeAsync(5 * 60_000 + 15_000)
+    expect(sent).toHaveBeenCalledTimes(1)
+
+    // 이어 보낸 턴이 또 제한에 걸렸다 — 이번엔 10분 뒤다. 그 사이 조회가 괜찮다고 해도 안 보낸다.
+    await coordinator.noteRateLimit(WORKSPACE_ID)
+    expect(store.getState().workspaces[0].rateLimited?.resetsAt).toBeNull()
+    await vi.advanceTimersByTimeAsync(8 * 60_000)
+
+    expect(sent).toHaveBeenCalledTimes(1)
   })
 
   it('네트워크가 없으면 보내지 않고 기다렸다가, 연결이 돌아오면 이어 보낸다', async () => {
@@ -350,7 +539,11 @@ describe('RateLimitResumeCoordinator', () => {
 
     online = true
     await vi.advanceTimersByTimeAsync(30_000)
-    expect(sent).toHaveBeenCalledWith(WORKSPACE_ID, RATE_LIMIT_CONTINUATION)
+    expect(sent).toHaveBeenCalledWith(
+      WORKSPACE_ID,
+      RATE_LIMIT_CONTINUATION,
+      RATE_LIMIT_CONTINUATION_LABEL
+    )
     expect(store.getState().workspaces[0].pendingRateLimitResume).toBeNull()
   })
 
@@ -373,7 +566,11 @@ describe('RateLimitResumeCoordinator', () => {
     vi.setSystemTime(Date.now() + 6 * 60 * 60_000)
     await vi.advanceTimersByTimeAsync(60_000)
 
-    expect(sent).toHaveBeenCalledWith(WORKSPACE_ID, RATE_LIMIT_CONTINUATION)
+    expect(sent).toHaveBeenCalledWith(
+      WORKSPACE_ID,
+      RATE_LIMIT_CONTINUATION,
+      RATE_LIMIT_CONTINUATION_LABEL
+    )
   })
 
   it('이어 보낸 턴이 실패하면 다시 예약하고, 그래도 안 되면 예산 안에서 멈춘다', async () => {
@@ -557,7 +754,11 @@ describe('연결 실패 이어가기', () => {
     expect(store.getState().workspaces[0].rateLimited).toBeNull()
 
     await vi.advanceTimersByTimeAsync(30_000)
-    expect(sent).toHaveBeenCalledWith(WORKSPACE_ID, CONNECTION_CONTINUATION)
+    expect(sent).toHaveBeenCalledWith(
+      WORKSPACE_ID,
+      CONNECTION_CONTINUATION,
+      CONNECTION_CONTINUATION_LABEL
+    )
     expect(store.getState().workspaces[0].pendingRateLimitResume).toBeNull()
   })
 
@@ -656,5 +857,153 @@ describe('연결 실패 이어가기', () => {
 
     coordinator.noteConnectionLost(WORKSPACE_ID)
     expect(store.getState().workspaces[0].pendingRateLimitResume).toBeNull()
+  })
+})
+
+/**
+ * 복귀 정책의 계약: **앱이 꺼져 있던 동안 밀린 예약을 켜자마자 몰아서 보내지 않는다.**
+ * 데스크톱 앱이라 예약 시각에 프로세스가 없을 수 있고, 그때 그냥 다시 걸면 워크스페이스 수만큼의
+ * 턴이 동시에 시작된다 — 깨움 하나가 곧 사용자 토큰 하나이므로 이것이 막아야 할 최악이다.
+ */
+describe('놓친 예약의 유예(grace) 정책', () => {
+  interface Spec {
+    id: string
+    retryAt: number
+  }
+
+  function seedPending(
+    store: { update: (mutate: (state: AppState) => void) => void },
+    specs: Spec[]
+  ): void {
+    store.update((draft) => {
+      draft.workspaces = specs.map(
+        ({ id, retryAt }) =>
+          ({
+            id,
+            repoId: 'repo-1',
+            agentBackend: 'claude',
+            name: id,
+            displayName: null,
+            branch: `feat/${id}`,
+            baseBranch: 'main',
+            worktreePath: `/tmp/${id}`,
+            status: 'idle',
+            sessionId: `sess-${id}`,
+            archived: false,
+            rateLimited: null,
+            pendingRateLimitResume: {
+              backend: 'claude',
+              sessionId: `sess-${id}`,
+              detectedAt: retryAt - 60_000,
+              cause: 'rateLimit',
+              retryAt,
+              attempt: 0
+            }
+          }) as unknown as Workspace
+      )
+      draft.settings.autoResumeAfterRateLimit = true
+      draft.rateLimitsByAgent = {
+        claude: { fetchedAt: 1, available: true, subscriptionType: 'pro', windows: [] }
+      }
+    })
+  }
+
+  function coordinatorWith(continued: string[], notices: string[]): RateLimitResumeCoordinator {
+    return new RateLimitResumeCoordinator({
+      backend: 'claude',
+      refreshLimits: async () => {},
+      sendContinuation: (workspaceId) => continued.push(workspaceId),
+      emitItem: (workspaceId, item) => notices.push(`${workspaceId}:${item.type}`),
+      broadcastState: () => {}
+    })
+  }
+
+  const pendingOf = (state: AppState, id: string): unknown =>
+    state.workspaces.find((ws) => ws.id === id)?.pendingRateLimitResume
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(NOW)
+    resetResumeBudget()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('밀린 예약이 여럿이어도 가장 최근 것 하나만 이어가고 나머지는 버린다', async () => {
+    const { getStore } = await import('./store')
+    seedPending(getStore(), [
+      { id: 'ws-old', retryAt: NOW - 30 * 60_000 },
+      { id: 'ws-new', retryAt: NOW - 60_000 },
+      { id: 'ws-mid', retryAt: NOW - 10 * 60_000 }
+    ])
+    const continued: string[] = []
+    const notices: string[] = []
+    coordinatorWith(continued, notices).restore()
+    await vi.advanceTimersByTimeAsync(1)
+
+    expect(continued).toEqual(['ws-new'])
+    const state = getStore().getState()
+    expect(pendingOf(state, 'ws-old')).toBeNull()
+    expect(pendingOf(state, 'ws-mid')).toBeNull()
+    // 버린 것은 조용히 알린다 — 자동으로 돌리지는 않는다.
+    expect(notices.filter((text) => text.startsWith('ws-old:'))).toHaveLength(1)
+    expect(notices.filter((text) => text.startsWith('ws-mid:'))).toHaveLength(1)
+  })
+
+  it('유예 창을 넘긴 예약은 이어가지 않고 버린다', async () => {
+    const { getStore } = await import('./store')
+    seedPending(getStore(), [{ id: 'ws-stale', retryAt: NOW - 2 * 60 * 60_000 }])
+    const continued: string[] = []
+    const notices: string[] = []
+    coordinatorWith(continued, notices).restore()
+    await vi.advanceTimersByTimeAsync(60_000)
+
+    expect(continued).toEqual([])
+    expect(pendingOf(getStore().getState(), 'ws-stale')).toBeNull()
+    expect(notices).toHaveLength(1)
+  })
+
+  it('시각이 아직 오지 않은 예약은 그대로 살려 두고 유예 예산도 쓰지 않는다', async () => {
+    const { getStore } = await import('./store')
+    seedPending(getStore(), [
+      { id: 'ws-future', retryAt: NOW + 30 * 60_000 },
+      { id: 'ws-missed', retryAt: NOW - 60_000 }
+    ])
+    const continued: string[] = []
+    const notices: string[] = []
+    coordinatorWith(continued, notices).restore()
+    await vi.advanceTimersByTimeAsync(1)
+
+    expect(continued).toEqual(['ws-missed'])
+    expect(pendingOf(getStore().getState(), 'ws-future')).not.toBeNull()
+  })
+
+  it('빗장은 백엔드 사이에서도 공유된다 — 복귀 한 번에 깨움은 하나뿐이다', async () => {
+    const { getStore } = await import('./store')
+    seedPending(getStore(), [
+      { id: 'ws-claude', retryAt: NOW - 60_000 },
+      { id: 'ws-codex', retryAt: NOW - 2 * 60_000 }
+    ])
+    getStore().update((draft) => {
+      const codex = draft.workspaces.find((ws) => ws.id === 'ws-codex')!
+      codex.agentBackend = 'codex'
+      codex.pendingRateLimitResume!.backend = 'codex'
+    })
+    const continued: string[] = []
+    const notices: string[] = []
+    coordinatorWith(continued, notices).restore()
+    new RateLimitResumeCoordinator({
+      backend: 'codex',
+      refreshLimits: async () => {},
+      sendContinuation: (workspaceId) => continued.push(workspaceId),
+      emitItem: (workspaceId, item) => notices.push(`${workspaceId}:${item.type}`),
+      broadcastState: () => {}
+    }).restore()
+    await vi.advanceTimersByTimeAsync(1)
+
+    expect(continued).toEqual(['ws-claude'])
+    expect(pendingOf(getStore().getState(), 'ws-codex')).toBeNull()
   })
 })

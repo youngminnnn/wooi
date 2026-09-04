@@ -8,6 +8,8 @@ import {
   Clock,
   Compass,
   Download,
+  Eye,
+  EyeOff,
   Info,
   Laptop,
   Link2,
@@ -16,10 +18,12 @@ import {
   RotateCcw,
   Search,
   Settings2,
+  Trash2,
   X
 } from 'lucide-react'
 import { useStore } from '../store'
 import { openRepoSettings } from '../lib/repoSettings'
+import { openMigrate } from '../lib/migrate'
 import { hasNewVersion, scheduledRestartText, updateStatusText } from '../lib/update'
 import { useNow } from '../lib/useNow'
 import { inputClass } from './Modal'
@@ -32,13 +36,18 @@ import { permissionModesFor } from '../lib/permission'
 import { effortOptionsFor } from '../lib/effort'
 import { useAvailableBackends, useBackend, useModels } from '../lib/backends'
 import { applyTheme } from '../lib/theme'
-import { SETTINGS_PAGE_KEY, type SettingsPage } from '../lib/settingsNavigation'
+import { SETTINGS_PAGES, SETTINGS_PAGE_KEY, type SettingsPage } from '../lib/settingsNavigation'
+import { CONFIRM_SKIP_LABELS } from '../lib/confirmSkips'
 import {
+  CONFIRM_SKIP_KEYS,
   DEFAULT_AGENT_SETTINGS,
   DEFAULT_NOTIFICATION_SETTINGS,
   NOTIFICATION_CHANNEL_LABELS,
   NOTIFICATION_EVENT_LABELS,
+  NOTIFICATION_SKIP_LABELS,
   agentSettingsFor,
+  isBlockedAgentEnvKey,
+  isValidAgentEnvKey,
   normalizePermissionMode
 } from '@shared/types'
 import type {
@@ -50,6 +59,7 @@ import type {
   NotificationChannel,
   NotificationEvent,
   NotificationSettings,
+  NotificationSkip,
   PermissionMode,
   Repo,
   ThemePreference
@@ -96,58 +106,29 @@ function PermissionModeHelp({
     </details>
   )
 }
-const PAGES: { id: Page; label: string; icon: typeof Settings2; keywords: string }[] = [
-  {
-    id: 'general',
-    label: 'General',
-    icon: Settings2,
-    keywords: 'theme appearance panel sidebar workspace creation'
-  },
-  {
-    id: 'agents',
-    label: 'Agents',
-    icon: Bot,
-    keywords: 'model permission reasoning effort fast compact claude codex'
-  },
-  {
-    id: 'notifications',
-    label: 'Notifications',
-    icon: Bell,
-    keywords: 'notification sound badge completed error input'
-  },
-  {
-    id: 'integrations',
-    label: 'Integrations',
-    icon: Link2,
-    keywords: 'login account github claude codex connect'
-  },
-  {
-    id: 'mcp',
-    label: 'MCP servers',
-    icon: Plug,
-    keywords: 'mcp model context protocol server tool stdio http sse claude.json'
-  },
-  {
-    id: 'plugins',
-    label: 'Plugins',
-    icon: Blocks,
-    keywords: 'plugin marketplace codex agent skill hook extension install'
-  },
-  {
-    id: 'repositories',
-    label: 'Repositories',
-    icon: Laptop,
-    keywords: 'repo setup dev archive carry worktree'
-  },
-  { id: 'about', label: 'About', icon: Info, keywords: 'version update tour help' }
-]
+/**
+ * 좌측 목록에 붙일 아이콘. 라벨·키워드는 [[lib/settingsNavigation]] 이 들고 있다 — ⌘K 팔레트가
+ * 같은 목록을 읽어야 해서 밖으로 옮겼고, 여기 남는 것은 그리는 데만 필요한 아이콘뿐이다.
+ */
+const PAGE_ICONS: Record<Page, typeof Settings2> = {
+  general: Settings2,
+  agents: Bot,
+  notifications: Bell,
+  integrations: Link2,
+  mcp: Plug,
+  plugins: Blocks,
+  repositories: Laptop,
+  about: Info
+}
 
+const PAGES = SETTINGS_PAGES.map((p) => ({ ...p, icon: PAGE_ICONS[p.id] }))
 function describeRepoConfig(repo: Repo): string {
   const parts: string[] = []
   if (repo.setupScript.trim()) parts.push('setup')
   if (repo.runScripts.length) parts.push(`${repo.runScripts.length} run script(s)`)
   if (repo.archiveScript.trim()) parts.push('archive')
   if (repo.carryItems.length > 0) parts.push(`${repo.carryItems.length} carried file(s)`)
+  if (repo.savedPrompts?.length) parts.push(`${repo.savedPrompts.length} saved prompt(s)`)
   return parts.length > 0 ? parts.join(' · ') : 'Nothing configured yet'
 }
 
@@ -246,7 +227,7 @@ export default function SettingsModal({
     : false
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/55" onMouseDown={onClose}>
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/50" onMouseDown={onClose}>
       <div
         role="dialog"
         aria-modal="true"
@@ -446,6 +427,76 @@ function GeneralPage({
             onChange={(value) => save({ showRunningAgents: value })}
           />
         </SettingRow>
+        <SettingRow
+          title="Recently active workspaces first"
+          description="Moves the active workspace stack below pinned stacks. You can still drag stacks into your preferred order."
+        >
+          <Switch
+            label="Recently active workspaces first"
+            checked={settings.autoSortWorkspacesByActivity}
+            onChange={(value) => save({ autoSortWorkspacesByActivity: value })}
+          />
+        </SettingRow>
+        <SettingRow
+          title="Show tips"
+          description="Small cards that point out a feature the moment you're about to need it (e.g. opening a pull request)."
+        >
+          <Switch
+            label="Show tips"
+            checked={settings.showHints}
+            onChange={(value) => save({ showHints: value })}
+          />
+        </SettingRow>
+      </SettingGroup>
+      <SettingGroup title="While agents work">
+        <SettingRow
+          title="Keep this Mac awake"
+          description="Prevents sleep only while a workspace is running, so long turns finish unattended. The display still sleeps."
+        >
+          <Switch
+            label="Keep this Mac awake"
+            checked={settings.keepAwakeWhileRunning}
+            onChange={(value) => save({ keepAwakeWhileRunning: value })}
+          />
+        </SettingRow>
+        <SettingRow
+          title="Continue unfinished turns after a restart"
+          description="Resume turns interrupted by a quit, crash, or app update when Wooi reopens."
+        >
+          <Switch
+            label="Continue unfinished turns after a restart"
+            checked={settings.resumeUnfinishedTurnsOnLaunch}
+            onChange={(value) => save({ resumeUnfinishedTurnsOnLaunch: value })}
+          />
+        </SettingRow>
+        <SettingRow
+          title="Keep working after you quit"
+          description="Quitting with work in progress closes the window and keeps it running from the menu bar. Wooi quits on its own once everything finishes."
+        >
+          <Switch
+            label="Keep working after you quit"
+            checked={settings.keepWorkingInBackground}
+            onChange={(value) => save({ keepWorkingInBackground: value })}
+          />
+        </SettingRow>
+      </SettingGroup>
+      <SettingGroup title="Confirmations">
+        {CONFIRM_SKIP_KEYS.map((key) => (
+          <SettingRow
+            key={key}
+            title={CONFIRM_SKIP_LABELS[key].title}
+            description={CONFIRM_SKIP_LABELS[key].description}
+          >
+            <Switch
+              label={CONFIRM_SKIP_LABELS[key].title}
+              // 스위치가 켜짐 = 묻는다. 저장하는 값은 "건너뛴다" 이므로 뒤집어 읽고 쓴다.
+              checked={!settings.confirmSkips?.[key]}
+              onChange={(value) =>
+                save({ confirmSkips: { ...settings.confirmSkips, [key]: !value } })
+              }
+            />
+          </SettingRow>
+        ))}
       </SettingGroup>
       <SettingGroup title="Workspace creation">
         <SettingRow
@@ -475,6 +526,8 @@ function AgentsPage({
 }): React.JSX.Element {
   const availableBackends = useAvailableBackends()
   const [editing, setEditing] = useState<AgentBackendId>(settings.defaultAgentBackend)
+  // 저장값이 지금 못 쓰는 백엔드를 가리킬 때(그 CLI 를 지운 등) 그 사실을 한 줄로 알리는 데 쓴다.
+  const savedDefaultMeta = useBackend(settings.defaultAgentBackend)
   // Solo/팀은 여기서 고르지 않는다. 새 워크스페이스는 언제나 Solo 로 시작하고, 팀은 필요해지는
   // 순간 그 워크스페이스에서 켠다 — 만들기도 전에 정하게 하면 사용자가 가장 모르는 때에 고르게
   // 하는 셈이다([[main/workspaces]] createWorkspace).
@@ -494,7 +547,7 @@ function AgentsPage({
       title="Agents"
       description="Defaults for new workspaces. Existing workspaces keep their current agent and can override model settings."
     >
-      {availableBackends.length > 1 && (
+      {availableBackends.length > 1 ? (
         <SettingGroup title="Default agent">
           <SettingRow
             title="Agent"
@@ -517,6 +570,26 @@ function AgentsPage({
             </select>
           </SettingRow>
         </SettingGroup>
+      ) : (
+        availableBackends.length === 1 && (
+          // 하나만 연결됐으면 고를 게 없다 — 그래도 어떤 에이전트가 기본인지는 보여준다
+          // (전엔 이 그룹 자체가 숨어서 단일 에이전트 사용자는 이 설정의 존재조차 몰랐다).
+          <SettingGroup title="Default agent">
+            <SettingRow
+              title="Agent"
+              description={
+                settings.defaultAgentBackend === availableBackends[0].id
+                  ? 'Each workspace stays with the agent it was created with.'
+                  : `Saved default was ${savedDefaultMeta?.label ?? settings.defaultAgentBackend} — using ${availableBackends[0].label} since that's the only agent connected.`
+              }
+            >
+              <span className="text-sm text-neutral-300">
+                {availableBackends[0].label}
+                <span className="text-neutral-600"> · the only agent connected</span>
+              </span>
+            </SettingRow>
+          </SettingGroup>
+        )
       )}
 
       <div className="flex items-center justify-between">
@@ -693,7 +766,209 @@ function AgentsPage({
           />
         </SettingRow>
       </SettingGroup>
+
+      <AgentEnvSection
+        // 백엔드 탭을 바꾸면 다시 마운트해 그 백엔드의 값에서 새로 시작한다. 편집 중에는 행 배열이
+        // 원본이라(빈 키 행은 아직 저장되지 않는다) props 로 되돌리면 방금 더한 행이 사라진다.
+        key={editing}
+        backendLabel={backend?.label ?? editing}
+        // codex 는 app-server 를 모든 워크스페이스가 공유하는 단일 프로세스로 띄우고 그 환경이
+        // 기동 시점에 굳는다([[codex/appServer]]). claude 는 세션마다 SDK 에 실어 보내므로 즉시다.
+        restartRequired={editing === 'codex'}
+        value={agent.env ?? {}}
+        onChange={(env) => patchAgent({ env })}
+      />
     </PageFrame>
+  )
+}
+
+/**
+ * 백엔드별 기본 환경 변수 편집기.
+ *
+ * 범위를 환경 변수로 못 박은 이유는 [[shared/types]] 에 적어 두었다 — Wooi 는 Claude Agent SDK 와
+ * Codex CLI 를 감싸므로 임의 인자 주입은 그 계약을 조용히 깬다.
+ *
+ * 편집 중에는 배열이 원본이다. `Record` 를 직접 고치면 키를 지우고 다시 치는 사이 행이 사라지고,
+ * 빈 키/중복 키를 만드는 순간 다른 행을 덮어쓴다. 저장할 때만 레코드로 접는다.
+ */
+function AgentEnvSection({
+  backendLabel,
+  restartRequired,
+  value,
+  onChange
+}: {
+  backendLabel: string
+  /** 이 백엔드가 값을 프로세스 기동 시점에 굳히는가(codex-host). 사실대로 알린다. */
+  restartRequired: boolean
+  value: Record<string, string>
+  onChange: (next: Record<string, string>) => void
+}): React.JSX.Element {
+  // 마운트 시 한 번만 씨를 뿌린다. 이후 원본은 이 배열이고, 저장된 레코드는 commit 이 만든다.
+  const [rows, setRows] = useState<Array<{ key: string; value: string }>>(() =>
+    Object.entries(value).map(([key, item]) => ({ key, value: item }))
+  )
+  const [revealed, setRevealed] = useState<Set<number>>(() => new Set())
+
+  const commit = (next: Array<{ key: string; value: string }>): void => {
+    setRows(next)
+    // 빈 키 행은 아직 쓰는 중이다 — 저장하지 않는다. 같은 키를 두 번 적으면 마지막 것이 이긴다.
+    const record: Record<string, string> = {}
+    for (const row of next) {
+      const key = row.key.trim()
+      if (key) record[key] = row.value
+    }
+    onChange(record)
+  }
+
+  return (
+    <SettingGroup
+      title="Environment variables"
+      action={
+        <button
+          onClick={() => commit([...rows, { key: '', value: '' }])}
+          className="text-xs text-neutral-500 hover:text-neutral-300"
+        >
+          Add variable
+        </button>
+      }
+    >
+      {rows.length === 0 ? (
+        <div className="px-4 py-3.5 text-xs leading-relaxed text-neutral-600">
+          No variables. Anything you add here is passed to every new {backendLabel} session — use it
+          for things like <code className="text-neutral-500">HTTPS_PROXY</code> or a provider token
+          your hooks need.
+        </div>
+      ) : (
+        rows.map((row, index) => {
+          const name = row.key.trim()
+          const blocked = name.length > 0 && isBlockedAgentEnvKey(name)
+          const malformed = name.length > 0 && !isValidAgentEnvKey(name)
+          const problem = blocked
+            ? `Wooi sets ${name} itself — this one is ignored.`
+            : malformed
+              ? 'Use letters, digits and underscores, starting with a letter or underscore.'
+              : null
+          return (
+            <div key={index} className="px-4 py-2.5">
+              <div className="flex items-center gap-2">
+                <div className="w-52 shrink-0">
+                  <input
+                    className={inputClass + ' font-mono text-xs'}
+                    placeholder="NAME"
+                    spellCheck={false}
+                    autoCapitalize="off"
+                    autoCorrect="off"
+                    aria-label="Variable name"
+                    value={row.key}
+                    onChange={(event) =>
+                      commit(
+                        rows.map((item, i) =>
+                          i === index ? { ...item, key: event.target.value } : item
+                        )
+                      )
+                    }
+                  />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <input
+                    className={inputClass + ' font-mono text-xs'}
+                    placeholder="value"
+                    spellCheck={false}
+                    autoCapitalize="off"
+                    autoCorrect="off"
+                    aria-label="Variable value"
+                    // 값은 토큰일 수 있다. 기본은 가리고, 확인이 필요할 때만 사용자가 연다.
+                    type={revealed.has(index) ? 'text' : 'password'}
+                    value={row.value}
+                    onChange={(event) =>
+                      commit(
+                        rows.map((item, i) =>
+                          i === index ? { ...item, value: event.target.value } : item
+                        )
+                      )
+                    }
+                  />
+                </div>
+                <button
+                  aria-label={revealed.has(index) ? 'Hide value' : 'Show value'}
+                  onClick={() =>
+                    setRevealed((prev) => {
+                      const next = new Set(prev)
+                      if (next.has(index)) next.delete(index)
+                      else next.add(index)
+                      return next
+                    })
+                  }
+                  className="shrink-0 p-1 text-neutral-600 hover:text-neutral-300"
+                >
+                  {revealed.has(index) ? <EyeOff size={13} /> : <Eye size={13} />}
+                </button>
+                <button
+                  aria-label="Remove variable"
+                  onClick={() => commit(rows.filter((_, i) => i !== index))}
+                  className="shrink-0 p-1 text-neutral-600 hover:text-neutral-300"
+                >
+                  <Trash2 size={13} />
+                </button>
+              </div>
+              {problem && <p className="mt-1 text-xs text-[var(--warning-400)]">{problem}</p>}
+            </div>
+          )
+        })
+      )}
+      <div className="px-4 py-3 text-xs leading-relaxed text-neutral-600">
+        {restartRequired
+          ? `${backendLabel} reads these when it starts, so restart Wooi to apply changes.`
+          : `New ${backendLabel} turns pick these up right away.`}{' '}
+        <code className="text-neutral-500">PATH</code>,{' '}
+        <code className="text-neutral-500">HOME</code> and{' '}
+        <code className="text-neutral-500">WOOI_*</code> can’t be overridden — Wooi needs them to
+        find your agent CLI and keep workspaces apart.
+      </div>
+    </SettingGroup>
+  )
+}
+
+/**
+ * 마지막으로 건너뛴 알림 1건.
+ *
+ * 알림은 조건이 여러 겹이라(음소거 · 채널 · 포커스 · OS 권한) 안 울렸을 때 어디서 막혔는지
+ * 결과만 보고는 알 수 없다 — 특히 macOS 는 권한이 없거나 집중 모드면 **오류 없이** 삼킨다.
+ * 그 침묵을 여기서 문장으로 돌려준다.
+ *
+ * 값은 main 메모리에만 있으므로(진단값이라 디스크에 남기지 않는다) 이 페이지를 열 때 읽는다.
+ */
+function LastNotificationSkip(): React.JSX.Element {
+  const [skip, setSkip] = useState<NotificationSkip | null>(null)
+  useEffect(() => {
+    let alive = true
+    void window.api.notify
+      .lastSkip()
+      .then((value) => {
+        if (alive) setSkip(value)
+      })
+      .catch(() => {
+        // 진단 줄이 없다고 설정 화면이 망가질 이유는 없다.
+      })
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  if (!skip) {
+    return (
+      <p className="text-xs leading-relaxed text-neutral-600">
+        OS notifications appear only while Wooi is in the background. If macOS notifications are
+        disabled, allow Wooi in System Settings → Notifications.
+      </p>
+    )
+  }
+  return (
+    <p className="text-xs leading-relaxed text-neutral-600">
+      Last skipped notification: {NOTIFICATION_EVENT_LABELS[skip.event].toLowerCase()} for{' '}
+      <span className="text-neutral-400">{skip.workspaceName}</span> —{' '}
+      {NOTIFICATION_SKIP_LABELS[skip.reason]}.
+    </p>
   )
 }
 
@@ -768,10 +1043,21 @@ function NotificationsPage({
           </tbody>
         </table>
       </div>
-      <p className="text-xs leading-relaxed text-neutral-600">
-        OS notifications appear only while Wooi is in the background. If macOS notifications are
-        disabled, allow Wooi in System Settings → Notifications.
-      </p>
+      <SettingGroup title="Focus">
+        <SettingRow
+          title="Stay quiet for the workspace I’m watching"
+          description="Skips the OS notification when Wooi is in front and that workspace is the one on screen. Other workspaces still notify — you can be looking at one while another finishes."
+        >
+          <Switch
+            label="Stay quiet for the workspace I’m watching"
+            checked={settings.suppressWhenFocused !== false}
+            onChange={(value) => save({ suppressWhenFocused: value })}
+          />
+        </SettingRow>
+      </SettingGroup>
+
+      <LastNotificationSkip />
+
       <button
         onClick={() => update(structuredClone(DEFAULT_NOTIFICATION_SETTINGS))}
         className="flex items-center gap-1.5 text-xs text-neutral-500 hover:text-neutral-300"
@@ -817,6 +1103,27 @@ function RepositoriesPage({
           Configured only
         </button>
       </div>
+      {/* 리포를 가리지 않는 상시 입구. 사이드바 안내는 리포가 하나도 없을 때만 뜨고 + 메뉴는
+          리포 하나만 보므로, 여러 리포에 흩어진 worktree 를 한 번에 훑는 자리는 여기다. */}
+      <button
+        onClick={() => {
+          onClose()
+          openMigrate()
+        }}
+        className="flex w-full items-center gap-3 rounded-xl border border-[var(--border)] px-4 py-3 text-left hover:bg-[var(--surface-2)]"
+      >
+        <Download size={15} className="text-neutral-500" />
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm font-medium text-neutral-200">
+            Import existing worktrees
+          </span>
+          <span className="block text-xs text-neutral-600">
+            Turns worktrees that already exist — including ones Conductor or Orca made — into
+            workspaces, and can pick up the agent conversation that was running in them.
+          </span>
+        </span>
+        <ChevronRight size={15} className="text-neutral-600" />
+      </button>
       <div className="overflow-hidden rounded-xl border border-[var(--border)] divide-y divide-[var(--border)]">
         {filtered.map((repo) => (
           <button
@@ -897,7 +1204,7 @@ function UpdatesSection(): React.JSX.Element {
         <div className="flex items-center gap-2 text-sm text-neutral-300">
           Wooi <span className="text-neutral-500">v{version || '…'}</span>
           {isNew && (
-            <span className="rounded bg-[var(--accent-500)]/20 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--accent-300)]">
+            <span className="rounded bg-[var(--accent-500)]/20 px-1.5 py-0.5 text-2xs font-semibold uppercase tracking-wide text-[var(--accent-300)]">
               New version
             </span>
           )}

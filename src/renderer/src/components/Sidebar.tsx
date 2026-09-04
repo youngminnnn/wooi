@@ -10,7 +10,6 @@ import {
   ArchiveRestore,
   Trash2,
   ChevronRight,
-  ShieldQuestion,
   Pencil,
   Bell,
   BellOff,
@@ -21,35 +20,24 @@ import {
   MoreVertical,
   Users,
   Search,
-  ArrowUpDown,
   GitPullRequest,
   MessagesSquare,
   Copy,
+  Download,
   Square,
-  X,
-  Hourglass,
-  Clock,
-  Terminal,
-  GitFork
+  GitFork,
+  Pin,
+  PinOff
 } from 'lucide-react'
 import { backgroundTaskCount, REVIEW_BUSY_LABEL, useStore } from '../store'
+import { useUnarchiveWorkspace } from '../lib/unarchive'
 import RowActionsMenu, { type RowAction } from './RowActionsMenu'
 import { useAvailableBackends } from '../lib/backends'
 import { useMultiAgent } from '../lib/multiAgent'
 import { AgentBackendMark, GithubMark } from './BrandIcons'
-import {
-  QUICK_SWITCH_HINT_DISMISSED,
-  SWITCH_HINT_DONE,
-  SWITCH_HINT_THRESHOLD,
-  finishSwitchHint,
-  noteMouseSwitch,
-  onSwitchHintChange,
-  readUiFlag,
-  repoSettingsSeenFlag,
-  setUiFlag,
-  switchClickCount
-} from '../lib/uiFlags'
+import { noteMouseSwitch, readUiFlag, repoSettingsSeenFlag, setUiFlag } from '../lib/uiFlags'
 import { OPEN_REPO_SETTINGS_EVENT, openRepoSettings } from '../lib/repoSettings'
+import { openMigrate } from '../lib/migrate'
 import {
   AGENT_BACKEND_LABELS,
   DEFAULT_PEER_INBOUND,
@@ -57,23 +45,24 @@ import {
   fanoutGroupOf,
   orderVisibleWorkspaces,
   unresolvedFanoutGroups,
-  workspaceDisplayName
+  wasInterrupted,
+  workspaceDisplayName,
+  workspaceStackRootId
 } from '@shared/types'
 import { conversationForkDisabledReason } from '../lib/conversationFork'
 import { orderRowsWithPending } from '../lib/sidebarRows'
 import { useGithubDisconnected } from '../lib/github'
+import { askSummary } from '@shared/askSummary'
 import { WorkspaceAgents } from './WorkspaceAgents'
 import { WorkspaceApiRetry } from './WorkspaceApiRetry'
 import { WorkspaceGoal } from './WorkspaceGoal'
+import CacheTimer from './CacheTimer'
 import { useNow } from '../lib/useNow'
 import { formatCountdown, formatDuration } from '../lib/format'
 import { useDragReorder, type DragReorder } from '../lib/useDragReorder'
 import type {
   AgentBackendId,
   FanoutGroup,
-  PrState,
-  PrStatus,
-  RateLimitPause,
   Repo,
   ReviewSession,
   ReviewStatus,
@@ -81,9 +70,8 @@ import type {
 } from '@shared/types'
 import { reviewTitle, STATUS_LABEL } from '../lib/review'
 import { OPEN_NEW_WORKSPACE_MENU_EVENT } from '../lib/newWorkspaceMenu'
-
-/** running 상태가 이 시간을 넘기면 사이드바에 "오래 실행 중" 힌트(멈춤일 수 있음)를 표시한다. */
-const RUNNING_STALE_MS = 5 * 60 * 1000
+import { StatusDot } from './StatusDot'
+import { resumeTitle, runningFor } from '../lib/workspaceStatus'
 
 // 리포 드래그와 워크스페이스 드래그를 구분하는 dataTransfer 타입. 워크스페이스 행은 리포 블록
 // 안에 중첩되므로, 이 타입으로 "지금 끌고 있는 게 무엇인지"를 각 드롭존이 판별한다.
@@ -144,6 +132,7 @@ export default function Sidebar({
       !w.archived &&
       (w.status === 'running' ||
         Boolean(w.pendingRateLimitResume) ||
+        Boolean(w.pendingShutdownResume) ||
         Boolean(w.rateLimited) ||
         Boolean(w.awaitingStackedWork))
   )
@@ -154,15 +143,6 @@ export default function Sidebar({
   const shortcutById = new Map<string, number>()
   ordered.slice(0, 9).forEach((w, i) => shortcutById.set(w.id, i + 1))
 
-  // ⌘K 힌트는 '실제로 번호가 모자라진 순간'에만, 한 번만 띄운다. 9개 이하로 쓰는 사용자는
-  // 평생 보지 않고, 한 번 닫으면 실행 간에 기억된다(순수 화면 상태라 localStorage 로 충분).
-  const [hintDismissed, setHintDismissed] = useState(() => readUiFlag(QUICK_SWITCH_HINT_DISMISSED))
-  const showQuickSwitchHint = ordered.length > 9 && !hintDismissed
-  const dismissHint = (): void => {
-    setUiFlag(QUICK_SWITCH_HINT_DISMISSED, true)
-    setHintDismissed(true)
-  }
-
   // 설정 모달을 한 번이라도 열어 본 리포들. 아직 안 열어 본 리포에만 톱니 옆에 안내 점을 띄운다.
   // 진입 경로가 여러 개(톱니·토스트 액션·⌘K·설정 모달)라 각각에서 표시하지 않고, 공통
   // 이벤트를 여기서 한 번 듣는다.
@@ -172,6 +152,7 @@ export default function Sidebar({
   const [seenRepos, setSeenRepos] = useState<Set<string>>(
     () => new Set(app.repos.filter((r) => readUiFlag(repoSettingsSeenFlag(r.id))).map((r) => r.id))
   )
+  const [highlightedRepoId, setHighlightedRepoId] = useState<string | null>(null)
   useEffect(() => {
     const onOpen = (e: Event): void => {
       const repoId = (e as CustomEvent<string>).detail
@@ -183,27 +164,41 @@ export default function Sidebar({
     return () => window.removeEventListener(OPEN_REPO_SETTINGS_EVENT, onOpen)
   }, [])
 
-  // ⌘↑/⌘↓ 힌트. "행을 여러 번 마우스로 눌러 전환했는데 아직 단축키는 안 써 본" 사용자에게만,
-  // 즉 실제로 손해를 보고 있는 게 증명된 순간에만 뜬다. 온보딩에서 미리 가르치지 않는 이유가
-  // 이것 — 그때는 워크스페이스가 하나뿐이라 전환할 대상 자체가 없고, 배워도 쓸 데가 없어 잊힌다.
-  // 단축키를 한 번이라도 쓰면(App.tsx) 그 즉시 영구히 사라진다.
-  const [switchHint, setSwitchHint] = useState(() => ({
-    done: readUiFlag(SWITCH_HINT_DONE),
-    clicks: switchClickCount()
-  }))
-  useEffect(
-    () =>
-      onSwitchHintChange(() =>
-        setSwitchHint({ done: readUiFlag(SWITCH_HINT_DONE), clicks: switchClickCount() })
-      ),
-    []
-  )
-  // 전환할 곳이 둘 이상일 때만 의미가 있다. ⌘K 힌트와 동시에 뜨면 잔소리가 되므로 양보한다.
-  const showSwitchHint =
-    !switchHint.done &&
-    switchHint.clicks >= SWITCH_HINT_THRESHOLD &&
-    ordered.length > 1 &&
-    !showQuickSwitchHint
+  // 키보드로 새 워크스페이스 메뉴를 열면 마우스 포인터가 맥락을 알려 주지 않는다. 대상 리포가
+  // 스크롤 밖에 있던 경우에도 어느 리포에서 만드는지 바로 보이도록 헤더를 잠깐 강조한다.
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const onOpen = (e: Event): void => {
+      const repoId = (e as CustomEvent<string>).detail
+      if (!repoId) return
+      setHighlightedRepoId(repoId)
+      if (timer) clearTimeout(timer)
+      timer = setTimeout(() => setHighlightedRepoId(null), 1200)
+    }
+    window.addEventListener(OPEN_NEW_WORKSPACE_MENU_EVENT, onOpen)
+    return () => {
+      window.removeEventListener(OPEN_NEW_WORKSPACE_MENU_EVENT, onOpen)
+      if (timer) clearTimeout(timer)
+    }
+  }, [])
+
+  // 리포가 하나도 없을 때만 훑어 본다. 들여오기를 권할 자리는 첫 화면 하나뿐이고, 스캔은
+  // 리포마다 git 을 부르므로 상시로 돌릴 이유가 없다(리포가 생긴 뒤에는 + 메뉴에 항상 있다).
+  const [migratable, setMigratable] = useState(false)
+  const noRepos = app.repos.length === 0
+  useEffect(() => {
+    if (!noRepos) return
+    let active = true
+    void window.api.migrate
+      .scan()
+      .then((scan) => {
+        if (active) setMigratable(scan.repos.length > 0)
+      })
+      .catch(() => undefined)
+    return () => {
+      active = false
+    }
+  }, [noRepos])
 
   const addRepo = async (): Promise<void> => {
     const res = await window.api.repo.add()
@@ -235,17 +230,23 @@ export default function Sidebar({
 
   const workspaceDnd = useDragReorder({
     mime: WORKSPACE_MIME,
-    // 사이드바는 워크스페이스를 stack 트리(orderByStack)로 그리므로, 배열 순서가 실제 화면 순서를
-    // 좌우하는 건 형제 사이뿐이다. 형제가 아닌 곳엔 드롭 표시선을 아예 띄우지 않아, 놓아도
-    // 아무 일도 일어나지 않는 자리를 유효한 것처럼 보이게 하지 않는다.
+    // 어느 행을 잡아도 stack 뿌리 전체를 옮긴다. 같은 레포·아카이브·고정 영역이 아닌 곳엔 드롭
+    // 표시선을 띄우지 않아, 놓아도 아무 일도 일어나지 않는 자리를 유효한 것처럼 보이지 않는다.
     canDrop: (draggedId, targetId) => {
       const a = app.workspaces.find((w) => w.id === draggedId)
       const b = app.workspaces.find((w) => w.id === targetId)
       if (!a || !b) return false
+      const aRoot = workspaceStackRootId(app.workspaces, a.id)
+      const bRoot = workspaceStackRootId(app.workspaces, b.id)
+      if (!aRoot || !bRoot || aRoot === bRoot) return false
+      const ar = app.workspaces.find((w) => w.id === aRoot)
+      const br = app.workspaces.find((w) => w.id === bRoot)
       return (
-        a.repoId === b.repoId &&
-        (a.parentWorkspaceId ?? null) === (b.parentWorkspaceId ?? null) &&
-        a.archived === b.archived
+        !!ar &&
+        !!br &&
+        ar.repoId === br.repoId &&
+        ar.archived === br.archived &&
+        !!ar.sidebarPinned === !!br.sidebarPinned
       )
     },
     onReorder: (workspaceId, targetId, position) =>
@@ -339,11 +340,21 @@ export default function Sidebar({
         </div>
 
         {app.repos.length === 0 && (
-          <p className="px-3 py-8 text-xs text-neutral-500 text-center leading-relaxed">
+          <div className="px-3 py-8 text-xs text-neutral-500 text-center leading-relaxed">
             No repositories yet.
             <br />
             Use the + button above to add a git repo.
-          </p>
+            {/* Conductor·Orca 를 쓰던 사람에게는 이 화면이 첫 화면이다. 여기서 알려주지 않으면
+                이미 등록해 둔 리포와 worktree 를 손으로 다시 만들게 된다. */}
+            {migratable && (
+              <button
+                onClick={() => openMigrate()}
+                className="mt-3 block w-full rounded-lg border border-[var(--border-2)] px-3 py-2 text-xs text-neutral-300 hover:bg-[var(--surface-2)]"
+              >
+                Import existing worktrees
+              </button>
+            )}
+          </div>
         )}
 
         {app.repos.map((repo) => {
@@ -365,7 +376,12 @@ export default function Sidebar({
             >
               <div
                 {...repoDnd.handleProps(repo.id)}
-                className="group flex items-center gap-1.5 px-2 py-1.5 rounded-md cursor-grab active:cursor-grabbing"
+                data-repo-header
+                className={`group scroll-mt-10 flex items-center gap-1.5 px-2 py-1.5 rounded-md cursor-grab active:cursor-grabbing transition-colors ${
+                  highlightedRepoId === repo.id
+                    ? 'bg-[var(--surface-2)] ring-1 ring-inset ring-[var(--info-500)]/60'
+                    : ''
+                }`}
               >
                 <RepoIcon repo={repo} />
                 <span
@@ -420,6 +436,7 @@ export default function Sidebar({
                 </button>
                 <NewWorkspaceButton
                   repoId={repo.id}
+                  repoName={repo.name}
                   onNewWorkspace={onNewWorkspace}
                   onNewFromIssue={onNewFromIssue}
                   onNewFromPr={onNewFromPr}
@@ -465,48 +482,10 @@ export default function Sidebar({
           )
         })}
 
-        {/* 목록이 9개를 넘어 ⌘번호가 없는 행이 생긴 순간에만, 그 행들 바로 아래에서 이유와
-            대안을 한 줄로 알려 준다. 앱을 처음 켤 때가 아니라 실제로 한계에 부딪힌 시점에
-            띄우는 것이 핵심 — 9개 이하로 쓰는 사용자에게는 아예 존재하지 않는 UI 다. */}
-        {showQuickSwitchHint && (
-          <div className="mx-1 mb-2 flex items-start gap-2 rounded-md bg-[var(--surface)] px-2 py-1.5 text-xs text-neutral-500">
-            <Search size={12} className="mt-0.5 shrink-0" />
-            <p className="flex-1 leading-relaxed">
-              Only the top 9 rows get a ⌘number. Press{' '}
-              <kbd className="font-medium text-neutral-300">⌘K</kbd> to search the rest.
-            </p>
-            <button
-              onClick={dismissHint}
-              aria-label="Dismiss hint"
-              title="Got it"
-              className="shrink-0 -mr-0.5 h-4 w-4 grid place-items-center rounded text-neutral-600 hover:bg-[var(--surface-2)] hover:text-neutral-300"
-            >
-              <X size={11} />
-            </button>
-          </div>
-        )}
-
-        {/* ⌘↑/⌘↓ 안내. ⌘K 힌트와 같은 자리·같은 톤(작고 흐린 한 줄)이라 새로운 UI 종류를
-            늘리지 않는다. 모달·토스트·코치마크처럼 시선을 뺏는 수단을 일부러 피했다 —
-            이건 몰라도 앱을 쓰는 데 지장이 없는 정보라서, 그만큼의 방해가 정당화되지 않는다. */}
-        {showSwitchHint && (
-          <div className="mx-1 mb-2 flex items-start gap-2 rounded-md bg-[var(--surface)] px-2 py-1.5 text-xs text-neutral-500">
-            <ArrowUpDown size={12} className="mt-0.5 shrink-0" />
-            <p className="flex-1 leading-relaxed">
-              Switch workspaces without leaving the keyboard —{' '}
-              <kbd className="font-medium text-neutral-300">⌘↑</kbd>{' '}
-              <kbd className="font-medium text-neutral-300">⌘↓</kbd>
-            </p>
-            <button
-              onClick={finishSwitchHint}
-              aria-label="Dismiss hint"
-              title="Got it"
-              className="shrink-0 -mr-0.5 h-4 w-4 grid place-items-center rounded text-neutral-600 hover:bg-[var(--surface-2)] hover:text-neutral-300"
-            >
-              <X size={11} />
-            </button>
-          </div>
-        )}
+        {/* 목록이 9개를 넘었을 때의 ⌘K 안내, 마우스로만 전환하는 사용자에게 뜨는 ⌘↑/⌘↓ 안내는
+            더는 여기서 그리지 않는다 — `lib/hints.ts` 레지스트리로 옮겨 `components/Hint.tsx`
+            (App.tsx 에 하나만 마운트되는 호스트)가 대신 그린다. 이 파일은 여전히 마우스 전환
+            횟수를 세는 신호(noteMouseSwitch, 아래 WorkspaceRow)만 낸다. */}
       </div>
     </aside>
   )
@@ -531,23 +510,6 @@ function RepoIcon({ repo }: { repo: Repo }): React.JSX.Element {
   return <FolderGit2 size={14} className="text-neutral-500 shrink-0" />
 }
 
-/**
- * 자동 이어가기 예약의 툴팁. 시각 하나만 보여 주면 "그때가 됐는데 왜 안 갔지" 를 설명하지 못한다 —
- * 네트워크가 없거나 이어 보낸 턴이 실패해 다시 기다리는 중이면 그 사정까지 말한다.
- *
- * 무엇 때문에 멈췄는지도 함께 말한다 — API 에 닿지 못해 걸린 예약을 "usage limit" 이라고 부르면
- * 사용자는 있지도 않은 제한이 풀리기를 기다리게 된다.
- */
-function resumeTitle(pending: NonNullable<Workspace['pendingRateLimitResume']>): string {
-  const why =
-    pending.cause === 'connection' ? 'Paused — no connection to the API' : 'Paused by usage limit'
-  if (pending.blocked === 'offline') return `${why} — waiting for a network connection to continue`
-  const at = new Date(pending.retryAt).toLocaleString()
-  return pending.blocked === 'error'
-    ? `${why} — the last attempt to continue failed, retrying at ${at}`
-    : `${why} — scheduled to resume at ${at}`
-}
-
 function WorkspaceRow({
   workspace,
   depth,
@@ -566,10 +528,9 @@ function WorkspaceRow({
   ) => void
   shortcut?: number
   now: number
-  /** 사이드바가 소유한 워크스페이스 재정렬 DnD 배선(형제끼리만 자리 교환). */
+  /** 사이드바가 소유한 워크스페이스 재정렬 DnD 배선(stack 단위 자리 교환). */
   dnd: DragReorder
 }): React.JSX.Element {
-  const selectedId = useStore((s) => s.selectedWorkspaceId)
   const select = useStore((s) => s.selectWorkspace)
   const git = useStore((s) => s.gitStatus[workspace.id])
   const pr = useStore((s) => s.prStatus[workspace.id])
@@ -586,10 +547,23 @@ function WorkspaceRow({
   const reportArchiveScriptFailure = useStore((s) => s.reportArchiveScriptFailure)
   const requestDelete = useStore((s) => s.requestDeleteWorkspace)
   const requireGithub = useStore((s) => s.requireGithub)
-  const githubDisconnected = useGithubDisconnected()
-  const awaitingPermission = useStore((s) =>
-    s.permissions.some((p) => p.workspaceId === workspace.id)
+  const openStackView = useStore((s) => s.openStackView)
+  const openSplitPane = useStore((s) => s.openSplitPane)
+  // 이 행 위에 층이 더 쌓여 있는가. 모델 A 는 살아 있는 자식 워크스페이스, 모델 B 는 워크트리
+  // 안의 브랜치 스택이 그 조건이다. 불리언만 돌려주므로 셀렉터가 매 렌더 새 값을 만들지 않는다.
+  const isStackParent = useStore(
+    (s) =>
+      (workspace.stack?.length ?? 0) > 1 ||
+      (s.app?.workspaces.some((w) => w.parentWorkspaceId === workspace.id && !w.archived) ?? false)
   )
+  const githubDisconnected = useGithubDisconnected()
+  // 대기 중인 요청을 **객체째** 집는다 — 예전에는 있는지 없는지(boolean)만 봤지만, 무엇을
+  // 묻는지 한 줄로 보여 주려면 요청 자체가 필요하다. 배열 원소를 그대로 돌려주므로 참조가
+  // 유지되어 셀렉터가 매 렌더 새 값을 만들지 않는다.
+  const pendingRequest = useStore((s) => s.permissions.find((p) => p.workspaceId === workspace.id))
+  const awaitingPermission = !!pendingRequest
+  const ask = pendingRequest ? askSummary(pendingRequest) : ''
+  const interrupted = wasInterrupted(workspace)
   const backgroundTasks = useStore((s) => backgroundTaskCount(s.runningAgents[workspace.id]))
   // null 이 아니면 표시 이름 인라인 편집 중. 초깃값은 현재 표시 이름으로 채운다.
   const [editingName, setEditingName] = useState<string | null>(null)
@@ -598,12 +572,29 @@ function WorkspaceRow({
   // 'right' = ⋯ 버튼 기준(우측 정렬), 'left' = 우클릭 커서 기준.
   const [menuAlign, setMenuAlign] = useState<'left' | 'right'>('right')
 
-  const active = workspace.id === selectedId
-  // running 인 채로 오래 머무르면(상태 변화 없이) "멈춤일 수 있음" 으로 본다. 정확한 진입 시각은
-  // runningSince(있으면)를, 없으면 lastActiveAt 을 근사치로 쓴다.
-  const runningStart = runningSince ?? workspace.lastActiveAt
-  const runningMs = workspace.status === 'running' ? Math.max(0, now - runningStart) : 0
-  const stale = runningMs >= RUNNING_STALE_MS
+  /**
+   * 이 행이 지금 화면의 어느 칸인가.
+   *
+   * 나란히 두 칸을 폈으면 둘 다 "보고 있는 것" 이다 — 한쪽만 표시하면 오른쪽 칸이 어디서
+   * 왔는지 사이드바에서 읽을 수 없다. 다만 사이드바 클릭은 **포커스된 칸**을 갈아 끼우므로,
+   * 둘을 같은 밝기로 그리면 다음 클릭이 어디로 갈지 알 수 없다. 그래서 포커스된 쪽만 진하다.
+   * 분할이 아니면 선택된 행이 곧 'focused' 라, 예전과 똑같이 그려진다.
+   */
+  const paneRole = useStore((s) => {
+    if (s.splitPane?.kind === 'workspace' && s.splitPane.workspaceId === workspace.id)
+      return s.splitFocus === 'split' ? 'focused' : 'paired'
+    if (s.selectedWorkspaceId === workspace.id)
+      return s.splitPane && s.splitFocus === 'split' ? 'paired' : 'focused'
+    return null
+  })
+  const active = paneRole !== null
+  const stackRootId = useStore((s) => workspaceStackRootId(s.app?.workspaces ?? [], workspace.id))
+  const stackPinned = useStore(
+    (s) => s.app?.workspaces.find((w) => w.id === stackRootId)?.sidebarPinned ?? false
+  )
+  // running 인 채로 오래 머무르면(상태 변화 없이) "멈춤일 수 있음" 으로 본다.
+  // 계산은 runningFor 한 곳에 있다 — 소비자마다 복제하면 화면끼리 갈라진다.
+  const { runningMs, stale } = runningFor(workspace, runningSince, now)
   // 사용량 제한으로 멈춘 상태. 자동 이어가기 예약(pendingRateLimitResume)이 있으면 그쪽이 더 많은
   // 것을 말해 주므로 그 표시를 쓰고, 없을 때(설정 off·예약 종료) 이 표시가 이유를 대신 알린다.
   const rateLimited = activeRateLimitPause(workspace.rateLimited, now)
@@ -637,7 +628,8 @@ function WorkspaceRow({
       title: `Archive "${displayName}"?`,
       body: 'Its worktree directory will be removed (branch & history kept). You can unarchive it later.',
       confirmLabel: 'Archive',
-      danger: true
+      danger: true,
+      skipKey: 'archiveWorkspace'
     })
     if (!ok) return
     const { archiveScriptFailure } = await archiveWorkspace(workspace.id)
@@ -659,6 +651,12 @@ function WorkspaceRow({
   const alternateStackBackends = availableBackends.filter((b) => b.id !== workspace.agentBackend)
 
   const actions: RowAction[] = [
+    {
+      key: 'pin',
+      label: stackPinned ? 'Unpin stack from top' : 'Pin stack to top',
+      icon: stackPinned ? <PinOff size={13} /> : <Pin size={13} />,
+      onSelect: () => void window.api.workspace.setPinned(workspace.id, !stackPinned)
+    },
     {
       key: 'rename',
       label: 'Rename…',
@@ -811,7 +809,13 @@ function WorkspaceRow({
         {...dnd.zoneProps(workspace.id)}
         // 이름 편집 중엔 드래그를 끈다 — draggable 조상 안에서는 입력 텍스트를 끌어 선택할 수 없다.
         draggable={editingName === null}
-        onClick={() => {
+        onClick={(e) => {
+          // ⌘+클릭: 지금 보고 있는 것 **옆에** 이 워크스페이스를 편다(Claude Desktop 과 같은
+          // 관용구). 짝이 성립하지 않으면 스토어가 이유를 알려 준다.
+          if (e.metaKey) {
+            openSplitPane({ kind: 'workspace', workspaceId: workspace.id })
+            return
+          }
           void select(workspace.id)
           // 마우스로만 전환하는 사용자에게만 ⌘↑/⌘↓ 힌트를 띄우기 위한 신호.
           noteMouseSwitch()
@@ -834,7 +838,10 @@ function WorkspaceRow({
           'group/ws relative w-full flex items-center gap-2 pr-1.5 py-1.5 rounded-md text-left cursor-pointer focus:outline-none focus-visible:ring-1 focus-visible:ring-[var(--border-strong)] ' +
           // 선택 행은 좌측에 파란 액센트 바를 띄워 현재 위치를 또렷하게 표시한다.
           (active
-            ? 'bg-[var(--surface-3)] before:absolute before:left-0 before:top-1.5 before:bottom-1.5 before:w-0.5 before:rounded-full before:bg-[var(--info-500)]'
+            ? 'bg-[var(--surface-3)] before:absolute before:left-0 before:top-1.5 before:bottom-1.5 before:w-0.5 before:rounded-full ' +
+              (paneRole === 'focused'
+                ? 'before:bg-[var(--info-500)]'
+                : 'before:bg-[var(--info-500)]/40')
             : // 키보드로 액션에 포커스가 들어오거나 메뉴가 열려 있으면, 오버레이 배경색과 어긋나지
               // 않게 행도 같이 밝힌다(메뉴를 띄운 뒤 커서가 행을 벗어나도 대상이 유지돼 보인다).
               'hover:bg-[var(--surface)] focus-within:bg-[var(--surface)] ' +
@@ -851,15 +858,21 @@ function WorkspaceRow({
           <StatusDot
             status={workspace.status}
             awaitingPermission={awaitingPermission}
+            ask={ask}
+            interrupted={interrupted}
             compacting={compacting}
             stale={stale}
             runningMs={runningMs}
             pendingRateLimitResume={workspace.pendingRateLimitResume}
+            pendingShutdownResume={workspace.pendingShutdownResume}
             awaitingStackedWork={workspace.awaitingStackedWork}
             rateLimited={rateLimited}
             backgroundTasks={backgroundTasks}
             pr={pr}
           />
+        )}
+        {stackPinned && depth === 0 && (
+          <Pin size={11} className="shrink-0 text-neutral-500" aria-label="Pinned to top" />
         )}
         <div className="relative flex-1 min-w-0">
           {editingName !== null ? (
@@ -957,7 +970,15 @@ function WorkspaceRow({
                 · {formatDuration(now - runningSince)}
               </span>
             )}
-            {workspace.pendingRateLimitResume ? (
+            <CacheTimer workspace={workspace} dot />
+            {workspace.pendingShutdownResume ? (
+              <span
+                className="text-[var(--warning-400)]/90 shrink-0"
+                title="Interrupted by shutdown"
+              >
+                · interrupted by shutdown — send a message to continue
+              </span>
+            ) : workspace.pendingRateLimitResume ? (
               <span
                 className="text-[var(--warning-400)]/90 shrink-0 tabular-nums"
                 title={resumeTitle(workspace.pendingRateLimitResume)}
@@ -1008,6 +1029,15 @@ function WorkspaceRow({
               </span>
             ) : null}
           </div>
+          {/* 무엇을 묻고 있는지 한 줄. 방패 아이콘만으로는 "yes 만 치면 되는 것" 과 "앉아서 봐야
+              하는 설계 결정" 이 구분되지 않아, 여럿이 동시에 물으면 전부 열어 봐야 우선순위를
+              정할 수 있었다. 메타 줄에 끼워 넣지 않고 줄을 따로 쓰는 이유는 그 줄이 이미
+              브랜치·뒤처짐·시간으로 빽빽해서, 여기 붙이면 둘 다 못 읽게 되기 때문이다. */}
+          {ask && (
+            <div className="mt-0.5 truncate text-xs text-[var(--warning-400)]/90" title={ask}>
+              {ask}
+            </div>
+          )}
           {/* 액션 클러스터는 absolute 오버레이로 띄운다. 호버 전용 컨트롤이 평상시 레이아웃 폭을
             점유하지 않게 해서 제목/메타가 사이드바 폭을 온전히 쓰도록 하는 것이 핵심이다.
             display 대신 opacity 로만 감추므로 Tab 포커스 경로도 그대로 유지된다.
@@ -1048,6 +1078,22 @@ function WorkspaceRow({
                 }
               >
                 <RefreshCw size={12} className={restackBusy ? 'animate-spin' : ''} />
+              </button>
+            )}
+            {/* 스택의 부모 행에서만 지도를 연다 — 아래 층이 없으면 펼칠 스택이 없다.
+              들여쓰기는 "무엇이 무엇 위에 있는가" 만 말해 주므로, 어긋남·behind·트레인까지
+              한 화면에서 보려면 여기서 들어간다. */}
+            {isStackParent && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  openStackView(workspace.id)
+                }}
+                className="h-6 w-6 grid place-items-center rounded shrink-0 text-[var(--accent-400)] hover:bg-[var(--surface-2)] hover:text-[var(--accent-300)]"
+                aria-label="Show this stack"
+                title="Show this stack (⇧⌘L) — every layer, its PR, drift and merge train"
+              >
+                <Layers size={12} />
               </button>
             )}
             <button
@@ -1138,8 +1184,13 @@ function ReviewRow({
   session: ReviewSession
   repoName: string
 }): React.JSX.Element {
-  const active = useStore((s) => s.activeReviewId === session.id)
+  const active = useStore(
+    (s) =>
+      s.activeReviewId === session.id ||
+      (s.splitPane?.kind === 'review' && s.splitPane.reviewId === session.id)
+  )
   const openReview = useStore((s) => s.openReview)
+  const openSplitPane = useStore((s) => s.openSplitPane)
   const requestCloseReview = useStore((s) => s.requestCloseReview)
   const requestArchiveReview = useStore((s) => s.requestArchiveReview)
   // 아카이브·삭제는 워크트리와 ref 를 지우느라 초 단위로 걸린다. 그동안 레코드는 그대로 방송되어
@@ -1157,7 +1208,14 @@ function ReviewRow({
     <div
       role="button"
       tabIndex={0}
-      onClick={() => openReview(id)}
+      onClick={(e) => {
+        // ⌘+클릭: 리뷰를 대화 옆에 나란히 편다 — 워크스페이스 행과 같은 관용구다.
+        if (e.metaKey) {
+          openSplitPane({ kind: 'review', reviewId: id })
+          return
+        }
+        openReview(id)
+      }}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault()
@@ -1290,7 +1348,7 @@ function ArchivedReviewsSection({ reviews }: { reviews: ReviewSession[] }): Reac
         </button>
         <button
           onClick={removeAll}
-          className="opacity-0 group-hover/arcrevsec:opacity-100 mr-1.5 h-5 w-5 grid place-items-center rounded text-neutral-500 hover:bg-[var(--danger-500)]/15 hover:text-[var(--danger-400)]"
+          className="opacity-0 group-hover/arcrevsec:opacity-100 focus-visible:opacity-100 mr-1.5 h-5 w-5 grid place-items-center rounded text-neutral-500 hover:bg-[var(--danger-500)]/15 hover:text-[var(--danger-400)]"
           title="Delete all archived reviews"
         >
           <Trash2 size={12} />
@@ -1324,7 +1382,7 @@ function ArchivedReviewRow({ session }: { session: ReviewSession }): React.JSX.E
       <button
         onClick={() => void unarchiveReview(session.id)}
         disabled={!!busy}
-        className="opacity-0 group-hover/arcrev:opacity-100 h-5 w-5 grid place-items-center rounded text-neutral-500 hover:bg-[var(--surface-2)] hover:text-neutral-200 disabled:cursor-not-allowed disabled:opacity-40"
+        className="opacity-0 group-hover/arcrev:opacity-100 focus-visible:opacity-100 h-5 w-5 grid place-items-center rounded text-neutral-500 hover:bg-[var(--surface-2)] hover:text-neutral-200 disabled:cursor-not-allowed disabled:opacity-40"
         title={busy ? REVIEW_BUSY_LABEL[busy] : 'Unarchive (recreate the review worktree)'}
       >
         <ArchiveRestore size={12} />
@@ -1332,7 +1390,7 @@ function ArchivedReviewRow({ session }: { session: ReviewSession }): React.JSX.E
       <button
         onClick={() => void requestCloseReview(session.id)}
         disabled={!!busy}
-        className="opacity-0 group-hover/arcrev:opacity-100 h-5 w-5 grid place-items-center rounded text-neutral-500 hover:bg-[var(--danger-500)]/15 hover:text-[var(--danger-400)] disabled:cursor-not-allowed disabled:opacity-40"
+        className="opacity-0 group-hover/arcrev:opacity-100 focus-visible:opacity-100 h-5 w-5 grid place-items-center rounded text-neutral-500 hover:bg-[var(--danger-500)]/15 hover:text-[var(--danger-400)] disabled:cursor-not-allowed disabled:opacity-40"
         title={busy ? REVIEW_BUSY_LABEL[busy] : 'Delete permanently'}
       >
         <Trash2 size={12} />
@@ -1424,7 +1482,7 @@ function ArchivedSection({
         </button>
         <button
           onClick={removeAll}
-          className="opacity-0 group-hover/arcsec:opacity-100 mr-1.5 h-5 w-5 grid place-items-center rounded text-neutral-500 hover:bg-[var(--danger-500)]/15 hover:text-[var(--danger-400)]"
+          className="opacity-0 group-hover/arcsec:opacity-100 focus-visible:opacity-100 mr-1.5 h-5 w-5 grid place-items-center rounded text-neutral-500 hover:bg-[var(--danger-500)]/15 hover:text-[var(--danger-400)]"
           title="Delete all archived workspaces"
         >
           <Trash2 size={12} />
@@ -1443,25 +1501,12 @@ function ArchivedSection({
 
 function ArchivedRow({ workspace }: { workspace: Workspace }): React.JSX.Element {
   const select = useStore((s) => s.selectWorkspace)
+  const selected = useStore((s) => s.selectedWorkspaceId === workspace.id)
   const confirm = useStore((s) => s.confirm)
-  const pushToast = useStore((s) => s.pushToast)
   const deleteWorkspaceNow = useStore((s) => s.deleteWorkspaceNow)
-  const reportCarryFailures = useStore((s) => s.reportCarryFailures)
-  const reportCarryMissing = useStore((s) => s.reportCarryMissing)
-  const suggestCarry = useStore((s) => s.suggestCarry)
+  const unarchiveWorkspace = useUnarchiveWorkspace()
 
-  const unarchive = async (): Promise<void> => {
-    const res = await window.api.workspace.unarchive(workspace.id)
-    if (res.error) pushToast('error', res.error)
-    else {
-      void select(workspace.id)
-      // 언아카이브도 worktree 를 새로 만들므로 전달이 다시 일어난다 — 실패는 동일하게 알리고,
-      // 전달 목록이 빈 리포라면 생성 경로와 똑같이 한 번 제안한다.
-      reportCarryFailures(res.carryFailures)
-      reportCarryMissing(workspace.repoId, res.carryMissing)
-      suggestCarry(workspace.repoId, workspace.id, res.carrySuggestions)
-    }
-  }
+  const unarchive = (): void => void unarchiveWorkspace(workspace)
 
   // 아카이브 시 표시 이름(PR 제목 등)을 displayName 에 보존하므로, PR 정보 없이도 같은 이름을 보여 준다.
   const displayName = workspaceDisplayName(workspace)
@@ -1478,167 +1523,36 @@ function ArchivedRow({ workspace }: { workspace: Workspace }): React.JSX.Element
   }
 
   return (
-    <div className="group/arc flex items-center gap-2 pl-6 pr-1.5 py-1 rounded-md hover:bg-[var(--surface)]">
-      <span className="flex-1 truncate text-xs text-neutral-500" title={workspace.branch}>
+    <div
+      className={`group/arc flex items-center gap-2 pl-6 pr-1.5 py-1 rounded-md ${
+        selected ? 'bg-[var(--surface-2)]' : 'hover:bg-[var(--surface)]'
+      }`}
+    >
+      {/* 행을 눌러 대화를 읽기 전용으로 연다 — 되살릴지 판단하려면 안을 봐야 한다. */}
+      <button
+        onClick={() => void select(workspace.id)}
+        title={`${displayName} — ${workspace.branch}`}
+        className={`flex-1 min-w-0 text-left truncate text-xs ${
+          selected ? 'text-neutral-200' : 'text-neutral-500 hover:text-neutral-300'
+        }`}
+      >
         {displayName}
-      </span>
+      </button>
       <button
         onClick={unarchive}
-        className="opacity-0 group-hover/arc:opacity-100 h-5 w-5 grid place-items-center rounded text-neutral-500 hover:bg-[var(--surface-2)] hover:text-neutral-200"
+        className="opacity-0 group-hover/arc:opacity-100 focus-visible:opacity-100 h-5 w-5 grid place-items-center rounded text-neutral-500 hover:bg-[var(--surface-2)] hover:text-neutral-200"
         title="Unarchive (recreate worktree)"
       >
         <ArchiveRestore size={12} />
       </button>
       <button
         onClick={remove}
-        className="opacity-0 group-hover/arc:opacity-100 h-5 w-5 grid place-items-center rounded text-neutral-500 hover:bg-[var(--danger-500)]/15 hover:text-[var(--danger-400)]"
+        className="opacity-0 group-hover/arc:opacity-100 focus-visible:opacity-100 h-5 w-5 grid place-items-center rounded text-neutral-500 hover:bg-[var(--danger-500)]/15 hover:text-[var(--danger-400)]"
         title="Delete permanently"
       >
         <Trash2 size={12} />
       </button>
     </div>
-  )
-}
-
-/**
- * PR 상태별 점 색(bg) 과 라벨. Tailwind v4 는 보간한 클래스명을 스캔하지 못하므로
- * 상태마다 전체 클래스 문자열을 그대로 둔다(ChatView 의 PR_STYLE 와 색 일치).
- */
-const PR_DOT: Record<PrState, { dotClass: string; label: string }> = {
-  draft: { dotClass: 'bg-neutral-400', label: 'Draft' },
-  review_required: { dotClass: 'bg-[var(--warning-400)]', label: 'Review required' },
-  changes_requested: { dotClass: 'bg-[var(--attention-400)]', label: 'Changes requested' },
-  ci_pending: { dotClass: 'bg-[var(--warning-400)]', label: 'Checks pending' },
-  ci_failed: { dotClass: 'bg-[var(--danger-400)]', label: 'Checks failed' },
-  approved: { dotClass: 'bg-[var(--success-400)]', label: 'Ready to merge' },
-  conflict: { dotClass: 'bg-[var(--danger-400)]', label: 'Conflict' },
-  open: { dotClass: 'bg-[var(--open-400)]', label: 'Open' },
-  merged: { dotClass: 'bg-[var(--merged-400)]', label: 'Merged' },
-  closed: { dotClass: 'bg-neutral-500', label: 'Closed' }
-}
-
-/** 상태 표시 점/아이콘. 사이드바 행과 ⌘K 퀵 스위처가 같은 시각 언어를 쓰도록 공유한다. */
-export function StatusDot({
-  status,
-  awaitingPermission,
-  compacting,
-  stale,
-  runningMs,
-  pendingRateLimitResume,
-  awaitingStackedWork,
-  rateLimited,
-  backgroundTasks = 0,
-  pr
-}: {
-  status: Workspace['status']
-  awaitingPermission: boolean
-  compacting: boolean
-  stale: boolean
-  runningMs: number
-  pendingRateLimitResume?: Workspace['pendingRateLimitResume']
-  awaitingStackedWork?: Workspace['awaitingStackedWork']
-  /** 제한에 걸린 상태(해제 시각이 지나지 않은 것). 호출부가 activeRateLimitPause 로 걸러 넘긴다. */
-  rateLimited?: RateLimitPause | null
-  /**
-   * 에이전트가 두고 간, 아직 살아 있는 백그라운드 셸의 수. 상태를 running 으로 만들지는 않는다
-   * ([[claude/session]] syncStatus) — 이 표시가 그 사실을 알리는 자리다.
-   */
-  backgroundTasks?: number
-  pr?: PrStatus | null
-}): React.JSX.Element {
-  // 권한 대기는 가장 행동 가능한 상태라 다른 표시보다 우선한다.
-  if (awaitingPermission) {
-    return (
-      <span title="Waiting for your permission" className="shrink-0 grid place-items-center">
-        <ShieldQuestion size={13} className="text-[var(--warning-400)]" />
-      </span>
-    )
-  }
-  if (status === 'running') {
-    // 압축 중(보라) · 오래 실행(앰버, 멈춤일 수 있음) · 일반 실행(파랑) 을 색으로 구분한다.
-    const color = compacting
-      ? 'text-[var(--merged-400)]'
-      : stale
-        ? 'text-[var(--warning-400)]'
-        : 'text-[var(--info-400)]'
-    const title = compacting
-      ? 'Compacting conversation…'
-      : stale
-        ? `Running for ${Math.round(runningMs / 60000)}m — may be stuck`
-        : 'Running'
-    return (
-      <span title={title} className="shrink-0 grid place-items-center">
-        <Loader2 size={13} className={`${color} animate-spin`} />
-      </span>
-    )
-  }
-  // 사용량 제한으로 멈춘 상태는 단순 idle 도, 그냥 error 도 아니다 — 시간이 지나면 스스로 풀리는
-  // 대기다. PR 상태·에러보다 우선해 표시하되, 위의 권한 대기·실행 중처럼 지금 일어나고 있는
-  // 상태에는 양보한다. 자동 이어가기가 꺼져 있어도(예약 없이 표시만 있어도) 같은 아이콘을 쓴다.
-  if (pendingRateLimitResume || rateLimited) {
-    const title = pendingRateLimitResume
-      ? resumeTitle(pendingRateLimitResume)
-      : rateLimited?.resetsAt
-        ? `Stopped by usage limit — resets at ${new Date(rateLimited.resetsAt).toLocaleString()}`
-        : 'Stopped by usage limit'
-    return (
-      <span title={title} className="shrink-0 grid place-items-center">
-        <Hourglass
-          size={12}
-          className="text-[var(--warning-400)]"
-          aria-label={
-            pendingRateLimitResume?.cause === 'connection'
-              ? 'Paused — no connection to the API'
-              : 'Paused by usage limit'
-          }
-        />
-      </span>
-    )
-  }
-  if (awaitingStackedWork) {
-    return (
-      <span
-        title={`Waiting for ${awaitingStackedWork.targets.length} stacked workspaces — until ${new Date(awaitingStackedWork.deadlineAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`}
-        className="shrink-0 grid place-items-center"
-      >
-        <Clock size={12} className="text-neutral-400" aria-label="Waiting for stacked work" />
-      </span>
-    )
-  }
-  // 에러는 PR 상태보다 우선해 알린다. 색만으로 idle 과 구분되지 않도록 경고 아이콘을 쓴다.
-  if (status === 'error') {
-    return (
-      <span title="Last turn ended with an error" className="shrink-0 grid place-items-center">
-        <AlertTriangle size={12} className="text-[var(--danger-400)]" aria-label="Error" />
-      </span>
-    )
-  }
-  // 대화는 끝났는데 에이전트가 두고 간 셸이 아직 돈다. 스피너를 쓰면 "에이전트가 일하는 중" 으로
-  // 읽히므로 — 그렇게 읽히는 것이 정확히 이 표시를 만들게 된 문제다 — 돌지 않는 아이콘으로 사실만
-  // 알린다. 무엇이 도는지와 개별 중지 버튼은 바로 아래 붙는 실행 목록(WorkspaceAgents)에 있다.
-  // PR 점보다 앞에 둔다: PR 상태는 언제 봐도 그대로지만 이건 지금 이 순간에만 있는 정보다.
-  if (backgroundTasks > 0) {
-    return (
-      <span
-        title={`${backgroundTasks} background ${backgroundTasks === 1 ? 'task' : 'tasks'} still running here — the agent itself is idle`}
-        className="shrink-0 grid place-items-center"
-      >
-        <Terminal size={12} className="text-neutral-400" aria-label="Background tasks running" />
-      </span>
-    )
-  }
-  // idle 이면서 PR 이 있으면 점 색으로 PR 상태를 한눈에 보여 준다.
-  if (pr) {
-    const { dotClass, label } = PR_DOT[pr.state]
-    return (
-      <span
-        title={`PR #${pr.number} — ${label}`}
-        className={`h-2 w-2 rounded-full shrink-0 ${dotClass}`}
-      />
-    )
-  }
-  return (
-    <span title="Idle — ready for input" className="h-2 w-2 rounded-full shrink-0 bg-neutral-600" />
   )
 }
 
@@ -1751,12 +1665,14 @@ function FanoutCandidateLine({
  */
 function NewWorkspaceButton({
   repoId,
+  repoName,
   onNewWorkspace,
   onNewFromIssue,
   onNewFromPr,
   onFanout
 }: {
   repoId: string
+  repoName: string
   onNewWorkspace: (repoId: string, agentBackend?: AgentBackendId) => void
   onNewFromIssue: (repoId: string) => void
   onNewFromPr: (repoId: string) => void
@@ -1772,11 +1688,21 @@ function NewWorkspaceButton({
   }
 
   useEffect(() => {
+    let frame: number | undefined
     const onOpen = (e: Event): void => {
-      if ((e as CustomEvent<string>).detail === repoId) openMenu()
+      if ((e as CustomEvent<string>).detail !== repoId) return
+      // 먼저 앵커를 화면 안으로 가져온 뒤 다음 프레임에서 좌표를 읽는다. 메뉴를 먼저 열면
+      // RowActionsMenu 의 scroll-close 규칙 때문에 스크롤 순간 닫히고, 예전 좌표를 읽으면 메뉴가
+      // 화면 가장자리에 대상과 떨어져 나타난다.
+      buttonRef.current?.closest('[data-repo-header]')?.scrollIntoView({ block: 'nearest' })
+      if (frame !== undefined) window.cancelAnimationFrame(frame)
+      frame = window.requestAnimationFrame(openMenu)
     }
     window.addEventListener(OPEN_NEW_WORKSPACE_MENU_EVENT, onOpen)
-    return () => window.removeEventListener(OPEN_NEW_WORKSPACE_MENU_EVENT, onOpen)
+    return () => {
+      window.removeEventListener(OPEN_NEW_WORKSPACE_MENU_EVENT, onOpen)
+      if (frame !== undefined) window.cancelAnimationFrame(frame)
+    }
   }, [repoId])
 
   const multi = backends.length > 1
@@ -1817,6 +1743,15 @@ function NewWorkspaceButton({
     icon: <Copy size={13} />,
     onSelect: () => onFanout(repoId)
   })
+  // 이미 있는 worktree 를 워크스페이스로 앉히는 것도 "여기 무언가를 더한다" 다. 손으로 만든
+  // worktree 든 다른 도구가 만든 것이든, 이 리포에서 시작하는 유일한 메뉴 안에 함께 둔다.
+  actions.push({
+    key: 'import',
+    label: 'Import existing worktrees…',
+    icon: <Download size={13} />,
+    onSelect: () => openMigrate(repoId),
+    separatorBefore: true
+  })
 
   return (
     <>
@@ -1835,6 +1770,7 @@ function NewWorkspaceButton({
         <RowActionsMenu
           at={menuAt}
           align="right"
+          heading={`New workspace in ${repoName}`}
           actions={actions}
           onClose={() => setMenuAt(null)}
         />

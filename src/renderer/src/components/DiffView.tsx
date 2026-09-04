@@ -6,20 +6,33 @@ import {
   FilePen,
   FileCode,
   Maximize2,
-  MessageSquarePlus
+  MessageSquarePlus,
+  Undo2
 } from 'lucide-react'
 import type { FileDiff, WorkspaceDiff } from '@shared/types'
-import { parsePatch, rowSign, type PatchHunk, type PatchRow } from './files/diffPatch'
+import { branchLineTotal } from '@shared/codePaths'
+import { diffRenderLimit } from '@shared/diffRenderLimit'
+import { hunkPatch, parsePatch, rowSign, type PatchHunk, type PatchRow } from './files/diffPatch'
 import type { DiffComment, DiffCommentAnchor } from '../lib/diffComments'
+import { diffWrapClasses, type DiffWrapClasses } from '../lib/diffWordWrap'
 import DiffCommentBox from './diff/DiffCommentBox'
 import DiffCommentCard from './diff/DiffCommentCard'
+import BranchLineTotalChip from './diff/BranchLineTotalChip'
+import DiffNavButtons from './diff/DiffNavButtons'
+import { DiffChangeAnchor, DiffNavProvider } from './diff/diffNav'
+import { LargeDiffNotice, OmittedPatchNotice } from './diff/LargeDiffNotice'
 
 /**
  * base 브랜치 대비 변경을 파일별로 표시한다(통합 diff).
  * 변경 보기 모달([[DiffModal]])과 우측 패널의 Changes 탭이 공유한다.
  *
- * diff 는 계속 읽기 전용이다 — 여기서 스테이징하거나 커밋하지 않는다. 다만 `commenting` 을
- * 주면 줄마다 코멘트를 달 수 있고, 그 코멘트는 파일이 아니라 **에이전트에게 보낼 메시지**가 된다.
+ * 기본은 읽기 전용이다 — 여기서 스테이징하거나 커밋하지 않는다. 커밋은 계속 에이전트의 몫이다.
+ * 다만 두 가지 배선을 선택적으로 받는다:
+ *
+ * - `commenting` — 줄마다 코멘트를 달 수 있다. 그 코멘트는 파일이 아니라 **에이전트에게 보낼
+ *   메시지**가 된다.
+ * - `discarding` — hunk 하나를 워킹 트리에서 되돌린다. 코멘트가 "고쳐 달라고 부탁하는 길"이라면
+ *   이쪽은 "그냥 내가 지우는 길"이다 — 왕복 한 턴과 토큰을 쓸 필요가 없는 변경을 위한 것이다.
  */
 export interface DiffCommenting {
   /** 이 diff 에 달려 있는, 아직 보내지 않은 코멘트 전부. */
@@ -29,14 +42,34 @@ export interface DiffCommenting {
   onRemove: (id: string) => void
 }
 
+/**
+ * hunk 버리기 배선. 주지 않으면 버튼 자체가 그려지지 않는다 — 지금은 워크스페이스의 Changes
+ * 패널만 준다(모달·PR 리뷰 화면의 diff 는 되돌릴 워킹 트리가 없거나, 남의 코드다).
+ */
+export interface DiffDiscarding {
+  /**
+   * 지금은 되돌릴 수 없는 이유. null 이면 되돌릴 수 있다.
+   *
+   * 이유가 있으면 버튼을 **숨기지 않고 잠근다.** 없어진 버튼은 사용자에게 "이 앱은 이걸 못
+   * 한다"로 읽히지만, 잠긴 버튼은 툴팁으로 "지금은 안 된다, 왜냐하면"까지 말할 수 있다.
+   */
+  blockedReason: string | null
+  /** `patch` 는 이 hunk 만 담은 완결된 patch 다([[hunkPatch]]). */
+  onDiscard: (file: FileDiff, patch: string) => void
+}
+
 const NO_COMMENTS: DiffComment[] = []
+const NO_HUNKS: PatchHunk[] = []
+const NO_FILES: FileDiff[] = []
 
 export default function DiffView({
   diff,
   loading,
   baseBranch,
   onOpenFile,
-  commenting
+  commenting,
+  discarding,
+  wrap = true
 }: {
   diff: WorkspaceDiff | null
   loading: boolean
@@ -48,6 +81,13 @@ export default function DiffView({
   onOpenFile?: (path: string) => void
   /** 라인 코멘트 배선. 주지 않으면 읽기 전용으로만 그린다. */
   commenting?: DiffCommenting
+  /** hunk 버리기 배선. 주지 않으면 버리기 버튼이 뜨지 않는다. */
+  discarding?: DiffDiscarding
+  /**
+   * 긴 줄을 접을지. 끄면 정렬을 지키고 가로로 민다([[diffWordWrap]]).
+   * 에디터의 워드랩과는 별개 값이다 — 두 화면이 원하는 게 반대다.
+   */
+  wrap?: boolean
 }): React.JSX.Element {
   // 코멘트를 파일별로 갈라 둔다 — 파일 블록마다 전체 목록을 훑지 않게.
   const byPath = useMemo(() => {
@@ -59,6 +99,9 @@ export default function DiffView({
     }
     return map
   }, [commenting?.comments])
+
+  // 이른 반환(로딩·변경 없음)보다 위에 둔다 — 훅은 건너뛸 수 없다.
+  const total = useMemo(() => branchLineTotal(diff?.files ?? NO_FILES), [diff?.files])
 
   if (loading) {
     return (
@@ -75,26 +118,31 @@ export default function DiffView({
     )
   }
 
-  const totalAdd = diff.files.reduce((n, f) => n + f.additions, 0)
-  const totalDel = diff.files.reduce((n, f) => n + f.deletions, 0)
-
   return (
-    <div className="space-y-3">
-      <div className="text-xs text-neutral-500">
-        {diff.files.length} file{diff.files.length > 1 ? 's' : ''} ·{' '}
-        <span className="text-[var(--success-400)]">+{totalAdd}</span>{' '}
-        <span className="text-[var(--danger-400)]">−{totalDel}</span>
+    <DiffNavProvider>
+      <div className="space-y-3">
+        <div className="flex items-center gap-2 text-xs text-neutral-500">
+          <span>
+            {diff.files.length} file{diff.files.length > 1 ? 's' : ''}
+          </span>
+          <span aria-hidden="true">·</span>
+          <BranchLineTotalChip total={total} />
+          <span className="flex-1" />
+          <DiffNavButtons />
+        </div>
+        {diff.files.map((f) => (
+          <FileBlock
+            key={f.path}
+            file={f}
+            onOpenFile={onOpenFile}
+            commenting={commenting}
+            discarding={discarding}
+            comments={byPath.get(f.path) ?? NO_COMMENTS}
+            wrap={wrap}
+          />
+        ))}
       </div>
-      {diff.files.map((f) => (
-        <FileBlock
-          key={f.path}
-          file={f}
-          onOpenFile={onOpenFile}
-          commenting={commenting}
-          comments={byPath.get(f.path) ?? NO_COMMENTS}
-        />
-      ))}
-    </div>
+    </DiffNavProvider>
   )
 }
 
@@ -109,14 +157,25 @@ function FileBlock({
   file,
   onOpenFile,
   commenting,
-  comments
+  discarding,
+  comments,
+  wrap
 }: {
   file: FileDiff
   onOpenFile?: (path: string) => void
   commenting?: DiffCommenting
+  discarding?: DiffDiscarding
   comments: DiffComment[]
+  wrap: boolean
 }): React.JSX.Element {
-  const hunks = useMemo(() => parsePatch(file.patch), [file.patch])
+  // 상한 판정이 먼저다. parsePatch 는 행마다 객체를 만들므로, 그리지 않기로 한 patch 를
+  // 파싱하는 것만으로도 이미 늦는다.
+  const limit = useMemo(() => diffRenderLimit(file.patch), [file.patch])
+  const hunks = useMemo(
+    () => (limit.limited ? NO_HUNKS : parsePatch(file.patch)),
+    [file.patch, limit.limited]
+  )
+  const cls = diffWrapClasses(wrap)
   // 사용자가 직접 접거나 편 상태. 손대지 않았으면 크기와 코멘트 유무로 정한다 — 방금 단 코멘트가
   // 접힌 파일 안에 숨어 버리면 어디에 썼는지 확인할 길이 없다.
   const [openOverride, setOpenOverride] = useState<boolean | null>(null)
@@ -177,7 +236,10 @@ function FileBlock({
   const selection = drag ?? draft
 
   return (
-    <div className="rounded-lg border border-[var(--border)] overflow-hidden">
+    <div
+      data-diff-file={file.path}
+      className="rounded-lg border border-[var(--border)] overflow-hidden"
+    >
       <div className="flex items-center gap-2 px-3 py-2 bg-[var(--bg-3)] hover:bg-[var(--surface)]">
         <button
           onClick={toggle}
@@ -190,7 +252,7 @@ function FileBlock({
         {comments.length > 0 && (
           <span
             title={`${comments.length} unsent comment${comments.length > 1 ? 's' : ''} on this file`}
-            className="shrink-0 rounded-full bg-[var(--info-500)]/20 px-2 py-0.5 text-[10px] font-medium text-[var(--info-300)]"
+            className="shrink-0 rounded-full bg-[var(--info-500)]/20 px-2 py-0.5 text-2xs font-medium text-[var(--info-300)]"
           >
             {comments.length}
           </span>
@@ -216,11 +278,19 @@ function FileBlock({
       </div>
 
       {open && !file.binary && file.patch && hunks.length > 0 && (
-        <div className="bg-[var(--code-bg)] text-xs font-mono leading-[1.45]">
+        <div className={cls.body}>
           {hunks.map((hunk, hi) => (
-            <div key={hi}>
-              <div className="px-3 py-1 text-[var(--diff-hunk)] bg-[var(--surface)]/40">
-                {hunk.header}
+            // hunk 하나가 곧 변경 덩어리다 — F7 이 뛰어다니는 단위.
+            <DiffChangeAnchor key={hi}>
+              <div className={`${cls.hunkHeader} group/hunk flex items-center gap-2`}>
+                <span className="min-w-0 flex-1 truncate">{hunk.header}</span>
+                {discarding && (
+                  <DiscardHunkButton
+                    path={file.path}
+                    blockedReason={discarding.blockedReason}
+                    onDiscard={() => discarding.onDiscard(file, hunkPatch(file, hunk))}
+                  />
+                )}
               </div>
               {hunk.rows.map((row, ri) => (
                 <Row
@@ -233,6 +303,7 @@ function FileBlock({
                     ri <= Math.max(selection.from, selection.to)
                   }
                   canComment={!!commenting}
+                  cls={cls}
                   onStart={() => {
                     setDraft(null)
                     setDrag({ hunk: hi, from: ri, to: ri })
@@ -258,29 +329,28 @@ function FileBlock({
                   ))}
                 </Row>
               ))}
-            </div>
+            </DiffChangeAnchor>
           ))}
-          {/* diff 가 바뀌어 원래 줄이 사라진 코멘트. 버리지 않고 파일 끝에 모아 둔다. */}
-          {placed.orphans.length > 0 && (
-            <div className="border-t border-[var(--border)]">
-              <p className="px-3 py-1 text-[10px] text-neutral-500 font-sans">
-                No longer matches the current diff:
-              </p>
-              {placed.orphans.map((c) => (
-                <DiffCommentCard
-                  key={c.id}
-                  comment={c}
-                  onEdit={(body) => commenting?.onEdit(c.id, body)}
-                  onRemove={() => commenting?.onRemove(c.id)}
-                />
-              ))}
-            </div>
-          )}
+          <OrphanComments comments={placed.orphans} commenting={commenting} />
+        </div>
+      )}
+
+      {/* main 이 본문을 못 실어 왔다(브랜치 diff 가 git 읽기 한도를 넘음). */}
+      {open && !file.binary && file.patchOmitted && (
+        <OmittedPatchNotice additions={file.additions} deletions={file.deletions} />
+      )}
+
+      {/* 본문은 있지만 그리면 렌더러가 멎는 크기 — 숫자로 이유를 대신한다. */}
+      {open && !file.binary && file.patch && limit.limited && (
+        <div className="bg-[var(--code-bg)]">
+          <LargeDiffNotice limit={limit} />
+          {/* hunk 가 없으니 이 파일의 코멘트는 전부 orphan 이다. 안 보인다고 버리지는 않는다. */}
+          <OrphanComments comments={placed.orphans} commenting={commenting} />
         </div>
       )}
 
       {/* hunk 를 못 뽑은 patch(모드 변경 등)는 예전처럼 통짜로 색만 입혀 보여 준다. */}
-      {open && !file.binary && file.patch && hunks.length === 0 && (
+      {open && !file.binary && file.patch && !limit.limited && hunks.length === 0 && (
         <pre className="overflow-x-auto text-xs font-mono leading-[1.45] bg-[var(--code-bg)] m-0">
           {file.patch.split('\n').map((line, i) => (
             <DiffLine key={i} line={line} />
@@ -291,10 +361,70 @@ function FileBlock({
   )
 }
 
+/**
+ * hunk 머리글에 붙는 "이 hunk 버리기".
+ *
+ * 잠겼을 때 툴팁을 **감싼 span 에** 단다. 브라우저는 `disabled` 버튼에 마우스 이벤트를 주지
+ * 않아서 버튼 자신의 title 은 절대 뜨지 않는다 — 이유를 말하려고 잠근 버튼인데 그러면 아무
+ * 말도 못 하게 된다.
+ */
+function DiscardHunkButton({
+  path,
+  blockedReason,
+  onDiscard
+}: {
+  path: string
+  blockedReason: string | null
+  onDiscard: () => void
+}): React.JSX.Element {
+  return (
+    <span
+      className="shrink-0"
+      title={blockedReason ?? 'Discard this hunk — these lines go back to what they were'}
+    >
+      <button
+        onClick={onDiscard}
+        disabled={!!blockedReason}
+        aria-label={`Discard this hunk in ${path}`}
+        className="grid h-5 w-5 place-items-center rounded text-neutral-500 opacity-0 transition-opacity hover:bg-[var(--danger-500)]/20 hover:text-[var(--danger-400)] focus-visible:opacity-100 disabled:cursor-not-allowed disabled:text-neutral-700 disabled:hover:bg-transparent disabled:hover:text-neutral-700 group-hover/hunk:opacity-100"
+      >
+        <Undo2 size={11} />
+      </button>
+    </span>
+  )
+}
+
+/** diff 가 바뀌어 원래 줄이 사라진 코멘트. 버리지 않고 파일 끝에 모아 둔다. */
+function OrphanComments({
+  comments,
+  commenting
+}: {
+  comments: DiffComment[]
+  commenting?: DiffCommenting
+}): React.JSX.Element | null {
+  if (comments.length === 0) return null
+  return (
+    <div className="border-t border-[var(--border)]">
+      <p className="px-3 py-1 text-2xs text-neutral-500 font-sans">
+        No longer matches the current diff:
+      </p>
+      {comments.map((c) => (
+        <DiffCommentCard
+          key={c.id}
+          comment={c}
+          onEdit={(body) => commenting?.onEdit(c.id, body)}
+          onRemove={() => commenting?.onRemove(c.id)}
+        />
+      ))}
+    </div>
+  )
+}
+
 function Row({
   row,
   selected,
   canComment,
+  cls,
   onStart,
   onExtend,
   children
@@ -302,6 +432,8 @@ function Row({
   row: PatchRow
   selected: boolean
   canComment: boolean
+  /** 워드랩이 만드는 클래스 차이([[diffWordWrap]]). */
+  cls: DiffWrapClasses
   onStart: () => void
   onExtend: () => void
   /** 이 줄 아래에 끼워 넣을 것(입력 상자·코멘트 카드). */
@@ -317,7 +449,7 @@ function Row({
   return (
     <>
       <div
-        className={`group/row flex ${selected ? 'bg-[var(--info-500)]/25' : tone}`}
+        className={`${cls.row} ${selected ? 'bg-[var(--info-500)]/25' : tone}`}
         onMouseEnter={onExtend}
       >
         <span className="w-10 shrink-0 select-none px-1.5 text-right text-neutral-600 tabular-nums">
@@ -337,16 +469,16 @@ function Row({
               }}
               title="Comment on this line (drag to select a range)"
               aria-label="Comment on this line"
-              className="grid h-full w-full place-items-center rounded bg-[var(--info-600)] text-white opacity-0 transition-opacity group-hover/row:opacity-100"
+              className="grid h-full w-full place-items-center rounded bg-[var(--info-600)] text-white opacity-0 transition-opacity group-hover/row:opacity-100 focus-visible:opacity-100"
             >
               <MessageSquarePlus size={11} />
             </button>
           </span>
         )}
         <span className="w-3 shrink-0 select-none text-neutral-600">{rowSign(row)}</span>
-        <span className="whitespace-pre-wrap break-all pr-3">{row.text || ' '}</span>
+        <span className={cls.code}>{row.text || ' '}</span>
       </div>
-      {children}
+      {children && <div className={cls.aside}>{children}</div>}
     </>
   )
 }

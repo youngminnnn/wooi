@@ -32,3 +32,21 @@ export function effortLabel(
   if (!effort) return 'Model default'
   return meta?.efforts.find((e) => e.id === effort)?.label ?? effort
 }
+
+/**
+ * 상태줄용 짧은 모델 라벨. `"Opus 5 (1M context)"` → `"Opus 5 · 1M"`.
+ *
+ * 목록에서는 괄호 주석이 고르는 데 도움이 되지만, 상태줄에서는 그 괄호가 한 줄에서 가장 넓은
+ * 텍스트다 — 그리고 거기서 필요한 정보는 "어떤 모델인가" 지 문장이 아니다. 그래서 괄호를
+ * 가운뎃점 뒤 한 조각으로 접고, 온전한 라벨은 부르는 쪽이 `title` 로 남긴다.
+ *
+ * 괄호 안의 'context' 는 지운다 — 옆에 컨텍스트 게이지가 붙어 있는 자리라 단어가 한 번 더
+ * 나올 이유가 없다. 괄호가 없는 라벨(`"Sonnet 4.6"`)과 카탈로그에 없는 값(ID 원문)은 그대로 둔다.
+ */
+export function compactModelLabel(models: ModelOption[], id: string | null): string {
+  const full = modelLabel(models, id)
+  const m = /^(.*?)\s*\(([^)]*)\)\s*$/.exec(full)
+  if (!m) return full
+  const note = m[2].replace(/context/i, '').trim()
+  return note ? `${m[1]} · ${note}` : m[1]
+}

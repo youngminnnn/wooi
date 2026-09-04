@@ -58,12 +58,12 @@ export default function PeerInboxBanner({
             )}
             {/* 리포가 다르면 그 사실이 판단을 바꾼다 — 여기 코드베이스 이야기가 아니다. */}
             {pending.crossRepo && (
-              <span className="shrink-0 rounded bg-[var(--surface-2)] px-1.5 py-0.5 text-[10px] text-neutral-400">
+              <span className="shrink-0 rounded bg-[var(--surface-2)] px-1.5 py-0.5 text-2xs text-neutral-400">
                 {pending.fromRepoName}
               </span>
             )}
             {inbox.length > 1 && (
-              <span className="shrink-0 text-[10px] text-neutral-500">
+              <span className="shrink-0 text-2xs text-neutral-500">
                 +{inbox.length - 1} more waiting
               </span>
             )}

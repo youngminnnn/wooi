@@ -5,7 +5,9 @@ import { basename, isAbsolute, join, resolve } from 'node:path'
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { wooiHome } from './paths'
 import { runGh } from './github'
+import { MAX_GIT_READ_BYTES } from '@shared/diffRenderLimit'
 import type {
+  DiscardHunkResult,
   FileDiff,
   FileDiffStatus,
   GitStatus,
@@ -19,7 +21,7 @@ import type {
 const exec = promisify(execFile)
 
 async function git(cwd: string, args: string[]): Promise<string> {
-  const { stdout } = await exec('git', args, { cwd, maxBuffer: 1024 * 1024 * 32 })
+  const { stdout } = await exec('git', args, { cwd, maxBuffer: MAX_GIT_READ_BYTES })
   return stdout.trim()
 }
 
@@ -29,7 +31,7 @@ async function gitTry(
   args: string[]
 ): Promise<{ ok: boolean; stdout: string; stderr: string }> {
   try {
-    const { stdout } = await exec('git', args, { cwd, maxBuffer: 1024 * 1024 * 32 })
+    const { stdout } = await exec('git', args, { cwd, maxBuffer: MAX_GIT_READ_BYTES })
     return { ok: true, stdout: stdout.trim(), stderr: '' }
   } catch (e) {
     const err = e as { stdout?: string; stderr?: string }
@@ -39,6 +41,31 @@ async function gitTry(
       stderr: (err.stderr ?? '').toString().trim()
     }
   }
+}
+
+/**
+ * stdin 으로 입력을 먹여야 하는 git(지금은 `git apply` 뿐)을 위한 변형.
+ * promisify(execFile) 은 자식 프로세스를 돌려주지 않아 stdin 을 쓸 수 없다.
+ */
+function gitWithInput(
+  cwd: string,
+  args: string[],
+  input: string
+): Promise<{ ok: boolean; stderr: string }> {
+  return new Promise((resolve) => {
+    const child = execFile(
+      'git',
+      args,
+      { cwd, maxBuffer: MAX_GIT_READ_BYTES },
+      (err, _stdout, stderr) => {
+        resolve({ ok: !err, stderr: (stderr ?? '').toString().trim() })
+      }
+    )
+    child.stdin?.on('error', () => {
+      // git 이 먼저 죽으면 EPIPE 가 난다. 종료 코드는 위 콜백이 돌려준다.
+    })
+    child.stdin?.end(input)
+  })
 }
 
 const parseGitPathList = (output: string): string[] =>
@@ -205,6 +232,35 @@ export async function resolveUniqueWorktree(
     const taken = existsSync(worktreePath) || (await localBranchExists(repoPath, candidate))
     if (!taken) return { branch: candidate, worktreePath }
   }
+}
+
+/** `git worktree list` 한 항목. detached HEAD 면 branch 가 null 이다. */
+export interface WorktreeEntry {
+  path: string
+  branch: string | null
+}
+
+/**
+ * 이 리포에 딸린 worktree 전부(메인 체크아웃 포함). 마이그레이션이 다른 도구가 만들어 둔
+ * worktree 를 **실제로 살아 있는 것만** 골라내는 근거다 — 그 도구의 DB·JSON 은 지워진
+ * worktree 도 기억하고 있으므로, git 에게 물어 확인한 목록과 교집합을 취해야 한다.
+ */
+export async function listWorktrees(repoPath: string): Promise<WorktreeEntry[]> {
+  const out = await git(repoPath, ['worktree', 'list', '--porcelain']).catch(() => '')
+  const entries: WorktreeEntry[] = []
+  let current: WorktreeEntry | null = null
+  for (const line of out.split('\n')) {
+    if (line.startsWith('worktree ')) {
+      current = { path: line.slice('worktree '.length).trim(), branch: null }
+      entries.push(current)
+    } else if (line.startsWith('branch ') && current) {
+      current.branch = line
+        .slice('branch '.length)
+        .trim()
+        .replace(/^refs\/heads\//, '')
+    }
+  }
+  return entries
 }
 
 /** origin 에서 fetch 한다 (origin 미설정/오프라인 등은 조용히 무시). */
@@ -477,8 +533,30 @@ export async function deleteReviewRefs(repoPath: string, reviewId: string): Prom
 }
 
 /** 사이드바 배지용 경량 상태 (브랜치, origin/base 우선 기준의 ahead/behind, 변경 파일 수). */
-export async function getStatus(worktreePath: string, baseBranch: string): Promise<GitStatus> {
-  const branch = await git(worktreePath, ['rev-parse', '--abbrev-ref', 'HEAD']).catch(() => '?')
+const STATUS_REF_CACHE_MS = 60_000
+const statusRefCache = new Map<
+  string,
+  { at: number; baseBranch: string; branch: string; ahead: number; behind: number }
+>()
+
+/**
+ * 전체 사이드바 폴링에서는 파일 상태만 매번 읽고, 브랜치와 base 대비 커밋 수는 잠시 재사용한다.
+ * 명시적 사용자 동작·턴 완료·fetch 뒤 조회는 force=true 로 즉시 다시 계산한다.
+ */
+export async function getStatus(
+  worktreePath: string,
+  baseBranch: string,
+  force = true
+): Promise<GitStatus> {
+  const cached = statusRefCache.get(worktreePath)
+  const canReuse =
+    !force &&
+    cached !== undefined &&
+    cached.baseBranch === baseBranch &&
+    Date.now() - cached.at < STATUS_REF_CACHE_MS
+  const branch = canReuse
+    ? cached.branch
+    : await git(worktreePath, ['rev-parse', '--abbrev-ref', 'HEAD']).catch(() => '?')
 
   let changedFiles = 0
   let conflicted = false
@@ -492,25 +570,27 @@ export async function getStatus(worktreePath: string, baseBranch: string): Promi
     // 무시 — 0 으로 둔다.
   }
 
-  let ahead = 0
-  let behind = 0
-  try {
-    const remoteBase = `origin/${baseBranch.replace(/^origin\//, '')}`
-    // 15초 폴링의 공통 경로에 ref 확인 프로세스를 더하지 않는다. origin ref 로 바로 계산하고,
-    // 리모트가 없는 리포에서만 같은 명령을 로컬 base 로 한 번 더 시도한다.
-    const counts = await git(worktreePath, [
-      'rev-list',
-      '--left-right',
-      '--count',
-      `${remoteBase}...HEAD`
-    ]).catch(() =>
-      git(worktreePath, ['rev-list', '--left-right', '--count', `${baseBranch}...HEAD`])
-    )
-    const [b, a] = counts.split(/\s+/).map((n) => parseInt(n, 10))
-    behind = Number.isFinite(b) ? b : 0
-    ahead = Number.isFinite(a) ? a : 0
-  } catch {
-    // base 브랜치 ref 가 없으면 0 으로 둔다.
+  let ahead = canReuse ? cached.ahead : 0
+  let behind = canReuse ? cached.behind : 0
+  if (!canReuse) {
+    try {
+      const remoteBase = `origin/${baseBranch.replace(/^origin\//, '')}`
+      // 리모트가 없는 리포에서만 같은 명령을 로컬 base 로 한 번 더 시도한다.
+      const counts = await git(worktreePath, [
+        'rev-list',
+        '--left-right',
+        '--count',
+        `${remoteBase}...HEAD`
+      ]).catch(() =>
+        git(worktreePath, ['rev-list', '--left-right', '--count', `${baseBranch}...HEAD`])
+      )
+      const [b, a] = counts.split(/\s+/).map((n) => parseInt(n, 10))
+      behind = Number.isFinite(b) ? b : 0
+      ahead = Number.isFinite(a) ? a : 0
+    } catch {
+      // base 브랜치 ref 가 없으면 0 으로 둔다.
+    }
+    statusRefCache.set(worktreePath, { at: Date.now(), baseBranch, branch, ahead, behind })
   }
 
   return { branch, ahead, behind, changedFiles, conflicted, rebasing: isRebasing(worktreePath) }
@@ -728,6 +808,36 @@ export async function updateFromBase(
 }
 
 /** 진행 중인 머지를 취소해 워크스페이스를 머지 직전 상태로 되돌린다(충돌 포기용). */
+/**
+ * patch 를 워킹 트리에 **거꾸로** 적용한다 — Changes 탭의 "이 hunk 버리기".
+ *
+ * 인덱스도 HEAD 도 건드리지 않는다(`git apply` 는 기본이 워킹 트리 전용이다). 커밋이 남긴
+ * 변경이든 아직 커밋 안 된 변경이든 상관없이 **파일의 현재 내용**에서 그 hunk 만 빼는 것이라,
+ * 결과는 언제나 "커밋되지 않은 변경"으로 남고 이력은 그대로다.
+ *
+ * `--reverse` 를 쓰고 뒤집힌 patch 를 직접 만들지 않는 이유: 개행 없는 파일 끝 표식처럼
+ * 뒤집기가 미묘한 자리가 있고, 그걸 우리가 틀리면 **사용자 코드가 지워진다**. 뒤집는 판단은
+ * git 에 맡기고 우리는 hunk 를 골라 오리기만 한다([[hunkPatch]]).
+ *
+ * `--3way` 도 `--recount` 도 주지 않는다. 문맥이 어긋나면 그냥 거절당하는 편이 맞다 —
+ * diff 를 그린 뒤 파일이 또 바뀌었다는 뜻이고, 그때 억지로 맞춰 붙이면 엉뚱한 줄이 사라진다.
+ */
+export async function applyReversePatch(
+  worktreePath: string,
+  patch: string
+): Promise<DiscardHunkResult> {
+  const { ok, stderr } = await gitWithInput(worktreePath, ['apply', '--reverse', '-'], patch)
+  if (ok) return { status: 'discarded' }
+  // git 이 문맥 불일치로 거절한 경우. 파일은 한 글자도 바뀌지 않았다(apply 는 전부 아니면 전무다).
+  if (/patch does not apply|does not match index|No such file or directory/i.test(stderr)) {
+    return {
+      status: 'stale',
+      message: 'This hunk no longer matches the file on disk. Refresh the diff and try again.'
+    }
+  }
+  return { status: 'error', message: stderr || 'git apply failed.' }
+}
+
 export async function abortMerge(worktreePath: string): Promise<void> {
   await git(worktreePath, ['merge', '--abort']).catch(() => {})
 }
@@ -995,12 +1105,16 @@ export async function getDiff(worktreePath: string, baseBranch: string): Promise
   const from = await git(worktreePath, ['merge-base', baseRef, 'HEAD']).catch(() => baseRef)
 
   let raw = ''
+  let overflowed = false
   try {
     raw = await git(worktreePath, ['diff', from])
-  } catch {
-    // base ref 가 없으면 추적 변경은 비운다.
+  } catch (err) {
+    // base ref 가 없으면 추적 변경은 비운다 — 하지만 **읽기 버퍼가 넘친 것**은 "변경 없음" 이
+    // 아니다. 여기서 뭉뚱그리면 32MB 를 넘는 브랜치가 조용히 "No changes" 로 보이고, 그건
+    // 화면이 느려지는 것보다 나쁘다(있는 변경을 없다고 말한다).
+    overflowed = isMaxBufferError(err)
   }
-  const files = parseUnifiedDiff(raw)
+  const files = overflowed ? await numstatOnlyDiff(worktreePath, from) : parseUnifiedDiff(raw)
 
   // untracked(신규) 파일은 git diff 에 나오지 않으므로 직접 추가 패치를 만든다.
   try {
@@ -1302,6 +1416,71 @@ export async function summarizeBranch(
 }
 
 /** 통합 diff 출력을 파일 단위로 쪼갠다. */
+/** execFile 의 `maxBuffer` 초과인가. 다른 실패(ref 없음 등)와 갈라야 해서 코드로 본다. */
+function isMaxBufferError(err: unknown): boolean {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    (err as { code?: unknown }).code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER'
+  )
+}
+
+/**
+ * 통합 diff 가 읽기 버퍼를 넘겼을 때의 대체 경로 — 본문 없이 **파일 목록과 줄 수만** 가져온다.
+ *
+ * `--numstat` 과 `--name-status` 는 파일당 한 줄이라 크기가 사실상 고정이다. 본문을 못 실은
+ * 파일은 `patchOmitted` 로 표시해, 렌더러가 "왜 안 보이는지" 를 숫자와 함께 말할 수 있게 한다.
+ *
+ * `-M`(rename 검출)은 켜지 않는다 — 위의 `git diff` 와 같은 시야를 유지해야 두 경로의 파일
+ * 목록이 갈라지지 않는다. 경로는 `core.quotePath=false` 로 그대로 받는다(한글 경로가 8진 이스케이프로
+ * 오면 화면에서 읽을 수 없다).
+ */
+async function numstatOnlyDiff(worktreePath: string, from: string): Promise<FileDiff[]> {
+  const quiet = ['-c', 'core.quotePath=false', 'diff']
+  const [numstat, nameStatus] = await Promise.all([
+    gitTry(worktreePath, [...quiet, '--numstat', from]),
+    gitTry(worktreePath, [...quiet, '--name-status', from])
+  ])
+  if (!numstat.ok) return []
+
+  const statuses = new Map<string, FileDiffStatus>()
+  for (const line of nameStatus.stdout.split('\n').filter(Boolean)) {
+    const [code = '', ...rest] = line.split('\t')
+    const path = rest.join('\t')
+    if (!path) continue
+    statuses.set(
+      path,
+      code.startsWith('A')
+        ? 'added'
+        : code.startsWith('D')
+          ? 'deleted'
+          : code.startsWith('R')
+            ? 'renamed'
+            : 'modified'
+    )
+  }
+
+  const files: FileDiff[] = []
+  for (const line of numstat.stdout.split('\n').filter(Boolean)) {
+    const [added = '', deleted = '', ...rest] = line.split('\t')
+    const path = rest.join('\t')
+    if (!path) continue
+    // 바이너리는 numstat 에서 추가/삭제가 "-" 로 온다.
+    const binary = added === '-' || deleted === '-'
+    files.push({
+      path,
+      status: statuses.get(path) ?? 'modified',
+      additions: binary ? 0 : Number(added) || 0,
+      deletions: binary ? 0 : Number(deleted) || 0,
+      patch: '',
+      binary,
+      // 바이너리는 원래 본문이 없다 — 그쪽까지 "너무 커서 못 읽었다" 고 말하지 않는다.
+      ...(binary ? {} : { patchOmitted: 'too-large' as const })
+    })
+  }
+  return files
+}
+
 function parseUnifiedDiff(raw: string): FileDiff[] {
   if (!raw.trim()) return []
   // 각 파일 블록은 "diff --git " 으로 시작한다.

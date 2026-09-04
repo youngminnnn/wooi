@@ -2,6 +2,7 @@ import type { AgentBackendId, ChatItem, RateLimitSnapshot, Workspace } from '@sh
 import { getStore } from './store'
 import { getTranscripts } from './transcripts'
 import { log } from './logger'
+import { takeUnrequestedTurn } from './resumeBudget'
 
 const FALLBACK_WAIT_MS = 5 * 60_000
 /**
@@ -42,12 +43,51 @@ const PROBE_PATIENCE = 5
  * 그보다 오래 정상으로 돌다가 걸린 것은 새 제한이므로 시도 횟수를 처음부터 센다.
  */
 const STREAK_WINDOW_MS = 10 * 60_000
+/**
+ * 예약 시각을 기다리는 동안 "정말 아직 제한 중인가" 를 다시 물어보는 간격.
+ *
+ * 백엔드 하나당 이 간격으로 **한 번만** 조회하고, 기다리는 워크스페이스들이 그 한 번을 같이 쓴다 —
+ * 아홉 개가 같은 제한을 기다린다고 조회를 아홉 번 할 이유는 없다(스냅샷은 계정 단위다).
+ */
+const EARLY_CHECK_MS = 5 * 60_000
+/**
+ * "이 창에 걸린 것" 으로 볼 만한 사용률의 하한(likelyExhaustedResetAt).
+ *
+ * 제한 직후의 수치는 요청 한 번어치만큼 늦으므로 99% 는 100% 로 읽어야 하지만, 20% 는 그렇지 않다.
+ * 넉넉하게 잡아도 "늦은 100%" 와 "그냥 모르는 스냅샷" 사이는 충분히 갈린다.
+ */
+const NEAR_EXHAUSTED_UTILIZATION = 90
+/**
+ * 예약 시각을 놓친 뒤에도 이어가 볼 수 있는 유예 창.
+ *
+ * Wooi 는 데스크톱 앱이라 예약 시각에 프로세스가 살아 있으리라는 보장이 없다 — 앱이 꺼져 있거나
+ * 맥이 자고 있으면 그 시각은 그냥 지나간다. 늦게라도 이어가는 편이 낫지만, **아무리 늦어도**
+ * 이어간다면 그것은 예약이 아니라 "언젠가 앱을 켜면 시키지 않은 턴이 하나 뜬다" 는 뜻이 된다.
+ *
+ * 한 시간으로 잡은 근거는 MAX_FALLBACK_WAIT_MS 다. 앱이 **돌고 있을 때조차** 예약을 그보다 오래
+ * 확인 없이 두지 않으므로, 돌고 있을 때의 최대 방치 시간을 "이 예약을 아직 살아 있는 것으로 볼 수
+ * 있는" 상한으로 그대로 쓴다. 그보다 오래 지났으면 예약을 걸 때 본 사용량 그림은 이미 남의 것이고
+ * (5시간 창은 그새 리셋되고 다시 소진될 수 있다), 사용자도 그 작업을 손에 들고 있지 않다.
+ *
+ * **설정으로 만들지 않는다.** 유예 시간을 고르게 하면 사용자가 가장 모르는 때에 고르게 하는
+ * 셈이고, Wooi 는 전역 토글을 늘리지 않는 것을 원칙으로 삼는다([[types]] AppSettings 주석).
+ */
+const MISSED_RESUME_GRACE_MS = 60 * 60_000
 
 export const RATE_LIMIT_CONTINUATION =
   'The previous turn stopped because the provider usage limit was reached. Inspect the current conversation and workspace state, then continue the unfinished task. Do not repeat work that is already complete.'
 
 export const CONNECTION_CONTINUATION =
   'The previous turn stopped because Wooi could not reach the API. Inspect the current conversation and workspace state, then continue the unfinished task. Do not repeat work that is already complete.'
+
+/**
+ * 이어가기 턴이 대화에서 접힐 때 한 줄에 남는 이름([[shared/types]] WooiTurnOrigin).
+ *
+ * 사용자가 치지 않은 턴이므로 감추지는 않는다 — 다만 지시문 자체는 세 줄짜리 상용구라, 펼쳐 둔 채로는
+ * 정작 읽어야 할 앞뒤 대화를 밀어낸다.
+ */
+export const RATE_LIMIT_CONTINUATION_LABEL = 'Continuing after the usage limit'
+export const CONNECTION_CONTINUATION_LABEL = 'Continuing after the connection came back'
 
 /** 예약이 걸린 이유. 저장된 옛 레코드에는 없으므로 사용량 제한으로 읽는다. */
 function causeOf(pending: Workspace['pendingRateLimitResume']): 'rateLimit' | 'connection' {
@@ -57,7 +97,7 @@ function causeOf(pending: Workspace['pendingRateLimitResume']): 'rateLimit' | 'c
 interface Deps {
   backend: AgentBackendId
   refreshLimits: () => Promise<void>
-  sendContinuation: (workspaceId: string, text: string) => void
+  sendContinuation: (workspaceId: string, text: string, label: string) => void
   emitItem: (workspaceId: string, item: ChatItem) => void
   /**
    * 지금 네트워크에 닿을 수 있는지. 알 수 없는 환경(테스트 등)에서는 넘기지 않아도 되고,
@@ -103,15 +143,68 @@ export class RateLimitResumeCoordinator {
    * (noteConnectionLost). 턴이 끝까지 가면 0 으로 되돌린다.
    */
   private offlineRetries = new Map<string, number>()
+  /**
+   * 기다리는 중에 사용량을 마지막으로 다시 물어본 시각. 백엔드 하나당 하나다 — 스냅샷은 계정
+   * 단위이므로, 같은 제한을 기다리는 워크스페이스가 몇 개든 조회는 EARLY_CHECK_MS 에 한 번이면 된다.
+   */
+  private earlyCheckAt = 0
 
   constructor(private deps: Deps) {}
 
+  /**
+   * 앱이 다시 떴다 — 살아 있는 예약을 타이머에 다시 건다.
+   *
+   * 아직 시각이 오지 않은 예약은 그대로 걸면 된다. 문제는 **이미 지나간** 예약이다. 그냥 다시
+   * 걸면 arm 이 곧바로 깨어나므로, 밀려 있던 예약이 켜자마자 한꺼번에 터진다 — 사용자가 치지도
+   * 않은 턴이 워크스페이스 수만큼 동시에 시작된다. 깨움 하나가 곧 사용자 토큰 하나이므로 이것이
+   * 여기서 막아야 할 최악이다.
+   *
+   * 그래서 놓친 예약에는 세 규칙을 둔다.
+   * 1. 유예 창(MISSED_RESUME_GRACE_MS) 안에 복귀했으면 이어간다.
+   * 2. 이어가는 것은 **복귀당 하나뿐이다.** 밀린 것이 여럿이어도 몰아서 보내지 않는다.
+   * 3. 나머지는 버리고 그렇게 말한다. 자동으로 돌리지 않는다 — 사용자가 한 줄 보내면 이어진다.
+   */
   restore(): void {
-    for (const ws of getStore().getState().workspaces) {
-      if (ws.pendingRateLimitResume?.backend === this.deps.backend && !ws.archived) {
-        this.arm(ws.id, ws.pendingRateLimitResume.retryAt)
-      }
+    const now = Date.now()
+    const mine = getStore()
+      .getState()
+      .workspaces.filter(
+        (ws) => ws.pendingRateLimitResume?.backend === this.deps.backend && !ws.archived
+      )
+    const missed: Workspace[] = []
+    for (const ws of mine) {
+      const { retryAt } = ws.pendingRateLimitResume!
+      if (retryAt > now) this.arm(ws.id, retryAt)
+      else missed.push(ws)
     }
+    // 놓친 것은 최신 예약부터 본다. 이어갈 하나를 고를 때 가장 덜 상한 것을 고르게 되고, 오래된
+    // 것일수록 사용자 손을 떠난 지 오래라 버려도 덜 아깝다.
+    missed.sort((a, b) => b.pendingRateLimitResume!.retryAt - a.pendingRateLimitResume!.retryAt)
+    for (const ws of missed) {
+      const { retryAt } = ws.pendingRateLimitResume!
+      if (now - retryAt > MISSED_RESUME_GRACE_MS) {
+        this.dropMissed(
+          ws.id,
+          `Wooi was not running when this task was due to continue (${formatWhen(retryAt)}), so it was not resumed. Send a message to pick it up.`
+        )
+        continue
+      }
+      if (!takeUnrequestedTurn()) {
+        this.dropMissed(
+          ws.id,
+          `This task was due to continue at ${formatWhen(retryAt)}, but Wooi had already continued another one on this launch and never starts more than one unrequested turn at a time. Send a message to pick it up.`
+        )
+        continue
+      }
+      // 시각은 이미 지났으므로 arm 은 곧바로 깨어난다. 그 뒤 판단은 평소 경로 그대로다 —
+      // 오프라인이면 기다리고, 아직 제한 중이면 물러서고, 세션이 바뀌었으면 접는다.
+      this.arm(ws.id, retryAt)
+    }
+  }
+
+  /** 놓친 예약을 버린다. 제한 표시(rateLimited)는 사실이므로 남긴다 — 스스로 만료된다. */
+  private dropMissed(workspaceId: string, text: string): void {
+    if (this.clearPending(workspaceId)) this.notice(workspaceId, text)
   }
 
   /**
@@ -378,7 +471,7 @@ export class RateLimitResumeCoordinator {
       return
     }
     if (before.pendingRateLimitResume!.retryAt - Date.now() > 1_000) {
-      this.arm(workspaceId, before.pendingRateLimitResume!.retryAt)
+      await this.checkLiftedEarly(workspaceId, before)
       return
     }
 
@@ -431,6 +524,62 @@ export class RateLimitResumeCoordinator {
   }
 
   /**
+   * 예약 시각이 아직 오지 않았다 — 다시 재우기 전에 **정말 아직 제한 중인지** 한 번 확인한다.
+   *
+   * 우리가 아는 해제 시각은 틀릴 수 있다. 5시간 창이 막 굴러간 직후의 usage 응답이 그렇다 —
+   * 사용률은 옛 창의 100% 를 잠시 물고 있으면서 resetsAt 은 **새 창의 것**을 싣는다. 그 둘을 그대로
+   * 믿으면 십 분 뒤면 풀릴 제한을 다섯 시간 뒤로 예약하고, 그 사이 제한이 풀려도 아무 일도 일어나지
+   * 않는다. 실제로 그렇게 됐다 — 예약 하나가 22:50 으로 밀리면 18:10 에 풀린 제한을 사용자가
+   * 돌아와 손으로 이어가는 수밖에 없다.
+   *
+   * 그래서 기다리는 동안에도 사용량을 다시 보고, 스냅샷이 **적극적으로** "제한이 아니다" 라고 말하면
+   * 예약 시각을 앞당겨 곧바로 이어간다. 모르겠다는 대답(조회 실패·창 없음·available=false)은 근거로
+   * 쓰지 않는다 — 그때는 원래 예약대로 기다린다. 이 판정은 예약 시각에 쓰는 것과 같은 것이라
+   * (isRateLimited), 신뢰 수준을 새로 만들지 않고 **시점만 앞당긴다.**
+   *
+   * 다만 **해제 시각을 안다고 믿고 기다리는 예약에만** 쓴다(rateLimited.resetsAt). 시각을 모른 채
+   * 백오프로 물러선 예약에는 앞당길 근거가 없다 — 거기서는 조회가 "괜찮다" 고 말하는데도 실제 턴이
+   * 제한에 걸린 것이므로, 그 조회를 근거로 다시 보내면 물러선 의미가 사라지고 시도 예산만 몇 분 만에
+   * 태운다. 백오프 자체가 그 경우의 확인 절차다.
+   */
+  private async checkLiftedEarly(workspaceId: string, ws: Workspace): Promise<void> {
+    const pending = ws.pendingRateLimitResume!
+    const remaining = pending.retryAt - Date.now()
+    // 곧 깨어날 예약은 그냥 기다린다. 연결 대기(cause)나 턴 실패 백오프(blocked)는 제한과 무관한
+    // 이유로 물러선 것이므로, 제한이 풀렸다고 앞당길 자리가 아니다.
+    const eligible =
+      remaining > EARLY_CHECK_MS &&
+      causeOf(pending) === 'rateLimit' &&
+      !pending.blocked &&
+      Boolean(ws.rateLimited?.resetsAt)
+    if (!eligible || (this.deps.isOnline && !this.deps.isOnline())) {
+      this.arm(workspaceId, pending.retryAt)
+      return
+    }
+    if (Date.now() - this.earlyCheckAt >= EARLY_CHECK_MS) {
+      this.earlyCheckAt = Date.now()
+      await this.deps
+        .refreshLimits()
+        .catch((err) => log.info(`rate-limit resume: early usage check failed (${String(err)})`))
+    }
+    // 조회를 기다리는 사이 예약이 바뀌었을 수 있다(사용자가 보냈다·다시 걸렸다) — 다시 읽는다.
+    const current = this.pendingWorkspace(workspaceId)
+    if (!current) return
+    const now = Date.now()
+    const latest = current.pendingRateLimitResume!
+    if (latest.retryAt - now <= 1_000) return this.arm(workspaceId, latest.retryAt)
+    const snapshot = getStore().getState().rateLimitsByAgent?.[this.deps.backend]
+    if (!limitLifted(snapshot, now)) {
+      this.arm(workspaceId, latest.retryAt)
+      return
+    }
+    log.info(
+      `rate-limit resume: 예약(${new Date(latest.retryAt).toISOString()}) 보다 먼저 제한이 풀렸다 — 바로 이어간다 (${workspaceId})`
+    )
+    this.continueNow(workspaceId, current, latest)
+  }
+
+  /**
    * 아직 API 에 닿는지 확인하고, 닿으면 이어 보낸다.
    *
    * 확인은 사용량 조회로 한다 — 대화를 건드리지 않는 유일한 왕복이다. `fetchedAt` 이 새로
@@ -477,7 +626,8 @@ export class RateLimitResumeCoordinator {
     )
     this.deps.sendContinuation(
       workspaceId,
-      connection ? CONNECTION_CONTINUATION : RATE_LIMIT_CONTINUATION
+      connection ? CONNECTION_CONTINUATION : RATE_LIMIT_CONTINUATION,
+      connection ? CONNECTION_CONTINUATION_LABEL : RATE_LIMIT_CONTINUATION_LABEL
     )
   }
 
@@ -685,14 +835,68 @@ export function isRateLimited(snapshot: RateLimitSnapshot | undefined, now = Dat
   })
 }
 
+/**
+ * 스냅샷이 "이제 제한이 아니다" 라고 **적극적으로** 말하는지.
+ *
+ * isRateLimited 의 반대가 아니다 — 그쪽은 "제한이라는 근거가 있는가" 를 묻고, 근거가 없으면(조회
+ * 실패로 available=false, 창을 못 받아 windows 가 빈 응답) false 를 준다. 그 false 를 "풀렸다" 로
+ * 읽으면 아무것도 모르는 상태에서 턴을 보내게 되므로, 여기서는 **최근에 성공한 조회**만 근거로 삼는다.
+ */
+export function limitLifted(snapshot: RateLimitSnapshot | undefined, now = Date.now()): boolean {
+  if (!snapshot?.available || !snapshot.windows.length) return false
+  // 조회에 실패하면 fetchedAt 은 그대로다(마지막 성공 시각). 낡은 스냅샷은 지금을 말해 주지 않는다.
+  if (now - snapshot.fetchedAt > EARLY_CHECK_MS) return false
+  return !isRateLimited(snapshot, now)
+}
+
 /** reset 시각을 모를 때 다음 확인까지 기다릴 시간. 시도마다 배로 늘려 한 시간에서 멈춘다. */
 export function backoffWait(attempt: number): number {
   return Math.min(FALLBACK_WAIT_MS * 2 ** Math.max(0, attempt), MAX_FALLBACK_WAIT_MS)
 }
 
 /**
+ * 제한에 걸린 것이 확실한데 100% 를 가리키는 창이 하나도 없을 때, **어느 창에 걸렸는지** 추정한다.
+ *
+ * 제한에 막 걸린 순간의 사용률은 늦다 — CLI 가 주는 수치는 마지막으로 **성공한** 응답이 실어 준
+ * 값이고, 지금 거절당한 요청은 그 수치를 올려 주지 않았기 때문이다. 그래서 걸린 바로 그때 조회하면
+ * 5시간 창이 99% 로 보이고, 몇 분 뒤에야 100% 로 올라온다. exhaustedResetTimes 만 보면 하필 예약을
+ * 거는 그 순간에만 해제 시각을 모르게 되어, 네 시간 뒤에 풀릴 제한을 **5분 뒤**로 예약했다
+ * (관측: 22:42 에 걸려 22:47 로 예약 → 22:47 에 다시 물어보고서야 03:20 으로 정정).
+ *
+ * 추정은 **사용률이 가장 높은 창**이 범인이라는 것이다. 수치가 늦을 뿐 창 사이의 순서까지 틀리지는
+ * 않으므로, 5시간 창을 막 소진했으면 그쪽이, 주간 창을 소진했으면 그쪽이 골라진다.
+ *
+ * 다만 **거의 다 쓴 창**만 근거로 삼는다(NEAR_EXHAUSTED_UTILIZATION). 늦는 폭은 요청 한 번어치이지
+ * 수십 %가 아니다 — 20% 라고 말하는 스냅샷은 늦은 것이 아니라 그냥 우리에게 아무것도 말해 주지 못하는
+ * 것이고, 그때는 지금까지처럼 눈먼 백오프로 물러서는 편이 맞다.
+ *
+ * 틀려도 손해가 작은 쪽으로 틀린다. 너무 늦게 잡았으면 기다리는 동안의 재확인(checkLiftedEarly)이
+ * 풀리자마자 앞당겨 주고, 너무 이르게 잡았으면 그 시각의 조회가 100% 를 보고 다시 물러선다
+ * (resume → isRateLimited → waitLonger). 최악이라야 지금의 5분 백오프와 같은 자리로 돌아온다.
+ */
+export function likelyExhaustedResetAt(
+  snapshot: RateLimitSnapshot | undefined,
+  now: number
+): number | null {
+  if (!snapshot?.available) return null
+  let best: { utilization: number; at: number } | null = null
+  for (const window of snapshot.windows) {
+    const utilization = window.utilization ?? 0
+    if (utilization < NEAR_EXHAUSTED_UTILIZATION) continue
+    const at = window.resetsAt ? Date.parse(window.resetsAt) : Number.NaN
+    if (!Number.isFinite(at) || at <= now) continue
+    if (!best || utilization > best.utilization) best = { utilization, at }
+  }
+  return best?.at ?? null
+}
+
+/**
  * 우리가 아는 해제 시각 — 스냅샷의 소진된 창과 오류가 알려 준 resetAt 중 가장 늦은 것.
- * 하나도 모르면 null(그때는 백오프로 다시 확인한다).
+ *
+ * 둘 다 없으면 사용률이 가장 높은 창을 범인으로 보고 그 창의 해제 시각을 쓴다
+ * (likelyExhaustedResetAt). 이 함수를 부르는 자리는 모두 "제한에 걸렸다" 를 이미 아는 곳이므로
+ * (schedule — 제한 오류를 받았다, resume — isRateLimited 가 참이다), 추정의 전제가 깨지지 않는다.
+ * 그리고도 모르면 null(그때는 백오프로 다시 확인한다).
  */
 export function knownResetAt(
   snapshot: RateLimitSnapshot | undefined,
@@ -701,7 +905,8 @@ export function knownResetAt(
 ): number | null {
   const resets = exhaustedResetTimes(snapshot, now)
   if (resetAt && Number.isFinite(resetAt) && resetAt > now) resets.push(resetAt)
-  return resets.length ? Math.max(...resets) : null
+  if (resets.length) return Math.max(...resets)
+  return likelyExhaustedResetAt(snapshot, now)
 }
 
 /**
@@ -717,6 +922,6 @@ export function retryTime(
   return (known ?? now + backoffWait(attempt)) + RESET_GRACE_MS
 }
 
-function formatWhen(at: number): string {
+export function formatWhen(at: number): string {
   return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(at)
 }

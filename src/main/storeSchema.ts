@@ -26,7 +26,7 @@ const DEFAULT_MODEL = CLAUDE_DEFAULT_MODEL
  * 디스크 영속 형식의 현재 스키마 버전. 영속 데이터 모양이 바뀔 때마다 1 올리고,
  * MIGRATIONS 에 직전 버전 → 새 버전 변환 함수를 추가한다.
  */
-export const CURRENT_SCHEMA_VERSION = 24
+export const CURRENT_SCHEMA_VERSION = 25
 
 /**
  * v12 이하의 settings 모양. 그 시절엔 에이전트가 Claude 하나뿐이라 모델·effort·fast mode·
@@ -95,14 +95,34 @@ export const DEFAULT_SETTINGS: AppSettings = {
   // 옵트인으로 숨겨 둘 이유가 없다. 기존 사용자도 load 의 기본값 병합으로 켜진 상태가 되므로
   // schemaVersion 을 올릴 필요가 없다.
   showRunningAgents: true,
+  // 최근 활동 stack 자동 승격은 기본 켜짐. 새 필드라 기본값 병합만으로 구버전도 적용된다.
+  autoSortWorkspacesByActivity: true,
+  // 점진적 힌트는 기본 켜짐 — 예전 일괄 투어가 하던 소개를 대신하는 것이라, 이 필드가 없던
+  // 버전에서 올라온 사용자에게도 똑같이 보여야 한다. schemaVersion 을 올려 마이그레이션에서도
+  // 명시적으로 채운다(showRunningAgents 와 달리 — plan 이 명시적인 회귀 가드를 요구했다).
+  showHints: true,
   // CLI 와 동일하게 자동 압축을 기본 켜둔다(autoCompactEnabled). 압축을 트리거하는 임계치는
   // Claude Code 가 모델별로 알려주는 값을 그대로 쓴다(session.ts 의 overAutoCompactThreshold).
   autoCompact: true,
   // 자동 실행은 명시적인 opt-in 이어야 한다. 출시 공지와 설정에서 사용자가 직접 켠다.
   autoResumeAfterRateLimit: false,
+  // 사용자가 이미 시작한 턴을 종료 뒤 잇는 것이므로, 새 작업을 여는 레이트리밋 자동 재개와 달리
+  // 기본으로 켠다. 옛 파일도 기본값 병합으로 이 값을 받으므로 schemaVersion 은 올리지 않는다.
+  resumeUnfinishedTurnsOnLaunch: true,
   // 충돌 해결 턴은 토큰을 쓰므로 기본은 꺼짐 — 기존 사용자도 load 의 기본값 병합으로 false 가
   // 되므로 schemaVersion 을 올릴 필요가 없다.
   autoResolveConflicts: false,
+  // 수면 방지는 기본 켜짐 — 걸어두고 자리를 뜬 턴이 맥이 잠들어 멈추는 것이 이 앱에서 가장
+  // 흔한 손실이고, 화면을 켜 두지 않으므로 비용이 작다. 기존 사용자도 load 의 기본값 병합으로
+  // true 가 되므로 schemaVersion 을 올릴 필요가 없다.
+  keepAwakeWhileRunning: true,
+  // 백그라운드 계속하기도 기본 켜짐 — ⌘Q 한 번에 도는 턴이 사라지는 것이 수면과 같은 종류의
+  // 손실이다. 실제 종료 여부는 확인 다이얼로그에서 사용자가 고르고, 기존 사용자도 load 의
+  // 기본값 병합으로 true 가 되므로 schemaVersion 을 올릴 필요가 없다.
+  keepWorkingInBackground: true,
+  // 아무 확인도 꺼져 있지 않은 상태로 시작한다. 기존 사용자도 load 의 기본값 병합으로 빈
+  // 객체가 되므로 schemaVersion 을 올릴 필요가 없다.
+  confirmSkips: {},
   manualWorkspaceSetup: false,
   onboarded: false,
   // 아직 기본값을 고르지 않음 — 기존 사용자도 load 의 기본값 병합으로 false 가 되어,
@@ -119,7 +139,11 @@ export const DEFAULT_SETTINGS: AppSettings = {
   // 푸시는 제3자 전달망을 지나므로 원격 접근과 별도로 명시적으로 켜야 한다.
   remotePushEnabled: false,
   // 데스크톱을 쓰는 동안은 폰을 깨우지 않는 편이 기본이다. 항상 받고 싶으면 설정에서 켠다.
-  remotePushWhileActive: false
+  remotePushWhileActive: false,
+  // 보고 있는 워크스페이스의 알림은 누른다 — 예전 동작("창이 앞에 있으면 무조건 억제")에서
+  // 워크스페이스 단위로 좁힌 것이다. 기존 사용자도 load 의 기본값 병합으로 true 가 되므로
+  // schemaVersion 을 올릴 필요가 없다([[shared/types]] suppressWhenFocused).
+  suppressWhenFocused: true
 }
 
 export const EMPTY_STATE: AppState = {
@@ -447,7 +471,17 @@ export const MIGRATIONS: Array<(raw: Record<string, unknown>) => Record<string, 
   },
   // v23 → v24: 완료 응답의 미확인 배지를 앱 재시작 뒤에도 복원한다. 과거에는 렌더러 메모리에만
   // 살아 기존 파일에서 옮겨 올 값이 없으므로 빈 목록으로 시작한다.
-  (raw) => ({ ...raw, unreadWorkspaceIds: [] })
+  (raw) => ({ ...raw, unreadWorkspaceIds: [] }),
+
+  // v24 → v25: 점진적 온보딩 힌트를 끄는 전역 스위치(showHints) 도입. 기존 사용자도 기본
+  // 켜짐으로 시작한다 — 이 필드가 없던 버전에서 올라온 사람에게도 예전 일괄 투어를 대신하는
+  // 안내이니 똑같이 보여야 한다. settings 외에는 아무것도 건드리지 않는다(v5→v6 이 onboarded
+  // 를 실수로 초기화했던 사고를 storeSchema.test.ts 가 회귀로 걸어 둔 것과 같은 이유).
+  (raw) => {
+    const settings = { ...((raw.settings as Partial<AppSettings>) ?? {}) }
+    settings.showHints = true
+    return { ...raw, settings }
+  }
 ]
 
 /**
@@ -540,9 +574,16 @@ export function migrate(
  * 여기서 값을 덮으면 데이터가 손상된다. 없는 것을 채우기만 한다.
  */
 export function normalizeShape(raw: Record<string, unknown>): Record<string, unknown> {
-  const repos = ((raw.repos as Array<Record<string, unknown>>) ?? []).map((repo) =>
-    Array.isArray(repo.runScripts) ? repo : { ...repo, runScripts: [] }
-  )
+  const repos = ((raw.repos as Array<Record<string, unknown>>) ?? []).map((repo) => {
+    const withRunScripts = Array.isArray(repo.runScripts) ? repo : { ...repo, runScripts: [] }
+    // savedPrompts 는 옵셔널이라 **없으면 없는 채로 둔다** — 빈 배열로 메우면 다운그레이드한
+    // 구버전이 그 키를 그대로 다시 쓸 뿐이고, 스키마 버전을 올리지 않으려는 이유도 사라진다.
+    // 다만 배열이 아닌 값은 지운다. 목록을 그냥 순회하는 화면들이 그것 하나로 통째로 멈춘다.
+    if (!('savedPrompts' in withRunScripts) || Array.isArray(withRunScripts.savedPrompts))
+      return withRunScripts
+    const { savedPrompts: _malformed, ...rest } = withRunScripts
+    return rest
+  })
   const workspaces = ((raw.workspaces as Array<Record<string, unknown>>) ?? []).map((workspace) =>
     isRecord(workspace.ports) ? workspace : { ...workspace, ports: {} }
   )

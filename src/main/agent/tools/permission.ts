@@ -101,9 +101,10 @@ function needsApproval(workspace: Workspace, tool: string): boolean {
 export async function ensureToolApproved(
   workspace: Workspace,
   tool: string,
-  args: unknown
+  args: unknown,
+  options?: { always?: boolean }
 ): Promise<void> {
-  if (!needsApproval(workspace, tool)) return
+  if (!options?.always && !needsApproval(workspace, tool)) return
   if (!deps) throw new Error('Wooi cannot ask for permission right now.')
 
   const requestId = randomUUID()
@@ -186,10 +187,12 @@ const TOOL_LABELS: Record<string, string> = {
   open_pull_request: 'Open a pull request',
   run_script: 'Run a repository script',
   stop_script: 'Stop a repository script',
+  open_preview: 'Open the preview',
   create_workspace: 'Create a workspace',
   archive_workspace: 'Archive a workspace',
   set_workspace_name: 'Set the workspace name',
-  switch_to_agent_team: 'Switch to an agent team'
+  switch_to_agent_team: 'Switch to an agent team',
+  switch_workspace_agent: 'Switch the workspace agent'
 }
 
 /** 카드가 지목된 대상을 이름으로 부를 수 있게 한다. 못 찾으면 핸들러가 어차피 거절한다. */
@@ -298,6 +301,16 @@ function titleFor(tool: string, args: unknown, workspace: Workspace): string {
       `until you switch it back.${reason}`
     )
   }
+  if (tool === 'switch_workspace_agent') {
+    const target = typeof a.agentBackend === 'string' ? a.agentBackend : 'another agent'
+    const label = AGENT_BACKEND_LABELS[target as AgentBackendId] ?? target
+    const reason =
+      typeof a.reason === 'string' && a.reason.trim() ? ` It says: ${a.reason.trim()}` : ''
+    return (
+      `The agent wants to hand this workspace over to ${label}. The current conversation will ` +
+      `be compressed into a checkpoint and billed as input to the new agent.${reason}`
+    )
+  }
   if (tool === 'report_to_parent') {
     return 'The agent wants to report this workspace’s result back to the workspace it was stacked on.'
   }
@@ -316,7 +329,21 @@ function titleFor(tool: string, args: unknown, workspace: Workspace): string {
     // base 는 모델의 인자가 아니라 앱이 정한다. 사용자가 판단하는 지점이 바로 그 값이므로
     // 핸들러와 **같은 함수**로 다시 구해 보여 준다 — 카드의 base 와 실제 base 가 갈리면
     // 승인이 승인이 아니게 된다.
-    return `The agent wants to open a ${draft}pull request from \`${workspace.branch}\` into \`${resolvePrBase(workspace)}\`.`
+    // 개명은 승인 대상의 일부다 — 이 카드를 승인하면 push 되는 브랜치 이름이 바뀐다.
+    // 사용자가 카드에서 본 이름과 실제로 올라가는 이름이 갈리면 승인이 승인이 아니게 된다.
+    const rename =
+      typeof a.renameBranch === 'string' && a.renameBranch.trim()
+        ? ` It renames the branch to \`${a.renameBranch.trim()}\` first.`
+        : ''
+    return `The agent wants to open a ${draft}pull request from \`${workspace.branch}\` into \`${resolvePrBase(workspace)}\`.${rename}`
+  }
+  if (tool === 'open_preview') {
+    // 카드에 origin 은 적지 않는다 — 이 도구가 열 수 있는 곳은 언제나 이 워크스페이스의 dev
+    // 서버이고(핸들러가 인자로 받지 않는다), 사용자가 판단할 거리는 어느 화면을 여는가다.
+    // 읽기 전용으로 두지 않은 이유는 눈에 보이는 상태를 바꾸기 때문이다 — 사용자가 보고 있던
+    // 탭을 Preview 로 바꾸고 그 안의 페이지를 이동시킨다.
+    const path = typeof a.path === 'string' && a.path.trim() ? a.path.trim() : '/'
+    return `The agent wants to open this workspace’s dev server at \`${path}\` in the preview.`
   }
   if (tool === 'run_script' || tool === 'stop_script') {
     const name = typeof a.name === 'string' ? a.name : typeof a.kind === 'string' ? a.kind : ''

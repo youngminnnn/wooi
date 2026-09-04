@@ -81,7 +81,7 @@
         <h1>Privacy Policy</h1>
       </header>
       <p>&lt;!-- DRAFT — 이 문서는 기술적 사실에 기반한 초안이며 법적 자문이 아니다. 배포 전 관할·책임 조항 등은 법무 검토를 거쳐야 한다. --&gt;</p>
-      <p>_Last updated: 2026-08-16 · Version 1_</p>
+      <p>_Last updated: 2026-08-31 · Version 1_</p>
       <p>Wooi is a local macOS desktop application that orchestrates parallel AI coding agents — <a href="https://claude.com/claude-code">Claude Code</a> and <a href="https://developers.openai.com/codex">OpenAI Codex</a> — over isolated git worktrees. This policy explains what data the app handles and where it goes.</p>
       <h2 id="summary">Summary</h2>
       <p>Wooi does not collect analytics or telemetry, and it does not transmit your code or conversations to the developer. Your code and conversations leave your machine only when sent to the third‑party services you connect (Anthropic or OpenAI, and optionally GitHub) to make the app function.</p>
@@ -143,6 +143,12 @@
         <li><strong>Delete all remote data</strong> removes your computer's record from the relay along with every paired device, queued command, and state snapshot, and erases the local keys. Every phone would have to pair again.</li>
         <li>Data also expires on its own: pairing codes after 5 minutes, commands after 6 hours, notification records after 2 days, and a computer that has not connected for 180 days is removed entirely.</li>
       </ul>
+      <h2 id="data-deletion-requests">Data deletion requests</h2>
+      <p>Wooi has no user accounts. You never create one, there is no profile, and nothing on a server is keyed to your name or email. The only server‑side record that can exist is the one remote access creates — an anonymous row for your computer and one for each paired phone, identified by UUIDs that Wooi generates on the device. <strong>If you have never turned remote access on, there is nothing on a server to delete.</strong></p>
+      <p><strong>From the app, which is immediate and complete.</strong> On your Mac, Settings → Remote has <strong>Revoke a device</strong> and <strong>Delete all remote data</strong>; what each one erases is listed under <a href="https://github.com/youngminnnn/wooi/blob/main/#turning-it-off-and-deleting-your-data">Turning it off and deleting your data</a>. On your phone, Settings → <strong>Unpair this phone</strong> ends that phone's access. Local files are deleted by deleting them — see <a href="https://github.com/youngminnnn/wooi/blob/main/#what-is-stored-locally">What is stored locally</a>.</p>
+      <p><strong>By email, if you no longer have the app.</strong> Write to &lt;youngmin3306@gmail.com&gt; with the subject <code>Data deletion request</code>. Say which phone was paired — its name and platform, for example <code>SM‑F741N</code> / <code>android</code> — and roughly when. Those are the only things the relay holds in plain text, so they are the only things a request can be matched against. Requests are answered within 30 days, at no charge, and you do not need an account to make one.</p>
+      <p>The anonymity cuts both ways. If a request cannot be narrowed to exactly one computer we will not delete on a guess, because the row deleted by mistake would be someone else's — and we will say that rather than report a deletion that did not happen.</p>
+      <p>Nothing is kept indefinitely in any case. Pairing codes expire after 5 minutes, commands after 6 hours, notification records after 2 days, and a computer that has not connected for 180 days is removed entirely along with its paired devices. An installation that is simply abandoned erases itself.</p>
       <h2 id="telemetry">Telemetry</h2>
       <p>Wooi does not include analytics, crash reporting, or telemetry at this time. If this changes, this policy will be updated and consent will be requested.</p>
       <h2 id="changes-to-this-policy">Changes to this policy</h2>

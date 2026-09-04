@@ -3,6 +3,15 @@
  * preload 가 이 타입을 그대로 노출하므로, 채널 이름·페이로드 모양의 단일 출처(SSOT)다.
  */
 
+/**
+ * Changes 패널이 무엇과 견줄지. **표시 전용 값이다** — PR 대상도 rebase 대상도 여기서 나오지
+ * 않는다. 그 경계의 근거와 이 값을 읽어도 되는 유일한 경로는 [[compareBase]] 에 적혀 있다.
+ *
+ * (이 파일은 React Native 가 그대로 번들하므로 import 를 둘 수 없어, 헬퍼가 아니라 타입이
+ * 여기에 산다. `compareBase.ts` 가 이 타입을 받아 쓴다.)
+ */
+export type WorkspaceCompareBase = 'stack-parent' | 'default-branch'
+
 // ── 권한 모드 ───────────────────────────────────────────────────────────
 /**
  * 에이전트의 권한 모드. **백엔드마다 지원하는 값이 다르다** — 어떤 모드를 어떤 순서로 노출할지는
@@ -216,9 +225,60 @@ export interface Repo {
    */
   avatarDataUrl?: string
   addedAt: number
+  /**
+   * 리포에 저장해 둔 프롬프트(리뷰 요청·릴리즈 노트 초안·테스트 보강 …).
+   *
+   * 리포에 저장하는 것의 **두 번째 종류**다 — 첫 번째는 셸 스크립트(setupScript·runScripts·
+   * archiveScript)이고 이쪽은 에이전트에게 보낼 말이다. 새 저장소를 만들지 않고 Repo 안에 두는
+   * 이유가 그것이다: 같은 리포 설정 화면에서 같은 IPC 로 저장되고 같은 파일에 영속된다.
+   *
+   * 다만 runScripts 배열에 종류 필드를 얹어 섞지는 **않는다.** 그 배열은 실행 대상 목록이라
+   * autoStart·포트 배정·`run_script` 도구·Scripts 패널이 모두 그것을 프로세스로 다룬다 —
+   * 프롬프트를 그 안에 넣는 순간 셸로 spawn 될 길이 열린다. 종류가 다르면 목록도 나눈다.
+   *
+   * 옵셔널이다. 없으면 저장해 둔 프롬프트가 없다는 뜻일 뿐이라 스키마 버전을 올리지 않는다.
+   */
+  savedPrompts?: SavedPrompt[]
 }
 
 export type WorkspaceStatus = 'idle' | 'running' | 'error'
+
+/**
+ * 마지막 턴이 **사용자 중단**(Esc·Stop 버튼·`/stop`·폰의 중단)으로 끝났다는 표시.
+ *
+ * 왜 상태값을 하나 더 만들지 않았나: 중단은 상태가 아니라 **끝난 방식**이다. 중단된 워크스페이스도
+ * 여전히 idle 이고(다음 턴을 받을 수 있고), 그 위에 에러가 나면 에러가 이겨야 한다. 상태 열거에
+ * 'interrupted' 를 끼우면 세 상태를 읽는 모든 자리가 네 번째 경우를 따로 다뤄야 하는데, 그 자리
+ * 대부분은 "돌고 있나 아닌가" 만 궁금하다. 그래서 상태는 그대로 두고 표시만 곁들인다.
+ *
+ * 필드는 옵셔널이라 저장된 워크스페이스는 마이그레이션 없이 그대로 읽힌다(undefined = 중단 아님).
+ */
+export interface InterruptedTurn {
+  /** 중단한 시각. */
+  at: number
+  /**
+   * 중단된 그 세션의 id. 지금 세션이 다르면 이 표시는 남의 것이다 — 세션을 지우고 새로 앉힌
+   * 자리에서 옛 표시가 새 대화를 중단된 것처럼 보이게 하면 안 된다
+   * ([[main/rateLimitResume]] continueNow·[[main/stackedWait]] 가 같은 방식으로 낡은 예약을 거른다).
+   */
+  sessionId: string | null
+}
+
+/**
+ * 이 워크스페이스를 "중단됨" 으로 표시해야 하는가.
+ *
+ * 사용자가 Esc 로 끊은 것과 에이전트가 스스로 마친 것은 둘 다 idle 로 수렴한다. 목록을 훑을 때
+ * 둘 다 같은 회색 점이면 재개할 대상을 고를 수 없다 — 이 함수가 그 둘을 가른다.
+ *
+ * 돌고 있으면(running) 지금 하는 일이 먼저고, 에러면 에러가 더 급한 사실이라 둘 다 표시하지 않는다.
+ */
+export function wasInterrupted(
+  workspace: Pick<Workspace, 'status' | 'sessionId' | 'interruptedTurn'>
+): boolean {
+  const mark = workspace.interruptedTurn
+  if (!mark || workspace.status !== 'idle') return false
+  return mark.sessionId === workspace.sessionId
+}
 
 /**
  * 병렬 dev 서버 포트 배정의 시작점. workspace 마다 이 값부터 비어 있는 포트를 하나씩 올려
@@ -452,6 +512,75 @@ export function reorderById<T extends { id: string }>(
   return next
 }
 
+/** 사이드바에서 한 덩어리로 움직이는 stack 의 살아 있는 뿌리를 찾는다. */
+export function workspaceStackRootId<
+  T extends { id: string; parentWorkspaceId: string | null; archived: boolean }
+>(workspaces: T[], workspaceId: string): string | null {
+  const byId = new Map(workspaces.map((w) => [w.id, w]))
+  let current = byId.get(workspaceId)
+  if (!current) return null
+  const seen = new Set<string>()
+  while (current.parentWorkspaceId && !seen.has(current.id)) {
+    seen.add(current.id)
+    const parent = byId.get(current.parentWorkspaceId)
+    if (!parent || parent.archived !== current.archived) break
+    current = parent
+  }
+  return current.id
+}
+
+/**
+ * dragged/target 이 stack 의 어느 행이든 각각의 뿌리 stack 전체를 형제 사이에서 옮긴다.
+ * 배열 안에서는 뿌리의 위치만 바꾸면 orderByStack 이 자손을 바로 뒤에 붙이므로 관계 필드는
+ * 건드리지 않는다.
+ */
+export function reorderWorkspaceStack<
+  T extends {
+    id: string
+    repoId: string
+    parentWorkspaceId: string | null
+    archived: boolean
+    sidebarPinned?: boolean
+  }
+>(workspaces: T[], draggedId: string, targetId: string, position: DropPosition): T[] {
+  const draggedRoot = workspaceStackRootId(workspaces, draggedId)
+  const targetRoot = workspaceStackRootId(workspaces, targetId)
+  if (!draggedRoot || !targetRoot || draggedRoot === targetRoot) return workspaces
+  const a = workspaces.find((w) => w.id === draggedRoot)
+  const b = workspaces.find((w) => w.id === targetRoot)
+  if (
+    !a ||
+    !b ||
+    a.repoId !== b.repoId ||
+    a.archived !== b.archived ||
+    !!a.sidebarPinned !== !!b.sidebarPinned
+  )
+    return workspaces
+  return reorderById(workspaces, draggedRoot, targetRoot, position)
+}
+
+/** 최근 활성화된 stack 을 고정 stack 바로 아래로 올린다. */
+export function promoteWorkspaceStack<
+  T extends {
+    id: string
+    repoId: string
+    parentWorkspaceId: string | null
+    archived: boolean
+    sidebarPinned?: boolean
+  }
+>(workspaces: T[], workspaceId: string): T[] {
+  const rootId = workspaceStackRootId(workspaces, workspaceId)
+  const root = workspaces.find((w) => w.id === rootId)
+  if (!root || root.archived || root.sidebarPinned) return workspaces
+  const roots = workspaces.filter(
+    (w) =>
+      w.repoId === root.repoId && !w.archived && workspaceStackRootId(workspaces, w.id) === w.id
+  )
+  const firstUnpinned = roots.find((w) => !w.sidebarPinned)
+  if (!firstUnpinned || firstUnpinned.id === root.id) return workspaces
+  return reorderById(workspaces, root.id, firstUnpinned.id, 'before')
+}
+
 /**
  * 사이드바에 실제로 보이는 순서(위 → 아래) 그대로 활성 워크스페이스를 평탄하게 나열한다.
  * 규칙: repos 배열 순서로 레포를 훑고, 레포 안에서는 orderByStack(부모 바로 뒤에 자식) 순서.
@@ -515,6 +644,22 @@ export const AGENT_BACKEND_IDS: AgentBackendId[] = ['claude', 'codex']
 export const DEFAULT_AGENT_BACKEND: AgentBackendId = 'claude'
 
 /**
+ * 저장된 기본 에이전트가 지금 쓸 수 있는지 보고, 아니면 쓸 수 있는 것으로 바꿔 돌려준다.
+ *
+ * `available`이 비어 있으면(감지가 실패했거나 아직 못 물어봤으면) `configured`를 그대로 돌려준다
+ * — 일시적인 감지 실패를 사용자가 저장해 둔 선택을 지우는 사고로 바꾸지 않기 위해서다.
+ * `configured`가 `available`에 있으면 그대로, 없으면(그 CLI 를 지운 등) 등록 순서상 첫 번째로
+ * 바꿔 보여준다. **저장값 자체는 건드리지 않는다** — 이 함수는 읽는 시점에만 보정한다.
+ */
+export function usableDefaultBackend(
+  configured: AgentBackendId,
+  available: AgentBackendId[]
+): AgentBackendId {
+  if (available.length === 0) return configured
+  return available.includes(configured) ? configured : available[0]
+}
+
+/**
  * 백엔드의 사람이 읽는 이름. 브랜드 마크(SVG)는 렌더러가 갖지만 이름은 도메인 메타데이터라
  * 여기 둔다(main 의 로그·알림에서도 같은 표기를 쓸 수 있다).
  *
@@ -550,7 +695,11 @@ export interface AgentCapabilities {
   interactiveCommands: CommandPanelKind[]
   /** 슬래시 명령 자동완성 */
   slashCommands: boolean
-  /** 턴이 도는 중에도 입력을 밀어 넣을 수 있는지(Codex 의 turn/steer). false 면 큐잉 후 다음 턴. */
+  /**
+   * 턴이 도는 중에도 입력을 밀어 넣을 수 있는지. 두 백엔드 모두 지원한다 — Codex 는 turn/steer 로
+   * 네이티브 반영하고, Claude(Agent SDK)는 CLI 가 툴 라운드 사이에 진행 중인 턴으로 접어
+   * 넣는다(fold). 단, 툴을 하나도 쓰지 않는 순수 텍스트 턴은 접힐 지점이 없어 다음 턴으로 밀린다.
+   */
   steering: boolean
   /** 앱 안에서 로그인/로그아웃을 끝낼 수 있는지. false 면 외부 터미널 안내. */
   inAppLogin: boolean
@@ -776,6 +925,14 @@ export interface Workspace {
    */
   baseMismatchDismissed?: string | null
   /**
+   * Changes 패널이 **무엇과 견줘 보여 줄지**. 없으면 지금까지의 자동 판정 그대로다.
+   *
+   * ⚠️ 표시 전용이다 — PR 대상도 rebase 대상도 이 값에서 나오지 않는다. 실제 base 는 계속
+   * `baseBranch` / `stack[].baseBranch` / GitHub 의 `baseRefName` 만 소유한다. 판단의 근거와
+   * 경계는 [[compareBase]] 에 적어 뒀고, 읽는 곳은 `IPC.gitDiff` 하나뿐이다.
+   */
+  compareBase?: WorkspaceCompareBase | null
+  /**
    * 이 워크스페이스의 PR 이 속한 **GitHub 스택** 번호(GitHub 이 서버에 들고 있는 stacked PR
    * 객체). 세 필드 모두 옵셔널이고 폴백 경로에서는 아예 없다 — Wooi 의 체인은 여전히
    * parentWorkspaceId / ws.stack 이 소유하고, 이 값들은 그 위에 얹히는 메타데이터일 뿐이다.
@@ -841,12 +998,18 @@ export interface Workspace {
   sessionId: string | null
   /** 계정 사용량 제한이 풀린 뒤 같은 대화를 자동으로 이어가기 위한 영속 예약. */
   pendingRateLimitResume?: PendingRateLimitResume | null
+  pendingShutdownResume?: PendingShutdownResume | null
   /** 마지막 턴이 사용량 제한으로 멈췄다는 표시(자동 이어가기 설정과 무관하게 기록·표시한다). */
   rateLimited?: RateLimitPause | null
   /** `await_stacked_work` 로 건 대기 예약. 없으면 기다리는 것이 없다. */
   awaitingStackedWork?: PendingStackedWait | null
   permissionMode: PermissionMode
   status: WorkspaceStatus
+  /**
+   * 마지막 턴이 사용자 중단으로 끝났다는 표시. null/undefined 면 중단으로 끝나지 않았다.
+   * 읽을 때는 직접 보지 말고 [[wasInterrupted]] 를 쓴다 — 낡은 세션의 표시를 거르는 판단이 거기 있다.
+   */
+  interruptedTurn?: InterruptedTurn | null
   /** 이 workspace 전용 모델 오버라이드. null 이면 전역 설정(AppSettings.model) 을 따른다. */
   model: string | null
   /** 이 workspace 전용 reasoning effort 오버라이드. null 이면 전역 설정(AppSettings.effort) 을 따른다. */
@@ -879,8 +1042,25 @@ export interface Workspace {
   pendingHandoffFrom?: string | null
   /** 아카이브되면 사이드바 기본 목록에서 숨기고 worktree 를 제거한다(브랜치·기록은 유지). */
   archived: boolean
+  /** 자동 최신순 정렬에서도 stack 전체를 사이드바 상단에 유지한다(뿌리에서만 읽는다). */
+  sidebarPinned?: boolean
   /** 이 워크스페이스의 모든 알림(OS 알림·소리·Dock 배지)을 음소거한다. 레거시는 undefined=false. */
   muted?: boolean
+  /**
+   * CI 체크가 실패로 확정되면 에이전트에게 턴을 하나 열어 고치게 한다. 레거시는 undefined=false.
+   *
+   * **기본값은 꺼짐이다.** 사용자가 치지 않은 턴은 토큰을 쓰고 브랜치에 커밋을 만든다 —
+   * 그 비용을 켜 본 적 없는 사람에게 떠안기지 않는다. 워크스페이스마다 따로 두는 이유는,
+   * 자동으로 밀어도 되는 브랜치인지가 작업마다 다르기 때문이다.
+   */
+  autoFixCi?: boolean
+  /**
+   * auto-fix 의 진행 상태(시도 횟수·재무장 여부). 판정은 [[ciFix]] 의 `decideCiFix` 가 한다.
+   *
+   * 영속하는 이유는 상한이 앱을 다시 켜도 유지돼야 하기 때문이다 — 메모리에만 두면 재시작이
+   * 곧 상한 초기화가 되고, 그러면 밤새 도는 고리를 막지 못한다.
+   */
+  autoFixCiState?: CiFixProgress
   /**
    * 우하단 터미널의 탭 목록(각 탭 = 독립 PTY). 없거나 비어 있으면 첫 조회 때 탭 하나를 만들어
    * 채운다 — 레거시 워크스페이스는 마이그레이션 없이 "탭 1개" 로 읽힌다.
@@ -999,6 +1179,14 @@ export interface AgentSettings {
   fallbackModels: string[]
   /** 새 워크스페이스의 기본 권한 모드. null 이면 백엔드의 defaultPermissionMode. */
   permissionMode: PermissionMode | null
+  /**
+   * 이 백엔드의 에이전트 프로세스에 얹을 기본 환경 변수. 값이 비밀(API 키·토큰)일 수 있으므로
+   * **로그에는 키 이름만** 남긴다([[codex/config]] redactDebugConfig 와 같은 원칙).
+   *
+   * 이 설정 이전 버전에서 올라온 파일에는 이 키가 없다 — 옵셔널로 두어 스키마 버전을 올리지
+   * 않는다. 읽는 쪽은 언제나 `sanitizeAgentEnv` 를 거쳐 위험한 키를 떨어뜨린다.
+   */
+  env?: Record<string, string>
 }
 
 /** 백엔드별 기본값의 초기 상태(모두 "백엔드 기본을 따름"). */
@@ -1007,7 +1195,10 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   effort: null,
   permissionMode: null,
   fastMode: false,
-  fallbackModels: []
+  fallbackModels: [],
+  // 비어 있음 = 아무것도 얹지 않음. 여기 적어 두어야 설정 화면의 "Reset" 이 환경 변수까지
+  // 되돌린다(리셋은 이 객체를 그대로 덮어쓴다).
+  env: {}
 }
 
 /**
@@ -1016,6 +1207,64 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
  */
 export function agentSettingsFor(settings: AppSettings, id: AgentBackendId): AgentSettings {
   return { ...DEFAULT_AGENT_SETTINGS, ...settings.agents?.[id] }
+}
+
+// ── 에이전트 기본 환경 변수 ──────────────────────────────────────────────
+//
+// 범위는 **환경 변수뿐**이다. 명령 인자나 실행 파일 오버라이드는 두지 않는다 — Wooi 는 Claude
+// Agent SDK 와 Codex CLI 를 직접 감싸므로, 임의 인자를 끼워 넣으면 그 계약이 조용히 깨진다.
+
+/**
+ * 사용자가 덮어쓸 수 없는 환경 변수 이름.
+ *
+ * `PATH`·`HOME` 은 Wooi 가 로그인 셸에서 복원해 자식에게 물려주는 값이라([[main/env]]),
+ * 사용자가 덮으면 에이전트 CLI 가 "설치됐는데 미설치" 로 보이거나 자격 증명을 못 읽는다.
+ */
+export const AGENT_ENV_BLOCKED_KEYS = ['PATH', 'HOME'] as const
+
+/** Wooi 가 자식 프로세스에 스스로 정해 내리는 이름 공간. 덮이면 dev/설치본 격리가 무너진다. */
+export const AGENT_ENV_BLOCKED_PREFIX = 'WOOI_'
+
+/** 환경 변수 이름으로 쓸 수 있는 형태인가(POSIX 관례: 영문자·`_` 로 시작, 영숫자·`_`). */
+export function isValidAgentEnvKey(key: string): boolean {
+  return /^[A-Za-z_][A-Za-z0-9_]*$/.test(key)
+}
+
+/** 이 키를 사용자가 정할 수 있는가. 막힌 키는 조용히 무시하지 않고 UI·로그에서 알린다. */
+export function isBlockedAgentEnvKey(key: string): boolean {
+  const upper = key.toUpperCase()
+  return (
+    upper.startsWith(AGENT_ENV_BLOCKED_PREFIX) ||
+    (AGENT_ENV_BLOCKED_KEYS as readonly string[]).includes(upper)
+  )
+}
+
+/**
+ * 저장된 맵에서 실제로 주입할 것만 남긴다. 막힌 키와 형태가 어긋난 키는 이유와 함께 돌려준다 —
+ * 조용히 떨어뜨리면 "설정했는데 왜 안 먹지" 가 되고, 그건 진단할 수 없는 종류의 침묵이다.
+ *
+ * 저장 파일은 손으로 고칠 수 있으므로 값의 타입까지 여기서 좁힌다.
+ */
+export function sanitizeAgentEnv(raw: Record<string, string> | undefined): {
+  env: Record<string, string>
+  blocked: string[]
+} {
+  const env: Record<string, string> = {}
+  const blocked: string[] = []
+  for (const [key, value] of Object.entries(raw ?? {})) {
+    const name = key.trim()
+    if (!name) continue
+    if (typeof value !== 'string') {
+      blocked.push(name)
+      continue
+    }
+    if (!isValidAgentEnvKey(name) || isBlockedAgentEnvKey(name)) {
+      blocked.push(name)
+      continue
+    }
+    env[name] = value
+  }
+  return { env, blocked }
 }
 
 // ── MCP 서버 (Wooi 스코프) ────────────────────────────────────────────────
@@ -1213,6 +1462,29 @@ export interface McpInventory {
   inherited: InheritedMcpServer[]
 }
 
+/**
+ * "다시 묻지 않기" 를 붙일 수 있는 확인 대화상자.
+ *
+ * **되돌릴 수 있는 동작에만 붙인다.** 아카이브는 워크트리만 지우고 브랜치·PR·대화를 남기므로
+ * 사이드바에서 되살릴 수 있다 — 잘못 눌러도 잃는 것이 없다. 삭제·머지·`/clear`·백엔드 전환처럼
+ * 되돌릴 수 없거나 돈이 드는 것, 그리고 도구 승인처럼 안전 장치인 것은 매번 묻는다.
+ *
+ * `discardHunk` 는 이 규칙의 **의도된 예외**다. 되돌릴 수 없는데도 붙어 있다 — hunk 버리기는
+ * 리뷰하다 한 화면에서 열 번도 누르는 동작이라, 매번 묻는 확인은 곧 아무도 읽지 않는 확인이
+ * 되고 그 상태가 오히려 위험하다. 대신 범위를 최소로 묶어 뒀다: 버리는 것은 워킹 트리의 변경
+ * 뿐이고 커밋된 이력은 건드리지 않으며, 끄는 순간의 토스트와 설정에서 언제든 다시 켤 수 있다.
+ *
+ * 확인 종류마다 따로 저장한다. "모든 확인 끄기" 하나로 두면 사용자가 아카이브 하나를 끄려다
+ * 삭제 확인까지 함께 끄게 된다.
+ */
+export const CONFIRM_SKIP_KEYS = [
+  'archiveWorkspace',
+  'archiveReview',
+  'discardHunk',
+  'keepWorkingInBackground'
+] as const
+export type ConfirmSkipKey = (typeof CONFIRM_SKIP_KEYS)[number]
+
 export interface AppSettings {
   /** 대화의 도구 로그 외형. 접기·요약 정책은 두 스타일이 공유한다. */
   toolLogStyle: 'wooi' | 'terminal'
@@ -1255,6 +1527,17 @@ export interface AppSettings {
    * 반영되고, 다시 켜면 지금 돌고 있는 것이 바로 나타난다(추적을 껐다면 다음 턴까지 빈 목록이 된다).
    */
   showRunningAgents: boolean
+  /** workspace 가 활동할 때 그 stack 을 사이드바의 고정 영역 바로 아래로 올린다. */
+  autoSortWorkspacesByActivity: boolean
+  /**
+   * 점진적 온보딩 힌트(기능에 실제로 도달한 순간에 뜨는 작은 안내 카드, `lib/hints.ts`)를
+   * 보여줄지. 기본 켜짐.
+   *
+   * `uiFlags.ts` 가 아니라 여기 두는 이유는 그 파일 헤더의 구분 기준 그대로다 — 힌트 하나하나를
+   * 봤는지·닫았는지는 기기 로컬 UI 기억이지만, "힌트 자체를 원치 않는다" 는 것은 사용자가 내린
+   * 결정이라 다른 기기에서도, 재설치 후에도 이어져야 한다.
+   */
+  showHints: boolean
   /**
    * Claude Code CLI 처럼, 한 턴이 끝났을 때 컨텍스트 사용량이 임계치를 넘으면 대화를
    * 자동으로 압축(/compact)한다. 끄면 사용량만 표시하고 압축은 수동(/compact)으로만.
@@ -1263,6 +1546,7 @@ export interface AppSettings {
   autoCompact: boolean
   /** Claude/Codex 계정 사용량 제한이 풀리면 중단된 작업을 같은 세션에서 자동으로 이어간다. */
   autoResumeAfterRateLimit: boolean
+  resumeUnfinishedTurnsOnLaunch: boolean
   /**
    * restack·캐스케이드가 충돌하면 그 워크트리의 에이전트에게 해결을 맡긴다. **기본 꺼짐.**
    *
@@ -1271,6 +1555,32 @@ export interface AppSettings {
    * 시키지도 않은 턴이고, 그 비용을 기본값으로 떠안기지 않는다.
    */
   autoResolveConflicts: boolean
+  /**
+   * 에이전트가 도는 동안 맥이 잠들지 않게 붙잡는다(기본 켜짐). 화면은 끄고 시스템만 깨워 둔다.
+   *
+   * 토글을 두는 이유는 이것이 사용자의 하드웨어에 손대는 유일한 기능이기 때문이다 — 배터리로
+   * 쓰는 사람은 긴 턴보다 남은 전력이 중요할 수 있고, 그 판단은 우리가 대신할 수 없다.
+   * 판정 자체는 설정으로 열지 않는다(항상 켬/자동 3단이 아니라 켬·끔 하나뿐이다) —
+   * "도는 동안만" 외에 합리적인 다른 정책이 없기 때문이다. [[main/sleepBlocker]] 참고.
+   */
+  keepAwakeWhileRunning: boolean
+  /**
+   * ⌘Q 를 눌렀을 때 아직 도는 일이 있으면 창만 닫고 메뉴 막대(Tray)에서 계속 굴린다(기본 켜짐).
+   * 일이 전부 끝나면 앱이 스스로 종료한다([[main/backgroundMode]]).
+   *
+   * 이 값은 "그래도 종료" 를 고르며 다시 묻지 않기를 켠 사용자의 결정도 함께 담는다 — 꺼지면
+   * 확인 자체가 사라지고 ⌘Q 는 언제나 곧바로 종료한다. 어느 쪽을 골라도 돌던 턴은 기록됐다가
+   * 다음 실행에서 이어진다([[main/shutdownResume]]).
+   */
+  keepWorkingInBackground: boolean
+  /**
+   * 사용자가 "다시 묻지 않기" 로 끈 확인 대화상자. 끈 것만 true 로 담긴다(없으면 묻는다).
+   *
+   * 설정 화면에 다시 켜는 자리가 있어야 하고, 끄는 순간에도 되돌리는 길을 같이 준다 —
+   * 저장 직후 뜨는 토스트의 "Open settings" 버튼이 그 자리로 데려간다. 이것이 없으면
+   * 실수로 끈 확인을 되살릴 방법을 사용자가 영영 찾지 못한다.
+   */
+  confirmSkips: Partial<Record<ConfirmSkipKey, boolean>>
   /**
    * true 면 새 workspace 생성 시 이름·베이스 브랜치를 직접 입력하는 모달을 띄운다.
    * false(기본) 면 이름을 자동 생성하고 베이스는 리포 기본 브랜치(main/origin)로 즉시 만든다.
@@ -1331,6 +1641,103 @@ export interface AppSettings {
    * 지금 연결된 디스플레이 밖이면(모니터를 뽑은 뒤) 무시하고 기본 위치로 연다.
    */
   paneWindowBounds?: Partial<Record<PaneKind, WindowBounds>>
+  /**
+   * 지금 보고 있는 워크스페이스의 OS 알림을 누른다. 기본은 켜짐(=이전 동작).
+   *
+   * "보고 있다" 는 **앱 포커스만으로는 부족하다** — Wooi 는 워크스페이스를 여럿 띄우는 앱이라
+   * 창은 앞에 있지만 다른 워크스페이스를 보고 있는 경우가 흔하고, 그때 조용해지면 정작 알아야
+   * 할 완료를 놓친다. 그래서 앱이 포커스돼 있고 **그 워크스페이스가 화면에 떠 있을 때만** 누른다
+   * ([[shared/types]] notificationSkipReason).
+   *
+   * 이 설정이 없던 파일에서 올라오면 기본값 병합이 true 로 채운다 — 예전 동작이 "포커스면 무조건
+   * 억제" 였으므로 켜짐이 그때와 가장 가깝다.
+   */
+  suppressWhenFocused?: boolean
+}
+
+// ── 알림이 왜 안 갔는가 ──────────────────────────────────────────────────
+//
+// 원격 푸시 쪽에서 "왜 안 울렸나" 가 진단하기 어려운 문제로 이미 알려져 있다. 데스크톱 알림도
+// 조건이 여러 겹이라(음소거 · 채널 · 포커스 · OS 권한) 결과만 보고는 어디서 막혔는지 알 수 없다.
+// 그래서 판정 결과를 사유 코드로 남긴다 — 로그에 찍고, 설정 화면에서 마지막 사유를 보여 준다.
+
+/** 알림이 전달되지 않은 이유. 'delivered' 는 성공이므로 여기 없다. */
+export type NotificationSkipReason =
+  /** 워크스페이스가 음소거됨(Workspace.muted). */
+  | 'muted'
+  /** 이 이벤트의 osNotification 채널이 꺼짐. */
+  | 'channel-off'
+  /** 지금 그 워크스페이스를 보고 있음(suppressWhenFocused). */
+  | 'suppressed-focus'
+  /** OS 가 알림을 지원하지 않음(Notification.isSupported()). */
+  | 'not-supported'
+  /**
+   * 띄우라고 했는데 화면에 뜨지 않았다. macOS 가 조용히 삼키는 경우다 — 알림 권한이 거부돼
+   * 있거나 집중 모드가 켜져 있으면 Electron 은 오류 없이 성공한 것처럼 반환한다. 표시 확인
+   * ('show' 이벤트)이 제때 오지 않는 것으로만 잡아낼 수 있다.
+   */
+  | 'blocked-by-system'
+
+/** 설정 화면에 그대로 띄우는 설명. 사유 코드는 로그용, 이 문장은 사람용이다. */
+export const NOTIFICATION_SKIP_LABELS: Record<NotificationSkipReason, string> = {
+  muted: 'the workspace was muted',
+  'channel-off': 'OS notifications are turned off for that event',
+  'suppressed-focus': 'you were already looking at that workspace',
+  'not-supported': 'this system does not support notifications',
+  'blocked-by-system': 'macOS did not display it — check System Settings → Notifications'
+}
+
+/** 마지막으로 건너뛴 알림 1건. 설정 화면의 진단 줄이 읽는다. */
+export interface NotificationSkip {
+  reason: NotificationSkipReason
+  event: NotificationEvent
+  /** 표시용 워크스페이스 이름(id 는 사용자에게 의미가 없다). */
+  workspaceName: string
+  at: number
+}
+
+/** 알림 한 건을 실제로 띄울지, 아니면 어떤 사유로 건너뛸지. */
+export interface NotificationDecisionInput {
+  /** 이 워크스페이스가 음소거인가. */
+  muted: boolean
+  /** 이 이벤트의 osNotification 채널이 켜져 있는가. */
+  channelOn: boolean
+  /** Wooi 창이 지금 포커스를 갖고 있는가. */
+  appFocused: boolean
+  /** 렌더러가 마지막으로 알려 준, 지금 화면에 떠 있는 워크스페이스. 모르면 null. */
+  viewingWorkspaceId: string | null
+  /** 알림을 띄우려는 워크스페이스. */
+  workspaceId: string
+  /** 보고 있는 워크스페이스의 알림을 누를 것인가(settings.suppressWhenFocused). */
+  suppressWhenFocused: boolean
+  /** OS 가 알림을 지원하는가. */
+  supported: boolean
+}
+
+/**
+ * 알림을 띄울지 판정한다. 띄우면 null, 아니면 사유 코드.
+ *
+ * 포커스 억제가 **워크스페이스까지 본다**는 것이 요점이다. 예전에는 창이 앞에 있기만 하면
+ * 전부 눌렀는데, 워크스페이스 A 를 들여다보는 동안 B 가 끝나면 아무 소식도 오지 않았다 —
+ * 병렬로 여러 개를 돌리는 것이 이 앱의 본령이라 그 침묵이 가장 아쉬운 자리였다.
+ *
+ * 보고 있는 워크스페이스를 모르면(렌더러가 아직 알려 주지 않음) 억제하지 않는다. 알림이 한 번
+ * 더 뜨는 것이 놓치는 것보다 낫다.
+ */
+export function notificationSkipReason(
+  input: NotificationDecisionInput
+): NotificationSkipReason | null {
+  if (input.muted) return 'muted'
+  if (!input.channelOn) return 'channel-off'
+  if (
+    input.suppressWhenFocused &&
+    input.appFocused &&
+    input.viewingWorkspaceId === input.workspaceId
+  ) {
+    return 'suppressed-focus'
+  }
+  if (!input.supported) return 'not-supported'
+  return null
 }
 
 // ── fan-out (같은 프롬프트를 여러 워크스페이스에 동시에) ────────────────────
@@ -1520,7 +1927,42 @@ export interface ConflictResolveOrigin {
   auto: boolean
 }
 
-export type ChatUserOrigin = PeerMessageOrigin | ConflictResolveOrigin
+/**
+ * Wooi 가 실패한 CI 를 맡기며 넣은 사용자 턴.
+ *
+ * ConflictResolveOrigin 과 같은 이유로 보이게 남기고 접는다 — 사용자가 치지 않은 턴이므로
+ * 무엇을 왜 시켰는지가 대화에 있어야 한다. 시도 횟수를 함께 싣는 것은, 접힌 한 줄만 보고도
+ * "이게 몇 번째이고 몇 번에서 멈추는지" 를 알 수 있어야 켜 둔 채로 잊지 않기 때문이다.
+ */
+export interface CiFixOrigin {
+  kind: 'ciFix'
+  prNumber: number
+  /** 실패한 체크 이름들 — 펼치지 않고도 무엇이 깨졌는지 알 수 있게 한다. */
+  failedChecks: string[]
+  /** 이번이 몇 번째 자동 시도인지(1-based). */
+  attempt: number
+  /** 몇 번에서 멈추는지. */
+  max: number
+}
+
+/**
+ * Wooi 가 사용자 대신 넣은 그 밖의 턴 — 제한이 풀려 이어가기, fan-out 의 첫 지시, 스택 자식이
+ * 부모를 깨우는 보고, 새 워크스페이스에 넘기는 작업, 백엔드를 바꾸며 넘기는 대화.
+ *
+ * 위의 세 origin 과 이유는 같다. 사용자가 치지 않은 턴이 토큰을 쓰므로 **감추지 않고**(silent 가
+ * 아니다) 무엇을 왜 시켰는지 대화에 남기되, 프롬프트 자체는 길어 펼쳐 둔 채로는 앞뒤 대화를 밀어낸다.
+ * 그래서 접어서 한 줄만 둔다. 다른 셋과 달리 요약에 쓸 구조가 저마다라 공통분모가 이름 하나뿐이고,
+ * 그래서 **하나의 generic 한 종류**로 둔다 — 종류가 늘 때마다 화면에 컴포넌트를 하나씩 더 만드는
+ * 대신, 부르는 쪽이 접힌 줄에 쓸 이름을 정해서 넘긴다.
+ */
+export interface WooiTurnOrigin {
+  kind: 'wooi'
+  /** 접힌 한 줄에 그대로 실리는 이름. 문장이 아니라 짧은 명사구여야 한다("Continuing after usage limit"). */
+  label: string
+}
+
+export type ChatUserOrigin =
+  PeerMessageOrigin | ConflictResolveOrigin | CiFixOrigin | WooiTurnOrigin
 
 /** 백엔드까지 함께 흘려 보낼 사용자 턴의 표시·모델용 옵션. */
 export interface SendMessageOptions {
@@ -1964,6 +2406,13 @@ export type WorkspaceGoal =
 export type ChatEvent =
   /** id 기준 append-or-replace. 권위 있는 완성 항목. */
   | { type: 'item'; item: ChatItem }
+  /**
+   * 이 항목부터(포함) 뒤를 전부 버린다 — /rewind 의 대화 되돌리기.
+   *
+   * 통째로 다시 실어 보내지 않는 이유는 긴 대화에서 IPC 한 번에 트랜스크립트 전체가 실리기
+   * 때문이다. 자를 지점만 알려 주면 렌더러와 메인이 같은 규칙으로 같은 결과에 도달한다.
+   */
+  | { type: 'truncate'; fromItemId: string }
   /** assistant/thinking 버블(id)에 텍스트 조각을 이어붙임. */
   | { type: 'delta'; id: string; itemType: 'assistant' | 'thinking'; text: string }
   /** workspace 실행 상태 변화. */
@@ -2147,6 +2596,18 @@ export interface RunScript {
   autoStart: boolean
 }
 
+/**
+ * 저장해 둔 프롬프트 하나. 고르면 **보내지 않고 컴포저에 채운다** — 사용자가 손볼 기회를 남기지
+ * 않으면 시키지도 않은 턴을 만드는 셈이 된다. 스코프는 리포별뿐이다(전역 목록은 두지 않는다).
+ */
+export interface SavedPrompt {
+  id: string
+  /** 목록에 뜨는 짧은 이름. */
+  name: string
+  /** 컴포저에 채워 넣을 본문. */
+  prompt: string
+}
+
 /** setup 스크립트의 마지막 실행 결과(Workspace.setupState 에 영속). */
 export type SetupState = 'idle' | 'success' | 'failed'
 
@@ -2218,9 +2679,9 @@ export interface PreviewCaptureResult {
  * 메인 창에서 떼어 별도 창으로 띄울 수 있는 패널.
  * 듀얼 모니터에서 대화는 이쪽 화면에, 파일·터미널·스크립트 로그는 저쪽 화면에 두기 위한 것.
  */
-export type PaneKind = 'work' | 'scripts'
+export type PaneKind = 'work' | 'scripts' | 'overview'
 
-export const PANE_KINDS: readonly PaneKind[] = ['work', 'scripts'] as const
+export const PANE_KINDS: readonly PaneKind[] = ['work', 'scripts', 'overview'] as const
 
 /** 지금 별도 창으로 떠 있는 패널(main 이 소유하고 모든 창에 방송한다). */
 export type PaneState = Record<PaneKind, boolean>
@@ -2274,6 +2735,18 @@ export interface UpdateFromBaseResult {
   /** status==='conflict' 일 때 충돌난 파일 경로들. */
   conflictedFiles?: string[]
   /** dirty/error 등 사용자에게 보여 줄 사유. */
+  message?: string
+}
+
+/**
+ * hunk 버리기 결과.
+ *
+ * 실패를 던지지 않고 값으로 돌려준다 — 가장 흔한 실패가 "그 사이 파일이 바뀌어 patch 가 더는
+ * 맞지 않는다" 이고, 그건 버그가 아니라 사용자에게 설명해야 할 상태다(diff 를 다시 읽으면 된다).
+ */
+export interface DiscardHunkResult {
+  status: 'discarded' | 'stale' | 'busy' | 'error'
+  /** status !== 'discarded' 일 때 사용자에게 보여 줄 사유. */
   message?: string
 }
 
@@ -2521,6 +2994,14 @@ export interface FileDiff {
   /** 이 파일의 통합 diff 본문(헤더 포함). 바이너리는 빈 문자열. */
   patch: string
   binary: boolean
+  /**
+   * patch 본문을 싣지 못한 이유. 있으면 `patch` 는 비어 있지만 `additions`/`deletions` 는
+   * 여전히 믿을 수 있다 — 본문 없이 numstat 만 읽어 온 경우다(`getDiff` 참고).
+   *
+   * 없는 필드로 두는 이유: 정상 경로에서는 붙지 않아야 하고, 이 기능 이전 버전이 만든
+   * 값과도 그대로 호환된다.
+   */
+  patchOmitted?: 'too-large'
 }
 
 /** base 브랜치 대비 workspace 의 전체 변경(커밋 + 미커밋). */
@@ -3036,6 +3517,95 @@ export interface IssueCandidate {
  */
 export type MemoryScope = 'project' | 'user'
 
+// ── 기존 worktree 를 워크스페이스로 들여오기 ────────────────────────────────
+
+/**
+ * 후보 리포를 알려 준 다른 도구. 없으면(null) 이미 Wooi 에 등록된 리포를 훑은 것이다.
+ *
+ * 이 값의 역할은 **발견과 표시**뿐이다 — 들여오기 자체는 도구를 가리지 않고 git 이 아는
+ * worktree 를 대상으로 한다. Conductor·Orca 는 아직 등록되지 않은 리포 경로와, 사람이
+ * worktree 에 붙여 둔 이름·셋업 명령을 얹어 줄 뿐이다.
+ */
+export type MigrationSourceId = 'conductor' | 'orca'
+
+/** 이 worktree 에서 돌던 에이전트 대화. 이어받으면 다음 턴이 그 맥락 위에서 시작한다. */
+export interface MigrationAgentSession {
+  /** 이 세션을 이어받으면 워크스페이스의 백엔드도 이쪽으로 정해진다. */
+  backend: AgentBackendId
+  /** Claude Code 의 session id · Codex 의 thread id. */
+  sessionId: string
+  /** 사람이 알아볼 이름(Claude 의 대화 제목 등). 없으면 시각으로 채운다. */
+  label: string
+  /** 마지막으로 쓰인 시각(ms). 여러 개 중 가장 최근 것을 고르는 근거다. */
+  updatedAt: number
+  /**
+   * 그 CLI 가 대화를 적어 둔 파일. main 이 지난 대화를 트랜스크립트로 옮길 때만 쓴다
+   * ([[migrate/convert]]) — 렌더러는 읽지 않는다. 들여오기는 이 값을 렌더러에서 받지 않고
+   * **다시 훑어 얻은 것**만 쓰므로, 여기 실려 나가도 신뢰 경계는 그대로다.
+   */
+  sourcePath: string
+}
+
+/** 들여올 수 있는 worktree 하나. git 이 실재를 확인해 준 것만 온다. */
+export interface MigrationWorkspaceCandidate {
+  /** 선택을 main 으로 되돌려 보낼 때 쓰는 키(정규화된 경로에서 파생). */
+  key: string
+  /** 표시 이름 — 다른 도구가 붙여 둔 이름이 있으면 그것, 없으면 디렉터리 이름. */
+  name: string
+  branch: string
+  worktreePath: string
+  /** 이미 Wooi 워크스페이스가 이 worktree 나 브랜치를 쓰고 있다. */
+  alreadyImported: boolean
+  /** 이 worktree 에서 발견된 가장 최근 에이전트 세션. 없으면 null. */
+  session: MigrationAgentSession | null
+}
+
+/** 들여올 수 있는 리포 하나. */
+export interface MigrationRepoCandidate {
+  key: string
+  name: string
+  path: string
+  /** 이미 Wooi 에 등록된 리포다. 등록은 건너뛰고 worktree 만 들여온다. */
+  alreadyAdded: boolean
+  /** 이 후보를 알려 준 도구(있으면). 등록된 리포를 훑은 것이면 null. */
+  source: MigrationSourceId | null
+  sourceLabel: string | null
+  /** 함께 옮겨올 설정. 그 도구에 설정이 없었거나 출처가 없으면 빈 값이다. */
+  setupScript: string
+  archiveScript: string
+  runScripts: { name: string; command: string }[]
+  workspaces: MigrationWorkspaceCandidate[]
+}
+
+/** 무엇을 훑을지. repoId 를 주면 그 리포 하나만 본다(리포 메뉴에서 여는 경로). */
+export interface MigrationScanArgs {
+  repoId?: string | null
+}
+
+export interface MigrationScan {
+  /** 들여올 것이 남은 리포만 담는다(전부 들여왔으면 빈 배열). */
+  repos: MigrationRepoCandidate[]
+  /** 훑다가 읽지 못한 것의 사유(예: sqlite3 없음). 사용자에게 그대로 보여 준다. */
+  warnings: string[]
+}
+
+/** 사용자가 고른 것. main 은 이 키를 다시 훑어 대조한다(IPC 는 신뢰 경계다). */
+export interface MigrationImportSelection {
+  repoKeys: string[]
+  workspaceKeys: string[]
+  /** 대화까지 이어받을 worktree 의 키. workspaceKeys 의 부분집합이다. */
+  sessionKeys: string[]
+}
+
+export interface MigrationImportResult {
+  repos: number
+  workspaces: number
+  /** 그중 대화를 이어받은 수. */
+  sessions: number
+  /** 항목별 실패 사유. 전체를 멈추지 않고 나머지는 계속 들여온다. */
+  errors: string[]
+}
+
 // ── IPC 채널 이름 ────────────────────────────────────────────────────────
 
 export const IPC = {
@@ -3059,6 +3629,10 @@ export const IPC = {
   repoResolvePr: 'repo:resolvePr',
   repoGetIssueBody: 'repo:getIssueBody',
   repoGetPrBody: 'repo:getPrBody',
+  /** 다른 병렬 에이전트 도구(Conductor·Orca)가 남긴 리포·worktree 를 훑는다. */
+  migrateScan: 'migrate:scan',
+  /** 훑어 낸 것 중 사용자가 고른 리포·worktree 를 Wooi 로 들여온다. */
+  migrateImport: 'migrate:import',
   workspaceCreate: 'workspace:create',
   workspaceFork: 'workspace:fork',
   workspaceArchive: 'workspace:archive',
@@ -3100,10 +3674,13 @@ export const IPC = {
   workspaceSetAgentBackend: 'workspace:setAgentBackend',
   /** 워크스페이스별 알림 음소거 토글. */
   workspaceSetMuted: 'workspace:setMuted',
+  /** CI 실패를 에이전트에게 넘기는 워크스페이스별 토글. */
+  workspaceSetAutoFixCi: 'workspace:setAutoFixCi',
   workspaceSetMultiAgent: 'workspace:setMultiAgent',
   workspaceRename: 'workspace:rename',
   /** 사이드바 드래그 앤 드롭으로 워크스페이스 표시 순서를 바꾼다(같은 레포·같은 stack 부모끼리만). */
   workspaceReorder: 'workspace:reorder',
+  workspaceSetPinned: 'workspace:setPinned',
   workspaceOpenInEditor: 'workspace:openInEditor',
   workspaceRevealInFinder: 'workspace:revealInFinder',
   /** /memory — worktree 의 CLAUDE.md 를 에디터로 연다(없으면 worktree 를 연다). */
@@ -3126,6 +3703,12 @@ export const IPC = {
   /** 워크스페이스를 가로지르는 대화 검색. 결과는 스니펫만 담긴다(원문은 main 에 남는다). */
   chatSearch: 'chat:search',
   permissionRespond: 'permission:respond',
+  /**
+   * 지금 답을 기다리는 승인 요청 전부. 렌더러의 목록은 라이브 이벤트로만 차기 때문에,
+   * 창이 없는 동안(백그라운드 모드) 올라온 요청은 창을 다시 열어도 보이지 않는다 — 초기화
+   * 시점에 이 스냅샷으로 씨를 뿌린다.
+   */
+  permissionPending: 'permission:pending',
   scriptRun: 'script:run',
   scriptStop: 'script:stop',
   scriptGetStatus: 'script:getStatus',
@@ -3136,6 +3719,10 @@ export const IPC = {
   scriptGetOutput: 'script:getOutput',
   gitStatus: 'git:status',
   gitDiff: 'git:diff',
+  /**
+   * Changes 패널의 비교 기준을 바꾼다. **표시 전용** — PR·rebase 대상은 건드리지 않는다.
+   */
+  workspaceSetCompareBase: 'workspace:setCompareBase',
   /** 리포의 origin tracking ref 를 갱신한다. 실패는 main 에서 조용히 무시한다. */
   gitFetch: 'git:fetch',
   /** base 브랜치를 현재 워크스페이스 브랜치로 머지해 드리프트를 해소한다. */
@@ -3166,6 +3753,11 @@ export const IPC = {
   stackResolveConflict: 'stack:resolveConflict',
   /** 진행 중인 머지를 취소한다(충돌 포기). */
   gitAbortMerge: 'git:abortMerge',
+  /**
+   * Changes 탭에서 고른 hunk 하나를 워킹 트리에서 되돌린다(`git apply --reverse`).
+   * 스테이징도 커밋도 하지 않는다 — 커밋은 계속 에이전트의 몫이다.
+   */
+  gitDiscardHunk: 'git:discardHunk',
   prStatus: 'pr:status',
   /** 지정한 브랜치(worktree 의 현재 브랜치가 아니어도)의 PR 상태를 조회한다. 모델 B 스택 조망용. */
   prStatusForBranch: 'pr:statusForBranch',
@@ -3280,6 +3872,8 @@ export const IPC = {
   // 파일 브라우저 (All files 탭)
   fsList: 'fs:list',
   fsRead: 'fs:read',
+  /** 뷰어에서 고친 파일 저장. 열었을 때의 해시를 함께 받아 동시 수정을 막는다. */
+  fsWrite: 'fs:write',
   /** 입력창 `@` 자동완성용 파일 검색(git ls-files 기반 퍼지 매칭). */
   fsSearch: 'fs:search',
   // 인터랙티브 터미널 (worktree PTY — 탭 하나당 하나)
@@ -3317,6 +3911,8 @@ export const IPC = {
   paneSetWorkspace: 'pane:setWorkspace',
   /** 분리한 창에서 리포 설정을 요청한다(메인 창을 앞으로 가져와 모달을 연다). */
   paneOpenRepoSettings: 'pane:openRepoSettings',
+  /** 분리한 창 전용 — 메인 창을 앞으로 가져와 그 워크스페이스를 연다. */
+  paneSelectWorkspace: 'pane:selectWorkspace',
   // Preview 패널 (워크트리의 dev 서버를 앱 안에서 보는 탭)
   /** Preview 가 마지막으로 본 주소를 워크스페이스에 영속한다(주소창 입력·내비게이션 후). */
   previewSetUrl: 'preview:setUrl',
@@ -3453,7 +4049,18 @@ export const IPC = {
    * 그것을 볼 수 없다 — 폰은 무엇이 안 읽혔는지 영영 모른다. 반대 방향(`evt:remoteRead`)과
    * 짝이다.
    */
-  remoteSetUnread: 'remote:setUnread'
+  remoteSetUnread: 'remote:setUnread',
+  /**
+   * 지금 화면에 떠 있는 워크스페이스를 main 에 알린다(렌더러 → main). 창이 흐려졌거나 아무것도
+   * 열지 않았으면 null 이다.
+   *
+   * 선택 상태는 렌더러 메모리에만 있는데, 포커스 억제를 워크스페이스 단위로 하려면 알림을 띄우는
+   * main 이 그것을 알아야 한다([[shared/types]] notificationSkipReason). unread 를 올리는
+   * `remote:setUnread` 와 같은 방향·같은 이유다.
+   */
+  notifySetViewing: 'notify:setViewing',
+  /** 마지막으로 건너뛴 알림의 사유를 읽는다(설정 화면의 진단 줄). 없으면 null. */
+  notifyLastSkip: 'notify:lastSkip'
 } as const
 
 // ── IPC 페이로드 타입 ────────────────────────────────────────────────────
@@ -3549,6 +4156,15 @@ export interface PendingRateLimitResume {
    *   확인 간격을 늘려 가며 기다린다([[rateLimitResume]] noteConnectionLost).
    */
   cause?: 'rateLimit' | 'connection'
+}
+
+export interface PendingShutdownResume {
+  backend: AgentBackendId
+  sessionId: string
+  at: number
+  reason: 'update' | 'background' | 'quit' | 'crash'
+  /** 자동 이어가기를 하지 않기로 확정된 기록. 다음 실행에서 다시 시도하지 않고, 표시로만 남는다. */
+  handled?: boolean
 }
 
 /**
@@ -4033,22 +4649,54 @@ export interface ReloadResult {
   errorCount?: number
 }
 
+/**
+ * /rewind — 무엇을 되돌릴지. 터미널 Claude Code 의 세 갈래와 같은 의미다.
+ *
+ * - `files` — 추적된 파일만 그 시점으로(SDK rewindFiles). 대화는 그대로 남는다.
+ * - `conversation` — 대화만 그 지점 직전까지 자른다(SDK resumeSessionAt). 파일은 그대로다.
+ * - `both` — 둘 다. 파일을 먼저 되돌린 뒤 대화를 자른다.
+ *
+ * 하나만 되돌리면 모델의 기억과 디스크가 어긋난다는 점을 UI 가 알려 줘야 한다 — 예컨대 파일만
+ * 되돌리면 모델은 "내가 방금 고쳤다" 고 알고 있는데 그 변경이 디스크에 없다.
+ */
+export type RewindMode = 'files' | 'conversation' | 'both'
+
 /** /rewind — 되돌릴 수 있는 체크포인트 1개(사용자 메시지 기준). */
 export interface RewindPoint {
   /** SDK 가 부여한 사용자 메시지 UUID. rewindFiles 에 그대로 넘긴다. */
   userMessageId: string
+  /** 같은 메시지의 Wooi ChatItem id. 화면 트랜스크립트를 어디서부터 자를지 가리킨다. */
+  itemId: string
+  /**
+   * 이 메시지 **직전** 체인 항목(assistant/user)의 UUID. 대화를 되돌릴 때 resumeSessionAt 으로
+   * 넘겨, 여기까지만 불러오게 한다. null 이면 앞에 아무것도 없다 — 대화 되돌리기는 곧 새 세션이다.
+   */
+  forkAt: string | null
   /** 그 메시지의 첫 줄(표시용). */
   text: string
   ts: number
 }
 
-/** /rewind 실행 결과(SDK rewindFiles 응답을 표시용으로 추린 것). */
+/** /rewind 실행 결과(SDK rewindFiles 응답 + 대화 절단 결과를 표시용으로 추린 것). */
 export interface RewindActionResult {
   canRewind: boolean
   error?: string
+  /**
+   * 되돌린 파일 목록과 증감. **오지 않을 수 있다** — 설치된 CLI 에 따라 성공 응답이
+   * `{canRewind, skippedLinks}` 뿐인 경우가 있다. 없음과 0 을 구분해서 표시해야 한다.
+   */
   filesChanged?: string[]
   insertions?: number
   deletions?: number
+  /**
+   * 링크 안전 검사에 걸려 복원하지 않은 추적 파일 수(심볼릭/하드링크가 놓여 있거나 백업을
+   * 안전하게 읽지 못한 경우). 0 이거나 없으면 그런 파일은 없었다.
+   */
+  skippedLinks?: number
+  /** 대화를 실제로 잘랐는지. mode 에 conversation 이 포함됐을 때만 의미가 있다. */
+  conversationRewound?: boolean
+  /** 되돌린 지점의 사용자 메시지 원문. 입력창에 채워 넣어 고쳐 보낼 수 있게 한다. */
+  prefill?: string
 }
 
 /** /permissions — 현재 권한 모드 + 설정 파일에서 모은 도구 규칙(읽기 전용). */
@@ -4165,7 +4813,59 @@ export interface FileContent {
   truncated: boolean
   /** 바이너리(또는 표시 불가)면 본문 없이 true. */
   binary: boolean
+  /**
+   * 읽은 시점 **파일 전체**(잘린 앞부분이 아니라) 내용의 sha256.
+   *
+   * 뷰어에서 고친 내용을 저장할 때 낙관적 동시성 제어의 기준값으로 쓴다 — 사람이 오타를
+   * 고치는 동안 에이전트가 같은 파일을 바꿔 놨는지 이 값으로 안다. mtime 대신 해시를 쓰는
+   * 이유는, 에이전트가 1 초 안에 여러 번 쓰면 mtime 해상도로는 변경을 놓치기 때문이다.
+   */
+  sha: string
 }
+
+/** 저장을 막은 이유. 판정 규칙은 `@shared/fileEdit` 의 `classifySave` 한 곳에 있다. */
+export type FileSaveConflict =
+  /** 열었을 때와 디스크 내용이 다르다 — 다른 누군가(보통 에이전트)가 고쳤다. */
+  | 'stale'
+  /** 파일이 사라졌다 — 지워졌거나 옮겨졌다. */
+  | 'vanished'
+
+/**
+ * 한 PR 에 대해 CI auto-fix 가 자동으로 열 수 있는 턴의 수.
+ *
+ * 이 상한이 auto-fix 의 안전장치다. 에이전트가 고치고 → 밀고 → 또 실패하면, 상한이 없는 한
+ * 사람이 자는 동안에도 그 고리가 계속 돈다. 3 은 "한 번 헛짚고 한 번 더 시도해 볼 여지"까지만
+ * 주는 수다 — 세 번 고쳐서 안 되는 실패는 대개 에이전트가 못 보는 것(비밀값·인프라·flaky)이
+ * 원인이라, 네 번째 시도는 토큰만 쓴다.
+ *
+ * 판정은 메인의 [[ciFix]] 가 하지만, 남은 횟수를 화면에도 적어야 해서 여기 둔다 — 상한이
+ * 보이지 않으면 "왜 이제 안 고쳐 주지" 로만 읽힌다.
+ */
+export const CI_FIX_MAX_ATTEMPTS = 3
+
+/**
+ * 워크스페이스 하나의 CI auto-fix 진행 상태. 필드의 뜻과 판정 규칙은 [[ciFix]] 에 있다.
+ * (main 의 `CiFixState` 와 같은 모양이다 — 워크스페이스 레코드에 실려 렌더러까지 간다.)
+ */
+export interface CiFixProgress {
+  prNumber: number
+  attempts: number
+  armed: boolean
+  notifiedStop: boolean
+}
+
+/** `fs:write` 의 결과. 실패는 사용자에게 다르게 보여야 해서 이유를 나눠 돌려준다. */
+export type FileWriteResult =
+  | { ok: true; content: FileContent }
+  /**
+   * 열었을 때와 디스크가 달라 쓰지 않았다. `current` 는 지금 디스크에 있는 내용(사라졌으면
+   * null) — 사용자가 덮어쓸지 버릴지 고르려면 상대편을 볼 수 있어야 한다.
+   */
+  | { ok: false; reason: 'conflict'; conflict: FileSaveConflict; current: FileContent | null }
+  /** 워크트리 밖 경로·아카이브된 워크스페이스·파일이 아닌 대상 — 애초에 쓸 수 없다. */
+  | { ok: false; reason: 'denied' }
+  /** 권한 없음·디스크 가득 참 등 쓰기 자체의 실패. */
+  | { ok: false; reason: 'error'; message: string }
 
 /** 입력창 `@` 자동완성 후보(worktree 상대 경로). */
 export interface FileHit {

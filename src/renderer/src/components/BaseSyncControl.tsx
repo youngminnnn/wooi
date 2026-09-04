@@ -4,6 +4,7 @@ import type { GitStatus, PrState, StackOpProgress, Workspace } from '@shared/typ
 import { useStore } from '../store'
 import HeaderChip from './HeaderChip'
 import MenuPanel, { menuItemCls } from './MenuPanel'
+import { upToDateWithBase } from '../lib/rebaseGate'
 
 /**
  * 진행 중인 스택 작업의 종류별 문구.
@@ -106,7 +107,7 @@ export default function BaseSyncControl({
   ).length
   const stackSize = workspace.stack?.length ?? 0
   const baseBranch = workspace.baseBranch
-  const upToDate = git.behind <= 0 && !prNeedsBaseUpdate && !busy && !showFinished
+  const upToDate = upToDateWithBase(git, prNeedsBaseUpdate) && !busy && !showFinished
 
   let label = stackSize > 1 ? 'Rebase stack' : 'Rebase'
   let tooltip = upToDate

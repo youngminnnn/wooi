@@ -171,11 +171,18 @@ export async function readMcpServersSettled(
  * 이 목록이 권한 규칙의 전부는 아니다 — 플러그인이 싣는 규칙과 Wooi 가 query 에 주입하는 인라인
  * settings 레이어는 파일로 존재하지 않고, SDK 의 initializationResult() 응답에도 권한 필드가 없다.
  * 그래서 카드는 실제로 읽은 파일 목록(sources)을 그대로 보여 주고 전부가 아닐 수 있다고 말한다.
+ *
+ * 유저 스코프는 CLI 와 같은 규칙으로 정한다: `CLAUDE_CONFIG_DIR` 이 `~/.claude` 를 통째로
+ * 대체한다([[claude/memory]] memoryFile·[[claude/mcp]] claudeConfigPath 와 같은 규칙이고,
+ * 같아야 한다). 여기만 homedir() 를 고집하면 설정 디렉터리를 옮겨 둔 사용자에게 /hooks 와
+ * /permissions 가 **쓰이지도 않는 파일**을 읽어 준다. 관리형 정책은 조직이 기기에 배포하는
+ * 것이라 이 변수로 옮겨지지 않는다 — CLI 도 그렇다.
  */
 export function permissionSettingsFiles(
   cwd: string,
   home: string = homedir(),
-  platform: NodeJS.Platform = process.platform
+  platform: NodeJS.Platform = process.platform,
+  configDir: string | undefined = process.env.CLAUDE_CONFIG_DIR?.trim()
 ): string[] {
   const managed =
     platform === 'darwin'
@@ -183,10 +190,11 @@ export function permissionSettingsFiles(
       : platform === 'win32'
         ? join(process.env.PROGRAMDATA ?? 'C:\\ProgramData', 'ClaudeCode', 'managed-settings.json')
         : '/etc/claude-code/managed-settings.json'
+  const userDir = configDir || join(home, '.claude')
   return [
     managed,
-    join(home, '.claude', 'settings.json'),
-    join(home, '.claude', 'settings.local.json'),
+    join(userDir, 'settings.json'),
+    join(userDir, 'settings.local.json'),
     join(cwd, '.claude', 'settings.json'),
     join(cwd, '.claude', 'settings.local.json')
   ]

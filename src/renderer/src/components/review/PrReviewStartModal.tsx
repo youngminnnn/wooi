@@ -1,10 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Check, Layers, Loader2, Search } from 'lucide-react'
 import type { AgentBackendId, EffortSetting, PrCandidate } from '@shared/types'
-import { DEFAULT_AGENT_BACKEND } from '@shared/types'
 import Modal, { ghostBtn, inputClass, labelClass, primaryBtn } from '../Modal'
 import { useStore } from '../../store'
-import { useAgentSettings, useAvailableBackends, useBackend, useModels } from '../../lib/backends'
+import {
+  useAgentSettings,
+  useAvailableBackends,
+  useBackend,
+  useDefaultBackend,
+  useModels
+} from '../../lib/backends'
 import { effortLabel, effortOptionsFor } from '../../lib/effort'
 import { modelLabel } from '../../lib/models'
 import { AgentBackendMark } from '../BrandIcons'
@@ -35,9 +40,7 @@ export default function PrReviewStartModal({
   onClose: () => void
 }): React.JSX.Element {
   const repos = useStore((s) => s.app?.repos ?? [])
-  const defaultBackend = useStore(
-    (s) => s.app?.settings.defaultAgentBackend ?? DEFAULT_AGENT_BACKEND
-  )
+  const defaultBackend = useDefaultBackend()
   const startReview = useStore((s) => s.startReview)
 
   // 리뷰도 워크스페이스와 같은 규칙이다 — 시작할 때 고른 에이전트로 **끝까지** 돈다(후속 턴은

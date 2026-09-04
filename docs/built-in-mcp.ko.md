@@ -14,7 +14,7 @@ Wooi 는 모든 코딩 에이전트 세션에 `wooi` 라는 내장 MCP 서버를
 도구는 보통 에이전트에게 `mcp__wooi__<도구-이름>` 으로 보입니다. 대부분의 도구 정의는 필요할 때
 불러오므로, 처음 모델 컨텍스트에 보이지 않아도 도구 검색을 통해 사용할 수 있습니다.
 
-핵심 도구 20개는 모든 워크스페이스에 제공됩니다. `claude_subagent` 와 `codex_subagent` 는
+핵심 도구 24개는 모든 워크스페이스에 제공됩니다. `claude_subagent` 와 `codex_subagent` 는
 멀티 에이전트 모드를 켜고 해당 백엔드에 위임할 수 있을 때만 추가됩니다.
 
 ## 안전 모델
@@ -31,6 +31,8 @@ Wooi 는 모든 코딩 에이전트 세션에 `wooi` 라는 내장 MCP 서버를
   사용자가 이미 Wooi 에 추가해 둔 리포만 적을 수 있고, 어느 리포인지는 승인 카드에 적힙니다.
 - 읽기 전용 도구는 승인 없이 실행됩니다. 상태를 바꾸는 도구는 워크스페이스 권한 모드를 따르며,
   보통 실행 전에 승인 카드를 표시합니다. Full Access 에서는 승인 없이 실행합니다.
+- `switch_workspace_agent` 는 예외입니다. 다른 에이전트에게 대화를 넘기는 동작은 Full Access
+  에서도 항상 승인 카드를 표시합니다.
 - 상태를 바꾸면서도 카드를 띄우지 않는 도구는 `set_workspace_name` 하나뿐입니다. 읽기 전용으로
   표시하지는 않았습니다 — 실제로 상태를 바꾸니까요. 다만 그 변경은 Wooi 자체 store 의 문자열
   하나이고, 컴퓨터 밖으로 나가지 않으며, 컨텍스트 메뉴 한 번으로 되돌아가고, 결과가 사이드바에
@@ -388,6 +390,71 @@ Wooi 가 push 할 수 없는 fork 의 PR 도 숨기지 않고 이유와 함께 �
 
 로그 끝부분을 보존하며 출력은 약 8 KiB 로 제한됩니다. 잘렸는지도 결과에 표시합니다.
 
+## 프리뷰
+
+이 세 도구는 에이전트가 사용자에게 "화면이 어떻게 보이나요" 라고 묻는 대신 자기 변경을 직접
+확인하게 합니다. 페이지를 열고, 찍고, 콘솔이 무엇을 불평했는지 읽습니다.
+
+에이전트 전용 헤드리스 브라우저를 따로 띄우지 않고 **사용자가 보고 있는 그 Preview 패널**을
+그대로 씁니다. 사용자가 에이전트와 같은 화면을 보게 하려는 선택이고, 대신 분명히 적어 둘 결과가
+하나 있습니다 — **프리뷰는 지금 화면에 열려 있는 워크스페이스에만 존재합니다.** Wooi 는 선택된
+워크스페이스의 작업 패널만 만들기 때문에, 뒤에서 도는 워크스페이스의 에이전트는 빈 스크린샷이
+아니라 그 사실을 그대로 적은 실패를 받습니다.
+
+클릭·입력 도구는 없습니다. 페이지에 쓰는 동작은 승인 정책을 따로 설계해야 하고, 읽기만으로도
+자기 작업을 확인하는 루프는 닫힙니다.
+
+### `open_preview`
+
+Wooi 의 Preview 패널을 이 워크스페이스의 dev 서버로 열고 페이지가 로드될 때까지 기다립니다.
+주소는 입력이 아닙니다. 이 워크스페이스에서 지금 돌고 있는 run 스크립트에서 Wooi 가 가져옵니다 —
+스크립트가 찍은 로컬 주소가 먼저이고, 그다음이 Wooi 가 배정한 포트, 마지막이 프리뷰가 마지막으로
+보고 있던 주소입니다. 다른 origin 으로 이어지는 `path` 는 거부하므로, 이 워크스페이스의 dev 서버
+밖으로 나갈 수 없습니다.
+
+| 입력 | 타입 | 필수 | 설명 |
+| --- | --- | --- | --- |
+| `path` | string | 아니요 | dev 서버의 경로(`/settings` 등). 기본값 `/`. |
+
+열 dev 서버가 없으면 셋 중 무엇이 없는지를 오류에 적습니다 — run 스크립트가 설정돼 있지 않은지,
+설정은 됐지만 아무것도 돌고 있지 않은지, 돌고는 있지만 주소를 찍지 않았는지. 에이전트가 다음에
+할 일이 각각 다르기 때문입니다. 로드가 실패하면 `ERR_CONNECTION_REFUSED` 처럼 브라우저가 준
+사유를 그대로 실어 보냅니다.
+
+프리뷰 도구 중 상태를 바꾸는 유일한 도구라, 경로를 적은 승인 카드를 띄웁니다.
+
+### `capture_preview`
+
+프리뷰가 지금 보여 주고 있는 화면을 찍어 텍스트가 아니라 이미지 블록으로 돌려줍니다. 입력은
+없고 이동도 하지 않으므로 `open_preview` 를 먼저 호출해야 합니다. 에이전트에게 돌려주는 크기를
+넘으면 줄이고, 줄였다는 사실과 원래 크기를 결과에 적습니다. 읽기 전용입니다.
+
+Wooi 는 프리뷰 탭이 화면에 있을 때만 그 화면을 그립니다. 사용자가 다른 곳으로 옮긴 뒤에 찍으면
+빈 이미지를 돌려주는 대신 그 사유로 실패합니다.
+
+### `read_preview_issues`
+
+프리뷰에 뜬 페이지에서 Wooi 가 모은 콘솔 에러와 실패한 요청을 에러부터 돌려줍니다. 같은 문제가
+반복되면 횟수를 함께 적습니다. 입력은 없고 읽기 전용입니다.
+
+프리뷰가 이동할 때마다 모아 둔 것을 비우므로, 결과는 마지막 로드 이후의 상태입니다 — 고친 것이
+에러를 없앴는지 보려면 페이지를 다시 여는 것이 그 확인입니다. 목록은 50건 · 약 8 KiB 로 제한되며,
+잘렸는지도 결과에 표시합니다.
+
+### `switch_workspace_agent`
+
+워크트리는 그대로 둔 채 현재 워크스페이스를 설치된 다른 에이전트 백엔드에 넘깁니다. 현재 턴이
+끝난 뒤 Wooi 가 옛 세션을 닫고 최근 사용자 의도, 보고된 진행 상황, 변경 파일 경로, 검증 명령으로
+압축 체크포인트를 만든 다음 새 에이전트를 자동으로 시작합니다.
+
+| 입력 | 타입 | 필수 | 설명 |
+| --- | --- | --- | --- |
+| `agentBackend` | `claude` 또는 `codex` | 예 | 워크스페이스를 이어받을 에이전트 제품. |
+| `reason` | 문자열 | 예 | 전환 이유. 승인 카드에 표시됩니다. |
+
+자동 진행이나 Full Access 모드에서도 승인 카드는 반드시 뜹니다. 거절하면 현재 백엔드와 세션은
+그대로 유지됩니다.
+
 ## 에이전트 팀 모드
 
 ### `switch_to_agent_team`
@@ -453,6 +520,7 @@ Claude 는 Wooi 서브에이전트 도구 여러 개를 동시에 시작할 수 
 | `/wooi:send <바뀐 것>` | `send_to_workspace` | 에이전트 |
 | `/wooi:message-status [메시지 ID]` | `check_message_status` | 즉시 |
 | `/wooi:team [위임할 일]` | `switch_to_agent_team` | 에이전트 |
+| `/wooi:agent <claude\|codex> [이유]` | `switch_workspace_agent` | 에이전트 |
 | `/wooi:repos` | `list_repositories` | 즉시 |
 | `/wooi:peers` | `list_workspace_peers` | 즉시 |
 | `/wooi:children` | `check_stacked_work` | 즉시 |
@@ -463,6 +531,9 @@ Claude 는 Wooi 서브에이전트 도구 여러 개를 동시에 시작할 수 
 | `/wooi:run <이름>` | `run_script` | 즉시 |
 | `/wooi:stop <이름>` | `stop_script` | 즉시 |
 | `/wooi:logs <이름> [줄 수]` | `read_script_output` | 즉시 |
+| `/wooi:preview [경로]` | `open_preview` | 즉시 |
+| `/wooi:screenshot` | `capture_preview` | 에이전트 |
+| `/wooi:preview-errors` | `read_preview_issues` | 즉시 |
 | `/wooi:archive <워크스페이스 id>` | `archive_workspace` | 즉시 |
 | `/wooi:rename [이름]` | `set_workspace_name` | 즉시 |
 
@@ -500,7 +571,9 @@ app-server 프로토콜에는 명령을 나열하거나 확장하는 RPC 가 없
 도구 카탈로그와 스키마는 `src/main/agent/tools/catalog.ts`, 핸들러 등록은
 `src/main/agent/tools/index.ts` 에 있습니다. Claude 는 `src/main/claude/wooiMcp.ts` 의 인프로세스
 어댑터를, Codex 는 `src/main/codex/toolShim.ts` 의 stdio 어댑터를 사용합니다. 두 전송 계층 모두
-실행을 같은 registry 와 `src/main/agent/tools/` 아래 핸들러로 전달합니다.
+실행을 같은 registry 와 `src/main/agent/tools/` 아래 핸들러로 전달합니다. 프리뷰 도구는
+`src/main/preview.ts` 를 거쳐 패널의 게스트 페이지에 닿고, 이미지를 실은 결과를 MCP 콘텐츠
+블록으로 바꾸는 일은 두 전송 계층이 함께 쓰는 `src/shared/agentToolContent.ts` 가 합니다.
 
 슬래시 명령 카탈로그는 `src/shared/wooiCommands.ts`, 생성되는 Claude 플러그인은
 `src/main/agent/plugin.ts`, 즉시 실행은 `src/main/ipc.ts` 의 `command:wooiRun` 핸들러가 맡습니다.

@@ -13,7 +13,8 @@ export default function HeaderButton({
   hasPopup,
   expanded,
   suppressTooltip,
-  disabled
+  disabled,
+  dataTour
 }: {
   children: React.ReactNode
   onClick: () => void
@@ -31,9 +32,11 @@ export default function HeaderButton({
   /** 드롭다운이 열려 있을 때처럼 툴팁이 방해가 되는 경우 숨긴다. */
   suppressTooltip?: boolean
   disabled?: boolean
+  /** 점진적 힌트(`lib/hints.ts`)가 이 버튼을 가리킬 때 쓰는 `data-tour` 마커. */
+  dataTour?: string
 }): React.JSX.Element {
   return (
-    <div className="no-drag group relative inline-flex">
+    <div data-tour={dataTour} className="no-drag group relative inline-flex">
       <button
         onClick={onClick}
         disabled={disabled}
@@ -60,7 +63,7 @@ export default function HeaderButton({
         <div className="pointer-events-none absolute right-0 top-full z-50 mt-1.5 hidden items-center gap-1.5 whitespace-nowrap rounded-md border border-[var(--border)] bg-[var(--surface-2)] px-2 py-1 text-xs text-neutral-200 shadow-lg group-hover:flex">
           <span>{title}</span>
           {shortcut && (
-            <kbd className="rounded bg-[var(--surface-4)] px-1 py-0.5 text-[10px] leading-none font-medium tabular-nums text-neutral-300">
+            <kbd className="rounded bg-[var(--surface-4)] px-1 py-0.5 text-2xs leading-none font-medium tabular-nums text-neutral-300">
               {shortcut}
             </kbd>
           )}

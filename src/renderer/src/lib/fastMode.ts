@@ -24,27 +24,48 @@ export function fastModeLabel(fastMode: boolean | null): string {
  * 상태줄에 보여 줄 텍스트. 설정이 아니라 **실제 상태**를 우선한다 — 켜 뒀어도 미지원 모델·플랜
  * 제한이면 표준 속도로 돌고, rate limit 을 넘기면 쿨다운 동안 잠시 꺼진다.
  * 아직 턴을 돌리지 않아 실제 상태를 모르면(null) 설정값을 그대로 보여 준다.
+ *
+ * `notable` 은 "이 값이 말할 것이 있는가" 다. 꺼져 있는 fast mode 는 곧 아무 일도 일어나지
+ * 않는다는 뜻이라 라벨이 자리만 차지한다 — 상태줄은 이때 아이콘만 남겨 폭을 돌려준다
+ * (칩은 사라지지 않으므로 눌러서 켜는 길은 그대로다). 켜짐·쿨다운·미지원은 전부 평소와 다른
+ * 상태이므로 글자로 말한다.
  */
 export function fastModeStatus(
   enabled: boolean,
   state: FastModeState | null,
   reason: FastModeDisabledReason | null
-): { text: string; active: boolean; title: string } {
+): { text: string; active: boolean; notable: boolean; title: string } {
   if (state === 'cooldown') {
     return {
       text: 'Fast (cooling down)',
       active: false,
+      notable: true,
       title: 'Fast mode hit its rate limit — running at standard speed until it resets'
     }
   }
   if (state === 'on') {
-    return { text: 'Fast', active: true, title: 'Fast mode is on — same model, faster output' }
+    return {
+      text: 'Fast',
+      active: true,
+      notable: true,
+      title: 'Fast mode is on — same model, faster output'
+    }
   }
   if (state === 'off' && enabled) {
     // CLI 가 이유를 알려 준 경우 그대로 쓰고, 없으면(모델 미지원이 대부분) 일반 안내를 쓴다.
-    return { text: 'Fast (unavailable)', active: false, title: fastModeReasonText(reason) }
+    return {
+      text: 'Fast (unavailable)',
+      active: false,
+      notable: true,
+      title: fastModeReasonText(reason)
+    }
   }
   return enabled
-    ? { text: 'Fast', active: true, title: `Fast mode: on — ${FAST_MODE_HINT}` }
-    : { text: 'Standard', active: false, title: `Fast mode: off — ${FAST_MODE_HINT}` }
+    ? { text: 'Fast', active: true, notable: true, title: `Fast mode: on — ${FAST_MODE_HINT}` }
+    : {
+        text: 'Standard',
+        active: false,
+        notable: false,
+        title: `Fast mode: off — ${FAST_MODE_HINT}`
+      }
 }

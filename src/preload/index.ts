@@ -11,6 +11,11 @@ function subscribe<T>(channel: string, cb: (payload: T) => void): () => void {
 const api: WooiApi = {
   getState: () => ipcRenderer.invoke(IPC.appGetState),
 
+  migrate: {
+    scan: (args) => ipcRenderer.invoke(IPC.migrateScan, args),
+    run: (selection) => ipcRenderer.invoke(IPC.migrateImport, selection)
+  },
+
   repo: {
     add: () => ipcRenderer.invoke(IPC.repoAdd),
     update: (repoId, patch) => ipcRenderer.invoke(IPC.repoUpdate, repoId, patch),
@@ -60,11 +65,15 @@ const api: WooiApi = {
     setAgentBackend: (workspaceId, agentBackend, opts) =>
       ipcRenderer.invoke(IPC.workspaceSetAgentBackend, workspaceId, agentBackend, opts),
     setMuted: (workspaceId, muted) => ipcRenderer.invoke(IPC.workspaceSetMuted, workspaceId, muted),
+    setAutoFixCi: (workspaceId, enabled) =>
+      ipcRenderer.invoke(IPC.workspaceSetAutoFixCi, workspaceId, enabled),
     setMultiAgent: (workspaceId, multiAgent) =>
       ipcRenderer.invoke(IPC.workspaceSetMultiAgent, workspaceId, multiAgent),
     rename: (workspaceId, name) => ipcRenderer.invoke(IPC.workspaceRename, workspaceId, name),
     reorder: (workspaceId, targetWorkspaceId, position) =>
       ipcRenderer.invoke(IPC.workspaceReorder, workspaceId, targetWorkspaceId, position),
+    setPinned: (workspaceId, pinned) =>
+      ipcRenderer.invoke(IPC.workspaceSetPinned, workspaceId, pinned),
     revealInFinder: (workspaceId) => ipcRenderer.invoke(IPC.workspaceRevealInFinder, workspaceId),
     openInEditor: (workspaceId) => ipcRenderer.invoke(IPC.workspaceOpenInEditor, workspaceId),
     openMemory: (workspaceId, scope) =>
@@ -85,7 +94,7 @@ const api: WooiApi = {
       ipcRenderer.invoke(IPC.chatSend, workspaceId, text, images),
     interrupt: (workspaceId) => ipcRenderer.invoke(IPC.chatInterrupt, workspaceId),
     stopTask: (workspaceId, taskId) => ipcRenderer.invoke(IPC.chatStopTask, workspaceId, taskId),
-    getHistory: (workspaceId) => ipcRenderer.invoke(IPC.chatGetHistory, workspaceId),
+    getHistory: (workspaceId, limit) => ipcRenderer.invoke(IPC.chatGetHistory, workspaceId, limit),
     getCosts: () => ipcRenderer.invoke(IPC.chatGetCosts),
     sideQuestion: (workspaceId, question) =>
       ipcRenderer.invoke(IPC.chatSideQuestion, workspaceId, question),
@@ -95,7 +104,9 @@ const api: WooiApi = {
   },
 
   permission: {
-    respond: (requestId, decision) => ipcRenderer.invoke(IPC.permissionRespond, requestId, decision)
+    respond: (requestId, decision) =>
+      ipcRenderer.invoke(IPC.permissionRespond, requestId, decision),
+    pending: () => ipcRenderer.invoke(IPC.permissionPending)
   },
 
   script: {
@@ -125,11 +136,14 @@ const api: WooiApi = {
   },
 
   git: {
-    status: (workspaceId) => ipcRenderer.invoke(IPC.gitStatus, workspaceId),
+    status: (workspaceId, force) => ipcRenderer.invoke(IPC.gitStatus, workspaceId, force),
     diff: (workspaceId) => ipcRenderer.invoke(IPC.gitDiff, workspaceId),
+    setCompareBase: (workspaceId, compareBase) =>
+      ipcRenderer.invoke(IPC.workspaceSetCompareBase, workspaceId, compareBase),
     fetch: (repoId) => ipcRenderer.invoke(IPC.gitFetch, repoId),
     updateFromBase: (workspaceId) => ipcRenderer.invoke(IPC.gitUpdateFromBase, workspaceId),
-    abortMerge: (workspaceId) => ipcRenderer.invoke(IPC.gitAbortMerge, workspaceId)
+    abortMerge: (workspaceId) => ipcRenderer.invoke(IPC.gitAbortMerge, workspaceId),
+    discardHunk: (workspaceId, patch) => ipcRenderer.invoke(IPC.gitDiscardHunk, workspaceId, patch)
   },
 
   pr: {
@@ -189,6 +203,8 @@ const api: WooiApi = {
   fs: {
     list: (workspaceId, relPath) => ipcRenderer.invoke(IPC.fsList, workspaceId, relPath),
     read: (workspaceId, relPath) => ipcRenderer.invoke(IPC.fsRead, workspaceId, relPath),
+    write: (workspaceId, relPath, text, baselineSha, force) =>
+      ipcRenderer.invoke(IPC.fsWrite, workspaceId, relPath, text, baselineSha, force),
     search: (workspaceId, query) => ipcRenderer.invoke(IPC.fsSearch, workspaceId, query)
   },
 
@@ -202,8 +218,8 @@ const api: WooiApi = {
     run: (workspaceId, kind) => ipcRenderer.invoke(IPC.commandRun, workspaceId, kind),
     mcpAction: (workspaceId, serverName, action) =>
       ipcRenderer.invoke(IPC.mcpAction, workspaceId, serverName, action),
-    rewindAction: (workspaceId, userMessageId) =>
-      ipcRenderer.invoke(IPC.commandRewindAction, workspaceId, userMessageId),
+    rewindAction: (workspaceId, userMessageId, mode) =>
+      ipcRenderer.invoke(IPC.commandRewindAction, workspaceId, userMessageId, mode),
     wooiRun: (workspaceId, name, rest) =>
       ipcRenderer.invoke(IPC.wooiCommandRun, workspaceId, name, rest)
   },
@@ -245,6 +261,7 @@ const api: WooiApi = {
     getState: () => ipcRenderer.invoke(IPC.paneGetState),
     setWorkspace: (workspaceId) => ipcRenderer.invoke(IPC.paneSetWorkspace, workspaceId),
     openRepoSettings: (repoId) => ipcRenderer.invoke(IPC.paneOpenRepoSettings, repoId),
+    selectWorkspace: (workspaceId) => ipcRenderer.invoke(IPC.paneSelectWorkspace, workspaceId),
     onState: (cb) => subscribe(IPC.evtPaneState, cb),
     onWorkspace: (cb) => subscribe(IPC.evtPaneWorkspace, cb)
   },
@@ -281,6 +298,11 @@ const api: WooiApi = {
 
   settings: {
     update: (patch) => ipcRenderer.invoke(IPC.settingsUpdate, patch)
+  },
+
+  notify: {
+    setViewing: (workspaceId) => ipcRenderer.invoke(IPC.notifySetViewing, workspaceId),
+    lastSkip: () => ipcRenderer.invoke(IPC.notifyLastSkip)
   },
 
   mcp: {

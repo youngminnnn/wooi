@@ -1,6 +1,6 @@
 import { app, session, shell, webContents } from 'electron'
 import type { WebContents } from 'electron'
-import { PREVIEW_PARTITION } from '@shared/types'
+import { IPC, PREVIEW_PARTITION } from '@shared/types'
 import type { ComposerAttachment, ImageAttachment, PreviewCaptureResult } from '@shared/types'
 import { previewLabel } from '@shared/devUrl'
 import { formatPickedElement } from '@shared/previewPick'
@@ -40,12 +40,22 @@ export function previewIssues(): PreviewIssueCollector {
 }
 
 /**
+ * 렌더러로 이벤트를 보내는 통로(initPreview 가 받아 둔다).
+ *
+ * ipc 계층이 아니라 여기에도 들고 있는 이유는 에이전트 도구 때문이다 — 도구는 메인에서 돌지만
+ * Preview 탭을 여는 것은 렌더러의 일이라, 사람이 누르는 "Open in Preview" 와 **같은 방송**을
+ * 도구도 쓸 수 있어야 한다([[agent/tools/preview]]).
+ */
+let dispatchToRenderer: (channel: string, payload: unknown) => void = () => {}
+
+/**
  * Preview 세션과 webview 울타리를 세운다(앱 기동 시 1회).
  *
  * `web-contents-created` 하나로 모든 창을 덮는 것이 요점이다 — 메인 창과 분리한 패널 창이
  * 각각 webview 를 붙일 수 있는데, 가드를 창마다 걸면 나중에 생긴 창에서 조용히 빠진다.
  */
 export function initPreview(dispatch: (channel: string, payload: unknown) => void): void {
+  dispatchToRenderer = dispatch
   issues = new PreviewIssueCollector(dispatch)
   issues.initSession()
 
@@ -178,5 +188,119 @@ export function cancelPreviewPick(webContentsId: number): void {
 export function watchPreviewIssues(workspaceId: string, webContentsId: number): void {
   const target = resolveGuest(webContentsId)
   if ('error' in target) return
+  rememberGuest(workspaceId, target.guest)
   issues.watch(workspaceId, target.guest)
+}
+
+// ── 에이전트가 쓰는 입구 ────────────────────────────────────────────────────
+//
+// 도구는 메인에서 도는데 게스트는 렌더러가 붙인다. 그래서 메인은 "이 워크스페이스의 Preview
+// 게스트가 누구인가" 를 알아야 하고, 그 사실이 이미 한 번 지나가는 자리가 watchPreviewIssues 다
+// (렌더러가 dom-ready 에서 워크스페이스와 게스트를 함께 알려 준다). 별도의 등록 IPC 를 새로
+// 만들지 않고 그 길에 얹는다 — 두 개면 언젠가 한쪽만 불린다.
+
+/** 워크스페이스 → 지금 붙어 있는 Preview 게스트. 워크스페이스당 화면에 하나뿐이다. */
+const guests = new Map<string, WebContents>()
+
+function rememberGuest(workspaceId: string, guest: WebContents): void {
+  guests.set(workspaceId, guest)
+  // 게스트가 죽으면 지운다. unwatch 를 못 받고 사라지는 경로(창이 통째로 닫힘)가 있다.
+  guest.once('destroyed', () => {
+    if (guests.get(workspaceId) === guest) guests.delete(workspaceId)
+  })
+}
+
+/** 이 게스트를 잊는다(Preview 패널이 사라질 때, unwatch 와 같은 자리에서). */
+export function forgetPreviewGuest(webContentsId: number): void {
+  for (const [workspaceId, guest] of guests) {
+    if (guest.id === webContentsId) guests.delete(workspaceId)
+  }
+}
+
+/**
+ * 이 워크스페이스의 Preview 게스트. 없으면 null — Preview 탭이 아직 열리지 않았거나, 사용자가
+ * 지금 다른 워크스페이스를 보고 있다는 뜻이다(WorkPanel 은 선택된 워크스페이스만 마운트한다).
+ */
+export function previewGuestFor(workspaceId: string): WebContents | null {
+  const guest = guests.get(workspaceId)
+  if (!guest || guest.isDestroyed()) {
+    guests.delete(workspaceId)
+    return null
+  }
+  return guest
+}
+
+/**
+ * Preview 탭을 열라고 모든 창에 방송한다. 사람이 누르는 "Open in Preview" 와 같은 신호다.
+ *
+ * `url` 이 비면 탭만 열고 이동은 하지 않는다 — 에이전트 경로에서는 이동을 메인이 직접 하기
+ * 때문이다([[agent/tools/preview]]). 렌더러와 메인이 같은 게스트에 각자 loadURL 을 걸면 서로를
+ * ERR_ABORTED 로 끊어, "열었는데 왜 실패했는지" 를 아무도 정확히 말할 수 없게 된다.
+ */
+export function requestPreviewOpen(workspaceId: string, url: string): void {
+  dispatchToRenderer(IPC.evtPreviewOpen, { workspaceId, url })
+}
+
+/**
+ * 에이전트에게 돌려줄 캡처의 base64 상한. 이미지는 잘라 낼 수가 없으므로(반쪽 PNG 는 그림이
+ * 아니다) 상한을 넘으면 **줄인다**. 줄였다는 사실은 결과에 적어 보낸다.
+ */
+const MAX_AGENT_CAPTURE_BASE64 = 1_000_000
+
+/** 상한에 맞출 때까지 차례로 내려가 볼 가로 크기(px). 첫 값이 기본 해상도다. */
+const AGENT_CAPTURE_WIDTHS = [1280, 1024, 768, 512]
+
+export interface AgentCapture {
+  dataBase64: string
+  width: number
+  height: number
+  /** 상한에 맞추려고 줄였다면 원래 크기. 안 줄였으면 없다. */
+  scaledFrom?: { width: number; height: number }
+}
+
+/**
+ * 에이전트에게 돌려줄 화면을 찍는다.
+ *
+ * 사람용 캡처(capturePreview)와 나눠 둔 이유는 예산이 다르기 때문이다. 사람 쪽은 컴포저에
+ * 붙어 사용자가 보고 지울 수 있지만, 이쪽은 모델의 컨텍스트에 그대로 들어가 그 세션의 남은
+ * 요청마다 다시 실린다 — 큰 그림 한 장의 값이 한 번이 아니다.
+ */
+export async function captureForAgent(
+  guest: WebContents
+): Promise<{ capture: AgentCapture } | { error: string }> {
+  try {
+    const shot = await guest.capturePage()
+    const original = shot.getSize()
+    if (shot.isEmpty() || original.width === 0 || original.height === 0) {
+      return {
+        error:
+          'The preview rendered nothing to capture. Wooi only paints the preview while its tab ' +
+          'is on screen, so this usually means the user moved to another tab or workspace.'
+      }
+    }
+
+    // 원본보다 크게 늘리지 않는다 — 확대는 정보를 더하지 않고 바이트만 늘린다. 원본이 첫
+    // 단계보다 이미 작으면 사다리는 비고, 그때는 원본 크기 하나만 시도한다.
+    const ladder = AGENT_CAPTURE_WIDTHS.filter((w) => w < original.width)
+    let chosen = shot
+    let dataBase64 = ''
+    for (const width of ladder.length ? ladder : [original.width]) {
+      chosen = width === original.width ? shot : shot.resize({ width })
+      dataBase64 = chosen.toPNG().toString('base64')
+      if (dataBase64.length <= MAX_AGENT_CAPTURE_BASE64) break
+    }
+
+    const size = chosen.getSize()
+    return {
+      capture: {
+        dataBase64,
+        width: size.width,
+        height: size.height,
+        ...(size.width < original.width ? { scaledFrom: original } : {})
+      }
+    }
+  } catch (err) {
+    log.error('preview: agent capturePage failed', err)
+    return { error: err instanceof Error ? err.message : 'Could not capture the preview.' }
+  }
 }

@@ -78,6 +78,22 @@ class TranscriptStore {
   }
 
   /**
+   * 최근 `limit` 개만 돌려준다. 며칠 이어 쓴 워크스페이스로 전환할 때 렌더러가 대화 전체를
+   * 이고 첫 페인트를 하지 않도록 만든 통로다.
+   *
+   * 파일 자체는 어차피 통째로 파싱한다 — 같은 id 의 마지막 줄이 이기는 형식이라 앞을 건너뛸 수
+   * 없다. 여기서 아끼는 것은 IPC 로 건너가는 양과 렌더러가 만드는 DOM 이고, 파싱 결과는 캐시에
+   * 남아 다음 페이지 요청이 디스크를 다시 읽지 않는다.
+   *
+   * 돌려준 개수가 `limit` 보다 적으면 그것이 곧 "더 오래된 것은 없다" 는 신호다.
+   */
+  loadTail(workspaceId: string, limit: number): ChatItem[] {
+    const all = this.load(workspaceId)
+    if (limit <= 0 || limit >= all.length) return all
+    return all.slice(-limit)
+  }
+
+  /**
    * 이 workspace 에서 backend 가 보고한 누적 비용(USD).
    *
    * 예전에는 렌더러가 트랜스크립트를 통째로 들고 와 매 토큰마다 다시 합산했다 — 워크스페이스가
@@ -118,6 +134,22 @@ class TranscriptStore {
     }
   }
 
+  /**
+   * 여러 항목을 한 번에 적재한다(다른 도구에서 옮겨 온 지난 대화).
+   *
+   * upsert 를 반복하지 않는 이유는 비용이다 — 항목마다 append 를 한 번씩 하면 수백~수천 번의
+   * 쓰기가 되고, 그 사이 캐시도 매번 흔들린다. 들여오기는 워크스페이스가 만들어지는 순간
+   * 딱 한 번 일어나므로, 한 번에 쓰고 캐시는 다음 읽기에서 다시 만들게 둔다.
+   */
+  importItems(workspaceId: string, items: ChatItem[]): void {
+    if (items.length === 0) return
+    if (!this.cache.has(workspaceId)) this.load(workspaceId)
+    appendFileDurable(this.fileFor(workspaceId), items.map(serializeItem).join(''))
+    // 캐시·비용 집계는 버린다. 다음 load 가 파일에서 정확한 상태를 다시 만든다.
+    this.cache.delete(workspaceId)
+    this.costs.delete(workspaceId)
+  }
+
   /** 워크스페이스의 대화 기록을 다른 워크스페이스로 복제한다(분기). */
   copy(fromWorkspaceId: string, toWorkspaceId: string): void {
     // 목적지 id 가 재사용된 비정상 상태에서도 옛 기록·비용을 다시 내놓지 않도록 먼저 끊는다.
@@ -136,6 +168,32 @@ class TranscriptStore {
     copyFileSync(source, this.fileFor(toWorkspaceId))
     this.cache.delete(toWorkspaceId)
     this.costs.delete(toWorkspaceId)
+  }
+
+  /**
+   * `itemId` 부터(포함) 뒤의 항목을 전부 버린다 — /rewind 의 대화 되돌리기.
+   * 버려진 항목들을 순서대로 돌려준다(첫 항목이 되돌림 지점의 사용자 메시지다).
+   *
+   * append 로 굴러가는 파일을 여기서만 통째로 다시 쓴다. 되돌리기는 사용자가 직접 누르는
+   * 드문 동작이라 O(n) 재작성이 정당하고, append 로는 "지운다" 를 표현할 수 없다.
+   * `itemId` 가 없으면 아무것도 건드리지 않고 빈 배열을 돌려준다.
+   */
+  truncateFrom(workspaceId: string, itemId: string): ChatItem[] {
+    const items = this.load(workspaceId)
+    const idx = items.findIndex((i) => i.id === itemId)
+    if (idx < 0) return []
+
+    const kept = items.slice(0, idx)
+    const dropped = items.slice(idx)
+
+    writeFileAtomic(this.fileFor(workspaceId), kept.map(serializeItem).join(''))
+    this.touch(workspaceId, kept)
+
+    // 비용 집계도 같이 줄인다 — 버린 턴의 비용을 계속 더하면 사용량 표시가 실제와 어긋난다.
+    const byId = this.costs.get(workspaceId)
+    if (byId) for (const item of dropped) byId.delete(item.id)
+
+    return dropped
   }
 
   /**

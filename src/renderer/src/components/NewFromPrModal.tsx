@@ -3,7 +3,7 @@ import { Check, Loader2, Search } from 'lucide-react'
 import type { AgentBackendId, PrCandidate, Workspace } from '@shared/types'
 import { useStore } from '../store'
 import Modal, { ghostBtn, inputClass, labelClass, primaryBtn } from './Modal'
-import { useAvailableBackends } from '../lib/backends'
+import { useAvailableBackends, useDefaultBackend } from '../lib/backends'
 import { AgentBackendMark } from './BrandIcons'
 
 type PickedPr = { candidate: PrCandidate; workspace?: Workspace }
@@ -18,9 +18,8 @@ export default function NewFromPrModal({
   const app = useStore((s) => s.app)!
   const repo = app.repos.find((item) => item.id === repoId)
   const available = useAvailableBackends()
-  const [agentBackend, setAgentBackend] = useState<AgentBackendId>(
-    () => app.settings.defaultAgentBackend
-  )
+  const defaultBackend = useDefaultBackend()
+  const [agentBackend, setAgentBackend] = useState<AgentBackendId>(() => defaultBackend)
   const effectiveBackend =
     available.some((backend) => backend.id === agentBackend) || available.length === 0
       ? agentBackend
@@ -260,12 +259,12 @@ export default function NewFromPrModal({
                     <span className="block truncate text-sm text-neutral-200">
                       {pr.title}
                       {pr.isDraft && (
-                        <span className="ml-2 rounded-full bg-[var(--surface-3)] px-1.5 py-0.5 text-[10px] text-neutral-500">
+                        <span className="ml-2 rounded-full bg-[var(--surface-3)] px-1.5 py-0.5 text-2xs text-neutral-500">
                           Draft
                         </span>
                       )}
                       {pr.state && pr.state !== 'OPEN' && (
-                        <span className="ml-2 rounded-full bg-[var(--surface-3)] px-1.5 py-0.5 text-[10px] text-neutral-400">
+                        <span className="ml-2 rounded-full bg-[var(--surface-3)] px-1.5 py-0.5 text-2xs text-neutral-400">
                           {pr.state === 'MERGED' ? 'Merged' : 'Closed'}
                         </span>
                       )}

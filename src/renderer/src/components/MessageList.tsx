@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   ChevronRight,
   Brain,
@@ -17,7 +17,8 @@ import {
   ListTodo,
   Layers,
   MessagesSquare,
-  GitMergeConflict
+  GitMergeConflict,
+  Sparkles
 } from 'lucide-react'
 import { useStore } from '../store'
 import { DiffLine } from './DiffView'
@@ -35,7 +36,19 @@ import { AGENT_BACKEND_LABELS, canSwitchAgentBackend } from '@shared/types'
 import type { ChatItem } from '@shared/types'
 import { BASH_FOLD, foldBashOutput } from '@shared/bashDisplay'
 import { SELECTABLE, unlessSelecting } from '../lib/selection'
-import { TOOL_VERBOSE_SHORTCUT } from '@shared/toolDisplay'
+import SelectionCopyBubble from './SelectionCopyBubble'
+import { useChatFontScale } from '../lib/chatFontScale'
+import { restoredScrollTop, TRANSCRIPT_TOP_THRESHOLD_PX } from '../lib/transcriptPagination'
+import { DENSITY_SHORTCUT } from '@shared/toolDisplay'
+import {
+  DEFAULT_TRANSCRIPT_DENSITY,
+  expandsToolOutput,
+  showsEntry,
+  showsInlineDiff,
+  transcriptEntryKind,
+  type TranscriptDensity
+} from '../lib/transcriptDensity'
+import { usePaneFocused } from '../lib/paneFocus'
 
 /**
  * Wooi 가 rebase 충돌 해결을 맡기며 넣은 사용자 턴을 한 줄로 접어 보여 준다.
@@ -74,10 +87,107 @@ function ConflictResolveMessage({
           {/* 자동으로 시작된 턴이라는 사실은 접힌 상태에서도 읽혀야 한다 — 사용자가 누르지 않은
               턴이 왜 돌았는지 묻게 만드는 것이 바로 이 경우다. */}
           {origin.auto && (
-            <span className="shrink-0 rounded bg-[var(--surface-2)] px-1.5 py-0.5 text-[10px] text-neutral-500">
+            <span className="shrink-0 rounded bg-[var(--surface-2)] px-1.5 py-0.5 text-2xs text-neutral-500">
               auto
             </span>
           )}
+          <ChevronRight
+            size={12}
+            className={`ml-auto shrink-0 transition-transform ${expanded ? 'rotate-90' : ''}`}
+          />
+        </span>
+        {expanded && (
+          <span className="mt-2 block whitespace-pre-wrap break-words border-t border-[var(--border)] pt-2 text-sm leading-relaxed text-neutral-300">
+            {item.text}
+          </span>
+        )}
+      </button>
+    </div>
+  )
+}
+
+/**
+ * CI auto-fix 로 Wooi 가 넣은 턴. ConflictResolveMessage 와 같은 이유로 접어서 보여 준다 —
+ * 실패 로그까지 실려 프롬프트가 길고, 펼쳐 둔 채로는 대화를 밀어낸다.
+ */
+function CiFixMessage({
+  item,
+  title
+}: {
+  item: Extract<ChatItem, { type: 'user' }>
+  title: string
+}): React.JSX.Element {
+  const [expanded, setExpanded] = useState(false)
+  const origin = item.origin
+  if (!origin || origin.kind !== 'ciFix') return <UserMessage text={item.text} title={title} />
+
+  return (
+    <div className="flex justify-end my-2" title={title}>
+      <button
+        type="button"
+        aria-expanded={expanded}
+        onClick={() => setExpanded((value) => !value)}
+        className="max-w-[min(42rem,88%)] rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2.5 py-1.5 text-left text-xs text-neutral-400 hover:border-[var(--border-strong)] hover:text-neutral-300"
+      >
+        <span className="flex items-center gap-1.5">
+          <XCircle size={12} className="shrink-0 text-neutral-500" />
+          <span className="shrink-0">Fix failing checks</span>
+          <span className="truncate font-mono text-neutral-300">
+            {origin.failedChecks.join(', ')}
+          </span>
+          {/* 자동으로 시작된 턴이라는 사실과, 몇 번째이고 어디서 멈추는지는 접힌 상태에서도
+              읽혀야 한다 — 켜 둔 채로 잊은 사람이 대화만 보고 알아챌 유일한 자리다. */}
+          <span className="shrink-0 rounded bg-[var(--surface-2)] px-1.5 py-0.5 text-2xs text-neutral-500">
+            auto {origin.attempt}/{origin.max}
+          </span>
+          <ChevronRight
+            size={12}
+            className={`ml-auto shrink-0 transition-transform ${expanded ? 'rotate-90' : ''}`}
+          />
+        </span>
+        {expanded && (
+          <span className="mt-2 block whitespace-pre-wrap break-words border-t border-[var(--border)] pt-2 text-sm leading-relaxed text-neutral-300">
+            {item.text}
+          </span>
+        )}
+      </button>
+    </div>
+  )
+}
+
+/**
+ * Wooi 가 사용자 대신 넣은 그 밖의 턴(WooiTurnOrigin).
+ *
+ * ConflictResolveMessage·CiFixMessage 와 같은 모양이지만 접힌 줄에 쓸 재료가 이름 하나뿐이라
+ * 종류마다 컴포넌트를 새로 만들지 않고 이 하나가 전부를 받는다. 이름은 보내는 쪽이 정한다.
+ */
+function WooiTurnMessage({
+  item,
+  title
+}: {
+  item: Extract<ChatItem, { type: 'user' }>
+  title: string
+}): React.JSX.Element {
+  const [expanded, setExpanded] = useState(false)
+  const origin = item.origin
+  if (!origin || origin.kind !== 'wooi') return <UserMessage text={item.text} title={title} />
+
+  return (
+    <div className="flex justify-end my-2" title={title}>
+      <button
+        type="button"
+        aria-expanded={expanded}
+        onClick={() => setExpanded((value) => !value)}
+        className="max-w-[min(42rem,88%)] rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2.5 py-1.5 text-left text-xs text-neutral-400 hover:border-[var(--border-strong)] hover:text-neutral-300"
+      >
+        <span className="flex items-center gap-1.5">
+          <Sparkles size={12} className="shrink-0 text-neutral-500" />
+          <span className="truncate">{origin.label}</span>
+          {/* 사용자가 치지 않은 턴이라는 사실은 접힌 상태에서도 읽혀야 한다 — 대화만 보고
+              "이 턴은 왜 돌았지" 에 답할 수 있어야 하는 것이 이 카드의 존재 이유다. */}
+          <span className="shrink-0 rounded bg-[var(--surface-2)] px-1.5 py-0.5 text-2xs text-neutral-500">
+            Wooi
+          </span>
           <ChevronRight
             size={12}
             className={`ml-auto shrink-0 transition-transform ${expanded ? 'rotate-90' : ''}`}
@@ -131,7 +241,7 @@ function PeerMessage({
             </span>
           )}
           {messages.length === 1 && only.crossRepo && (
-            <span className="shrink-0 rounded bg-[var(--surface-2)] px-1.5 py-0.5 text-[10px] text-neutral-500">
+            <span className="shrink-0 rounded bg-[var(--surface-2)] px-1.5 py-0.5 text-2xs text-neutral-500">
               {only.fromRepoName}
             </span>
           )}
@@ -191,8 +301,21 @@ export default function MessageList({
   const [activeIdx, setActiveIdx] = useState(0)
   const searchInputRef = useRef<HTMLInputElement>(null)
   const jumpTarget = useStore((s) => s.jumpTarget)
-  const toolVerbose = useStore((s) => !!s.toolVerbose[workspaceId])
+  // 대화 밀도(⌃O / 상태줄 칩). 무엇을 그릴지와 도구 출력을 펴 둘지를 모두 여기서 갈라 준다.
+  const density = useStore((s) => s.transcriptDensity[workspaceId] ?? DEFAULT_TRANSCRIPT_DENSITY)
   const toolLogStyle = useStore((s) => s.app?.settings.toolLogStyle ?? 'wooi')
+  const overlayOpen = useStore((s) => s.overlayOpen)
+  // 나란히 두 칸을 띄우면 이 화면이 다는 전역 리스너가 두 번 발동한다 — 포커스된 칸만 받는다.
+  const paneFocused = usePaneFocused()
+  const hasMoreHistory = useStore((s) => !!s.transcriptPaging[workspaceId]?.hasMore)
+  const loadingEarlier = useStore((s) => !!s.transcriptPaging[workspaceId]?.loading)
+  const loadEarlier = useStore((s) => s.loadEarlierTranscript)
+  // 위쪽에 항목이 끼어들면 콘텐츠가 자란다. 붙기 직전의 스크롤 상태를 잡아 두고, 커밋된 뒤
+  // 자란 만큼 밀어 사용자가 보던 지점을 그대로 둔다 — 브라우저는 이걸 대신 해 주지 않는다.
+  const prependAnchorRef = useRef<{ scrollHeight: number; scrollTop: number } | null>(null)
+  // ⌘+ / ⌘- / ⌘0 — 대화 표면에만 걸리는 배율. 앱 전체 줌을 키우면 사이드바·터미널까지 커져서
+  // 정작 읽으려던 대화가 좁아진 폭 안에 갇힌다. 오버레이가 덮고 있을 때는 키를 듣지 않는다.
+  const fontScale = useChatFontScale(!overlayOpen && paneFocused)
 
   const compactWindow = useMemo(() => compactHistoryWindow(items), [items])
   const historyExpanded = expandedBoundaryId === compactWindow.boundary?.id
@@ -216,41 +339,58 @@ export default function MessageList({
 
   // 할 일 도구 호출들을 체크리스트 카드로 묶는다. 카드로 대체된 도구 행·결과는 목록 단계에서
   // 걸러 내, 검색과 스크롤도 실제로 보이는 항목만 대상으로 삼게 한다.
-  const { visibleItems, resolved, results, cardByItemId, latestCardItemId, groupByItemId } =
-    useMemo(() => {
-      const { cardByItemId: cards, hiddenItemIds: taskHiddenIds } = buildTaskCards(renderedItems)
-      // 체크리스트가 가져간 자리는 도구 그룹의 연속 구간에서도 경계다. 대표 카드 항목까지 제외해야
-      // 두 시각화가 같은 원본을 서로 차지하지 않는다.
-      const taskItemIds = new Set([...taskHiddenIds, ...cards.keys()])
-      const { groupByItemId: groups, hiddenItemIds: groupHiddenIds } = buildToolGroups(
-        renderedItems,
-        taskItemIds
+  const {
+    visibleItems,
+    resolved,
+    results,
+    cardByItemId,
+    latestCardItemId,
+    groupByItemId,
+    hiddenByDensity
+  } = useMemo(() => {
+    const { cardByItemId: cards, hiddenItemIds: taskHiddenIds } = buildTaskCards(renderedItems)
+    // 체크리스트가 가져간 자리는 도구 그룹의 연속 구간에서도 경계다. 대표 카드 항목까지 제외해야
+    // 두 시각화가 같은 원본을 서로 차지하지 않는다.
+    const taskItemIds = new Set([...taskHiddenIds, ...cards.keys()])
+    const { groupByItemId: groups, hiddenItemIds: groupHiddenIds } = buildToolGroups(
+      renderedItems,
+      taskItemIds
+    )
+    const hiddenItemIds = new Set([...taskHiddenIds, ...groupHiddenIds])
+    const resolvedIds = new Set<string>()
+    for (const it of renderedItems) if (it.type === 'tool_result') resolvedIds.add(it.toolId)
+    const resultByToolId = new Map<string, Extract<ChatItem, { type: 'tool_result' }>>()
+    const uses = new Set(
+      renderedItems.filter((it) => it.type === 'tool_use').map((it) => it.toolId)
+    )
+    for (const it of renderedItems) if (it.type === 'tool_result') resultByToolId.set(it.toolId, it)
+    // 체크리스트·묶음이 흡수한 자리와, 도구 카드 안으로 들어간 결과를 뺀 "실제로 놓이는" 항목들.
+    const placed = renderedItems.filter(
+      (it) => !hiddenItemIds.has(it.id) && !(it.type === 'tool_result' && uses.has(it.toolId))
+    )
+    const visible = placed.filter((it) =>
+      showsEntry(
+        density,
+        transcriptEntryKind(it, {
+          todoCard: cards.has(it.id),
+          toolGroupHead: groups.has(it.id)
+        })
       )
-      const hiddenItemIds = new Set([...taskHiddenIds, ...groupHiddenIds])
-      const resolvedIds = new Set<string>()
-      for (const it of renderedItems) if (it.type === 'tool_result') resolvedIds.add(it.toolId)
-      const resultByToolId = new Map<string, Extract<ChatItem, { type: 'tool_result' }>>()
-      const uses = new Set(
-        renderedItems.filter((it) => it.type === 'tool_use').map((it) => it.toolId)
-      )
-      for (const it of renderedItems)
-        if (it.type === 'tool_result') resultByToolId.set(it.toolId, it)
-      return {
-        cardByItemId: cards,
-        groupByItemId: groups,
-        resolved: resolvedIds,
-        results: resultByToolId,
-        // 진행 중 스피너는 마지막 카드에만 붙인다 — 앞선 카드들은 이미 지나간 스냅샷이라,
-        // 전부 돌면 어떤 것이 지금 상태인지 알 수 없게 된다.
-        latestCardItemId: cards.size ? Array.from(cards.keys())[cards.size - 1] : undefined,
-        visibleItems: hiddenItemIds.size
-          ? renderedItems.filter(
-              (it) =>
-                !hiddenItemIds.has(it.id) && !(it.type === 'tool_result' && uses.has(it.toolId))
-            )
-          : renderedItems.filter((it) => !(it.type === 'tool_result' && uses.has(it.toolId)))
-      }
-    }, [renderedItems])
+    )
+    return {
+      cardByItemId: cards,
+      groupByItemId: groups,
+      resolved: resolvedIds,
+      results: resultByToolId,
+      // 진행 중 스피너는 마지막 카드에만 붙인다 — 앞선 카드들은 이미 지나간 스냅샷이라,
+      // 전부 돌면 어떤 것이 지금 상태인지 알 수 없게 된다.
+      latestCardItemId: cards.size ? Array.from(cards.keys())[cards.size - 1] : undefined,
+      visibleItems: visible,
+      // Summary 가 몇 걸음을 접었는지. 아무것도 안 남은 화면을 고장으로 오해하지 않도록
+      // 목록 끝에 한 줄로 알린다.
+      hiddenByDensity: placed.length - visible.length
+    }
+  }, [renderedItems, density])
 
   // ── 대화 내 검색(⌘F) ─────────────────────────────────────────────────────
   const matches = useMemo(() => {
@@ -283,6 +423,7 @@ export default function MessageList({
   // ⌘F / Ctrl+F 로 검색바를 연다(입력창 등 다른 곳에 포커스가 있어도 대화 검색을 우선한다).
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
+      if (!paneFocused) return
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f') {
         // 모달·파일 뷰어가 떠 있으면 ⌘F 는 그쪽 것이다(파일 내 검색). 뒤에서 대화 검색바가
         // 같이 열리면 닫을 때까지 사용자는 그 존재를 모른다.
@@ -294,7 +435,7 @@ export default function MessageList({
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [])
+  }, [paneFocused])
 
   // 검색어 변경으로 matches 가 줄어들면 setActiveIdx(0) 이펙트가 커밋되기 전 프레임에서 activeIdx 가
   // 범위를 벗어날 수 있다 — 카운터/하이라이트/스크롤 모두 클램프한 인덱스를 쓴다.
@@ -342,6 +483,19 @@ export default function MessageList({
     if (atBottomRef.current) bottomRef.current?.scrollIntoView({ block: 'end' })
   }, [items, workspaceId])
 
+  /** 위쪽으로 한 페이지 더 읽는다. 스크롤로도, 버튼으로도 같은 자리를 지나간다. */
+  const pageInEarlier = (): void => {
+    const el = containerRef.current
+    if (!el || !hasMoreHistory || loadingEarlier) return
+    prependAnchorRef.current = { scrollHeight: el.scrollHeight, scrollTop: el.scrollTop }
+    void loadEarlier(workspaceId)
+    // 스토어가 첫 await 전에 동기로 loading 을 세운다. 서지 않았다면 요청이 거절된 것이므로
+    // 앵커를 거둔다 — 남겨 두면 다음 스트리밍 갱신 때 엉뚱한 자리로 스크롤이 튄다.
+    if (!useStore.getState().transcriptPaging[workspaceId]?.loading) {
+      prependAnchorRef.current = null
+    }
+  }
+
   const onScroll = (): void => {
     const el = containerRef.current
     if (!el) return
@@ -349,7 +503,19 @@ export default function MessageList({
     atBottomRef.current = atBottom
     setShowJump(!atBottom)
     setScroll(workspaceId, el.scrollTop)
+    if (el.scrollTop < TRANSCRIPT_TOP_THRESHOLD_PX) pageInEarlier()
   }
+
+  // 앞에 붙은 페이지의 높이만큼 스크롤을 밀어 준다. 페인트 전에 끝나야 화면이 튀지 않으므로
+  // layout effect 다. 아래의 따라 내려가기 이펙트는 사용자가 위에 있는 동안 아무 일도 하지
+  // 않으므로(atBottomRef) 여기와 부딪히지 않는다.
+  useLayoutEffect(() => {
+    const el = containerRef.current
+    const anchor = prependAnchorRef.current
+    if (!el || !anchor) return
+    prependAnchorRef.current = null
+    el.scrollTop = restoredScrollTop(anchor, el.scrollHeight)
+  }, [items])
 
   const jumpToBottom = (): void => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
@@ -359,6 +525,7 @@ export default function MessageList({
   // 이미 쓰이므로 Shift를 더한다. 버튼과 같은 함수를 써서 스크롤 동작을 항상 맞춘다.
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
+      if (!paneFocused) return
       if (
         e.metaKey &&
         e.shiftKey &&
@@ -373,7 +540,7 @@ export default function MessageList({
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [])
+  }, [paneFocused])
 
   if (items.length === 0) {
     // 에이전트는 나중에도 바꿀 수 있지만([[canSwitchAgentBackend]]) 공짜로 바꿀 수 있는 건 지금
@@ -467,7 +634,25 @@ export default function MessageList({
         </div>
       )}
       <div ref={containerRef} onScroll={onScroll} className="h-full overflow-y-auto">
-        <div className="max-w-3xl mx-auto px-5 py-5 space-y-3">
+        <SelectionCopyBubble
+          className="max-w-3xl mx-auto px-5 py-5 space-y-3"
+          style={fontScale === 1 ? undefined : { zoom: fontScale }}
+        >
+          {hasMoreHistory && (
+            <button
+              type="button"
+              onClick={pageInEarlier}
+              disabled={loadingEarlier}
+              className="mx-auto flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs text-neutral-500 hover:bg-[var(--surface)] hover:text-neutral-300 disabled:opacity-50"
+            >
+              {loadingEarlier ? (
+                <Loader2 size={12} className="animate-spin" />
+              ) : (
+                <ArrowUp size={12} />
+              )}
+              {loadingEarlier ? 'Loading earlier messages…' : 'Load earlier messages'}
+            </button>
+          )}
           {compactWindow.boundary && (
             <button
               type="button"
@@ -496,7 +681,7 @@ export default function MessageList({
                   : undefined
               }
             >
-              <Item
+              <MemoizedItem
                 item={item}
                 running={running}
                 resolved={resolved}
@@ -506,13 +691,19 @@ export default function MessageList({
                 latestCardItemId={latestCardItemId}
                 result={item.type === 'tool_use' ? results.get(item.toolId) : undefined}
                 results={results}
-                toolVerbose={toolVerbose}
+                density={density}
                 toolLogStyle={toolLogStyle}
               />
             </div>
           ))}
+          {density === 'summary' && hiddenByDensity > 0 && (
+            <div className="text-center text-xs text-neutral-600">
+              Summary hides {hiddenByDensity} step{hiddenByDensity === 1 ? '' : 's'} —{' '}
+              {DENSITY_SHORTCUT} for Normal
+            </div>
+          )}
           <div ref={bottomRef} />
-        </div>
+        </SelectionCopyBubble>
       </div>
       {showJump && (
         <button
@@ -537,7 +728,7 @@ function Item({
   latestCardItemId,
   result,
   results,
-  toolVerbose,
+  density,
   toolLogStyle
 }: {
   item: ChatItem
@@ -552,10 +743,13 @@ function Item({
   latestCardItemId?: string
   result?: Extract<ChatItem, { type: 'tool_result' }>
   results: ReadonlyMap<string, Extract<ChatItem, { type: 'tool_result' }>>
-  toolVerbose: boolean
+  density: TranscriptDensity
   toolLogStyle: 'wooi' | 'terminal'
 }): React.JSX.Element | null {
   const time = formatTime(item.ts)
+  // 밀도는 여기서 딱 두 가지로 번역된다 — 도구 출력을 펴 둘지, 인라인 diff 를 붙일지.
+  // 무엇을 아예 그리지 않을지는 이미 목록 단계에서 걸러져 여기까지 오지 않는다.
+  const toolVerbose = expandsToolOutput(density)
 
   // 할 일 도구 호출 구간은 원래의 도구 행 대신 체크리스트 카드 한 장으로 대체한다.
   const card = cardByItemId.get(item.id)
@@ -573,6 +767,8 @@ function Item({
       if (item.origin?.kind === 'peer') return <PeerMessage item={item} title={time} />
       if (item.origin?.kind === 'conflictResolve')
         return <ConflictResolveMessage item={item} title={time} />
+      if (item.origin?.kind === 'ciFix') return <CiFixMessage item={item} title={time} />
+      if (item.origin?.kind === 'wooi') return <WooiTurnMessage item={item} title={time} />
       return (
         <UserMessage text={item.text} title={time}>
           {item.attachments && item.attachments.length > 0 && (
@@ -613,7 +809,7 @@ function Item({
           style={toolLogStyle}
           verbose={toolVerbose}
         >
-          {item.diff && (
+          {item.diff && showsInlineDiff(density) && (
             <pre className="ml-4 mt-1 max-h-72 overflow-auto rounded-md bg-[var(--code-bg)] py-1 text-xs font-mono leading-[1.45]">
               {item.diff.split('\n').map((line, i) => (
                 <DiffLine key={i} line={line} />
@@ -670,6 +866,22 @@ function Item({
       return null
   }
 }
+
+/**
+ * 스트리밍 중에는 목록 부모가 계속 계산돼도 이미 끝난 일반 메시지는 다시 렌더하지 않는다.
+ * 도구 행은 주변 결과·그룹·실행 상태에 의존하므로 기본 비교에 맡겨 정확성을 우선한다.
+ */
+const MemoizedItem = memo(Item, (prev, next) => {
+  if (
+    prev.item !== next.item ||
+    prev.workspaceId !== next.workspaceId ||
+    prev.density !== next.density ||
+    prev.toolLogStyle !== next.toolLogStyle
+  ) {
+    return false
+  }
+  return prev.item.type !== 'tool_use'
+})
 
 function UnknownCard({
   item
@@ -905,10 +1117,8 @@ function BashBlock({
             {shown}
           </pre>
           {folded.omitted > 0 && (
-            <span className="block border-t border-[var(--border)] px-2.5 py-1 text-[11px] text-neutral-600 hover:text-neutral-400">
-              {expanded
-                ? 'Collapse output'
-                : `Show full output (${TOOL_VERBOSE_SHORTCUT} to expand)`}
+            <span className="block border-t border-[var(--border)] px-2.5 py-1 text-xs text-neutral-600 hover:text-neutral-400">
+              {expanded ? 'Collapse output' : `Show full output (${DENSITY_SHORTCUT} to expand)`}
             </span>
           )}
         </button>

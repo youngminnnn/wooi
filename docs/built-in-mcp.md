@@ -16,7 +16,7 @@ Tools normally appear to the agent as `mcp__wooi__<tool-name>`. Most tool defini
 are loaded on demand, so a tool may not be visible in the model's initial context even
 though it is available through tool search.
 
-The 20 core tools are available in every workspace. `claude_subagent` and
+The 24 core tools are available in every workspace. `claude_subagent` and
 `codex_subagent` are added only when multi-agent mode is enabled and the corresponding
 backend is available for delegation.
 
@@ -36,6 +36,8 @@ backend is available for delegation.
 - Read-only tools run without an approval prompt. State-changing tools follow the
   workspace's permission mode and normally show an approval card before running. Full
   Access runs them without approval.
+- `switch_workspace_agent` is the exception: handing the conversation to another agent
+  always requires an approval card, including in Full Access.
 - `set_workspace_name` is the one state-changing tool that never shows a card. It is not
   marked read-only — it does change state — but the change is one string in Wooi's own
   store: it never leaves the machine, one context-menu click undoes it, and the result
@@ -417,6 +419,77 @@ read-only.
 Output keeps the end of the log, is limited to approximately 8 KiB, and reports whether
 it was truncated.
 
+## Preview
+
+These three tools let an agent look at its own change instead of asking the user what
+they see: open the page, screenshot it, read what the console complained about.
+
+They drive the same Preview panel the user is looking at, not a private headless
+browser. That is deliberate — the user can see what the agent is looking at — and it has
+one consequence worth stating plainly: **the preview exists only for the workspace that
+is currently open on screen.** Wooi builds the work panel for the selected workspace, so
+an agent working in a background workspace gets a failure that says exactly that instead
+of a blank screenshot.
+
+There are no click or type tools. Writing to the page needs its own approval design, and
+reading is enough to close the check-your-own-work loop.
+
+### `open_preview`
+
+Opens Wooi's Preview panel on this workspace's dev server and waits for the page to
+load. The origin is not an input: Wooi takes it from the run script that is currently
+running in this workspace — its printed local address first, then the port Wooi assigned
+it, and finally the address the preview last showed. A `path` that resolves to any other
+origin is rejected, so the tool cannot reach past this workspace's dev server.
+
+| Input | Type | Required | Description |
+| --- | --- | --- | --- |
+| `path` | string | No | Path on the dev server, such as `/settings`. Defaults to `/`. |
+
+When there is no dev server to open, the error names which of three things is missing —
+no run script is configured, none of them is running, or one is running but has printed
+no address — because the agent's next move differs in each case. A load that fails
+carries the browser's own reason, such as `ERR_CONNECTION_REFUSED`.
+
+It is the one preview tool that changes state, so it shows an approval card naming the
+path.
+
+### `capture_preview`
+
+Returns a screenshot of the page the preview is currently showing, as an image content
+block rather than text. It takes no inputs and never navigates; call `open_preview`
+first. Screenshots are scaled down when needed to stay within the size Wooi returns to
+an agent, and the result says when that happened and what the original size was. It is
+read-only.
+
+Wooi only paints the preview while its tab is on screen, so a capture taken after the
+user moved away fails with that reason rather than returning an empty image.
+
+### `read_preview_issues`
+
+Returns the console errors and failed requests Wooi collected from the page in the
+preview, errors first, with a repeat count for each. It takes no inputs and is
+read-only.
+
+Wooi clears what it collected whenever the preview navigates, so the result is the state
+since the last load — reopening the page is how you check whether a fix cleared them.
+The list is capped at 50 entries and roughly 8 KiB, and reports when it was truncated.
+
+### `switch_workspace_agent`
+
+Hands the current workspace over to another installed agent backend without changing its
+worktree. The current turn finishes first, then Wooi closes the old session, builds a compact
+checkpoint from recent user intent, reported progress, changed-file paths, and verification
+commands, and starts the new agent automatically.
+
+| Input | Type | Required | Description |
+| --- | --- | --- | --- |
+| `agentBackend` | `claude` or `codex` | Yes | Agent product that takes over the workspace. |
+| `reason` | string | Yes | Why the handoff is needed; shown on the approval card. |
+
+The approval card is mandatory even in autonomous or Full Access modes. Declining leaves the
+current backend and session untouched.
+
 ## Agent team mode
 
 ### `switch_to_agent_team`
@@ -487,6 +560,7 @@ with your own commands: `/wooi:pr`, `/wooi:children`, and so on. The catalog is
 | `/wooi:send <what changed>` | `send_to_workspace` | agent |
 | `/wooi:message-status [message id]` | `check_message_status` | direct |
 | `/wooi:team [what to delegate]` | `switch_to_agent_team` | agent |
+| `/wooi:agent <claude\|codex> [reason]` | `switch_workspace_agent` | agent |
 | `/wooi:repos` | `list_repositories` | direct |
 | `/wooi:peers` | `list_workspace_peers` | direct |
 | `/wooi:children` | `check_stacked_work` | direct |
@@ -497,6 +571,9 @@ with your own commands: `/wooi:pr`, `/wooi:children`, and so on. The catalog is
 | `/wooi:run <name>` | `run_script` | direct |
 | `/wooi:stop <name>` | `stop_script` | direct |
 | `/wooi:logs <name> [lines]` | `read_script_output` | direct |
+| `/wooi:preview [path]` | `open_preview` | direct |
+| `/wooi:screenshot` | `capture_preview` | agent |
+| `/wooi:preview-errors` | `read_preview_issues` | direct |
 | `/wooi:archive <workspace id>` | `archive_workspace` | direct |
 | `/wooi:rename [name]` | `set_workspace_name` | direct |
 
@@ -537,7 +614,10 @@ The tool catalog and schemas live in `src/main/agent/tools/catalog.ts`; handlers
 registered in `src/main/agent/tools/index.ts`. Claude uses the in-process adapter in
 `src/main/claude/wooiMcp.ts`, while Codex uses the stdio adapter in
 `src/main/codex/toolShim.ts`. Both transports forward execution to the same registry and
-handlers under `src/main/agent/tools/`. Slash commands live in
+handlers under `src/main/agent/tools/`. The preview tools reach the panel's guest page
+through `src/main/preview.ts`, and results that carry an image are turned into MCP
+content blocks by `src/shared/agentToolContent.ts`, which both transports share. Slash
+commands live in
 `src/shared/wooiCommands.ts`; the generated Claude plugin is written by
 `src/main/agent/plugin.ts` and direct execution goes through the `command:wooiRun` IPC handler in
 `src/main/ipc.ts`.

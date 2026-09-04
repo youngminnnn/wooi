@@ -5,6 +5,9 @@
  * 알아야 할 도메인 상태가 아니다(우측 패널 상태·테마 캐시와 같은 계층). 그래서 IPC 왕복도 없다.
  * localStorage 접근 실패(private 모드 등)는 무시한다 — 기억은 편의 기능일 뿐, 없으면 힌트가
  * 한 번 더 보이는 정도의 비용이다.
+ *
+ * (힌트를 아예 보여줄지 말지의 **결정**은 다르다 — 그건 사용자가 내린 설정이라
+ * `AppSettings.showHints` 에 있다. 여기 있는 건 "이 특정 힌트를 이미 봤다" 는 기기 로컬 기억뿐이다.)
  */
 
 /**
@@ -150,3 +153,35 @@ export function setUiNumber(name: string, value: number): void {
     /* 무시 */
   }
 }
+
+/**
+ * 점진적 힌트 레지스트리(`lib/hints.ts`)가 이 힌트 id 를 이미 봤는지 기억하는 키.
+ *
+ * 사이드바에 하드코딩돼 있던 두 힌트(⌘K, ⌘↑/⌘↓)를 레지스트리로 옮기면서도, 이미 그 둘을 닫아 본
+ * 사용자에게 다시 뜨면 안 되므로 **그 둘만 예전 키를 그대로 돌려준다**
+ * (`QUICK_SWITCH_HINT_DISMISSED`, `SWITCH_HINT_DONE`). 나머지 힌트는 사이드바 밖에서 새로
+ * 시작하는 것들이라 이어받을 예전 키가 없고, `hintSeen.<id>` 로 새로 만든다.
+ */
+export function hintSeenFlag(id: string): string {
+  if (id === 'quick-switch') return QUICK_SWITCH_HINT_DISMISSED
+  if (id === 'keyboard-switch') return SWITCH_HINT_DONE
+  return `hintSeen.${id}`
+}
+
+/**
+ * Changes 패널의 파일 트리를 펴 뒀는지, 그리고 그 폭(px).
+ *
+ * 전역 설정이 아니라 여기 두는 이유는 이 파일의 원칙 그대로다 — 어느 기기의 어느 패널을 얼마나
+ * 넓게 봤는지는 main 이 알아야 할 도메인 상태가 아니다. 기본값은 "닫힘": 우측 패널은 원래 좁고,
+ * 대부분의 변경은 파일이 몇 개뿐이라 트리가 diff 에서 가로폭만 빼앗는다.
+ */
+export const DIFF_FILE_TREE_OPEN = 'diffFileTreeOpen'
+export const DIFF_FILE_TREE_WIDTH = 'diffFileTreeWidth'
+
+/**
+ * diff 뷰어의 워드랩을 **꺼 뒀는지**. 켜짐이 기본이라 "끔"을 저장한다 — 저장된 값이 없을 때
+ * `readUiFlag` 가 false 를 돌려주는 것이 그대로 "랩 켜짐"이 되게.
+ *
+ * 에디터의 워드랩과 묶지 않는다. 이유는 [[diffWordWrap]] 에 적어 뒀다.
+ */
+export const DIFF_WORD_WRAP_OFF = 'diffWordWrapOff'

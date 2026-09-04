@@ -3,7 +3,11 @@ import { getStore } from '../store'
 import { getTranscripts } from '../transcripts'
 import { buildHandoffPrompt } from '@shared/handoff'
 import {
+  AGENT_BACKEND_LABELS,
   DEFAULT_AGENT_BACKEND,
+  IPC,
+  agentSettingsFor,
+  normalizePermissionMode,
   type AgentBackendId,
   type CommandPanelKind,
   type CommandResult,
@@ -18,6 +22,7 @@ import {
   type PermissionDecision,
   type PermissionMode,
   type RewindActionResult,
+  type RewindMode,
   type SendMessageOptions,
   type SlashCommandInfo
 } from '@shared/types'
@@ -34,6 +39,9 @@ import {
   resetAllPeerSessions,
   resetPeerSession
 } from './tools/peer'
+import { forgetContextUsage } from '../contextUsageCache'
+import { forgetWorkspaceUsage } from '../usageLedger'
+import { forgetRunningAgents } from '../runningAgentsCache'
 
 /**
  * 여러 에이전트 백엔드를 소유하고, 워크스페이스가 지정한 백엔드(workspace.agentBackend)로 호출을
@@ -110,6 +118,11 @@ export class AgentOrchestrator {
    * pendingRestart 에도 반드시 들어 있다.
    */
   private pendingResume = new Map<string, string>()
+  /** 현재 도구 호출의 결과가 돌아간 뒤 백엔드를 바꾸기 위한 예약. */
+  private pendingAgentSwitch = new Map<
+    string,
+    { target: AgentBackendId; fromLabel: string; targetLabel: string }
+  >()
 
   constructor(
     private dispatch: Dispatch,
@@ -248,14 +261,21 @@ export class AgentOrchestrator {
 
   // ── 핵심 (모든 백엔드 위임) ──────────────────────────────────────────────
 
-  /** 저장된 Codex 워크스페이스가 있으면 app-server 를 백그라운드에서 미리 준비한다. */
+  /**
+   * 기동 직후의 준비 작업.
+   *
+   * 이어가기 예약(rate limit·종료 중단)을 든 워크스페이스의 백엔드를 먼저 인스턴스화한다 —
+   * 매니저 생성자가 restore() 를 부르므로, 여기서 깨우지 않으면 예약이 영원히 잠든 채 남는다.
+   * 그다음 저장된 Codex 워크스페이스가 있으면 app-server 를 백그라운드에서 미리 준비한다.
+   */
   prewarm(): void {
     const pendingBackends = new Set(
       getStore()
         .getState()
-        .workspaces.flatMap((workspace) =>
-          workspace.pendingRateLimitResume ? [workspace.pendingRateLimitResume.backend] : []
-        )
+        .workspaces.flatMap((workspace) => [
+          ...(workspace.pendingRateLimitResume ? [workspace.pendingRateLimitResume.backend] : []),
+          ...(workspace.pendingShutdownResume ? [workspace.pendingShutdownResume.backend] : [])
+        ])
     )
     for (const backend of pendingBackends) this.get(backend)
     const hasCodexWorkspace = getStore()
@@ -305,15 +325,31 @@ export class AgentOrchestrator {
   }
 
   /**
+   * 에이전트가 자기 턴 안에서 요청한 백엔드 교체를 예약한다. 지금 store 를 바꾸거나 dispose 하면
+   * 이 메서드를 부른 MCP 도구의 결과가 돌아갈 세션이 사라지므로 실제 교체는 handleTurnEnd 에서 한다.
+   */
+  switchAgentAfterTurn(workspaceId: string, target: AgentBackendId): void {
+    const workspace = getStore()
+      .getState()
+      .workspaces.find((w) => w.id === workspaceId)
+    if (!workspace) throw new Error('This workspace no longer exists.')
+    if (workspace.agentBackend === target) return
+    this.pendingAgentSwitch.set(workspaceId, {
+      target,
+      fromLabel: AGENT_BACKEND_LABELS[workspace.agentBackend] ?? workspace.agentBackend,
+      targetLabel: AGENT_BACKEND_LABELS[target] ?? target
+    })
+  }
+
+  /**
    * 백엔드가 턴 종료를 알려 온다([[agent/backend]] TurnEndHook). 이어 보낼 것이 있으면 여기서
    * 보내고 true 를 돌려준다 — 그러면 백엔드는 이 턴을 끝난 것으로 방송하지 않는다.
    *
    * **방송하지 않는 것이 이 설계의 전부다.** 방송하면 턴과 턴 사이에 렌더러가 "쉬고 있다" 고 보는
-   * 틈이 생기고, 그 틈에 사용자가 친 말은 곧 시작될 자동 턴에 섞여 들어간다 — Codex 는 steering
-   * 으로 즉시([[agent/backend]] CODEX_META 의 capabilities.steering), Claude 는 대기 큐가 풀려서
-   * (렌더러 store 의 messageQueue). 정확히 그 실패를 한 번 겪고 설계를 되돌린 적이 있다
-   * ([[shared/handoff]]). 틈이 없으면 입력창은 계속 '진행 중' 규칙으로 동작하므로 렌더러는 고칠
-   * 것이 없다 — 사용자에게는 턴 하나가 이어서 도는 것으로만 보인다.
+   * 틈이 생기고, 그 틈에 사용자가 친 말은 곧 시작될 자동 턴에 섞여 들어간다 — 두 백엔드 모두
+   * mid-turn 입력을 받아들인다([[agent/backend]] capabilities.steering). 정확히 그 실패를 한 번
+   * 겪고 설계를 되돌린 적이 있다([[shared/handoff]]). 틈이 없으면 입력창은 계속 '진행 중' 규칙으로
+   * 동작하므로 렌더러는 고칠 것이 없다 — 사용자에게는 턴 하나가 이어서 도는 것으로만 보인다.
    */
   private handleTurnEnd(workspaceId: string, status: 'idle' | 'error'): boolean {
     if (status === 'error') {
@@ -324,6 +360,61 @@ export class AgentOrchestrator {
       // 곧 유휴가 되어 받을 수 있는 메시지를 사람 손에 떠넘기게 된다(버퍼는 자기 타이머가 비운다).
       forgetPeerSessionRules(workspaceId)
     }
+    const switch_ = this.pendingAgentSwitch.get(workspaceId)
+    if (switch_) {
+      this.pendingAgentSwitch.delete(workspaceId)
+      if (status !== 'idle') return false
+      const workspace = getStore()
+        .getState()
+        .workspaces.find((w) => w.id === workspaceId)
+      if (!workspace) return false
+      const handoff = buildHandoffPrompt({
+        items: getTranscripts().load(workspaceId),
+        fromLabel: switch_.fromLabel
+      })
+
+      // 아직 store 는 옛 백엔드를 가리키므로 정확히 그 세션을 정리한다.
+      this.dispose(workspaceId)
+      forgetContextUsage(workspaceId)
+      forgetWorkspaceUsage(workspaceId)
+      forgetRunningAgents(workspaceId)
+      getStore().update((st) => {
+        const target = st.workspaces.find((w) => w.id === workspaceId)
+        if (!target) return
+        target.agentBackend = switch_.target
+        target.sessionId = null
+        target.pendingHandoffFrom = null
+        target.model = null
+        target.lastModel = null
+        target.effort = null
+        target.fastMode = null
+        target.fastModeState = null
+        target.fastModeReason = null
+        target.permissionMode = normalizePermissionMode(
+          backendMeta(switch_.target),
+          agentSettingsFor(st.settings, switch_.target).permissionMode
+        )
+      })
+      this.dispatch(IPC.evtState, getStore().getState())
+      this.touch(workspaceId)
+      const continuePrompt =
+        `Wooi switched this workspace to ${switch_.targetLabel} after the user approved it. ` +
+        'Wooi started this turn, not the user. Continue the user request from the workspace ' +
+        'checkpoint; do not ask them to repeat it and do not redo completed work.'
+      try {
+        this.backendFor(workspaceId).sendMessage(workspaceId, continuePrompt, undefined, {
+          silent: true,
+          ...(handoff ? { prefix: handoff } : {})
+        })
+      } catch (err) {
+        log.error(`orchestrator: 에이전트 교체 뒤 자동 이어가기 실패 (${workspaceId})`, err)
+        // 백엔드와 store 전환은 이미 끝났다. false 로 idle/error 방송을 허용하면 사용자가 같은
+        // 워크스페이스에 다음 메시지를 보내 새 에이전트 세션을 정상적으로 열 수 있다.
+        return false
+      }
+      return true
+    }
+
     const resume = this.pendingResume.get(workspaceId)
     if (!resume) {
       // accept 메시지는 running 턴을 끊지 않고 여기까지 모은다. 여기서 true 를 돌려 idle 방송을
@@ -429,6 +520,14 @@ export class AgentOrchestrator {
   interrupt(workspaceId: string): Promise<void> {
     // 중단은 "그만" 이다. 그 턴이 끝나자마자 Wooi 가 다음 턴을 시작하면 중단이 중단이 아니게 된다.
     this.cancelResume(workspaceId)
+    this.pendingAgentSwitch.delete(workspaceId)
+    // 중단 표시는 **여기서만** 찍는다. 이 메서드가 백엔드와 무관한 유일한 중단 길목이고(IPC 의
+    // chatInterrupt 가 폰까지 포함해 전부 여기로 들어온다), 백엔드의 forceIdle 에 얹으면 /clear 와
+    // 크래시 복구까지 중단으로 물든다. 상태를 추론하지 않고 실제 중단 경로에서 세팅하는 것이 요점이다.
+    getStore().update((st) => {
+      const w = st.workspaces.find((x) => x.id === workspaceId)
+      if (w) w.interruptedTurn = { at: Date.now(), sessionId: w.sessionId }
+    })
     return this.backendFor(workspaceId).interrupt(workspaceId)
   }
 
@@ -482,6 +581,7 @@ export class AgentOrchestrator {
     // 세션이 사라졌으면 이어갈 턴도 사라진 것이다. (자동 이어가기 자신이 부르는 dispose 는
     // 이미 예약을 꺼내 간 뒤라 여기서 지울 것이 없다 — [[handleTurnEnd]])
     this.cancelResume(workspaceId)
+    this.pendingAgentSwitch.delete(workspaceId)
     resetPeerSession(workspaceId, '세션 폐기')
     this.backendFor(workspaceId).dispose(workspaceId)
   }
@@ -490,6 +590,7 @@ export class AgentOrchestrator {
     this.lastUsedAt.clear()
     this.pendingRestart.clear()
     this.pendingResume.clear()
+    this.pendingAgentSwitch.clear()
     resetAllPeerSessions('모든 세션 폐기')
     for (const backend of this.backends.values()) backend.disposeAll()
   }
@@ -498,6 +599,7 @@ export class AgentOrchestrator {
     this.lastUsedAt.clear()
     this.pendingRestart.clear()
     this.pendingResume.clear()
+    this.pendingAgentSwitch.clear()
     resetAllPeerSessions('모든 세션 중단')
     for (const backend of this.backends.values()) backend.abortAll()
   }
@@ -517,6 +619,14 @@ export class AgentOrchestrator {
     // 아직 인스턴스화되지 않은 backend의 영속 예약도 함께 제거한다.
     getStore().update((state) => {
       for (const ws of state.workspaces) ws.pendingRateLimitResume = null
+    })
+  }
+
+  cancelAllShutdownResumes(): void {
+    for (const backend of this.backends.values()) backend.cancelAllShutdownResumes?.()
+    // 아직 인스턴스화되지 않은 backend의 영속 예약도 함께 제거한다.
+    getStore().update((state) => {
+      for (const ws of state.workspaces) ws.pendingShutdownResume = null
     })
   }
 
@@ -641,12 +751,16 @@ export class AgentOrchestrator {
     return backend.mcpAction(workspaceId, serverName, action)
   }
 
-  rewindAction(workspaceId: string, userMessageId: string): Promise<RewindActionResult> {
+  rewindAction(
+    workspaceId: string,
+    userMessageId: string,
+    mode: RewindMode
+  ): Promise<RewindActionResult> {
     const backend = this.backendFor(workspaceId)
     if (!backend.meta.capabilities.rewind) {
       throw new Error(`${backend.meta.label} does not support rewind.`)
     }
-    return backend.rewindAction(workspaceId, userMessageId)
+    return backend.rewindAction(workspaceId, userMessageId, mode)
   }
 
   /** 워크스페이스 백엔드로 라우팅해 슬래시 명령 목록을 조회한다. 미지원이면 빈 목록. */

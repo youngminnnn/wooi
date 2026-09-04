@@ -7,18 +7,28 @@ import {
   Square,
   Gauge,
   Timer,
-  AlertTriangle,
   MessageSquarePlus,
-  Terminal
+  SquareArrowOutUpRight
 } from 'lucide-react'
 import { backgroundTaskCount, refreshAccountUsage, useStore } from '../store'
 import { useNow } from '../lib/useNow'
 import { formatCost, formatCountdown, formatDuration, formatTime } from '../lib/format'
-import { workspaceDisplayName } from '@shared/types'
-import type { AgentBackendId, RateLimitSnapshot, UsageInfo, Workspace } from '@shared/types'
+import { activeRateLimitPause, wasInterrupted, workspaceDisplayName } from '@shared/types'
+import type {
+  AgentBackendId,
+  PermissionRequest,
+  RateLimitSnapshot,
+  UsageInfo,
+  Workspace
+} from '@shared/types'
+import { askSummary } from '@shared/askSummary'
+import { isPaneWindow } from '../lib/paneWindow'
 import { headlineWindows, normalizeUtilization } from '../lib/rateLimit'
 import type { RateLimitWindow } from '../lib/rateLimit'
+import { StatusDot } from './StatusDot'
+import { describeWorkspaceStatus, runningFor } from '../lib/workspaceStatus'
 import { ClaudeMark, CodexMark } from './BrandIcons'
+import CacheTimer from './CacheTimer'
 
 /** 요금제 사용률 재조회 주기. 5시간 창이 눈에 띄게 움직이는 단위가 분이라 1분이면 충분하다. */
 const USAGE_REFRESH_MS = 60_000
@@ -46,6 +56,7 @@ export default function Overview(): React.JSX.Element {
   const unread = useStore((s) => s.unread)
   const permissions = useStore((s) => s.permissions)
   const selectWorkspace = useStore((s) => s.selectWorkspace)
+  const detachPane = useStore((s) => s.detachPane)
   const stopAll = useStore((s) => s.stopAll)
   const confirm = useStore((s) => s.confirm)
   const [filter, setFilter] = useState<FilterKey>('all')
@@ -126,15 +137,31 @@ export default function Overview(): React.JSX.Element {
     }
   }, [showCardCost, usageNonce])
 
-  const pendingIds = new Set(permissions.map((p) => p.workspaceId))
+  // 분리한 현황판 창은 계속 보드로 남는다 — 카드를 누르면 메인 창을 앞으로 가져와 거기서 연다.
+  const openWorkspace = (id: string): void => {
+    if (isPaneWindow) void window.api.pane.selectWorkspace(id)
+    else void selectWorkspace(id)
+  }
+
+  // 워크스페이스마다 대기 중인 요청 **하나**를 집어 둔다(가장 먼저 온 것). id 집합만 들고
+  // 있었을 때는 방패 아이콘밖에 그릴 수 없었지만, 요청을 들고 있으면 무엇을 묻는지도 그릴 수 있다.
+  const pendingByWorkspace = new Map<string, PermissionRequest>()
+  for (const p of permissions)
+    if (!pendingByWorkspace.has(p.workspaceId)) pendingByWorkspace.set(p.workspaceId, p)
 
   const flagsOf = (
     w: Workspace
   ): { running: boolean; attention: boolean; unread: boolean; idle: boolean } => {
     const running = w.status === 'running'
-    const attention = pendingIds.has(w.id)
+    const attention = pendingByWorkspace.has(w.id)
     const isUnread = !!unread[w.id]
     return { running, attention, unread: isUnread, idle: !running && !attention && !isUnread }
+  }
+
+  /** 입력 대기 중이면 무엇을 묻고 있는지 한 줄로. 아니면 빈 문자열. */
+  const askOf = (w: Workspace): string => {
+    const pending = pendingByWorkspace.get(w.id)
+    return pending ? askSummary(pending) : ''
   }
 
   const counts = {
@@ -191,10 +218,20 @@ export default function Overview(): React.JSX.Element {
               Review PR
               {/* 단축키를 버튼에 붙여 둔다 — 사이드바의 'Search workspaces / ⌘K' 와 같은 방식으로,
                   익히기 전까지만 눈에 들어오고 익히면 자연히 배경이 된다. */}
-              <kbd className="ml-0.5 text-[11px] leading-none font-medium text-neutral-600 tabular-nums">
+              <kbd className="ml-0.5 text-xs leading-none font-medium text-neutral-600 tabular-nums">
                 ⇧⌘R
               </kbd>
             </button>
+            {!isPaneWindow && (
+              <button
+                onClick={() => detachPane('overview')}
+                aria-label="Open the overview in a separate window"
+                title="Open in a separate window — keep the board on a second monitor"
+                className="h-7 w-7 shrink-0 grid place-items-center rounded-md text-neutral-500 border border-[var(--border-2)] hover:bg-[var(--surface-2)] hover:text-neutral-200"
+              >
+                <SquareArrowOutUpRight size={13} />
+              </button>
+            )}
             {counts.running > 0 && (
               <button
                 onClick={onStopAll}
@@ -266,10 +303,11 @@ export default function Overview(): React.JSX.Element {
                 workspace={w}
                 repoName={repoName(w.repoId)}
                 flags={flagsOf(w)}
+                ask={askOf(w)}
                 now={now}
                 cost={costByWorkspace[w.id] ?? 0}
                 showCost={showCardCost}
-                onOpen={() => void selectWorkspace(w.id)}
+                onOpen={() => openWorkspace(w.id)}
               />
             ))}
           </div>
@@ -373,7 +411,7 @@ function AgentUsagePanel({
       <div className="flex items-center gap-2 mb-3 text-sm font-medium text-neutral-200">
         {agentId === 'claude' ? <ClaudeMark size={16} /> : <CodexMark size={16} />}
         {label}
-        <span className="text-[11px] font-normal text-neutral-600">account usage</span>
+        <span className="text-xs font-normal text-neutral-600">account usage</span>
         {panelLoading && <Loader2 size={11} className="ml-auto animate-spin text-neutral-500" />}
       </div>
 
@@ -447,7 +485,7 @@ function StatTile({
         {icon}
       </div>
       <div className="min-w-0">
-        <div className="text-[11px] uppercase tracking-wide text-neutral-500">{label}</div>
+        <div className="text-xs uppercase tracking-wide text-neutral-500">{label}</div>
         <div className="flex items-center gap-1.5">
           <span className="text-base font-semibold text-neutral-100 tabular-nums">{value}</span>
           {loading && <Loader2 size={12} className="animate-spin text-neutral-500 shrink-0" />}
@@ -496,10 +534,10 @@ function PlanLimits({
       }
     >
       <div className="flex items-center gap-2 mb-2">
-        <span className="text-[11px] uppercase tracking-wide text-neutral-500">Plan usage</span>
+        <span className="text-xs uppercase tracking-wide text-neutral-500">Plan usage</span>
         {loading && <Loader2 size={11} className="animate-spin text-neutral-500" />}
         {/* 모델별 창(Opus·Sonnet)은 계정에 있을 때만 행으로 나타나므로 헤더에서 약속하지 않는다. */}
-        <span className="text-[11px] text-neutral-600">{accountLabel} · account-wide · used</span>
+        <span className="text-xs text-neutral-600">{accountLabel} · account-wide · used</span>
       </div>
       {windows.length === 0 ? (
         // 조회 중: 실제 행과 같은 높이의 자리표시자를 둬 결과가 와도 화면이 밀리지 않는다.
@@ -571,6 +609,7 @@ function OverviewCard({
   workspace,
   repoName,
   flags,
+  ask,
   now,
   cost,
   showCost,
@@ -579,6 +618,8 @@ function OverviewCard({
   workspace: Workspace
   repoName: string
   flags: { running: boolean; attention: boolean; unread: boolean; idle: boolean }
+  /** 입력 대기 중일 때 무엇을 묻고 있는지 한 줄. 그 외 상태에서는 빈 문자열. */
+  ask: string
   now: number
   cost: number
   showCost: boolean
@@ -589,8 +630,31 @@ function OverviewCard({
   const runningSince = useStore((s) => s.runningSince[workspace.id])
   const context = useStore((s) => s.contextUsage[workspace.id])
   const backgroundTasks = useStore((s) => backgroundTaskCount(s.runningAgents[workspace.id]))
+  const compacting = useStore((s) => s.compacting[workspace.id] ?? false)
 
   const displayName = workspaceDisplayName(workspace, pr?.title)
+
+  // 사이드바 WorkspaceRow(Sidebar.tsx) 와 같은 재료로 판단 입력을 갖춘다 — 판단 자체는
+  // describeWorkspaceStatus(사이드바와 공유) 가 한다. 새로 판단을 만들지 않는다.
+  const { runningMs, stale } = runningFor(workspace, runningSince, now)
+  const rateLimited = activeRateLimitPause(workspace.rateLimited, now)
+  const interrupted = wasInterrupted(workspace)
+  const statusInput = {
+    status: workspace.status,
+    awaitingPermission: flags.attention,
+    ask,
+    interrupted,
+    compacting,
+    stale,
+    runningMs,
+    pendingRateLimitResume: workspace.pendingRateLimitResume,
+    pendingShutdownResume: workspace.pendingShutdownResume,
+    awaitingStackedWork: workspace.awaitingStackedWork,
+    rateLimited,
+    backgroundTasks,
+    pr
+  }
+  const status = describeWorkspaceStatus(statusInput)
 
   return (
     <button
@@ -607,11 +671,7 @@ function OverviewCard({
       }
     >
       <div className="flex items-center gap-2">
-        <StatusDot
-          workspace={workspace}
-          attention={flags.attention}
-          backgroundTasks={backgroundTasks}
-        />
+        <StatusDot {...statusInput} />
         <span className="flex-1 min-w-0 truncate text-sm text-neutral-100" title={displayName}>
           {displayName}
         </span>
@@ -626,6 +686,15 @@ function OverviewCard({
         )}
       </div>
 
+      {/* 무엇을 묻고 있는지 한 줄. 카드 다섯 장이 동시에 물어볼 때 다섯 번 열어 보지 않고
+          우선순위를 정하게 하는 것이 이 줄의 존재 이유다. 제목 바로 아래에 두어 훑을 때
+          이름 다음으로 읽히게 한다. */}
+      {ask && (
+        <div className="mt-1.5 truncate text-xs text-[var(--warning-400)]/90" title={ask}>
+          {ask}
+        </div>
+      )}
+
       <div className="mt-1.5 flex items-center gap-1.5 text-xs text-neutral-500 min-w-0">
         <span className="truncate text-neutral-600">{repoName}</span>
         <GitBranch size={10} className="shrink-0" />
@@ -639,7 +708,9 @@ function OverviewCard({
             {formatDuration(now - runningSince)}
           </span>
         ) : (
-          <span className="text-neutral-600">{workspace.status}</span>
+          // raw enum(status) 대신 사다리의 라벨을 쓴다 — 중단·압축·제한 대기 같은 사정이
+          // 사용자가 읽는 문구에 그대로 실린다(describeWorkspaceStatus, 사이드바와 공유).
+          <span className="text-neutral-600">{status.label}</span>
         )}
         {git && git.changedFiles > 0 && (
           <span className="text-[var(--warning-500)]/80" title="Changed files">
@@ -651,6 +722,7 @@ function OverviewCard({
             {formatCost(cost)}
           </span>
         )}
+        <CacheTimer workspace={workspace} />
         {context && context.percentage > 0 && (
           <span
             className="text-neutral-600 tabular-nums"
@@ -672,35 +744,4 @@ function OverviewCard({
       </div>
     </button>
   )
-}
-
-function StatusDot({
-  workspace,
-  attention,
-  backgroundTasks
-}: {
-  workspace: Workspace
-  attention: boolean
-  /** 에이전트가 두고 간, 아직 살아 있는 백그라운드 셸의 수. 사이드바와 같은 판단을 쓴다. */
-  backgroundTasks: number
-}): React.JSX.Element {
-  if (attention) return <ShieldQuestion size={13} className="text-[var(--warning-400)] shrink-0" />
-  if (workspace.status === 'running')
-    return <Loader2 size={13} className="text-[var(--info-400)] animate-spin shrink-0" />
-  // 색만으로 idle/error 를 구분하지 않도록 error 는 별도 아이콘(경고 삼각형)으로 표시한다.
-  if (workspace.status === 'error')
-    return (
-      <AlertTriangle size={12} className="text-[var(--danger-400)] shrink-0" aria-label="Error" />
-    )
-  // 대화는 끝났는데 에이전트가 두고 간 셸이 아직 돈다. 스피너를 쓰면 "에이전트가 일하는 중" 으로
-  // 읽히므로 돌지 않는 아이콘으로 사실만 알린다(사이드바 StatusDot 과 같은 어휘).
-  if (backgroundTasks > 0)
-    return (
-      <Terminal
-        size={12}
-        className="text-neutral-400 shrink-0"
-        aria-label="Background tasks running"
-      />
-    )
-  return <span className="h-2 w-2 rounded-full shrink-0 bg-neutral-600" aria-label="Idle" />
 }

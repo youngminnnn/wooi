@@ -24,6 +24,8 @@ const result = (id: string, costUsd: number): ChatItem =>
 const assistant = (id: string): ChatItem =>
   ({ id, type: 'assistant', ts: 1, text: '내용' }) as ChatItem
 
+const user = (id: string, text: string): ChatItem => ({ id, type: 'user', ts: 1, text }) as ChatItem
+
 /**
  * 비용은 화면에 숫자 하나로 나오지만, 예전에는 그걸 위해 대화 전체가 렌더러로 넘어가 매 토큰마다
  * 다시 합산됐다. 이제 메인이 증분으로 들고 있으므로, 그 증분이 실제 기록과 어긋나지 않아야 한다.
@@ -118,5 +120,105 @@ describe('TranscriptStore.copy', () => {
 
     expect(t.load('copy-stale-target')).toEqual(t.load('copy-fresh-source'))
     expect(t.costOf('copy-stale-target')).toBeCloseTo(0.75)
+  })
+})
+
+/**
+ * 렌더러는 대화를 뒤에서부터 한 페이지씩 읽는다 — 며칠 이어 쓴 워크스페이스의 첫 페인트가
+ * 대화 전체를 이고 가지 않게 하기 위해서다. 그 창을 만드는 쪽이 여기다.
+ */
+describe('TranscriptStore.loadTail', () => {
+  it('최근 limit 개만 순서 그대로 돌려준다', async () => {
+    const { getTranscripts } = await import('./transcripts')
+    const t = getTranscripts()
+    for (let i = 0; i < 10; i++) t.upsert('ws-tail', assistant(`a${i}`))
+
+    expect(t.loadTail('ws-tail', 3).map((item) => item.id)).toEqual(['a7', 'a8', 'a9'])
+  })
+
+  it('가진 것보다 많이 요청하면 전부 준다 — 이 "적게 왔다" 가 곧 더 없다는 신호다', async () => {
+    const { getTranscripts } = await import('./transcripts')
+    const t = getTranscripts()
+    for (let i = 0; i < 4; i++) t.upsert('ws-short', assistant(`a${i}`))
+
+    expect(t.loadTail('ws-short', 300)).toHaveLength(4)
+  })
+
+  it('없는 워크스페이스는 빈 배열이다', async () => {
+    const { getTranscripts } = await import('./transcripts')
+    expect(getTranscripts().loadTail('ws-none', 300)).toEqual([])
+  })
+
+  it('같은 id 가 갱신된 뒤에도 꼬리는 합쳐진 결과 기준이다', async () => {
+    const { getTranscripts } = await import('./transcripts')
+    const t = getTranscripts()
+    for (let i = 0; i < 5; i++) t.upsert('ws-merge', assistant(`a${i}`))
+    t.upsert('ws-merge', { ...assistant('a0'), text: '고쳐 쓴 내용' } as ChatItem)
+
+    // 같은 id 의 마지막 줄이 이기되 첫 등장 순서를 지키므로 개수는 그대로다.
+    expect(t.loadTail('ws-merge', 5)).toHaveLength(5)
+    expect(t.loadTail('ws-merge', 2).map((item) => item.id)).toEqual(['a3', 'a4'])
+  })
+})
+
+/**
+ * /rewind 의 대화 되돌리기는 append 로 굴러가던 파일에서 처음으로 "지운다" 를 요구한다.
+ * 캐시만 자르고 파일을 안 자르면 앱을 다시 켰을 때 되돌린 대화가 되살아난다.
+ */
+describe('TranscriptStore.truncateFrom', () => {
+  it('그 항목부터 뒤를 버리고, 버린 것을 돌려준다', async () => {
+    const { getTranscripts } = await import('./transcripts')
+    const t = getTranscripts()
+    t.upsert('ws-cut', user('u1', '첫 메시지'))
+    t.upsert('ws-cut', assistant('a1'))
+    t.upsert('ws-cut', user('u2', '둘째 메시지'))
+    t.upsert('ws-cut', assistant('a2'))
+
+    const dropped = t.truncateFrom('ws-cut', 'u2')
+
+    expect(dropped.map((i) => i.id)).toEqual(['u2', 'a2'])
+    expect(t.load('ws-cut').map((i) => i.id)).toEqual(['u1', 'a1'])
+  })
+
+  it('디스크에도 반영된다 — 다시 읽어도 되살아나지 않는다', async () => {
+    vi.resetModules()
+    const { getTranscripts } = await import('./transcripts')
+    const t = getTranscripts()
+    t.upsert('ws-cut2', user('u1', '남을 메시지'))
+    t.upsert('ws-cut2', user('u2', '버릴 메시지'))
+    t.truncateFrom('ws-cut2', 'u2')
+
+    // 캐시를 통째로 버리고 파일에서 다시 읽는다.
+    vi.resetModules()
+    const fresh = await import('./transcripts')
+    expect(
+      fresh
+        .getTranscripts()
+        .load('ws-cut2')
+        .map((i) => i.id)
+    ).toEqual(['u1'])
+  })
+
+  it('버린 턴의 비용은 집계에서 빠진다', async () => {
+    const { getTranscripts } = await import('./transcripts')
+    const t = getTranscripts()
+    t.upsert('ws-cut3', user('u1', '첫 메시지'))
+    t.upsert('ws-cut3', result('r1', 0.25))
+    t.upsert('ws-cut3', user('u2', '둘째 메시지'))
+    t.upsert('ws-cut3', result('r2', 0.5))
+    expect(t.costOf('ws-cut3')).toBeCloseTo(0.75)
+
+    t.truncateFrom('ws-cut3', 'u2')
+
+    expect(t.costOf('ws-cut3')).toBeCloseTo(0.25)
+  })
+
+  it('없는 항목이면 아무것도 건드리지 않는다', async () => {
+    const { getTranscripts } = await import('./transcripts')
+    const t = getTranscripts()
+    t.upsert('ws-cut4', user('u1', '유일한 메시지'))
+
+    expect(t.truncateFrom('ws-cut4', 'nope')).toEqual([])
+    expect(t.load('ws-cut4').map((i) => i.id)).toEqual(['u1'])
   })
 })
