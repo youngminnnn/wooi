@@ -51,6 +51,25 @@ const STREAK_WINDOW_MS = 10 * 60_000
  */
 const EARLY_CHECK_MS = 5 * 60_000
 /**
+ * 이어 보내기 사이의 최소 간격. **백엔드(=계정) 하나당** 지켜진다.
+ *
+ * 사용량 제한은 계정 단위이므로 예약도 계정 단위로 같은 시각에 걸린다 — `retryTime` 에 들어가는
+ * 것은 공유 스냅샷과 오류가 준 해제 시각뿐이라, 아홉 개가 기다렸으면 아홉 개가 **결정적으로 같은**
+ * retryAt 을 갖는다. 그대로 두면 제한이 풀리는 순간 전부 한꺼번에 나가고, 둘이 겹쳐 나쁘다:
+ * 각자 프롬프트 캐시를 새로 써 넣고(대기하는 동안 캐시는 확실히 죽는다), 갓 열린 창을 한꺼번에
+ * 태워 곧바로 다시 제한에 걸린다.
+ *
+ * 조회를 계정 단위로 합치는 EARLY_CHECK_MS 와 같은 논리다 — 스냅샷이 계정 단위라 조회를 아홉 번
+ * 할 이유가 없듯, 창도 계정 단위라 아홉 개를 같은 순간에 밀어 넣을 이유가 없다.
+ *
+ * 20초인 근거는 WAKE_CHECK_MS 다. 그보다 **짧아야** 게이트에 걸린 워크스페이스가 다음 폴링 틱을
+ * 기다리지 않고 제 시각에 깨어난다. 전체 지연은 `n × 20초` 로 묶이고, 그 정도로 밀리는 것은
+ * 몇 시간을 기다린 예약에 비하면 없는 것과 같다.
+ *
+ * **설정으로 만들지 않는다**([[types]] AppSettings 주석).
+ */
+const CONTINUATION_SPACING_MS = 20_000
+/**
  * "이 창에 걸린 것" 으로 볼 만한 사용률의 하한(likelyExhaustedResetAt).
  *
  * 제한 직후의 수치는 요청 한 번어치만큼 늦으므로 99% 는 100% 로 읽어야 하지만, 20% 는 그렇지 않다.
@@ -148,6 +167,11 @@ export class RateLimitResumeCoordinator {
    * 단위이므로, 같은 제한을 기다리는 워크스페이스가 몇 개든 조회는 EARLY_CHECK_MS 에 한 번이면 된다.
    */
   private earlyCheckAt = 0
+  /**
+   * 마지막으로 이어 보낸 시각. 이 코디네이터는 백엔드당 하나뿐이라([[claude/manager]] 생성자)
+   * 인스턴스 필드 하나가 곧 계정 단위 게이트가 된다(CONTINUATION_SPACING_MS).
+   */
+  private lastContinuationAt = 0
 
   constructor(private deps: Deps) {}
 
@@ -611,6 +635,20 @@ export class RateLimitResumeCoordinator {
     pending: NonNullable<Workspace['pendingRateLimitResume']>
   ): void {
     if (current.sessionId !== pending.sessionId) return this.cancel(workspaceId)
+    // 계정 단위 간격을 지킨다(CONTINUATION_SPACING_MS). 여기 한 곳에 두는 이유는 진입점이 넷이라서다
+    // — resume 의 두 갈래, checkLiftedEarly 의 조기 재개, probeConnection. 그중 조기 재개가 가장
+    // 강한 동시 발사원이라(공유 스냅샷 하나를 보고 전원이 같은 틱에 판단한다) 어느 하나만 막아서는
+    // 소용이 없다.
+    //
+    // 예약을 **건드리지 않고** 다시 잰다 — clearPending 도 streak 도 여기서는 손대지 않는다.
+    // 그것들을 먼저 지우면 되돌아올 근거가 사라져 이 워크스페이스는 영영 안 이어진다.
+    const now = Date.now()
+    const waited = now - this.lastContinuationAt
+    if (waited < CONTINUATION_SPACING_MS) {
+      this.arm(workspaceId, now + (CONTINUATION_SPACING_MS - waited))
+      return
+    }
+    this.lastContinuationAt = now
     const connection = causeOf(pending) === 'connection'
     // 이어 보낸 턴이 곧바로 또 걸리면 이 횟수를 물려받아 무한 재시도를 막는다(streak 주석 참고).
     this.streak.set(workspaceId, { attempt: pending.attempt + 1, at: Date.now() })
