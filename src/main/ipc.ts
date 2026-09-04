@@ -57,7 +57,8 @@ import {
   buildStackFromGhStack,
   buildStackFromPrs,
   detectArchiveSuggestion,
-  detectBaseMismatch
+  detectBaseMismatch,
+  detectIdleArchiveSuggestion
 } from './stack'
 import { getRepoStacks, getStackForPr } from './ghStack'
 import type { GhStackInfo } from './ghStack'
@@ -127,6 +128,7 @@ import {
   agentSettingsFor,
   agentSwitchNeedsHandoff,
   canSwitchAgentBackend,
+  fanoutGroupOf,
   isBranchStack,
   normalizePermissionMode,
   reorderById,
@@ -2255,6 +2257,26 @@ export function registerIpc(ctx: IpcContext): void {
         return meta.headRefName === curBranch ? { number: meta.number } : null
       }
     }).catch(() => null)
+    // 병합이 아니어도 정리할 값어치가 있는 워크스페이스가 있다 — 만들고 손대지 않은 것과,
+    // 아무도 채택하지 않은 fan-out 후보. 병합 제안이 이미 떴으면 그쪽이 더 강한 사유다.
+    const idleSuggestion =
+      suggestion ??
+      detectIdleArchiveSuggestion({
+        branch: curBranch,
+        existing: ws.archiveSuggest,
+        dismissed: ws.archiveSuggestDismissed,
+        branchStack: isBranchStack(ws),
+        hasLiveChildren: store
+          .getState()
+          .workspaces.some((w) => w.parentWorkspaceId === ws.id && !w.archived),
+        pendingSync: plan !== null,
+        sessionId: ws.sessionId,
+        prNumber: ws.prNumber,
+        createdAt: ws.createdAt,
+        lastActiveAt: ws.lastActiveAt,
+        fanout: fanoutGroupOf(store.getState().fanoutGroups, ws.id) ?? null,
+        now: Date.now()
+      })
 
     let changed = false
     store.update((st) => {
@@ -2269,8 +2291,11 @@ export function registerIpc(ctx: IpcContext): void {
         w.stackSync = plan
         changed = true
       }
-      if ((w.archiveSuggest?.mergedBranch ?? null) !== (suggestion?.mergedBranch ?? null)) {
-        w.archiveSuggest = suggestion
+      if (
+        (w.archiveSuggest?.mergedBranch ?? null) !== (idleSuggestion?.mergedBranch ?? null) ||
+        (w.archiveSuggest?.reason ?? 'merged') !== (idleSuggestion?.reason ?? 'merged')
+      ) {
+        w.archiveSuggest = idleSuggestion
         changed = true
       }
       // GitHub 스택 메타데이터. 모델 B 로 흡수됐는지와 무관하게 기록한다 — 계층마다 worktree 를

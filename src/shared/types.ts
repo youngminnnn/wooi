@@ -2969,12 +2969,35 @@ export interface StackSyncPlan {
  * `git worktree remove --force` 로 지우므로, 사용자 모르게 나가면 안 된다.
  */
 export interface ArchiveSuggestion {
-  /** 이 제안을 띄우게 만든 병합 브랜치. 해제 기억(archiveSuggestDismissed)의 키이기도 하다. */
+  /**
+   * 이 제안을 띄우게 만든 브랜치. 해제 기억(archiveSuggestDismissed)의 키이기도 하다.
+   *
+   * 이름이 `merged` 인 것은 병합이 오랫동안 유일한 사유였기 때문이고, 지금은 `reason` 이
+   * 그것을 말한다 — 필드명을 바꾸지 않는 이유는 저장된 해제 기억이 이 키로 붙어 있어서다.
+   */
   mergedBranch: string
-  /** 병합된 PR 번호(배너에 보여 준다). 번호를 알아내지 못했으면 null. */
+  /** 병합된 PR 번호(배너에 보여 준다). 번호를 알아내지 못했거나 사유가 병합이 아니면 null. */
   prNumber: number | null
+  /**
+   * 왜 정리를 제안하는가. 없으면 `'merged'` — 옵셔널로 두는 것이 요점이다. 저장된 제안은
+   * 이 필드가 없고, 그때는 전부 병합 감지로 만들어진 것이므로 마이그레이션 없이 옳게 읽힌다.
+   */
+  reason?: ArchiveSuggestReason
   detectedAt: number
 }
+
+/**
+ * 정리를 제안하는 사유.
+ *
+ * - `merged` — PR 이 병합돼 이 워크스페이스의 일이 끝났다.
+ * - `unused` — 만들어 놓고 한 번도 쓰지 않았다. 에이전트가 턴을 돈 적이 없고(sessionId 가 없다)
+ *   생성 이후 활동도 없다. 이런 워크스페이스도 사이드바 한 자리와 worktree 하나를 차지하고,
+ *   무엇보다 **첫 턴마다 시스템 프롬프트·CLAUDE.md·도구 스키마를 캐시에 새로 써 넣는다.**
+ * - `fanoutLoser` — fan-out 후보인데 그룹에서 아무도 채택되지 않은 채 오래 지났다. 채택하면
+ *   형제 아카이브가 그 자리에서 일어나므로([[fanout]] adoptFanoutWinner), 여기 걸리는 것은
+ *   "물어보고 답을 고르지 않은" 그룹뿐이다.
+ */
+export type ArchiveSuggestReason = 'merged' | 'unused' | 'fanoutLoser'
 
 /**
  * 스택 워크스페이스의 PR 이 부모가 아닌 브랜치(대개 리포 기본 브랜치)를 향하고 있는 상태.

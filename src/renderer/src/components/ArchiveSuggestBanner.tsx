@@ -14,11 +14,12 @@ import { useStore } from '../store'
 const LARGE_CONTEXT_TOKENS = 100_000
 
 /**
- * 이 워크스페이스의 PR 이 병합돼 남은 일이 없을 때 뜨는 정리 제안 배너.
+ * 이 워크스페이스에 남은 일이 없을 때 뜨는 정리 제안 배너([[types]] ArchiveSuggestReason).
  *
- * 앱이 이미 아는 사실을 앱이 말한다 — 병합 감지는 스택 캐스케이드가 쓰는 것과 같은 신호이므로,
- * 에이전트에게 턴을 태워 다시 판단시키지 않는다. 죽은 워크스페이스가 사이드바에 쌓이는 것을
- * 사용자가 눈으로 알아채야 하는 상황을 없애는 것이 목적이다.
+ * 앱이 이미 아는 사실을 앱이 말한다 — 병합 감지는 스택 캐스케이드가 쓰는 것과 같은 신호이고,
+ * "손대지 않았다" 는 워크스페이스가 이미 들고 있는 필드다. 어느 쪽도 에이전트에게 턴을 태워 다시
+ * 판단시키지 않는다. 죽은 워크스페이스가 사이드바에 쌓이는 것을 사용자가 눈으로 알아채야 하는
+ * 상황을 없애는 것이 목적이다.
  *
  * 감지는 자동이지만 실행은 자동이 아니다 — 아카이브는 worktree 디렉토리를 지우므로(브랜치·기록은
  * 남는다) 사용자 승인 뒤에만 나간다. 이 배너가 곧 그 확인 창이라, 별도 확인 다이얼로그는 띄우지
@@ -47,6 +48,8 @@ export default function ArchiveSuggestBanner({
   // 캐스케이드 배너가 있으면 그쪽이 먼저다 — 스택을 정리하기 전에 아카이브하면 자식들이 끊긴다.
   // 판정에서 이미 배제하지만(detectArchiveSuggestion), 렌더 순서로도 한 번 더 보장한다.
   if (!suggestion || workspace.stackSync) return null
+  // 저장된 옛 제안에는 사유가 없다 — 그때는 병합이 유일한 사유였다([[types]] ArchiveSuggestion).
+  const reason = suggestion.reason ?? 'merged'
 
   const archive = async (): Promise<void> => {
     setBusy(true)
@@ -83,14 +86,29 @@ export default function ArchiveSuggestBanner({
         <Archive size={14} className="mt-0.5 shrink-0 text-neutral-400" />
         <div className="min-w-0 flex-1 text-xs leading-relaxed text-neutral-200">
           <div className="font-medium">
-            {suggestion.prNumber ? `#${suggestion.prNumber} ` : ''}was merged —{' '}
-            <span className="font-mono">{suggestion.mergedBranch}</span> is done.
+            {reason === 'unused' ? (
+              <>
+                <span className="font-mono">{suggestion.mergedBranch}</span> was never used — no
+                turn has run here since it was created.
+              </>
+            ) : reason === 'fanoutLoser' ? (
+              <>
+                <span className="font-mono">{suggestion.mergedBranch}</span> is a fan-out candidate
+                and none of the group was adopted.
+              </>
+            ) : (
+              <>
+                {suggestion.prNumber ? `#${suggestion.prNumber} ` : ''}was merged —{' '}
+                <span className="font-mono">{suggestion.mergedBranch}</span> is done.
+              </>
+            )}
           </div>
           <div className="text-neutral-400">
-            Archiving removes this worktree directory. The branch, pull request, and conversation
-            are kept, and you can unarchive it later.
+            Archiving removes this worktree directory. The branch
+            {reason === 'merged' ? ', pull request,' : ''} and conversation are kept, and you can
+            unarchive it later.
           </div>
-          {contextTokens >= LARGE_CONTEXT_TOKENS && (
+          {reason === 'merged' && contextTokens >= LARGE_CONTEXT_TOKENS && (
             <div className="mt-1 text-neutral-400">
               If you keep working here, the next turn still carries{' '}
               {Math.round(contextTokens / 1000).toLocaleString()}k tokens of the finished work
@@ -108,7 +126,7 @@ export default function ArchiveSuggestBanner({
           )}
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
-          {contextTokens >= LARGE_CONTEXT_TOKENS && (
+          {reason === 'merged' && contextTokens >= LARGE_CONTEXT_TOKENS && (
             <button
               disabled={busy}
               onClick={() => void startFresh()}
