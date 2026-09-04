@@ -310,7 +310,7 @@ export default function RepoConfigModal({
               </div>
             </div>
             {runScripts.length > 0 && (
-              <div className="mb-1.5 grid grid-cols-[7.5rem_minmax(0,1fr)_5.5rem_5rem] gap-2 px-1 text-[11px] font-medium uppercase tracking-wide text-neutral-600">
+              <div className="mb-1.5 grid grid-cols-[7.5rem_minmax(0,1fr)_5.5rem_5rem] gap-2 px-1 text-xs font-medium uppercase tracking-wide text-neutral-600">
                 <span>Name</span>
                 <span>Command</span>
                 <span>Auto-start</span>
@@ -438,7 +438,7 @@ export default function RepoConfigModal({
               </p>
             </div>
             {savedPrompts.length > 0 && (
-              <div className="mb-1.5 grid grid-cols-[9rem_minmax(0,1fr)_2.5rem] gap-2 px-1 text-[11px] font-medium uppercase tracking-wide text-neutral-600">
+              <div className="mb-1.5 grid grid-cols-[9rem_minmax(0,1fr)_2.5rem] gap-2 px-1 text-xs font-medium uppercase tracking-wide text-neutral-600">
                 <span>Name</span>
                 <span>Prompt</span>
                 <span className="sr-only">Actions</span>

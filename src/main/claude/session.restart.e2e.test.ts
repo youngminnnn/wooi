@@ -74,7 +74,11 @@ describe.skipIf(!process.env.WOOI_E2E)('ClaudeSession failed-turn restart', () =
     await new Promise<void>((r) => server.close(() => r()))
     delete process.env.ANTHROPIC_BASE_URL
 
-    const sessionIds = events.flatMap((e) => (e.type === 'session' ? [e.sessionId] : []))
+    // session 이벤트에는 프로세스 init 외에도 assistant 메시지가 실제 사용 모델을 알리는 갱신이
+    // 섞인다. 프로세스 기동 횟수는 isFallback 필드가 없는 init 이벤트만 세어야 한다.
+    const sessionIds = events.flatMap((e) =>
+      e.type === 'session' && e.isFallback === undefined ? [e.sessionId] : []
+    )
 
     // (1) CLI 프로세스가 두 번 떴다 = 사용자 재전송 없이 메시지를 다시 돌렸다.
     expect(sessionIds).toHaveLength(2)

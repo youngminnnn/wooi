@@ -1,6 +1,7 @@
 import { connect } from 'node:net'
 import { z } from 'zod'
 import { agentToolsFor, WOOI_MCP_INSTRUCTIONS } from '../agent/tools/catalog'
+import { agentToolContent } from '@shared/agentToolContent'
 import type { AgentBackendId } from '@shared/types'
 
 /**
@@ -141,10 +142,8 @@ async function handle(msg: JsonRpcMessage): Promise<void> {
     // 인자는 도구가 정의한 그대로 넘긴다. 호출자는 이 프로세스가 env 로 알고 있다.
     try {
       const data = await callMain(WORKSPACE, name, args)
-      return send({
-        id,
-        result: { content: [{ type: 'text', text: JSON.stringify(data ?? null) }] }
-      })
+      // 이미지 블록까지 만드는 변환은 Claude 쪽 서버와 공유한다([[shared/agentToolContent]]).
+      return send({ id, result: { content: agentToolContent(data) } })
     } catch (err) {
       // 프로토콜 오류가 아니라 **도구 실패**로 돌려준다 — 모델이 문장을 읽고 고쳐 다시 부를 수
       // 있어야 한다(예: "커밋하고 다시 호출하라").

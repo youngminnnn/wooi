@@ -7,7 +7,13 @@ import { codexMcpServerEnv } from '../mcpSettings'
 import { agentDefaultEnv } from '../agentEnv'
 import { getTranscripts } from '../transcripts'
 import { log } from '../logger'
-import { IPC, agentSettingsFor, isQuestionPermission, normalizePermissionMode } from '@shared/types'
+import {
+  IPC,
+  agentSettingsFor,
+  isQuestionPermission,
+  normalizePermissionMode,
+  promoteWorkspaceStack
+} from '@shared/types'
 import { CODEX_META, type AgentBackend, type TurnEndHook } from '../agent/backend'
 import { canLeadAgentTeam, delegateBackendsFor } from '../agent/multiAgent'
 import { delegateThreadInstructions, soloThreadInstructions } from '../subagent/catalog'
@@ -16,6 +22,7 @@ import { durationLabel } from './rateLimits'
 import { CodexSkillsCache, mergeSkillCommands } from './skills'
 import type { SkillsListResponse } from './wire'
 import { RateLimitResumeCoordinator } from '../rateLimitResume'
+import { ShutdownResumeCoordinator } from '../shutdownResume'
 import { type RemotePushKind } from '../remote/push'
 import { showDesktopNotification } from '../notifications'
 import {
@@ -161,6 +168,7 @@ export class CodexSessionManager implements AgentBackend {
   >()
   private validModelIds: Set<string> | null = null
   private readonly rateLimitResume: RateLimitResumeCoordinator
+  private readonly shutdownResume: ShutdownResumeCoordinator
   /** 자동완성 hot path 는 이 캐시만 읽는다. app-server 의 skills/changed 알림만 이를 비운다. */
   private readonly skills = new CodexSkillsCache(async (cwd) => {
     const response = await this.request<SkillsListResponse>((reqId) => ({
@@ -186,14 +194,24 @@ export class CodexSessionManager implements AgentBackend {
     this.rateLimitResume = new RateLimitResumeCoordinator({
       backend: CODEX_META.id,
       refreshLimits: () => this.refreshRateLimits(true),
-      sendContinuation: (workspaceId, text) => this.sendContinuation(workspaceId, text),
+      sendContinuation: (workspaceId, text, label) =>
+        this.sendContinuation(workspaceId, text, label),
       emitItem: (workspaceId, item) =>
         this.dispatch(IPC.evtChat, { workspaceId, event: { type: 'item', item } }),
       // 맥이 자다 깼거나 와이파이가 꺼져 있으면 이어 보내 봐야 실패한다 — 보내기 전에 물어본다.
       isOnline: () => net.isOnline(),
       broadcastState: () => this.dispatch(IPC.evtState, getStore().getState())
     })
+    this.shutdownResume = new ShutdownResumeCoordinator({
+      backend: CODEX_META.id,
+      sendContinuation: (workspaceId, text, label) =>
+        this.sendContinuation(workspaceId, text, label),
+      emitItem: (workspaceId, item) =>
+        this.dispatch(IPC.evtChat, { workspaceId, event: { type: 'item', item } }),
+      broadcastState: () => this.dispatch(IPC.evtState, getStore().getState())
+    })
     this.rateLimitResume.restore()
+    this.shutdownResume.restore()
   }
 
   // ── 호스트 프로세스 ──────────────────────────────────────────────────────
@@ -411,6 +429,7 @@ export class CodexSessionManager implements AgentBackend {
     opts?: SendMessageOptions
   ): void {
     this.rateLimitResume.cancel(workspaceId)
+    this.shutdownResume.cancel(workspaceId)
     const ws = this.getWorkspace(workspaceId)
     if (!ws) return
 
@@ -498,14 +517,27 @@ export class CodexSessionManager implements AgentBackend {
     })
   }
 
-  private sendContinuation(workspaceId: string, text: string): void {
+  /**
+   * 사용량 제한·연결 복구 뒤 Wooi 가 대신 넣는 턴.
+   *
+   * silent 가 아니다 — 사용자가 치지 않은 턴이 토큰을 쓰므로 왜 돌았는지가 대화에 남아야 한다.
+   * 대신 origin 을 실어 화면에서는 한 줄로 접힌다([[shared/types]] WooiTurnOrigin).
+   */
+  private sendContinuation(workspaceId: string, text: string, label: string): void {
     const ws = this.getWorkspace(workspaceId)
     if (!ws) return
-    this.send({ type: 'send', workspaceId, config: this.configFor(ws), text })
+    this.send({
+      type: 'send',
+      workspaceId,
+      config: this.configFor(ws),
+      text,
+      origin: { kind: 'wooi', label }
+    })
   }
 
   async interrupt(workspaceId: string): Promise<void> {
     this.rateLimitResume.cancel(workspaceId, true)
+    this.shutdownResume.cancel(workspaceId)
     this.sendIfHost({ type: 'interrupt', workspaceId })
     // 위임 서브런은 세션이 아니라 메인에서 돈다 — 스레드 인터럽트로는 끊기지 않으므로 여기서 끊는다.
     abortSubAgents(workspaceId)
@@ -639,6 +671,7 @@ export class CodexSessionManager implements AgentBackend {
    */
   clearSession(workspaceId: string): void {
     this.rateLimitResume.cancel(workspaceId)
+    this.shutdownResume.cancel(workspaceId)
     this.dispose(workspaceId)
     getStore().update((st) => {
       const w = st.workspaces.find((x) => x.id === workspaceId)
@@ -672,6 +705,10 @@ export class CodexSessionManager implements AgentBackend {
 
   cancelAllRateLimitResumes(): void {
     this.rateLimitResume.cancelAll()
+  }
+
+  cancelAllShutdownResumes(): void {
+    this.shutdownResume.cancelAll()
   }
 
   disposeAll(): void {
@@ -984,7 +1021,13 @@ export class CodexSessionManager implements AgentBackend {
         if (w) {
           w.status = event.status
           w.lastActiveAt = Date.now()
+          // 새 턴이 시작하면 지난 턴의 중단 표시는 더 이상 사실이 아니다. 지우는 자리를 턴 **끝**이
+          // 아니라 **시작**으로 잡은 이유가 있다 — 중단하면 이 턴의 idle 이 뒤늦게 한 번 더 올라오고,
+          // 끝에서 지우면 방금 찍은 표시를 그 신호가 바로 지워 버린다.
+          if (event.status === 'running') w.interruptedTurn = null
         }
+        if (w && st.settings.autoSortWorkspacesByActivity)
+          st.workspaces = promoteWorkspaceStack(st.workspaces, workspaceId)
       })
       if (event.status === 'idle') this.notify(workspaceId, 'completed', 'Response complete', false)
       else if (event.status === 'error') this.notify(workspaceId, 'error', 'Session error', true)
@@ -999,6 +1042,8 @@ export class CodexSessionManager implements AgentBackend {
         w.sessionId = sessionId
         w.lastActiveAt = Date.now()
       }
+      if (w && st.settings.autoSortWorkspacesByActivity)
+        st.workspaces = promoteWorkspaceStack(st.workspaces, workspaceId)
     })
   }
 

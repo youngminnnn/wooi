@@ -354,13 +354,13 @@ export default function QuestionPrompt({
                             <div className="flex items-center gap-2">
                               <span
                                 className={`inline-block h-3 w-3 shrink-0 border ${
-                                  multi ? 'rounded-[3px]' : 'rounded-full'
+                                  multi ? 'rounded' : 'rounded-full'
                                 } ${on ? 'bg-[var(--brand-400)] border-[var(--brand-400)]' : 'border-neutral-500'}`}
                               />
                               <span className="text-sm text-neutral-100">{opt.label}</span>
                               {/* 숫자 키로 바로 고를 수 있음을 알려 주는 힌트(9 번까지). */}
                               {oi < 9 && (
-                                <span className="ml-auto shrink-0 text-[10px] text-neutral-500 tabular-nums">
+                                <span className="ml-auto shrink-0 text-2xs text-neutral-500 tabular-nums">
                                   {oi + 1}
                                 </span>
                               )}
@@ -400,7 +400,7 @@ export default function QuestionPrompt({
       </div>
 
       <div className="mt-3 flex shrink-0 items-center justify-end gap-1.5">
-        <span className="mr-auto hidden truncate text-[11px] text-neutral-500 sm:block">
+        <span className="mr-auto hidden truncate text-xs text-neutral-500 sm:block">
           ↑↓ move · Space select · ⏎ next · ⌘⏎ submit · Esc cancel
         </span>
         <button

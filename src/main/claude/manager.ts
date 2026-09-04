@@ -13,14 +13,22 @@ import {
   agentSettingsFor,
   isQuestionPermission,
   nativePeerInbound,
+  promoteWorkspaceStack,
   peerSessionName
 } from '@shared/types'
 import { CLAUDE_META, CLAUDE_MODELS, type AgentBackend, type TurnEndHook } from '../agent/backend'
 import { agentDefaultsFor, canLeadAgentTeam, delegateBackendsFor } from '../agent/multiAgent'
 import { agentDefaultEnv } from '../agentEnv'
-import { claudeMode, type HostCommand, type HostEvent, type SessionConfig } from './protocol'
+import {
+  claudeMode,
+  type HostCommand,
+  type HostEvent,
+  type RewindHostResult,
+  type SessionConfig
+} from './protocol'
 import { runAgentTool } from '../agent/tools'
 import { RateLimitResumeCoordinator } from '../rateLimitResume'
+import { ShutdownResumeCoordinator } from '../shutdownResume'
 import { type RemotePushKind } from '../remote/push'
 import { showDesktopNotification } from '../notifications'
 import { nameFromPlan, shouldAutoName } from './planName'
@@ -42,6 +50,7 @@ import type {
   PermissionRequest,
   RateLimitSnapshot,
   RewindActionResult,
+  RewindMode,
   SendMessageOptions,
   SlashCommandInfo,
   UsageInfo,
@@ -103,6 +112,7 @@ export class SessionManager implements AgentBackend {
   private rateLimitDebounce: ReturnType<typeof setTimeout> | null = null
   private rateLimitPoll: ReturnType<typeof setInterval> | null = null
   private readonly rateLimitResume: RateLimitResumeCoordinator
+  private readonly shutdownResume: ShutdownResumeCoordinator
 
   constructor(
     private dispatch: Dispatch,
@@ -112,14 +122,24 @@ export class SessionManager implements AgentBackend {
     this.rateLimitResume = new RateLimitResumeCoordinator({
       backend: CLAUDE_META.id,
       refreshLimits: () => this.refreshRateLimits(true),
-      sendContinuation: (workspaceId, text) => this.sendContinuation(workspaceId, text),
+      sendContinuation: (workspaceId, text, label) =>
+        this.sendContinuation(workspaceId, text, label),
       emitItem: (workspaceId, item) =>
         this.dispatch(IPC.evtChat, { workspaceId, event: { type: 'item', item } }),
       // 맥이 자다 깼거나 와이파이가 꺼져 있으면 이어 보내 봐야 실패한다 — 보내기 전에 물어본다.
       isOnline: () => net.isOnline(),
       broadcastState: () => this.dispatch(IPC.evtState, getStore().getState())
     })
+    this.shutdownResume = new ShutdownResumeCoordinator({
+      backend: CLAUDE_META.id,
+      sendContinuation: (workspaceId, text, label) =>
+        this.sendContinuation(workspaceId, text, label),
+      emitItem: (workspaceId, item) =>
+        this.dispatch(IPC.evtChat, { workspaceId, event: { type: 'item', item } }),
+      broadcastState: () => this.dispatch(IPC.evtState, getStore().getState())
+    })
     this.rateLimitResume.restore()
+    this.shutdownResume.restore()
   }
 
   // ── 호스트 프로세스 ──────────────────────────────────────────────────────
@@ -397,6 +417,7 @@ export class SessionManager implements AgentBackend {
     opts?: SendMessageOptions
   ): void {
     this.rateLimitResume.cancel(workspaceId)
+    this.shutdownResume.cancel(workspaceId)
     const ws = this.getWorkspace(workspaceId)
     if (!ws) return
     this.send({
@@ -411,10 +432,22 @@ export class SessionManager implements AgentBackend {
     })
   }
 
-  private sendContinuation(workspaceId: string, text: string): void {
+  /**
+   * 사용량 제한·연결 복구 뒤 Wooi 가 대신 넣는 턴.
+   *
+   * silent 가 아니다 — 사용자가 치지 않은 턴이 토큰을 쓰므로 왜 돌았는지가 대화에 남아야 한다.
+   * 대신 origin 을 실어 화면에서는 한 줄로 접힌다([[shared/types]] WooiTurnOrigin).
+   */
+  private sendContinuation(workspaceId: string, text: string, label: string): void {
     const ws = this.getWorkspace(workspaceId)
     if (!ws) return
-    this.send({ type: 'send', workspaceId, config: this.configFor(ws), text })
+    this.send({
+      type: 'send',
+      workspaceId,
+      config: this.configFor(ws),
+      text,
+      origin: { kind: 'wooi', label }
+    })
   }
 
   /** /btw 사이드 질문. 메인 세션과 분리된 임시 query 로 호스트가 처리한다. */
@@ -474,17 +507,51 @@ export class SessionManager implements AgentBackend {
     }))
   }
 
-  /** /rewind — 고른 체크포인트로 추적된 파일을 되돌리고 결과를 돌려준다. */
-  async rewindAction(workspaceId: string, userMessageId: string): Promise<RewindActionResult> {
+  /**
+   * /rewind — 고른 체크포인트로 파일·대화를 되돌리고 결과를 돌려준다.
+   *
+   * 파일 되돌리기는 호스트가 끝까지 처리하지만, 대화 되돌리기는 반쪽만 호스트 소유다: CLI 세션을
+   * 자르는 것은 호스트가, 화면에 남은 트랜스크립트와 워크스페이스 store 를 맞추는 것은 메인이
+   * 한다. 호스트는 후자를 지시로 돌려주고(RewindHostResult), 여기서 처리한 뒤 떼고 넘긴다.
+   */
+  async rewindAction(
+    workspaceId: string,
+    userMessageId: string,
+    mode: RewindMode
+  ): Promise<RewindActionResult> {
     const ws = this.getWorkspace(workspaceId)
     if (!ws) throw new Error('Workspace not found.')
-    return this.request<RewindActionResult>((reqId) => ({
-      type: 'rewindAction',
-      reqId,
-      workspaceId,
-      config: this.configFor(ws),
-      userMessageId
-    }))
+    const { truncateFromItemId, sessionReset, ...result } = await this.request<RewindHostResult>(
+      (reqId) => ({
+        type: 'rewindAction',
+        reqId,
+        workspaceId,
+        config: this.configFor(ws),
+        userMessageId,
+        mode
+      })
+    )
+
+    if (truncateFromItemId) {
+      const dropped = getTranscripts().truncateFrom(workspaceId, truncateFromItemId)
+      // 되돌림 지점의 사용자 메시지 원문을 입력창에 채워 준다 — 고쳐서 다시 보내는 것이 이 동작의
+      // 목적이기 때문이다. 호스트가 넣어 둔 라벨(첫 줄)보다 이쪽이 정확하다(여러 줄·전체 본문).
+      const target = dropped[0]
+      if (target && 'text' in target && typeof target.text === 'string')
+        result.prefill = target.text
+      this.emit(workspaceId, { type: 'truncate', fromItemId: truncateFromItemId })
+    }
+
+    if (sessionReset) {
+      this.rateLimitResume.cancel(workspaceId)
+      getStore().update((st) => {
+        const w = st.workspaces.find((x) => x.id === workspaceId)
+        if (w) w.sessionId = null
+      })
+      this.dispatch(IPC.evtState, getStore().getState())
+    }
+
+    return result
   }
 
   /**
@@ -494,6 +561,7 @@ export class SessionManager implements AgentBackend {
    */
   clearSession(workspaceId: string): void {
     this.rateLimitResume.cancel(workspaceId)
+    this.shutdownResume.cancel(workspaceId)
     this.dispose(workspaceId)
     getStore().update((st) => {
       const w = st.workspaces.find((x) => x.id === workspaceId)
@@ -535,6 +603,7 @@ export class SessionManager implements AgentBackend {
 
   async interrupt(workspaceId: string): Promise<void> {
     this.rateLimitResume.cancel(workspaceId, true)
+    this.shutdownResume.cancel(workspaceId)
     this.sendIfHost({ type: 'interrupt', workspaceId })
     // 세션이 없거나 끊긴 경우에도 사이드바가 '진행 중'에 갇히지 않도록 idle 로 확정한다.
     this.forceIdle(workspaceId)
@@ -683,6 +752,10 @@ export class SessionManager implements AgentBackend {
 
   cancelAllRateLimitResumes(): void {
     this.rateLimitResume.cancelAll()
+  }
+
+  cancelAllShutdownResumes(): void {
+    this.shutdownResume.cancelAll()
   }
 
   disposeAll(): void {
@@ -958,7 +1031,13 @@ export class SessionManager implements AgentBackend {
         if (w) {
           w.status = event.status
           w.lastActiveAt = Date.now()
+          // 새 턴이 시작하면 지난 턴의 중단 표시는 더 이상 사실이 아니다. 지우는 자리를 턴 **끝**이
+          // 아니라 **시작**으로 잡은 이유가 있다 — 중단하면 이 턴의 idle 이 뒤늦게 한 번 더 올라오고,
+          // 끝에서 지우면 방금 찍은 표시를 그 신호가 바로 지워 버린다.
+          if (event.status === 'running') w.interruptedTurn = null
         }
+        if (w && st.settings.autoSortWorkspacesByActivity)
+          st.workspaces = promoteWorkspaceStack(st.workspaces, workspaceId)
       })
       // 창이 비활성일 때만 완료/에러를 OS 알림으로. (활성 창은 사이드바·알림음으로 충분)
       if (event.status === 'idle') {
@@ -993,6 +1072,8 @@ export class SessionManager implements AgentBackend {
         w.sessionId = sessionId
         w.lastActiveAt = Date.now()
       }
+      if (w && st.settings.autoSortWorkspacesByActivity)
+        st.workspaces = promoteWorkspaceStack(st.workspaces, workspaceId)
     })
   }
 

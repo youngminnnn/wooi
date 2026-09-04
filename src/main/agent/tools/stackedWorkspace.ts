@@ -125,7 +125,9 @@ export const createStackedWorkspace: AgentToolHandler = async (deps, workspaceId
     //
     // 실패해도 인계는 진행한다 — 요약은 자식을 빠르게 만들 뿐, 없다고 틀리지는 않는다.
     const summary = await summarizeBranch(ws.worktreePath, ws.baseBranch).catch(() => null)
-    deps.sendMessage(childId, handoffMessage(task, ws, summary))
+    deps.sendMessage(childId, handoffMessage(task, ws, summary), {
+      origin: { kind: 'wooi', label: 'Task handed down from the parent workspace' }
+    })
   }
 
   // 전달 실패는 생성을 막지 않지만 조용히 넘기면 안 된다 — 새 워크스페이스의 에이전트가

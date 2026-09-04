@@ -86,7 +86,7 @@ export default function BranchLineTotalChip({
         aria-hidden="true"
         className="pointer-events-none absolute left-0 top-full z-10 mt-1 hidden min-w-[13rem] rounded-md border border-[var(--border)] bg-[var(--surface)] p-2 shadow-lg group-hover/total:block"
       >
-        <span className="mb-1 block text-[10px] uppercase tracking-wide text-neutral-500">
+        <span className="mb-1 block text-2xs uppercase tracking-wide text-neutral-500">
           Lines of code
         </span>
         {rows.map((row) => (

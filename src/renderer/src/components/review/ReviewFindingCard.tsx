@@ -102,7 +102,7 @@ export default function ReviewFindingCard({
         />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5 flex-wrap">
-            <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${severity.className}`}>
+            <span className={`px-1.5 py-0.5 rounded text-2xs font-medium ${severity.className}`}>
               {severity.label}
             </span>
             <span className="text-sm font-medium text-neutral-100">{finding.title}</span>
@@ -110,7 +110,7 @@ export default function ReviewFindingCard({
                 보이지 않으면 카드만 봐서는 무엇에 대한 지적인지 알 수 없다. */}
             {(finding.stackPrNumbers?.length ?? 0) > 0 ? (
               <span
-                className="flex items-center gap-1 rounded bg-[var(--accent-400)]/15 px-1.5 py-0.5 text-[10px] font-medium text-[var(--accent-300)]"
+                className="flex items-center gap-1 rounded bg-[var(--accent-400)]/15 px-1.5 py-0.5 text-2xs font-medium text-[var(--accent-300)]"
                 title={`About ${finding.stackPrNumbers!.map((n) => `#${n}`).join(', ')} — posted on #${finding.prNumber ?? finding.stackPrNumbers![0]}`}
               >
                 <Layers size={10} />
@@ -119,7 +119,7 @@ export default function ReviewFindingCard({
             ) : (
               layerLabel !== undefined && (
                 <span
-                  className="rounded bg-[var(--surface-2)] px-1.5 py-0.5 font-mono text-[10px] text-neutral-400"
+                  className="rounded bg-[var(--surface-2)] px-1.5 py-0.5 font-mono text-2xs text-neutral-400"
                   title={`Posted on #${layerLabel}`}
                 >
                   #{layerLabel}
@@ -131,7 +131,7 @@ export default function ReviewFindingCard({
             {comment?.resolved && (
               <span
                 title="This thread is marked resolved on GitHub."
-                className="flex items-center gap-1 rounded bg-[var(--success-500)]/15 px-1.5 py-0.5 text-[10px] font-medium text-[var(--success-300)]"
+                className="flex items-center gap-1 rounded bg-[var(--success-500)]/15 px-1.5 py-0.5 text-2xs font-medium text-[var(--success-300)]"
               >
                 <CheckCheck size={10} />
                 Resolved
@@ -142,7 +142,7 @@ export default function ReviewFindingCard({
             {comment?.outdated && (
               <span
                 title="The line this comment is on has changed — GitHub marks it outdated."
-                className="flex items-center gap-1 rounded bg-[var(--warning-500)]/15 px-1.5 py-0.5 text-[10px] font-medium text-[var(--warning-300)]"
+                className="flex items-center gap-1 rounded bg-[var(--warning-500)]/15 px-1.5 py-0.5 text-2xs font-medium text-[var(--warning-300)]"
               >
                 <History size={10} />
                 Outdated
@@ -152,7 +152,7 @@ export default function ReviewFindingCard({
 
           {/* 줄이 옮겨졌으면 반드시 알린다 — 사용자가 엉뚱한 줄에 다는 걸 눈으로 잡을 수 있어야 한다. */}
           {finding.anchor?.snappedFrom != null && (
-            <p className="mt-1 flex items-center gap-1 text-[11px] text-[var(--warning-300)]">
+            <p className="mt-1 flex items-center gap-1 text-xs text-[var(--warning-300)]">
               <MoveVertical size={11} />
               Line {finding.anchor.snappedFrom} isn&rsquo;t in the diff — moved to line{' '}
               {finding.anchor.line}.

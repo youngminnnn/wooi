@@ -1,22 +1,43 @@
-import { useEffect, useMemo, useState } from 'react'
-import { RefreshCw } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { ListTree, RefreshCw, WrapText } from 'lucide-react'
 import { useStore } from '../store'
 import { isPaneWindow } from '../lib/paneWindow'
-import { useWorkspaceBackend } from '../lib/backends'
-import DiffView, { type DiffCommenting } from './DiffView'
+import DiffView, { type DiffCommenting, type DiffDiscarding } from './DiffView'
 import DiffCommentsBar from './diff/DiffCommentsBar'
+import DiffFileTree, {
+  DIFF_TREE_DEFAULT_WIDTH,
+  DIFF_TREE_MAX_WIDTH,
+  DIFF_TREE_MIN_WIDTH
+} from './diff/DiffFileTree'
+import CompareBasePicker from './diff/CompareBasePicker'
 import { isSendCommentsShortcut, type DiffComment } from '../lib/diffComments'
-import type { WorkspaceDiff } from '@shared/types'
+import { normalizeCompareBase, offersCompareBaseChoice } from '@shared/compareBase'
+import { findDiffFileSection } from '../lib/diffFileTree'
+import {
+  DIFF_FILE_TREE_OPEN,
+  DIFF_FILE_TREE_WIDTH,
+  DIFF_WORD_WRAP_OFF,
+  readUiFlag,
+  readUiNumber,
+  setUiFlag,
+  setUiNumber
+} from '../lib/uiFlags'
+import type { FileDiff, WorkspaceDiff } from '@shared/types'
 
 /** 참조 동일성 유지용 — 셀렉터가 매번 새 배열을 돌려주면 무한 리렌더가 난다. */
 const NO_COMMENTS: DiffComment[] = []
+
+/** diff 가 아직 없을 때 트리에 넘길 빈 목록. 매번 새 배열을 만들면 트리가 헛돈다. */
+const NO_FILES: FileDiff[] = []
 
 /**
  * 우측 패널의 Changes 탭. base 브랜치 대비 변경을 표시한다.
  * 턴이 끝나 git 상태가 바뀌면(store 의 gitStatus 갱신) 자동으로 다시 불러온다.
  *
- * diff 는 읽기 전용이지만, 줄에 코멘트를 달아 모았다가 한 번에 에이전트에게 보낼 수 있다.
- * 코멘트는 초안일 뿐이라 store 의 휘발성 슬라이스에만 산다([[diffComments]]).
+ * 리뷰가 이 패널 안에서 닫히도록 두 갈래를 준다. 줄에 코멘트를 달아 모았다가 한 번에
+ * 에이전트에게 보내거나(코멘트는 초안일 뿐이라 store 의 휘발성 슬라이스에만 산다
+ * [[diffComments]]), 마음에 안 드는 hunk 는 그냥 워킹 트리에서 버린다. 스테이징도 커밋도
+ * 하지 않는다 — 커밋은 계속 에이전트의 몫이다.
  */
 export default function ChangesPanel({
   workspaceId,
@@ -27,6 +48,17 @@ export default function ChangesPanel({
 }): React.JSX.Element {
   const [diff, setDiff] = useState<WorkspaceDiff | null>(null)
   const [loading, setLoading] = useState(true)
+  // 파일 트리는 이 패널만의 화면 상태다 — 전역 설정이 아니라 localStorage 로 기억한다([[uiFlags]]).
+  const [treeOpen, setTreeOpen] = useState(() => readUiFlag(DIFF_FILE_TREE_OPEN))
+  const [treeWidth, setTreeWidth] = useState(() => {
+    const stored = readUiNumber(DIFF_FILE_TREE_WIDTH)
+    if (!stored) return DIFF_TREE_DEFAULT_WIDTH
+    return Math.min(DIFF_TREE_MAX_WIDTH, Math.max(DIFF_TREE_MIN_WIDTH, stored))
+  })
+  // 랩은 켜짐이 기본이라 "꺼 뒀는지"를 저장한다([[uiFlags]] DIFF_WORD_WRAP_OFF).
+  const [wrap, setWrap] = useState(() => !readUiFlag(DIFF_WORD_WRAP_OFF))
+  const [activePath, setActivePath] = useState<string | null>(null)
+  const scrollRef = useRef<HTMLDivElement | null>(null)
   // git 상태의 변경 파일 수가 바뀌면 diff 를 다시 가져오는 트리거로 쓴다.
   const changedFiles = useStore((s) => s.gitStatus[workspaceId]?.changedFiles ?? 0)
   const openFileViewer = useStore((s) => s.openFileViewer)
@@ -37,12 +69,17 @@ export default function ChangesPanel({
   const removeDiffComment = useStore((s) => s.removeDiffComment)
   const clearDiffComments = useStore((s) => s.clearDiffComments)
   const sendDiffComments = useStore((s) => s.sendDiffComments)
+  const discardDiffHunk = useStore((s) => s.discardDiffHunk)
 
-  // 지금 보내면 바로 나가는지, 턴이 끝날 때까지 큐에 앉아 있는지 — 버튼 문구가 달라진다
-  // (판단 자체는 store 의 sendDiffComments 가 하고, 여기서는 같은 조건을 보고 말만 맞춘다).
   const workspace = useStore((s) => s.app?.workspaces.find((w) => w.id === workspaceId))
-  const backend = useWorkspaceBackend(workspace)
-  const queue = workspace?.status === 'running' && !backend?.capabilities.steering
+  // 턴이 도는 중에 워킹 트리를 되쓰면 에이전트가 방금 읽은 파일과 어긋난다. main 도 같은 판정을
+  // 한 번 더 하지만(누른 뒤 실제로 쓰기까지 사이가 있다), 애초에 누를 수 없게 하는 게 먼저다.
+  const running = workspace?.status === 'running'
+
+  // 무엇과 견줄지. 표시 전용 값이라 PR·rebase 대상은 그대로다([[compareBase]]).
+  const repoId = workspace?.repoId
+  const repo = useStore((s) => s.app?.repos.find((r) => r.id === repoId))
+  const compareBase = normalizeCompareBase(workspace?.compareBase)
 
   useEffect(() => {
     let alive = true
@@ -56,7 +93,7 @@ export default function ChangesPanel({
     return () => {
       alive = false
     }
-  }, [workspaceId, changedFiles])
+  }, [workspaceId, changedFiles, compareBase])
 
   /**
    * ⌘↵ 로 모아 둔 코멘트를 보낸다.
@@ -81,13 +118,13 @@ export default function ChangesPanel({
     return () => window.removeEventListener('keydown', onKey)
   }, [hasComments, workspaceId])
 
-  const refresh = (): void => {
+  const refresh = useCallback((): void => {
     setLoading(true)
     void window.api.git.diff(workspaceId).then((d) => {
       setDiff(d)
       setLoading(false)
     })
-  }
+  }, [workspaceId])
 
   const commenting = useMemo<DiffCommenting>(
     () => ({
@@ -99,26 +136,125 @@ export default function ChangesPanel({
     [comments, workspaceId, addDiffComment, editDiffComment, removeDiffComment]
   )
 
+  /**
+   * hunk 하나 버리기. 되돌리고 나면 diff 를 **여기서** 다시 읽는다 — gitStatus 폴링이 변경 파일
+   * 수를 갱신해 주기를 기다리면 최대 15 초 동안 화면이 방금 지운 줄을 그대로 보여 준다.
+   */
+  const discarding = useMemo<DiffDiscarding>(
+    () => ({
+      blockedReason: running
+        ? 'The agent is working in this workspace. Wait for the turn to finish.'
+        : null,
+      onDiscard: (file, patch) => {
+        void discardDiffHunk(workspaceId, file.path, patch).then((ok) => {
+          if (ok) refresh()
+        })
+      }
+    }),
+    [running, workspaceId, discardDiffHunk, refresh]
+  )
+
+  /** 트리에서 고른 파일의 블록으로 스크롤한다. 접혀 있으면 머리글까지만 — 펴는 건 사용자 몫이다. */
+  const jumpTo = (path: string): void => {
+    setActivePath(path)
+    findDiffFileSection(scrollRef.current, path)?.scrollIntoView({ block: 'start' })
+  }
+
+  const toggleTree = (): void => {
+    const next = !treeOpen
+    setTreeOpen(next)
+    setUiFlag(DIFF_FILE_TREE_OPEN, next)
+  }
+
+  const toggleWrap = (): void => {
+    const next = !wrap
+    setWrap(next)
+    setUiFlag(DIFF_WORD_WRAP_OFF, !next)
+  }
+
+  const resizeTree = (next: number): void => {
+    setTreeWidth(next)
+    setUiNumber(DIFF_FILE_TREE_WIDTH, next)
+  }
+
   return (
     <div className="h-full flex flex-col min-h-0">
       <PanelToolbar
         label={`vs ${diff?.baseBranch ?? baseBranch}`}
+        labelNode={
+          repo && offersCompareBaseChoice(baseBranch, repo.defaultBranch) ? (
+            <CompareBasePicker
+              label={`vs ${diff?.baseBranch ?? baseBranch}`}
+              value={compareBase}
+              parentBranch={baseBranch}
+              defaultBranch={repo.defaultBranch}
+              onChange={(next) => void window.api.git.setCompareBase(workspaceId, next)}
+            />
+          ) : undefined
+        }
         onRefresh={refresh}
         spinning={loading}
+        actions={
+          <>
+            <button
+              onClick={toggleWrap}
+              title={
+                wrap
+                  ? 'Stop wrapping long lines (keeps columns aligned)'
+                  : 'Wrap long lines instead of scrolling sideways'
+              }
+              aria-label="Wrap long diff lines"
+              aria-pressed={wrap}
+              className={`grid h-5 w-5 place-items-center rounded ${
+                wrap
+                  ? 'bg-[var(--surface-2)] text-neutral-200'
+                  : 'text-neutral-600 hover:text-neutral-300'
+              }`}
+            >
+              <WrapText size={11} />
+            </button>
+            <button
+              onClick={toggleTree}
+              title={treeOpen ? 'Hide the file tree' : 'Show the file tree'}
+              aria-label={treeOpen ? 'Hide the file tree' : 'Show the file tree'}
+              aria-pressed={treeOpen}
+              className={`grid h-5 w-5 place-items-center rounded ${
+                treeOpen
+                  ? 'bg-[var(--surface-2)] text-neutral-200'
+                  : 'text-neutral-600 hover:text-neutral-300'
+              }`}
+            >
+              <ListTree size={11} />
+            </button>
+          </>
+        }
       />
-      <div className="flex-1 overflow-y-auto px-3 py-3">
-        <DiffView
-          diff={diff}
-          loading={loading}
-          baseBranch={diff?.baseBranch ?? baseBranch}
-          // 분리한 패널 창에는 큰 뷰어가 없다(FileBrowser 의 openViewer 주석 참고).
-          onOpenFile={isPaneWindow ? undefined : (path) => openFileViewer(workspaceId, path)}
-          commenting={commenting}
-        />
+      <div className="flex-1 min-h-0 flex">
+        {treeOpen && (
+          <DiffFileTree
+            files={diff?.files ?? NO_FILES}
+            activePath={activePath}
+            width={treeWidth}
+            onWidthChange={resizeTree}
+            onSelect={jumpTo}
+            onClose={toggleTree}
+          />
+        )}
+        <div ref={scrollRef} className="flex-1 min-w-0 overflow-y-auto px-3 py-3">
+          <DiffView
+            diff={diff}
+            loading={loading}
+            baseBranch={diff?.baseBranch ?? baseBranch}
+            // 분리한 패널 창에는 큰 뷰어가 없다(FileBrowser 의 openViewer 주석 참고).
+            onOpenFile={isPaneWindow ? undefined : (path) => openFileViewer(workspaceId, path)}
+            commenting={commenting}
+            discarding={discarding}
+            wrap={wrap}
+          />
+        </div>
       </div>
       <DiffCommentsBar
         comments={comments}
-        queue={queue}
         onRemove={(id) => removeDiffComment(workspaceId, id)}
         onDiscardAll={() => clearDiffComments(workspaceId)}
         onSend={() => sendDiffComments(workspaceId)}
@@ -130,17 +266,27 @@ export default function ChangesPanel({
 /** 패널 상단 공통 도구줄(라벨 + 새로고침). */
 export function PanelToolbar({
   label,
+  labelNode,
   onRefresh,
-  spinning
+  spinning,
+  actions
 }: {
   label: string
+  /**
+   * 라벨 자리를 통째로 대신할 것. 주지 않으면 `label` 을 그대로 그린다.
+   * (기본 라벨은 `truncate` 로 잘리므로, 팝오버를 여는 것은 이 자리를 직접 받아야 한다.)
+   */
+  labelNode?: React.ReactNode
   onRefresh: () => void
   spinning: boolean
+  /** 새로고침 왼쪽에 놓을 이 패널만의 버튼들. 다른 패널은 주지 않으므로 선택 항목이다. */
+  actions?: React.ReactNode
 }): React.JSX.Element {
   return (
     <div className="h-8 shrink-0 flex items-center gap-2 px-3 border-b border-[var(--border)] text-xs text-neutral-500">
-      <span className="truncate">{label}</span>
+      {labelNode ?? <span className="truncate">{label}</span>}
       <div className="flex-1" />
+      {actions}
       <button
         onClick={onRefresh}
         className="text-neutral-600 hover:text-neutral-300"

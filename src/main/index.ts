@@ -32,12 +32,24 @@ import { disposeSleepBlocker, initSleepBlocker, noteSleepBlockerEvent } from './
 import type { AppState, ChatEvent, PermissionRequest } from '@shared/types'
 import { log } from './logger'
 import { hydrateEnvFromLoginShell } from './env'
-import { initUpdater } from './updater'
+import { initUpdater, isInstallingUpdate } from './updater'
+import { captureRunningTurns } from './shutdownResume'
+import {
+  enterBackground,
+  initBackgroundMode,
+  revealWindow,
+  shouldStayAlive
+} from './backgroundMode'
+import { setWindowOpener } from './notifications'
 import { initNotice } from './notice'
 import { initFeatures } from './features'
 import { initPreview } from './preview'
 
 let mainWindow: BrowserWindow | null = null
+
+function reasonForQuit(): 'update' | 'quit' {
+  return isInstallingUpdate() ? 'update' : 'quit'
+}
 
 // dev 실행이 설치된 앱의 설정·워크스페이스·트랜스크립트를 건드리지 않도록 userData 를 먼저
 // 옮긴다([[paths]]). 아래 WOOI_USER_DATA 캡처보다, 그리고 store/transcripts(lazy 싱글턴)가
@@ -178,7 +190,8 @@ initToolPermission({ dispatch: (request) => dispatch(IPC.evtPermission, request)
 const terminals = new TerminalManager(dispatch)
 
 const stackedWaits = initStackedWaits({
-  sendMessage: (workspaceId, text) => sessions.sendMessage(workspaceId, text),
+  sendMessage: (workspaceId, text, opts) =>
+    sessions.sendMessage(workspaceId, text, undefined, opts),
   postToTranscript: (workspaceId, item) => {
     getTranscripts().upsert(workspaceId, item)
     dispatch(IPC.evtChat, { workspaceId, event: { type: 'item', item } })
@@ -255,7 +268,15 @@ function createWindow(): void {
   mainWindow.on('ready-to-show', () => mainWindow?.show())
 
   // 분리한 패널 창은 메인 창의 위성이다 — 주인이 닫히면 함께 정리한다.
-  mainWindow.on('closed', () => panes.closeAll())
+  //
+  // 참조를 **반드시 null 로 되돌린다.** 그러지 않으면 getWindow() 가 파괴된 BrowserWindow 를
+  // 계속 돌려주고, 거기에 무엇을 물어보든 `Object has been destroyed` 로 던진다(`?.` 는
+  // non-null 인 파괴 객체를 막지 못한다). 그 예외가 알림 판정에서 터지면 승인 요청 방송까지
+  // 함께 끊긴다([[main/notifications]] 의 liveWindow 주석).
+  mainWindow.on('closed', () => {
+    mainWindow = null
+    panes.closeAll()
+  })
 
   // 창이 포커스를 얻으면 renderer 가 보고 있는 workspace 의 미확인 표시를 해제하도록 알린다.
   // DOM 의 window 'focus' 는 Dock 클릭·앱 전환 시 누락될 수 있어, main 의 신뢰 가능한 이벤트로 보완한다.
@@ -323,6 +344,16 @@ app.whenReady().then(() => {
   // 기동 시점에는 도는 워크스페이스가 없다(store 가 남은 'running' 을 'idle' 로 씻는다) —
   // 설정만 물려주고, 실제 판단은 첫 방송부터 시작한다.
   initSleepBlocker(getStore().getState().settings.keepAwakeWhileRunning)
+  // 창이 사라진 뒤에도 사용자가 돌아올 통로가 있어야 한다 — 메뉴 막대와 OS 알림 클릭이
+  // 둘 다 같은 방법으로 메인 창을 되살린다([[main/backgroundMode]]).
+  initBackgroundMode({
+    showWindow: () => createWindow(),
+    getWindow: () => mainWindow,
+    broadcastState: () => dispatch(IPC.evtState, getStore().getState())
+  })
+  // 창이 없을 때의 알림 클릭도 메뉴 막대의 "Show Wooi" 와 같은 문을 쓴다 — 되살아난 창 앞에
+  // 앉은 사용자를 두고 앱이 스스로 꺼지지 않도록, 이 경로가 백그라운드 모드도 함께 푼다.
+  setWindowOpener(() => revealWindow())
   createWindow()
   sessions.prewarm()
   initUpdater(dispatch)
@@ -357,11 +388,23 @@ app.whenReady().then(() => {
 })
 
 app.on('window-all-closed', () => {
+  // mac 이 아니면 마지막 창이 곧 앱이다. 백그라운드 모드가 darwin 한정인 이유가 여기 있다 —
+  // 이 quit 을 가드가 막으면 창도 Dock 도 없이 앱이 갇힌다([[main/backgroundMode]] 헤더).
   if (process.platform !== 'darwin') app.quit()
 })
 
-app.on('before-quit', () => {
+app.on('before-quit', (event) => {
+  // 가드는 **이 리스너 안에서** 물어본다. 별도 리스너로 막으면 Electron 이 나머지 리스너를
+  // 그대로 실행해, 지키려던 세션·소켓·승인·리뷰 워크트리가 먼저 사라진다([[main/backgroundMode]]).
+  if (shouldStayAlive()) {
+    event.preventDefault()
+    enterBackground()
+    return
+  }
   void disposeRemote()
+  // 세션을 먼저 내리면 어느 턴이 실행 중이었는지 사라진다. 또 Store.update 는 디바운스되므로
+  // 아래 flushStore 보다 반드시 먼저 기록해야 이번 종료에서 디스크까지 내려간다.
+  captureRunningTurns(reasonForQuit())
   sessions.disposeAll()
   scripts.disposeAll()
   terminals.disposeAll()

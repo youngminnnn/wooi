@@ -20,7 +20,7 @@ export function WorkspaceGoal({
   const tone =
     goal.backend === 'codex'
       ? codexGoalTone(goal.status)
-      : 'border-violet-500/30 bg-violet-500/10 text-violet-300'
+      : 'border-[var(--accent-500)]/30 bg-[var(--accent-500)]/10 text-[var(--accent-300)]'
   const title = goal.backend === 'codex' ? goal.objective : goal.condition
   const status = goal.backend === 'codex' ? goal.status : `iteration ${goal.iterations}`
   const detail =

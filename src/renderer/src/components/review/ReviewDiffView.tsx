@@ -116,7 +116,7 @@ export default function ReviewDiffView({
               <span className="min-w-0 flex-1 truncate text-xs text-neutral-300">
                 {session.layers.find((l) => l.prNumber === layer.prNumber)?.prTitle ?? ''}
               </span>
-              <span className="shrink-0 text-[11px] text-neutral-500">
+              <span className="shrink-0 text-xs text-neutral-500">
                 Layer {i + 1} of {diffs.length}
               </span>
             </div>
@@ -207,7 +207,7 @@ function FileBlock({
           <StatusIcon status={file.status} />
           <span className="flex-1 truncate text-sm font-mono text-neutral-200">{file.path}</span>
           {findingCount > 0 && (
-            <span className="shrink-0 rounded-full bg-[var(--info-500)]/20 px-2 py-0.5 text-[10px] font-medium text-[var(--info-300)]">
+            <span className="shrink-0 rounded-full bg-[var(--info-500)]/20 px-2 py-0.5 text-2xs font-medium text-[var(--info-300)]">
               {findingCount}
             </span>
           )}

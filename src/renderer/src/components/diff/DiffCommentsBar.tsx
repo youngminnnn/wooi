@@ -13,14 +13,11 @@ import { commentLocation, type DiffComment } from '../../lib/diffComments'
  */
 export default function DiffCommentsBar({
   comments,
-  queue,
   onRemove,
   onDiscardAll,
   onSend
 }: {
   comments: DiffComment[]
-  /** 지금 보내면 바로 나가지 않고 대기 큐에 들어가는지(실행 중 + steering 미지원 백엔드). */
-  queue: boolean
   onRemove: (id: string) => void
   onDiscardAll: () => void
   onSend: () => void
@@ -29,7 +26,7 @@ export default function DiffCommentsBar({
   if (!comments.length) return null
 
   const n = comments.length
-  const label = `${queue ? 'Queue' : 'Send'} ${n} comment${n > 1 ? 's' : ''}`
+  const label = `Send ${n} comment${n > 1 ? 's' : ''}`
 
   return (
     <div className="shrink-0 border-t border-[var(--border)] bg-[var(--bg-3)]">
@@ -38,16 +35,14 @@ export default function DiffCommentsBar({
           {comments.map((c) => (
             <li key={c.id} className="group flex items-start gap-2 px-3 py-1.5">
               <div className="min-w-0 flex-1">
-                <p className="truncate font-mono text-[10px] text-neutral-500">
-                  {commentLocation(c)}
-                </p>
+                <p className="truncate font-mono text-2xs text-neutral-500">{commentLocation(c)}</p>
                 <p className="truncate text-xs text-neutral-300">{c.body}</p>
               </div>
               <button
                 onClick={() => onRemove(c.id)}
                 title="Delete this comment"
                 aria-label={`Delete the comment on ${commentLocation(c)}`}
-                className="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded text-neutral-600 opacity-0 hover:bg-[var(--surface-2)] hover:text-[var(--danger-400)] group-hover:opacity-100"
+                className="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded text-neutral-600 opacity-0 hover:bg-[var(--surface-2)] hover:text-[var(--danger-400)] group-hover:opacity-100 focus-visible:opacity-100"
               >
                 <X size={12} />
               </button>
@@ -76,11 +71,7 @@ export default function DiffCommentsBar({
         </button>
         <button
           onClick={onSend}
-          title={
-            (queue
-              ? 'The agent is busy — these go out as one message when the turn ends'
-              : 'Send every comment to the agent as one message') + ' (⌘↵)'
-          }
+          title={'Send every comment to the agent as one message' + ' (⌘↵)'}
           className="flex shrink-0 items-center gap-1.5 rounded bg-[var(--info-600)] px-2.5 py-1 text-xs font-medium text-white hover:bg-[var(--info-500)]"
         >
           <Send size={11} />

@@ -208,6 +208,11 @@ stack them in dependency order, and pass results along the chain.
 - **Grow into a team when the work calls for it** — an agent can request a switch from a
   solo workspace to an agent team. Once approved, Wooi carries the conversation over and
   automatically continues the task after the switch.
+- **See its own change** — `open_preview` points Wooi's preview at this workspace's dev
+  server, `capture_preview` returns a screenshot as an image, and `read_preview_issues`
+  returns the console errors and failed requests from that page. The agent drives the
+  same panel you are looking at, so you can see what it is looking at. Reading only —
+  there are no click or type tools.
 - **Plus the everyday ones** — `open_pull_request` (Wooi picks the base: the parent
   branch when stacked, the default branch otherwise), `list_issues`, `archive_workspace`,
   and `run_script` / `stop_script` / `read_script_output` for the repo scripts you
@@ -286,10 +291,9 @@ only ever shows controls that actually work there.
   is shown below the input box. Permission prompts offer **"Always allow"**
   (auto-approve that tool for the rest of the session) alongside Allow/Deny —
   Enter = Allow, Esc = Deny.
-- **Capabilities that only one side has** — `/rewind` (roll code back to a file
-  checkpoint) and `/btw` (ask a side question without derailing the turn) show up where
-  the backend supports them, and mid-turn steering is used where it exists instead of
-  being queued.
+- **Capabilities that only one side has** — `/rewind` (roll the code, the conversation, or
+  both back to a message) and `/btw` (ask a side question without derailing the turn) show up where
+  the backend supports them.
 - **Fast mode & effort** — pick them per workspace from the status line or with `/model`,
   `/effort`, and `/fast`; options that the current model doesn't support are marked
   rather than silently ignored.
@@ -349,8 +353,9 @@ A tabbed panel on top plus an interactive terminal below (resizable split):
 - **Status line** — branch · directory · model · effort · context usage are always
   shown above the input box; long conversations **auto-compact** (toggleable), or run
   `/compact` manually.
-- **Draft preservation & message queueing** — an in-progress message survives workspace
-  switches, and you can queue follow-up messages while a turn is running.
+- **Draft preservation & mid-turn steering** — an in-progress message survives workspace
+  switches, and a follow-up you send while a turn is running reaches the agent right away
+  instead of waiting for the turn to end.
 
 ### Convenience
 

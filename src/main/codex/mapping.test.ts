@@ -184,6 +184,64 @@ describe('명령 실행', () => {
     expect(done.persist).toHaveLength(1)
   })
 
+  it('에이전트 명령을 실행하는 동안 sidebar activity에 보여 준다', () => {
+    const state = createMapperState()
+
+    const started = map(
+      NOTIFY.itemStarted,
+      { item: { id: 'c1', type: 'commandExecution', command: 'npm test', cwd: '/repo' } },
+      state
+    )
+    expect(started.events[1]).toMatchObject({
+      type: 'agents',
+      agents: [
+        {
+          taskId: 'c1',
+          taskType: 'bash',
+          agentType: 'bash',
+          description: 'npm test'
+        }
+      ]
+    })
+
+    const done = map(
+      NOTIFY.itemCompleted,
+      { item: { id: 'c1', type: 'commandExecution', status: 'completed', exitCode: 0 } },
+      state
+    )
+    expect(done.events[1]).toEqual({ type: 'agents', agents: [] })
+  })
+
+  it('명령 activity를 갱신해도 실행 중인 Codex 서브에이전트를 보존한다', () => {
+    const state = createMapperState()
+    map(
+      NOTIFY.itemCompleted,
+      {
+        item: {
+          id: 'a1',
+          type: 'subAgentActivity',
+          kind: 'started',
+          agentThreadId: 'thr-child',
+          agentPath: 'reviewer'
+        }
+      },
+      state
+    )
+
+    const started = map(
+      NOTIFY.itemStarted,
+      { item: { id: 'c1', type: 'commandExecution', command: 'git status' } },
+      state
+    )
+    expect(started.events[1]).toMatchObject({
+      type: 'agents',
+      agents: [
+        { taskId: 'thr-child', agentType: 'reviewer' },
+        { taskId: 'c1', taskType: 'bash' }
+      ]
+    })
+  })
+
   it('완료 시 서버의 전체 출력이 델타 버퍼보다 우선한다', () => {
     const state = createMapperState()
     map(NOTIFY.itemStarted, { item: { id: 'c1', type: 'commandExecution', command: 'x' } }, state)
@@ -219,6 +277,7 @@ describe('명령 실행', () => {
       state
     )
     expect(items(started)[0]).not.toHaveProperty('agent')
+    expect(started.events).toHaveLength(1)
 
     const mid = map(NOTIFY.commandOutputDelta, { itemId: 'c1', delta: 'clean' }, state)
     expect(items(mid)[0]).not.toHaveProperty('agent')

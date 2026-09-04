@@ -542,6 +542,65 @@ export async function getPrChecks(worktreePath: string): Promise<PrChecks | null
   }
 }
 
+/** 실패 로그에서 프롬프트에 싣는 꼬리 길이(줄). 원인은 거의 끝에 있다. */
+const CI_LOG_TAIL_LINES = 120
+/** 로그 한 덩어리의 상한(문자). 한 잡이 프롬프트를 통째로 잡아먹지 않게 자른다. */
+const CI_LOG_MAX_CHARS = 8_000
+/** 로그를 가져올 워크플로 실행의 최대 개수. 여러 잡이 같은 실행에 속하면 한 번만 부른다. */
+const CI_LOG_MAX_RUNS = 3
+
+/**
+ * 체크 상세 URL 에서 GitHub Actions 의 실행 id 를 뽑는다.
+ * `https://github.com/o/r/actions/runs/<runId>/job/<jobId>` 꼴만 해당한다 — 외부 CI 는
+ * URL 모양이 제각각이라 여기서 걸러지고, 그때는 로그 없이 이름만 프롬프트에 실린다.
+ */
+export function runIdFromCheckUrl(url: string | undefined): string | null {
+  if (!url) return null
+  const m = /\/actions\/runs\/(\d+)(?:\/|$)/.exec(url)
+  return m ? m[1] : null
+}
+
+/**
+ * 실패한 체크의 로그 꼬리를 모은다(auto-fix 프롬프트용).
+ *
+ * `gh run view --log-failed` 는 실패한 스텝의 출력만 준다 — 전체 로그는 수 MB 가 되기도 해서
+ * 프롬프트에 실을 수 없다. 그래도 길 수 있으므로 뒤에서부터 잘라 쓴다.
+ *
+ * 로그를 못 가져오는 경우(외부 CI, 만료된 로그, 권한)는 실패가 아니다. 이름만이라도 넘기는
+ * 편이 아무것도 안 하는 것보다 낫고, 프롬프트가 "로그를 못 읽었다" 고 밝히므로 에이전트가
+ * 없는 출력을 지어내지 않는다.
+ */
+export async function getCiFailureLogs(
+  worktreePath: string,
+  failed: PrCheck[]
+): Promise<Array<{ checkName: string; text?: string }>> {
+  const out: Array<{ checkName: string; text?: string }> = []
+  // 같은 워크플로 실행에 속한 잡이 여럿이면 gh 를 한 번만 부른다.
+  const byRun = new Map<string, string>()
+  for (const check of failed) {
+    const runId = runIdFromCheckUrl(check.url)
+    if (runId && !byRun.has(runId)) byRun.set(runId, check.name)
+  }
+
+  const runs = [...byRun.keys()].slice(0, CI_LOG_MAX_RUNS)
+  const logs = new Map<string, string>()
+  for (const runId of runs) {
+    const { stdout, code } = await runLoginShell(
+      `gh run view ${shellQuote(runId)} --log-failed`,
+      worktreePath
+    ).catch(() => ({ stdout: '', stderr: '', code: 1 }))
+    if (code !== 0 || !stdout.trim()) continue
+    const tail = stdout.trimEnd().split('\n').slice(-CI_LOG_TAIL_LINES).join('\n')
+    logs.set(runId, tail.length > CI_LOG_MAX_CHARS ? tail.slice(-CI_LOG_MAX_CHARS) : tail)
+  }
+
+  for (const check of failed) {
+    const runId = runIdFromCheckUrl(check.url)
+    out.push({ checkName: check.name, text: runId ? logs.get(runId) : undefined })
+  }
+  return out
+}
+
 /**
  * GitHub PR 작성 화면을 브라우저로 연다(`gh pr create --web --fill`).
  * 실제 생성은 사용자가 브라우저에서 확정하므로 앱이 PR 을 바로 만들지 않는다.

@@ -30,9 +30,11 @@ import type {
   CreateWorkspaceArgs,
   CreateWorkspaceResult,
   DirEntry,
+  DiscardHunkResult,
   DropPosition,
   EffortSetting,
   FileContent,
+  FileWriteResult,
   FileHit,
   GitStatus,
   GithubLoginEvent,
@@ -71,6 +73,7 @@ import type {
   MigrationScanArgs,
   ReviewVerdict,
   RewindActionResult,
+  RewindMode,
   StackCascadeResult,
   StackOpProgress,
   ScriptExitEvent,
@@ -84,6 +87,7 @@ import type {
   TranscriptSearchResult,
   UpdateFromBaseResult,
   UpdateStatus,
+  WorkspaceCompareBase,
   WorkspaceDiff
 } from './types'
 import type { PreviewIssue } from './previewIssues'
@@ -218,6 +222,11 @@ export interface WooiApi {
     /** 워크스페이스별 알림 음소거를 설정한다. */
     setMuted(workspaceId: string, muted: boolean): Promise<void>
     /**
+     * CI 실패를 에이전트에게 넘기는 토글. 켜면 체크가 실패로 확정됐을 때 Wooi 가 턴을 연다.
+     * 끄면 진행 상태(시도 횟수)도 함께 지워져, 다시 켜면 상한을 처음부터 받는다.
+     */
+    setAutoFixCi(workspaceId: string, enabled: boolean): Promise<void>
+    /**
      * 멀티 에이전트 모드를 켜고 끈다(실험 기능).
      *
      * 세션이 이미 열려 있으면 다음 세션부터 반영된다 — 위임 도구는 query 를 열 때 options 에
@@ -228,10 +237,11 @@ export interface WooiApi {
     rename(workspaceId: string, name: string): Promise<void>
     /**
      * 사이드바에서 워크스페이스를 끌어 놓아 표시 순서를 바꾼다.
-     * 사이드바 순서는 stack 트리의 DFS 결과이므로, 형제(같은 레포 · 같은 부모 · 같은 아카이브 상태)
-     * 끼리만 자리를 바꿀 수 있다. 그 외 조합은 main 에서 조용히 무시된다.
+     * 어느 행을 잡아도 그 stack 뿌리와 자손을 함께 옮긴다. 같은 레포·아카이브·고정 영역 안에서만
+     * 자리를 바꿀 수 있고, 그 외 조합은 main 에서 조용히 무시된다.
      */
     reorder(workspaceId: string, targetWorkspaceId: string, position: DropPosition): Promise<void>
+    setPinned(workspaceId: string, pinned: boolean): Promise<void>
     revealInFinder(workspaceId: string): Promise<void>
     openInEditor(workspaceId: string): Promise<void>
     /** /memory — 선택한 스코프의 CLAUDE.md 를 에디터로 연다. */
@@ -299,6 +309,8 @@ export interface WooiApi {
 
   permission: {
     respond(requestId: string, decision: PermissionDecision): Promise<void>
+    /** 지금 답을 기다리는 승인 요청 전부(창이 없던 동안 올라온 것 포함). */
+    pending(): Promise<PermissionRequest[]>
   }
 
   script: {
@@ -347,14 +359,25 @@ export interface WooiApi {
   }
 
   git: {
-    status(workspaceId: string): Promise<GitStatus | null>
+    /** force=false 는 짧은 전체 폴링용: 비싼 base 대비 커밋 계산을 캐시해 재사용한다. */
+    status(workspaceId: string, force?: boolean): Promise<GitStatus | null>
     diff(workspaceId: string): Promise<WorkspaceDiff | null>
+    /**
+     * Changes 탭이 무엇과 견줄지 바꾼다. **표시 전용** — PR 대상도 rebase 대상도 바뀌지 않는다
+     * ([[compareBase]]).
+     */
+    setCompareBase(workspaceId: string, compareBase: WorkspaceCompareBase): Promise<void>
     /** 리포당 합류된 fetch 로 origin tracking ref 를 갱신한다. */
     fetch(repoId: string): Promise<void>
     /** 최신 base 브랜치를 현재 브랜치로 머지한다(드리프트 해소). 충돌 시 워킹트리에 충돌이 남는다. */
     updateFromBase(workspaceId: string): Promise<UpdateFromBaseResult>
     /** 진행 중인 머지를 취소한다(충돌 포기). */
     abortMerge(workspaceId: string): Promise<void>
+    /**
+     * Changes 탭에서 고른 hunk 하나를 워킹 트리에서 되돌린다. `patch` 는 그 hunk 만 담은
+     * 완결된 patch 다([[hunkPatch]]). 스테이징·커밋은 하지 않는다.
+     */
+    discardHunk(workspaceId: string, patch: string): Promise<DiscardHunkResult>
   }
 
   pr: {
@@ -522,6 +545,18 @@ export interface WooiApi {
     /** worktree 내 파일 1개 읽기. 바이너리/과대 파일은 본문 없이 표시 정보만. */
     read(workspaceId: string, relPath: string): Promise<FileContent | null>
     /**
+     * 뷰어에서 고친 파일 저장. `baselineSha` 는 `read` 로 받은 `FileContent.sha` 를 그대로
+     * 넘긴다 — 그 사이 디스크가 바뀌었으면 쓰지 않고 conflict 를 돌려준다. `force` 는
+     * 사용자가 경고를 보고 덮어쓰기를 고른 경우에만 true 로 준다.
+     */
+    write(
+      workspaceId: string,
+      relPath: string,
+      text: string,
+      baselineSha: string | null,
+      force?: boolean
+    ): Promise<FileWriteResult>
+    /**
      * 입력창 `@` 자동완성용 후보 검색. 부분 경로(파일명 조각 또는 `src/co` 같은 경로 조각)를
      * 받아 점수순 후보를 돌려준다. 상위 결과에는 파일 크기가 붙는다.
      */
@@ -560,12 +595,14 @@ export interface WooiApi {
       action: McpAction
     ): Promise<{ servers?: McpServerInfo[]; error?: string }>
     /**
-     * /rewind 패널에서 고른 체크포인트(사용자 메시지 UUID)로 추적된 파일을 되돌린다.
-     * 파일 체크포인팅이 켜진 살아 있는 세션 위에서만 의미가 있다(세션이 없으면 canRewind=false).
+     * /rewind 패널에서 고른 체크포인트(사용자 메시지 UUID)로 되돌린다. `mode` 가 파일·대화·둘 다를
+     * 가른다. 파일 되돌리기는 파일 체크포인팅이 켜진 살아 있는 세션 위에서만 의미가 있다
+     * (세션이 없으면 canRewind=false). 대화 되돌리기는 세션 객체만 살아 있으면 된다.
      */
     rewindAction(
       workspaceId: string,
-      userMessageId: string
+      userMessageId: string,
+      mode: RewindMode
     ): Promise<{ result?: RewindActionResult; error?: string }>
     /**
      * `/wooi:*` 즉시 실행 명령을 에이전트 없이 바로 돌린다([[shared/wooiCommands]]).

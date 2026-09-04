@@ -1,4 +1,12 @@
-import { openSync, writeSync, fsyncSync, closeSync, renameSync, appendFileSync } from 'node:fs'
+import {
+  openSync,
+  writeSync,
+  fsyncSync,
+  fchmodSync,
+  closeSync,
+  renameSync,
+  appendFileSync
+} from 'node:fs'
 import { dirname } from 'node:path'
 
 /**
@@ -10,11 +18,15 @@ import { dirname } from 'node:path'
  * OS 페이지 캐시에만 남고 디스크에는 안 내려간 상태에서의 전원 차단(= rename 은 보였는데 내용은
  * 유실)도 막는다. 설정([[store]])·트랜스크립트([[transcripts]]) 처럼 손상되면 안 되는 데이터에 쓴다.
  */
-export function writeFileAtomic(filePath: string, data: string): void {
+export function writeFileAtomic(filePath: string, data: string, opts?: { mode?: number }): void {
   const tmp = `${filePath}.tmp`
   const fd = openSync(tmp, 'w')
   try {
     writeSync(fd, data, null, 'utf-8')
+    // 임시 파일은 umask 가 깎은 기본 권한으로 생기므로, 원본의 권한을 물려받아야 할 때는
+    // 여기서 명시적으로 맞춘다 — 안 하면 실행 가능한 스크립트를 뷰어에서 고쳐 저장하는
+    // 순간 +x 가 조용히 떨어져 나간다. open 의 mode 인자는 umask 에 다시 깎이므로 못 쓴다.
+    if (opts?.mode !== undefined) fchmodSync(fd, opts.mode)
     fsyncSync(fd)
   } finally {
     closeSync(fd)

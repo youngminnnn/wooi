@@ -61,8 +61,8 @@ export default function NewFromIssueModal({
       setBusy(false)
       return
     }
-    const draft = [`#${picked.number} ${picked.title}`, picked.url, body].join('\n\n').trimEnd()
-    useStore.getState().setDraft(workspaceId, draft)
+    const prompt = [`#${picked.number} ${picked.title}`, picked.url, body].join('\n\n').trimEnd()
+    void window.api.chat.send(workspaceId, prompt)
     onClose()
   }
 

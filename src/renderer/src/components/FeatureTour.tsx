@@ -273,7 +273,7 @@ export default function FeatureTour({ onDone }: { onDone: () => void }): React.J
         </>
       ) : (
         <div
-          className="absolute inset-0 grid place-items-center bg-black/62"
+          className="absolute inset-0 grid place-items-center bg-black/50"
           onMouseDown={(e) => e.stopPropagation()}
         >
           {card(false)}

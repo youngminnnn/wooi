@@ -292,7 +292,7 @@ export default function NewWorkspaceModal({
                   <AgentBackendMark backend={b.id} size={15} />
                   {b.label}
                   {parent?.agentBackend === b.id && (
-                    <span className="text-[10px] text-neutral-500">Inherited</span>
+                    <span className="text-2xs text-neutral-500">Inherited</span>
                   )}
                 </button>
               ))}

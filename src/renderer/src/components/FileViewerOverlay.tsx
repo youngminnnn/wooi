@@ -13,6 +13,8 @@ import { useStore } from '../store'
 import { appendMention, mentionWithRange } from '../lib/mention'
 import FileTree from './files/FileTree'
 import FileViewer from './files/FileViewer'
+import FileEditControls from './files/FileEditControls'
+import { useFileEditor } from './files/useFileEditor'
 import { selectedLineRange } from './files/lineRange'
 import Splitter from './Splitter'
 import { openFileQuickOpen } from '../lib/fileViewer'
@@ -37,6 +39,7 @@ export default function FileViewerOverlay({
   const navigate = useStore((s) => s.navigateFileViewer)
   const setDraft = useStore((s) => s.setDraft)
   const pushToast = useStore((s) => s.pushToast)
+  const confirm = useStore((s) => s.confirm)
 
   const [content, setContent] = useState<FileContent | null>(null)
   const [loading, setLoading] = useState(true)
@@ -64,11 +67,59 @@ export default function FileViewerOverlay({
     }
   }, [workspace.id, path, reloadKey])
 
+  const editor = useFileEditor({
+    workspaceId: workspace.id,
+    path,
+    content,
+    onContent: setContent
+  })
+
   // 파일이 바뀌면 검색바는 접는다 — 이전 파일에서 찾던 말이 그대로 남아 있으면 혼란스럽다.
   useEffect(() => setSearchOpen(false), [path])
 
   const canBack = !!state && state.index > 0
   const canForward = !!state && state.index < state.history.length - 1
+
+  /** 편집을 접는다. 고친 것이 있으면 먼저 확인을 받는다. */
+  const cancelWithGuard = async (): Promise<void> => {
+    if (editor.dirty) {
+      const ok = await confirm({
+        title: `Discard unsaved changes to ${path}?`,
+        body: 'Your edits were never written to disk.',
+        confirmLabel: 'Discard',
+        danger: true
+      })
+      if (!ok) return
+    }
+    editor.cancel()
+  }
+
+  /**
+   * 저장하지 않은 초안을 안고 뷰어를 닫으려 할 때 확인을 받는다.
+   *
+   * 초안은 경로별로 남으므로 뷰어 안을 돌아다니는 동안은 아무것도 잃지 않는다. 잃는 지점은
+   * 여기 하나뿐이라 확인도 여기에만 둔다. 승인하면 초안을 버리고 대화로 돌아간다.
+   */
+  const closeWithGuard = async (): Promise<void> => {
+    const unsaved = editor.dirtyPaths
+    if (unsaved.length) {
+      const ok = await confirm({
+        title:
+          unsaved.length === 1
+            ? `Discard unsaved changes to ${unsaved[0]}?`
+            : `Discard unsaved changes to ${unsaved.length} files?`,
+        body:
+          unsaved.length === 1
+            ? 'Your edits were never written to disk. Closing the viewer throws them away.'
+            : `${unsaved.join(', ')}\n\nThese edits were never written to disk. Closing the viewer throws them away.`,
+        confirmLabel: 'Discard',
+        danger: true
+      })
+      if (!ok) return
+      editor.discardAll()
+    }
+    close()
+  }
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
@@ -77,11 +128,26 @@ export default function FileViewerOverlay({
 
       if (e.key === 'Escape') {
         e.preventDefault()
+        // Esc 는 한 겹씩 벗긴다 — 검색바, 그다음 편집, 그다음 뷰어. 편집 중에 한 번에
+        // 닫아 버리면 대화로 돌아가려던 습관적인 Esc 가 초안을 지우는 키가 된다.
         if (searchOpen) setSearchOpen(false)
-        else close()
+        else if (editor.editing) void cancelWithGuard()
+        else void closeWithGuard()
         return
       }
       if (!e.metaKey) return
+      // ⌘S: 저장. 편집 중이 아니면 아무 일도 없다.
+      if (e.code === 'KeyS' && !e.shiftKey && !e.altKey) {
+        e.preventDefault()
+        if (editor.editing && editor.dirty && !editor.saving) void editor.save()
+        return
+      }
+      // ⌘E: 편집 시작. ⇧⌘E 는 외부 에디터로 여는 기존 단축키라 건드리지 않는다.
+      if (e.code === 'KeyE' && !e.shiftKey && !e.altKey) {
+        e.preventDefault()
+        if (!editor.editing) editor.begin()
+        return
+      }
       // ⌘F: 파일 내 검색. 뒤쪽 대화 검색은 overlayOpen 동안 양보한다(MessageList 참고).
       if (e.code === 'KeyF' && !e.shiftKey && !e.altKey) {
         e.preventDefault()
@@ -96,7 +162,7 @@ export default function FileViewerOverlay({
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [close, navigate, searchOpen])
+  }, [close, navigate, searchOpen, editor, confirm])
 
   /**
    * 보고 있는 파일을 입력창 초안에 `@멘션` 으로 붙인다(작업 패널 뷰어와 같은 동작).
@@ -164,6 +230,7 @@ export default function FileViewerOverlay({
         >
           <RotateCw size={14} />
         </button>
+        <FileEditControls editor={editor} />
         <button
           onClick={mention}
           className="shrink-0 flex items-center gap-1.5 h-7 px-2 rounded-md text-xs text-neutral-400 hover:bg-[var(--surface-2)] hover:text-neutral-100"
@@ -172,12 +239,12 @@ export default function FileViewerOverlay({
           <AtSign size={13} /> Mention
         </button>
         <button
-          onClick={close}
+          onClick={() => void closeWithGuard()}
           className="shrink-0 flex items-center gap-1.5 h-7 px-2 rounded-md text-xs text-neutral-400 hover:bg-[var(--surface-2)] hover:text-neutral-100"
           title="Back to the conversation (Esc)"
         >
           <X size={14} /> Close
-          <kbd className="rounded bg-[var(--surface-3)] px-1 py-0.5 text-[10px] leading-none text-neutral-400">
+          <kbd className="rounded bg-[var(--surface-3)] px-1 py-0.5 text-2xs leading-none text-neutral-400">
             esc
           </kbd>
         </button>
@@ -211,6 +278,7 @@ export default function FileViewerOverlay({
             focusLine={entry?.line}
             searchOpen={searchOpen}
             onCloseSearch={() => setSearchOpen(false)}
+            editor={editor}
           />
         </div>
       </div>

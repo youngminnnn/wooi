@@ -1,14 +1,16 @@
 import type { CodexGoalStatus, WorkspaceGoal } from '@shared/types'
 
 export function codexGoalTone(status: CodexGoalStatus): string {
-  if (status === 'blocked') return 'border-red-500/40 bg-red-500/10 text-red-300'
+  if (status === 'blocked')
+    return 'border-[var(--danger-500)]/40 bg-[var(--danger-500)]/10 text-[var(--danger-300)]'
   if (status === 'usageLimited' || status === 'budgetLimited') {
-    return 'border-amber-500/40 bg-amber-500/10 text-amber-300'
+    return 'border-[var(--warning-500)]/40 bg-[var(--warning-500)]/10 text-[var(--warning-300)]'
   }
   if (status === 'active') {
     return 'border-[var(--info-500)]/40 bg-[var(--info-500)]/10 text-[var(--info-300)]'
   }
-  if (status === 'complete') return 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
+  if (status === 'complete')
+    return 'border-[var(--success-500)]/40 bg-[var(--success-500)]/10 text-[var(--success-300)]'
   return 'border-neutral-600 bg-neutral-800/50 text-neutral-400'
 }
 

@@ -93,7 +93,7 @@ export default function PreferencesStep({
   }
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/60">
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/50">
       <div className="no-drag w-[520px] max-w-[92vw] max-h-[88vh] flex flex-col bg-[var(--surface)] border border-[var(--border)] rounded-xl shadow-2xl overflow-hidden">
         <div className="px-6 pt-6 pb-3 text-center">
           <h2 className="text-lg font-semibold text-neutral-100">Make it yours</h2>

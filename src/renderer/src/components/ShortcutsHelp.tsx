@@ -1,98 +1,13 @@
 import Modal from './Modal'
+import { SHORTCUT_GROUPS } from '../lib/shortcutCatalog'
 
-/** 키보드 단축키 참조 모달(? 로 열림). 앱 전반의 단축키를 한곳에 모아 보여 준다. */
-const GROUPS: { title: string; items: { keys: string[]; label: string }[] }[] = [
-  {
-    title: 'Navigation',
-    items: [
-      { keys: ['⌘K'], label: 'Quick switcher — search any workspace' },
-      { keys: ['⇧⌘K'], label: 'Search conversations across every workspace' },
-      { keys: ['⌘1', '–', '⌘9'], label: 'Switch to the top 9 workspaces in the sidebar' },
-      { keys: ['⌘↑', '/', '⌘↓'], label: 'Previous / next workspace' },
-      { keys: ['⌘['], label: 'Back to the workspace you were just in' },
-      { keys: ['⌘U'], label: 'Jump to next unread session' },
-      { keys: ['⌘I'], label: 'Jump to next session needing input' }
-    ]
-  },
-  {
-    title: 'Session & panels',
-    items: [
-      { keys: ['⌘N'], label: 'New workspace in the focused repository' },
-      { keys: ['⇧⌘N'], label: 'Choose an agent for a new workspace' },
-      { keys: ['⌘Z'], label: 'Undo — delete the workspace you just created' },
-      { keys: ['⇧⌘R'], label: 'Review a pull request' },
-      { keys: ['⌘,'], label: 'Open settings' },
-      { keys: ['⌘J'], label: 'Toggle the work panel' },
-      { keys: ['⇧⌘S'], label: 'Toggle the scripts panel' },
-      { keys: ['⇧⌘D'], label: 'Run / stop the dev script' },
-      { keys: ['⇧⇥'], label: 'Cycle permission mode' },
-      { keys: ['⇧⌘A'], label: 'Approve all pending permissions' }
-    ]
-  },
-  {
-    title: 'Workspace tools',
-    items: [
-      { keys: ['⇧⌘O'], label: 'Open a file in the big viewer' },
-      { keys: ['⇧⌘E'], label: 'Open workspace in editor' },
-      { keys: ['⇧⌘F'], label: 'Reveal workspace in Finder' },
-      { keys: ['⇧⌘X'], label: 'Export conversation' },
-      { keys: ['⇧⌘⌫'], label: 'Archive workspace — or the review you have open' },
-      { keys: ['⌥⌘⌫'], label: 'Delete workspace for good — worktree, branch and history' }
-    ]
-  },
-  {
-    title: 'Terminal tabs',
-    items: [
-      { keys: ['⌃⇧T'], label: 'New terminal tab' },
-      { keys: ['⌃⇧W'], label: 'Close the terminal tab you are on' },
-      { keys: ['⌃⇥', '/', '⇧⌃⇥'], label: 'Next / previous terminal tab' },
-      { keys: ['Double-click'], label: 'Rename a tab' }
-    ]
-  },
-  {
-    title: 'File viewer',
-    items: [
-      { keys: ['⇧⌘O'], label: 'Open a file — type a path, add #L42 to jump to a line' },
-      { keys: ['⌘F'], label: 'Find in the open file' },
-      { keys: ['⌘⌥←', '/', '⌘⌥→'], label: 'Back / forward through visited files' },
-      { keys: ['Esc'], label: 'Close the viewer and return to the conversation' }
-    ]
-  },
-  {
-    title: 'Changes',
-    items: [
-      { keys: ['F7'], label: 'Jump to the next change in the diff' },
-      { keys: ['⇧F7'], label: 'Jump to the previous change in the diff' }
-    ]
-  },
-  {
-    title: 'Pull request review',
-    items: [
-      { keys: ['⇧⌘R'], label: 'Review a pull request' },
-      { keys: ['n', '/', 'p'], label: 'Next / previous comment on the diff' },
-      { keys: ['⌥⌘↓', '/', '⌥⌘↑'], label: 'Next / previous comment — same thing, with modifiers' },
-      { keys: ['⇧⌘⌫'], label: 'Archive the review you have open' }
-    ]
-  },
-  {
-    title: 'Conversation',
-    items: [
-      { keys: ['⌘L'], label: 'Focus the message input' },
-      { keys: ['⌘F'], label: 'Search the conversation' },
-      { keys: ['⌘+', '/', '⌘-'], label: 'Bigger / smaller conversation text' },
-      { keys: ['⌘0'], label: 'Reset conversation text size' },
-      { keys: ['⌃O'], label: 'Expand or collapse all tool results' },
-      { keys: ['⇧⌘↓'], label: 'Jump to the latest message' },
-      { keys: ['↑', '/', '↓'], label: 'Recall previous messages (in the input box)' },
-      { keys: ['⏎'], label: 'Send message — queues it while a turn is running' },
-      { keys: ['⌘⏎'], label: 'Stop the current turn and send the message now' },
-      { keys: ['⇧⏎'], label: 'New line' },
-      { keys: ['Esc'], label: 'Stop the current turn — or close a card / deny a permission' },
-      { keys: ['Esc', 'Esc'], label: 'Rewind — restore code to an earlier message' },
-      { keys: ['#'], label: 'Start a message with # to save it to CLAUDE.md' }
-    ]
-  }
-]
+/**
+ * 키보드 단축키 참조 모달(? 로 열림). 앱 전반의 단축키를 한곳에 모아 보여 준다.
+ *
+ * 목록 자체는 [[lib/shortcutCatalog]] 에 있다 — ⌘K 팔레트가 같은 목록을 읽어 항목을 만든다.
+ * 여기서 라벨을 다시 쓰면 두 화면이 서로 다른 앱을 설명하게 된다.
+ */
+const GROUPS = SHORTCUT_GROUPS
 
 export default function ShortcutsHelp({ onClose }: { onClose: () => void }): React.JSX.Element {
   return (

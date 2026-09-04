@@ -42,7 +42,7 @@ function Shell({
             </div>
           ))}
         </dl>
-        <p className="text-[11px] text-neutral-500">{footer}</p>
+        <p className="text-xs text-neutral-500">{footer}</p>
       </div>
     </div>
   )

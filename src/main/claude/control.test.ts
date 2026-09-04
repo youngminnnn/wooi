@@ -149,6 +149,26 @@ describe('permissionSettingsFiles', () => {
     expect(files[0]).toBe('/etc/claude-code/managed-settings.json')
     expect(files).toContain('/home/test/.claude/settings.local.json')
   })
+
+  /**
+   * 설정 디렉터리를 옮겨 둔 사용자에게 ~/.claude 를 읽어 주면, 카드는 실제로 걸려 있지 않은
+   * 훅과 권한을 보여 주고 걸려 있는 것은 놓친다. CLI·memoryFile·claudeConfigPath 와 같은 규칙이다.
+   */
+  it('CLAUDE_CONFIG_DIR 이 유저 스코프의 ~/.claude 를 통째로 대체한다', () => {
+    const files = permissionSettingsFiles('/repo', '/home/test', 'linux', '/elsewhere/config')
+    expect(files).toContain('/elsewhere/config/settings.json')
+    expect(files).toContain('/elsewhere/config/settings.local.json')
+    expect(files.some((file) => file.startsWith('/home/test'))).toBe(false)
+    // 프로젝트 스코프와 관리형 정책은 옮겨지지 않는다.
+    expect(files[0]).toBe('/etc/claude-code/managed-settings.json')
+    expect(files).toContain('/repo/.claude/settings.json')
+  })
+
+  it('빈 CLAUDE_CONFIG_DIR 은 무시하고 home 을 쓴다', () => {
+    expect(permissionSettingsFiles('/repo', '/home/test', 'linux', '')).toContain(
+      '/home/test/.claude/settings.json'
+    )
+  })
 })
 
 describe('collectPermissions', () => {

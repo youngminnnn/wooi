@@ -75,6 +75,7 @@ describe('원격 허용목록의 형태', () => {
       // 파일 내용·git·PR 을 노출하거나 바꾼다
       IPC.fsList,
       IPC.fsRead,
+      IPC.fsWrite,
       IPC.fsSearch,
       IPC.gitStatus,
       IPC.gitDiff,

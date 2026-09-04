@@ -114,7 +114,7 @@ export default function ScriptPanel({
               {item.command.trim() && !(item.setup && ws.setupState === 'success') && (
                 <button
                   onClick={() => toggle(item.id)}
-                  className="opacity-0 group-hover:opacity-100 text-neutral-400 hover:text-neutral-100"
+                  className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 text-neutral-400 hover:text-neutral-100"
                 >
                   {statuses.find((s) => s.scriptId === item.id)?.state === 'running' ? (
                     <Square size={11} fill="currentColor" />

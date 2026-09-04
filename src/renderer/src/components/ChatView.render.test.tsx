@@ -107,3 +107,103 @@ describe('충돌 해결 턴은 접혀 있다', () => {
     expect(screen.getByText('auto')).toBeInTheDocument()
   })
 })
+
+describe('대화 밀도 3단계', () => {
+  const ITEMS = [
+    { id: 'user:1', type: 'user', text: 'fix the parser', ts: 1 },
+    { id: 'think:1', type: 'thinking', text: 'weighing options', ts: 2 },
+    {
+      id: 'use:1',
+      type: 'tool_use',
+      name: 'Read',
+      input: { file_path: '/tmp/sunny-bison/parser.ts' },
+      toolId: 'call-read',
+      ts: 3
+    },
+    {
+      id: 'res:1',
+      type: 'tool_result',
+      toolId: 'call-read',
+      text: 'const parse = () => {}\nsecond line\nthird line\nfourth line\nfifth line\nsixth line',
+      isError: false,
+      ts: 4
+    },
+    {
+      id: 'use:2',
+      type: 'tool_use',
+      name: 'Edit',
+      input: { file_path: '/tmp/sunny-bison/parser.ts' },
+      toolId: 'call-edit',
+      diff: '--- a/parser.ts\n+++ b/parser.ts\n+const parse = (s: string) => {}',
+      ts: 5
+    },
+    { id: 'assistant:1', type: 'assistant', text: 'Parser fixed.', ts: 6 }
+  ]
+
+  function renderAt(density: 'summary' | 'normal' | 'verbose') {
+    const ws = workspace()
+    useStore.setState({
+      app: app([ws]),
+      selectedWorkspaceId: ws.id,
+      gitStatus: { [ws.id]: git() },
+      prStatus: { [ws.id]: pr('open') },
+      loadedTranscripts: { [ws.id]: true },
+      transcripts: { [ws.id]: ITEMS as never },
+      transcriptDensity: { [ws.id]: density }
+    })
+    return renderWithStore(<ChatView workspace={ws} />)
+  }
+
+  it('Normal 은 전부 그리되 도구 결과는 접어 둔다 — 지금까지의 기본 상태', () => {
+    renderAt('normal')
+
+    expect(screen.getByText('Parser fixed.')).toBeInTheDocument()
+    expect(screen.getByText('Read')).toBeInTheDocument()
+    expect(screen.getByText('Thinking')).toBeInTheDocument()
+    // 결과는 앞 몇 줄만 — 뒤쪽 줄은 펼치기 전에는 없다.
+    expect(screen.queryByText(/fourth line/)).not.toBeInTheDocument()
+  })
+
+  it('Verbose 는 도구 결과를 펴 둔 채로 시작한다', () => {
+    renderAt('verbose')
+
+    expect(screen.getByText('Read')).toBeInTheDocument()
+    expect(screen.getByText(/fourth line/)).toBeInTheDocument()
+  })
+
+  it('Summary 는 최종 응답과 바뀐 파일만 남기고, 몇 걸음을 접었는지 알린다', () => {
+    renderAt('summary')
+
+    expect(screen.getByText('Parser fixed.')).toBeInTheDocument()
+    expect(screen.getByText('fix the parser')).toBeInTheDocument()
+    // 바꾼 것은 남는다. 다만 diff 원문은 아니고 "무엇을 바꿨는지" 만.
+    expect(screen.getByText('Edit')).toBeInTheDocument()
+    expect(screen.queryByText(/const parse = \(s: string\)/)).not.toBeInTheDocument()
+    // 중간 단계는 사라진다.
+    expect(screen.queryByText('Read')).not.toBeInTheDocument()
+    expect(screen.queryByText('Thinking')).not.toBeInTheDocument()
+    // 성긴 화면이 고장이 아니라 밀도 때문임을 화면이 말해 준다.
+    expect(screen.getByText(/Summary hides 2 steps/)).toBeInTheDocument()
+  })
+
+  it('상태줄이 현재 밀도를 말하고, 눌러서 바꿀 수 있다', async () => {
+    const user = userEvent.setup()
+    const ws = workspace()
+    useStore.setState({
+      app: app([ws]),
+      selectedWorkspaceId: ws.id,
+      gitStatus: { [ws.id]: git() },
+      prStatus: { [ws.id]: pr('open') },
+      loadedTranscripts: { [ws.id]: true },
+      transcripts: { [ws.id]: ITEMS as never }
+    })
+    renderWithStore(<ChatView workspace={ws} />)
+
+    // 기본값(Normal)일 때 칩은 아이콘만 남는다 — 글자가 아니라 칩 자체를 눌러 연다.
+    await user.click(screen.getByRole('button', { name: /Conversation density: Normal/ }))
+    await user.click(screen.getByText('Summary'))
+
+    expect(useStore.getState().transcriptDensity[ws.id]).toBe('summary')
+    expect(screen.queryByText('Read')).not.toBeInTheDocument()
+  })
+})

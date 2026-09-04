@@ -5,6 +5,7 @@ import type { Workspace } from '@shared/types'
 import { log } from '../../logger'
 import { getStore } from '../../store'
 import { ensureToolApproved } from './permission'
+import { approvesInsideHandlerToolName } from './catalog'
 import { runAgentTool, runExternalAgentTool } from './registry'
 
 /**
@@ -115,7 +116,9 @@ async function respond(socket: Socket, line: string): Promise<void> {
     const workspace = verifyCaller(req.workspaceId, caller)
     // 승인은 실행 직전에 받는다. Claude 는 SDK 의 canUseTool 이 같은 자리를 맡으므로 공용
     // 실행부가 아니라 **이 전송 계층**에 둔다 — 양쪽에 걸면 Claude 가 두 번 묻는다.
-    if (workspace) await ensureToolApproved(workspace, req.tool, req.args)
+    if (workspace && !approvesInsideHandlerToolName(req.tool)) {
+      await ensureToolApproved(workspace, req.tool, req.args)
+    }
     const data =
       caller === 'external'
         ? await runExternalAgentTool(req.tool, req.args)

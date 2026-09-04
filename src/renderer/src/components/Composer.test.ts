@@ -169,6 +169,12 @@ describe('선택 카드 슬래시 명령', () => {
     expect(matchPicker('/fast', { fast: true, agent: true, plan: true })).toBe('fast')
   })
 
+  it('/density 는 백엔드와 무관한 화면 설정이라 어디서나 카드를 연다', () => {
+    const none = { fast: false, agent: false, plan: false }
+    expect(matchPicker('/density', none)).toBe('density')
+    expect(matchPicker('/density summary', none)).toBe('density')
+  })
+
   it('/model·/effort 는 뒤따르는 인자와 무관하게 카드를 연다', () => {
     const allow = { fast: false, agent: false, plan: false }
     expect(matchPicker('/model opus', allow)).toBe('model')

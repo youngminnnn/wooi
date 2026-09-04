@@ -1,12 +1,16 @@
 @import 'tailwindcss';
 
 /*
-  타이포그래피 스케일 — 4단계로 통일한다. 예전엔 text-[9.5px]~text-[15px] 까지 9종의
-  임의 크기가 흩어져 있었는데, 이를 text-xs/sm/base/lg 네 단계로 모은다.
-  (11/12/13/15px) line-height 도 함께 정해 세로 리듬을 일관되게 한다.
-  개별 컴포넌트에서 leading-* 를 명시하면 그쪽이 우선한다.
+  타이포그래피 스케일 — 이제 5단계다(2xs/xs/sm/base/lg = 10/11/12/13/15px). 처음엔
+  text-[9.5px]~text-[15px] 까지 9종의 임의 크기가 흩어져 있었는데 text-xs/sm/base/lg
+  네 단계로 모았지만, 10px(48곳)는 그대로 남아 있었다. 10px 를 text-xs(11px)로 올리면
+  실제로 10px 로 그려지던 값이 조용히 11px 로 바뀌어 버리므로, 있는 걸 없는 척하지 않고
+  --text-2xs 를 스케일에 정식으로 들인다. line-height 도 단계마다 정해 세로 리듬을
+  일관되게 한다. 개별 컴포넌트에서 leading-* 를 명시하면 그쪽이 우선한다.
 */
 @theme {
+  --text-2xs: 10px;
+  --text-2xs--line-height: 1.45;
   --text-xs: 11px;
   --text-xs--line-height: 1.45;
   --text-sm: 12px;
@@ -15,6 +19,22 @@
   --text-base--line-height: 1.5;
   --text-lg: 15px;
   --text-lg--line-height: 1.4;
+
+  /*
+    반경(border-radius) 규칙 — 아래 다섯 단계로 통일한다. 값은 Tailwind v4 기본값과
+    동일해 외관 변화는 없다 — 여기서 변수로 등록해 두는 이유는 이후 Tailwind 업데이트가
+    기본값을 바꾸더라도 이 앱의 반경은 흔들리지 않게 잠그기 위해서다.
+    ─ 점·칩·배지·아바타                   rounded-full  9999px (Tailwind 기본, 별도 등록 불필요)
+    ─ 작은 컨트롤(아이콘 버튼·인라인 코드)  rounded       4px  (--radius)
+    ─ 표준 컨트롤(버튼·입력·셀렉트·툴바)    rounded-md    6px  (--radius-md)
+    ─ 카드·패널·팝오버·드롭다운            rounded-lg    8px  (--radius-lg)
+    ─ 모달·다이얼로그                    rounded-xl    12px (--radius-xl)
+    혼용 자체는 금지하지 않는다(스킬 규칙) — 다만 새로 쓸 때는 위 다섯 중 하나를 고른다.
+  */
+  --radius: 0.25rem;
+  --radius-md: 0.375rem;
+  --radius-lg: 0.5rem;
+  --radius-xl: 0.75rem;
 }
 
 /*
@@ -169,6 +189,27 @@
   --diff-meta: #525252;
 }
 
+/*
+  그림자 색 틴트 — Tailwind 기본 그림자는 순수 검정 알파(rgb(0 0 0 / …))라 흰 배경 위에서
+  탁하게 보인다. 기하(offset·blur·spread)는 Tailwind 기본값 그대로 두고 색만 테마별로
+  바꾼다. 다크는 앱 배경(--bg, #14161a → rgb(20 22 26))에 맞춘 차가운 어두운 색을 쓰고,
+  라이트는 순수 검정 대신 zinc-900 계열의 차가운 회색을 쓰며 알파를 다크보다 훨씬
+  낮춘다(아래 html[data-theme='light'] 블록). 이름은 반드시 Tailwind v4 의
+  --shadow-* 변수(node_modules/tailwindcss/theme.css)와 일치해야 한다.
+
+  고도 단계 용도 — 지금은 이 규칙을 글로 남기는 것까지만 하고, 기존 사용처를 이 단계에
+  맞춰 옮기는 강제는 다음 라운드로 미룬다:
+  ─ sm : 미세한 들림(버튼·칩처럼 살짝 뜬 요소)
+  ─ lg / xl : 떠 있는 패널(팝오버·드롭다운·툴팁류)
+  ─ 2xl : 모달(배경 위로 완전히 분리된 오버레이)
+*/
+:root {
+  --shadow-sm: 0 1px 3px 0 rgb(20 22 26 / 0.1), 0 1px 2px -1px rgb(20 22 26 / 0.1);
+  --shadow-lg: 0 10px 15px -3px rgb(20 22 26 / 0.1), 0 4px 6px -4px rgb(20 22 26 / 0.1);
+  --shadow-xl: 0 20px 25px -5px rgb(20 22 26 / 0.1), 0 8px 10px -6px rgb(20 22 26 / 0.1);
+  --shadow-2xl: 0 25px 50px -12px rgb(20 22 26 / 0.25);
+}
+
 html[data-theme='light'] {
   color-scheme: light;
 
@@ -189,7 +230,24 @@ html[data-theme='light'] {
 
   --warning-200: oklch(47.3% 0.137 46.201); /* amber-800 */
   --warning-300: oklch(55.5% 0.163 48.998); /* amber-700 */
-  --warning-400: oklch(66.6% 0.179 58.318); /* amber-600 */
+  /*
+    amber-600 은 라이트 배경(#f4f4f5) 위에서 2.91:1 로 아이콘·상태점 기준 3:1 에 못 미친다.
+    이 색은 권한 대기(ShieldQuestion)·사용량 한도(Hourglass)·정체된 실행 스피너 —
+    가장 급한 세 상태를 칠하는 색이라 미달을 두고 볼 수 없다. 데스크톱은 -400 을
+    전경(아이콘·글자) 전용으로만 쓰고 솔리드 버튼 배경은 -500/-600 을 쓰므로 어둡게 해도
+    버튼이 깨지지 않는다. (폰에서 같은 문제에 amber-700 을 검토하고 버린 기록이 있는데,
+    그건 폰의 warning 하나가 솔리드 버튼 배경까지 겸했기 때문 — 데스크톱은 사정이 다르다.)
+
+    **amber-700 을 쓰지 않은 이유**: 라이트의 --warning-300 이 이미 amber-700 이라 값이
+    겹친다. 겹치면 Sidebar 의 restack 버튼(text-warning-400 → hover:text-warning-300)이
+    라이트에서 호버해도 색이 변하지 않고, PermissionPrompt 의 솔리드 버튼이 호버에서
+    과하게 어두워져 text-black 라벨이 위태로워진다.
+
+    그래서 amber-600 과 amber-700 사이의 값을 직접 고른다 — Tailwind 단계가 아니다.
+    L=64% 에서 3.216:1 로 임계값에 7% 여유가 있고(L=65.5% 는 3.015 로 너무 붙는다),
+    -300(L=55.5%) 과도 뚜렷이 갈린다. 이 두 조건이 이 값을 고른 이유의 전부다.
+  */
+  --warning-400: oklch(64% 0.179 58.318); /* amber-600 과 amber-700 사이 — 위 주석 참조 */
 
   --success-200: oklch(43.2% 0.095 166.913); /* emerald-800 */
   --success-300: oklch(50.8% 0.118 165.612); /* emerald-700 */
@@ -223,7 +281,10 @@ html[data-theme='light'] {
   --bg-3: #ebebee;
 
   --surface: #ffffff;
-  --surface-2: #f4f4f5;
+  /* --bg(#f4f4f5) 와 값이 같으면 --surface-2 가 --bg 위에 놓이는 자리에서 보이지 않는다.
+     #f2f2f4 는 --surface(#ffffff)·--surface-3(#efeff1)·--bg-3(#ebebee) 어느 것과도
+     겹치지 않는 값으로 골랐다. */
+  --surface-2: #f2f2f4;
   --surface-3: #efeff1;
   --surface-4: #eaeaed;
 
@@ -289,6 +350,18 @@ html[data-theme='light'] {
   --color-neutral-700: #c4c4ca;
   --color-neutral-800: #d4d4d8;
   --color-neutral-900: #e4e4e7;
+}
+
+/*
+  그림자 색 틴트(라이트) — 위 :root 의 그림자 주석 참조. 순수 검정이 아니라
+  zinc-900(#18181b → rgb(24 24 27)) 계열로 톤을 맞추고, 흰 배경에서 탁해 보이지 않도록
+  알파를 다크보다 훨씬 낮춘다.
+*/
+html[data-theme='light'] {
+  --shadow-sm: 0 1px 3px 0 rgb(24 24 27 / 0.06), 0 1px 2px -1px rgb(24 24 27 / 0.04);
+  --shadow-lg: 0 10px 15px -3px rgb(24 24 27 / 0.07), 0 4px 6px -4px rgb(24 24 27 / 0.04);
+  --shadow-xl: 0 20px 25px -5px rgb(24 24 27 / 0.08), 0 8px 10px -6px rgb(24 24 27 / 0.04);
+  --shadow-2xl: 0 25px 50px -12px rgb(24 24 27 / 0.14);
 }
 
 html,
@@ -590,5 +663,24 @@ code.hljs {
 @container (max-width: 420px) {
   .workpanel-tab-label {
     display: none;
+  }
+}
+
+/*
+  동작 줄이기(prefers-reduced-motion: reduce) 전역 가드. 앱 전체에 이 미디어 쿼리가 없어서
+  스피너(.animate-spin 86곳)와 .animate-pulse(4곳)가 이 설정을 켠 사용자에게도 무조건 돈다.
+  아이콘을 display:none 으로 없애지 않고 회전(애니메이션)만 멈추는 이유는, Wooi 에서 스피너는
+  장식이 아니라 "지금 돌고 있다" 는 상태 정보이기 때문이다 — 없애면 무엇이 진행 중이라는
+  사실 자체가 사라진다. 이 규칙은 위 button/[role='button']/select/summary/a 의 120ms 전역
+  트랜지션(transition-duration)도 함께 무력화한다 — 의도된 부수효과다.
+*/
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

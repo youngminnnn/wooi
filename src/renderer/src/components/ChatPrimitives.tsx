@@ -25,7 +25,7 @@ export function UserMessage({
 }): React.JSX.Element {
   return (
     <div className="flex justify-end" title={title}>
-      <div className="min-w-0 max-w-[85%] break-words bg-[var(--surface-4)] text-neutral-100 rounded-2xl rounded-br-md px-3.5 py-2 text-base">
+      <div className="min-w-0 max-w-[85%] break-words bg-[var(--surface-4)] text-neutral-100 rounded-xl rounded-br-md px-3.5 py-2 text-base">
         {children}
         {text && <div className="whitespace-pre-wrap">{text}</div>}
       </div>
@@ -46,8 +46,11 @@ export function AgentMessage({
   return (
     <div className="group/msg relative md text-base text-neutral-200" title={title}>
       <MarkdownBody text={text} />
+      {/* focus-visible 이 아니라 focus-within 을 쓴다 — opacity-0 을 쥔 이 div 자체는
+          포커스를 받지 않고, 안의 CopyButton 이 받는다. focus-visible 은 자기 자신이
+          포커스일 때만 반응하므로 자식이 포커스여도 절대 켜지지 않는다. */}
       {copyable && text && (
-        <div className="absolute -top-1 right-0 opacity-0 group-hover/msg:opacity-100 transition">
+        <div className="absolute -top-1 right-0 opacity-0 group-hover/msg:opacity-100 focus-within:opacity-100 transition">
           <CopyButton text={text} />
         </div>
       )}
@@ -166,7 +169,9 @@ export function CopyButton({
 export function PreWithCopy({ children }: { children?: React.ReactNode }): React.JSX.Element {
   return (
     <div className="group/code relative">
-      <div className="absolute top-1.5 right-1.5 opacity-0 group-hover/code:opacity-100 transition">
+      {/* 위 CopyButton(메시지 헤더)와 같은 이유로 focus-within 을 쓴다 — 이 div 는 포커스를
+          받지 않고, 안의 CopyButton 이 받는다. */}
+      <div className="absolute top-1.5 right-1.5 opacity-0 group-hover/code:opacity-100 focus-within:opacity-100 transition">
         <CopyButton text={extractText(children)} />
       </div>
       <pre>{children}</pre>

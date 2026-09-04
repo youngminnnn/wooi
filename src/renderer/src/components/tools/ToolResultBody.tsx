@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { FOLD, TOOL_VERBOSE_SHORTCUT, fold } from '@shared/toolDisplay'
+import { FOLD, DENSITY_SHORTCUT, fold } from '@shared/toolDisplay'
 import { formatToolSummary } from '@shared/toolSummary'
 import type { ChatItem } from '@shared/types'
 import { SELECTABLE, unlessSelecting } from '../../lib/selection'
@@ -50,8 +50,8 @@ export function ToolResultBody({
         {expanded
           ? 'Collapse'
           : hidden < 0
-            ? `Show output (${TOOL_VERBOSE_SHORTCUT} to expand)`
-            : `… +${hidden} lines (${TOOL_VERBOSE_SHORTCUT} to expand)`}
+            ? `Show output (${DENSITY_SHORTCUT} to expand)`
+            : `… +${hidden} lines (${DENSITY_SHORTCUT} to expand)`}
       </span>
     </button>
   )

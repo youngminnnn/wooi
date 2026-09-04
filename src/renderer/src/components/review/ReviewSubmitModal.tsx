@@ -261,14 +261,12 @@ export default function ReviewSubmitModal({
                   aria-label={`Message for #${row.layer.prNumber}`}
                 />
                 {row.blocked && stacked && (
-                  <p className="mt-1 text-[11px] text-neutral-500">
+                  <p className="mt-1 text-xs text-neutral-500">
                     You wrote this one — {SELF_REVIEW_BLOCKED.toLowerCase()}
                   </p>
                 )}
                 {row.layer.lastSubmission && !row.body.trim() && (
-                  <p className="mt-1 text-[11px] text-[var(--warning-300)]">
-                    {EMPTY_RESUBMIT_BLOCKED}
-                  </p>
+                  <p className="mt-1 text-xs text-[var(--warning-300)]">{EMPTY_RESUBMIT_BLOCKED}</p>
                 )}
               </div>
             ))}

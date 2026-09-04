@@ -95,6 +95,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   // 옵트인으로 숨겨 둘 이유가 없다. 기존 사용자도 load 의 기본값 병합으로 켜진 상태가 되므로
   // schemaVersion 을 올릴 필요가 없다.
   showRunningAgents: true,
+  // 최근 활동 stack 자동 승격은 기본 켜짐. 새 필드라 기본값 병합만으로 구버전도 적용된다.
+  autoSortWorkspacesByActivity: true,
   // 점진적 힌트는 기본 켜짐 — 예전 일괄 투어가 하던 소개를 대신하는 것이라, 이 필드가 없던
   // 버전에서 올라온 사용자에게도 똑같이 보여야 한다. schemaVersion 을 올려 마이그레이션에서도
   // 명시적으로 채운다(showRunningAgents 와 달리 — plan 이 명시적인 회귀 가드를 요구했다).
@@ -104,6 +106,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   autoCompact: true,
   // 자동 실행은 명시적인 opt-in 이어야 한다. 출시 공지와 설정에서 사용자가 직접 켠다.
   autoResumeAfterRateLimit: false,
+  // 사용자가 이미 시작한 턴을 종료 뒤 잇는 것이므로, 새 작업을 여는 레이트리밋 자동 재개와 달리
+  // 기본으로 켠다. 옛 파일도 기본값 병합으로 이 값을 받으므로 schemaVersion 은 올리지 않는다.
+  resumeUnfinishedTurnsOnLaunch: true,
   // 충돌 해결 턴은 토큰을 쓰므로 기본은 꺼짐 — 기존 사용자도 load 의 기본값 병합으로 false 가
   // 되므로 schemaVersion 을 올릴 필요가 없다.
   autoResolveConflicts: false,
@@ -111,6 +116,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
   // 흔한 손실이고, 화면을 켜 두지 않으므로 비용이 작다. 기존 사용자도 load 의 기본값 병합으로
   // true 가 되므로 schemaVersion 을 올릴 필요가 없다.
   keepAwakeWhileRunning: true,
+  // 백그라운드 계속하기도 기본 켜짐 — ⌘Q 한 번에 도는 턴이 사라지는 것이 수면과 같은 종류의
+  // 손실이다. 실제 종료 여부는 확인 다이얼로그에서 사용자가 고르고, 기존 사용자도 load 의
+  // 기본값 병합으로 true 가 되므로 schemaVersion 을 올릴 필요가 없다.
+  keepWorkingInBackground: true,
   // 아무 확인도 꺼져 있지 않은 상태로 시작한다. 기존 사용자도 load 의 기본값 병합으로 빈
   // 객체가 되므로 schemaVersion 을 올릴 필요가 없다.
   confirmSkips: {},

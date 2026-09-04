@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest'
-import { orderByStack, orderVisibleWorkspaces, reorderById, workspaceStackMembers } from './types'
+import {
+  orderByStack,
+  orderVisibleWorkspaces,
+  promoteWorkspaceStack,
+  reorderById,
+  reorderWorkspaceStack,
+  workspaceStackMembers
+} from './types'
 
 type W = {
   id: string
@@ -175,5 +182,35 @@ describe('workspaceStackMembers', () => {
   it('자기 자신을 부모로 가리켜도 한 번만 담는다', () => {
     const workspaces = [ws('a', 'r1', 'a')]
     expect(ids(workspaceStackMembers(workspaces, 'a'))).toEqual(['a'])
+  })
+})
+
+describe('sidebar stack ordering', () => {
+  it('자식을 끌어도 뿌리와 자손이 함께 다른 stack 앞으로 이동한다', () => {
+    const workspaces = [
+      ws('a', 'r1'),
+      ws('a-child', 'r1', 'a'),
+      ws('b', 'r1'),
+      ws('b-child', 'r1', 'b')
+    ]
+    const moved = reorderWorkspaceStack(workspaces, 'b-child', 'a-child', 'before')
+    expect(orderByStack(moved).map(({ workspace }) => workspace.id)).toEqual([
+      'b',
+      'b-child',
+      'a',
+      'a-child'
+    ])
+  })
+
+  it('최근 활성 stack 은 고정 stack 아래로 올라오고 고정 stack 은 움직이지 않는다', () => {
+    const pinned = { ...ws('pinned', 'r1'), sidebarPinned: true }
+    const workspaces = [pinned, ws('older', 'r1'), ws('active', 'r1'), ws('child', 'r1', 'active')]
+    const moved = promoteWorkspaceStack(workspaces, 'child')
+    expect(orderByStack(moved).map(({ workspace }) => workspace.id)).toEqual([
+      'pinned',
+      'active',
+      'child',
+      'older'
+    ])
   })
 })

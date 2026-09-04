@@ -1,6 +1,7 @@
 import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk'
 import type { McpSdkServerConfigWithInstance } from '@anthropic-ai/claude-agent-sdk'
 import { agentToolsFor, wooiMcpInstructions, WOOI_MCP_SERVER_NAME } from '../agent/tools/catalog'
+import { agentToolContent } from '@shared/agentToolContent'
 import type { AgentBackendId } from '@shared/types'
 
 /**
@@ -33,7 +34,9 @@ export function createWooiMcpServer(
           // 실패는 던져 보낸다 — MCP 층이 도구 오류로 감싸 모델에게 주고, 모델은 그 문장을 읽고
           // 스스로 고쳐 다시 부를 수 있다(예: "커밋하고 다시 호출하라").
           const data = await callTool(spec.name, args)
-          return { content: [{ type: 'text' as const, text: JSON.stringify(data ?? null) }] }
+          // 그림을 실어 보내는 도구가 있어 변환은 공용 함수가 한다([[shared/agentToolContent]]) —
+          // 여기서만 고치면 Codex shim 쪽에서는 조용히 텍스트가 된다.
+          return { content: agentToolContent(data) }
         },
         {
           ...(spec.annotations ? { annotations: spec.annotations } : {}),

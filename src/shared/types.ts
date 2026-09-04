@@ -3,6 +3,15 @@
  * preload 가 이 타입을 그대로 노출하므로, 채널 이름·페이로드 모양의 단일 출처(SSOT)다.
  */
 
+/**
+ * Changes 패널이 무엇과 견줄지. **표시 전용 값이다** — PR 대상도 rebase 대상도 여기서 나오지
+ * 않는다. 그 경계의 근거와 이 값을 읽어도 되는 유일한 경로는 [[compareBase]] 에 적혀 있다.
+ *
+ * (이 파일은 React Native 가 그대로 번들하므로 import 를 둘 수 없어, 헬퍼가 아니라 타입이
+ * 여기에 산다. `compareBase.ts` 가 이 타입을 받아 쓴다.)
+ */
+export type WorkspaceCompareBase = 'stack-parent' | 'default-branch'
+
 // ── 권한 모드 ───────────────────────────────────────────────────────────
 /**
  * 에이전트의 권한 모드. **백엔드마다 지원하는 값이 다르다** — 어떤 모드를 어떤 순서로 노출할지는
@@ -233,6 +242,43 @@ export interface Repo {
 }
 
 export type WorkspaceStatus = 'idle' | 'running' | 'error'
+
+/**
+ * 마지막 턴이 **사용자 중단**(Esc·Stop 버튼·`/stop`·폰의 중단)으로 끝났다는 표시.
+ *
+ * 왜 상태값을 하나 더 만들지 않았나: 중단은 상태가 아니라 **끝난 방식**이다. 중단된 워크스페이스도
+ * 여전히 idle 이고(다음 턴을 받을 수 있고), 그 위에 에러가 나면 에러가 이겨야 한다. 상태 열거에
+ * 'interrupted' 를 끼우면 세 상태를 읽는 모든 자리가 네 번째 경우를 따로 다뤄야 하는데, 그 자리
+ * 대부분은 "돌고 있나 아닌가" 만 궁금하다. 그래서 상태는 그대로 두고 표시만 곁들인다.
+ *
+ * 필드는 옵셔널이라 저장된 워크스페이스는 마이그레이션 없이 그대로 읽힌다(undefined = 중단 아님).
+ */
+export interface InterruptedTurn {
+  /** 중단한 시각. */
+  at: number
+  /**
+   * 중단된 그 세션의 id. 지금 세션이 다르면 이 표시는 남의 것이다 — 세션을 지우고 새로 앉힌
+   * 자리에서 옛 표시가 새 대화를 중단된 것처럼 보이게 하면 안 된다
+   * ([[main/rateLimitResume]] continueNow·[[main/stackedWait]] 가 같은 방식으로 낡은 예약을 거른다).
+   */
+  sessionId: string | null
+}
+
+/**
+ * 이 워크스페이스를 "중단됨" 으로 표시해야 하는가.
+ *
+ * 사용자가 Esc 로 끊은 것과 에이전트가 스스로 마친 것은 둘 다 idle 로 수렴한다. 목록을 훑을 때
+ * 둘 다 같은 회색 점이면 재개할 대상을 고를 수 없다 — 이 함수가 그 둘을 가른다.
+ *
+ * 돌고 있으면(running) 지금 하는 일이 먼저고, 에러면 에러가 더 급한 사실이라 둘 다 표시하지 않는다.
+ */
+export function wasInterrupted(
+  workspace: Pick<Workspace, 'status' | 'sessionId' | 'interruptedTurn'>
+): boolean {
+  const mark = workspace.interruptedTurn
+  if (!mark || workspace.status !== 'idle') return false
+  return mark.sessionId === workspace.sessionId
+}
 
 /**
  * 병렬 dev 서버 포트 배정의 시작점. workspace 마다 이 값부터 비어 있는 포트를 하나씩 올려
@@ -466,6 +512,75 @@ export function reorderById<T extends { id: string }>(
   return next
 }
 
+/** 사이드바에서 한 덩어리로 움직이는 stack 의 살아 있는 뿌리를 찾는다. */
+export function workspaceStackRootId<
+  T extends { id: string; parentWorkspaceId: string | null; archived: boolean }
+>(workspaces: T[], workspaceId: string): string | null {
+  const byId = new Map(workspaces.map((w) => [w.id, w]))
+  let current = byId.get(workspaceId)
+  if (!current) return null
+  const seen = new Set<string>()
+  while (current.parentWorkspaceId && !seen.has(current.id)) {
+    seen.add(current.id)
+    const parent = byId.get(current.parentWorkspaceId)
+    if (!parent || parent.archived !== current.archived) break
+    current = parent
+  }
+  return current.id
+}
+
+/**
+ * dragged/target 이 stack 의 어느 행이든 각각의 뿌리 stack 전체를 형제 사이에서 옮긴다.
+ * 배열 안에서는 뿌리의 위치만 바꾸면 orderByStack 이 자손을 바로 뒤에 붙이므로 관계 필드는
+ * 건드리지 않는다.
+ */
+export function reorderWorkspaceStack<
+  T extends {
+    id: string
+    repoId: string
+    parentWorkspaceId: string | null
+    archived: boolean
+    sidebarPinned?: boolean
+  }
+>(workspaces: T[], draggedId: string, targetId: string, position: DropPosition): T[] {
+  const draggedRoot = workspaceStackRootId(workspaces, draggedId)
+  const targetRoot = workspaceStackRootId(workspaces, targetId)
+  if (!draggedRoot || !targetRoot || draggedRoot === targetRoot) return workspaces
+  const a = workspaces.find((w) => w.id === draggedRoot)
+  const b = workspaces.find((w) => w.id === targetRoot)
+  if (
+    !a ||
+    !b ||
+    a.repoId !== b.repoId ||
+    a.archived !== b.archived ||
+    !!a.sidebarPinned !== !!b.sidebarPinned
+  )
+    return workspaces
+  return reorderById(workspaces, draggedRoot, targetRoot, position)
+}
+
+/** 최근 활성화된 stack 을 고정 stack 바로 아래로 올린다. */
+export function promoteWorkspaceStack<
+  T extends {
+    id: string
+    repoId: string
+    parentWorkspaceId: string | null
+    archived: boolean
+    sidebarPinned?: boolean
+  }
+>(workspaces: T[], workspaceId: string): T[] {
+  const rootId = workspaceStackRootId(workspaces, workspaceId)
+  const root = workspaces.find((w) => w.id === rootId)
+  if (!root || root.archived || root.sidebarPinned) return workspaces
+  const roots = workspaces.filter(
+    (w) =>
+      w.repoId === root.repoId && !w.archived && workspaceStackRootId(workspaces, w.id) === w.id
+  )
+  const firstUnpinned = roots.find((w) => !w.sidebarPinned)
+  if (!firstUnpinned || firstUnpinned.id === root.id) return workspaces
+  return reorderById(workspaces, root.id, firstUnpinned.id, 'before')
+}
+
 /**
  * 사이드바에 실제로 보이는 순서(위 → 아래) 그대로 활성 워크스페이스를 평탄하게 나열한다.
  * 규칙: repos 배열 순서로 레포를 훑고, 레포 안에서는 orderByStack(부모 바로 뒤에 자식) 순서.
@@ -580,7 +695,11 @@ export interface AgentCapabilities {
   interactiveCommands: CommandPanelKind[]
   /** 슬래시 명령 자동완성 */
   slashCommands: boolean
-  /** 턴이 도는 중에도 입력을 밀어 넣을 수 있는지(Codex 의 turn/steer). false 면 큐잉 후 다음 턴. */
+  /**
+   * 턴이 도는 중에도 입력을 밀어 넣을 수 있는지. 두 백엔드 모두 지원한다 — Codex 는 turn/steer 로
+   * 네이티브 반영하고, Claude(Agent SDK)는 CLI 가 툴 라운드 사이에 진행 중인 턴으로 접어
+   * 넣는다(fold). 단, 툴을 하나도 쓰지 않는 순수 텍스트 턴은 접힐 지점이 없어 다음 턴으로 밀린다.
+   */
   steering: boolean
   /** 앱 안에서 로그인/로그아웃을 끝낼 수 있는지. false 면 외부 터미널 안내. */
   inAppLogin: boolean
@@ -806,6 +925,14 @@ export interface Workspace {
    */
   baseMismatchDismissed?: string | null
   /**
+   * Changes 패널이 **무엇과 견줘 보여 줄지**. 없으면 지금까지의 자동 판정 그대로다.
+   *
+   * ⚠️ 표시 전용이다 — PR 대상도 rebase 대상도 이 값에서 나오지 않는다. 실제 base 는 계속
+   * `baseBranch` / `stack[].baseBranch` / GitHub 의 `baseRefName` 만 소유한다. 판단의 근거와
+   * 경계는 [[compareBase]] 에 적어 뒀고, 읽는 곳은 `IPC.gitDiff` 하나뿐이다.
+   */
+  compareBase?: WorkspaceCompareBase | null
+  /**
    * 이 워크스페이스의 PR 이 속한 **GitHub 스택** 번호(GitHub 이 서버에 들고 있는 stacked PR
    * 객체). 세 필드 모두 옵셔널이고 폴백 경로에서는 아예 없다 — Wooi 의 체인은 여전히
    * parentWorkspaceId / ws.stack 이 소유하고, 이 값들은 그 위에 얹히는 메타데이터일 뿐이다.
@@ -871,12 +998,18 @@ export interface Workspace {
   sessionId: string | null
   /** 계정 사용량 제한이 풀린 뒤 같은 대화를 자동으로 이어가기 위한 영속 예약. */
   pendingRateLimitResume?: PendingRateLimitResume | null
+  pendingShutdownResume?: PendingShutdownResume | null
   /** 마지막 턴이 사용량 제한으로 멈췄다는 표시(자동 이어가기 설정과 무관하게 기록·표시한다). */
   rateLimited?: RateLimitPause | null
   /** `await_stacked_work` 로 건 대기 예약. 없으면 기다리는 것이 없다. */
   awaitingStackedWork?: PendingStackedWait | null
   permissionMode: PermissionMode
   status: WorkspaceStatus
+  /**
+   * 마지막 턴이 사용자 중단으로 끝났다는 표시. null/undefined 면 중단으로 끝나지 않았다.
+   * 읽을 때는 직접 보지 말고 [[wasInterrupted]] 를 쓴다 — 낡은 세션의 표시를 거르는 판단이 거기 있다.
+   */
+  interruptedTurn?: InterruptedTurn | null
   /** 이 workspace 전용 모델 오버라이드. null 이면 전역 설정(AppSettings.model) 을 따른다. */
   model: string | null
   /** 이 workspace 전용 reasoning effort 오버라이드. null 이면 전역 설정(AppSettings.effort) 을 따른다. */
@@ -909,8 +1042,25 @@ export interface Workspace {
   pendingHandoffFrom?: string | null
   /** 아카이브되면 사이드바 기본 목록에서 숨기고 worktree 를 제거한다(브랜치·기록은 유지). */
   archived: boolean
+  /** 자동 최신순 정렬에서도 stack 전체를 사이드바 상단에 유지한다(뿌리에서만 읽는다). */
+  sidebarPinned?: boolean
   /** 이 워크스페이스의 모든 알림(OS 알림·소리·Dock 배지)을 음소거한다. 레거시는 undefined=false. */
   muted?: boolean
+  /**
+   * CI 체크가 실패로 확정되면 에이전트에게 턴을 하나 열어 고치게 한다. 레거시는 undefined=false.
+   *
+   * **기본값은 꺼짐이다.** 사용자가 치지 않은 턴은 토큰을 쓰고 브랜치에 커밋을 만든다 —
+   * 그 비용을 켜 본 적 없는 사람에게 떠안기지 않는다. 워크스페이스마다 따로 두는 이유는,
+   * 자동으로 밀어도 되는 브랜치인지가 작업마다 다르기 때문이다.
+   */
+  autoFixCi?: boolean
+  /**
+   * auto-fix 의 진행 상태(시도 횟수·재무장 여부). 판정은 [[ciFix]] 의 `decideCiFix` 가 한다.
+   *
+   * 영속하는 이유는 상한이 앱을 다시 켜도 유지돼야 하기 때문이다 — 메모리에만 두면 재시작이
+   * 곧 상한 초기화가 되고, 그러면 밤새 도는 고리를 막지 못한다.
+   */
+  autoFixCiState?: CiFixProgress
   /**
    * 우하단 터미널의 탭 목록(각 탭 = 독립 PTY). 없거나 비어 있으면 첫 조회 때 탭 하나를 만들어
    * 채운다 — 레거시 워크스페이스는 마이그레이션 없이 "탭 1개" 로 읽힌다.
@@ -1319,10 +1469,20 @@ export interface McpInventory {
  * 사이드바에서 되살릴 수 있다 — 잘못 눌러도 잃는 것이 없다. 삭제·머지·`/clear`·백엔드 전환처럼
  * 되돌릴 수 없거나 돈이 드는 것, 그리고 도구 승인처럼 안전 장치인 것은 매번 묻는다.
  *
+ * `discardHunk` 는 이 규칙의 **의도된 예외**다. 되돌릴 수 없는데도 붙어 있다 — hunk 버리기는
+ * 리뷰하다 한 화면에서 열 번도 누르는 동작이라, 매번 묻는 확인은 곧 아무도 읽지 않는 확인이
+ * 되고 그 상태가 오히려 위험하다. 대신 범위를 최소로 묶어 뒀다: 버리는 것은 워킹 트리의 변경
+ * 뿐이고 커밋된 이력은 건드리지 않으며, 끄는 순간의 토스트와 설정에서 언제든 다시 켤 수 있다.
+ *
  * 확인 종류마다 따로 저장한다. "모든 확인 끄기" 하나로 두면 사용자가 아카이브 하나를 끄려다
  * 삭제 확인까지 함께 끄게 된다.
  */
-export const CONFIRM_SKIP_KEYS = ['archiveWorkspace', 'archiveReview'] as const
+export const CONFIRM_SKIP_KEYS = [
+  'archiveWorkspace',
+  'archiveReview',
+  'discardHunk',
+  'keepWorkingInBackground'
+] as const
 export type ConfirmSkipKey = (typeof CONFIRM_SKIP_KEYS)[number]
 
 export interface AppSettings {
@@ -1367,6 +1527,8 @@ export interface AppSettings {
    * 반영되고, 다시 켜면 지금 돌고 있는 것이 바로 나타난다(추적을 껐다면 다음 턴까지 빈 목록이 된다).
    */
   showRunningAgents: boolean
+  /** workspace 가 활동할 때 그 stack 을 사이드바의 고정 영역 바로 아래로 올린다. */
+  autoSortWorkspacesByActivity: boolean
   /**
    * 점진적 온보딩 힌트(기능에 실제로 도달한 순간에 뜨는 작은 안내 카드, `lib/hints.ts`)를
    * 보여줄지. 기본 켜짐.
@@ -1384,6 +1546,7 @@ export interface AppSettings {
   autoCompact: boolean
   /** Claude/Codex 계정 사용량 제한이 풀리면 중단된 작업을 같은 세션에서 자동으로 이어간다. */
   autoResumeAfterRateLimit: boolean
+  resumeUnfinishedTurnsOnLaunch: boolean
   /**
    * restack·캐스케이드가 충돌하면 그 워크트리의 에이전트에게 해결을 맡긴다. **기본 꺼짐.**
    *
@@ -1401,6 +1564,15 @@ export interface AppSettings {
    * "도는 동안만" 외에 합리적인 다른 정책이 없기 때문이다. [[main/sleepBlocker]] 참고.
    */
   keepAwakeWhileRunning: boolean
+  /**
+   * ⌘Q 를 눌렀을 때 아직 도는 일이 있으면 창만 닫고 메뉴 막대(Tray)에서 계속 굴린다(기본 켜짐).
+   * 일이 전부 끝나면 앱이 스스로 종료한다([[main/backgroundMode]]).
+   *
+   * 이 값은 "그래도 종료" 를 고르며 다시 묻지 않기를 켠 사용자의 결정도 함께 담는다 — 꺼지면
+   * 확인 자체가 사라지고 ⌘Q 는 언제나 곧바로 종료한다. 어느 쪽을 골라도 돌던 턴은 기록됐다가
+   * 다음 실행에서 이어진다([[main/shutdownResume]]).
+   */
+  keepWorkingInBackground: boolean
   /**
    * 사용자가 "다시 묻지 않기" 로 끈 확인 대화상자. 끈 것만 true 로 담긴다(없으면 묻는다).
    *
@@ -1755,7 +1927,42 @@ export interface ConflictResolveOrigin {
   auto: boolean
 }
 
-export type ChatUserOrigin = PeerMessageOrigin | ConflictResolveOrigin
+/**
+ * Wooi 가 실패한 CI 를 맡기며 넣은 사용자 턴.
+ *
+ * ConflictResolveOrigin 과 같은 이유로 보이게 남기고 접는다 — 사용자가 치지 않은 턴이므로
+ * 무엇을 왜 시켰는지가 대화에 있어야 한다. 시도 횟수를 함께 싣는 것은, 접힌 한 줄만 보고도
+ * "이게 몇 번째이고 몇 번에서 멈추는지" 를 알 수 있어야 켜 둔 채로 잊지 않기 때문이다.
+ */
+export interface CiFixOrigin {
+  kind: 'ciFix'
+  prNumber: number
+  /** 실패한 체크 이름들 — 펼치지 않고도 무엇이 깨졌는지 알 수 있게 한다. */
+  failedChecks: string[]
+  /** 이번이 몇 번째 자동 시도인지(1-based). */
+  attempt: number
+  /** 몇 번에서 멈추는지. */
+  max: number
+}
+
+/**
+ * Wooi 가 사용자 대신 넣은 그 밖의 턴 — 제한이 풀려 이어가기, fan-out 의 첫 지시, 스택 자식이
+ * 부모를 깨우는 보고, 새 워크스페이스에 넘기는 작업, 백엔드를 바꾸며 넘기는 대화.
+ *
+ * 위의 세 origin 과 이유는 같다. 사용자가 치지 않은 턴이 토큰을 쓰므로 **감추지 않고**(silent 가
+ * 아니다) 무엇을 왜 시켰는지 대화에 남기되, 프롬프트 자체는 길어 펼쳐 둔 채로는 앞뒤 대화를 밀어낸다.
+ * 그래서 접어서 한 줄만 둔다. 다른 셋과 달리 요약에 쓸 구조가 저마다라 공통분모가 이름 하나뿐이고,
+ * 그래서 **하나의 generic 한 종류**로 둔다 — 종류가 늘 때마다 화면에 컴포넌트를 하나씩 더 만드는
+ * 대신, 부르는 쪽이 접힌 줄에 쓸 이름을 정해서 넘긴다.
+ */
+export interface WooiTurnOrigin {
+  kind: 'wooi'
+  /** 접힌 한 줄에 그대로 실리는 이름. 문장이 아니라 짧은 명사구여야 한다("Continuing after usage limit"). */
+  label: string
+}
+
+export type ChatUserOrigin =
+  PeerMessageOrigin | ConflictResolveOrigin | CiFixOrigin | WooiTurnOrigin
 
 /** 백엔드까지 함께 흘려 보낼 사용자 턴의 표시·모델용 옵션. */
 export interface SendMessageOptions {
@@ -2199,6 +2406,13 @@ export type WorkspaceGoal =
 export type ChatEvent =
   /** id 기준 append-or-replace. 권위 있는 완성 항목. */
   | { type: 'item'; item: ChatItem }
+  /**
+   * 이 항목부터(포함) 뒤를 전부 버린다 — /rewind 의 대화 되돌리기.
+   *
+   * 통째로 다시 실어 보내지 않는 이유는 긴 대화에서 IPC 한 번에 트랜스크립트 전체가 실리기
+   * 때문이다. 자를 지점만 알려 주면 렌더러와 메인이 같은 규칙으로 같은 결과에 도달한다.
+   */
+  | { type: 'truncate'; fromItemId: string }
   /** assistant/thinking 버블(id)에 텍스트 조각을 이어붙임. */
   | { type: 'delta'; id: string; itemType: 'assistant' | 'thinking'; text: string }
   /** workspace 실행 상태 변화. */
@@ -2521,6 +2735,18 @@ export interface UpdateFromBaseResult {
   /** status==='conflict' 일 때 충돌난 파일 경로들. */
   conflictedFiles?: string[]
   /** dirty/error 등 사용자에게 보여 줄 사유. */
+  message?: string
+}
+
+/**
+ * hunk 버리기 결과.
+ *
+ * 실패를 던지지 않고 값으로 돌려준다 — 가장 흔한 실패가 "그 사이 파일이 바뀌어 patch 가 더는
+ * 맞지 않는다" 이고, 그건 버그가 아니라 사용자에게 설명해야 할 상태다(diff 를 다시 읽으면 된다).
+ */
+export interface DiscardHunkResult {
+  status: 'discarded' | 'stale' | 'busy' | 'error'
+  /** status !== 'discarded' 일 때 사용자에게 보여 줄 사유. */
   message?: string
 }
 
@@ -3448,10 +3674,13 @@ export const IPC = {
   workspaceSetAgentBackend: 'workspace:setAgentBackend',
   /** 워크스페이스별 알림 음소거 토글. */
   workspaceSetMuted: 'workspace:setMuted',
+  /** CI 실패를 에이전트에게 넘기는 워크스페이스별 토글. */
+  workspaceSetAutoFixCi: 'workspace:setAutoFixCi',
   workspaceSetMultiAgent: 'workspace:setMultiAgent',
   workspaceRename: 'workspace:rename',
   /** 사이드바 드래그 앤 드롭으로 워크스페이스 표시 순서를 바꾼다(같은 레포·같은 stack 부모끼리만). */
   workspaceReorder: 'workspace:reorder',
+  workspaceSetPinned: 'workspace:setPinned',
   workspaceOpenInEditor: 'workspace:openInEditor',
   workspaceRevealInFinder: 'workspace:revealInFinder',
   /** /memory — worktree 의 CLAUDE.md 를 에디터로 연다(없으면 worktree 를 연다). */
@@ -3474,6 +3703,12 @@ export const IPC = {
   /** 워크스페이스를 가로지르는 대화 검색. 결과는 스니펫만 담긴다(원문은 main 에 남는다). */
   chatSearch: 'chat:search',
   permissionRespond: 'permission:respond',
+  /**
+   * 지금 답을 기다리는 승인 요청 전부. 렌더러의 목록은 라이브 이벤트로만 차기 때문에,
+   * 창이 없는 동안(백그라운드 모드) 올라온 요청은 창을 다시 열어도 보이지 않는다 — 초기화
+   * 시점에 이 스냅샷으로 씨를 뿌린다.
+   */
+  permissionPending: 'permission:pending',
   scriptRun: 'script:run',
   scriptStop: 'script:stop',
   scriptGetStatus: 'script:getStatus',
@@ -3484,6 +3719,10 @@ export const IPC = {
   scriptGetOutput: 'script:getOutput',
   gitStatus: 'git:status',
   gitDiff: 'git:diff',
+  /**
+   * Changes 패널의 비교 기준을 바꾼다. **표시 전용** — PR·rebase 대상은 건드리지 않는다.
+   */
+  workspaceSetCompareBase: 'workspace:setCompareBase',
   /** 리포의 origin tracking ref 를 갱신한다. 실패는 main 에서 조용히 무시한다. */
   gitFetch: 'git:fetch',
   /** base 브랜치를 현재 워크스페이스 브랜치로 머지해 드리프트를 해소한다. */
@@ -3514,6 +3753,11 @@ export const IPC = {
   stackResolveConflict: 'stack:resolveConflict',
   /** 진행 중인 머지를 취소한다(충돌 포기). */
   gitAbortMerge: 'git:abortMerge',
+  /**
+   * Changes 탭에서 고른 hunk 하나를 워킹 트리에서 되돌린다(`git apply --reverse`).
+   * 스테이징도 커밋도 하지 않는다 — 커밋은 계속 에이전트의 몫이다.
+   */
+  gitDiscardHunk: 'git:discardHunk',
   prStatus: 'pr:status',
   /** 지정한 브랜치(worktree 의 현재 브랜치가 아니어도)의 PR 상태를 조회한다. 모델 B 스택 조망용. */
   prStatusForBranch: 'pr:statusForBranch',
@@ -3628,6 +3872,8 @@ export const IPC = {
   // 파일 브라우저 (All files 탭)
   fsList: 'fs:list',
   fsRead: 'fs:read',
+  /** 뷰어에서 고친 파일 저장. 열었을 때의 해시를 함께 받아 동시 수정을 막는다. */
+  fsWrite: 'fs:write',
   /** 입력창 `@` 자동완성용 파일 검색(git ls-files 기반 퍼지 매칭). */
   fsSearch: 'fs:search',
   // 인터랙티브 터미널 (worktree PTY — 탭 하나당 하나)
@@ -3910,6 +4156,15 @@ export interface PendingRateLimitResume {
    *   확인 간격을 늘려 가며 기다린다([[rateLimitResume]] noteConnectionLost).
    */
   cause?: 'rateLimit' | 'connection'
+}
+
+export interface PendingShutdownResume {
+  backend: AgentBackendId
+  sessionId: string
+  at: number
+  reason: 'update' | 'background' | 'quit' | 'crash'
+  /** 자동 이어가기를 하지 않기로 확정된 기록. 다음 실행에서 다시 시도하지 않고, 표시로만 남는다. */
+  handled?: boolean
 }
 
 /**
@@ -4394,22 +4649,54 @@ export interface ReloadResult {
   errorCount?: number
 }
 
+/**
+ * /rewind — 무엇을 되돌릴지. 터미널 Claude Code 의 세 갈래와 같은 의미다.
+ *
+ * - `files` — 추적된 파일만 그 시점으로(SDK rewindFiles). 대화는 그대로 남는다.
+ * - `conversation` — 대화만 그 지점 직전까지 자른다(SDK resumeSessionAt). 파일은 그대로다.
+ * - `both` — 둘 다. 파일을 먼저 되돌린 뒤 대화를 자른다.
+ *
+ * 하나만 되돌리면 모델의 기억과 디스크가 어긋난다는 점을 UI 가 알려 줘야 한다 — 예컨대 파일만
+ * 되돌리면 모델은 "내가 방금 고쳤다" 고 알고 있는데 그 변경이 디스크에 없다.
+ */
+export type RewindMode = 'files' | 'conversation' | 'both'
+
 /** /rewind — 되돌릴 수 있는 체크포인트 1개(사용자 메시지 기준). */
 export interface RewindPoint {
   /** SDK 가 부여한 사용자 메시지 UUID. rewindFiles 에 그대로 넘긴다. */
   userMessageId: string
+  /** 같은 메시지의 Wooi ChatItem id. 화면 트랜스크립트를 어디서부터 자를지 가리킨다. */
+  itemId: string
+  /**
+   * 이 메시지 **직전** 체인 항목(assistant/user)의 UUID. 대화를 되돌릴 때 resumeSessionAt 으로
+   * 넘겨, 여기까지만 불러오게 한다. null 이면 앞에 아무것도 없다 — 대화 되돌리기는 곧 새 세션이다.
+   */
+  forkAt: string | null
   /** 그 메시지의 첫 줄(표시용). */
   text: string
   ts: number
 }
 
-/** /rewind 실행 결과(SDK rewindFiles 응답을 표시용으로 추린 것). */
+/** /rewind 실행 결과(SDK rewindFiles 응답 + 대화 절단 결과를 표시용으로 추린 것). */
 export interface RewindActionResult {
   canRewind: boolean
   error?: string
+  /**
+   * 되돌린 파일 목록과 증감. **오지 않을 수 있다** — 설치된 CLI 에 따라 성공 응답이
+   * `{canRewind, skippedLinks}` 뿐인 경우가 있다. 없음과 0 을 구분해서 표시해야 한다.
+   */
   filesChanged?: string[]
   insertions?: number
   deletions?: number
+  /**
+   * 링크 안전 검사에 걸려 복원하지 않은 추적 파일 수(심볼릭/하드링크가 놓여 있거나 백업을
+   * 안전하게 읽지 못한 경우). 0 이거나 없으면 그런 파일은 없었다.
+   */
+  skippedLinks?: number
+  /** 대화를 실제로 잘랐는지. mode 에 conversation 이 포함됐을 때만 의미가 있다. */
+  conversationRewound?: boolean
+  /** 되돌린 지점의 사용자 메시지 원문. 입력창에 채워 넣어 고쳐 보낼 수 있게 한다. */
+  prefill?: string
 }
 
 /** /permissions — 현재 권한 모드 + 설정 파일에서 모은 도구 규칙(읽기 전용). */
@@ -4526,7 +4813,59 @@ export interface FileContent {
   truncated: boolean
   /** 바이너리(또는 표시 불가)면 본문 없이 true. */
   binary: boolean
+  /**
+   * 읽은 시점 **파일 전체**(잘린 앞부분이 아니라) 내용의 sha256.
+   *
+   * 뷰어에서 고친 내용을 저장할 때 낙관적 동시성 제어의 기준값으로 쓴다 — 사람이 오타를
+   * 고치는 동안 에이전트가 같은 파일을 바꿔 놨는지 이 값으로 안다. mtime 대신 해시를 쓰는
+   * 이유는, 에이전트가 1 초 안에 여러 번 쓰면 mtime 해상도로는 변경을 놓치기 때문이다.
+   */
+  sha: string
 }
+
+/** 저장을 막은 이유. 판정 규칙은 `@shared/fileEdit` 의 `classifySave` 한 곳에 있다. */
+export type FileSaveConflict =
+  /** 열었을 때와 디스크 내용이 다르다 — 다른 누군가(보통 에이전트)가 고쳤다. */
+  | 'stale'
+  /** 파일이 사라졌다 — 지워졌거나 옮겨졌다. */
+  | 'vanished'
+
+/**
+ * 한 PR 에 대해 CI auto-fix 가 자동으로 열 수 있는 턴의 수.
+ *
+ * 이 상한이 auto-fix 의 안전장치다. 에이전트가 고치고 → 밀고 → 또 실패하면, 상한이 없는 한
+ * 사람이 자는 동안에도 그 고리가 계속 돈다. 3 은 "한 번 헛짚고 한 번 더 시도해 볼 여지"까지만
+ * 주는 수다 — 세 번 고쳐서 안 되는 실패는 대개 에이전트가 못 보는 것(비밀값·인프라·flaky)이
+ * 원인이라, 네 번째 시도는 토큰만 쓴다.
+ *
+ * 판정은 메인의 [[ciFix]] 가 하지만, 남은 횟수를 화면에도 적어야 해서 여기 둔다 — 상한이
+ * 보이지 않으면 "왜 이제 안 고쳐 주지" 로만 읽힌다.
+ */
+export const CI_FIX_MAX_ATTEMPTS = 3
+
+/**
+ * 워크스페이스 하나의 CI auto-fix 진행 상태. 필드의 뜻과 판정 규칙은 [[ciFix]] 에 있다.
+ * (main 의 `CiFixState` 와 같은 모양이다 — 워크스페이스 레코드에 실려 렌더러까지 간다.)
+ */
+export interface CiFixProgress {
+  prNumber: number
+  attempts: number
+  armed: boolean
+  notifiedStop: boolean
+}
+
+/** `fs:write` 의 결과. 실패는 사용자에게 다르게 보여야 해서 이유를 나눠 돌려준다. */
+export type FileWriteResult =
+  | { ok: true; content: FileContent }
+  /**
+   * 열었을 때와 디스크가 달라 쓰지 않았다. `current` 는 지금 디스크에 있는 내용(사라졌으면
+   * null) — 사용자가 덮어쓸지 버릴지 고르려면 상대편을 볼 수 있어야 한다.
+   */
+  | { ok: false; reason: 'conflict'; conflict: FileSaveConflict; current: FileContent | null }
+  /** 워크트리 밖 경로·아카이브된 워크스페이스·파일이 아닌 대상 — 애초에 쓸 수 없다. */
+  | { ok: false; reason: 'denied' }
+  /** 권한 없음·디스크 가득 참 등 쓰기 자체의 실패. */
+  | { ok: false; reason: 'error'; message: string }
 
 /** 입력창 `@` 자동완성 후보(worktree 상대 경로). */
 export interface FileHit {

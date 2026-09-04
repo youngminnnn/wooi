@@ -205,6 +205,20 @@ describe('ensureToolApproved', () => {
     expect(cards).toHaveLength(0)
   })
 
+  it('에이전트 교체의 always 옵션은 fullAccess 에서도 승인 카드를 띄운다', async () => {
+    const pending = ensureToolApproved(
+      workspace({ permissionMode: 'fullAccess' }),
+      'switch_workspace_agent',
+      { agentBackend: 'codex', reason: 'Continue with Codex.' },
+      { always: true }
+    )
+    await vi.waitFor(() => expect(cards).toHaveLength(1))
+    expect(cards[0].title).toMatch(/hand this workspace over to Codex/)
+    expect(cards[0].title).toMatch(/billed as input/)
+    answer('allow')
+    await expect(pending).resolves.toBeUndefined()
+  })
+
   /**
    * 자동 모드의 식별자는 백엔드마다 다르다 — Claude 는 'auto', Codex 는 'default'(라벨 "Auto").
    * 그런데 Claude 의 'default' 는 정반대로 "매번 묻는" 모드다. 문자열 하나로 판단하면 반드시

@@ -11,7 +11,7 @@ import type { ModelOption } from '@shared/types'
  */
 
 export type { ModelOption }
-export { modelLabel } from '@shared/agentLabels'
+export { compactModelLabel, modelLabel } from '@shared/agentLabels'
 
 /**
  * 이 모델에서 fast mode 가 켜질 수 있는지(목록 기준). 목록에 없는 커스텀 ID 는 판단하지 않고

@@ -354,6 +354,50 @@ export const AGENT_TOOLS: AgentToolSpec[] = [
     annotations: { title: 'Read script output', readOnlyHint: true }
   },
   {
+    name: 'open_preview',
+    description: [
+      'Open this workspace’s dev server in Wooi’s Preview panel and wait for the page to load.',
+      'Use it to check a change with your own eyes instead of asking the user what they see.',
+      '',
+      'You choose only the path — the address comes from this workspace’s running run script, and',
+      'there is no argument that points the preview anywhere else. When no dev server can be',
+      'found, the error names which of the three things is missing: no run script configured,',
+      'none of them running, or running but no address printed yet.',
+      '',
+      'This is the same panel the user is looking at, so it exists only while this workspace is',
+      'the one open on screen. If it is not, the call fails and says so rather than guessing.'
+    ].join(' '),
+    inputSchema: {
+      path: z
+        .string()
+        .optional()
+        .describe('Path on the dev server, such as "/settings". Defaults to "/".')
+    },
+    annotations: { title: 'Open the preview', readOnlyHint: false }
+  },
+  {
+    name: 'capture_preview',
+    description: [
+      'Screenshot what the preview is showing right now and return it as an image.',
+      'Call `open_preview` first — this tool never navigates, so it shows the current page.',
+      'Large screenshots are scaled down to stay within the size Wooi returns to an agent, and',
+      'the result says when that happened.'
+    ].join(' '),
+    inputSchema: {},
+    annotations: { title: 'Screenshot the preview', readOnlyHint: true }
+  },
+  {
+    name: 'read_preview_issues',
+    description: [
+      'Read the console errors and failed requests Wooi collected from the page in the preview,',
+      'errors first. Wooi drops them whenever the preview navigates, so this is the state since',
+      'the last load — reload with `open_preview` to see whether a fix cleared them.',
+      'The list is capped, and the result says when it was truncated.'
+    ].join(' '),
+    inputSchema: {},
+    annotations: { title: 'Read preview errors', readOnlyHint: true }
+  },
+  {
     name: 'check_related_work',
     description: [
       'Report whether other open workspaces are changing the same files as this one — which',
@@ -645,6 +689,33 @@ export const AGENT_TOOLS: AgentToolSpec[] = [
     annotations: { title: 'Switch to an agent team', readOnlyHint: false }
   },
   {
+    name: 'switch_workspace_agent',
+    description: [
+      'Switch the main agent running this workspace to another installed agent product, while',
+      'keeping the same worktree and handing over a compact checkpoint of the conversation.',
+      '',
+      'Call this only when the user asks to continue this workspace with a different agent, or',
+      'after you explain why a different agent is needed and the user agrees. The call always',
+      'shows a Wooi approval card, even in an autonomous or full-access workspace.',
+      '',
+      'The switch happens after this turn ends so this tool result can return safely. Wooi then',
+      'starts the new agent automatically with the current goal, reported progress, changed-file',
+      'paths and verification commands. End the turn immediately after a successful call; do not',
+      'ask the user to repeat the task.'
+    ].join(' '),
+    inputSchema: {
+      agentBackend: z
+        .enum(AGENT_BACKEND_IDS as [AgentBackendId, ...AgentBackendId[]])
+        .describe(
+          `Agent that should take over this workspace: ${AGENT_BACKEND_IDS.map((id) => `${id} (${AGENT_BACKEND_LABELS[id]})`).join(', ')}.`
+        ),
+      reason: z
+        .string()
+        .describe('One sentence explaining the switch. The user reads it on the approval card.')
+    },
+    annotations: { title: 'Switch the workspace agent', readOnlyHint: false }
+  },
+  {
     name: 'archive_workspace',
     description: [
       'Archive a workspace you created from here, once its work is finished or abandoned, so it',
@@ -886,4 +957,22 @@ export function neverAsksWooiTool(qualifiedName: string): boolean {
   const prefix = `mcp__${WOOI_MCP_SERVER_NAME}__`
   if (!qualifiedName.startsWith(prefix)) return false
   return neverAsksToolName(qualifiedName.slice(prefix.length))
+}
+
+/**
+ * 전송 계층이 아니라 핸들러에서 직접 승인받는 도구. 양 백엔드에서 같은 카드와 반드시-묻기
+ * 계약을 보장해야 하는 좁은 경우에만 쓴다.
+ */
+const HANDLER_APPROVES = new Set(['switch_workspace_agent'])
+
+export function approvesInsideHandlerToolName(name: string): boolean {
+  return HANDLER_APPROVES.has(name)
+}
+
+export function approvesInsideHandlerWooiTool(qualifiedName: string): boolean {
+  const prefix = `mcp__${WOOI_MCP_SERVER_NAME}__`
+  return (
+    qualifiedName.startsWith(prefix) &&
+    approvesInsideHandlerToolName(qualifiedName.slice(prefix.length))
+  )
 }

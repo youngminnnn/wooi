@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { MAX_DIFF_LINES_PER_SIDE } from '@shared/diffRenderLimit'
 import type { FileDiff, WorkspaceDiff } from '@shared/types'
 import { renderWithStore } from '../test/harness'
-import DiffView from './DiffView'
+import type { DiffCommentAnchor } from '../lib/diffComments'
+import DiffView, { type DiffDiscarding } from './DiffView'
 
 function fileDiff(over: Partial<FileDiff> & { path: string }): FileDiff {
   return {
@@ -254,5 +255,213 @@ describe('변경 지점 간 이동', () => {
     fireEvent.keyDown(window, { code: 'F7', ctrlKey: true })
     fireEvent.keyDown(window, { code: 'F7', altKey: true })
     expect(scrollTo).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * 워드랩 토글이 **라인 코멘트의 히트 테스트를 어긋나게 하지 않는지** 확인한다.
+ *
+ * Wooi 는 드래그로 행 범위를 골라 코멘트를 단다. 랩이 켜지면 한 줄이 여러 시각적 줄로 늘어나고,
+ * 끄면 행이 화면보다 넓어져 가로로 밀린다 — 좌표로 행을 찾는 구현이었다면 둘 다 어긋났을
+ * 자리다. 실제로는 행 `<div>` 의 `onMouseEnter` 와 배열 인덱스만 쓰므로 기하학이 개입하지
+ * 않는다. 그 사실을 고정해 둔다.
+ */
+const WRAP_PATCH = `diff --git a/src/a.ts b/src/a.ts
+index 1111111..2222222 100644
+--- a/src/a.ts
++++ b/src/a.ts
+@@ -1,3 +1,4 @@
+ const a = 1
+-const b = 2
++const b = 3
++const veryLong = '${'x'.repeat(400)}'
+ const c = 4
+`
+
+const WRAP_DIFF: WorkspaceDiff = {
+  baseBranch: 'origin/main',
+  files: [
+    {
+      path: 'src/a.ts',
+      status: 'modified',
+      additions: 2,
+      deletions: 1,
+      patch: WRAP_PATCH,
+      binary: false
+    }
+  ]
+}
+
+/** 행 0 에서 눌러 행 3 까지 끌고 놓은 뒤, 열린 상자에 코멘트를 저장한다. */
+function dragComment(fromRow: number, toRow: number): void {
+  const buttons = screen.getAllByLabelText('Comment on this line')
+  fireEvent.mouseDown(buttons[fromRow])
+  // 버튼의 조상이 행 컨테이너다 — span > div(row).
+  const target = buttons[toRow].parentElement!.parentElement!
+  fireEvent.mouseEnter(target)
+  fireEvent.mouseUp(window)
+  fireEvent.change(screen.getByRole('textbox'), { target: { value: 'fix this' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Add comment' }))
+}
+
+describe.each([
+  ['랩 켜짐', true],
+  ['랩 꺼짐', false]
+])('DiffView 라인 코멘트 (%s)', (_label, wrap) => {
+  const renderView = (
+    onAdd: (anchor: DiffCommentAnchor, body: string) => void
+  ): ReturnType<typeof render> =>
+    render(
+      <DiffView
+        diff={WRAP_DIFF}
+        loading={false}
+        baseBranch="origin/main"
+        wrap={wrap}
+        commenting={{ comments: [], onAdd, onEdit: vi.fn(), onRemove: vi.fn() }}
+      />
+    )
+
+  it('드래그로 고른 범위가 같은 줄 번호로 굳는다', () => {
+    const onAdd = vi.fn()
+    renderView(onAdd)
+
+    // 행 0(문맥 L1) → 행 3(추가 L3). 사이의 삭제 행은 새 파일에 줄 번호가 없어 건너뛴다.
+    dragComment(0, 3)
+
+    expect(onAdd).toHaveBeenCalledWith(
+      { path: 'src/a.ts', deleted: false, from: 1, to: 3 },
+      'fix this'
+    )
+  })
+
+  it('한 행만 눌러도 그 줄에 달린다', () => {
+    const onAdd = vi.fn()
+    renderView(onAdd)
+
+    dragComment(4, 4)
+
+    expect(onAdd).toHaveBeenCalledWith(
+      { path: 'src/a.ts', deleted: false, from: 4, to: 4 },
+      'fix this'
+    )
+  })
+})
+
+describe('DiffView 워드랩', () => {
+  const renderWrap = (wrap: boolean): HTMLElement => {
+    const { container } = render(
+      <DiffView diff={WRAP_DIFF} loading={false} baseBranch="origin/main" wrap={wrap} />
+    )
+    return container.querySelector('[data-diff-file="src/a.ts"]') as HTMLElement
+  }
+
+  it('랩을 켜면 접히고, 가로 스크롤을 만들지 않는다', () => {
+    const block = renderWrap(true)
+    expect(block.querySelector('.whitespace-pre-wrap')).not.toBeNull()
+    expect(block.querySelector('.overflow-x-auto')).toBeNull()
+  })
+
+  it('랩을 끄면 정렬을 지키고 가로로 민다', () => {
+    const block = renderWrap(false)
+    expect(block.querySelector('.whitespace-pre-wrap')).toBeNull()
+    expect(block.querySelector('.overflow-x-auto')).not.toBeNull()
+    // 짧은 줄에서도 행 상자가 화면 폭까지 늘어나야 hover 로 범위를 늘릴 수 있다.
+    expect(block.querySelector('.min-w-full')).not.toBeNull()
+  })
+
+  it('파일 블록에는 트리가 찾아올 표적이 달려 있다', () => {
+    expect(renderWrap(true)).not.toBeNull()
+  })
+})
+
+/**
+ * hunk 버리기는 이 앱에서 **사용자의 코드를 지우는** 몇 안 되는 버튼이다. 그래서 여기서 재는
+ * 것은 모양이 아니라 "언제 눌리면 안 되는가" 다 — 잘못 눌린 한 번이 곧 데이터 손실이다.
+ */
+describe('hunk 버리기 버튼', () => {
+  const TWO_HUNKS = `@@ -1,2 +1,2 @@\n a\n-b\n+c\n@@ -10,2 +10,2 @@\n d\n-e\n+f\n`
+
+  function discarding(over: Partial<DiffDiscarding> = {}): DiffDiscarding {
+    return { blockedReason: null, onDiscard: vi.fn(), ...over }
+  }
+
+  it('배선을 주지 않으면 버튼 자체가 없다 — 모달·PR 리뷰의 diff 는 읽기 전용이다', () => {
+    renderWithStore(
+      <DiffView
+        diff={workspaceDiff([
+          fileDiff({ path: 'src/a.ts', patch: TWO_HUNKS, additions: 2, deletions: 2 })
+        ])}
+        loading={false}
+        baseBranch="main"
+      />
+    )
+    expect(screen.queryByLabelText('Discard this hunk in src/a.ts')).toBeNull()
+  })
+
+  it('hunk 마다 하나씩 붙고, 누르면 그 hunk 만 담은 patch 를 넘긴다', () => {
+    const onDiscard = vi.fn()
+    renderWithStore(
+      <DiffView
+        diff={workspaceDiff([
+          fileDiff({ path: 'src/a.ts', patch: TWO_HUNKS, additions: 2, deletions: 2 })
+        ])}
+        loading={false}
+        baseBranch="main"
+        discarding={discarding({ onDiscard })}
+      />
+    )
+    const buttons = screen.getAllByLabelText('Discard this hunk in src/a.ts')
+    expect(buttons).toHaveLength(2)
+
+    fireEvent.click(buttons[1])
+    expect(onDiscard).toHaveBeenCalledTimes(1)
+    const [file, patch] = onDiscard.mock.calls[0]
+    expect(file.path).toBe('src/a.ts')
+    // 두 번째 hunk 만 들어 있어야 한다 — 첫 번째 것까지 딸려 가면 안 지운 줄이 사라진다.
+    expect(patch).toBe(
+      ['--- a/src/a.ts', '+++ b/src/a.ts', '@@ -10,2 +10,2 @@', ' d', '-e', '+f', ''].join('\n')
+    )
+  })
+
+  /** 턴이 도는 중. 에이전트가 방금 읽은 파일을 뒤에서 되쓰면 두 쪽이 어긋난다. */
+  it('막힌 이유가 있으면 잠기고, 그 이유를 툴팁으로 말한다', () => {
+    const onDiscard = vi.fn()
+    renderWithStore(
+      <DiffView
+        diff={workspaceDiff([
+          fileDiff({ path: 'src/a.ts', patch: TWO_HUNKS, additions: 2, deletions: 2 })
+        ])}
+        loading={false}
+        baseBranch="main"
+        discarding={discarding({ blockedReason: 'The agent is working here.', onDiscard })}
+      />
+    )
+    const button = screen.getAllByLabelText('Discard this hunk in src/a.ts')[0]
+    expect(button).toBeDisabled()
+    fireEvent.click(button)
+    expect(onDiscard).not.toHaveBeenCalled()
+    // 잠긴 버튼은 마우스 이벤트를 받지 못하므로 이유는 감싼 쪽에 달려 있어야 읽힌다.
+    expect(button.parentElement?.getAttribute('title')).toBe('The agent is working here.')
+  })
+
+  /**
+   * 상한에 걸려 본문을 안 그린 파일에는 hunk 도, 버릴 자리도 없다. 카드만 있는 화면에 버튼이
+   * 뜨면 "무엇을 버리는지 못 본 채 버리기" 가 되므로 아예 나오지 않아야 한다.
+   */
+  it('너무 커서 그리지 않은 diff 에는 붙지 않는다', () => {
+    const lines = MAX_DIFF_LINES_PER_SIDE + 1
+    renderWithStore(
+      <DiffView
+        diff={workspaceDiff([
+          fileDiff({ path: 'dist/bundle.js', patch: hugePatch(lines), additions: lines })
+        ])}
+        loading={false}
+        baseBranch="main"
+        discarding={discarding()}
+      />
+    )
+    fireEvent.click(screen.getByTitle('Expand this file'))
+    expect(screen.getByText(/too large to display safely/)).toBeTruthy()
+    expect(screen.queryByLabelText('Discard this hunk in dist/bundle.js')).toBeNull()
   })
 })

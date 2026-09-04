@@ -24,6 +24,19 @@ import { shouldSendRemotePush, type RemotePushKind } from './remote/push'
 /** 렌더러가 마지막으로 알려 준, 지금 화면에 떠 있는 워크스페이스. 모르면 null. */
 let viewingWorkspaceId: string | null = null
 
+/**
+ * 창이 하나도 없을 때 메인 창을 되살리는 방법. 등록되지 않았으면 알림 클릭이 아무 일도 하지
+ * 않던 예전 동작 그대로다.
+ *
+ * 매니저를 거쳐 주입하지 않고 모듈 상태로 두는 것은 바로 위 `viewingWorkspaceId` 와 같은
+ * 이유다 — 이 값은 앱에 하나뿐이고, 알림을 띄우는 두 매니저가 각자 다른 창을 열 일이 없다.
+ */
+let openWindow: (() => void) | null = null
+
+export function setWindowOpener(open: () => void): void {
+  openWindow = open
+}
+
 /** 마지막으로 건너뛴 알림 1건. 설정 화면이 읽는 진단값이라 디스크에 남기지 않는다. */
 let lastSkip: NotificationSkip | null = null
 
@@ -67,6 +80,7 @@ export interface DesktopNotification {
 }
 
 export interface NotificationDeps {
+  /** 파괴된 창이 돌아올 수 있다 — 반드시 liveWindow() 를 거쳐 쓴다. */
   getWindow: () => BrowserWindow | null
   getWorkspace: (workspaceId: string) => Workspace | undefined
   dispatch: (channel: string, payload: unknown) => void
@@ -84,7 +98,7 @@ export function showDesktopNotification(
   deps: NotificationDeps
 ): void {
   const { workspaceId, event, body, urgent } = notification
-  const win = deps.getWindow()
+  const win = liveWindow(deps)
   const ws = deps.getWorkspace(workspaceId)
   const name = ws ? workspaceDisplayName(ws) : 'Workspace'
   const settings = getStore().getState().settings
@@ -142,13 +156,31 @@ export function showDesktopNotification(
   })
 
   osNotification.on('click', () => {
-    const w = deps.getWindow()
+    const w = liveWindow(deps)
     if (w) {
       if (w.isMinimized()) w.restore()
       w.show()
       w.focus()
+    } else {
+      // 창이 없는 동안(백그라운드 모드) 온 알림이다 — 되살려야 클릭이 의미를 갖는다.
+      // 아래 방송은 새 창의 렌더러가 준비되면서 다시 상태를 읽으므로 순서를 바꿀 필요는 없다.
+      openWindow?.()
     }
     deps.dispatch(IPC.evtSelectWorkspace, workspaceId)
   })
   osNotification.show()
+}
+
+/**
+ * 살아 있는 메인 창(없거나 이미 파괴됐으면 null).
+ *
+ * `getWindow()` 는 **파괴된** BrowserWindow 를 돌려줄 수 있고, 그 객체에 무엇을 물어보든
+ * `Object has been destroyed` 로 던진다 — `?.` 로는 막히지 않는다(null 이 아니기 때문이다).
+ * 여기서 던지면 호출부인 onPermissionRequest 가 승인 요청을 방송하기 **전에** 끊겨,
+ * 렌더러에도 폰에도 카드가 뜨지 않고 호스트는 아무도 답하지 않을 프로미스에 매달린다.
+ * ipc.ts·updater.ts 가 쓰는 것과 같은 방어다.
+ */
+function liveWindow(deps: NotificationDeps): BrowserWindow | null {
+  const win = deps.getWindow()
+  return win && !win.isDestroyed() ? win : null
 }

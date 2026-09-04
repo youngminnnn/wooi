@@ -1,8 +1,11 @@
 import { execFile } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { readdir, readFile, realpath, stat } from 'node:fs/promises'
-import { join, resolve, relative, isAbsolute, sep, basename } from 'node:path'
+import { join, resolve, relative, isAbsolute, sep, basename, dirname } from 'node:path'
 import { promisify } from 'node:util'
-import type { DirEntry, FileContent, FileHit } from '@shared/types'
+import type { DirEntry, FileContent, FileHit, FileWriteResult } from '@shared/types'
+import { classifySave } from '@shared/fileEdit'
+import { writeFileAtomic } from './fsutil'
 
 const exec = promisify(execFile)
 
@@ -47,6 +50,29 @@ async function realPathInRoot(root: string, relPath: string): Promise<string | n
 }
 
 /**
+ * **쓰기 대상**의 절대 경로를 정한다. 아직 없는 파일도 허용한다는 점만 `realPathInRoot` 와 다르다.
+ *
+ * 지워진 파일에 초안을 되살려 저장하려면 대상이 없는 상태에서도 경로를 정해야 하는데,
+ * `realpath` 는 없는 경로에서 그냥 실패한다. 그래서 **부모 디렉토리**를 realpath 해서 격리를
+ * 확인하고 파일명을 다시 붙인다 — 링크로 밖을 가리키는 디렉토리는 여기서 걸린다.
+ */
+async function realWriteTargetInRoot(root: string, relPath: string): Promise<string | null> {
+  const existing = await realPathInRoot(root, relPath)
+  if (existing) return existing
+
+  const abs = resolveInRoot(root, relPath)
+  // root 자신에는 쓸 수 없다(basename 이 없다).
+  if (!abs || abs === resolve(root)) return null
+
+  const parent = await realPathInRoot(root, relative(root, dirname(abs)))
+  if (!parent) return null
+  // 부모가 디렉토리가 아니면 그 밑에 쓸 수 없다.
+  const parentInfo = await stat(parent).catch(() => null)
+  if (!parentInfo?.isDirectory()) return null
+  return join(parent, basename(abs))
+}
+
+/**
  * worktree 내 한 디렉토리의 항목을 나열한다(All files 탭의 lazy 트리용).
  * 디렉토리 먼저, 그다음 파일을 이름순으로. `.git` 은 노이즈라 숨긴다.
  */
@@ -87,15 +113,70 @@ export async function readFileInRoot(root: string, relPath: string): Promise<Fil
     if (!info.isFile()) return null
 
     const buf = await readFile(abs)
+    // 해시는 **잘리기 전 전체**를 대상으로 한다. 화면에 보이는 앞부분만 해시하면, 뒷부분만
+    // 바뀐 파일을 "안 바뀌었다" 로 보고 통째로 덮어쓰게 된다.
+    const sha = createHash('sha256').update(buf).digest('hex')
     const truncated = buf.length > READ_MAX_BYTES
     const slice = truncated ? buf.subarray(0, READ_MAX_BYTES) : buf
     if (slice.includes(0)) {
-      return { path: relPath, text: '', truncated, binary: true }
+      return { path: relPath, text: '', truncated, binary: true, sha }
     }
-    return { path: relPath, text: slice.toString('utf-8'), truncated, binary: false }
+    return { path: relPath, text: slice.toString('utf-8'), truncated, binary: false, sha }
   } catch {
     return null
   }
+}
+
+/**
+ * 뷰어에서 고친 파일을 worktree 에 저장한다.
+ *
+ * `baselineSha` 는 편집을 시작할 때 읽은 내용의 해시다. 쓰기 직전에 디스크를 다시 읽어
+ * 그 해시와 맞춰 보고, 다르면 **쓰지 않고** 지금 디스크에 있는 내용을 함께 돌려준다 —
+ * 사람과 에이전트가 같은 워크트리를 동시에 만지는 앱이라 이 확인이 없으면 남의 작업이
+ * 조용히 사라진다. 사용자가 경고를 보고 고른 `force` 만 이 검사를 건너뛴다.
+ *
+ * 이건 낙관적 동시성 제어지 잠금이 아니다 — 확인과 쓰기 사이의 짧은 틈은 남는다. 파일
+ * 시스템에 compare-and-swap 이 없으므로 그 틈을 없앨 수는 없고, 여기서 막으려는 것은
+ * 몇 초~몇 분에 걸친 "열어 놓고 고치는 동안 바뀐" 경우다.
+ */
+export async function writeFileInRoot(
+  root: string,
+  relPath: string,
+  text: string,
+  baselineSha: string | null,
+  opts: { force?: boolean } = {}
+): Promise<FileWriteResult> {
+  const abs = await realWriteTargetInRoot(root, relPath)
+  if (!abs) return { ok: false, reason: 'denied' }
+
+  const current = await readFileInRoot(root, relPath)
+  // 있기는 한데 파일이 아니면(디렉토리·소켓 등) 손대지 않는다.
+  if (!current && (await stat(abs).catch(() => null))) return { ok: false, reason: 'denied' }
+
+  const verdict = classifySave({
+    baselineSha,
+    diskSha: current?.sha ?? null,
+    force: opts.force
+  })
+  if (verdict.kind === 'conflict') {
+    return { ok: false, reason: 'conflict', conflict: verdict.conflict, current }
+  }
+
+  try {
+    // 원본 권한을 물려준다. 없던 파일(force 로 되살리는 경우)이면 기본 권한에 맡긴다.
+    const mode = await stat(abs)
+      .then((info) => info.mode & 0o777)
+      .catch(() => undefined)
+    writeFileAtomic(abs, text, { mode })
+  } catch (e) {
+    return { ok: false, reason: 'error', message: e instanceof Error ? e.message : String(e) }
+  }
+
+  const saved = await readFileInRoot(root, relPath)
+  // 방금 쓴 파일을 못 읽는 경우는 사실상 없지만, 못 읽으면 새 baseline 을 줄 수 없다.
+  if (!saved)
+    return { ok: false, reason: 'error', message: 'Saved, but could not re-read the file.' }
+  return { ok: true, content: saved }
 }
 
 // ── @멘션 자동완성용 파일 인덱스 ─────────────────────────────────────────

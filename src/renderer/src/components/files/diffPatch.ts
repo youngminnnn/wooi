@@ -11,6 +11,8 @@
  * 합치지 않고, hunk 를 "헤더가 말한 줄 수만큼 읽는다"는 핵심 규칙만 같은 방식으로 지킨다.
  */
 
+import type { FileDiff } from '@shared/types'
+
 export type PatchRowKind = 'context' | 'add' | 'del'
 
 export interface PatchRow {
@@ -32,6 +34,14 @@ export interface PatchHunk {
   /** "@@ -1,7 +1,9 @@ fn foo()" 원문 헤더(뒤쪽 섹션 힌트 포함). */
   header: string
   rows: PatchRow[]
+  /**
+   * hunk 본문을 patch 원문 그대로 담은 줄들. `rows` 와 달리 아무것도 해석하지 않는다 —
+   * "\ No newline at end of file" 처럼 rows 가 세지 않는 줄까지 순서대로 들어 있다.
+   *
+   * 이 hunk 하나만 담은 patch 를 다시 조립할 때 쓴다([[hunkPatch]]). 파싱해서 되쓰면 원문에
+   * 있던 표식이 조용히 사라지고, 그 patch 로 파일을 되돌리면 마지막 줄의 개행 유무가 뒤집힌다.
+   */
+  body: string[]
 }
 
 interface HunkRange {
@@ -52,8 +62,8 @@ export function parsePatch(patch: string): PatchHunk[] {
     if (!header.startsWith('@@')) continue
     const range = parseHunkHeader(header)
     if (!range) continue
-    const { rows, next } = readRows(lines, i + 1, range)
-    hunks.push({ header, rows })
+    const { rows, body, next } = readRows(lines, i + 1, range)
+    hunks.push({ header, rows, body })
     i = next - 1
   }
   return hunks
@@ -86,8 +96,9 @@ function readRows(
   lines: string[],
   start: number,
   range: HunkRange
-): { rows: PatchRow[]; next: number } {
+): { rows: PatchRow[]; body: string[]; next: number } {
   const rows: PatchRow[] = []
+  const body: string[] = []
   let oldLine = range.oldStart
   let newLine = range.newStart
   let oldLeft = range.oldCount
@@ -98,11 +109,15 @@ function readRows(
     const line = lines[i]
     if (line.startsWith('@@') || line.startsWith('diff --git ')) break
 
-    // "\ No newline at end of file" 은 줄 수에 포함되지 않는다.
+    // "\ No newline at end of file" 은 줄 수에 포함되지 않는다. 다만 원문에는 남긴다 —
+    // 이 표식이 빠진 patch 로 되돌리면 파일 끝 개행이 뒤바뀐다.
     if (line.startsWith('\\')) {
+      body.push(line)
       i++
       continue
     }
+
+    body.push(line)
 
     const marker = line[0]
     const text = line.slice(1)
@@ -134,10 +149,32 @@ function readRows(
     i++
   }
 
-  return { rows, next: i }
+  return { rows, body, next: i }
 }
 
 /** diff 한 줄 앞에 붙는 표식. */
 export function rowSign(row: PatchRow): string {
   return row.kind === 'add' ? '+' : row.kind === 'del' ? '-' : ' '
+}
+
+/**
+ * hunk 하나만 담은, 그 자체로 완결된 patch 를 만든다. main 이 `git apply --reverse` 로 이걸
+ * 워킹 트리에 되먹여 그 hunk 만 버린다([[IPC.gitDiscardHunk]]).
+ *
+ * **본문은 손대지 않는다.** `rows` 로 다시 쓰지 않고 `hunk.body` 를 원문 그대로 옮긴다 —
+ * 여기서 한 글자라도 달라지면 git 이 문맥 불일치로 거절하거나(다행), 엉뚱한 자리를 지운다.
+ * 반대로 헤더는 **다시 짓는다**. 원문 헤더를 그대로 쓰면 두 군데서 사고가 난다:
+ *
+ * - 이름이 바뀐 파일의 원문은 `--- a/옛경로` / `+++ b/새경로` 라, 역적용하면 내용이 아니라
+ *   **이름을 되돌린다**. 우리가 버리려는 건 그 hunk 의 내용뿐이므로 양쪽을 현재 경로로 맞춘다.
+ * - untracked 파일의 헤더는 git 이 아니라 Wooi 가 지어낸 것이라(`git.ts` untrackedFileDiff)
+ *   git 의 파서가 아는 모양이 아니다.
+ *
+ * 파일이 통째로 생겼거나(`added`) 사라진(`deleted`) 경우만 `/dev/null` 을 쓴다. 그 두 상태의
+ * patch 는 언제나 hunk 하나뿐이라, 그 하나를 버리는 것이 곧 파일을 되돌리는 것과 같다.
+ */
+export function hunkPatch(file: Pick<FileDiff, 'path' | 'status'>, hunk: PatchHunk): string {
+  const from = file.status === 'added' ? '/dev/null' : `a/${file.path}`
+  const to = file.status === 'deleted' ? '/dev/null' : `b/${file.path}`
+  return [`--- ${from}`, `+++ ${to}`, hunk.header, ...hunk.body, ''].join('\n')
 }

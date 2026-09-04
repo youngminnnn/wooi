@@ -3,10 +3,13 @@ import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { handle } from './commandRegistry'
+import { compareBaseBranch, normalizeCompareBase } from '@shared/compareBase'
 import { openInEditor } from './openInEditor'
 import { memoryFile } from './claude/memory'
 import { getStore } from './store'
 import { getRemoteBridge } from './remote'
+import { pendingPermissions } from './remote/permissions'
+import { isStayingAlive } from './backgroundMode'
 import { lastNotificationSkip, setViewingWorkspace } from './notifications'
 import { rememberPrStatus } from './prStatusCache'
 import { forgetContextUsage } from './contextUsageCache'
@@ -15,12 +18,13 @@ import { forgetRunningAgents } from './runningAgentsCache'
 import { setSleepBlockerEnabled } from './sleepBlocker'
 import { getTranscripts } from './transcripts'
 import { buildHandoffPrompt, estimateHandoffTokens, formatHandoffTokens } from '@shared/handoff'
-import { listDir, readFileInRoot, searchFiles } from './fsbrowse'
+import { listDir, readFileInRoot, searchFiles, writeFileInRoot } from './fsbrowse'
 import { importMigration, scanMigration } from './migrate'
 import { formatIssues } from '@shared/previewIssues'
 import { log } from './logger'
 import {
   abortMerge,
+  applyReversePatch,
   addWorktree,
   checkoutBranch,
   currentBranch,
@@ -61,6 +65,7 @@ import { findFreePort, waitForPortFree } from './net'
 import {
   getPrStatus,
   getPrChecks,
+  getCiFailureLogs,
   getPrMeta,
   getPrHeadSha,
   createPrWeb,
@@ -83,9 +88,11 @@ import {
   fetchOwnerAvatarDataUrl
 } from './github'
 import { planMergeTrain, runMergeTrain, type TrainLayer } from './mergeTrain'
+import { buildCiFixPrompt, decideCiFix, CI_FIX_MAX_ATTEMPTS } from './ciFix'
 import { ReviewManager } from './review/manager'
 import { resolveStackForPr } from './review/stackResolve'
 import type {
+  FileWriteResult,
   MigrationImportResult,
   MigrationImportSelection,
   MigrationScan,
@@ -123,7 +130,9 @@ import {
   isBranchStack,
   normalizePermissionMode,
   reorderById,
+  reorderWorkspaceStack,
   usableDefaultBackend,
+  workspaceStackRootId,
   workspaceStack
 } from '@shared/types'
 import {
@@ -186,10 +195,12 @@ import type {
   PendingPeerMessage,
   PeerInboundPolicy,
   PermissionMode,
+  PermissionRequest,
   PrMergeMethod,
   Repo,
   RestackResult,
   RewindActionResult,
+  RewindMode,
   SavedPrompt,
   StackCascadeResult,
   StackCascadeStep,
@@ -199,6 +210,7 @@ import type {
   StackTrainPlan,
   StackTrainResult,
   UpdateFromBaseResult,
+  DiscardHunkResult,
   Workspace
 } from '@shared/types'
 import type { AgentOrchestrator } from './agent/orchestrator'
@@ -209,6 +221,7 @@ import type { PaneWindows } from './paneWindows'
 import {
   cancelPreviewPick,
   capturePreview,
+  forgetPreviewGuest,
   pickPreviewElement,
   previewIssues,
   watchPreviewIssues
@@ -287,8 +300,8 @@ export function registerIpc(ctx: IpcContext): void {
     })
     try {
       // 이 전송은 토큰을 쓰게 된 이유 그 자체라 transcript 에 남아야 한다. 그래서 silent 나 prefix 를
-      // 쓰지 않는다. running 가드도 두지 않는다 — Claude 는 SDK 입력 큐에 enqueue 하고, Codex 는
-      // 진행 중인 턴에 네이티브 steering 하므로 두 백엔드 모두 mid-turn 전송을 받아들인다.
+      // 쓰지 않는다. running 가드도 두지 않는다 — 두 백엔드 모두 진행 중인 턴에 mid-turn 전송을
+      // 받아들인다(Codex 는 네이티브 steering, Claude 는 CLI 가 툴 라운드 사이에 접어 넣는다).
       //
       // origin 은 화면에서 이 전문을 한 줄로 접기 위한 표식이다([[types]] ConflictResolveOrigin).
       // 감추는 것과는 다르다 — 본문은 그대로 기록되고 한 번 눌러 펼치면 전부 보인다.
@@ -303,6 +316,130 @@ export function registerIpc(ctx: IpcContext): void {
       return { started: true }
     } catch (err) {
       return { error: err instanceof Error ? err.message : String(err) }
+    }
+  }
+
+  /**
+   * CI 실패를 에이전트에게 넘긴다. [[conflictResolve]] 의 `startConflictResolve` 와 같은 자리다 —
+   * 토큰을 쓰기 직전의 검증과 대화 기록 정책을 한 함수에 모아 둔다.
+   *
+   * 부르는 쪽은 값싼 신호(PR 상태가 'ci_failed')만 보고 여기까지 온다. **비싼 확인은 여기서**
+   * 한다 — 롤업을 다시 읽어 정말 끝난 실패인지 보고(다른 체크가 아직 돌고 있을 수 있다),
+   * 시도 횟수 상한을 확인하고, 그 다음에야 로그를 가져온다.
+   */
+  const ciFixInFlight = new Set<string>()
+
+  const maybeStartCiFix = async (workspaceId: string): Promise<void> => {
+    const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
+    if (!ws || ws.archived || !ws.autoFixCi) return
+
+    // 이 판정은 gh 를 두 번 왕복하는 동안 armed 를 읽고 쓴다. 폴링이 겹쳐 두 번 들어오면
+    // 둘 다 잠기기 전의 armed 를 보고 턴을 두 번 열 수 있다 — 상한을 세는 기능에서 그건
+    // 그냥 버그다. 워크스페이스당 한 번에 하나만 돌게 막는다.
+    if (ciFixInFlight.has(workspaceId)) return
+    ciFixInFlight.add(workspaceId)
+    try {
+      await evaluateCiFix(ws.id, ws.worktreePath)
+    } finally {
+      ciFixInFlight.delete(workspaceId)
+    }
+  }
+
+  const evaluateCiFix = async (workspaceId: string, worktreePath: string): Promise<void> => {
+    const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
+    if (!ws) return
+
+    const checks = await getPrChecks(worktreePath).catch(() => null)
+    const decision = decideCiFix({
+      enabled: true,
+      running: ws.status === 'running',
+      checks,
+      prev: ws.autoFixCiState ?? null
+    })
+
+    /**
+     * 판정 결과를 워크스페이스에 적고, 렌더러가 보는 값이 바뀌었으면 방송한다.
+     *
+     * 값이 같으면 방송하지 않는다 — 이 함수는 폴링마다 도는데, 대부분의 폴링은 아무것도
+     * 바꾸지 않는다. 그때마다 방송하면 토글을 켠 워크스페이스 수만큼, 아무것도 바꾸지 못하는
+     * 상태 방송이 45 초마다 반복된다([[prStatusCache]] 가 같은 이유로 같은 일을 한다).
+     */
+    const persist = (): void => {
+      const before = JSON.stringify(ws.autoFixCiState ?? null)
+      store.update((st) => {
+        const w = st.workspaces.find((x) => x.id === workspaceId)
+        if (!w) return
+        if (decision.state) w.autoFixCiState = decision.state
+        else delete w.autoFixCiState
+      })
+      if (before !== JSON.stringify(decision.state ?? null)) broadcastState()
+    }
+
+    if (decision.kind === 'idle') {
+      persist()
+      return
+    }
+
+    if (decision.kind === 'stop') {
+      persist()
+      // 조용히 포기하지 않는다. 켜 두고 잊은 사람에게는 "왜 안 고쳐졌지" 보다 "여기서
+      // 멈췄다" 가 필요하고, 멈춘 자리가 곧 사람이 이어받을 자리다.
+      const item: ChatItem = {
+        id: `system:ci-fix-stop:${Date.now()}`,
+        type: 'system',
+        text: `Checks are still failing after ${CI_FIX_MAX_ATTEMPTS} automatic attempts (${decision.failed
+          .map((c) => c.name)
+          .join(
+            ', '
+          )}). Wooi stopped retrying — take it from here, or push a change to start the count over.`,
+        ts: Date.now()
+      }
+      getTranscripts().upsert(workspaceId, item)
+      dispatch(IPC.evtChat, { workspaceId, event: { type: 'item', item } })
+      return
+    }
+
+    // 로그는 정말 보낼 때만 가져온다 — `gh run view --log-failed` 는 폴링마다 부를 것이 아니다.
+    const logs = await getCiFailureLogs(ws.worktreePath, decision.failed).catch(() =>
+      decision.failed.map((c) => ({ checkName: c.name }))
+    )
+    const prompt = buildCiFixPrompt({
+      prNumber: checks?.prNumber ?? ws.prNumber ?? 0,
+      prUrl: checks?.prUrl ?? '',
+      failed: decision.failed,
+      logs,
+      attempt: decision.state.attempts,
+      max: CI_FIX_MAX_ATTEMPTS
+    })
+
+    try {
+      // 상태를 **보내기 전에** 적는다. 전송이 오래 걸리는 사이 다음 폴링이 같은 실패를 보고
+      // 또 열면, 상한을 세는 의미가 없어진다.
+      persist()
+      // conflictResolve 와 같은 정책이다 — 이 전송은 토큰을 쓰게 된 이유 그 자체라 transcript 에
+      // 남아야 하므로 silent 나 prefix 를 쓰지 않는다. origin 은 화면에서 한 줄로 접기 위한 표식이다.
+      await ctx.sessions.sendMessage(workspaceId, prompt, undefined, {
+        origin: {
+          kind: 'ciFix',
+          prNumber: checks?.prNumber ?? 0,
+          failedChecks: decision.failed.map((c) => c.name),
+          attempt: decision.state.attempts,
+          max: CI_FIX_MAX_ATTEMPTS
+        }
+      })
+    } catch {
+      // 보내지 못했으면 이 시도는 없었던 것으로 되돌린다 — 실패한 전송으로 상한을 축내면
+      // 정작 고칠 수 있었을 기회가 줄어든다.
+      store.update((st) => {
+        const w = st.workspaces.find((x) => x.id === workspaceId)
+        if (w)
+          w.autoFixCiState = {
+            ...decision.state,
+            attempts: decision.state.attempts - 1,
+            armed: true
+          }
+      })
+      broadcastState()
     }
   }
 
@@ -356,7 +493,8 @@ export function registerIpc(ctx: IpcContext): void {
   /** fan-out 은 생성에 더해 만든 후보에게 첫 프롬프트까지 보낸다([[fanout]]). */
   const fanoutDeps: CreateFanoutDeps = {
     ...workspaceDeps,
-    sendMessage: (workspaceId, text) => ctx.sessions.sendMessage(workspaceId, text)
+    sendMessage: (workspaceId, text, opts) =>
+      ctx.sessions.sendMessage(workspaceId, text, undefined, opts)
   }
   /** 아카이브는 워크스페이스에 매달린 것들까지 끊어야 해 더 넓다([[workspaces]] archiveWorkspace). */
   const archiveDeps: ArchiveWorkspaceDeps = {
@@ -622,25 +760,49 @@ export function registerIpc(ctx: IpcContext): void {
     IPC.workspaceReorder,
     (_e, workspaceId: string, targetWorkspaceId: string, position: DropPosition) => {
       const { workspaces } = store.getState()
-      const dragged = workspaces.find((w) => w.id === workspaceId)
-      const target = workspaces.find((w) => w.id === targetWorkspaceId)
+      const draggedRootId = workspaceStackRootId(workspaces, workspaceId)
+      const targetRootId = workspaceStackRootId(workspaces, targetWorkspaceId)
+      const dragged = workspaces.find((w) => w.id === draggedRootId)
+      const target = workspaces.find((w) => w.id === targetRootId)
       if (!dragged || !target) return
 
-      // 사이드바는 워크스페이스를 orderByStack 의 DFS 결과로 그리므로, 배열 순서가 실제 표시
-      // 순서를 좌우하는 범위는 "같은 부모를 둔 형제들 사이"뿐이다. 그 밖의 조합(다른 레포·다른
-      // stack 부모)은 배열만 흔들고 화면은 그대로여서 사용자에게 아무 일도 안 일어난 것처럼 보인다.
-      // 부모를 바꾸는 건 stack 의 베이스 브랜치를 갈아 끼우는 git 작업이라 드래그로 다루지 않는다.
-      // 렌더러도 같은 규칙으로 드롭을 막지만, IPC 는 신뢰 경계이므로 여기서 다시 확인한다.
+      // 어느 행을 잡아도 그 stack 의 뿌리를 찾아 DFS 묶음 전체를 옮긴다. 부모를 바꾸는 것은
+      // 베이스 브랜치를 갈아 끼우는 git 작업이라 드래그로 다루지 않는다. 렌더러도 같은 레포·
+      // 아카이브·고정 영역 규칙으로 드롭을 막지만, IPC 는 신뢰 경계이므로 여기서 다시 확인한다.
       if (dragged.repoId !== target.repoId) return
-      if ((dragged.parentWorkspaceId ?? null) !== (target.parentWorkspaceId ?? null)) return
       if (dragged.archived !== target.archived) return
+      if (!!dragged.sidebarPinned !== !!target.sidebarPinned) return
 
       store.update((st) => {
-        st.workspaces = reorderById(st.workspaces, workspaceId, targetWorkspaceId, position)
+        st.workspaces = reorderWorkspaceStack(
+          st.workspaces,
+          workspaceId,
+          targetWorkspaceId,
+          position
+        )
       })
       broadcastState()
     }
   )
+
+  handle(IPC.workspaceSetPinned, (_e, workspaceId: string, pinned: boolean) => {
+    store.update((st) => {
+      const rootId = workspaceStackRootId(st.workspaces, workspaceId)
+      const root = st.workspaces.find((w) => w.id === rootId)
+      if (!root || root.archived) return
+      root.sidebarPinned = pinned
+      if (!pinned) return
+      const firstRoot = st.workspaces.find(
+        (w) =>
+          w.repoId === root.repoId &&
+          !w.archived &&
+          workspaceStackRootId(st.workspaces, w.id) === w.id
+      )
+      if (firstRoot && firstRoot.id !== root.id)
+        st.workspaces = reorderWorkspaceStack(st.workspaces, root.id, firstRoot.id, 'before')
+    })
+    broadcastState()
+  })
 
   handle(IPC.repoListBranches, async (_e, repoId: string): Promise<string[]> => {
     const repo = repoFor(repoId)
@@ -1057,7 +1219,7 @@ export function registerIpc(ctx: IpcContext): void {
       if (needsHandoff && !opts?.handoff) {
         return {
           error:
-            'This conversation has already started — switching agents replays it to the new agent. Confirm the switch to continue.'
+            'This conversation has already started — switching agents sends a compact workspace checkpoint to the new agent. Confirm the switch to continue.'
         }
       }
 
@@ -1096,8 +1258,8 @@ export function registerIpc(ctx: IpcContext): void {
         // codex/manager 의 resumeThreadId). 비우면 새 세션이 열리고, 맥락은 아래 인수인계가 잇는다.
         w.sessionId = null
         // 인수인계는 여기서 보내지 않고 **다음 메시지에 얹어** 나간다. 여기서 한 턴을 돌리면
-        // 사용자가 시작하지도 않은 그 턴에 곧바로 입력한 명령이 끼어들어(Codex 의 steering)
-        // 엉뚱한 답이 돌아온다 — 실제로 겪은 증상이다([[shared/handoff]]).
+        // 사용자가 시작하지도 않은 그 턴에 곧바로 입력한 명령이 끼어들어(두 백엔드 모두 mid-turn
+        // 입력을 받아들인다) 엉뚱한 답이 돌아온다 — 실제로 겪은 증상이다([[shared/handoff]]).
         w.pendingHandoffFrom = handoffPrompt ? fromLabel : null
         // 모델·effort·fast mode 는 백엔드마다 값 자체가 다르다(Claude 의 모델 ID 를 Codex 에 줄 수
         // 없다). 그대로 들고 가면 조용히 무시되거나 거부되므로 새 백엔드의 기본값으로 되돌린다.
@@ -1120,7 +1282,7 @@ export function registerIpc(ctx: IpcContext): void {
         const item: ChatItem = {
           id: `system:agent-switch:${Date.now()}`,
           type: 'system',
-          text: `Switched to ${target.label}. The conversation above goes with your next message (${formatHandoffTokens(estimateHandoffTokens(handoffPrompt))} tokens of input) — it can’t see any of it until then.`,
+          text: `Switched to ${target.label}. A compact workspace checkpoint goes with your next message (${formatHandoffTokens(estimateHandoffTokens(handoffPrompt))} tokens of input) — it can’t see any of it until then.`,
           ts: Date.now()
         }
         getTranscripts().upsert(workspaceId, item)
@@ -1135,6 +1297,18 @@ export function registerIpc(ctx: IpcContext): void {
     store.update((st) => {
       const w = st.workspaces.find((x) => x.id === workspaceId)
       if (w) w.muted = muted
+    })
+    broadcastState()
+  })
+
+  handle(IPC.workspaceSetAutoFixCi, (_e, workspaceId: string, enabled: boolean) => {
+    store.update((st) => {
+      const w = st.workspaces.find((x) => x.id === workspaceId)
+      if (!w) return
+      w.autoFixCi = enabled
+      // 끄면 진행 상태도 버린다. 다시 켜는 것은 명시적인 사용자 동작이니, 그때는 남은 시도가
+      // 0 인 채로 시작해 아무 일도 안 일어나는 대신 상한을 처음부터 받는 편이 맞다.
+      if (!enabled) delete w.autoFixCiState
     })
     broadcastState()
   })
@@ -1312,6 +1486,16 @@ export function registerIpc(ctx: IpcContext): void {
     dispatch(IPC.evtPermissionCancel, requestId)
   })
 
+  /**
+   * 지금 답을 기다리는 승인 요청 전부.
+   *
+   * 렌더러의 목록은 라이브 이벤트로만 차기 때문에(store.ts 의 onPermission), 창이 없던 동안
+   * 올라온 요청은 창을 다시 열어도 보이지 않는다 — 그 사이 호스트는 아무도 답하지 않을
+   * 프로미스에 매달린다. 목록은 폰이 쓰는 것을 그대로 재사용한다([[remote/permissions]]) —
+   * 같은 질문에 두 개의 답을 두지 않는다.
+   */
+  handle(IPC.permissionPending, (): PermissionRequest[] => pendingPermissions.list())
+
   // ── 스크립트 ───────────────────────────────────────────────────────────
 
   handle(IPC.scriptRun, async (_e, workspaceId: string, scriptId: string) => {
@@ -1424,6 +1608,8 @@ export function registerIpc(ctx: IpcContext): void {
 
   handle(IPC.previewUnwatchIssues, (_e, webContentsId: number) => {
     previewIssues().unwatch(webContentsId)
+    // 에이전트 도구가 이 워크스페이스의 게스트를 찾는 표도 같은 자리에서 지운다([[main/preview]]).
+    forgetPreviewGuest(webContentsId)
   })
 
   handle(IPC.previewListIssues, (_e, workspaceId: string) => previewIssues().list(workspaceId))
@@ -1491,10 +1677,10 @@ export function registerIpc(ctx: IpcContext): void {
 
   // ── git ────────────────────────────────────────────────────────────────
 
-  handle(IPC.gitStatus, async (_e, workspaceId: string) => {
+  handle(IPC.gitStatus, async (_e, workspaceId: string, force = true) => {
     const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
     if (!ws) return null
-    return getStatus(ws.worktreePath, ws.baseBranch).catch(() => null)
+    return getStatus(ws.worktreePath, ws.baseBranch, force).catch(() => null)
   })
 
   handle(IPC.gitFetch, async (_e, repoId: string) => {
@@ -1504,9 +1690,32 @@ export function registerIpc(ctx: IpcContext): void {
   })
 
   handle(IPC.gitDiff, async (_e, workspaceId: string) => {
-    const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
+    const st = store.getState()
+    const ws = st.workspaces.find((w) => w.id === workspaceId)
     if (!ws || ws.archived) return null
-    return getDiff(ws.worktreePath, ws.baseBranch).catch(() => null)
+    // 비교 기준은 **여기서만** 읽는다. PR·rebase 대상은 계속 ws.baseBranch 가 소유한다
+    // (경계의 근거는 [[compareBase]]). 리포를 못 찾으면 예전처럼 base 그대로 간다.
+    const defaultBranch = st.repos.find((r) => r.id === ws.repoId)?.defaultBranch
+    const base = defaultBranch
+      ? compareBaseBranch({
+          baseBranch: ws.baseBranch,
+          defaultBranch,
+          compareBase: ws.compareBase
+        })
+      : ws.baseBranch
+    return getDiff(ws.worktreePath, base).catch(() => null)
+  })
+
+  /**
+   * Changes 패널의 비교 기준을 바꾼다. **표시 전용** — 이 값은 IPC.gitDiff 말고 아무 데서도
+   * 읽히지 않으며, PR 대상(ipc.ts 의 PR 생성)·rebase 대상(cascade)은 손대지 않는다.
+   */
+  handle(IPC.workspaceSetCompareBase, (_e, workspaceId: string, compareBase: unknown) => {
+    store.update((st) => {
+      const w = st.workspaces.find((x) => x.id === workspaceId)
+      if (w) w.compareBase = normalizeCompareBase(compareBase)
+    })
+    broadcastState()
   })
 
   // base 브랜치를 현재 브랜치로 머지해 드리프트를 해소한다(충돌 시 워킹트리에 충돌이 남는다).
@@ -1527,6 +1736,34 @@ export function registerIpc(ctx: IpcContext): void {
     if (!ws || ws.archived) return
     await abortMerge(ws.worktreePath).catch(() => {})
   })
+
+  /**
+   * Changes 탭에서 고른 hunk 하나를 워킹 트리에서 버린다. 커밋도 스테이징도 하지 않는다.
+   *
+   * 턴이 도는 중이면 거절한다. 렌더러가 이미 버튼을 막아 두지만, 사용자가 버튼을 누른 뒤
+   * git 이 파일을 여는 사이에 에이전트가 그 파일을 쓰기 시작할 수 있다 — 판정은 실제로
+   * 되쓰기 직전인 여기서 한 번 더 해야 의미가 있다.
+   */
+  handle(
+    IPC.gitDiscardHunk,
+    async (_e, workspaceId: string, patch: string): Promise<DiscardHunkResult> => {
+      const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
+      if (!ws || ws.archived) return { status: 'error', message: 'Workspace not found.' }
+      if (ws.status === 'running') {
+        return {
+          status: 'busy',
+          message: 'The agent is working in this workspace. Wait for the turn to finish.'
+        }
+      }
+      if (typeof patch !== 'string' || !patch.includes('@@')) {
+        return { status: 'error', message: 'Nothing to discard.' }
+      }
+      return applyReversePatch(ws.worktreePath, patch).catch((err) => ({
+        status: 'error' as const,
+        message: err instanceof Error ? err.message : String(err)
+      }))
+    }
+  )
 
   /**
    * 모델 B 스택(단일 worktree · N 브랜치)을 아래→위로 순차 rebase 한다. 각 상위 브랜치를 이전
@@ -2106,6 +2343,16 @@ export function registerIpc(ctx: IpcContext): void {
     // 이름이라 그동안 폰의 워크스페이스 이름이 낡은 채로 남는다. 폴링마다 방송하지
     // 않으므로 값이 그대로인 동안에는 비용이 없다.
     if (rememberPrStatus(workspaceId, status)) broadcastState()
+
+    // CI auto-fix 는 여기에 붙는다. main 에는 CI 타이머가 없고, 렌더러의 PR 폴링이 이미
+    // 45 초마다 돌면서 체크 결과까지 받아 오므로(stateFor 가 롤업을 읽는다) 새 폴링을
+    // 만들지 않고 이 폴링의 결과에 얹는다.
+    //
+    // 여기서 보는 것은 값싼 신호(이미 받아 둔 상태값)뿐이다. 롤업을 다시 읽고 로그를
+    // 가져오는 비싼 일은 maybeStartCiFix 안에서, 토글이 켜진 워크스페이스에 한해서만 한다.
+    if (status && (status.state === 'ci_failed' || status.state === 'ci_pending')) {
+      void maybeStartCiFix(workspaceId).catch(() => {})
+    }
     return status
   })
 
@@ -2646,6 +2893,10 @@ export function registerIpc(ctx: IpcContext): void {
   // 앱을 닫을 때는 **워크트리만** 정리한다. 리뷰 레코드·ref·사이드카를 지우면 다음 실행에
   // 리뷰가 통째로 사라져 영속화가 무의미해진다(ref 를 남겨야 오프라인에서도 복원된다).
   app.on('before-quit', () => {
+    // 종료가 막혔으면(백그라운드 모드) 리뷰는 계속 돌아야 한다. Electron 은 preventDefault 와
+    // 무관하게 모든 before-quit 리스너를 실행하므로, 여기서 직접 물어보지 않으면 살아 있어야 할
+    // 워크트리를 지운다([[main/backgroundMode]]).
+    if (isStayingAlive()) return
     void reviewManager.disposeWorktreesOnQuit()
   })
 
@@ -2800,6 +3051,27 @@ export function registerIpc(ctx: IpcContext): void {
     return readFileInRoot(ws.worktreePath, relPath).catch(() => null)
   })
 
+  handle(
+    IPC.fsWrite,
+    (
+      _e,
+      workspaceId: string,
+      relPath: string,
+      text: string,
+      baselineSha: string | null,
+      force?: boolean
+    ): Promise<FileWriteResult> => {
+      const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
+      // 아카이브된 워크스페이스는 읽기 전용이다(읽기와 같은 규칙).
+      if (!ws || ws.archived) return Promise.resolve({ ok: false, reason: 'denied' })
+      return writeFileInRoot(ws.worktreePath, relPath, text, baselineSha, { force }).catch((e) => ({
+        ok: false as const,
+        reason: 'error' as const,
+        message: e instanceof Error ? e.message : String(e)
+      }))
+    }
+  )
+
   handle(IPC.fsSearch, (_e, workspaceId: string, query: string) => {
     const ws = store.getState().workspaces.find((w) => w.id === workspaceId)
     if (!ws || ws.archived) return []
@@ -2910,16 +3182,17 @@ export function registerIpc(ctx: IpcContext): void {
     }
   )
 
-  // /rewind 패널 — 고른 체크포인트(사용자 메시지 UUID)로 추적된 파일을 되돌린다.
+  // /rewind 패널 — 고른 체크포인트(사용자 메시지 UUID)로 파일·대화를 되돌린다.
   handle(
     IPC.commandRewindAction,
     async (
       _e,
       workspaceId: string,
-      userMessageId: string
+      userMessageId: string,
+      mode: RewindMode
     ): Promise<{ result?: RewindActionResult; error?: string }> => {
       try {
-        const result = await ctx.sessions.rewindAction(workspaceId, userMessageId)
+        const result = await ctx.sessions.rewindAction(workspaceId, userMessageId, mode)
         return { result }
       } catch (err) {
         return { error: err instanceof Error ? err.message : String(err) }
@@ -3023,6 +3296,7 @@ export function registerIpc(ctx: IpcContext): void {
   handle(IPC.settingsUpdate, (_e, patch: Partial<AppSettings>) => {
     store.update((st) => Object.assign(st.settings, patch))
     if (patch.autoResumeAfterRateLimit === false) ctx.sessions.cancelAllRateLimitResumes()
+    if (patch.resumeUnfinishedTurnsOnLaunch === false) ctx.sessions.cancelAllShutdownResumes()
     // 껐으면 지금 붙잡고 있는 것을 바로 놓아야 한다 — 다음 방송까지 기다리면 도는 턴이 끝날
     // 때까지 맥이 계속 깨어 있다.
     if (patch.keepAwakeWhileRunning !== undefined)
