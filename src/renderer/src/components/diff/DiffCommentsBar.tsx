@@ -13,14 +13,11 @@ import { commentLocation, type DiffComment } from '../../lib/diffComments'
  */
 export default function DiffCommentsBar({
   comments,
-  queue,
   onRemove,
   onDiscardAll,
   onSend
 }: {
   comments: DiffComment[]
-  /** 지금 보내면 바로 나가지 않고 대기 큐에 들어가는지(실행 중 + steering 미지원 백엔드). */
-  queue: boolean
   onRemove: (id: string) => void
   onDiscardAll: () => void
   onSend: () => void
@@ -29,7 +26,7 @@ export default function DiffCommentsBar({
   if (!comments.length) return null
 
   const n = comments.length
-  const label = `${queue ? 'Queue' : 'Send'} ${n} comment${n > 1 ? 's' : ''}`
+  const label = `Send ${n} comment${n > 1 ? 's' : ''}`
 
   return (
     <div className="shrink-0 border-t border-[var(--border)] bg-[var(--bg-3)]">
@@ -74,11 +71,7 @@ export default function DiffCommentsBar({
         </button>
         <button
           onClick={onSend}
-          title={
-            (queue
-              ? 'The agent is busy — these go out as one message when the turn ends'
-              : 'Send every comment to the agent as one message') + ' (⌘↵)'
-          }
+          title={'Send every comment to the agent as one message' + ' (⌘↵)'}
           className="flex shrink-0 items-center gap-1.5 rounded bg-[var(--info-600)] px-2.5 py-1 text-xs font-medium text-white hover:bg-[var(--info-500)]"
         >
           <Send size={11} />

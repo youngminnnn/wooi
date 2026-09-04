@@ -16,7 +16,6 @@ import type {
   EffortSetting,
   FanoutSlot,
   GitStatus,
-  ImageAttachment,
   ModelOption,
   PaneKind,
   PaneState,
@@ -39,7 +38,6 @@ import type {
 import type { NotificationChannel, NotificationEvent } from '@shared/types'
 import {
   AGENT_BACKEND_IDS,
-  DEFAULT_AGENT_BACKEND,
   cascadeProblems,
   fanoutSlotName,
   workspaceDisplayName
@@ -154,12 +152,6 @@ function notifyEnabled(
 
 /** diff 라인 코멘트의 id 카운터. 창 수명 안에서만 유일하면 되므로 단조 증가로 충분하다. */
 let diffCommentSeq = 0
-
-/** 실행 중 대기 큐에 보관되는 후속 메시지(텍스트 + 선택적 이미지 첨부). */
-export interface QueuedMessage {
-  text: string
-  images?: ImageAttachment[]
-}
 
 /** 컨텍스트 윈도 사용량 스냅샷(마지막 턴). percentage 는 0~1. */
 export interface ContextUsage {
@@ -433,12 +425,6 @@ interface UIState {
   agentsCollapsed: Record<string, boolean>
   /** workspace 전환에도 살아남아야 하는 입력창 초안. */
   drafts: Record<string, string>
-  /**
-   * 현재 턴이 실행 중일 때 보낸 후속 메시지의 대기 큐(workspace 별, 순서 유지).
-   * 백엔드로 즉시 보내지 않고 여기 모았다가, 턴이 끝나면(idle) 순서대로 전송한다.
-   * 전송 전이므로 사용자가 취소/수정할 수 있다.
-   */
-  messageQueue: Record<string, QueuedMessage[]>
   /**
    * Changes 탭 diff 에 달아 둔, 아직 보내지 않은 라인 코멘트(workspace 별, 작성 순서).
    *
@@ -731,10 +717,6 @@ interface UIState {
   nextPendingPermissionId: () => string | null
   /** 실행 중인 모든 workspace 의 현재 턴을 중단한다(폭주 시 일괄 정지). */
   stopAll: () => Promise<void>
-  /** 실행 중일 때 후속 메시지를 대기 큐에 넣는다(턴 종료 시 자동 전송). */
-  enqueueMessage: (workspaceId: string, text: string, images?: ImageAttachment[]) => void
-  /** 대기 큐에서 index 번째 메시지를 취소(제거)한다. */
-  removeQueued: (workspaceId: string, index: number) => void
   setDraft: (workspaceId: string, text: string) => void
   clearPromptSuggestion: (workspaceId: string) => void
   /** diff 라인 코멘트를 하나 추가한다. 만들어진 id 를 돌려준다(방금 만든 카드를 지목하는 용도). */
@@ -1170,7 +1152,6 @@ export const useStore = create<UIState>((set, get) => ({
   promptSuggestions: {},
   agentsCollapsed: {},
   drafts: {},
-  messageQueue: {},
   diffComments: {},
   scrollPositions: {},
   scriptPanelOpen: {},
@@ -1501,34 +1482,24 @@ export const useStore = create<UIState>((set, get) => ({
         const live = new Set(next.workspaces.filter((w) => !w.archived).map((w) => w.id))
         const stale = Object.keys(s.unread).filter((id) => s.unread[id] && !live.has(id))
         const staleRunning = Object.keys(s.runningSince).filter((id) => !live.has(id))
-        const staleQueue = Object.keys(s.messageQueue).filter((id) => !live.has(id))
         const staleComments = Object.keys(s.diffComments).filter((id) => !live.has(id))
         // 나란히 편 칸이 사라진 워크스페이스·리뷰를 가리키고 있으면 접는다 — 그대로 두면
         // 그릴 것이 없는 빈 칸이 화면 절반을 차지한다(주 칸은 기존 복구 경로가 돌본다).
         const splitPane = livePaneView(next, s.splitPane)
         const splitCollapsed = !!s.splitPane && !splitPane
-        if (
-          !stale.length &&
-          !staleRunning.length &&
-          !staleQueue.length &&
-          !staleComments.length &&
-          !splitCollapsed
-        ) {
+        if (!stale.length && !staleRunning.length && !staleComments.length && !splitCollapsed) {
           return { app: next }
         }
         const unread = { ...s.unread }
         for (const id of stale) delete unread[id]
         const runningSince = { ...s.runningSince }
         for (const id of staleRunning) delete runningSince[id]
-        const messageQueue = { ...s.messageQueue }
-        for (const id of staleQueue) delete messageQueue[id]
         const diffComments = { ...s.diffComments }
         for (const id of staleComments) delete diffComments[id]
         return {
           app: next,
           unread,
           runningSince,
-          messageQueue,
           diffComments,
           splitPane,
           splitFocus: splitPane ? s.splitFocus : ('main' as PaneSlot)
@@ -1829,26 +1800,12 @@ export const useStore = create<UIState>((set, get) => ({
             return { runningAgents }
           })
         }
-        // 턴이 정상 종료되면 대기 큐에 쌓인 후속 메시지를 순서대로 전송한다(취소 기회는 여기서 끝).
-        // 에러 종료 시에는 자동 전송하지 않고 큐를 남겨, 사용자가 검토/취소하도록 둔다.
+        // 턴이 완전히 끝났다. 다른 workspace 의 완료, 또는 창이 비활성일 때 본 workspace 의
+        // 완료를 Dock 배지·점프 버튼으로 알린다.
         if (event.type === 'status' && event.status === 'idle') {
-          const queued = get().messageQueue[workspaceId]
-          if (queued && queued.length) {
-            // 아직 처리할 메시지가 남았으니 곧 다시 running 이 된다 — 여기서는 unread 로 표시하지
-            // 않는다(작업이 이어지는데 Next unread 가 뜨면 안 된다).
-            set((s) => {
-              const messageQueue = { ...s.messageQueue }
-              delete messageQueue[workspaceId]
-              return { messageQueue }
-            })
-            for (const m of queued) void window.api.chat.send(workspaceId, m.text, m.images)
-          } else {
-            // 큐가 비어 턴이 완전히 끝났다. 이제서야 미확인으로 표시한다 — 다른 workspace 의 완료,
-            // 또는 창이 비활성일 때 본 workspace 의 완료를 Dock 배지·점프 버튼으로 알린다.
-            const s = get()
-            if (workspaceId !== s.selectedWorkspaceId || !windowFocused) {
-              set({ unread: { ...s.unread, [workspaceId]: true } })
-            }
+          const s = get()
+          if (workspaceId !== s.selectedWorkspaceId || !windowFocused) {
+            set({ unread: { ...s.unread, [workspaceId]: true } })
           }
         }
         // 백그라운드 세션이 에러로 끝나면 미확인으로 표시(빨간 점 + 점프 대상).
@@ -3122,25 +3079,6 @@ export const useStore = create<UIState>((set, get) => ({
     await Promise.all(running.map((w) => window.api.chat.interrupt(w.id).catch(() => {})))
   },
 
-  enqueueMessage: (workspaceId, text, images) =>
-    set((s) => ({
-      messageQueue: {
-        ...s.messageQueue,
-        [workspaceId]: [...(s.messageQueue[workspaceId] ?? []), { text, images }]
-      }
-    })),
-
-  removeQueued: (workspaceId, index) =>
-    set((s) => {
-      const cur = s.messageQueue[workspaceId]
-      if (!cur) return {}
-      const next = cur.filter((_, i) => i !== index)
-      const messageQueue = { ...s.messageQueue }
-      if (next.length) messageQueue[workspaceId] = next
-      else delete messageQueue[workspaceId]
-      return { messageQueue }
-    }),
-
   setDraft: (workspaceId, text) => set((s) => ({ drafts: { ...s.drafts, [workspaceId]: text } })),
 
   clearPromptSuggestion: (workspaceId) =>
@@ -3193,26 +3131,16 @@ export const useStore = create<UIState>((set, get) => ({
       return { diffComments }
     }),
 
-  /**
-   * 전송 분기는 Composer 의 그것과 같아야 한다 — steering 을 못 하는 백엔드에 실행 중 메시지를
-   * 그냥 밀어 넣으면 현재 턴과 뒤엉키므로, 그럴 때는 대기 큐에 넣어 턴이 끝나면 나가게 한다.
-   */
   sendDiffComments: (workspaceId) => {
     const s = get()
     const comments = s.diffComments[workspaceId]
     if (!comments?.length) return
-    const ws = s.app?.workspaces.find((w) => w.id === workspaceId)
-    const backend = s.backends.find((b) => b.id === (ws?.agentBackend ?? DEFAULT_AGENT_BACKEND))
     const text = composeDiffCommentsMessage(comments)
 
     // 비우는 것이 먼저다. 전송 실패로 코멘트가 되살아나는 것보다, 보낸 뒤 남은 카드가 다시
     // 보내지는 쪽이 사용자에게 더 나쁘다(같은 지시가 두 번 나간다).
     get().clearDiffComments(workspaceId)
-    if (ws?.status === 'running' && !backend?.capabilities.steering) {
-      get().enqueueMessage(workspaceId, text)
-    } else {
-      void window.api.chat.send(workspaceId, text)
-    }
+    void window.api.chat.send(workspaceId, text)
   },
 
   /**

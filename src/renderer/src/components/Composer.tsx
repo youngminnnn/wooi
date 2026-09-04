@@ -5,7 +5,6 @@ import {
   Terminal as TerminalIcon,
   MessageCircleQuestion,
   X,
-  Clock,
   ImageIcon,
   Loader2,
   Plug,
@@ -166,10 +165,6 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
   const promptSuggestion = useStore((s) => s.promptSuggestions[workspace.id] ?? null)
   const clearPromptSuggestion = useStore((s) => s.clearPromptSuggestion)
   const items = useStore((s) => s.transcripts[workspace.id]) ?? EMPTY
-  // 실행 중 보낸 후속 메시지의 대기 큐(전송 전이라 취소 가능, 턴 종료 시 자동 전송).
-  const queue = useStore((s) => s.messageQueue[workspace.id]) ?? EMPTY_QUEUE
-  const enqueueMessage = useStore((s) => s.enqueueMessage)
-  const removeQueued = useStore((s) => s.removeQueued)
   const pushToast = useStore((s) => s.pushToast)
   const confirm = useStore((s) => s.confirm)
   const refreshAuth = useStore((s) => s.refreshAuth)
@@ -603,28 +598,26 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
   }
 
   /**
-   * 메시지를 실제로 백엔드에 넘긴다. steering 을 못 하는 백엔드만 실행 중 메시지를 대기 큐에
-   * 넣는다(Codex 처럼 지원하면 즉시 보내 현재 턴에 반영한다). /subtask 가 렌더러에서 만들어 낸
-   * 프롬프트도 이 길을 타야 큐잉·중단 규칙이 입구마다 갈라지지 않는다.
+   * 메시지를 실제로 백엔드에 넘긴다. 항상 즉시 전송한다(모든 백엔드가 steering 을 지원). /subtask
+   * 가 렌더러에서 만들어 낸 프롬프트도 이 길을 타야 중단 규칙이 입구마다 갈라지지 않는다.
    */
-  const deliver = (body: string, payload?: ImageAttachment[], stopFirst?: boolean): void => {
+  const deliver = async (
+    body: string,
+    payload?: ImageAttachment[],
+    stopFirst?: boolean
+  ): Promise<void> => {
     setPickerCard(null)
     clearPromptSuggestion(workspace.id)
-    if (running && !backend?.capabilities.steering) {
-      enqueueMessage(workspace.id, body, payload?.length ? payload : undefined)
-      // 큐에 넣은 뒤 중단한다 — 순서가 반대면 턴이 먼저 끝나 플러시가 이 메시지를 놓친다.
-      if (stopFirst) void window.api.chat.interrupt(workspace.id)
-    } else {
-      void window.api.chat.send(workspace.id, body, payload?.length ? payload : undefined)
-    }
+    // interrupt 를 먼저 await 해야 그 중단이 방금 보낸 메시지까지 삼키지 않는다.
+    if (stopFirst) await window.api.chat.interrupt(workspace.id)
+    void window.api.chat.send(workspace.id, body, payload?.length ? payload : undefined)
   }
 
   /**
    * 입력창 내용을 보낸다.
    *
    * stopFirst 는 "지금 하던 걸 멈추고 이거부터" — 터미널에서 Esc 로 끊고 다시 치는 조작을 한 번에
-   * 한다. 메시지를 큐에 넣고 턴을 중단하면, 턴이 idle 로 끝나는 순간 store 의 큐 플러시가 그대로
-   * 이어서 보낸다(중단이 에러로 끝나면 메시지는 큐에 남아 사용자가 확인·취소할 수 있다).
+   * 한다. 현재 턴을 먼저 중단하고, 그 직후 이 메시지를 곧바로 보낸다.
    */
   const send = (opts?: { stopFirst?: boolean }): void => {
     // 압축 중에는 전송(및 로컬 명령·bash)을 모두 막는다 — 초안은 그대로 두고, 압축이 끝나면
@@ -773,7 +766,7 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
         taRef.current?.focus()
         return
       }
-      deliver(subtaskPrompt(workspace.agentBackend, subtask.task))
+      void deliver(subtaskPrompt(workspace.agentBackend, subtask.task))
       setText('')
       historyIdx.current = -1
       return
@@ -809,8 +802,9 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
       return
     }
 
-    // /btw 는 사이드 질문으로 분기한다 — 일반 메시지로 보내면 현재 턴 뒤에 큐잉되어 메인 대화에
-    // 쌓이므로(=오염), 맥락만 공유하는 임시 질의로 처리하고 답변은 별도 카드로 보여 준다.
+    // /btw 는 사이드 질문으로 분기한다 — 일반 메시지로 보내면 진행 중인 턴에 끼어들어 메인 대화를
+    // 흔들고 기록에도 쌓이므로(=오염), 맥락만 공유하는 임시 질의로 처리하고 답변은 별도 카드로
+    // 보여 준다.
     // (사이드 질문은 텍스트 전용 — 첨부가 있으면 일반 메시지로 보낸다.)
     const sideQ = images.length ? null : matchSideQuestion(trimmed, supportsSideQuestion)
     if (sideQ) {
@@ -843,7 +837,7 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
       mediaType,
       dataBase64
     }))
-    deliver(trimmed, payload, opts?.stopFirst)
+    void deliver(trimmed, payload, opts?.stopFirst)
     setText('')
     setImages([])
     historyIdx.current = -1
@@ -1227,8 +1221,9 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
       .map((i) => i.text)
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
-    // ⌘⏎ = 진행 중인 턴을 멈추고 방금 쓴 메시지를 바로 보낸다. 턴이 길어질 때 방향을 트는
-    // 조작이라 대기 큐(Enter)와 별도 키가 필요하다.
+    // ⌘⏎ = 진행 중인 턴을 멈추고 방금 쓴 메시지를 바로 보낸다. 그냥 Enter 로 보내도 메시지는
+    // 진행 중인 턴에 반영되지만(steering), 그때는 돌던 도구가 끝까지 돈다 — "지금 하던 것부터
+    // 멈춰라" 는 그것과 다른 조작이라 별도 키가 필요하다.
     if (e.metaKey && e.key === 'Enter' && !e.nativeEvent.isComposing) {
       e.preventDefault()
       send({ stopFirst: true })
@@ -1406,32 +1401,6 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
         )}
         {/* 입력창 위 상태줄: 디렉토리 · (교체 가능하면 에이전트) · 모델 · effort · 컨텍스트 사용량. */}
         <StatusLine workspace={workspace} onPick={openPicker} />
-        {queue.length > 0 && (
-          <div className="mb-2 space-y-1">
-            {queue.map((m, i) => (
-              <div
-                key={i}
-                className="flex items-center gap-2 bg-[var(--warning-500)]/5 border border-[var(--warning-500)]/20 rounded-lg pl-2.5 pr-1.5 py-1.5"
-              >
-                <Clock size={12} className="text-[var(--warning-400)]/80 shrink-0" />
-                <span className="flex-1 min-w-0 truncate text-sm text-neutral-300" title={m.text}>
-                  {m.text || (m.images?.length ? `${m.images.length} image(s)` : '')}
-                </span>
-                {m.images && m.images.length > 0 && (
-                  <span className="text-xs text-neutral-600 shrink-0">📎{m.images.length}</span>
-                )}
-                <span className="text-xs text-neutral-600 shrink-0">queued</span>
-                <button
-                  onClick={() => removeQueued(workspace.id, i)}
-                  title="Cancel this queued message"
-                  className="shrink-0 h-5 w-5 grid place-items-center rounded text-neutral-500 hover:bg-[var(--surface-2)] hover:text-neutral-200"
-                >
-                  <X size={12} />
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
         {/* 드롭은 window 리스너가 창 전체에서 받는다. 여기서는 어디에 담기는지 보이도록 테두리만 켠다. */}
         <div
           className={
@@ -1470,7 +1439,7 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
                 locked
                   ? 'Compacting the conversation…  (input resumes when it finishes)'
                   : running
-                    ? 'Queue a follow-up…  (Enter to queue · ⌘Enter to stop the turn and send now)'
+                    ? 'Steer the agent while it works…  (Enter to send · ⌘Enter to stop the turn and send now)'
                     : text === '' && promptSuggestion
                       ? `⇥ ${promptSuggestion}`
                       : 'Message your agent…  (Enter to send · @ for files · / for commands · ! for terminal)'
@@ -1504,7 +1473,7 @@ export default function Composer({ workspace }: { workspace: Workspace }): React
                   : bashMode
                     ? 'Run in terminal'
                     : running
-                      ? 'Queue message — ⌘Enter stops the current turn and sends now'
+                      ? 'Send now — ⌘Enter stops the current turn first'
                       : 'Send'
               }
               className={
@@ -3956,7 +3925,6 @@ function RateLimitStatus({
 const EMPTY: ChatItem[] = []
 /** 멘션 후보가 없을 때 돌려주는 고정 배열(매 렌더 새 배열을 만들지 않도록). */
 const EMPTY_HITS: FileHit[] = []
-const EMPTY_QUEUE: import('../store').QueuedMessage[] = []
 /** 참조 동일성 유지용 — 매 렌더마다 새 배열을 만들면 하위 memo 가 헛되이 깨진다. */
 const EMPTY_COMMANDS: CommandPanelKind[] = []
 const EMPTY_PROMPTS: SavedPrompt[] = []

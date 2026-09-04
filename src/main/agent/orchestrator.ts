@@ -346,11 +346,10 @@ export class AgentOrchestrator {
    * 보내고 true 를 돌려준다 — 그러면 백엔드는 이 턴을 끝난 것으로 방송하지 않는다.
    *
    * **방송하지 않는 것이 이 설계의 전부다.** 방송하면 턴과 턴 사이에 렌더러가 "쉬고 있다" 고 보는
-   * 틈이 생기고, 그 틈에 사용자가 친 말은 곧 시작될 자동 턴에 섞여 들어간다 — Codex 는 steering
-   * 으로 즉시([[agent/backend]] CODEX_META 의 capabilities.steering), Claude 는 대기 큐가 풀려서
-   * (렌더러 store 의 messageQueue). 정확히 그 실패를 한 번 겪고 설계를 되돌린 적이 있다
-   * ([[shared/handoff]]). 틈이 없으면 입력창은 계속 '진행 중' 규칙으로 동작하므로 렌더러는 고칠
-   * 것이 없다 — 사용자에게는 턴 하나가 이어서 도는 것으로만 보인다.
+   * 틈이 생기고, 그 틈에 사용자가 친 말은 곧 시작될 자동 턴에 섞여 들어간다 — 두 백엔드 모두
+   * mid-turn 입력을 받아들인다([[agent/backend]] capabilities.steering). 정확히 그 실패를 한 번
+   * 겪고 설계를 되돌린 적이 있다([[shared/handoff]]). 틈이 없으면 입력창은 계속 '진행 중' 규칙으로
+   * 동작하므로 렌더러는 고칠 것이 없다 — 사용자에게는 턴 하나가 이어서 도는 것으로만 보인다.
    */
   private handleTurnEnd(workspaceId: string, status: 'idle' | 'error'): boolean {
     if (status === 'error') {

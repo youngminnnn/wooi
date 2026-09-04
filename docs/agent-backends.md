@@ -34,9 +34,13 @@ vary by workspace.
 | MCP | Supported | Supported |
 | In-app sign-in | Supported | Supported |
 | Account rate limits | Supported | Supported |
-| Steering during a turn | Queued for the next turn | Supported |
+| Steering during a turn | Supported | Supported |
 | Side question (`/btw`) | Supported | Not supported |
 | Rewind | Supported | Not supported |
+
+The two backends steer differently under the hood. Codex has a native `turn/steer` call, while
+Claude Code folds a message sent mid-turn into the running turn between tool rounds — so a turn
+that calls no tools has no fold point and the message runs as the next turn instead.
 
 Codex enforces permissions with a combination of its OS sandbox, approval policy, and
 collaboration mode. In particular, **Full access** disables the sandbox and approvals,
