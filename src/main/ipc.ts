@@ -17,6 +17,8 @@ import { forgetWorkspaceUsage } from './usageLedger'
 import { forgetRunningAgents } from './runningAgentsCache'
 import { setSleepBlockerEnabled } from './sleepBlocker'
 import { getTranscripts } from './transcripts'
+import { ArtifactError, getArtifacts } from './artifacts'
+import { notifyArtifactsChanged } from './artifactProtocol'
 import { buildHandoffPrompt, estimateHandoffTokens, formatHandoffTokens } from '@shared/handoff'
 import { listDir, readFileInRoot, searchFiles, writeFileInRoot } from './fsbrowse'
 import { importMigration, scanMigration } from './migrate'
@@ -772,6 +774,7 @@ export function registerIpc(ctx: IpcContext): void {
       ctx.scripts.disposeWorkspace(ws.id)
       ctx.terminals.disposeWorkspace(ws.id)
       getTranscripts().remove(ws.id)
+      getArtifacts().remove(ws.id)
       if (repo) await removeWorktree(repo.path, ws.worktreePath, ws.branch, false)
     }
     store.update((st) => {
@@ -1140,6 +1143,7 @@ export function registerIpc(ctx: IpcContext): void {
           ? await runArchiveScript(ctx.scripts, repo.archiveScript, ws.worktreePath)
           : undefined
       getTranscripts().remove(workspaceId)
+      getArtifacts().remove(workspaceId)
       invalidateWorkspacePr(workspaceId)
       if (repo) await removeWorktree(repo.path, ws.worktreePath, ws.branch, deleteBranch)
 
@@ -1165,6 +1169,7 @@ export function registerIpc(ctx: IpcContext): void {
       ctx.scripts.disposeWorkspace(ws.id)
       ctx.terminals.disposeWorkspace(ws.id)
       getTranscripts().remove(ws.id)
+      getArtifacts().remove(ws.id)
       // 아카이브된 워크스페이스는 worktree 디렉토리가 이미 제거된 상태일 수 있으나,
       // removeWorktree 는 누락된 worktree 를 prune 으로 정리하므로 안전하다. 브랜치도 함께 삭제.
       if (repo) await removeWorktree(repo.path, ws.worktreePath, ws.branch, true)
@@ -1666,6 +1671,32 @@ export function registerIpc(ctx: IpcContext): void {
   })
 
   handle(IPC.previewListIssues, (_e, workspaceId: string) => previewIssues().list(workspaceId))
+
+  handle(IPC.artifactsList, (_e, workspaceId: string) => {
+    try {
+      return getArtifacts().list(workspaceId)
+    } catch {
+      // 없는 워크스페이스를 물어본 것. 화면에는 "아직 없음" 으로 보이는 편이 맞다.
+      return []
+    }
+  })
+
+  handle(IPC.artifactsRead, (_e, workspaceId: string, artifactId: string, version: number) => {
+    try {
+      return getArtifacts().readSource(workspaceId, artifactId, version)
+    } catch {
+      return null
+    }
+  })
+
+  handle(IPC.artifactsRemove, (_e, workspaceId: string, artifactId: string) => {
+    try {
+      getArtifacts().removeArtifact(workspaceId, artifactId)
+      notifyArtifactsChanged(workspaceId)
+    } catch (err) {
+      if (!(err instanceof ArtifactError)) throw err
+    }
+  })
 
   handle(IPC.previewClearIssues, (_e, workspaceId: string) => {
     previewIssues().clear(workspaceId)

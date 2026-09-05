@@ -314,6 +314,17 @@ export const WOOI_COMMANDS: WooiCommandSpec[] = [
     prompt: 'Call `mcp__wooi__read_script_output` and show the output for: $ARGUMENTS'
   },
   {
+    // 즉시 실행이 아니라 에이전트를 거친다 — 이 도구의 인자는 아티팩트 본문 전체이고, 그건
+    // 사용자가 슬래시 명령에 타이핑하는 것이 아니라 모델이 써야 하는 것이다.
+    name: 'artifact',
+    tool: 'create_artifact',
+    mode: 'agent',
+    description: 'Build something and show it running in the Artifacts panel',
+    argumentHint: '<what to build>',
+    prompt:
+      'Build this as a self-contained artifact and publish it with `mcp__wooi__create_artifact`: $ARGUMENTS'
+  },
+  {
     name: 'preview',
     tool: 'open_preview',
     mode: 'direct',

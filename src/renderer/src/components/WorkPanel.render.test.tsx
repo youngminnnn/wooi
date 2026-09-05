@@ -15,7 +15,7 @@ beforeEach(() => resetStore())
 describe('work panel 탭', () => {
   it('탭마다 접근 가능한 이름이 있어 라벨이 감춰져도 식별된다', () => {
     renderWithStore(<WorkPanel workspace={workspace()} />)
-    for (const label of ['All files', 'Changes', 'Check', 'Preview']) {
+    for (const label of ['All files', 'Changes', 'Check', 'Preview', 'Artifacts']) {
       expect(screen.getByRole('button', { name: label })).toBeInTheDocument()
     }
     expect(screen.queryByRole('button', { name: 'Commits' })).not.toBeInTheDocument()

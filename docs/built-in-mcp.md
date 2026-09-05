@@ -16,7 +16,7 @@ Tools normally appear to the agent as `mcp__wooi__<tool-name>`. Most tool defini
 are loaded on demand, so a tool may not be visible in the model's initial context even
 though it is available through tool search.
 
-The 24 core tools are available in every workspace. `claude_subagent` and
+The 25 core tools are available in every workspace. `claude_subagent` and
 `codex_subagent` are added only when multi-agent mode is enabled and the corresponding
 backend is available for delegation.
 
@@ -475,6 +475,40 @@ Wooi clears what it collected whenever the preview navigates, so the result is t
 since the last load — reopening the page is how you check whether a fix cleared them.
 The list is capped at 50 entries and roughly 8 KiB, and reports when it was truncated.
 
+## Artifacts
+
+### `create_artifact`
+
+Renders something the agent built — a page, a chart, a diagram, a document — in Wooi's
+Artifacts panel, so you see it running instead of reading its source. Takes an
+`artifact_id`, a `kind`, a `title` and the full `content`. The kinds are `html` (a complete
+self-contained page), `react` (a JSX module that default-exports its component), `svg`,
+`mermaid` (diagram source) and `markdown`.
+
+The `artifact_id` is chosen by the agent and is the identity of the artifact: calling
+again with the same id publishes the next version rather than a second artifact, and the
+panel keeps the last 20 versions. Ids are lowercase kebab-case.
+
+Artifacts render in their own Electron session, on their own `wooi-artifact://` scheme,
+with **no network access at all** — a CDN `<script src>`, a remote stylesheet or a
+`fetch()` cannot load. The tool rejects a write that references the network rather than
+letting it render blank, so the agent learns on the same turn instead of leaving you a
+dead page. Inline `<script>` and `<style>` do work. Navigation out of the artifact, new
+windows and downloads are all refused.
+
+Tailwind utility classes work in `html`, `svg` and `react` artifacts. The stylesheet is
+compiled in the main process from the classes the agent actually wrote, so any class is
+available including arbitrary values like `p-[13px]` — there is no safelist to fall off. No
+CSS reset is applied to `html` or `svg`, so the agent's own `<style>` still wins.
+
+`react` artifacts are compiled with sucrase in the main process and may import only `react`,
+`react-dom/client`, `lucide-react` and `recharts`, which Wooi ships as a vendored bundle. Any
+other import is a tool error rather than a broken page, and so is a JSX syntax error — the
+agent learns on the same turn.
+
+Artifacts belong to the workspace and survive `/clear` — they are output, not
+conversation. They are deleted with the workspace, and kept when it is archived.
+
 ### `switch_workspace_agent`
 
 Hands the current workspace over to another installed agent backend without changing its
@@ -571,6 +605,7 @@ with your own commands: `/wooi:pr`, `/wooi:children`, and so on. The catalog is
 | `/wooi:run <name>` | `run_script` | direct |
 | `/wooi:stop <name>` | `stop_script` | direct |
 | `/wooi:logs <name> [lines]` | `read_script_output` | direct |
+| `/wooi:artifact <what to build>` | `create_artifact` | agent |
 | `/wooi:preview [path]` | `open_preview` | direct |
 | `/wooi:screenshot` | `capture_preview` | agent |
 | `/wooi:preview-errors` | `read_preview_issues` | direct |

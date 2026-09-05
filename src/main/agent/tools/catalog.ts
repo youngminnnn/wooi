@@ -2,6 +2,7 @@ import { z } from 'zod'
 import {
   AGENT_BACKEND_IDS,
   AGENT_BACKEND_LABELS,
+  ARTIFACT_ALLOWED_IMPORTS,
   type AgentBackendId,
   type EffortSetting
 } from '@shared/types'
@@ -374,6 +375,50 @@ export const AGENT_TOOLS: AgentToolSpec[] = [
         .describe('Path on the dev server, such as "/settings". Defaults to "/".')
     },
     annotations: { title: 'Open the preview', readOnlyHint: false }
+  },
+  {
+    name: 'create_artifact',
+    description: [
+      'Render something you built — a page, a chart, a diagram, a document — in Wooi’s Artifacts',
+      'panel, where the user sees it running instead of reading its source.',
+      '',
+      'Reach for this when the answer *is* an artifact: a dashboard, a mockup, a data',
+      'visualisation, a standalone tool, a document worth keeping. Do not use it to show a patch',
+      'to the repository — that belongs in the diff.',
+      '',
+      'You choose the artifact_id. Calling again with the same id creates the next version rather',
+      'than a second artifact, so reuse the id when you iterate and pick a fresh one for a new',
+      'thing.',
+      '',
+      'The sandbox has NO NETWORK. A CDN <script src>, a remote stylesheet, a font URL or a',
+      'fetch() will not load, and this tool rejects the write rather than letting it render blank —',
+      'inline everything, and embed images as data: URIs. Inline <script> and <style> do work.',
+      '',
+      'Tailwind utility classes work in html, svg and react artifacts — the stylesheet is compiled',
+      'from what you actually wrote, so any class is available, including arbitrary values like',
+      'p-[13px]. In html artifacts your own <style> still wins; no CSS reset is applied there.',
+      '',
+      `A react artifact is a JSX/TSX module that \`export default\`s its component. It may import`,
+      `only: ${ARTIFACT_ALLOWED_IMPORTS.join(', ')}. Any other import is an error — write it inline instead.`,
+      'JSX is compiled here, so a syntax error comes back to you on this turn rather than showing',
+      'the user a blank page.'
+    ].join(' '),
+    inputSchema: {
+      artifact_id: z
+        .string()
+        .describe(
+          'Stable kebab-case slug, such as "sales-dashboard". Reuse it to publish a new version.'
+        ),
+      kind: z
+        .enum(['html', 'svg', 'markdown', 'react', 'mermaid'])
+        .describe(
+          'html: a full self-contained page. react: a component module that default-exports it. ' +
+            'svg: a single SVG. mermaid: diagram source. markdown: a formatted document.'
+        ),
+      title: z.string().describe('Short human-readable title shown in the panel.'),
+      content: z.string().describe('The complete artifact source. Not a diff, not a fragment.')
+    },
+    annotations: { title: 'Create an artifact', readOnlyHint: false }
   },
   {
     name: 'capture_preview',

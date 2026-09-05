@@ -44,6 +44,9 @@ import { setWindowOpener } from './notifications'
 import { initNotice } from './notice'
 import { initFeatures } from './features'
 import { initPreview } from './preview'
+// 스킴 등록은 이 import 의 부수효과로, app ready 전에 일어나야 한다([[artifactScheme]]).
+import './artifactScheme'
+import { initArtifactSession } from './artifactProtocol'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -326,6 +329,9 @@ app.whenReady().then(() => {
   // Preview 게스트의 울타리는 창보다 먼저 세운다 — will-attach-webview 를 놓치면 그 webview 는
   // 우리가 강제하려던 설정 없이 붙는다([[preview]]).
   initPreview(dispatch)
+  // 아티팩트 세션도 같은 이유로 창보다 먼저 — 게스트가 붙기 전에 protocol 핸들러와
+  // 권한·다운로드 거절이 서 있어야 한다([[artifactProtocol]]).
+  initArtifactSession(dispatch)
   // 원격 브리지는 IPC 등록보다 **먼저** 만들어야 한다 — 핸들러가 getRemoteBridge() 를 부른다.
   // 만드는 것 자체는 아무 자원도 잡지 않는다(설정을 읽을 뿐이다). 실제 연결은 아래에서
   // 사용자가 켜 둔 경우에만 일어난다.

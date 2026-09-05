@@ -116,6 +116,16 @@ const api: WooiApi = {
     getOutput: (workspaceId, kind) => ipcRenderer.invoke(IPC.scriptGetOutput, workspaceId, kind)
   },
 
+  artifact: {
+    list: (workspaceId) => ipcRenderer.invoke(IPC.artifactsList, workspaceId),
+    read: (workspaceId, artifactId, version) =>
+      ipcRenderer.invoke(IPC.artifactsRead, workspaceId, artifactId, version),
+    remove: (workspaceId, artifactId) =>
+      ipcRenderer.invoke(IPC.artifactsRemove, workspaceId, artifactId),
+    onOpen: (cb) => subscribe(IPC.evtArtifactOpen, cb),
+    onChanged: (cb) => subscribe(IPC.evtArtifactsChanged, cb)
+  },
+
   preview: {
     setUrl: (workspaceId, url) => ipcRenderer.invoke(IPC.previewSetUrl, workspaceId, url),
     open: (workspaceId, url) => ipcRenderer.invoke(IPC.previewOpen, workspaceId, url),

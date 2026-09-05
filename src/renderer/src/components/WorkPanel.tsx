@@ -5,6 +5,7 @@ import {
   GitCommitVertical,
   CheckCheck,
   MonitorPlay,
+  Sparkles,
   SquareArrowOutUpRight
 } from 'lucide-react'
 import FileBrowser from './FileBrowser'
@@ -12,11 +13,12 @@ import ChangesPanel from './ChangesPanel'
 import CommitsPanel from './CommitsPanel'
 import ChecksPanel from './ChecksPanel'
 import PreviewPanel from './PreviewPanel'
+import ArtifactPanel from './ArtifactPanel'
 import { useStore } from '../store'
 import { isPaneWindow } from '../lib/paneWindow'
 import type { Workspace } from '@shared/types'
 
-type Tab = 'files' | 'changes' | 'check' | 'preview'
+type Tab = 'files' | 'changes' | 'check' | 'preview' | 'artifact'
 type ChangesView = 'changes' | 'commits'
 
 const TABS: {
@@ -27,10 +29,11 @@ const TABS: {
   { id: 'files', label: 'All files', icon: Files },
   { id: 'changes', label: 'Changes', icon: GitCompare },
   { id: 'check', label: 'Check', icon: CheckCheck },
-  { id: 'preview', label: 'Preview', icon: MonitorPlay }
+  { id: 'preview', label: 'Preview', icon: MonitorPlay },
+  { id: 'artifact', label: 'Artifacts', icon: Sparkles }
 ]
 
-/** 우상단 탭 패널: All files / Changes / Check / Preview. */
+/** 우상단 탭 패널: All files / Changes / Check / Preview / Artifacts. */
 export default function WorkPanel({ workspace }: { workspace: Workspace }): React.JSX.Element {
   const [tab, setTab] = useState<Tab>('changes')
   const [changesView, setChangesView] = useState<ChangesView>('changes')
@@ -43,6 +46,30 @@ export default function WorkPanel({ workspace }: { workspace: Workspace }): Reac
   // "Open in Preview" 로 들어오는 이동 명령. 같은 주소를 다시 눌러도 반응하도록 seq 를 붙인다.
   const [navTarget, setNavTarget] = useState<{ url: string; seq: number } | null>(null)
   const navSeq = useRef(0)
+
+  // 아티팩트 게스트도 같은 이유로 한 번 붙으면 언마운트하지 않는다. 다만 Preview 와 달리
+  // 워크스페이스에 "열려 있었다" 는 표시가 없으므로(주소가 없다) 탭을 처음 누를 때 붙인다.
+  const [artifactOpened, setArtifactOpened] = useState(false)
+  /**
+   * 도구가 방금 만든 아티팩트를 열라는 명령.
+   *
+   * 방송을 ArtifactPanel 이 직접 듣게 두면 **첫 아티팩트를 놓친다** — 그 방송이 오는 시점에
+   * 패널은 아직 마운트되지 않았기 때문이다(방송이 마운트를 유발한다). 그래서 Preview 의
+   * navTarget 과 같은 모양으로, 붙이는 쪽이 받아서 prop 으로 내려보낸다.
+   */
+  const [artifactTarget, setArtifactTarget] = useState<{
+    artifactId: string
+    version: number
+    seq: number
+  } | null>(null)
+  const artifactSeq = useRef(0)
+
+  const openArtifact = (artifactId?: string, version?: number): void => {
+    setArtifactOpened(true)
+    setTab('artifact')
+    if (artifactId && version !== undefined)
+      setArtifactTarget({ artifactId, version, seq: ++artifactSeq.current })
+  }
 
   const openPreview = (url?: string): void => {
     setPreviewOpened(true)
@@ -58,6 +85,21 @@ export default function WorkPanel({ workspace }: { workspace: Workspace }): Reac
       openPreview(e.url)
     })
   }, [workspace.id])
+
+  // create_artifact 가 방금 만든 것. 같은 이유로 main 을 거쳐 온다.
+  useEffect(() => {
+    return window.api.artifact.onOpen((e) => {
+      if (e.workspaceId !== workspace.id) return
+      openArtifact(e.artifactId, e.version)
+    })
+  }, [workspace.id])
+
+  /** 탭 버튼 하나의 동작. 게스트를 쓰는 두 탭은 누르는 순간 붙이기부터 한다. */
+  const openTab = (id: Tab): void => {
+    if (id === 'preview') return openPreview()
+    if (id === 'artifact') return openArtifact()
+    setTab(id)
+  }
 
   return (
     <div className="h-full flex flex-col min-h-0 bg-[var(--bg)]">
@@ -75,7 +117,7 @@ export default function WorkPanel({ workspace }: { workspace: Workspace }): Reac
             return (
               <button
                 key={id}
-                onClick={() => (id === 'preview' ? openPreview() : setTab(id))}
+                onClick={() => openTab(id)}
                 // 라벨이 감춰지면 버튼에 남는 것은 아이콘뿐이라, 이름을 여기서 보장한다.
                 aria-label={label}
                 title={label}
@@ -155,6 +197,16 @@ export default function WorkPanel({ workspace }: { workspace: Workspace }): Reac
         {previewOpened && (
           <div className={tab === 'preview' ? 'h-full' : 'hidden'}>
             <PreviewPanel workspace={workspace} navTarget={navTarget} active={tab === 'preview'} />
+          </div>
+        )}
+        {/* 같은 이유로 감추기다 — 언마운트하면 게스트가 매번 처음부터 붙는다. */}
+        {artifactOpened && (
+          <div className={tab === 'artifact' ? 'h-full' : 'hidden'}>
+            <ArtifactPanel
+              workspace={workspace}
+              target={artifactTarget}
+              active={tab === 'artifact'}
+            />
           </div>
         )}
       </div>

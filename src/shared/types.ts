@@ -2659,6 +2659,129 @@ export interface PreviewOpenEvent {
   url: string
 }
 
+// ── Artifacts(에이전트가 만든 것을 앱 안에서 실행해 보여주는 탭) ────────────────
+
+/**
+ * 아티팩트 `<webview>` 가 쓰는 세션 파티션.
+ *
+ * Preview 와 **또 갈라 놓는다**. 미리보는 dev 서버는 사용자 자신의 코드지만 아티팩트는
+ * 모델이 쓴 코드이고, 그 모델은 방금 읽은 저장소에서 프롬프트 인젝션을 당했을 수 있다.
+ * 같은 파티션에 얹으면 아티팩트가 dev 앱의 로그인 쿠키를 그대로 쓰게 된다.
+ *
+ * `persist:` 를 **일부러 뺐다** — 이 세션은 디스크에 쿠키도 스토리지도 남기지 않는다.
+ * 남길 이유가 없고(아티팩트에 로그인할 곳이 없다), 남기면 그게 곧 적대적 콘텐츠가
+ * 앱 재시작을 건너뛰고 상태를 잇는 통로가 된다.
+ */
+export const ARTIFACT_PARTITION = 'wooi-artifact'
+
+/** 아티팩트 본문을 게스트에게 건네는 전용 스킴. */
+export const ARTIFACT_SCHEME = 'wooi-artifact'
+
+/**
+ * 아티팩트 URL 의 host 자리.
+ *
+ * 지금은 모든 아티팩트가 이 host 하나를 공유하므로 origin 도 하나다(= localStorage 를
+ * 공유한다). `connect-src 'none'` 에 영속 저장 API 도 없고 파티션도 비영속이라 v1 에서는
+ * 실질 피해가 없지만, **나중에 아티팩트별 origin 으로 가르려면 이 자리가 필요하다** —
+ * 그래서 URL 문법에서 빼지 않고 상수로 박아 둔다.
+ */
+export const ARTIFACT_HOST = 'a'
+
+/** 아티팩트 종류. 종류마다 렌더 경로가 다르다 — `markdown` 만 webview 를 타지 않는다. */
+export type ArtifactKind = 'html' | 'svg' | 'markdown' | 'react' | 'mermaid'
+
+export const ARTIFACT_KINDS: readonly ArtifactKind[] = [
+  'html',
+  'svg',
+  'markdown',
+  'react',
+  'mermaid'
+]
+
+/**
+ * 본문 바이트 상한.
+ *
+ * 본문은 **모델의 도구 인자**다 — 출력 토큰을 쓰고 에이전트 프로토콜을 타고 넘어온다.
+ * 상한이 없으면 500KB 짜리 페이지를 프로덕션에서 처음 보게 된다.
+ */
+export const ARTIFACT_MAX_BYTES = 256 * 1024
+
+/** 아티팩트 하나가 보관하는 최대 버전 수. 넘으면 오래된 것부터 지운다. */
+export const ARTIFACT_MAX_VERSIONS = 20
+
+/** 워크스페이스 하나가 가질 수 있는 최대 아티팩트 수. */
+export const ARTIFACT_MAX_PER_WORKSPACE = 50
+
+/**
+ * `react` 아티팩트가 import 할 수 있는 것 — **모델에게 보여 줄 목록**.
+ *
+ * 실제 해석표(지정자 → 벤더 URL)는 [[main/artifactBuild]] 에 있는데, 그 모듈은 sucrase 와
+ * tailwindcss 를 끌어온다. 도구 카탈로그가 목록을 쓰려고 그쪽을 import 하면 **Codex 툴 shim
+ * 번들에까지 컴파일러가 딸려 들어간다** — shim 은 asarUnpack 범위라 bare 의존성을 가질 수
+ * 없고, `toolShim.e2e.test.ts` 가 그것을 막는다. 실제로 CI 에서 그렇게 걸렸다.
+ *
+ * 그래서 목록만 여기(의존성 0)에 두고, 해석표가 이 목록을 전부 덮는지는 테스트가 지킨다.
+ */
+export const ARTIFACT_ALLOWED_IMPORTS = [
+  'react',
+  'react-dom/client',
+  'lucide-react',
+  'recharts'
+] as const
+
+/**
+ * 아티팩트 id 규칙 — 모델이 정하는 kebab-case slug.
+ *
+ * **이 정규식이 경로 탈출의 1차 방어선이다.** id 는 그대로 디렉터리 이름이 되고 URL 에서
+ * 다시 파싱돼 나온다. 통과해도 `path.resolve` 뒤 봉쇄 검사를 한 번 더 한다 —
+ * 정규식 하나에 파일시스템 안전을 걸지 않는다([[main/artifacts]]).
+ */
+export const ARTIFACT_ID_RE = /^[a-z0-9][a-z0-9-]{0,63}$/
+
+/** index.jsonl 한 줄. 같은 (id, version) 이 여러 줄이면 마지막이 이긴다. */
+export interface ArtifactMeta {
+  id: string
+  version: number
+  kind: ArtifactKind
+  title: string
+  createdAt: number
+  /** 이 버전에 같이 구운 스타일시트가 있으면 true(Tailwind). 없으면 문서가 링크하지 않는다. */
+  hasCss?: boolean
+  /** 묘비. index.jsonl 은 append-only 라 지우는 대신 이 줄을 덧붙인다. */
+  deleted?: boolean
+  /**
+   * 아티팩트 전체 묘비(`version: 0`)에서만 쓴다 — 이 번호 **이하**의 버전이 죽었다는 뜻.
+   *
+   * 묘비를 "이 id 는 죽었다" 로 쓰면 지운 뒤 같은 slug 를 다시 쓴 아티팩트까지 같이 죽는다.
+   * 모델은 같은 일에 같은 slug 를 다시 고르므로 그건 흔한 경로지, 드문 경로가 아니다.
+   * 그래서 묘비는 **수위선**이고, 새 버전은 그 위에서 이어진다(번호를 재사용하지 않는다 —
+   * 덤으로 지워진 주소가 캐시에서 되살아날 여지도 없다).
+   */
+  upTo?: number
+}
+
+/** 목록 화면이 쓰는, 아티팩트 하나의 최신 상태 + 가진 버전들. */
+export interface ArtifactSummary {
+  id: string
+  title: string
+  kind: ArtifactKind
+  /** 내림차순(최신이 앞). */
+  versions: number[]
+  updatedAt: number
+}
+
+/** 아티팩트 탭을 열고 특정 아티팩트를 보이라는 신호(evtArtifactOpen 페이로드). */
+export interface ArtifactOpenEvent {
+  workspaceId: string
+  artifactId: string
+  version: number
+}
+
+/** 이 워크스페이스의 아티팩트 목록이 바뀌었다는 신호(evtArtifactsChanged 페이로드). */
+export interface ArtifactsChangedEvent {
+  workspaceId: string
+}
+
 /**
  * 컴포저에 넣을 것 한 건. 스크린샷은 이미지만, 요소 픽커는 이미지(크롭)와 텍스트를 함께 싣는다.
  * 둘을 한 건으로 묶는 것이 요점이다 — 픽커의 그림과 설명은 짝이라, 따로 흘려보내면 컴포저에서
@@ -3996,6 +4119,13 @@ export const IPC = {
   previewClearIssues: 'preview:clearIssues',
   /** 고른 문제들을 컴포저에 넣는다. */
   previewSendIssues: 'preview:sendIssues',
+  // Artifacts
+  /** 이 워크스페이스의 아티팩트 목록(본문 없이 메타만). */
+  artifactsList: 'artifacts:list',
+  /** 아티팩트 한 버전의 원문 — 복사·내보내기용이지 렌더용이 아니다(렌더는 스킴으로 간다). */
+  artifactsRead: 'artifacts:read',
+  /** 아티팩트 하나를 지운다(모든 버전). */
+  artifactsRemove: 'artifacts:remove',
   // Dock 미확인 배지
   appSetBadge: 'app:setBadge',
   // 앱 버전 / 자동 업데이트
@@ -4067,6 +4197,16 @@ export const IPC = {
    * IPC 로 밀면 폭주하는 dev 로그가 메시지 홍수가 되어 메인 힙을 밀어 올린다([[main/previewIssues]]).
    */
   evtPreviewIssues: 'evt:previewIssues',
+  /**
+   * 아티팩트 탭을 열고 그 버전을 보이라는 신호. `evtPreviewOpen` 과 같은 이유로 main 을 거친다 —
+   * 작업 패널은 분리될 수 있고, 도구는 main 에서 도는데 탭을 여는 것은 렌더러의 일이다.
+   *
+   * **best-effort 다.** 이 신호를 받을 화면이 없어도(다른 워크스페이스를 보고 있거나 앱이
+   * 접혀 있어도) 아티팩트는 이미 디스크에 쓰였다 — 도구 결과를 여기에 걸지 않는다.
+   */
+  evtArtifactOpen: 'evt:artifactOpen',
+  /** 이 워크스페이스의 아티팩트 목록이 바뀌었다. 패널이 받아 다시 조회한다. */
+  evtArtifactsChanged: 'evt:artifactsChanged',
   /**
    * 컴포저에 붙일 이미지(Preview 스크린샷). 캡처는 어느 창에서든 일어날 수 있지만 컴포저는
    * 메인 창에만 있으므로, main 이 받아 방송하고 컴포저가 있는 창만 집어 간다.
