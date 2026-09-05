@@ -122,14 +122,28 @@ export default function BaseSyncControl({
         ? ''
         : ` (${Math.min(doneBranches + 1, progress.total)}/${progress.total})`
     const copy = OP_COPY[progress.kind]
-    label = branch ? `${copy.busy}${count}` : copy.preparing
-    tooltip = branch ? `${copy.tooltip(branch)}${count}` : copy.preparing
+    // 머지 트레인은 CI 를 기다리는 시간이 실제 작업 시간보다 길다. 그때 "Merging stack…" 만
+    // 띄우면 멈춘 것처럼 보인다 — 무엇을 기다리는지 그대로 적는다.
+    if (progress.waiting) {
+      label = `Waiting for checks${count}`
+      tooltip = `${progress.waiting.branch} — ${progress.waiting.note}`
+    } else {
+      label = branch ? `${copy.busy}${count}` : copy.preparing
+      tooltip = branch ? `${copy.tooltip(branch)}${count}` : copy.preparing
+    }
   } else if (showFinished) {
-    label = problems
-      ? `Finished with ${problems} issue${problems > 1 ? 's' : ''}`
-      : progress
-        ? OP_COPY[progress.kind].finished
-        : 'Rebase complete'
+    // 취소·중단을 "complete" 라고 적으면 사용자는 다 됐다고 읽는다. 트레인은 결과를 싣고
+    // 오므로 그걸 그대로 말한다(단계가 하나도 안 남는 취소는 problems 로 잡히지 않는다).
+    const trainResult = progress?.kind === 'train' ? progress.result : null
+    label = trainResult?.canceled
+      ? 'Merge train canceled'
+      : trainResult?.stoppedAt
+        ? 'Merge train stopped'
+        : problems
+          ? `Finished with ${problems} issue${problems > 1 ? 's' : ''}`
+          : progress
+            ? OP_COPY[progress.kind].finished
+            : 'Rebase complete'
     tooltip = label
   }
 

@@ -31,7 +31,6 @@ import type {
   ScriptStatus,
   StackCascadeResult,
   StackOpProgress,
-  StackTrainResult,
   UpdateStatus,
   Workspace
 } from '@shared/types'
@@ -648,12 +647,19 @@ interface UIState {
   restackWorkspace: (workspaceId: string) => Promise<void>
   /** 외부 병합으로 대기 중인 스택 캐스케이드를 실행한다(rebase + force-push — 사용자 승인 후). */
   applyStackSync: (workspaceId: string) => Promise<void>
-  /** 한 번의 승인으로 스택을 아래부터 병합하고 뒤따르는 브랜치들을 다시 쓴다. */
+  /**
+   * 한 번의 승인으로 스택을 아래부터 병합하고 뒤따르는 브랜치들을 다시 쓴다.
+   * 트레인은 백그라운드에서 도므로 이 호출은 시작만 알린다 — 진행과 결과는 stackProgress 로 온다.
+   */
   runMergeTrain: (
     workspaceId: string,
     method: PrMergeMethod,
     total: number
-  ) => Promise<StackTrainResult>
+  ) => Promise<{ error?: string }>
+  /** 백그라운드에서 도는 머지 트레인을 멈춘다. */
+  cancelMergeTrain: (workspaceId: string) => Promise<void>
+  /** 다 본 스택 작업 진행 상태를 치운다(끝난 트레인 결과는 저절로 사라지지 않는다). */
+  dismissStackProgress: (workspaceId: string) => Promise<void>
   /** 대기 중인 스택 캐스케이드 계획을 무시한다. */
   dismissStackSync: (workspaceId: string) => Promise<void>
   /** PR 병합으로 뜬 아카이브 제안을 해제한다(같은 병합은 다시 제안하지 않는다). */
@@ -664,6 +670,8 @@ interface UIState {
   keepBase: (workspaceId: string) => Promise<void>
   /** 캐스케이드 단계별 결과를 토스트로 알린다(문제가 있으면 브랜치별로 나열). */
   reportCascade: (cascade: StackCascadeResult, successMsg: string) => void
+  /** 백그라운드에서 끝난 머지 트레인을 토스트로 알린다(창을 닫아 둔 사이 끝났을 수 있다). */
+  reportMergeTrain: (progress: StackOpProgress) => void
   /** 방문 순서 스택(브라우저 뒤로가기용). 현재 선택은 포함하지 않고, 오래된 것이 앞이다. */
   workspaceHistory: string[]
   /** ⌘[ 로 떠나온 워크스페이스들. ⌘] 가 여기서 꺼내 되짚어 간다. */
@@ -891,6 +899,7 @@ function optimisticStackProgress(
     total,
     done: [],
     current: null,
+    waiting: null,
     finished: false,
     startedAt: Date.now()
   }
@@ -1542,11 +1551,35 @@ export const useStore = create<UIState>((set, get) => ({
       })
     })
 
+    // 창이 늦게 떴거나 다시 적재됐을 수 있다. 머지 트레인은 백그라운드에서 몇십 분을 도므로
+    // 방송만 기다리면 그동안 아무것도 안 보인다 — 지금 값을 한 번 읽고 시작한다.
+    void window.api.stack.progress().then((list) => {
+      if (!Array.isArray(list) || list.length === 0) return
+      set((s) => {
+        const next = { ...s.stackProgress }
+        for (const entry of list) {
+          // 이미 방송으로 받은 더 새로운 상태를 옛 사진으로 덮지 않는다.
+          const seen = next[entry.workspaceId]
+          if (!seen || seen.startedAt <= entry.startedAt) next[entry.workspaceId] = entry
+        }
+        return { stackProgress: next }
+      })
+    })
+
     window.api.onStackProgress((progress) => {
+      const previous = get().stackProgress[progress.workspaceId]
       set((s) => ({
         stackProgress: { ...s.stackProgress, [progress.workspaceId]: progress }
       }))
       if (!progress.finished) return
+      if (progress.kind === 'train') {
+        // 끝난 트레인은 스스로 사라지지 않는다 — 백그라운드에서 끝났을 수 있어, 사용자가
+        // 결과를 보고 닫을 때까지 남긴다(모달의 Close 가 dismissStackProgress 를 부른다).
+        if (previous?.startedAt !== progress.startedAt || !previous.finished) {
+          get().reportMergeTrain(progress)
+        }
+        return
+      }
       setTimeout(() => {
         set((s) => {
           // 같은 workspace 에서 이미 다음 작업이 시작됐으면 이전 작업의 타이머가 지우지 않는다.
@@ -2707,23 +2740,29 @@ export const useStore = create<UIState>((set, get) => ({
   runMergeTrain: async (workspaceId, method, total) => {
     const optimistic = optimisticStackProgress(workspaceId, 'train', total)
     set((s) => ({ stackProgress: { ...s.stackProgress, [workspaceId]: optimistic } }))
-    const result = await window.api.stack.trainRun(workspaceId, method).catch((err) => ({
-      mergedPrs: [],
-      steps: [],
-      stoppedAt: null,
+    const started = await window.api.stack.trainRun(workspaceId, method).catch((err) => ({
       error: err instanceof Error ? err.message : String(err)
     }))
     // main 이 계획 만료처럼 스트림을 열기 전에 거절할 수 있다. 그때 우리가 넣은 객체만
     // 동일성으로 걷어 내야, 이미 IPC 로 넘어온 실제 진행 상태를 뒤늦게 지우지 않는다.
-    set((s) =>
-      s.stackProgress[workspaceId] === optimistic
-        ? { stackProgress: { ...s.stackProgress, [workspaceId]: null } }
-        : {}
-    )
-    if (result.error) get().pushToast('error', `Merge train failed: ${result.error}`)
-    void get().refreshGit(workspaceId)
-    void get().refreshPr(workspaceId)
-    return result
+    if (started.error) {
+      set((s) =>
+        s.stackProgress[workspaceId] === optimistic
+          ? { stackProgress: { ...s.stackProgress, [workspaceId]: null } }
+          : {}
+      )
+      get().pushToast('error', `Merge train failed: ${started.error}`)
+    }
+    return started
+  },
+
+  cancelMergeTrain: async (workspaceId) => {
+    await window.api.stack.trainCancel(workspaceId).catch(() => {})
+  },
+
+  dismissStackProgress: async (workspaceId) => {
+    set((s) => ({ stackProgress: { ...s.stackProgress, [workspaceId]: null } }))
+    await window.api.stack.progressDismiss(workspaceId).catch(() => {})
   },
 
   dismissStackSync: async (workspaceId) => {
@@ -2771,6 +2810,35 @@ export const useStore = create<UIState>((set, get) => ({
       return `• ${who}: ${p.kind} failed — ${p.message ?? 'unknown error'}`
     })
     get().pushToast('error', `Stack cascade needs attention:\n${lines.join('\n')}`)
+  },
+
+  reportMergeTrain: (progress) => {
+    const result = progress.result
+    const workspaceId = progress.workspaceId
+    const show = { label: 'Show', run: () => void get().selectWorkspace(workspaceId) }
+    void get().refreshGit(workspaceId)
+    void get().refreshPr(workspaceId)
+    const merged = result?.mergedPrs ?? []
+    const count = merged.length
+      ? `Merged ${merged.map((n) => `#${n}`).join(', ')}.`
+      : 'Nothing was merged.'
+    if (result?.error) {
+      get().pushToast('error', `Merge train failed: ${result.error}`, [show])
+      return
+    }
+    if (result?.canceled) {
+      get().pushToast('info', `Merge train canceled. ${count}`, [show])
+      return
+    }
+    if (result?.stoppedAt) {
+      get().pushToast(
+        'error',
+        `Merge train stopped at ${result.stoppedAt.branch}: ${result.stoppedAt.reason}\n${count}`,
+        [show]
+      )
+      return
+    }
+    get().pushToast('success', `Merge train finished. ${count}`)
   },
 
   selectWorkspace: async (id, opts) => {

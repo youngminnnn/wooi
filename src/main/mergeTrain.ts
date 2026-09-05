@@ -39,7 +39,8 @@ export interface MergeTrainDeps {
     newBase: string,
     sink?: StackProgressSink
   ): Promise<StackCascadeResult>
-  sleep(ms: number): Promise<void>
+  /** signal 이 끊기면 남은 시간을 버리고 즉시 깨어난다 — 취소가 30 초씩 늦으면 취소가 아니다. */
+  sleep(ms: number, signal?: AbortSignal): Promise<void>
 }
 
 export interface PlannedMergeTrain extends StackTrainPlan {
@@ -57,7 +58,26 @@ export interface RunMergeTrainInput {
   expectedHeadShas: Record<string, string | null>
   /** GitHub 병합 반영을 기다릴 최대 시간. 테스트에서는 짧게 줄인다. */
   mergeWaitMs?: number
+  /**
+   * force-push 직후 GitHub 가 새 head 의 체크를 등록하기까지 봐 줄 시간. 이 창 안에서는
+   * review_required/open 을 "아직 계산 중" 으로 읽는다(아래 awaitLayerReady 주석 참고).
+   */
+  settleMs?: number
+  /** CI 를 기다릴 때 다시 물어보기까지의 간격(테스트에서 0 으로 줄인다). */
+  pollDelaysMs?: number[]
+  /** 사용자가 트레인을 멈추면 끊긴다. 되쓰기 중간이 아닌 안전한 지점에서만 본다. */
+  signal?: AbortSignal
 }
+
+/** 기다리면 스스로 풀리는 상태인가. 사람이 손대야 하는 차단과 갈라 놓는 유일한 기준이다. */
+function isWaitable(state: PrState | undefined): boolean {
+  return state === 'ci_pending'
+}
+
+const CANCELED = 'Canceled.'
+const SETTLING_NOTE = 'Waiting for GitHub to register the new checks.'
+/** CI 를 다시 물어보는 간격. 20 초마다 한 단씩 올라가고 30 초에서 멈춘다. */
+const POLL_DELAYS_MS = [2_000, 5_000, 10_000, 20_000, 30_000]
 
 function statusBlock(state: PrState): string | null {
   switch (state) {
@@ -117,17 +137,21 @@ export async function planMergeTrain(
 
   for (const layer of input.layers) {
     const status = await deps.getPrStatus(layer.worktreePath, layer.branch)
-    const blockedReason = await layerBlock(layer, status, deps, prefixOpen)
+    const reason = await layerBlock(layer, status, deps, prefixOpen)
+    // CI 가 도는 층은 막힌 것이 아니라 기다릴 층이다. 실행은 기다렸다 머지하는데 계획이 여기서
+    // 끊으면, 정작 사용자가 트레인을 걸고 싶은 순간(= 방금 push 해 CI 가 도는 때)에 버튼이 없다.
+    const waiting = reason !== null && isWaitable(status?.state)
     layers.push({
       branch: layer.branch,
       prNumber: status?.number ?? layer.prNumber,
       state: status?.state ?? null,
-      blockedReason
+      blockedReason: waiting ? null : reason,
+      waitReason: waiting ? reason : null
     })
     const prNumber = status?.number ?? layer.prNumber
     headShas[layer.branch] =
       prNumber === null ? null : await deps.getPrHeadSha(layer.worktreePath, prNumber)
-    if (prefixOpen && blockedReason) prefixOpen = false
+    if (prefixOpen && reason && !waiting) prefixOpen = false
     if (prefixOpen && status?.state !== 'merged') mergeableCount++
   }
 
@@ -138,6 +162,48 @@ export async function planMergeTrain(
     forcePushCount: forcePushBranches.length,
     forcePushBranches,
     headShas
+  }
+}
+
+/**
+ * CI 가 도는 동안은 기다린다. 트레인이 아래층을 머지하면 캐스케이드가 위층을 force-push 하고,
+ * 그러면 그 층의 CI 는 **처음부터 다시** 돈다. 이걸 차단으로 읽으면 트레인은 사실상 항상 두 번째
+ * 층에서 멈춘다 — 기다리는 것이 트레인의 일이다.
+ *
+ * 정착(settle) 창이 따로 있는 이유: force-push 직후에는 새 head 의 statusCheckRollup 이 아직
+ * 비어 있고, 필수 체크가 걸린 리포는 그 상태를 mergeStateStatus: BLOCKED 로 돌려준다. github.ts
+ * 의 stateFor 는 그걸 review_required 로 옮기므로, 그대로 믿으면 "Review required." 로 헛되이
+ * 멈춘다. 그래서 **이번 실행이 직접 force-push 한 층**에 한해, 짧은 창 동안은 그 판정을 유보한다.
+ * 우리가 밀지 않은 층의 review_required 는 진짜 리뷰 요구이므로 그대로 멈춘다.
+ */
+async function awaitLayerReady(
+  layer: TrainLayer,
+  deps: MergeTrainDeps,
+  ctx: {
+    settleMs: number
+    delays: number[]
+    justPushed: boolean
+    signal?: AbortSignal
+    sink?: StackProgressSink
+  }
+): Promise<{ ok: true } | { ok: false; canceled?: boolean; reason: string }> {
+  let waited = 0
+  for (;;) {
+    if (ctx.signal?.aborted) return { ok: false, canceled: true, reason: CANCELED }
+    const status = await deps.getPrStatus(layer.worktreePath, layer.branch)
+    const blocked = await layerBlock(layer, status, deps, true)
+    if (!blocked) return { ok: true }
+
+    const state = status?.state
+    const settling = ctx.justPushed && (state === 'review_required' || state === 'open')
+    const waitable = isWaitable(state) || (settling && waited < ctx.settleMs)
+    if (!waitable) return { ok: false, reason: blocked }
+
+    ctx.sink?.waiting?.(layer.branch, isWaitable(state) ? blocked : SETTLING_NOTE)
+    const delay = ctx.delays[Math.min(ctx.delays.length - 1, Math.floor(waited / 20_000))]
+    // 간격이 0 인 테스트에서도 정착 창은 반드시 끝나야 한다 — 최소 1 은 흐르게 둔다.
+    await deps.sleep(delay, ctx.signal)
+    waited += Math.max(delay, 1)
   }
 }
 
@@ -161,8 +227,16 @@ export async function runMergeTrain(
   // 그 층까지 계획 대조로 막으면 트레인은 항상 첫 층 다음에서 멈춘다. 대조를 건너뛰어도
   // "내가 만들지 않은 push" 는 layerBlock 의 detectRemoteDivergence 가 그대로 잡는다.
   const rebasedHere = new Set<string>()
+  const settleMs = input.settleMs ?? 60_000
+  const pollDelays = input.pollDelaysMs ?? POLL_DELAYS_MS
+  const stopCanceled = (branch: string): StackTrainResult => {
+    result.canceled = true
+    result.stoppedAt = { branch, reason: CANCELED }
+    return result
+  }
 
   for (const layer of input.layers) {
+    if (input.signal?.aborted) return stopCanceled(layer.branch)
     const selector = layer.prNumber ?? layer.branch
     const initialMeta = await deps.getPrMeta(layer.worktreePath, selector)
     if (initialMeta?.state === 'MERGED') {
@@ -182,10 +256,16 @@ export async function runMergeTrain(
       return result
     }
 
-    const status = await deps.getPrStatus(layer.worktreePath, layer.branch)
-    const blocked = await layerBlock(layer, status, deps, true)
-    if (blocked) {
-      result.stoppedAt = { branch: layer.branch, reason: blocked }
+    const ready = await awaitLayerReady(layer, deps, {
+      settleMs,
+      delays: pollDelays,
+      justPushed: rebasedHere.has(layer.branch),
+      signal: input.signal,
+      sink
+    })
+    if (!ready.ok) {
+      if (ready.canceled) return stopCanceled(layer.branch)
+      result.stoppedAt = { branch: layer.branch, reason: ready.reason }
       return result
     }
     const actualHead = await deps.getPrHeadSha(layer.worktreePath, initialMeta.number)
@@ -220,6 +300,9 @@ export async function runMergeTrain(
     const delays = [1_000, 2_000, 3_000, 5_000]
     let waited = 0
     let mergedMeta: PrMeta | null = null
+    // 여기서는 취소를 보지 않는다. 머지는 이미 GitHub 로 나갔고, 남은 일(반영 확인 →
+    // 캐스케이드)을 건너뛰면 아래층은 병합됐는데 위층은 옛 base 를 가리킨 채 남는다.
+    // 이 창은 60 초로 묶여 있으니 취소는 늦어도 그만큼만 늦다.
     while (waited <= waitLimit) {
       const meta = await deps.getPrMeta(layer.worktreePath, initialMeta.number)
       if (meta?.state === 'MERGED') {
