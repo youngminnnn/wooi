@@ -30,6 +30,11 @@ export interface StackProgressSink {
   start(branch: string, kind: StackCascadeStep['kind']): void
   /** 단계 하나가 끝났다. 반환될 steps 에 담기는 값과 **같은 객체**를 흘린다. */
   step(step: StackCascadeStep): void
+  /**
+   * 일을 하는 게 아니라 남(=CI)을 기다리는 중이다. 트레인만 쓰므로 선택 사항으로 둔다 —
+   * 캐스케이드 경로는 기다리지 않고, 구현하지 않은 sink 를 그대로 꽂을 수 있어야 한다.
+   */
+  waiting?(branch: string, note: string): void
 }
 
 /**

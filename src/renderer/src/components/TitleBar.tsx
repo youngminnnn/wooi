@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Settings, Loader2, ShieldQuestion, BellDot, Square } from 'lucide-react'
+import { Settings, Loader2, ShieldQuestion, BellDot, Square, GitMerge } from 'lucide-react'
 import { useStore } from '../store'
 import { summarizePermission } from '../lib/permission'
 import { hasNewVersion, newVersionLabel } from '../lib/update'
@@ -57,6 +57,11 @@ function AttentionCluster(): React.JSX.Element | null {
   const selectWorkspace = useStore((s) => s.selectWorkspace)
   const stopAll = useStore((s) => s.stopAll)
   const confirm = useStore((s) => s.confirm)
+  // 머지 트레인은 CI 를 기다리며 백그라운드에서 몇십 분을 돈다. 그 사이 사용자는 다른
+  // 워크스페이스에서 일한다 — 앱 전역에서 "지금 트레인이 돌고 있다" 를 아는 자리는 여기뿐이다.
+  // 셀렉터는 저장된 값을 그대로 집기만 한다 — 안에서 배열을 만들면 매 스냅샷이 새 참조가 되어
+  // 렌더 루프에 빠진다(selectorStability.test.ts). 걸러 내는 일은 셀렉터 밖에서 한다.
+  const stackProgress = useStore((s) => s.stackProgress)
   const [queueOpen, setQueueOpen] = useState(false)
 
   if (!app) return null
@@ -69,7 +74,15 @@ function AttentionCluster(): React.JSX.Element | null {
     (id) => unread[id] && live.has(id) && id !== selectedId
   ).length
 
-  if (runningCount === 0 && pendingCount === 0 && unreadCount === 0) return null
+  const trainIds = Object.values(stackProgress)
+    .filter((p) => p?.kind === 'train' && !p.finished && live.has(p.workspaceId))
+    .map((p) => p!.workspaceId)
+  if (runningCount === 0 && pendingCount === 0 && unreadCount === 0 && trainIds.length === 0) {
+    return null
+  }
+  const trainNames = trainIds
+    .map((id) => app.workspaces.find((w) => w.id === id)?.branch ?? id)
+    .join(', ')
 
   const onStopAll = async (): Promise<void> => {
     const ok = await confirm({
@@ -101,6 +114,17 @@ function AttentionCluster(): React.JSX.Element | null {
             Stop all
           </button>
         </>
+      )}
+
+      {trainIds.length > 0 && (
+        <button
+          onClick={() => void selectWorkspace(trainIds[0])}
+          className="flex items-center gap-1 h-7 px-2 rounded-md text-xs text-[var(--accent-300)] bg-[var(--accent-500)]/10 border border-[var(--accent-500)]/20 hover:bg-[var(--accent-500)]/20"
+          title={`Merge train running: ${trainNames}`}
+        >
+          <GitMerge size={12} />
+          Merge train{trainIds.length > 1 ? ` (${trainIds.length})` : ''}
+        </button>
       )}
 
       {pendingCount > 0 && (

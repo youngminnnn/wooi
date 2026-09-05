@@ -2,6 +2,7 @@ import { useState } from 'react'
 import {
   ChevronDown,
   ChevronRight,
+  Clock,
   ExternalLink,
   GitBranch,
   GitCommitVertical,
@@ -52,6 +53,17 @@ function TrainChip({ cell }: { cell: StackTrainCell }): React.JSX.Element | null
       >
         <Loader2 size={9} className="animate-spin" />
         {STEP_LABEL[cell.kind]}…
+      </span>
+    )
+  }
+  if (cell.state === 'waiting') {
+    return (
+      <span
+        className={`${chipCls} text-[var(--warning-300)] bg-[var(--warning-500)]/10`}
+        title={cell.note}
+      >
+        <Clock size={9} />
+        Waiting for checks
       </span>
     )
   }

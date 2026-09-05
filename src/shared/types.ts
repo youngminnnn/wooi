@@ -2852,6 +2852,17 @@ export interface StackOpProgress {
   /** 작업이 끝났는가. 렌더러가 스피너를 내리고 결과 줄만 남긴다. */
   finished: boolean
   startedAt: number
+  /**
+   * 지금 무언가를 **기다리는 중**이다(머지 트레인이 CI 를 기다릴 때). current 와 달리 우리가
+   * 일을 하고 있는 게 아니라 남을 기다린다는 뜻이라, 화면에서도 다르게 읽혀야 한다.
+   * start/step 이 들어오면 null 로 되돌아간다.
+   */
+  waiting?: { branch: string; note: string; since: number } | null
+  /**
+   * 끝난 머지 트레인의 결과. 트레인은 백그라운드에서 돌아 invoke 반환값으로 결과를 줄 수
+   * 없으므로, 결과도 이 방송에 실어 보낸다(finished 와 함께 한 번 채워진다).
+   */
+  result?: StackTrainResult | null
 }
 
 /** 머지 트레인이 훑을 층 하나. 아래→위 순서로 담긴다. */
@@ -2861,6 +2872,11 @@ export interface StackTrainLayer {
   state: PrState | null
   /** 이 층에서 트레인이 멈추는 이유. null 이면 머지 가능. */
   blockedReason: string | null
+  /**
+   * 막힌 것은 아니지만 트레인이 여기서 **기다릴** 이유(CI 진행 중). 기다림은 차단이 아니므로
+   * mergeableCount 를 끊지 않는다 — 끊으면 CI 가 도는 동안에는 트레인을 걸 수조차 없다.
+   */
+  waitReason?: string | null
 }
 
 export interface StackTrainPlan {
@@ -2880,6 +2896,8 @@ export interface StackTrainResult {
   /** 모든 층의 단계를 이어 붙인다. 머지 단계도 빠뜨리지 않는다. */
   steps: StackCascadeStep[]
   stoppedAt: { branch: string; reason: string } | null
+  /** 사용자가 취소해서 멈췄는가. 실패와 구분해 읽혀야 한다. */
+  canceled?: boolean
   /** 실행을 시작조차 못 한 이유. */
   error?: string
 }
@@ -3770,8 +3788,14 @@ export const IPC = {
   stackSyncApply: 'stack:syncApply',
   /** 머지 N 번과 force-push M 번을 한 승인에 묶기 전, 아무것도 실행하지 않고 계획한다. */
   stackTrainPlan: 'stack:trainPlan',
-  /** 사용자가 확인한 계획대로 아래→위 머지 트레인을 실행한다. */
+  /** 사용자가 확인한 계획대로 아래→위 머지 트레인을 실행한다(백그라운드에서 돈다). */
   stackTrainRun: 'stack:trainRun',
+  /** 백그라운드에서 도는 머지 트레인을 멈춘다(안전한 지점에서만 끊는다). */
+  stackTrainCancel: 'stack:trainCancel',
+  /** 진행 중이거나 아직 안 치운 스택 작업 진행 상태를 한 번에 읽는다(늦게 뜬 창용). */
+  stackProgressGet: 'stack:progressGet',
+  /** 다 본 스택 작업 진행 상태를 치운다(끝난 머지 트레인 결과는 저절로 사라지지 않는다). */
+  stackProgressDismiss: 'stack:progressDismiss',
   /** 현재 레이어(baseBranch..HEAD)의 커밋 목록. */
   stackCommitsList: 'stack:commitsList',
   /** 커밋을 아래층으로 내리기 전, 아무것도 되쓰지 않고 blocker·영향 범위·복구용 tip 을 계산한다. */

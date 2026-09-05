@@ -259,6 +259,10 @@ export function registerIpc(ctx: IpcContext): void {
       mergeableCount: number
     }
   >()
+  /** 방송된 마지막 진행 상태. 늦게 뜬 창이 stackProgressGet 으로 한 번 읽어 간다. */
+  const liveStackProgress = new Map<string, StackOpProgress>()
+  /** 백그라운드에서 도는 머지 트레인. 값의 controller 로 사용자가 멈춘다. */
+  const activeTrains = new Map<string, { controller: AbortController; startedAt: number }>()
 
   /**
    * 전체 상태 스냅샷을 방송한다.
@@ -449,36 +453,64 @@ export function registerIpc(ctx: IpcContext): void {
     workspaceId: string,
     kind: StackOpProgress['kind'],
     total: number | null
-  ): { sink: StackProgressSink; finish: () => void } => {
+  ): { sink: StackProgressSink; finish: (result?: StackTrainResult) => void } => {
     const state: StackOpProgress = {
       workspaceId,
       kind,
       total,
       done: [],
       current: null,
+      waiting: null,
       finished: false,
       startedAt: Date.now()
     }
     // 단계 배열은 뒤에서 계속 자라므로 매 방송마다 복사한다. preload 경계를 건넌 사진이 다음
     // 단계 때문에 뒤늦게 바뀌는 일은 없어야 렌더러가 받은 순서를 그대로 믿을 수 있다.
-    const emit = (): void => dispatch(IPC.evtStackProgress, { ...state, done: [...state.done] })
+    const emit = (): void => {
+      const snapshot = { ...state, done: [...state.done] }
+      // 늦게 뜬 창(재적재·분리 패널)이 진행 중인 작업을 통째로 놓치지 않도록 마지막 사진을
+      // 남긴다 — 트레인은 백그라운드에서 몇십 분을 돌 수 있어 방송만으로는 부족하다.
+      liveStackProgress.set(workspaceId, snapshot)
+      dispatch(IPC.evtStackProgress, snapshot)
+    }
     emit()
     return {
       sink: {
         start: (branch, stepKind) => {
           state.current = { branch, kind: stepKind }
+          state.waiting = null
           emit()
         },
         step: (step) => {
           state.done.push(step)
           state.current = null
+          state.waiting = null
+          emit()
+        },
+        waiting: (branch, note) => {
+          // since 는 같은 사유가 이어지는 동안 유지한다 — 화면이 "얼마나 기다렸는지"를 센다.
+          if (state.waiting?.branch !== branch || state.waiting.note !== note) {
+            state.waiting = { branch, note, since: Date.now() }
+          }
+          state.current = null
           emit()
         }
       },
-      finish: () => {
+      finish: (result) => {
         state.current = null
+        state.waiting = null
         state.finished = true
+        if (result) state.result = result
         emit()
+        // 끝난 트레인 결과는 사용자가 치울 때까지 남긴다(백그라운드에서 끝났을 수 있다).
+        // 나머지 작업은 렌더러가 잠깐 보여 준 뒤 스스로 지우므로 보관할 이유가 없다.
+        if (kind !== 'train') {
+          setTimeout(() => {
+            if (liveStackProgress.get(workspaceId)?.startedAt === state.startedAt) {
+              liveStackProgress.delete(workspaceId)
+            }
+          }, 5_000).unref?.()
+        }
       }
     }
   }
@@ -2616,7 +2648,20 @@ export function registerIpc(ctx: IpcContext): void {
     detectRemoteDivergence,
     mergePr,
     runCascade: runMergeCascade,
-    sleep: (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
+    // 취소는 대기 중에 눌린다. 남은 시간을 다 채우고 깨어나면 취소가 30 초씩 늦어진다.
+    sleep: (ms: number, signal?: AbortSignal) =>
+      new Promise<void>((resolve) => {
+        if (signal?.aborted) return resolve()
+        const timer = setTimeout(() => {
+          signal?.removeEventListener('abort', onAbort)
+          resolve()
+        }, ms)
+        function onAbort(): void {
+          clearTimeout(timer)
+          resolve()
+        }
+        signal?.addEventListener('abort', onAbort, { once: true })
+      })
   }
 
   const forcePushesForPlan = (
@@ -2664,13 +2709,15 @@ export function registerIpc(ctx: IpcContext): void {
         error: 'Workspace not found.'
       }
     }
-    if (layers.length < 2) {
+    // 층이 하나여도 트레인은 할 일이 있다 — 그 PR 을 머지한 뒤 위층 전부를 새 base 로
+    // 리타겟·rebase·force-push 한다. 그건 prMerge 가 일부러 하지 않는 일이라 트레인만의 경로다.
+    if (layers.length === 0) {
       return {
         layers: [],
         mergeableCount: 0,
         forcePushCount: 0,
         forcePushBranches: [],
-        error: 'A merge train needs at least two layers.'
+        error: 'This workspace has no branch to merge.'
       }
     }
     const first = await planMergeTrain({ layers, forcePushBranches: [] }, trainDeps)
@@ -2686,48 +2733,83 @@ export function registerIpc(ctx: IpcContext): void {
     return publicPlan
   })
 
+  /**
+   * 트레인을 **백그라운드에서** 시작한다. 반환값은 "걸었다/못 걸었다" 뿐이다.
+   *
+   * 트레인은 위층 CI 가 다시 돌기를 기다리므로 몇십 분이 걸릴 수 있다. 그걸 invoke 한 번의
+   * 왕복 안에 가두면 창을 닫지도, 다른 일을 하지도 못한다. 그래서 실행은 떼어 내고, 진행과
+   * 결과는 evtStackProgress 로 흘린다 — 늦게 붙은 창은 stackProgressGet 으로 따라잡는다.
+   */
   handle(
     IPC.stackTrainRun,
-    async (_e, workspaceId: string, method: PrMergeMethod): Promise<StackTrainResult> => {
+    async (_e, workspaceId: string, method: PrMergeMethod): Promise<{ error?: string }> => {
+      if (activeTrains.has(workspaceId)) {
+        return { error: 'A merge train is already running here.' }
+      }
       const remembered = mergeTrainPlans.get(workspaceId)
       const layers = resolveMergeTrainLayers(workspaceId)
       if (
         !remembered ||
         remembered.branches.join('\0') !== layers.map((layer) => layer.branch).join('\0')
       ) {
-        return {
-          mergedPrs: [],
-          steps: [],
-          stoppedAt: null,
-          error: 'Plan the merge train before running it.'
-        }
+        return { error: 'Plan the merge train before running it.' }
       }
+      const controller = new AbortController()
+      activeTrains.set(workspaceId, { controller, startedAt: Date.now() })
       const operation = stackProgress(workspaceId, 'train', remembered.mergeableCount)
-      try {
-        const result = await runMergeTrain(
-          { layers, method, expectedHeadShas: remembered.headShas },
-          trainDeps,
-          operation.sink
-        )
-        clearStackSync(workspaceId, true)
-        for (const layer of layers) await reconcileWorkspaceStack(layer.workspaceId)
-        broadcastState()
-        // 트레인은 캐스케이드를 자기가 만들지 않고 runMergeCascade 를 그대로 꽂아 쓰므로
-        // (trainDeps.runCascade) 단계마다 workspaceId 가 이미 실려 있다. 대상은 트레인을 시작한
-        // 워크스페이스가 아니라 충돌이 난 층의 워크트리다. 트레인은 첫 문제에서 멈추고 돌아오니
-        // 여기서도 한 번 실행 = 최대 한 턴이고, 실패해도 다시 태우지 않는다.
-        const autoStep = pickAutoResolveStep(
-          store.getState().settings.autoResolveConflicts,
-          result.steps
-        )
-        if (autoStep) await startConflictResolve(autoStep.workspaceId, { auto: true })
-        return result
-      } finally {
-        mergeTrainPlans.delete(workspaceId)
-        operation.finish()
-      }
+      void (async () => {
+        let result: StackTrainResult = { mergedPrs: [], steps: [], stoppedAt: null }
+        try {
+          result = await runMergeTrain(
+            {
+              layers,
+              method,
+              expectedHeadShas: remembered.headShas,
+              signal: controller.signal
+            },
+            trainDeps,
+            operation.sink
+          )
+          clearStackSync(workspaceId, true)
+          for (const layer of layers) await reconcileWorkspaceStack(layer.workspaceId)
+          broadcastState()
+          // 트레인은 캐스케이드를 자기가 만들지 않고 runMergeCascade 를 그대로 꽂아 쓰므로
+          // (trainDeps.runCascade) 단계마다 workspaceId 가 이미 실려 있다. 대상은 트레인을 시작한
+          // 워크스페이스가 아니라 충돌이 난 층의 워크트리다. 트레인은 첫 문제에서 멈추고 돌아오니
+          // 여기서도 한 번 실행 = 최대 한 턴이고, 실패해도 다시 태우지 않는다.
+          const autoStep = pickAutoResolveStep(
+            store.getState().settings.autoResolveConflicts,
+            result.steps
+          )
+          if (autoStep) await startConflictResolve(autoStep.workspaceId, { auto: true })
+        } catch (err) {
+          result = {
+            ...result,
+            error: err instanceof Error ? err.message : String(err)
+          }
+        } finally {
+          mergeTrainPlans.delete(workspaceId)
+          activeTrains.delete(workspaceId)
+          operation.finish(result)
+        }
+      })()
+      return {}
     }
   )
+
+  handle(IPC.stackTrainCancel, async (_e, workspaceId: string): Promise<void> => {
+    // abort 는 "다음 안전한 지점에서 멈춰라" 는 뜻이다. 머지 요청이나 force-push 중간을
+    // 끊으면 스택이 반쯤 옮겨진 채 남으므로, runMergeTrain 이 대기 구간에서만 이 신호를 본다.
+    activeTrains.get(workspaceId)?.controller.abort()
+  })
+
+  handle(IPC.stackProgressGet, async (): Promise<StackOpProgress[]> => [
+    ...liveStackProgress.values()
+  ])
+
+  handle(IPC.stackProgressDismiss, async (_e, workspaceId: string): Promise<void> => {
+    if (liveStackProgress.get(workspaceId)?.finished) liveStackProgress.delete(workspaceId)
+  })
 
   /**
    * PR 을 병합한다. 병합만 한다 — 스택 캐스케이드(리타겟·rebase·force-push)는 여기 딸려 오지 않는다.

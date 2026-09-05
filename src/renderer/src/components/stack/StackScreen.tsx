@@ -248,11 +248,11 @@ export default function StackScreen({ workspaceId }: { workspaceId: string }): R
           </button>
           <button
             onClick={() => setTrainOpen(true)}
-            disabled={!trainTargetId || summary.layers < 2}
+            disabled={!trainTargetId}
             title={
               trainTargetBranch
                 ? `Merge this stack from the bottom up to ${trainTargetBranch}`
-                : 'A merge train needs at least two layers'
+                : 'There is no layer to merge'
             }
             className="flex h-7 items-center gap-1.5 rounded-md border border-[var(--border-2)] px-2 text-xs text-neutral-300 hover:bg-[var(--surface-2)] disabled:cursor-not-allowed disabled:text-neutral-600 disabled:hover:bg-transparent"
           >

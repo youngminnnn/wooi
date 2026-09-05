@@ -30,7 +30,13 @@ export function rebaseShortcutGate(input: {
   // git 상태를 아직 못 읽었으면 뒤처짐도 충돌도 판단할 근거가 없다. 모르는 채로 force-push 하지 않는다.
   if (!git) return { ok: false, message: 'Still reading this worktree — try again in a moment.' }
   if (progress && !progress.finished)
-    return { ok: false, message: 'This workspace is already rebasing.' }
+    return {
+      ok: false,
+      message:
+        progress.kind === 'train'
+          ? 'A merge train is running here — it rebases the stack itself.'
+          : 'This workspace is already rebasing.'
+    }
   if (git.conflicted) return { ok: false, message: 'Resolve the conflicts in this worktree first.' }
   // 외부 병합으로 생긴 캐스케이드는 배너가 승인을 받아 실행한다. 단축키가 먼저 옛 base 위로
   // rebase 하면 그 승인 절차를 건너뛴 채 엉뚱한 브랜치 위에 올라간다.

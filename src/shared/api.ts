@@ -59,7 +59,6 @@ import type {
   PreviewOpenEvent,
   PrMergeMethod,
   StackTrainPlan,
-  StackTrainResult,
   PrStatus,
   Repo,
   RestackResult,
@@ -515,10 +514,19 @@ export interface WooiApi {
     /** 스택을 아래에서 위로 훑는 머지 트레인의 사전 점검. 아무것도 실행하지 않는다. */
     trainPlan(workspaceId: string): Promise<StackTrainPlan>
     /**
-     * 사전 점검한 트레인을 실행한다 — 머지 N 번과 force-push M 번이 이 호출 하나에 들어 있다.
-     * 반드시 사용자가 계획을 보고 승인한 뒤에만 호출한다.
+     * 사전 점검한 트레인을 **백그라운드에서** 시작한다 — 머지 N 번과 force-push M 번이 이 승인
+     * 하나에 들어 있다. 반드시 사용자가 계획을 보고 승인한 뒤에만 호출한다.
+     *
+     * 트레인은 층마다 CI 를 기다리므로 오래 걸린다. 그래서 이 호출은 "걸었다/못 걸었다" 만
+     * 돌려주고, 진행과 결과는 onStackProgress 로 흘러온다(끝난 트레인은 result 를 싣는다).
      */
-    trainRun(workspaceId: string, method: PrMergeMethod): Promise<StackTrainResult>
+    trainRun(workspaceId: string, method: PrMergeMethod): Promise<{ error?: string }>
+    /** 백그라운드에서 도는 트레인을 멈춘다. 되쓰기 중간이 아닌 안전한 지점에서 멈춘다. */
+    trainCancel(workspaceId: string): Promise<void>
+    /** 늦게 뜬 창이 진행 중인(또는 아직 안 치운) 스택 작업을 한 번에 따라잡는다. */
+    progress(): Promise<StackOpProgress[]>
+    /** 다 본 진행 상태를 치운다. 끝난 트레인 결과는 이걸 부르기 전까지 남는다. */
+    progressDismiss(workspaceId: string): Promise<void>
     /** 현재 레이어(baseBranch..HEAD)의 커밋을 최신순으로 읽는다. */
     commitsList(workspaceId: string): Promise<CommitEntry[]>
     /** 히스토리를 바꾸기 전에 blocker·force-push 대상·복구용 tip을 한 번에 계산한다. */

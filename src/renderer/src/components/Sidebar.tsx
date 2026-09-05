@@ -543,6 +543,13 @@ function WorkspaceRow({
   const restackBusy = useStore(
     (s) => !!s.stackProgress[workspace.id] && !s.stackProgress[workspace.id]!.finished
   )
+  // 머지 트레인은 CI 를 기다리며 몇십 분을 돈다. 그동안 다른 워크스페이스에서 일해도
+  // 여기서 돌고 있다는 사실은 보여야 한다 — 그리고 "Rebasing…" 이라고 잘못 적으면 안 된다.
+  // 셀렉터는 저장된 객체를 그대로 집고, 세는 일은 밖에서 한다(selectorStability.test.ts).
+  const stackOp = useStore((s) => s.stackProgress[workspace.id])
+  const trainBusy = stackOp?.kind === 'train' && !stackOp.finished
+  const trainDone = trainBusy ? new Set(stackOp!.done.map((d) => d.branch)).size : 0
+  const trainTotal = trainBusy ? stackOp!.total : null
   const confirm = useStore((s) => s.confirm)
   const reportArchiveScriptFailure = useStore((s) => s.reportArchiveScriptFailure)
   const requestDelete = useStore((s) => s.requestDeleteWorkspace)
@@ -704,11 +711,13 @@ function WorkspaceRow({
       ? [
           {
             key: 'restack',
-            label: restackBusy
-              ? 'Rebasing…'
-              : githubDisconnected
-                ? `Rebase onto ${workspace.baseBranch} — Connect GitHub`
-                : `Rebase onto ${workspace.baseBranch}`,
+            label: trainBusy
+              ? 'Merge train running…'
+              : restackBusy
+                ? 'Rebasing…'
+                : githubDisconnected
+                  ? `Rebase onto ${workspace.baseBranch} — Connect GitHub`
+                  : `Rebase onto ${workspace.baseBranch}`,
             icon: githubDisconnected ? (
               <GithubMark size={12} />
             ) : (
@@ -960,6 +969,14 @@ function WorkspaceRow({
             {git && git.conflicted && (
               <span className="text-[var(--danger-fg)] shrink-0" title="Merge conflicts">
                 ⚠
+              </span>
+            )}
+            {trainBusy && (
+              <span
+                className="shrink-0 text-[var(--accent-400)]/90 tabular-nums"
+                title="A merge train is running from this workspace"
+              >
+                · merge train{trainTotal ? ` (${trainDone}/${trainTotal})` : ''}
               </span>
             )}
             {workspace.status === 'running' && runningSince && (

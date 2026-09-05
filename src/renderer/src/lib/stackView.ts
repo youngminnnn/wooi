@@ -169,6 +169,7 @@ export type StackTrainCell =
   | { state: 'ready' }
   | { state: 'blocked'; reason: string }
   | { state: 'running'; kind: StackCascadeStepKind }
+  | { state: 'waiting'; note: string }
   | { state: 'done'; status: StackCascadeStep['status']; message?: string }
 
 /**
@@ -182,6 +183,11 @@ export function trainCellFor(
 ): StackTrainCell {
   if (progress && !progress.finished && progress.current?.branch === branch) {
     return { state: 'running', kind: progress.current.kind }
+  }
+  // CI 를 기다리는 동안은 단계가 늘지 않는다. 이걸 "아직 안 왔음" 으로 그리면 트레인이
+  // 멎은 것처럼 보인다 — 기다리는 중임을 그 층에서 바로 읽혀야 한다.
+  if (progress && !progress.finished && progress.waiting?.branch === branch) {
+    return { state: 'waiting', note: progress.waiting.note }
   }
   const done = progress?.done.filter((step) => step.branch === branch).at(-1)
   if (done) {

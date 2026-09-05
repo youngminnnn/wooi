@@ -257,6 +257,19 @@ describe('trainCellFor', () => {
     expect(trainCellFor('feat/a', plan([]), progress())).toEqual({ state: 'none' })
   })
 
+  // 기다리는 동안은 done 도 current 도 늘지 않는다. 계획의 'ready' 로 되돌아가면 그 층은
+  // "아직 시작도 안 했다" 로 읽히고, 사용자는 트레인이 멎었다고 본다.
+  it('CI 를 기다리는 층은 계획 상태보다 대기를 먼저 보여 준다', () => {
+    const readyPlan = plan([{ branch: 'feat/a', prNumber: 1, state: null, blockedReason: null }])
+    const p = progress({
+      waiting: { branch: 'feat/a', note: 'Checks are still running.', since: 1 }
+    })
+    expect(trainCellFor('feat/a', readyPlan, p)).toEqual({
+      state: 'waiting',
+      note: 'Checks are still running.'
+    })
+  })
+
   it('같은 브랜치에 done 단계가 여럿이면 마지막 것을 쓴다', () => {
     const p = progress({
       finished: true,
