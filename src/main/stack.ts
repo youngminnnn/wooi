@@ -1,5 +1,17 @@
 import type { ArchiveSuggestion, BaseMismatch, StackedBranch } from '@shared/types'
 
+/**
+ * 손대지 않은 워크스페이스를 정리 대상으로 보기까지 기다리는 시간.
+ *
+ * 하루로 잡은 근거는 워크스페이스를 만드는 방식이다 — 앞으로 할 일을 미리 여러 개 열어 두는 것은
+ * 흔한 쓰임이고, 그날 안에는 손대지 않아도 이상하지 않다. 하루가 지나도 첫 턴조차 안 돌았다면
+ * 그것은 그날의 작업이 아니었다는 뜻이다.
+ *
+ * **설정으로 만들지 않는다**([[types]] AppSettings 주석). 이 값을 고르게 하는 것은 사용자가 가장
+ * 모르는 때에 고르게 하는 것이고, 틀려도 손해가 배너 하나라 물어볼 값어치가 없다.
+ */
+const IDLE_ARCHIVE_AFTER_MS = 24 * 60 * 60_000
+
 /** 열린 PR 의 head/base 브랜치 쌍(스택 감지 입력). */
 export interface PrEdge {
   number: number
@@ -183,4 +195,65 @@ export async function detectArchiveSuggestion(opts: {
   const merged = await opts.lookupMerged()
   if (!merged) return null
   return { mergedBranch: branch, prNumber: merged.number, detectedAt: opts.now }
+}
+
+/**
+ * 손대지 않은 워크스페이스를 정리 대상으로 볼 것인가([[types]] ArchiveSuggestReason).
+ *
+ * 병합 판정([[stack]] detectArchiveSuggestion)과 **일부러 갈라 둔다.** 저쪽은 gh 를 물어봐야
+ * 알 수 있는 원격의 사실이고, 이쪽은 이미 손에 든 로컬 필드만으로 끝난다 — 같은 함수에 넣으면
+ * 공짜인 판정이 비싼 판정의 조건에 끌려 들어간다(PR 을 연 적 없는 워크스페이스는 저쪽에서
+ * 조기 return 되는데, 그게 정확히 이쪽이 잡아야 할 대상이다).
+ *
+ * **git 상태를 보지 않는다.** 커밋이나 미저장 변경이 있는지는 여기서 확인하지 않고, 배너가
+ * `changedFiles` 경고로 이미 말한다([[ArchiveSuggestBanner]]). 판정마다 worktree 를 뒤지면
+ * 이 재동기화가 상태 갱신마다 도는 만큼 그 비용이 상시로 깔린다.
+ */
+export function detectIdleArchiveSuggestion(opts: {
+  /** 워크스페이스의 현재 브랜치(=제안이 걸리는 대상). */
+  branch: string
+  /** 이미 떠 있는 제안. 같은 브랜치의 제안이면 그대로 유지한다. */
+  existing: ArchiveSuggestion | null | undefined
+  /** 사용자가 해제한 브랜치. */
+  dismissed: string | null | undefined
+  /** worktree 안에 브랜치 스택(모델 B)을 보유하는지. */
+  branchStack: boolean
+  /** 아카이브되지 않은 자식 워크스페이스가 있는지. */
+  hasLiveChildren: boolean
+  /** 대기 중인 머지 캐스케이드 계획이 있는지. */
+  pendingSync: boolean
+  /** 에이전트가 한 번이라도 턴을 돌렸는지 — 돌렸으면 sessionId 가 있다. */
+  sessionId: string | null
+  /** PR 을 연 적이 있으면 그 번호. 있으면 손대지 않은 워크스페이스가 아니다. */
+  prNumber: number | null | undefined
+  createdAt: number
+  lastActiveAt: number
+  /** 이 워크스페이스가 속한 fan-out 그룹(없으면 null). */
+  fanout: { adoptedWorkspaceId: string | null; createdAt: number } | null
+  now: number
+}): ArchiveSuggestion | null {
+  const { branch, existing, dismissed, sessionId, prNumber, createdAt, lastActiveAt } = opts
+  // 차단 조건은 병합 제안과 같다 — 아카이브가 파괴적이라는 사실이 사유에 따라 달라지지 않는다.
+  if (opts.branchStack || opts.hasLiveChildren || opts.pendingSync) return null
+  if (branch === dismissed) return null
+  if (existing && existing.mergedBranch === branch) return existing
+
+  const age = opts.now - createdAt
+  if (age < IDLE_ARCHIVE_AFTER_MS) return null
+
+  // fan-out 후보는 첫 턴이 자동으로 나가므로 "한 번도 안 씀" 으로는 절대 안 걸린다. 그룹이
+  // 채택 없이 오래 남았는지를 따로 본다.
+  const fanout = opts.fanout
+  if (fanout) {
+    if (fanout.adoptedWorkspaceId !== null) return null
+    if (opts.now - fanout.createdAt < IDLE_ARCHIVE_AFTER_MS) return null
+    if (opts.now - lastActiveAt < IDLE_ARCHIVE_AFTER_MS) return null
+    return { mergedBranch: branch, prNumber: null, reason: 'fanoutLoser', detectedAt: opts.now }
+  }
+
+  // 여기부터는 "만들고 손대지 않았다". 셋 중 하나라도 어긋나면 쓰인 워크스페이스다.
+  if (sessionId !== null) return null
+  if (prNumber != null) return null
+  if (lastActiveAt !== createdAt) return null
+  return { mergedBranch: branch, prNumber: null, reason: 'unused', detectedAt: opts.now }
 }
