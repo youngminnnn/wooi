@@ -9,6 +9,7 @@ import {
   sendToWorkspaceExternal
 } from './peer'
 import { capturePreview, openPreview, readPreviewIssues } from './preview'
+import { createArtifact } from './artifact'
 import { openPullRequest } from './pullRequest'
 import { checkRelatedWork } from './relatedWork'
 import {
@@ -63,6 +64,7 @@ export function initAgentTools(deps: AgentToolDeps): void {
   registerAgentTool('open_preview', openPreview)
   registerAgentTool('capture_preview', capturePreview)
   registerAgentTool('read_preview_issues', readPreviewIssues)
+  registerAgentTool('create_artifact', createArtifact)
   registerAgentTool('check_related_work', checkRelatedWork)
   registerAgentTool('list_workspace_peers', listWorkspacePeers)
   registerAgentTool('send_to_workspace', sendToWorkspace)

@@ -14,7 +14,7 @@ Wooi 는 모든 코딩 에이전트 세션에 `wooi` 라는 내장 MCP 서버를
 도구는 보통 에이전트에게 `mcp__wooi__<도구-이름>` 으로 보입니다. 대부분의 도구 정의는 필요할 때
 불러오므로, 처음 모델 컨텍스트에 보이지 않아도 도구 검색을 통해 사용할 수 있습니다.
 
-핵심 도구 24개는 모든 워크스페이스에 제공됩니다. `claude_subagent` 와 `codex_subagent` 는
+핵심 도구 25개는 모든 워크스페이스에 제공됩니다. `claude_subagent` 와 `codex_subagent` 는
 멀티 에이전트 모드를 켜고 해당 백엔드에 위임할 수 있을 때만 추가됩니다.
 
 ## 안전 모델
@@ -441,6 +441,38 @@ Wooi 는 프리뷰 탭이 화면에 있을 때만 그 화면을 그립니다. �
 에러를 없앴는지 보려면 페이지를 다시 여는 것이 그 확인입니다. 목록은 50건 · 약 8 KiB 로 제한되며,
 잘렸는지도 결과에 표시합니다.
 
+## 아티팩트
+
+### `create_artifact`
+
+에이전트가 만든 것 — 페이지·차트·다이어그램·문서 — 을 Wooi 의 Artifacts 패널에서 **실행해**
+보여줍니다. 소스를 읽는 대신 돌아가는 것을 봅니다. 인자는 `artifact_id`, `kind`, `title`, 그리고
+본문 전체인 `content` 입니다. 종류는 `html`(자체 완결 페이지), `react`(컴포넌트를 default
+export 하는 JSX 모듈), `svg`, `mermaid`(다이어그램 원문), `markdown` 다섯입니다.
+
+`artifact_id` 는 에이전트가 정하며 그 자체가 아티팩트의 정체입니다 — 같은 id 로 다시 부르면
+아티팩트가 하나 더 생기는 것이 아니라 다음 버전이 올라갑니다. 패널은 최근 20개 버전을
+보관합니다. id 는 소문자 kebab-case 입니다.
+
+아티팩트는 전용 Electron 세션에서 전용 `wooi-artifact://` 스킴으로 뜨고 **망에 전혀 닿지
+못합니다** — CDN `<script src>` 도, 원격 스타일시트도, `fetch()` 도 로드되지 않습니다. 망을
+참조하는 아티팩트는 빈 화면으로 렌더되게 두는 대신 도구가 **쓰기를 거절**하므로, 에이전트가
+같은 턴에 배웁니다. 인라인 `<script>` · `<style>` 은 동작합니다. 아티팩트 밖으로의 이동,
+새 창, 다운로드는 전부 거절됩니다.
+
+`html` · `svg` · `react` 아티팩트에서는 Tailwind 유틸리티 클래스가 동작합니다. 스타일시트는
+에이전트가 **실제로 쓴 클래스**로 메인 프로세스에서 컴파일되므로 `p-[13px]` 같은 임의 값까지
+전부 나옵니다 — 세이프리스트에서 빠져 조용히 깨지는 일이 없습니다. `html` · `svg` 에는 CSS
+리셋을 얹지 않으므로 에이전트가 쓴 `<style>` 이 그대로 이깁니다.
+
+`react` 아티팩트는 메인 프로세스에서 sucrase 로 컴파일되며 `react` · `react-dom/client` ·
+`lucide-react` · `recharts` 만 import 할 수 있습니다(Wooi 가 벤더 번들로 함께 배포합니다).
+그 밖의 import 는 깨진 화면이 아니라 **도구 에러**가 되고, JSX 문법 오류도 마찬가지입니다 —
+에이전트가 같은 턴에 배웁니다.
+
+아티팩트는 워크스페이스에 속하며 `/clear` 로 지워지지 않습니다 — 대화가 아니라 산출물이기
+때문입니다. 워크스페이스를 삭제하면 함께 지워지고, 아카이브하면 남습니다.
+
 ### `switch_workspace_agent`
 
 워크트리는 그대로 둔 채 현재 워크스페이스를 설치된 다른 에이전트 백엔드에 넘깁니다. 현재 턴이
@@ -531,6 +563,7 @@ Claude 는 Wooi 서브에이전트 도구 여러 개를 동시에 시작할 수 
 | `/wooi:run <이름>` | `run_script` | 즉시 |
 | `/wooi:stop <이름>` | `stop_script` | 즉시 |
 | `/wooi:logs <이름> [줄 수]` | `read_script_output` | 즉시 |
+| `/wooi:artifact <무엇을 만들지>` | `create_artifact` | 에이전트 |
 | `/wooi:preview [경로]` | `open_preview` | 즉시 |
 | `/wooi:screenshot` | `capture_preview` | 에이전트 |
 | `/wooi:preview-errors` | `read_preview_issues` | 즉시 |

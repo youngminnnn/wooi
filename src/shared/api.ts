@@ -1,5 +1,9 @@
 import type { RemoteStatus } from './remote'
 import type {
+  ArtifactKind,
+  ArtifactOpenEvent,
+  ArtifactSummary,
+  ArtifactsChangedEvent,
   AdoptFanoutResult,
   AgentBackendId,
   AgentBackendMeta,
@@ -331,6 +335,23 @@ export interface WooiApi {
    * Preview 탭(워크트리의 dev 서버를 앱 안에서 보는 화면). 범용 브라우저가 아니라
    * "이 워크스페이스가 띄운 로컬 서버를 보는 창" 이라 API 도 그만큼만 있다.
    */
+  artifact: {
+    /** 이 워크스페이스의 아티팩트 목록(메타만 — 본문은 스킴으로 간다). */
+    list(workspaceId: string): Promise<ArtifactSummary[]>
+    /**
+     * 한 버전의 **원본**(모델이 쓴 것)을 읽는다. 복사·내보내기용이다.
+     * 렌더는 이 경로를 타지 않는다 — 게스트가 `wooi-artifact://` 로 직접 받는다.
+     */
+    read(
+      workspaceId: string,
+      artifactId: string,
+      version: number
+    ): Promise<{ kind: ArtifactKind; text: string } | null>
+    /** 아티팩트 하나를 지운다(모든 버전). */
+    remove(workspaceId: string, artifactId: string): Promise<void>
+    onOpen(cb: (e: ArtifactOpenEvent) => void): () => void
+    onChanged(cb: (e: ArtifactsChangedEvent) => void): () => void
+  }
   preview: {
     /** 마지막으로 본 주소를 워크스페이스에 영속한다(다음에 열면 여기서 시작한다). */
     setUrl(workspaceId: string, url: string): Promise<void>

