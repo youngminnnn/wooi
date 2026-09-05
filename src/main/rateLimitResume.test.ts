@@ -860,67 +860,67 @@ describe('연결 실패 이어가기', () => {
   })
 })
 
+interface Spec {
+  id: string
+  retryAt: number
+}
+
+function seedPending(
+  store: { update: (mutate: (state: AppState) => void) => void },
+  specs: Spec[]
+): void {
+  store.update((draft) => {
+    draft.workspaces = specs.map(
+      ({ id, retryAt }) =>
+        ({
+          id,
+          repoId: 'repo-1',
+          agentBackend: 'claude',
+          name: id,
+          displayName: null,
+          branch: `feat/${id}`,
+          baseBranch: 'main',
+          worktreePath: `/tmp/${id}`,
+          status: 'idle',
+          sessionId: `sess-${id}`,
+          archived: false,
+          rateLimited: null,
+          pendingRateLimitResume: {
+            backend: 'claude',
+            sessionId: `sess-${id}`,
+            detectedAt: retryAt - 60_000,
+            cause: 'rateLimit',
+            retryAt,
+            attempt: 0
+          }
+        }) as unknown as Workspace
+    )
+    draft.settings.autoResumeAfterRateLimit = true
+    draft.rateLimitsByAgent = {
+      claude: { fetchedAt: 1, available: true, subscriptionType: 'pro', windows: [] }
+    }
+  })
+}
+
+function coordinatorWith(continued: string[], notices: string[]): RateLimitResumeCoordinator {
+  return new RateLimitResumeCoordinator({
+    backend: 'claude',
+    refreshLimits: async () => {},
+    sendContinuation: (workspaceId) => continued.push(workspaceId),
+    emitItem: (workspaceId, item) => notices.push(`${workspaceId}:${item.type}`),
+    broadcastState: () => {}
+  })
+}
+
+const pendingOf = (state: AppState, id: string): unknown =>
+  state.workspaces.find((ws) => ws.id === id)?.pendingRateLimitResume
+
 /**
  * 복귀 정책의 계약: **앱이 꺼져 있던 동안 밀린 예약을 켜자마자 몰아서 보내지 않는다.**
  * 데스크톱 앱이라 예약 시각에 프로세스가 없을 수 있고, 그때 그냥 다시 걸면 워크스페이스 수만큼의
  * 턴이 동시에 시작된다 — 깨움 하나가 곧 사용자 토큰 하나이므로 이것이 막아야 할 최악이다.
  */
 describe('놓친 예약의 유예(grace) 정책', () => {
-  interface Spec {
-    id: string
-    retryAt: number
-  }
-
-  function seedPending(
-    store: { update: (mutate: (state: AppState) => void) => void },
-    specs: Spec[]
-  ): void {
-    store.update((draft) => {
-      draft.workspaces = specs.map(
-        ({ id, retryAt }) =>
-          ({
-            id,
-            repoId: 'repo-1',
-            agentBackend: 'claude',
-            name: id,
-            displayName: null,
-            branch: `feat/${id}`,
-            baseBranch: 'main',
-            worktreePath: `/tmp/${id}`,
-            status: 'idle',
-            sessionId: `sess-${id}`,
-            archived: false,
-            rateLimited: null,
-            pendingRateLimitResume: {
-              backend: 'claude',
-              sessionId: `sess-${id}`,
-              detectedAt: retryAt - 60_000,
-              cause: 'rateLimit',
-              retryAt,
-              attempt: 0
-            }
-          }) as unknown as Workspace
-      )
-      draft.settings.autoResumeAfterRateLimit = true
-      draft.rateLimitsByAgent = {
-        claude: { fetchedAt: 1, available: true, subscriptionType: 'pro', windows: [] }
-      }
-    })
-  }
-
-  function coordinatorWith(continued: string[], notices: string[]): RateLimitResumeCoordinator {
-    return new RateLimitResumeCoordinator({
-      backend: 'claude',
-      refreshLimits: async () => {},
-      sendContinuation: (workspaceId) => continued.push(workspaceId),
-      emitItem: (workspaceId, item) => notices.push(`${workspaceId}:${item.type}`),
-      broadcastState: () => {}
-    })
-  }
-
-  const pendingOf = (state: AppState, id: string): unknown =>
-    state.workspaces.find((ws) => ws.id === id)?.pendingRateLimitResume
-
   beforeEach(() => {
     vi.useFakeTimers()
     vi.setSystemTime(NOW)
@@ -1005,5 +1005,74 @@ describe('놓친 예약의 유예(grace) 정책', () => {
 
     expect(continued).toEqual(['ws-claude'])
     expect(pendingOf(getStore().getState(), 'ws-codex')).toBeNull()
+  })
+})
+
+/**
+ * 앱이 **켜져 있는 동안** 제한이 풀릴 때의 계약: 같은 시각에 걸린 예약이 여럿이어도 한꺼번에
+ * 나가지 않는다.
+ *
+ * 사용량 제한은 계정 단위라 예약 시각도 계정 단위로 같아진다 — `retryTime` 이 보는 것은 공유
+ * 스냅샷뿐이라 워크스페이스마다 다를 이유가 없다. 그대로 두면 풀리는 순간 전부 동시에 나가서
+ * 각자 캐시를 새로 쓰고, 갓 열린 창을 함께 태워 곧바로 다시 걸린다.
+ *
+ * 위의 '놓친 예약의 유예' 와는 다른 상황이다. 저쪽은 앱이 꺼져 있던 동안 밀린 것을 **버리는**
+ * 정책이고, 이쪽은 살아 있는 예약을 **줄 세우는** 정책이라 하나도 잃지 않는다.
+ */
+describe('제한 해제 시의 동시 이어가기', () => {
+  const IDS = ['ws-a', 'ws-b', 'ws-c']
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(NOW)
+    resetResumeBudget()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('같은 시각에 걸린 예약이 여럿이어도 한 번에 하나씩만 이어간다', async () => {
+    const { getStore } = await import('./store')
+    const retryAt = NOW + 60_000
+    seedPending(
+      getStore(),
+      IDS.map((id) => ({ id, retryAt }))
+    )
+    const continued: string[] = []
+    const notices: string[] = []
+    coordinatorWith(continued, notices).restore()
+
+    // 예약 시각에 도달 — 셋 다 깨어나지만 나가는 것은 하나다.
+    await vi.advanceTimersByTimeAsync(61_000)
+    expect(continued).toHaveLength(1)
+
+    // 나머지는 버려지지 않았다. 간격만큼 지나면 차례로 나간다.
+    await vi.advanceTimersByTimeAsync(20_000)
+    expect(continued).toHaveLength(2)
+
+    await vi.advanceTimersByTimeAsync(20_000)
+    expect(continued).toHaveLength(3)
+    // 하나도 잃지 않고, 같은 것을 두 번 보내지도 않는다.
+    expect(new Set(continued)).toEqual(new Set(IDS))
+  })
+
+  it('차례를 기다리는 동안 예약을 지우지 않는다', async () => {
+    const { getStore } = await import('./store')
+    const retryAt = NOW + 60_000
+    seedPending(
+      getStore(),
+      IDS.map((id) => ({ id, retryAt }))
+    )
+    const continued: string[] = []
+    coordinatorWith(continued, []).restore()
+
+    await vi.advanceTimersByTimeAsync(61_000)
+    // 먼저 나간 하나만 예약이 지워지고, 기다리는 둘은 그대로 살아 있어야 한다 — 여기서 지우면
+    // 되돌아올 근거가 사라져 그 둘은 영영 이어지지 않는다.
+    const state = getStore().getState()
+    const alive = IDS.filter((id) => pendingOf(state, id) != null)
+    expect(alive).toHaveLength(2)
+    expect(alive).not.toContain(continued[0])
   })
 })
