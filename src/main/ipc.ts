@@ -1417,16 +1417,35 @@ export function registerIpc(ctx: IpcContext): void {
 
   // /clear — 세션을 정리하고 대화 맥락(sessionId)·트랜스크립트를 비운다(워크스페이스는 유지).
   // 다음 메시지는 빈 맥락의 새 세션으로 시작한다. 렌더러는 호출 후 자기 트랜스크립트를 비운다.
-  handle(IPC.chatClear, (_e, workspaceId: string) => {
+  //
+  // `keepTranscript` 는 그중 **트랜스크립트 삭제만** 건너뛴다([[shared/api]] chat.clear). 맥락을
+  // 끊는 것은 `sessionId = null` 하나로 끝나고([[claude/session]] 이 그 값으로만 resume 을 건다),
+  // 기록 삭제는 거기에 필요하지 않다 — 둘을 묶어 둔 것은 `/clear` 의 의미였지 구현의 제약이 아니다.
+  handle(IPC.chatClear, (_e, workspaceId: string, opts?: { keepTranscript?: boolean }) => {
+    const keepTranscript = opts?.keepTranscript === true
     stackedWaits.cancel(workspaceId)
     ctx.sessions.clearSession(workspaceId)
-    getTranscripts().remove(workspaceId)
+    if (keepTranscript) {
+      // 기록을 남기면 화면과 맥락이 어긋난다 — 위에 대화가 보이는데 에이전트는 그걸 못 본다.
+      // 그 경계를 사용자가 눈으로 알아채야 하는 상황을 만들지 않는다.
+      const item: ChatItem = {
+        id: `system:fresh-session:${Date.now()}`,
+        type: 'system',
+        text: 'Context cleared. The conversation above stays here for you, but the next message starts a fresh session that cannot see it.',
+        ts: Date.now()
+      }
+      getTranscripts().upsert(workspaceId, item)
+      dispatch(IPC.evtChat, { workspaceId, event: { type: 'item', item } })
+    } else {
+      getTranscripts().remove(workspaceId)
+    }
     // 맥락이 빈 채로 다시 시작한다 — 게이지도 장부도 같이 비운다(렌더러도 resetTranscript 로
-    // 그렇게 한다).
+    // 그렇게 한다). 기록을 남겼더라도 마찬가지다: 비워진 것은 맥락이고, 이 값들이 재는 것도
+    // 맥락이다.
     forgetContextUsage(workspaceId)
     forgetWorkspaceUsage(workspaceId)
     forgetRunningAgents(workspaceId)
-    // 넘기기로 예약해 둔 대화가 방금 사라졌다 — 예약도 함께 지운다.
+    // 넘겨받기로 예약해 둔 맥락이 방금 사라졌다 — 예약도 함께 지운다.
     store.update((st) => {
       const w = st.workspaces.find((x) => x.id === workspaceId)
       if (w) w.pendingHandoffFrom = null

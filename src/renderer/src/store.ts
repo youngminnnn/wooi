@@ -736,6 +736,15 @@ interface UIState {
   discardDiffHunk: (workspaceId: string, path: string, patch: string) => Promise<boolean>
   /** /clear — 해당 workspace 의 대화 기록·컨텍스트 사용량을 화면에서 비운다(맥락 초기화). */
   resetTranscript: (workspaceId: string) => void
+  /**
+   * 기록은 남기고 **세션에 매인 값만** 버린다(`chat.clear` 의 `keepTranscript`).
+   *
+   * resetTranscript 와 갈라 두는 이유는 지우는 범위가 다르기 때문이다 — 저쪽은 대화를 통째로
+   * 비우고, 이쪽은 화면에 남은 대화 위에서 게이지만 0 으로 되돌린다. main 이 이 값들을 잊어도
+   * (forgetContextUsage) 렌더러는 모른다: 컨텍스트 사용량은 AppState 에 없어 상태 방송에 실리지
+   * 않고, 렌더러가 자기 복사본을 들고 있다.
+   */
+  resetSessionContext: (workspaceId: string) => void
   /** 위쪽으로 한 페이지 더 읽는다. 이미 읽는 중이거나 더 없으면 아무 일도 하지 않는다. */
   loadEarlierTranscript: (workspaceId: string) => Promise<void>
   /**
@@ -3190,6 +3199,17 @@ export const useStore = create<UIState>((set, get) => ({
     get().pushToast('error', res.message ?? `Could not discard the change in ${path}.`)
     return false
   },
+
+  resetSessionContext: (workspaceId) =>
+    set((s) => {
+      const contextUsage = { ...s.contextUsage }
+      delete contextUsage[workspaceId]
+      const compacting = { ...s.compacting }
+      delete compacting[workspaceId]
+      // goals 는 남긴다 — 목표는 세션이 아니라 워크스페이스에 걸린 것이고, 지우는 통로도
+      // 따로 있다(IPC.chatClearGoal).
+      return { contextUsage, compacting }
+    }),
 
   resetTranscript: (workspaceId) =>
     set((s) => {
