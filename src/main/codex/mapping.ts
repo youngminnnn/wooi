@@ -42,6 +42,30 @@ export interface Mapped {
 
 const NOTHING: Mapped = { events: [], persist: [] }
 
+const CODEX_AGENT_FALLBACK = 'Codex agent'
+
+/**
+ * Codex 는 사람에게 보일 역할명 대신 내부 agentPath (`/root/review_code`)를 보낸다.
+ * 경로의 마지막 역할만 표시하고, 내부 경로·구분자는 UI로 새지 않게 한다.
+ *
+ * `undefined` 는 activity 갱신에서 경로를 생략한 경우다. 이때는 앞서 받은 표시명을
+ * 유지해야 하므로 fallback 과 구분해 undefined 를 그대로 돌려준다.
+ */
+function codexAgentLabel(agentPath: string | undefined): string | undefined {
+  if (agentPath === undefined) return undefined
+
+  const segments = agentPath
+    .trim()
+    .split('/')
+    .filter((segment) => segment.length > 0)
+  const leaf = segments.at(-1)
+
+  if (!leaf || leaf === '~' || leaf === 'root') return CODEX_AGENT_FALLBACK
+
+  const label = leaf.replace(/[_-]+/g, ' ').trim()
+  return label || CODEX_AGENT_FALLBACK
+}
+
 /**
  * 변환에 필요한 최소 상태.
  *
@@ -546,12 +570,14 @@ function mapItem(
       const stopped = item.kind === 'interrupted'
       const description = item.kind === 'interacted' ? 'Working with the parent agent' : 'Running'
       const previous = state.agents.get(agentId)
+      const agentType =
+        codexAgentLabel(item.agentPath) ?? previous?.agentType ?? CODEX_AGENT_FALLBACK
       if (stopped) state.agents.delete(agentId)
       else {
         state.agents.set(agentId, {
           taskId: agentId,
           toolUseId: agentId,
-          agentType: item.agentPath ?? 'Codex agent',
+          agentType,
           description,
           startedAt: previous?.startedAt ?? ts
         })
@@ -565,7 +591,7 @@ function mapItem(
         type: 'subagent',
         toolId: agentId,
         backend: 'codex',
-        agentType: item.agentPath ?? previous?.agentType ?? 'Codex agent',
+        agentType,
         description: stopped ? (previous?.description ?? description) : description,
         status: stopped ? 'stopped' : 'running',
         ts: previous?.startedAt ?? ts

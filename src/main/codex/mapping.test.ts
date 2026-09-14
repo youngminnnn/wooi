@@ -422,6 +422,63 @@ describe('최신 Codex 활동 아이템', () => {
     expect(stopped.events[0]).toEqual({ type: 'agents', agents: [] })
   })
 
+  it('Codex 내부 agentPath를 읽기 좋은 역할명으로 일관되게 표시한다', () => {
+    const state = createMapperState()
+    const started = map(
+      NOTIFY.itemCompleted,
+      {
+        item: {
+          id: 'a1',
+          type: 'subAgentActivity',
+          kind: 'started',
+          agentThreadId: 'thr-child',
+          agentPath: '/root/review_code'
+        }
+      },
+      state
+    )
+    expect(started.events[0]).toMatchObject({
+      type: 'agents',
+      agents: [{ taskId: 'thr-child', agentType: 'review code' }]
+    })
+
+    const interacted = map(
+      NOTIFY.itemCompleted,
+      {
+        item: {
+          id: 'a2',
+          type: 'subAgentActivity',
+          kind: 'interacted',
+          agentThreadId: 'thr-child'
+        }
+      },
+      state
+    )
+    expect(items(interacted)[0]).toMatchObject({ agentType: 'review code', status: 'running' })
+
+    const ended = map(NOTIFY.turnCompleted, { turn: { status: 'completed' } }, state)
+    expect(items(ended)[0]).toMatchObject({ agentType: 'review code', status: 'completed' })
+  })
+
+  it.each([
+    ['/root/nested-agent', 'nested agent'],
+    ['', 'Codex agent'],
+    ['/root', 'Codex agent'],
+    ['/root/~', 'Codex agent'],
+    ['~', 'Codex agent']
+  ])('Codex agentPath %j는 %j로 표시한다', (agentPath, agentType) => {
+    const result = map(NOTIFY.itemCompleted, {
+      item: {
+        id: 'a1',
+        type: 'subAgentActivity',
+        kind: 'started',
+        agentThreadId: 'thr-child',
+        agentPath
+      }
+    })
+    expect(items(result)[0]).toMatchObject({ agentType })
+  })
+
   it('hookPrompt를 시스템 메시지로 보여 준다', () => {
     const r = map(NOTIFY.itemCompleted, {
       item: { id: 'h1', type: 'hookPrompt', fragments: [{ text: 'run formatter' }] }
