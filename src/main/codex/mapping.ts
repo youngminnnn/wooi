@@ -570,7 +570,8 @@ function mapItem(
       const stopped = item.kind === 'interrupted'
       const description = item.kind === 'interacted' ? 'Working with the parent agent' : 'Running'
       const previous = state.agents.get(agentId)
-      const agentType = codexAgentLabel(item.agentPath) ?? previous?.agentType ?? CODEX_AGENT_FALLBACK
+      const agentType =
+        codexAgentLabel(item.agentPath) ?? previous?.agentType ?? CODEX_AGENT_FALLBACK
       if (stopped) state.agents.delete(agentId)
       else {
         state.agents.set(agentId, {

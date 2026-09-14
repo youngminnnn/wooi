@@ -456,11 +456,7 @@ describe('최신 Codex 활동 아이템', () => {
     )
     expect(items(interacted)[0]).toMatchObject({ agentType: 'review code', status: 'running' })
 
-    const ended = map(
-      NOTIFY.turnCompleted,
-      { turn: { status: 'completed' } },
-      state
-    )
+    const ended = map(NOTIFY.turnCompleted, { turn: { status: 'completed' } }, state)
     expect(items(ended)[0]).toMatchObject({ agentType: 'review code', status: 'completed' })
   })
 
