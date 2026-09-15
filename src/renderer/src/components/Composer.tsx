@@ -37,7 +37,7 @@ import { defaultTranscriptDensity, transcriptDensityOf, useStore } from '../stor
 import SavedPromptPicker from './SavedPromptPicker'
 import { appendPrompt } from '../lib/savedPrompts'
 import { permissionModeFooter, permissionModesFor } from '../lib/permission'
-import { compactModelLabel, modelLabel, modelSupportsFastMode } from '../lib/models'
+import { compactModelLabel, defaultModelLabel, modelLabel, modelSupportsFastMode } from '../lib/models'
 import { effortLabel, effortOptionsFor } from '../lib/effort'
 import { FAST_MODE_HINT, fastModeLabel, fastModeStatus } from '../lib/fastMode'
 import { DENSITY_SHORTCUT } from '@shared/toolDisplay'
@@ -3605,7 +3605,11 @@ function PickerCard({
     }
     if (kind === 'model') {
       const base: PickerOption[] = [
-        { value: '', label: 'Default', hint: modelLabel(models, defaults.model) },
+        {
+          value: '',
+          label: 'Default',
+          hint: defaultModelLabel(models, defaults.model) ?? 'Agent decides'
+        },
         ...models.map((m) => ({ value: m.id, label: m.label }))
       ]
       // 목록에 없는 커스텀 모델을 이미 쓰고 있으면 그 항목도 노출해 선택 상태가 보이도록.

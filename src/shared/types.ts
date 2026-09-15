@@ -136,6 +136,8 @@ export interface EffortOptionInfo {
 export interface ModelOption {
   id: string
   label: string
+  /** 앱 서버가 이 모델을 에이전트의 기본 선택으로 선언했는지. */
+  isDefault?: true
   /**
    * 이 모델이 지원하는 effort 단계. 지정하면 effort 피커가 이 목록으로 좁혀진다
    * (Codex 의 model/list 는 모델별 supportedReasoningEfforts 를 준다). 없으면 백엔드 기본 목록.

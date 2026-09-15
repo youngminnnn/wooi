@@ -18,9 +18,25 @@ export function findModelOption(models: ModelOption[], id: string): ModelOption 
   return models.find((m) => m.id === id || m.id === bare || m.id === `${bare}[1m]`)
 }
 
+/**
+ * 실제 기본 모델의 표시명. 사용자가 설정한 ID가 있으면 그것을 우선하고, 없으면 백엔드
+ * 카탈로그가 선언한 기본 모델을 쓴다. 어느 쪽도 알 수 없으면 기본값을 추측하지 않는다.
+ */
+export function defaultModelLabel(
+  models: ModelOption[],
+  defaultId: string | null | undefined
+): string | null {
+  if (defaultId) return findModelOption(models, defaultId)?.label ?? defaultId
+  const catalogDefault = models.find((model) => model.isDefault)
+  return catalogDefault?.label ?? null
+}
+
 /** 모델 ID 를 친근한 라벨로. 목록에 없으면(카탈로그 조회 실패·구버전 저장값) ID 를 그대로. */
 export function modelLabel(models: ModelOption[], id: string | null): string {
-  if (!id) return 'Default'
+  if (!id) {
+    const actual = defaultModelLabel(models, null)
+    return actual ? `Default (${actual})` : 'Default'
+  }
   return findModelOption(models, id)?.label ?? id
 }
 

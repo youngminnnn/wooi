@@ -34,6 +34,7 @@ import PluginsPage from './PluginsPage'
 import { PageFrame, SettingGroup, SettingRow, Switch } from './SettingsPrimitives'
 import { permissionModesFor } from '../lib/permission'
 import { effortOptionsFor } from '../lib/effort'
+import { defaultModelLabel } from '../lib/models'
 import { useAvailableBackends, useBackend, useModels } from '../lib/backends'
 import { applyTheme } from '../lib/theme'
 import { SETTINGS_PAGES, SETTINGS_PAGE_KEY, type SettingsPage } from '../lib/settingsNavigation'
@@ -553,6 +554,7 @@ function AgentsPage({
   const agent = agentSettingsFor(settings, editing)
   const mode = backend ? normalizePermissionMode(backend, agent.permissionMode) : null
   const selectedModel = models.find((model) => model.id === agent.model)
+  const defaultModel = defaultModelLabel(models, backend?.defaultModel)
   const primaryModel = agent.model ?? backend?.defaultModel ?? null
   const efforts = effortOptionsFor(backend, selectedModel)
   const patchAgent = (patch: Partial<AgentSettings>): void =>
@@ -664,7 +666,11 @@ function AgentsPage({
               })
             }}
           >
-            <option value="">Default — let {backend?.label ?? 'agent'} decide</option>
+            <option value="">
+              {defaultModel
+                ? `Default — ${defaultModel}`
+                : `Default — let ${backend?.label ?? 'agent'} decide`}
+            </option>
             {models.map((model) => (
               <option key={model.id} value={model.id}>
                 {model.label}
