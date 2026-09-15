@@ -1,11 +1,23 @@
 import { describe, it, expect } from 'vitest'
-import { compactModelLabel, modelLabel } from './agentLabels'
+import { compactModelLabel, defaultModelLabel, modelLabel } from './agentLabels'
 import type { ModelOption } from './types'
 
 const MODELS: ModelOption[] = [
   { id: 'claude-opus-5[1m]', label: 'Opus 5 (1M context)' },
-  { id: 'claude-sonnet-4-6', label: 'Sonnet 4.6' }
+  { id: 'claude-sonnet-4-6', label: 'Sonnet 4.6', isDefault: true }
 ]
+
+describe('defaultModelLabel', () => {
+  it('uses the configured default, including an unknown saved ID', () => {
+    expect(defaultModelLabel(MODELS, 'claude-opus-5')).toBe('Opus 5 (1M context)')
+    expect(defaultModelLabel(MODELS, 'custom-model')).toBe('custom-model')
+  })
+
+  it('falls back to the catalog default and leaves unknown defaults unset', () => {
+    expect(defaultModelLabel(MODELS, null)).toBe('Sonnet 4.6')
+    expect(defaultModelLabel([], null)).toBeNull()
+  })
+})
 
 describe('compactModelLabel', () => {
   it('괄호 주석을 가운뎃점 뒤 한 조각으로 접는다', () => {
@@ -24,6 +36,7 @@ describe('compactModelLabel', () => {
 
   it('카탈로그에 없는 값은 ID 를 그대로 쓴다', () => {
     expect(compactModelLabel(MODELS, 'some-custom-model')).toBe('some-custom-model')
-    expect(compactModelLabel(MODELS, null)).toBe('Default')
+    expect(compactModelLabel(MODELS, null)).toBe('Default · Sonnet 4.6')
+    expect(modelLabel([], null)).toBe('Default')
   })
 })

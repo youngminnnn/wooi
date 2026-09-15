@@ -1023,6 +1023,7 @@ async function listModels(): Promise<ModelOption[]> {
       efforts: m.supportedReasoningEfforts
         ?.map((e) => e.reasoningEffort)
         .filter((e): e is string => !!e) as ModelOption['efforts'],
+      ...(m.isDefault ? { isDefault: true as const } : {}),
       ...(m.serviceTiers?.some((tier) => tier.id === 'fast') ? { fastMode: true as const } : {})
     }))
 }

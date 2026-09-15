@@ -11,7 +11,7 @@ import {
   useModels
 } from '../../lib/backends'
 import { effortLabel, effortOptionsFor } from '../../lib/effort'
-import { modelLabel } from '../../lib/models'
+import { defaultModelLabel } from '../../lib/models'
 import { AgentBackendMark } from '../BrandIcons'
 import { matchesPrQuery, parsePrSelector, parsePrUrl } from '../../lib/review'
 
@@ -393,7 +393,9 @@ export default function PrReviewStartModal({
               value={model}
               onChange={(e) => setModel(e.target.value)}
             >
-              <option value="">Default — {modelLabel(models, agentDefaults.model)}</option>
+              <option value="">
+                Default — {defaultModelLabel(models, agentDefaults.model) ?? 'Agent decides'}
+              </option>
               {models.map((m) => (
                 <option key={m.id} value={m.id}>
                   {m.label}
