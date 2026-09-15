@@ -1,11 +1,14 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { screen } from '@testing-library/react'
+import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import ChatView from './ChatView'
 import { app, git, pr, workspace } from '../test/fixtures'
-import { renderWithStore, resetStore, useStore } from '../test/harness'
+import { fakeApi, renderWithStore, resetStore, useStore } from '../test/harness'
 
-beforeEach(() => resetStore())
+beforeEach(() => {
+  resetStore()
+  fakeApi.reset()
+})
 
 function renderChat(options: { merged?: boolean; needsBaseUpdate?: boolean } = {}) {
   const ws = workspace()
@@ -51,6 +54,55 @@ describe('대화 헤더 파생 상태 표시', () => {
     expect(container.querySelector('.workspace-header-identity')).toBeInTheDocument()
     expect(container.querySelector('.workspace-header-actions')).toBeInTheDocument()
     expect(screen.getByText('Renderer tests')).toBeVisible()
+  })
+})
+
+describe('Codex 후속 행동', () => {
+  it('완료된 assistant 응답의 follow-up을 같은 워크스페이스로 보낸다', async () => {
+    const ws = workspace()
+    useStore.setState({
+      app: app([ws]),
+      selectedWorkspaceId: ws.id,
+      gitStatus: { [ws.id]: git() },
+      prStatus: { [ws.id]: pr('open') },
+      loadedTranscripts: { [ws.id]: true },
+      transcripts: {
+        [ws.id]: [
+          {
+            id: 'assistant:followup',
+            type: 'assistant',
+            text: 'Choose what to do next.\n- :codex-followup[Run checks]{prompt="Run npm run typecheck"}',
+            ts: 1
+          }
+        ]
+      }
+    })
+    const user = userEvent.setup()
+    renderWithStore(<ChatView workspace={ws} />)
+
+    expect(screen.queryByText(':codex-followup')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Run checks' }))
+    await waitFor(() => expect(fakeApi.called('chat.send')).toHaveLength(1))
+    expect(fakeApi.called('chat.send')[0].args).toEqual([ws.id, 'Run npm run typecheck'])
+  })
+
+  it('스트리밍 중인 follow-up은 원문으로 남긴다', () => {
+    const ws = workspace()
+    const directive = '- :codex-followup[Wait]{prompt="Send later"}'
+    useStore.setState({
+      app: app([ws]),
+      selectedWorkspaceId: ws.id,
+      gitStatus: { [ws.id]: git() },
+      prStatus: { [ws.id]: pr('open') },
+      loadedTranscripts: { [ws.id]: true },
+      transcripts: {
+        [ws.id]: [{ id: 'assistant:streaming', type: 'assistant', text: directive, ts: 1, streaming: true }]
+      }
+    })
+    renderWithStore(<ChatView workspace={ws} />)
+
+    expect(document.body).toHaveTextContent(':codex-followup')
+    expect(screen.queryByRole('button', { name: 'Wait' })).not.toBeInTheDocument()
   })
 })
 

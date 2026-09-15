@@ -23,7 +23,7 @@ import {
 } from 'lucide-react'
 import { transcriptDensityOf, useStore } from '../store'
 import { DiffLine } from './DiffView'
-import { AgentMessage, ErrorRow, UserMessage } from './ChatPrimitives'
+import { AgentMessage, ErrorRow, extractCodexFollowups, UserMessage } from './ChatPrimitives'
 import { ToolCard } from './tools/ToolCard'
 import { ToolGroupCard } from './tools/ToolGroupCard'
 import { formatTime } from '../lib/format'
@@ -704,6 +704,7 @@ export default function MessageList({
                 running={running}
                 resolved={resolved}
                 workspaceId={workspaceId}
+                followupsEnabled={!subagentToolId}
                 cardByItemId={cardByItemId}
                 groupByItemId={groupByItemId}
                 latestCardItemId={latestCardItemId}
@@ -741,6 +742,7 @@ function Item({
   running,
   resolved,
   workspaceId,
+  followupsEnabled,
   cardByItemId,
   groupByItemId,
   latestCardItemId,
@@ -753,6 +755,7 @@ function Item({
   running: boolean
   resolved: Set<string>
   workspaceId: string
+  followupsEnabled: boolean
   /** 이 자리에 할 일 체크리스트를 붙일 항목이면 그 시점의 목록 스냅샷. */
   cardByItemId: Map<string, TaskEntry[]>
   /** 이 자리에 연속 조회 도구의 접힌 행을 붙인다. */
@@ -807,11 +810,29 @@ function Item({
         </UserMessage>
       )
     case 'assistant':
+      // Codex 후속 행동은 완료된 본 대화 응답에서만 UI로 승격한다. 스트리밍·서브에이전트
+      // 응답은 원문을 유지해 토큰이 이어지는 동안 Markdown이 흔들리지 않게 한다.
+      const parsedFollowups =
+        followupsEnabled && !item.streaming ? extractCodexFollowups(item.text) : undefined
       return (
         <AgentMessage
-          text={item.text || (item.streaming ? '…' : '')}
+          text={
+            parsedFollowups
+              ? parsedFollowups.body
+              : item.text
+                ? item.text
+                : item.streaming
+                  ? '…'
+                  : ''
+          }
           title={time}
           copyable={!!item.text && !item.streaming}
+          followups={parsedFollowups?.followups}
+          onFollowup={
+            parsedFollowups?.followups.length
+              ? async (prompt) => await window.api.chat.send(workspaceId, prompt)
+              : undefined
+          }
         />
       )
     case 'thinking':
@@ -894,6 +915,7 @@ const MemoizedItem = memo(Item, (prev, next) => {
   if (
     prev.item !== next.item ||
     prev.workspaceId !== next.workspaceId ||
+    prev.followupsEnabled !== next.followupsEnabled ||
     prev.density !== next.density ||
     prev.toolLogStyle !== next.toolLogStyle
   ) {
