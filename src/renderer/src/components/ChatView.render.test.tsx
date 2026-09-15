@@ -96,7 +96,9 @@ describe('Codex 후속 행동', () => {
       prStatus: { [ws.id]: pr('open') },
       loadedTranscripts: { [ws.id]: true },
       transcripts: {
-        [ws.id]: [{ id: 'assistant:streaming', type: 'assistant', text: directive, ts: 1, streaming: true }]
+        [ws.id]: [
+          { id: 'assistant:streaming', type: 'assistant', text: directive, ts: 1, streaming: true }
+        ]
       }
     })
     renderWithStore(<ChatView workspace={ws} />)

@@ -6,11 +6,13 @@ import { renderWithStore } from '../test/harness'
 
 describe('Codex follow-up parsing', () => {
   it('removes complete list items and preserves their order and escaped prompts', () => {
-    const result = extractCodexFollowups([
-      'I can continue with either option.',
-      '- :codex-followup[Run tests]{prompt="Run the focused tests"}',
-      '- :codex-followup[Explain \\ details]{prompt="Explain \\"this\\" and \\\\that"}'
-    ].join('\n'))
+    const result = extractCodexFollowups(
+      [
+        'I can continue with either option.',
+        '- :codex-followup[Run tests]{prompt="Run the focused tests"}',
+        '- :codex-followup[Explain \\ details]{prompt="Explain \\"this\\" and \\\\that"}'
+      ].join('\n')
+    )
 
     expect(result.body).toContain('I can continue with either option.')
     expect(result.body).not.toContain(':codex-followup')

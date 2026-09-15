@@ -41,7 +41,9 @@ export default async function Codex_후속_제안은_모델_턴_없이_같은_�
         await followups.waitFor()
         const runChecks = followups.getByRole('button', { name: 'Run checks' })
         if ((await runChecks.count()) !== 1) {
-          throw new Error(`expected exactly one Run checks follow-up, found ${await runChecks.count()}`)
+          throw new Error(
+            `expected exactly one Run checks follow-up, found ${await runChecks.count()}`
+          )
         }
         if ((await win.getByText(':codex-followup', { exact: false }).count()) !== 0) {
           throw new Error('raw :codex-followup markup was rendered in the message body')
