@@ -51,7 +51,9 @@ export default async function Codex_기본_모델이_모델_선택기에_표시�
           catalog.backends.some((backend) => !backend.available) ||
           JSON.stringify(catalog.models) !== JSON.stringify(CODEX_MODELS)
         ) {
-          throw new Error(`deterministic Codex catalog was not installed: ${JSON.stringify(catalog)}`)
+          throw new Error(
+            `deterministic Codex catalog was not installed: ${JSON.stringify(catalog)}`
+          )
         }
         // store의 카탈로그 갱신은 renderer window focus listener가 소유한다. OS가 이미 이 창을
         // foreground로 보는 CI에서도 같은 경로를 결정적으로 태우도록 DOM focus를 보낸다.
