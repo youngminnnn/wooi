@@ -420,6 +420,14 @@ export class ClaudeSession {
   /** 실패한 턴을 새 프로세스에서 다시 돌리기 위해 의도적으로 query 를 끊었는지. */
   private restartRequested = false
   /**
+   * terminal failed result 뒤 resume 재시도에만 in-flight 입력 UUID 를 새로 발급한다.
+   *
+   * CLI 는 resume transcript 의 UUID 를 idempotency key 로 보므로, 이미 제출했던 입력을 같은 UUID 로
+   * 다시 보내면 중복으로 건너뛴다. 프로세스가 조용히 죽은 경우에는 제출 여부를 알 수 없으므로 이
+   * 플래그를 세우지 않는다.
+   */
+  private remintInFlightUuidsOnRestart = false
+  /**
    * 지금 살아 있는 CLI 세션의 ID(system:init 으로 확정).
    *
    * 프로세스를 갈아 끼울 때 이걸 resume 대상으로 삼아야 맥락이 끊기지 않는다 — deps.resumeSessionId
@@ -1249,7 +1257,30 @@ export class ClaudeSession {
    */
   private recycleInput(): void {
     const old = this.input
-    const pending = [...this.inFlight, ...old.drain()]
+    const remintInFlightUuids = this.remintInFlightUuidsOnRestart
+    // one-shot: 다음 재시도 경로(generic process death/fresh fallback)에는 적용하지 않는다.
+    this.remintInFlightUuidsOnRestart = false
+    const inFlight = remintInFlightUuids
+      ? (() => {
+          // fold 된 입력끼리도 checkpoint.forkAt 으로 이어질 수 있으므로, 전부 새 UUID 를 정한 뒤
+          // checkpoint를 한 번에 옮긴다. 한 건씩 바꾸면 뒤 checkpoint 가 옛 앞 UUID 를 가리킨다.
+          const uuidMap = new Map<string, string>()
+          const reminted = this.inFlight.map((msg) => {
+            const uuid = randomUUID()
+            if (msg.uuid) uuidMap.set(msg.uuid, uuid)
+            return { ...msg, uuid }
+          })
+          for (const checkpoint of this.checkpoints) {
+            const userMessageId = uuidMap.get(checkpoint.userMessageId)
+            if (userMessageId) checkpoint.userMessageId = userMessageId
+            const forkAt = checkpoint.forkAt && uuidMap.get(checkpoint.forkAt)
+            if (forkAt) checkpoint.forkAt = forkAt
+          }
+          return reminted
+        })()
+      : this.inFlight
+    // old.drain() 항목은 아직 CLI 가 꺼내지 않은 입력이다. 제출되지 않은 UUID 는 그대로 유지한다.
+    const pending = [...inFlight, ...old.drain()]
     this.inFlight = []
     old.close()
     this.input = new AsyncQueue<SDKUserMessage>()
@@ -1324,6 +1355,7 @@ export class ClaudeSession {
   private requestRestart(subtype: string): void {
     this.autoRetried = true
     this.restartRequested = true
+    this.remintInFlightUuidsOnRestart = true
     // 지금까지의 대화를 새 프로세스가 그대로 이어받게 한다 — 이 프로세스에서 처음 만들어진
     // 세션이라도 resume 대상으로 승격해, 재시작이 맥락을 잃지 않게 한다.
     if (this.currentSessionId) this.deps.resumeSessionId = this.currentSessionId
@@ -1373,6 +1405,13 @@ export class ClaudeSession {
   private handleQueryDeath(err: unknown, stalled: boolean): boolean {
     // 버퍼링해 둔 사용자 메시지가 있으면 큐로 옮긴다 — 재시도하는 query 나 다음 send 가 이어받도록.
     if (this.preflightPending) this.flushBuffered()
+
+    // restart 요청 뒤 사용자가 취소할 수 있다. 그 경우 재시작과 UUID 재발급 요청을 함께 버린다.
+    if (this.restartRequested && (this.interrupted || this.input.isClosed)) {
+      this.restartRequested = false
+      this.remintInFlightUuidsOnRestart = false
+      return false
+    }
 
     // 우리가 실패한 턴을 다시 돌리려고 끊은 경우 — 다른 판단 없이 새 프로세스로 이어간다.
     if (this.restartRequested) {
