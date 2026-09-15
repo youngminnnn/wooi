@@ -1,7 +1,9 @@
 import { useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import remarkMath from 'remark-math'
 import rehypeHighlight from 'rehype-highlight'
+import rehypeKatex from 'rehype-katex'
 import { AlertTriangle, Check, ChevronRight, Copy, Loader2, Wrench } from 'lucide-react'
 
 /**
@@ -145,15 +147,80 @@ export function AgentMessage({
   )
 }
 
+/**
+ * Codex가 저장한 수식의 `\\(...\\)` / `\\[...\\]` 표기를 remark-math 표기로 맞춘다.
+ *
+ * Markdown의 코드 영역은 그대로 둔다. 특히 사용자가 프롬프트에 수식 문법을 예시로 쓴
+ * 경우까지 렌더링하면 복사할 원문을 잃기 때문이다.
+ */
+function normalizeLatexDelimiters(text: string): string {
+  const replaceLatex = (source: string): string =>
+    source
+      .replace(/\\{1,2}\[([\s\S]*?)\\{1,2}\]/g, (_, math: string) => `$$${math}$$`)
+      .replace(/\\{1,2}\(([\s\S]*?)\\{1,2}\)/g, (_, math: string) => `$${math}$`)
+
+  const normalizeText = (source: string): string => {
+    let result = ''
+    let cursor = 0
+
+    while (cursor < source.length) {
+      const opening = source.indexOf('`', cursor)
+      if (opening === -1) {
+        result += replaceLatex(source.slice(cursor))
+        break
+      }
+
+      result += replaceLatex(source.slice(cursor, opening))
+
+      const marker = source.slice(opening).match(/^`+/)?.[0]
+      if (!marker) break
+      const closing = source.indexOf(marker, opening + marker.length)
+      if (closing === -1) {
+        result += source.slice(opening)
+        break
+      }
+      result += source.slice(opening, closing + marker.length)
+      cursor = closing + marker.length
+    }
+
+    return result
+  }
+
+  let result = ''
+  let prose = ''
+  let fence: '`' | '~' | undefined
+
+  for (const line of text.split(/(?<=\n)/)) {
+    const fenceMatch = line.match(/^ {0,3}(`{3,}|~{3,})/)
+    if (fenceMatch) {
+      const marker = fenceMatch[1][0] as '`' | '~'
+      const openingFence = !fence
+      if (!fence) {
+        result += normalizeText(prose)
+        prose = ''
+        fence = marker
+      }
+      result += line
+      if (!openingFence && fence === marker) fence = undefined
+      continue
+    }
+
+    if (fence) result += line
+    else prose += line
+  }
+
+  return result + normalizeText(prose)
+}
+
 /** 마크다운 본문만. 링크는 기본 브라우저로, 코드 블록에는 복사 버튼이 붙는다. */
 export function MarkdownBody({ text }: { text: string }): React.JSX.Element {
   return (
     <ReactMarkdown
-      remarkPlugins={[remarkGfm]}
-      rehypePlugins={[rehypeHighlight]}
+      remarkPlugins={[remarkGfm, remarkMath]}
+      rehypePlugins={[rehypeHighlight, rehypeKatex]}
       components={{ a: ExternalLinkRenderer, pre: PreWithCopy }}
     >
-      {text}
+      {normalizeLatexDelimiters(text)}
     </ReactMarkdown>
   )
 }
