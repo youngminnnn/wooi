@@ -37,7 +37,12 @@ import { defaultTranscriptDensity, transcriptDensityOf, useStore } from '../stor
 import SavedPromptPicker from './SavedPromptPicker'
 import { appendPrompt } from '../lib/savedPrompts'
 import { permissionModeFooter, permissionModesFor } from '../lib/permission'
-import { compactModelLabel, defaultModelLabel, modelLabel, modelSupportsFastMode } from '../lib/models'
+import {
+  compactModelLabel,
+  defaultModelLabel,
+  modelLabel,
+  modelSupportsFastMode
+} from '../lib/models'
 import { effortLabel, effortOptionsFor } from '../lib/effort'
 import { FAST_MODE_HINT, fastModeLabel, fastModeStatus } from '../lib/fastMode'
 import { DENSITY_SHORTCUT } from '@shared/toolDisplay'
