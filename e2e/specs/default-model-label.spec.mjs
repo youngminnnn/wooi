@@ -1,4 +1,4 @@
-/* global console, process, window */
+/* global console, Event, process, window */
 
 import { openSeededWorkspace, seedAppState, waitForInspection } from '../fixtures.mjs'
 import { launchWooi, withScratchRepo } from '../harness.mjs'
