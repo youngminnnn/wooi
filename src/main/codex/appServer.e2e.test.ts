@@ -155,6 +155,37 @@ describe.skipIf(!CODEX)('codex app-server (실물)', () => {
       // 파라미터가 거부되면 여기서 RpcError 로 터진다. 턴 자체의 성패는 보지 않는다.
       expect(turn?.turn?.id).toBeTruthy()
     }, 60_000)
+
+    it('turn/start 가 Plan 모드의 완전한 collaboration settings 를 받아들인다', async () => {
+      const rpc = await start().rpc()
+      const thread = await rpc.request<{
+        thread?: { id?: string }
+        model?: string
+        reasoningEffort?: string | null
+      }>(RPC.threadStart, {
+        cwd: process.cwd(),
+        sandbox: 'read-only'
+      })
+      expect(thread?.model, 'thread/start did not resolve a model').toBeTruthy()
+
+      const policy = turnPolicyFor('plan', process.cwd())
+      const turn = await rpc.request<{ turn?: { id?: string } }>(RPC.turnStart, {
+        threadId: thread?.thread?.id,
+        input: [{ type: 'text', text: 'ping' }],
+        sandboxPolicy: policy.sandboxPolicy,
+        approvalPolicy: policy.approvalPolicy,
+        approvalsReviewer: policy.approvalsReviewer,
+        collaborationMode: {
+          mode: 'plan',
+          settings: {
+            model: thread!.model!,
+            reasoningEffort: thread?.reasoningEffort ?? null,
+            developerInstructions: null
+          }
+        }
+      })
+      expect(turn?.turn?.id).toBeTruthy()
+    }, 60_000)
   })
 
   /**

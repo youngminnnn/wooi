@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { CodexThread, threadStatusType } from './thread'
 import { NOTIFY, RPC } from './wire'
-import type { ChatEvent, ChatItem } from '@shared/types'
+import type { ChatEvent, ChatItem, PermissionMode } from '@shared/types'
 import type { RpcClient } from './jsonrpc'
 
 /**
@@ -15,7 +15,11 @@ import type { RpcClient } from './jsonrpc'
  */
 
 function makeThread(
-  options: { onRateLimit?: () => void; autoResumeAfterRateLimit?: boolean } = {}
+  options: {
+    onRateLimit?: () => void
+    autoResumeAfterRateLimit?: boolean
+    permissionMode?: PermissionMode
+  } = {}
 ) {
   const events: ChatEvent[] = []
   const persisted: ChatItem[] = []
@@ -26,7 +30,7 @@ function makeThread(
       model: null,
       effort: null,
       fastMode: false,
-      permissionMode: 'default',
+      permissionMode: options.permissionMode ?? 'default',
       delegateBackends: [],
       delegateInstructions: null,
       resumeThreadId: null,
@@ -137,6 +141,40 @@ describe('thread id 소유권', () => {
 
     expect(adopted).toEqual(['thr-started'])
     expect(rpc.request).not.toHaveBeenCalledWith(RPC.threadFork, expect.anything())
+  })
+})
+
+describe('Plan 모드', () => {
+  it('thread/start 가 확정한 모델 설정을 collaborationMode 에 완전하게 싣는다', async () => {
+    const rpc = {
+      request: vi.fn(async (method: string) => {
+        if (method === RPC.threadStart) {
+          return { thread: { id: 'thr-plan' }, model: 'gpt-5.4', reasoningEffort: 'high' }
+        }
+        if (method === RPC.turnStart) return { turn: { id: 'turn-plan' } }
+        return {}
+      }),
+      supports: vi.fn(() => false),
+      tryRequest: vi.fn(async () => undefined)
+    } as unknown as RpcClient
+    const { thread } = makeThread({ permissionMode: 'plan' })
+    ;(thread as unknown as { deps: { rpc: () => Promise<RpcClient> } }).deps.rpc = async () => rpc
+
+    await thread.send('make a plan')
+
+    expect(rpc.request).toHaveBeenCalledWith(
+      RPC.turnStart,
+      expect.objectContaining({
+        collaborationMode: {
+          mode: 'plan',
+          settings: {
+            model: 'gpt-5.4',
+            reasoningEffort: 'high',
+            developerInstructions: null
+          }
+        }
+      })
+    )
   })
 })
 

@@ -387,6 +387,10 @@ export interface InitializeResult {
 }
 
 export interface ThreadResult {
+  /** 서버가 이 스레드에 실제로 확정한 모델. */
+  model?: string
+  /** 서버가 이 스레드에 실제로 확정한 추론 수준. */
+  reasoningEffort?: string | null
   thread?: {
     id?: ThreadId
     /** 버전에 따라 문자열 또는 `{ type, activeFlags }` 판별 객체로 온다. */

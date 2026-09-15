@@ -80,6 +80,9 @@ export class CodexThread {
   private lastUsage: { usedTokens: number; maxTokens: number; percentage: number } | null = null
   /** 승인 대기 중인 패치의 변경 목록(itemId 기준). 승인 요청이 diff 를 싣지 않아 필요하다. */
   private pendingPatches = new Map<string, FileUpdateChange[]>()
+  /** thread/start·resume 응답이 확정한 모델 설정. Plan 모드가 이를 필수로 요구한다. */
+  private resolvedModel: string | null = null
+  private resolvedReasoningEffort: string | null = null
   private disposed = false
 
   constructor(
@@ -184,10 +187,10 @@ export class CodexThread {
         sandboxPolicy: policy.sandboxPolicy,
         approvalPolicy: policy.approvalPolicy,
         approvalsReviewer: policy.approvalsReviewer,
-        // collaborationMode 는 실험 API 라 initialize 에서 opt-in 해야 전달된다. 서버가 무시하면
-        // Plan 모드는 읽기 전용 샌드박스만으로 동작한다(계획 지침 없이도 실행은 막힌다).
+        // collaborationMode 는 실험 API 라 initialize 에서 opt-in 해야 전달된다. Plan 모드는
+        // 서버가 thread/start·resume 에서 확정한 모델 설정도 함께 요구한다.
         ...(policy.collaborationMode
-          ? { collaborationMode: { mode: policy.collaborationMode } }
+          ? { collaborationMode: this.collaborationMode(policy.collaborationMode) }
           : {})
       })
       this.activeTurnId = turn?.turn?.id ?? null
@@ -365,6 +368,7 @@ export class CodexThread {
           threadId: resume,
           ...params
         })
+        this.rememberResolvedSettings(result)
         const id = result?.thread?.id ?? resume
         this.adoptThread(id)
         await this.refreshGoal(rpc, id)
@@ -383,6 +387,7 @@ export class CodexThread {
     }
 
     const result = await rpc.request<ThreadResult>(RPC.threadStart, params)
+    this.rememberResolvedSettings(result)
     const id = result?.thread?.id
     if (!id) throw new Error('Codex did not return a thread id')
     this.adoptThread(id)
@@ -394,6 +399,29 @@ export class CodexThread {
     this.threadId = id
     this.config = { ...this.config, resumeThreadId: id }
     this.deps.onThreadId(id)
+  }
+
+  private rememberResolvedSettings(result: ThreadResult): void {
+    this.resolvedModel = result.model ?? null
+    this.resolvedReasoningEffort = result.reasoningEffort ?? null
+  }
+
+  private collaborationMode(mode: 'plan'): {
+    mode: 'plan'
+    settings: { model: string; reasoningEffort: string | null; developerInstructions: null }
+  } {
+    if (!this.resolvedModel) {
+      throw new Error('Codex did not return a resolved model required for Plan mode')
+    }
+    // null은 Codex가 제공하는 Plan 내장 지침을 유지한다. 스레드 지침을 재사용하면 이를 덮는다.
+    return {
+      mode,
+      settings: {
+        model: this.resolvedModel,
+        reasoningEffort: this.resolvedReasoningEffort,
+        developerInstructions: null
+      }
+    }
   }
 
   private async refreshGoal(rpc: RpcClient, threadId: string): Promise<void> {
