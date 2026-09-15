@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
@@ -33,19 +33,106 @@ export function UserMessage({
   )
 }
 
+export type CodexFollowup = { label: string; prompt: string }
+
+/**
+ * Codex가 Markdown 목록으로 내보내는 후속 행동을 본문과 분리한다.
+ *
+ * 목록 한 줄 전체여야만 인식한다. 그래서 인라인 코드, 일반 문장, 깨진 구문은 손대지 않고,
+ * fenced/들여쓴 코드 블록도 Markdown의 코드 규칙대로 건너뛴다.
+ */
+export function extractCodexFollowups(text: string): {
+  body: string
+  followups: CodexFollowup[]
+} {
+  const followups: CodexFollowup[] = []
+  const parts = text.split(/(\r?\n)/)
+  let fence: '`' | '~' | undefined
+
+  const body = parts
+    .map((part) => {
+      if (/^\r?\n$/.test(part)) return part
+
+      const fenceMatch = part.match(/^ {0,3}(`{3,}|~{3,})/)
+      if (fenceMatch) {
+        const marker = fenceMatch[1][0] as '`' | '~'
+        if (!fence) fence = marker
+        else if (fence === marker) fence = undefined
+        return part
+      }
+      if (fence) return part
+
+      const match = part.match(
+        /^ {0,3}[-+*]\s+:codex-followup\[([^\]\r\n]+)\]\{prompt=("(?:[^"\\]|\\.)*")\}\s*$/
+      )
+      if (!match) return part
+
+      try {
+        const prompt = JSON.parse(match[2])
+        if (typeof prompt !== 'string') return part
+        followups.push({ label: match[1], prompt })
+        return ''
+      } catch {
+        return part
+      }
+    })
+    .join('')
+
+  return { body, followups }
+}
+
 /** 에이전트가 한 말. 마크다운 + 마우스를 올리면 복사 버튼. */
 export function AgentMessage({
   text,
   title,
-  copyable = true
+  copyable = true,
+  followups = [],
+  onFollowup
 }: {
   text: string
   title?: string
   copyable?: boolean
+  /** 일반 워크스페이스 대화에서만 MessageList가 채워 준다. */
+  followups?: readonly CodexFollowup[]
+  onFollowup?: (prompt: string) => Promise<void>
 }): React.JSX.Element {
+  const [sendingPrompt, setSendingPrompt] = useState<string>()
+  const sendingRef = useRef(false)
+
+  const sendFollowup = async (prompt: string) => {
+    if (!onFollowup || sendingRef.current) return
+    sendingRef.current = true
+    setSendingPrompt(prompt)
+    try {
+      await onFollowup(prompt)
+    } finally {
+      sendingRef.current = false
+      setSendingPrompt(undefined)
+    }
+  }
+
   return (
     <div className="group/msg relative md text-base text-neutral-200" title={title}>
       <MarkdownBody text={text} />
+      {followups.length > 0 && onFollowup && (
+        <div className="mt-3 flex flex-wrap gap-2" aria-label="Suggested follow-ups">
+          {followups.map((followup, index) => {
+            const sending = sendingPrompt === followup.prompt
+            return (
+              <button
+                key={`${followup.label}:${followup.prompt}:${index}`}
+                type="button"
+                disabled={sendingPrompt !== undefined}
+                onClick={() => void sendFollowup(followup.prompt)}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2.5 py-1.5 text-sm text-neutral-300 transition hover:border-[var(--border-strong)] hover:bg-[var(--surface-2)] disabled:cursor-wait disabled:opacity-60"
+              >
+                {sending && <Loader2 size={13} className="animate-spin" />}
+                {sending ? 'Sending…' : followup.label}
+              </button>
+            )
+          })}
+        </div>
+      )}
       {/* focus-visible 이 아니라 focus-within 을 쓴다 — opacity-0 을 쥔 이 div 자체는
           포커스를 받지 않고, 안의 CopyButton 이 받는다. focus-visible 은 자기 자신이
           포커스일 때만 반응하므로 자식이 포커스여도 절대 켜지지 않는다. */}
