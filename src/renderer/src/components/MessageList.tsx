@@ -809,7 +809,7 @@ function Item({
           )}
         </UserMessage>
       )
-    case 'assistant':
+    case 'assistant': {
       // Codex 후속 행동은 완료된 본 대화 응답에서만 UI로 승격한다. 스트리밍·서브에이전트
       // 응답은 원문을 유지해 토큰이 이어지는 동안 Markdown이 흔들리지 않게 한다.
       const parsedFollowups =
@@ -835,6 +835,7 @@ function Item({
           }
         />
       )
+    }
     case 'thinking':
       // 이미 기록된 대화에는 본문 없는 사고 과정 항목이 잔뜩 남아 있다(요약을 안 받던 시절의
       // 것들이다). 펼쳐도 아무것도 없는 카드라 자리만 차지하므로 그리지 않는다.
