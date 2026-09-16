@@ -1071,7 +1071,7 @@ describe('guardian 경고', () => {
 })
 
 describe('guardian 승인 auto-review', () => {
-  it('시작과 완료가 같은 modest 카드로 upsert 된다', () => {
+  it('시작과 승인 완료는 transcript에 남기지 않는다', () => {
     const started = map(NOTIFY.guardianApprovalReviewStarted, {
       threadId: 'thr_1',
       reviewId: 'review_1',
@@ -1080,11 +1080,7 @@ describe('guardian 승인 auto-review', () => {
       action: { type: 'command', command: 'npm test', cwd: '/repo', source: 'shell' },
       review: { status: 'inProgress' }
     })
-    expect(items(started)[0]).toMatchObject({
-      id: 'codex:guardian-review:review_1',
-      type: 'system',
-      text: expect.stringContaining('auto-reviewing')
-    })
+    expect(started.events).toEqual([])
     expect(started.persist).toEqual([])
 
     const completed = map(NOTIFY.guardianApprovalReviewCompleted, {
@@ -1097,37 +1093,50 @@ describe('guardian 승인 auto-review', () => {
       action: { type: 'command', command: 'npm test', cwd: '/repo', source: 'shell' },
       decisionSource: 'guardian'
     })
-    const item = items(completed)[0] as Extract<ChatItem, { type: 'system' }>
-    expect(item.id).toBe('codex:guardian-review:review_1')
-    expect(item.text).toContain('approved')
-    expect(item.text).toContain('Risk: low')
-    expect(item.text).toContain('Read-only command.')
-    expect(completed.persist).toHaveLength(1)
+    expect(completed.events).toEqual([])
+    expect(completed.persist).toEqual([])
   })
 
-  it('불안정한 상세 필드가 없거나 예상 밖 모양이어도 lifecycle 은 매핑한다', () => {
-    expect(() =>
-      map(NOTIFY.guardianApprovalReviewStarted, {
-        reviewId: 'review_sparse',
-        targetItemId: null,
-        startedAtMs: 100
-      })
-    ).not.toThrow()
-
+  it.each([
+    ['denied', 'Codex auto-review denied this action.'],
+    ['timedOut', 'Codex auto-review timed out.'],
+    ['aborted', 'Codex auto-review was aborted.']
+  ])('%s 완료는 상세 없이 짧은 notice만 남긴다', (status, text) => {
     const completed = map(NOTIFY.guardianApprovalReviewCompleted, {
-      reviewId: 'review_sparse',
-      targetItemId: null,
-      startedAtMs: 100,
+      reviewId: `review_${status}`,
       completedAtMs: 200,
-      review: ['changed upstream'],
-      action: 'changed upstream',
-      decisionSource: { type: 'changed upstream' }
+      review: {
+        status,
+        riskLevel: 'critical',
+        rationale: 'Details must not enter the transcript.'
+      },
+      action: { type: 'command', command: 'rm -rf /', cwd: '/', source: 'shell' },
+      decisionSource: 'guardian'
     })
-    expect(items(completed)[0]).toMatchObject({
-      id: 'codex:guardian-review:review_sparse',
-      type: 'system',
-      text: 'Codex auto-review completed.'
-    })
+    expect(items(completed)).toEqual([
+      expect.objectContaining({
+        id: `codex:guardian-review:review_${status}`,
+        type: 'system',
+        text
+      })
+    ])
+    expect(completed.persist).toHaveLength(1)
+    expect((items(completed)[0] as Extract<ChatItem, { type: 'system' }>).text).not.toContain(
+      'Details must not enter the transcript.'
+    )
+  })
+
+  it('진행 중이거나 불안정한 완료 payload는 notice를 만들지 않는다', () => {
+    for (const params of [
+      { reviewId: 'review_progress', review: { status: 'inProgress' } },
+      { reviewId: 'review_unknown', review: { status: 'rejected' } },
+      { reviewId: 'review_sparse', review: ['changed upstream'] },
+      { review: { status: 'denied' } }
+    ]) {
+      const completed = map(NOTIFY.guardianApprovalReviewCompleted, params)
+      expect(completed.events).toEqual([])
+      expect(completed.persist).toEqual([])
+    }
   })
 })
 
