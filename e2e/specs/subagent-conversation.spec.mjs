@@ -24,6 +24,7 @@ const PARENT_TEXT = 'Delegating the search to two agents.'
 const NAMED_TEXT = 'Found the config loader in src/main/paths.ts'
 const UNNAMED_TEXT = 'The branch rule lives in scripts/branch-name-rule.mjs'
 const CHILD_BASH = 'rg --files-with-matches loadConfig'
+const CODEX_ACTIVITY = 'Codex activity-only run'
 
 export default async function 서브에이전트의_대화를_사이드바에서_골라_들어간다() {
   const now = Date.now()
@@ -78,6 +79,16 @@ export default async function 서브에이전트의_대화를_사이드바에서
       toolUses: 7,
       totalTokens: 31_200,
       ts: now - 18
+    },
+    {
+      id: 'codex:subagent:activity-1',
+      type: 'subagent',
+      toolId: 'activity-1',
+      backend: 'codex',
+      agentType: 'Explore',
+      description: CODEX_ACTIVITY,
+      status: 'completed',
+      ts: now - 17.5
     },
 
     // 두 서브에이전트의 대화. 부모 대화에는 한 줄도 나오면 안 된다.
@@ -211,6 +222,28 @@ export default async function 서브에이전트의_대화를_사이드바에서
         }
         console.log(`[e2e] screenshot=${await wooi.shot('subagent-unnamed')}`)
 
+        // Codex app-server 는 서브에이전트의 상태·활동만 보내고 내부 transcript 는 보내지 않는다.
+        // 빈 자식 대화를 일반 워크스페이스 onboarding 으로 오인하면 안 된다.
+        await wooi.win
+          .getByRole('button', { name: new RegExp(CODEX_ACTIVITY) })
+          .first()
+          .click()
+        const codexActivity = await wooi.win.locator('body').innerText()
+        if (!codexActivity.includes('internal transcript is not available from Codex')) {
+          throw new Error(
+            `Codex activity-only runs should explain the unavailable transcript:\n${codexActivity.slice(0, 2000)}`
+          )
+        }
+        if (!codexActivity.includes('status and activity are shown above')) {
+          throw new Error(
+            `Codex activity-only runs should point to the visible status:\n${codexActivity.slice(0, 2000)}`
+          )
+        }
+        if (codexActivity.includes('Start an agent session')) {
+          throw new Error('Codex activity-only runs must not show the workspace onboarding')
+        }
+        console.log(`[e2e] screenshot=${await wooi.shot('subagent-codex-activity')}`)
+
         // ── 부모로 돌아간다 ─────────────────────────────────────────────
         await wooi.win.getByRole('button', { name: /^Back to/ }).click()
         const back = await wooi.win.locator('body').innerText()
@@ -221,8 +254,8 @@ export default async function 서브에이전트의_대화를_사이드바에서
         }
 
         // ── ⌃A 로 차례로 돌고 부모로 돌아온다 ───────────────────────────
-        // 시드의 두 실행은 둘 다 도는 중이고 config loader 쪽이 먼저 시작했다 — 사이드바 순서
-        // 그대로 돌아야 한다(순환과 목록이 같은 함수를 본다).
+        // 시드의 두 실행은 도는 중이고 Codex activity 는 완료됐다. config loader 쪽부터
+        // 사이드바 순서 그대로 돌아야 한다(순환과 목록이 같은 함수를 본다).
         await wooi.win.keyboard.press('Control+a')
         if (!(await wooi.win.locator('body').innerText()).includes(NAMED_TEXT)) {
           throw new Error('⌃A from the parent should enter the first subagent')
@@ -230,6 +263,11 @@ export default async function 서브에이전트의_대화를_사이드바에서
         await wooi.win.keyboard.press('Control+a')
         if (!(await wooi.win.locator('body').innerText()).includes(UNNAMED_TEXT)) {
           throw new Error('⌃A should step to the next subagent')
+        }
+        await wooi.win.keyboard.press('Control+a')
+        const codexCycle = await wooi.win.locator('body').innerText()
+        if (!codexCycle.includes('internal transcript is not available from Codex')) {
+          throw new Error('⌃A should step to the Codex activity-only subagent')
         }
         await wooi.win.keyboard.press('Control+a')
         const wrapped = await wooi.win.locator('body').innerText()
