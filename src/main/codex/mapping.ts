@@ -302,7 +302,10 @@ export function mapNotification(
  * upstream 이 임시라고 명시한 payload 이므로, 사용자가 알아야 할 알려진 실패 상태만 고정 문구로
  * 남긴다. action/risk/rationale/decisionSource 같은 진단 값은 transcript에 싣지 않는다.
  */
-function mapGuardianApprovalReviewCompleted(params: GuardianApprovalReviewParams, ts: number): Mapped {
+function mapGuardianApprovalReviewCompleted(
+  params: GuardianApprovalReviewParams,
+  ts: number
+): Mapped {
   if (!params || typeof params.reviewId !== 'string') {
     return NOTHING
   }
