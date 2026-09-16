@@ -85,6 +85,26 @@ describe('서브에이전트 대화 화면', () => {
     expect(screen.getByRole('textbox')).toBeInTheDocument()
   })
 
+  it('Codex 서브에이전트에 내부 기록이 없으면 상태 안내만 보인다', () => {
+    // Codex wire 는 subagent activity row 만 보내며 그 자식 transcript 는 보내지 않는다.
+    seed([row({ backend: 'codex', status: 'completed' })])
+    renderWithStore(<SubagentChatView workspace={ws()} toolId="t1" />)
+
+    expect(screen.getByText(/internal transcript is not available from Codex/i)).toBeInTheDocument()
+    expect(screen.getByText(/status and activity are shown above/i)).toBeInTheDocument()
+    expect(screen.queryByText('Start an agent session')).not.toBeInTheDocument()
+  })
+
+  it('Claude 서브에이전트에 내부 기록이 없으면 기존 onboarding을 보인다', () => {
+    seed([row({ backend: 'claude' })])
+    renderWithStore(<SubagentChatView workspace={ws()} toolId="t1" />)
+
+    expect(screen.getByText('Start an agent session')).toBeInTheDocument()
+    expect(
+      screen.queryByText(/internal transcript is not available from Codex/i)
+    ).not.toBeInTheDocument()
+  })
+
   it('보내면 그 task id 를 주소로 릴레이를 부른다', () => {
     // 주소는 이름이 아니라 SDK 의 task id 다 — 화면에 보이는 이름(Explore)과 부모가
     // SendMessage 에 실을 값이 다르다는 것이 이 단언의 요점이다.

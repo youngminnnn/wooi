@@ -110,7 +110,12 @@ export default function SubagentChatView({
         때만 높이가 잡힌다 — 평범한 div 로 한 겹 두르면 그 제약이 먹지 않아 목록이 내용만큼
         자라고 화면 밖으로 흘러넘친다. ChatView 도 같은 이유로 직접 놓는다.
       */}
-      <MessageList workspaceId={workspace.id} running={running} subagentToolId={toolId} />
+      <MessageList
+        workspaceId={workspace.id}
+        running={running}
+        subagentToolId={toolId}
+        subagentTranscriptUnavailable={row.backend === 'codex'}
+      />
 
       {address.canSend ? (
         <>

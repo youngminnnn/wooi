@@ -280,7 +280,8 @@ function PeerMessage({
 export default function MessageList({
   workspaceId,
   running,
-  subagentToolId
+  subagentToolId,
+  subagentTranscriptUnavailable = false
 }: {
   workspaceId: string
   running: boolean
@@ -292,6 +293,8 @@ export default function MessageList({
    * 페이지네이션도 이미 맞다.
    */
   subagentToolId?: string
+  /** Codex 는 subagent activity 만 보내며, 내부 transcript 는 제공하지 않는다. */
+  subagentTranscriptUnavailable?: boolean
 }): React.JSX.Element {
   const allItems = useStore((s) => s.transcripts[workspaceId]) ?? EMPTY
   // 서브에이전트가 낸 것은 그 서브에이전트의 대화에 속한다([[shared/subagents]]). 본 대화에 두면
@@ -561,6 +564,24 @@ export default function MessageList({
   }, [paneFocused])
 
   if (items.length === 0) {
+    // Codex 는 서브에이전트 실행의 상태·활동만 내보내고 그 내부 transcript 는 wire 에 싣지
+    // 않는다. 이 화면은 이미 SubagentChatView 의 헤더가 그 상태를 보여 주므로, 새 세션을
+    // 시작하라는 일반 onboarding 을 여기서 보이면 안 된다.
+    if (subagentTranscriptUnavailable) {
+      return (
+        <div ref={containerRef} className="flex-1 overflow-y-auto grid place-items-center px-8">
+          <div className="max-w-sm text-center">
+            <p className="text-base text-neutral-300">
+              This subagent’s internal transcript is not available from Codex.
+            </p>
+            <p className="mt-1 text-sm text-neutral-500 leading-relaxed">
+              Its status and activity are shown above.
+            </p>
+          </div>
+        </div>
+      )
+    }
+
     // 에이전트는 나중에도 바꿀 수 있지만([[canSwitchAgentBackend]]) 공짜로 바꿀 수 있는 건 지금
     // 뿐이다 — 넘길 대화가 없어 인수인계 턴이 돌지 않는다. 그 사실을 알려 주기 좋은 화면이 여기다.
     // 고를 대상이 둘 이상일 때만 알린다.
