@@ -90,9 +90,7 @@ describe('서브에이전트 대화 화면', () => {
     seed([row({ backend: 'codex', status: 'completed' })])
     renderWithStore(<SubagentChatView workspace={ws()} toolId="t1" />)
 
-    expect(
-      screen.getByText(/internal transcript is not available from Codex/i)
-    ).toBeInTheDocument()
+    expect(screen.getByText(/internal transcript is not available from Codex/i)).toBeInTheDocument()
     expect(screen.getByText(/status and activity are shown above/i)).toBeInTheDocument()
     expect(screen.queryByText('Start an agent session')).not.toBeInTheDocument()
   })
@@ -102,7 +100,9 @@ describe('서브에이전트 대화 화면', () => {
     renderWithStore(<SubagentChatView workspace={ws()} toolId="t1" />)
 
     expect(screen.getByText('Start an agent session')).toBeInTheDocument()
-    expect(screen.queryByText(/internal transcript is not available from Codex/i)).not.toBeInTheDocument()
+    expect(
+      screen.queryByText(/internal transcript is not available from Codex/i)
+    ).not.toBeInTheDocument()
   })
 
   it('보내면 그 task id 를 주소로 릴레이를 부른다', () => {
