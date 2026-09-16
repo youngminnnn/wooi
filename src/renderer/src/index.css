@@ -1,4 +1,12 @@
 @import 'tailwindcss';
+@import 'katex/dist/katex.min.css';
+
+/* 긴 전개식도 채팅 말풍선의 폭을 넓히지 않고 가로로 스크롤한다. */
+.katex-display {
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
 
 /*
   타이포그래피 스케일 — 이제 5단계다(2xs/xs/sm/base/lg = 10/11/12/13/15px). 처음엔

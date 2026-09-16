@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { AgentMessage, extractCodexFollowups } from './ChatPrimitives'
+import { AgentMessage, extractCodexFollowups, MarkdownBody } from './ChatPrimitives'
 import { renderWithStore } from '../test/harness'
 
 describe('Codex follow-up parsing', () => {
@@ -67,5 +67,42 @@ describe('Codex follow-up buttons', () => {
 
     resolve()
     await waitFor(() => expect(button).toBeEnabled())
+  })
+})
+
+describe('MarkdownBody math', () => {
+  it('renders persisted bracket-delimited display math with KaTeX', () => {
+    renderWithStore(
+      <MarkdownBody
+        text={String.raw`\[
+\begin{aligned}
+  x &= y + 1 \\
+  z &= x - 1
+\end{aligned}
+\]`}
+      />
+    )
+
+    expect(document.querySelector('.katex-display')).toBeInTheDocument()
+  })
+
+  it('renders inline LaTeX but preserves delimiters in inline and fenced code', () => {
+    renderWithStore(
+      <MarkdownBody
+        text={[
+          String.raw`Inline: \(x^2\).`,
+          '',
+          'Code: `\\(x^2\\)`',
+          '',
+          '```tex',
+          '\\[x^2\\]',
+          '```'
+        ].join('\n')}
+      />
+    )
+
+    expect(document.querySelectorAll('.katex')).toHaveLength(1)
+    expect(screen.getByText(String.raw`\(x^2\)`)).toBeInTheDocument()
+    expect(screen.getByText(String.raw`\[x^2\]`)).toBeInTheDocument()
   })
 })
