@@ -59,16 +59,21 @@ export default async function markdown_수식은_렌더링하고_code_안에서�
           }
         })
         if (rendered.prose?.includes('\\[') || rendered.prose?.includes('\\]')) {
-          throw new Error(`display delimiters leaked into rendered prose: ${JSON.stringify(rendered)}`)
+          throw new Error(
+            `display delimiters leaked into rendered prose: ${JSON.stringify(rendered)}`
+          )
         }
         if (rendered.prose?.includes('\\(') || rendered.prose?.includes('\\)')) {
-          throw new Error(`inline delimiters leaked into rendered prose: ${JSON.stringify(rendered)}`)
+          throw new Error(
+            `inline delimiters leaked into rendered prose: ${JSON.stringify(rendered)}`
+          )
         }
         if (rendered.inlineCode !== String.raw`\(not mathematics\)`) {
           throw new Error(`inline code was parsed as math or changed: ${JSON.stringify(rendered)}`)
         }
         if (
-          rendered.fencedCode !== String.raw`\[
+          rendered.fencedCode !==
+          String.raw`\[
 \begin{aligned}
   literal &= source
 \end{aligned}
@@ -94,10 +99,14 @@ export default async function markdown_수식은_렌더링하고_code_안에서�
           throw new Error(`display math escaped its message container: ${JSON.stringify(layout)}`)
         }
         if (layout.scrollWidth <= layout.clientWidth || layout.overflowX !== 'auto') {
-          throw new Error(`long display math cannot scroll within its container: ${JSON.stringify(layout)}`)
+          throw new Error(
+            `long display math cannot scroll within its container: ${JSON.stringify(layout)}`
+          )
         }
 
-        console.log(`[e2e] layout=${JSON.stringify(layout)} screenshot=${await wooi.shot('markdown-math')}`)
+        console.log(
+          `[e2e] layout=${JSON.stringify(layout)} screenshot=${await wooi.shot('markdown-math')}`
+        )
         await waitForInspection(wooi.win)
       } finally {
         await wooi.close()
