@@ -8,7 +8,7 @@ const TRANSCRIPT = [
   {
     id: 'assistant-e2e',
     type: 'assistant',
-    text: 'Done.\n- :codex-followup[Run checks]{prompt="Run npm run typecheck"}',
+    text: 'Done.\n- :codex-followup[Run checks]{prompt="Run npm run typecheck"}\n:codex-file-citation{path="/tmp/probability_homework_images.pdf" purpose="output"}',
     ts: Date.now()
   }
 ]
@@ -47,6 +47,28 @@ export default async function Codex_후속_제안은_모델_턴_없이_같은_�
         }
         if ((await win.getByText(':codex-followup', { exact: false }).count()) !== 0) {
           throw new Error('raw :codex-followup markup was rendered in the message body')
+        }
+
+        const outputFiles = win.locator('[aria-label="Output files"]')
+        if ((await outputFiles.count()) !== 1) {
+          throw new Error(
+            `expected exactly one Output files group, found ${await outputFiles.count()}`
+          )
+        }
+        if ((await win.getByText(':codex-file-citation', { exact: false }).count()) !== 0) {
+          throw new Error('raw :codex-file-citation markup was rendered in the message body')
+        }
+        const outputFile = outputFiles.getByText('probability_homework_images.pdf', { exact: true })
+        if ((await outputFile.count()) !== 1) {
+          throw new Error(
+            `expected exactly one probability_homework_images.pdf output, found ${await outputFile.count()}`
+          )
+        }
+        if (
+          (await outputFile.locator('..').getAttribute('title')) !==
+          '/tmp/probability_homework_images.pdf'
+        ) {
+          throw new Error('output file chip title did not contain the full path')
         }
 
         await runChecks.click()

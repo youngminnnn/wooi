@@ -1,7 +1,12 @@
 import { describe, expect, it, vi } from 'vitest'
 import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { AgentMessage, extractCodexFollowups, MarkdownBody } from './ChatPrimitives'
+import {
+  AgentMessage,
+  extractCodexFollowups,
+  extractCodexMessageExtras,
+  MarkdownBody
+} from './ChatPrimitives'
 import { renderWithStore } from '../test/harness'
 
 describe('Codex follow-up parsing', () => {
@@ -36,7 +41,59 @@ describe('Codex follow-up parsing', () => {
   })
 })
 
+describe('Codex output file citations', () => {
+  it('removes complete output directives, retaining their order and decoding escaped paths', () => {
+    const result = extractCodexMessageExtras(
+      [
+        'Saved the requested files.',
+        ':codex-file-citation{path="/tmp/first.pdf" purpose="output"}',
+        String.raw`:codex-file-citation{path="C:\\work\\second \"copy\".pdf" purpose="output"}`
+      ].join('\n')
+    )
+
+    expect(result.body).toContain('Saved the requested files.')
+    expect(result.body).not.toContain(':codex-file-citation')
+    expect(result.fileCitations).toEqual([
+      { path: '/tmp/first.pdf' },
+      { path: 'C:\\work\\second "copy".pdf' }
+    ])
+  })
+
+  it('leaves code, malformed, and non-output file directives untouched', () => {
+    const source = [
+      '` :codex-file-citation{path="/tmp/inline.pdf" purpose="output"}`',
+      '```text',
+      ':codex-file-citation{path="/tmp/fenced.pdf" purpose="output"}',
+      '```',
+      '    :codex-file-citation{path="/tmp/indented.pdf" purpose="output"}',
+      ':codex-file-citation{path="/tmp/malformed.pdf" purpose=output}',
+      ':codex-file-citation{path="/tmp/input.pdf" purpose="input"}'
+    ].join('\n')
+
+    expect(extractCodexMessageExtras(source)).toMatchObject({ body: source, fileCitations: [] })
+  })
+})
+
 describe('Codex follow-up buttons', () => {
+  it('shows output file chips alongside follow-up buttons', () => {
+    renderWithStore(
+      <AgentMessage
+        text="Done."
+        followups={[{ label: 'Continue', prompt: 'Continue with the implementation' }]}
+        fileCitations={[{ path: '/Users/youngmin/output/probability_homework_images.pdf' }]}
+        onFollowup={async () => undefined}
+      />
+    )
+
+    expect(screen.getByRole('button', { name: 'Continue' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Output files')).toBeInTheDocument()
+    const chip = screen.getByText('probability_homework_images.pdf')
+    expect(chip.parentElement).toHaveAttribute(
+      'title',
+      '/Users/youngmin/output/probability_homework_images.pdf'
+    )
+  })
+
   it('sends the prompt once and blocks duplicate clicks while it is pending', async () => {
     let resolve!: () => void
     const onFollowup = vi.fn(

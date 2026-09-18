@@ -23,7 +23,7 @@ import {
 } from 'lucide-react'
 import { transcriptDensityOf, useStore } from '../store'
 import { DiffLine } from './DiffView'
-import { AgentMessage, ErrorRow, extractCodexFollowups, UserMessage } from './ChatPrimitives'
+import { AgentMessage, ErrorRow, extractCodexMessageExtras, UserMessage } from './ChatPrimitives'
 import { ToolCard } from './tools/ToolCard'
 import { ToolGroupCard } from './tools/ToolGroupCard'
 import { formatTime } from '../lib/format'
@@ -833,24 +833,19 @@ function Item({
     case 'assistant': {
       // Codex 후속 행동은 완료된 본 대화 응답에서만 UI로 승격한다. 스트리밍·서브에이전트
       // 응답은 원문을 유지해 토큰이 이어지는 동안 Markdown이 흔들리지 않게 한다.
-      const parsedFollowups =
-        followupsEnabled && !item.streaming ? extractCodexFollowups(item.text) : undefined
+      const parsedExtras =
+        followupsEnabled && !item.streaming ? extractCodexMessageExtras(item.text) : undefined
       return (
         <AgentMessage
           text={
-            parsedFollowups
-              ? parsedFollowups.body
-              : item.text
-                ? item.text
-                : item.streaming
-                  ? '…'
-                  : ''
+            parsedExtras ? parsedExtras.body : item.text ? item.text : item.streaming ? '…' : ''
           }
           title={time}
           copyable={!!item.text && !item.streaming}
-          followups={parsedFollowups?.followups}
+          followups={parsedExtras?.followups}
+          fileCitations={parsedExtras?.fileCitations}
           onFollowup={
-            parsedFollowups?.followups.length
+            parsedExtras?.followups.length
               ? async (prompt) => await window.api.chat.send(workspaceId, prompt)
               : undefined
           }

@@ -4,7 +4,7 @@ import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import rehypeHighlight from 'rehype-highlight'
 import rehypeKatex from 'rehype-katex'
-import { AlertTriangle, Check, ChevronRight, Copy, Loader2, Wrench } from 'lucide-react'
+import { AlertTriangle, Check, ChevronRight, Copy, FileText, Loader2, Wrench } from 'lucide-react'
 
 /**
  * 대화 한 줄기를 그리는 조각들.
@@ -36,6 +36,13 @@ export function UserMessage({
 }
 
 export type CodexFollowup = { label: string; prompt: string }
+export type CodexFileCitation = { path: string }
+
+export type CodexMessageExtras = {
+  body: string
+  followups: CodexFollowup[]
+  fileCitations: CodexFileCitation[]
+}
 
 /**
  * Codex가 Markdown 목록으로 내보내는 후속 행동을 본문과 분리한다.
@@ -43,11 +50,9 @@ export type CodexFollowup = { label: string; prompt: string }
  * 목록 한 줄 전체여야만 인식한다. 그래서 인라인 코드, 일반 문장, 깨진 구문은 손대지 않고,
  * fenced/들여쓴 코드 블록도 Markdown의 코드 규칙대로 건너뛴다.
  */
-export function extractCodexFollowups(text: string): {
-  body: string
-  followups: CodexFollowup[]
-} {
+export function extractCodexMessageExtras(text: string): CodexMessageExtras {
   const followups: CodexFollowup[] = []
+  const fileCitations: CodexFileCitation[] = []
   const parts = text.split(/(\r?\n)/)
   let fence: '`' | '~' | undefined
 
@@ -67,12 +72,26 @@ export function extractCodexFollowups(text: string): {
       const match = part.match(
         /^ {0,3}[-+*]\s+:codex-followup\[([^\]\r\n]+)\]\{prompt=("(?:[^"\\]|\\.)*")\}\s*$/
       )
-      if (!match) return part
+      if (match) {
+        try {
+          const prompt = JSON.parse(match[2])
+          if (typeof prompt !== 'string') return part
+          followups.push({ label: match[1], prompt })
+          return ''
+        } catch {
+          return part
+        }
+      }
+
+      const citationMatch = part.match(
+        /^ {0,3}:codex-file-citation\{path=("(?:[^"\\]|\\.)*") purpose="output"\}\s*$/
+      )
+      if (!citationMatch) return part
 
       try {
-        const prompt = JSON.parse(match[2])
-        if (typeof prompt !== 'string') return part
-        followups.push({ label: match[1], prompt })
+        const path = JSON.parse(citationMatch[1])
+        if (typeof path !== 'string') return part
+        fileCitations.push({ path })
         return ''
       } catch {
         return part
@@ -80,7 +99,18 @@ export function extractCodexFollowups(text: string): {
     })
     .join('')
 
+  return { body, followups, fileCitations }
+}
+
+/** @deprecated Use extractCodexMessageExtras when file citations are also needed. */
+export function extractCodexFollowups(text: string): { body: string; followups: CodexFollowup[] } {
+  const { body, followups } = extractCodexMessageExtras(text)
   return { body, followups }
+}
+
+function fileBasename(path: string): string {
+  const segments = path.split(/[\\/]/)
+  return segments.at(-1) || path
 }
 
 /** 에이전트가 한 말. 마크다운 + 마우스를 올리면 복사 버튼. */
@@ -89,6 +119,7 @@ export function AgentMessage({
   title,
   copyable = true,
   followups = [],
+  fileCitations = [],
   onFollowup
 }: {
   text: string
@@ -96,6 +127,8 @@ export function AgentMessage({
   copyable?: boolean
   /** 일반 워크스페이스 대화에서만 MessageList가 채워 준다. */
   followups?: readonly CodexFollowup[]
+  /** 완료된 Codex 응답이 남긴 출력 파일. 경로는 title에서만 확인한다. */
+  fileCitations?: readonly CodexFileCitation[]
   onFollowup?: (prompt: string) => Promise<void>
 }): React.JSX.Element {
   const [sendingPrompt, setSendingPrompt] = useState<string>()
@@ -133,6 +166,20 @@ export function AgentMessage({
               </button>
             )
           })}
+        </div>
+      )}
+      {fileCitations.length > 0 && (
+        <div className="mt-3 flex flex-wrap gap-2" aria-label="Output files">
+          {fileCitations.map((citation, index) => (
+            <span
+              key={`${citation.path}:${index}`}
+              title={citation.path}
+              className="inline-flex max-w-full items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2.5 py-1.5 text-sm text-neutral-300"
+            >
+              <FileText size={13} className="shrink-0 text-neutral-400" />
+              <span className="truncate">{fileBasename(citation.path)}</span>
+            </span>
+          ))}
         </div>
       )}
       {/* focus-visible 이 아니라 focus-within 을 쓴다 — opacity-0 을 쥔 이 div 자체는
