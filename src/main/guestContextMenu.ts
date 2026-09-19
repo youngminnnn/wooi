@@ -101,7 +101,7 @@ function buildMenu(
   kind: HostedViewKind
 ): Menu | null {
   const sections: MenuItemConstructorOptions[][] = []
-  const canLeave = kind !== 'artifact'
+  const canLeave = kind !== 'artifact' && kind !== 'visualization'
 
   if (params.isEditable) {
     sections.push(editableItems(contents, params))

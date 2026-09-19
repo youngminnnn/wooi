@@ -1,9 +1,17 @@
 import { app, session } from 'electron'
 import type { Session } from 'electron'
 import { existsSync, readFileSync } from 'node:fs'
-import { join, resolve, sep } from 'node:path'
-import { ARTIFACT_SCHEME, IPC, isArtifactPartition } from '@shared/types'
-import { parseArtifactUrl } from '@shared/artifactUrl'
+import { lstatSync, realpathSync, statSync } from 'node:fs'
+import { isAbsolute, join, resolve, sep } from 'node:path'
+import {
+  ARTIFACT_PARTITION_PREFIX,
+  ARTIFACT_SCHEME,
+  IPC,
+  isArtifactPartition,
+  VISUALIZATION_MAX_BYTES
+} from '@shared/types'
+import { parseArtifactUrl, visualizationUrl } from '@shared/artifactUrl'
+import { randomUUID } from 'node:crypto'
 import { ArtifactError, getArtifacts } from './artifacts'
 import { log } from './logger'
 
@@ -56,10 +64,88 @@ const CSP = [
   "base-uri 'none'"
 ].join('; ')
 
+// A CDN allowlist is still an exfiltration channel: model-authored HTML can put secrets in a
+// permitted origin's path/query. Keep the guest fully offline, like artifacts.
+const VISUALIZATION_CSP = [
+  "default-src 'none'",
+  "script-src 'self' 'unsafe-inline'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob:",
+  "font-src 'self' data:",
+  "media-src 'self' data: blob:",
+  "connect-src 'none'",
+  "frame-src 'none'",
+  "child-src 'none'",
+  "object-src 'none'",
+  "form-action 'none'",
+  "base-uri 'none'"
+].join('; ')
+
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8'
+}
+
+interface VisualizationRecord {
+  workspaceId: string
+  body: string
+}
+
+const visualizations = new Map<string, VisualizationRecord>()
+
+function contained(root: string, candidate: string): boolean {
+  return candidate === root || candidate.startsWith(root + sep)
+}
+
+/** Validate the exact file both when a renderer requests it and when the protocol serves it. */
+export function validateVisualizationFile(worktreePath: string, candidate: string): string {
+  if (!candidate || !isAbsolute(candidate) || !candidate.endsWith('.html')) {
+    throw new Error('Visualization must be an absolute .html file.')
+  }
+  const root = realpathSync(worktreePath)
+  const input = resolve(candidate)
+  // lstat before realpath makes a symlink an explicit rejection, rather than silently following it.
+  const initial = lstatSync(input)
+  if (initial.isSymbolicLink()) throw new Error('Visualization symlinks are not allowed.')
+  const actual = realpathSync(input)
+  if (!contained(root, actual)) throw new Error('Visualization must be inside this workspace.')
+  const file = statSync(actual)
+  if (!file.isFile()) throw new Error('Visualization must be a regular file.')
+  if (file.size > VISUALIZATION_MAX_BYTES) throw new Error('Visualization is larger than 1 MiB.')
+  return actual
+}
+
+/** Creates an opaque URL; neither filesystem paths nor document contents cross the renderer boundary. */
+export function registerVisualization(workspaceId: string, worktreePath: string, path: string): string {
+  const actual = validateVisualizationFile(worktreePath, path)
+  // Snapshot at the trusted IPC boundary. Serving a path later would reopen a TOCTOU window.
+  const body = readFileSync(actual, 'utf-8')
+  if (Buffer.byteLength(body, 'utf-8') > VISUALIZATION_MAX_BYTES) {
+    throw new Error('Visualization is larger than 1 MiB.')
+  }
+  const id = randomUUID()
+  visualizations.set(id, { workspaceId, body })
+  return visualizationUrl(id)
+}
+
+/** IPC uses this before a session-only tab is created; a URL from another workspace is not reusable. */
+export function isVisualizationUrlForWorkspace(workspaceId: string, url: string): boolean {
+  const route = parseArtifactUrl(url)
+  return route?.kind === 'visualization' && visualizations.get(route.id)?.workspaceId === workspaceId
+}
+
+function readVisualization(id: string, partition: string): string | null {
+  const record = visualizations.get(id)
+  if (!record) return null
+  if (partition !== `${ARTIFACT_PARTITION_PREFIX}${record.workspaceId}`) return null
+  return record.body
+}
+
+/** Opaque handles are session-only and are discarded with their workspace's hosted views. */
+export function forgetVisualizationsForWorkspace(workspaceId: string): void {
+  for (const [id, record] of visualizations)
+    if (record.workspaceId === workspaceId) visualizations.delete(id)
 }
 
 function mimeFor(file: string): string {
@@ -81,6 +167,16 @@ function serve(body: string | null, file: string): Response {
   }
   if (body === null) return new Response('Not found', { status: 404, headers })
   return new Response(body, { status: 200, headers: { ...headers, 'Content-Type': mimeFor(file) } })
+}
+
+function serveVisualization(body: string | null): Response {
+  const headers = {
+    'Content-Security-Policy': VISUALIZATION_CSP,
+    'Cache-Control': 'no-store',
+    'X-Content-Type-Options': 'nosniff'
+  }
+  if (body === null) return new Response('Not found', { status: 404, headers })
+  return new Response(body, { status: 200, headers: { ...headers, 'Content-Type': MIME['.html'] } })
 }
 
 /**
@@ -200,6 +296,10 @@ export function ensureArtifactSession(partition: string): Session {
     }
 
     if (route.kind === 'vendor') return serve(readVendor(route.file), route.file)
+    if (route.kind === 'visualization') return serveVisualization(readVisualization(route.id, partition))
+    if (partition !== `${ARTIFACT_PARTITION_PREFIX}${route.workspaceId}`) {
+      return serve(null, route.file)
+    }
 
     try {
       const body = getArtifacts().readFile(

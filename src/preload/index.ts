@@ -128,6 +128,11 @@ const api: WooiApi = {
     onChanged: (cb) => subscribe(IPC.evtArtifactsChanged, cb)
   },
 
+  visualizations: {
+    open: (workspaceId, path, title) =>
+      ipcRenderer.invoke(IPC.visualizationsOpen, workspaceId, path, title)
+  },
+
   preview: {
     setUrl: (workspaceId, url) => ipcRenderer.invoke(IPC.previewSetUrl, workspaceId, url),
     open: (workspaceId, url) => ipcRenderer.invoke(IPC.previewOpen, workspaceId, url),
@@ -268,6 +273,8 @@ const api: WooiApi = {
   tabs: {
     get: (workspaceId) => ipcRenderer.invoke(IPC.tabsGet, workspaceId),
     open: (workspaceId, opts) => ipcRenderer.invoke(IPC.tabsOpen, workspaceId, opts),
+    openVisualization: (workspaceId, url, title) =>
+      ipcRenderer.invoke(IPC.tabsOpenVisualization, workspaceId, url, title),
     close: (workspaceId, tabId) => ipcRenderer.invoke(IPC.tabsClose, workspaceId, tabId),
     select: (workspaceId, tabId) => ipcRenderer.invoke(IPC.tabsSelect, workspaceId, tabId),
     rename: (workspaceId, tabId, title) =>

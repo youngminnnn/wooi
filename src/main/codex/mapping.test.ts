@@ -387,6 +387,22 @@ describe('최신 Codex 활동 아이템', () => {
     expect(items(r)[1]).toMatchObject({ summary: { kind: 'view', path: '/tmp/a.png' } })
   })
 
+  it('imageGeneration savedPath를 도구 결과에 보존한다', () => {
+    const r = map(NOTIFY.itemCompleted, {
+      item: {
+        id: 'g1',
+        type: 'imageGeneration',
+        status: 'completed',
+        savedPath: '/tmp/codex/generated-chart.png'
+      }
+    })
+    expect(items(r)[0]).toMatchObject({ type: 'tool_use', name: 'ImageGeneration' })
+    expect(items(r)[1]).toMatchObject({
+      type: 'tool_result',
+      text: 'Generated image: /tmp/codex/generated-chart.png'
+    })
+  })
+
   it('subAgentActivity를 실행 중 에이전트 스냅샷으로 옮긴다', () => {
     const state = createMapperState()
     const started = map(

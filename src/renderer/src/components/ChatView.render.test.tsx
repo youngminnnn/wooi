@@ -106,6 +106,95 @@ describe('Codex 후속 행동', () => {
     expect(document.body).toHaveTextContent(':codex-followup')
     expect(screen.queryByRole('button', { name: 'Wait' })).not.toBeInTheDocument()
   })
+
+  it('visualize directive도 완료 후에만 카드로 승격한다', () => {
+    const ws = workspace()
+    const directive = 'visualize{"path":"/tmp/stack-frame.html","title":"Stack frame"}'
+    useStore.setState({
+      app: app([ws]),
+      selectedWorkspaceId: ws.id,
+      gitStatus: { [ws.id]: git() },
+      prStatus: { [ws.id]: pr('open') },
+      loadedTranscripts: { [ws.id]: true },
+      transcripts: {
+        [ws.id]: [
+          { id: 'assistant:done', type: 'assistant', text: directive, ts: 1 },
+          { id: 'assistant:streaming', type: 'assistant', text: directive, ts: 2, streaming: true }
+        ]
+      }
+    })
+    renderWithStore(<ChatView workspace={ws} />)
+
+    expect(screen.getByText('Stack frame')).toBeInTheDocument()
+    expect(document.body).toHaveTextContent('visualize')
+  })
+
+  it('visualization 카드는 main이 검증한 opaque URL 탭을 연다', async () => {
+    const ws = workspace()
+    const path = '/Users/youngmin/wooi/workspaces/snu/punchy-octopus/visualizations/stack.html'
+    fakeApi.override('visualizations.open', () => ({
+      tabId: 'visualization-tab',
+      url: 'wooi-artifact://a/x/opaque-id'
+    }))
+    useStore.setState({
+      app: app([ws]),
+      selectedWorkspaceId: ws.id,
+      gitStatus: { [ws.id]: git() },
+      prStatus: { [ws.id]: pr('open') },
+      loadedTranscripts: { [ws.id]: true },
+      transcripts: {
+        [ws.id]: [
+          {
+            id: 'assistant:visualization',
+            type: 'assistant',
+            text: `visualize{"path":"${path}","title":"Stack frame"}`,
+            ts: 1
+          }
+        ]
+      }
+    })
+    const user = userEvent.setup()
+    renderWithStore(<ChatView workspace={ws} />)
+
+    await user.click(screen.getByRole('button', { name: 'Open' }))
+    await waitFor(() => expect(fakeApi.called('visualizations.open')).toHaveLength(1))
+    expect(fakeApi.called('visualizations.open')[0].args).toEqual([ws.id, path, 'Stack frame'])
+    expect(fakeApi.called('tabs.openVisualization')).toHaveLength(0)
+  })
+
+  it('visualization 열기 실패 뒤에는 버튼을 다시 쓸 수 있다', async () => {
+    const ws = workspace()
+    fakeApi.override('visualizations.open', () => Promise.reject(new Error('File is outside this workspace.')))
+    useStore.setState({
+      app: app([ws]),
+      selectedWorkspaceId: ws.id,
+      gitStatus: { [ws.id]: git() },
+      prStatus: { [ws.id]: pr('open') },
+      loadedTranscripts: { [ws.id]: true },
+      transcripts: {
+        [ws.id]: [
+          {
+            id: 'assistant:bad-visualization',
+            type: 'assistant',
+            text: 'visualize{"path":"/tmp/forbidden.html"}',
+            ts: 1
+          }
+        ]
+      }
+    })
+    const user = userEvent.setup()
+    renderWithStore(<ChatView workspace={ws} />)
+
+    const button = screen.getByRole('button', { name: 'Open' })
+    await user.click(button)
+    await waitFor(() => expect(button).toBeEnabled())
+    expect(useStore.getState().toasts).toContainEqual(
+      expect.objectContaining({
+        kind: 'error',
+        message: 'Could not open visualization: File is outside this workspace.'
+      })
+    )
+  })
 })
 
 describe('충돌 해결 턴은 접혀 있다', () => {

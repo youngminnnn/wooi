@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { artifactUrl, parseArtifactUrl, vendorUrl } from './artifactUrl'
+import { artifactUrl, parseArtifactUrl, vendorUrl, visualizationUrl } from './artifactUrl'
 
 const WS = '3f8b1c2e-0a4d-4b1f-9c7e-2d5a6b8c9e10'
 
@@ -28,6 +28,22 @@ describe('artifactUrl', () => {
       kind: 'vendor',
       file: 'react-dom-client.js'
     })
+  })
+
+  it('round-trips an opaque visualization URL without exposing a filesystem path', () => {
+    const id = '123e4567-e89b-12d3-a456-426614174000'
+    expect(parseArtifactUrl(visualizationUrl(id))).toEqual({ kind: 'visualization', id })
+  })
+
+  it('refuses malformed visualization handles', () => {
+    for (const bad of [
+      'wooi-artifact://a/visualization/not-an-id.html',
+      'wooi-artifact://a/visualization/123e4567-e89b-12d3-a456-426614174000.HTML',
+      'wooi-artifact://a/visualization/123e4567-e89b-12d3-a456-426614174000.html/extra',
+      'wooi-artifact://a/visualization/123e4567-e89b-12d3-a456-426614174000.html?path=/tmp/a.html'
+    ]) {
+      expect(parseArtifactUrl(bad)).toBeNull()
+    }
   })
 
   // 경로 탈출은 정규식이 1차 방어선이다. 2차(path.resolve 봉쇄)는 [[main/artifacts]] 쪽 테스트.
