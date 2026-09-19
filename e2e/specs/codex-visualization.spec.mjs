@@ -1,6 +1,7 @@
 /* global console, process */
 
 import { mkdir, writeFile } from 'node:fs/promises'
+import { Buffer } from 'node:buffer'
 import { join } from 'node:path'
 import { openSeededWorkspace, seedAppState, waitForInspection } from '../fixtures.mjs'
 import { launchWooi, withScratchRepo } from '../harness.mjs'
