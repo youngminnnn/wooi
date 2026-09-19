@@ -949,6 +949,17 @@ function mapHook(method: string, params: HookParams, ts: number): Mapped {
     .join('\n')
   const took = typeof run.durationMs === 'number' ? ` in ${Math.round(run.durationMs)}ms` : ''
   const headline = failed ? `Hook ${label} ${status}${took}.` : `Hook ${label} finished${took}.`
+  // sessionStart 의 context 출력은 모델에 주입되는 프로젝트 메모리다. 사용자에게 같은
+  // 인덱스 전문을 다시 보여 주지 않고, 시작이 끝났다는 사실만 짧게 알린다.
+  const isSessionStart = label.toLowerCase() === 'sessionstart'
+  if (!failed && isSessionStart) {
+    const text = `Workspace context loaded${took}.`
+    return {
+      events: [{ type: 'item', item: { id, type: 'system', text, ts } }],
+      persist: []
+    }
+  }
+
   const detail = run.statusMessage?.trim() || output
   const text = detail ? `${headline}\n\n${clampText(detail)}` : headline
 
