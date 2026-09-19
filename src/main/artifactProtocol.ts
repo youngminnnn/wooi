@@ -117,7 +117,11 @@ export function validateVisualizationFile(worktreePath: string, candidate: strin
 }
 
 /** Creates an opaque URL; neither filesystem paths nor document contents cross the renderer boundary. */
-export function registerVisualization(workspaceId: string, worktreePath: string, path: string): string {
+export function registerVisualization(
+  workspaceId: string,
+  worktreePath: string,
+  path: string
+): string {
   const actual = validateVisualizationFile(worktreePath, path)
   // Snapshot at the trusted IPC boundary. Serving a path later would reopen a TOCTOU window.
   const body = readFileSync(actual, 'utf-8')
@@ -132,7 +136,9 @@ export function registerVisualization(workspaceId: string, worktreePath: string,
 /** IPC uses this before a session-only tab is created; a URL from another workspace is not reusable. */
 export function isVisualizationUrlForWorkspace(workspaceId: string, url: string): boolean {
   const route = parseArtifactUrl(url)
-  return route?.kind === 'visualization' && visualizations.get(route.id)?.workspaceId === workspaceId
+  return (
+    route?.kind === 'visualization' && visualizations.get(route.id)?.workspaceId === workspaceId
+  )
 }
 
 function readVisualization(id: string, partition: string): string | null {
@@ -296,7 +302,8 @@ export function ensureArtifactSession(partition: string): Session {
     }
 
     if (route.kind === 'vendor') return serve(readVendor(route.file), route.file)
-    if (route.kind === 'visualization') return serveVisualization(readVisualization(route.id, partition))
+    if (route.kind === 'visualization')
+      return serveVisualization(readVisualization(route.id, partition))
     if (partition !== `${ARTIFACT_PARTITION_PREFIX}${route.workspaceId}`) {
       return serve(null, route.file)
     }

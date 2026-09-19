@@ -173,12 +173,20 @@ describe('WorkspaceTabManager', () => {
 
   it('visualization 탭은 선택되지만 workspace 레코드에는 영속하지 않는다', async () => {
     const { manager } = await makeManager()
-    const opened = manager.openVisualization(WS_ID, 'wooi-artifact://a/visualization/opaque.html', 'Chart')
+    const opened = manager.openVisualization(
+      WS_ID,
+      'wooi-artifact://a/visualization/opaque.html',
+      'Chart'
+    )
     const tab = opened.tabs.find((item) => item.kind === 'visualization')!
     expect(opened.activeId).toBe(tab.id)
 
     const { getStore } = await import('./store')
-    expect(getStore().getState().workspaces[0].tabs?.some((item) => item.kind === 'visualization')).toBe(false)
+    expect(
+      getStore()
+        .getState()
+        .workspaces[0].tabs?.some((item) => item.kind === 'visualization')
+    ).toBe(false)
     expect(manager.tabs(WS_ID).tabs.some((item) => item.id === tab.id)).toBe(true)
 
     manager.disposeWorkspace(WS_ID)
@@ -190,7 +198,9 @@ describe('WorkspaceTabManager', () => {
     const opened = manager.openVisualization(WS_ID, 'wooi-artifact://a/visualization/opaque.html')
     const activeId = opened.activeId
 
-    expect(manager.openTab(WS_ID, { kind: 'file', target: 'README.md', activate: false }).activeId).toBe(activeId)
+    expect(
+      manager.openTab(WS_ID, { kind: 'file', target: 'README.md', activate: false }).activeId
+    ).toBe(activeId)
     expect(manager.selectTab(WS_ID, 'missing-tab').activeId).toBe(activeId)
   })
 

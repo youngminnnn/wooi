@@ -57,7 +57,11 @@ export class WorkspaceTabManager {
       ws.tabs[0]?.id === WORK_TAB_ID &&
       ws.tabs.some((t) => t.id === ws.activeTabId)
     ) {
-      return this.withVisualizations({ workspaceId, tabs: ws.tabs, activeId: ws.activeTabId as string })
+      return this.withVisualizations({
+        workspaceId,
+        tabs: ws.tabs,
+        activeId: ws.activeTabId as string
+      })
     }
     return this.mutateTabs(workspaceId, () => {}, false)
   }
@@ -95,9 +99,20 @@ export class WorkspaceTabManager {
   openVisualization(workspaceId: string, url: string, title?: string): WorkspaceTabsState {
     const base = this.tabs(workspaceId)
     if (!base.tabs.length) return base
-    const existing = (this.visualizationTabs.get(workspaceId) ?? []).find((tab) => tab.target === url)
-    const tab = existing ?? { id: randomUUID(), kind: 'visualization' as const, target: url, ...(title ? { title } : {}) }
-    if (!existing) this.visualizationTabs.set(workspaceId, [...(this.visualizationTabs.get(workspaceId) ?? []), tab])
+    const existing = (this.visualizationTabs.get(workspaceId) ?? []).find(
+      (tab) => tab.target === url
+    )
+    const tab = existing ?? {
+      id: randomUUID(),
+      kind: 'visualization' as const,
+      target: url,
+      ...(title ? { title } : {})
+    }
+    if (!existing)
+      this.visualizationTabs.set(workspaceId, [
+        ...(this.visualizationTabs.get(workspaceId) ?? []),
+        tab
+      ])
     this.activeVisualization.set(workspaceId, tab.id)
     const state = this.withVisualizations(this.persistedState(workspaceId))
     this.dispatch(IPC.evtWorkspaceTabs, state)
@@ -113,8 +128,12 @@ export class WorkspaceTabManager {
     if (tabId === WORK_TAB_ID) return this.tabs(workspaceId)
     const visuals = this.visualizationTabs.get(workspaceId) ?? []
     if (visuals.some((tab) => tab.id === tabId)) {
-      this.visualizationTabs.set(workspaceId, visuals.filter((tab) => tab.id !== tabId))
-      if (this.activeVisualization.get(workspaceId) === tabId) this.activeVisualization.delete(workspaceId)
+      this.visualizationTabs.set(
+        workspaceId,
+        visuals.filter((tab) => tab.id !== tabId)
+      )
+      if (this.activeVisualization.get(workspaceId) === tabId)
+        this.activeVisualization.delete(workspaceId)
       const state = this.withVisualizations(this.persistedState(workspaceId))
       this.dispatch(IPC.evtWorkspaceTabs, state)
       return state
@@ -244,9 +263,15 @@ export class WorkspaceTabManager {
   }
 
   private persistedState(workspaceId: string): WorkspaceTabsState {
-    const ws = getStore().getState().workspaces.find((w) => w.id === workspaceId)
+    const ws = getStore()
+      .getState()
+      .workspaces.find((w) => w.id === workspaceId)
     if (!ws) return { workspaceId, tabs: [], activeId: '' }
-    return { workspaceId, tabs: structuredClone(ws.tabs ?? []), activeId: ws.activeTabId ?? WORK_TAB_ID }
+    return {
+      workspaceId,
+      tabs: structuredClone(ws.tabs ?? []),
+      activeId: ws.activeTabId ?? WORK_TAB_ID
+    }
   }
 
   private withVisualizations(state: WorkspaceTabsState): WorkspaceTabsState {

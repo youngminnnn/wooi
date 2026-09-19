@@ -1,5 +1,14 @@
 import { useState } from 'react'
-import { ChartNoAxesCombined, MessageSquare, Globe, FileCode, Layers, Sparkles, Plus, X } from 'lucide-react'
+import {
+  ChartNoAxesCombined,
+  MessageSquare,
+  Globe,
+  FileCode,
+  Layers,
+  Sparkles,
+  Plus,
+  X
+} from 'lucide-react'
 import MenuPanel, { menuItemCls } from './MenuPanel'
 import type { WorkspaceTab } from '@shared/types'
 

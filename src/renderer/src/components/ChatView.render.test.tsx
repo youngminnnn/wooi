@@ -164,7 +164,9 @@ describe('Codex 후속 행동', () => {
 
   it('visualization 열기 실패 뒤에는 버튼을 다시 쓸 수 있다', async () => {
     const ws = workspace()
-    fakeApi.override('visualizations.open', () => Promise.reject(new Error('File is outside this workspace.')))
+    fakeApi.override('visualizations.open', () =>
+      Promise.reject(new Error('File is outside this workspace.'))
+    )
     useStore.setState({
       app: app([ws]),
       selectedWorkspaceId: ws.id,

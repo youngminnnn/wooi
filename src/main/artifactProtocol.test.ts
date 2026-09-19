@@ -66,10 +66,10 @@ describe('validateVisualizationFile', () => {
 
     expect(() =>
       validateVisualizationFile(worktree, join(worktree, '..', basename(outside), 'outside.html'))
-    ).toThrow(
-      /inside this workspace/
+    ).toThrow(/inside this workspace/)
+    expect(() => validateVisualizationFile(worktree, join(worktree, 'directory.html'))).toThrow(
+      /regular file/
     )
-    expect(() => validateVisualizationFile(worktree, join(worktree, 'directory.html'))).toThrow(/regular file/)
     expect(() => validateVisualizationFile(worktree, text)).toThrow(/\.html/)
     expect(() => validateVisualizationFile(worktree, join(worktree, 'large.html'))).toThrow(/1 MiB/)
     expect(() => validateVisualizationFile(worktree, linked)).toThrow(/symlinks/)
@@ -85,8 +85,7 @@ describe('validateVisualizationFile', () => {
     const url = registerVisualization('ws-1', worktree, file)
     ensureArtifactSession('wooi-artifact-ws-1')
     const handler = protocolHandle.mock.calls.at(-1)?.[1] as
-      | ((request: { url: string }) => Promise<Response>)
-      | undefined
+      ((request: { url: string }) => Promise<Response>) | undefined
     expect(handler).toBeTypeOf('function')
 
     unlinkSync(file)
@@ -100,8 +99,7 @@ describe('validateVisualizationFile', () => {
     const { ensureArtifactSession } = await import('./artifactProtocol')
     ensureArtifactSession('wooi-artifact-ws-1')
     const handler = protocolHandle.mock.calls.at(-1)?.[1] as
-      | ((request: { url: string }) => Promise<Response>)
-      | undefined
+      ((request: { url: string }) => Promise<Response>) | undefined
     const response = await handler!({
       url: 'wooi-artifact://a/w/ws-2/artifact-id/1/index.html'
     })

@@ -3504,7 +3504,8 @@ export function registerIpc(ctx: IpcContext): void {
   )
 
   handle(IPC.tabsOpenVisualization, (_e, workspaceId: string, url: string, title?: string) => {
-    if (!isVisualizationUrlForWorkspace(workspaceId, url)) throw new Error('Invalid visualization URL.')
+    if (!isVisualizationUrlForWorkspace(workspaceId, url))
+      throw new Error('Invalid visualization URL.')
     return ctx.tabs.openVisualization(workspaceId, url, title)
   })
 

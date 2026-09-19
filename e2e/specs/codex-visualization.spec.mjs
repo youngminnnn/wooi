@@ -84,7 +84,8 @@ export default async function Codex_visualize_출력이_격리된_탭에서_열�
           }, PARTITION)
           if (!guestPng) await wooi.win.waitForTimeout(100)
         }
-        if (!guestPng) throw new Error('visualization guest rendered DOM but produced an empty frame')
+        if (!guestPng)
+          throw new Error('visualization guest rendered DOM but produced an empty frame')
         const shotDir = join(process.cwd(), '.wooi-e2e', 'shots', 'codex-visualization')
         await mkdir(shotDir, { recursive: true })
         const guestShot = join(shotDir, 'visualization-guest.png')

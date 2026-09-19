@@ -5369,7 +5369,8 @@ export interface TerminalTabsState {
  *
  * 작업 탭(`work`)은 늘 첫 탭이고 닫을 수 없다([[main/workspaceTabs]]).
  */
-export type WorkspaceTabKind = 'work' | 'dev' | 'web' | 'file' | 'artifact' | 'visualization' | 'stack'
+export type WorkspaceTabKind =
+  'work' | 'dev' | 'web' | 'file' | 'artifact' | 'visualization' | 'stack'
 
 export interface WorkspaceTab {
   id: string

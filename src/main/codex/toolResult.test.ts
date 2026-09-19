@@ -75,7 +75,9 @@ describe('codexToolResult', () => {
       ]
     }
     const text = codexToolResult({ type: 'mcpToolCall', result }).text
-    expect(text).toBe('[Embedded resource: Private report (application/pdf) — file:///private/report.pdf]')
+    expect(text).toBe(
+      '[Embedded resource: Private report (application/pdf) — file:///private/report.pdf]'
+    )
     expect(text).not.toContain('private text')
     expect(text).not.toContain('do-not-copy')
   })
@@ -126,5 +128,4 @@ describe('codexToolResult', () => {
       text: '{\n  "ok": true\n}'
     })
   })
-
 })
