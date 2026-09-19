@@ -1,9 +1,14 @@
 import { BrowserWindow, WebContentsView, shell } from 'electron'
 import type { WebContents } from 'electron'
 import { BROWSER_PARTITION, IPC, PREVIEW_PARTITION, artifactPartition } from '@shared/types'
-import { ARTIFACT_ORIGIN } from '@shared/artifactUrl'
+import { ARTIFACT_ORIGIN, parseArtifactUrl } from '@shared/artifactUrl'
 import { applyContextMenu } from './guestContextMenu'
-import { ensureArtifactSessionFor, forgetArtifactSession } from './artifactProtocol'
+import {
+  ensureArtifactSessionFor,
+  forgetArtifactSession,
+  forgetVisualizationsForWorkspace,
+  isVisualizationUrlForWorkspace
+} from './artifactProtocol'
 import type { HostedViewKind, HostedViewLayout } from '@shared/types'
 import { windowBackgroundColor } from './windows'
 import { log } from './logger'
@@ -103,6 +108,7 @@ export function partitionFor(kind: HostedViewKind, workspaceId: string): string 
     // 모델이 쓴 코드다. 워크스페이스마다 갈라 두고 **영속하지 않는다** — 앱이 사는 동안에도
     // 스토리지가 워크스페이스 경계를 넘으면 안 된다([[shared/types]] artifactPartition).
     case 'artifact':
+    case 'visualization':
       return artifactPartition(workspaceId)
     default: {
       const unhandled: never = kind
@@ -198,7 +204,11 @@ export class HostedViewManager {
    * 않은 탭에까지 프로세스를 내주면 탭을 쌓아 두는 평범한 사용이 곧 메모리 사고가 된다.
    */
   ensure(tabId: string, workspaceId: string, kind: HostedViewKind, initialUrl?: string): void {
-    if (this.entries.has(tabId)) {
+    const existing = this.entries.get(tabId)
+    if (existing) {
+      if (existing.workspaceId !== workspaceId || existing.kind !== kind) {
+        throw new Error('Hosted view identity mismatch.')
+      }
       // 이미 있다 — 렌더러가 방금 다시 마운트한 것이다(탭을 오갔거나 창을 옮겼거나). 지금
       // 상태를 한 번 밀어 준다. 이게 없으면 새 화면은 주소도 앞뒤 버튼도 빈 채로 시작하고,
       // **첫 주소를 다시 로드해 보고 있던 페이지를 처음으로 되감는다** — 뷰를 살려 두는
@@ -210,12 +220,12 @@ export class HostedViewManager {
     const partition = partitionFor(kind, workspaceId)
     // 아티팩트 세션은 게으르게 선다. 뷰가 생기기 **전**인 지금이 유일하게 안전한 자리다 —
     // 여기서 안 세우면 첫 loadURL 이 핸들러 없는 스킴을 만난다([[main/artifactProtocol]]).
-    if (kind === 'artifact') ensureArtifactSessionFor(partition)
+    if (kind === 'artifact' || kind === 'visualization') ensureArtifactSessionFor(partition)
     const view = new WebContentsView({ webPreferences: guestWebPreferences(partition) })
     // 첫 프레임 전과 리사이즈로 드러나는 가장자리에 흰 판이 번쩍이지 않게 앱 배경을 깔아 둔다.
     view.setBackgroundColor(windowBackgroundColor())
     // 모델이 쓴 코드는 아무 데도 못 간다. 사용자의 dev 서버·웹 탭과 규칙이 다르다.
-    if (kind === 'artifact') applyArtifactGuards(view.webContents)
+    if (kind === 'artifact' || kind === 'visualization') applyArtifactGuards(view.webContents)
     else applyGuestGuards(view.webContents)
     // 우클릭 메뉴. Electron 은 기본 메뉴를 주지 않으므로 안 달면 우클릭이 아무 일도 안 한다.
     // 주인 창을 값이 아니라 클로저로 넘긴다 — 뷰는 창 사이를 옮겨 다닌다([[main/guestContextMenu]]).
@@ -456,6 +466,17 @@ export class HostedViewManager {
   }
 
   load(tabId: string, url: string): void {
+    const entry = this.entries.get(tabId)
+    if (!entry) return
+    if (entry.kind === 'visualization' && !isVisualizationUrlForWorkspace(entry.workspaceId, url)) {
+      throw new Error('Invalid visualization URL.')
+    }
+    if (entry.kind === 'artifact') {
+      const route = parseArtifactUrl(url)
+      if (route?.kind !== 'artifact' || route.workspaceId !== entry.workspaceId) {
+        throw new Error('Invalid artifact URL.')
+      }
+    }
     const target = this.resolve(tabId)
     if ('error' in target) return
     void target.guest.loadURL(url).catch((err) => log.info(`webViews: load failed — ${err}`))
@@ -550,6 +571,7 @@ export class HostedViewManager {
     // 뷰를 다 거뒀으면 그 워크스페이스 전용 아티팩트 세션도 놓는다 — 파티션이 워크스페이스마다
     // 하나라, 여기서 안 놓으면 세션과 그 protocol 핸들러가 앱이 꺼질 때까지 남는다.
     forgetArtifactSession(partitionFor('artifact', workspaceId))
+    forgetVisualizationsForWorkspace(workspaceId)
   }
 
   /** 창이 닫힐 때 그 창이 붙이고 있던 뷰를 뗀다 — 파괴가 아니다(페이지를 살려 둔다). */

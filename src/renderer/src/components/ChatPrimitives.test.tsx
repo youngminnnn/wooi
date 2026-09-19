@@ -74,7 +74,72 @@ describe('Codex output file citations', () => {
   })
 })
 
+describe('Codex visualizations', () => {
+  it('extracts complete visualize directives and preserves their display metadata', () => {
+    const result = extractCodexMessageExtras(
+      [
+        'Here is the execution trace.',
+        'visualize{"path":"/tmp/add-stack-frame.html","title":"add execution","mode":"wide"}',
+        'visualize{"path":"/tmp/summary.html"}'
+      ].join('\n')
+    )
+
+    expect(result.body).toContain('Here is the execution trace.')
+    expect(result.body).not.toContain('visualize')
+    expect(result.visualizations).toEqual([
+      { path: '/tmp/add-stack-frame.html', title: 'add execution', mode: 'wide' },
+      { path: '/tmp/summary.html' }
+    ])
+  })
+
+  it('leaves malformed, unsupported, and code-sample visualize directives untouched', () => {
+    const source = [
+      'visualize{"path":"/tmp/bad-mode.html","mode":"compact"}',
+      'visualize{"path":42}',
+      'visualize{"path":"/tmp/unknown.html","theme":"dark"}',
+      '`visualize{"path":"/tmp/inline.html"}`',
+      '```text',
+      'visualize{"path":"/tmp/fenced.html"}',
+      '```',
+      '    visualize{"path":"/tmp/indented.html"}'
+    ].join('\n')
+
+    expect(extractCodexMessageExtras(source)).toMatchObject({ body: source, visualizations: [] })
+  })
+
+  it('does not close a long fence with a shorter or annotated fence', () => {
+    const source = [
+      '````text',
+      '```',
+      '````not-a-close',
+      'visualize{"path":"/tmp/still-code.html"}',
+      '````'
+    ].join('\n')
+    expect(extractCodexMessageExtras(source)).toMatchObject({ body: source, visualizations: [] })
+  })
+})
+
 describe('Codex follow-up buttons', () => {
+  it('shows a visualization card without injecting its HTML', () => {
+    renderWithStore(
+      <AgentMessage
+        text="Done."
+        visualizations={[
+          {
+            path: '/Users/youngmin/wooi/workspaces/snu/punchy-octopus/visualizations/add-stack-frame.html',
+            title: 'add 실행 중 %rsp·%rbp 변화',
+            mode: 'wide'
+          }
+        ]}
+      />
+    )
+
+    expect(screen.getByLabelText('Visualizations')).toBeInTheDocument()
+    expect(screen.getByText('add 실행 중 %rsp·%rbp 변화')).toBeInTheDocument()
+    expect(screen.getByText('Preview unavailable')).toBeInTheDocument()
+    expect(document.querySelector('iframe')).not.toBeInTheDocument()
+  })
+
   it('shows output file chips alongside follow-up buttons', () => {
     renderWithStore(
       <AgentMessage

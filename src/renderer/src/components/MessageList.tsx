@@ -789,6 +789,7 @@ function Item({
   toolLogStyle: 'wooi' | 'terminal'
 }): React.JSX.Element | null {
   const time = formatTime(item.ts)
+  const pushToast = useStore((s) => s.pushToast)
   // 밀도는 여기서 딱 두 가지로 번역된다 — 도구 출력을 펴 둘지, 인라인 diff 를 붙일지.
   // 무엇을 아예 그리지 않을지는 이미 목록 단계에서 걸러져 여기까지 오지 않는다.
   const toolVerbose = expandsToolOutput(density)
@@ -844,6 +845,23 @@ function Item({
           copyable={!!item.text && !item.streaming}
           followups={parsedExtras?.followups}
           fileCitations={parsedExtras?.fileCitations}
+          visualizations={parsedExtras?.visualizations}
+          onOpenVisualization={
+            parsedExtras?.visualizations.length
+              ? async (visualization) => {
+                  try {
+                    await window.api.visualizations.open(
+                      workspaceId,
+                      visualization.path,
+                      visualization.title
+                    )
+                  } catch (error) {
+                    const message = error instanceof Error ? error.message : String(error)
+                    pushToast('error', `Could not open visualization: ${message}`)
+                  }
+                }
+              : undefined
+          }
           onFollowup={
             parsedExtras?.followups.length
               ? async (prompt) => await window.api.chat.send(workspaceId, prompt)

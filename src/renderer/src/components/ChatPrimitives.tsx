@@ -4,7 +4,16 @@ import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import rehypeHighlight from 'rehype-highlight'
 import rehypeKatex from 'rehype-katex'
-import { AlertTriangle, Check, ChevronRight, Copy, FileText, Loader2, Wrench } from 'lucide-react'
+import {
+  AlertTriangle,
+  ChartNoAxesCombined,
+  Check,
+  ChevronRight,
+  Copy,
+  FileText,
+  Loader2,
+  Wrench
+} from 'lucide-react'
 
 /**
  * 대화 한 줄기를 그리는 조각들.
@@ -37,11 +46,13 @@ export function UserMessage({
 
 export type CodexFollowup = { label: string; prompt: string }
 export type CodexFileCitation = { path: string }
+export type CodexVisualization = { path: string; title?: string; mode?: 'wide' }
 
 export type CodexMessageExtras = {
   body: string
   followups: CodexFollowup[]
   fileCitations: CodexFileCitation[]
+  visualizations: CodexVisualization[]
 }
 
 /**
@@ -53,18 +64,24 @@ export type CodexMessageExtras = {
 export function extractCodexMessageExtras(text: string): CodexMessageExtras {
   const followups: CodexFollowup[] = []
   const fileCitations: CodexFileCitation[] = []
+  const visualizations: CodexVisualization[] = []
   const parts = text.split(/(\r?\n)/)
-  let fence: '`' | '~' | undefined
+  let fence: { marker: '`' | '~'; length: number } | undefined
 
   const body = parts
     .map((part) => {
       if (/^\r?\n$/.test(part)) return part
 
-      const fenceMatch = part.match(/^ {0,3}(`{3,}|~{3,})/)
+      const fenceMatch = part.match(/^ {0,3}(`{3,}|~{3,})(.*)$/)
       if (fenceMatch) {
         const marker = fenceMatch[1][0] as '`' | '~'
-        if (!fence) fence = marker
-        else if (fence === marker) fence = undefined
+        if (!fence) fence = { marker, length: fenceMatch[1].length }
+        else if (
+          fence.marker === marker &&
+          fenceMatch[1].length >= fence.length &&
+          fenceMatch[2].trim() === ''
+        )
+          fence = undefined
         return part
       }
       if (fence) return part
@@ -86,12 +103,43 @@ export function extractCodexMessageExtras(text: string): CodexMessageExtras {
       const citationMatch = part.match(
         /^ {0,3}:codex-file-citation\{path=("(?:[^"\\]|\\.)*") purpose="output"\}\s*$/
       )
-      if (!citationMatch) return part
+      if (citationMatch) {
+        try {
+          const path = JSON.parse(citationMatch[1])
+          if (typeof path !== 'string') return part
+          fileCitations.push({ path })
+          return ''
+        } catch {
+          return part
+        }
+      }
+
+      const visualizationMatch = part.match(/^ {0,3}visualize(\{.*\})\s*$/)
+      if (!visualizationMatch) return part
 
       try {
-        const path = JSON.parse(citationMatch[1])
-        if (typeof path !== 'string') return part
-        fileCitations.push({ path })
+        const value: unknown = JSON.parse(visualizationMatch[1])
+        if (
+          value === null ||
+          Array.isArray(value) ||
+          typeof value !== 'object' ||
+          Object.keys(value).some((key) => key !== 'path' && key !== 'title' && key !== 'mode')
+        ) {
+          return part
+        }
+        const { path, title, mode } = value as Record<string, unknown>
+        if (
+          typeof path !== 'string' ||
+          (title !== undefined && typeof title !== 'string') ||
+          (mode !== undefined && mode !== 'wide')
+        ) {
+          return part
+        }
+        visualizations.push({
+          path,
+          ...(title === undefined ? {} : { title }),
+          ...(mode === 'wide' ? { mode } : {})
+        })
         return ''
       } catch {
         return part
@@ -99,7 +147,7 @@ export function extractCodexMessageExtras(text: string): CodexMessageExtras {
     })
     .join('')
 
-  return { body, followups, fileCitations }
+  return { body, followups, fileCitations, visualizations }
 }
 
 /** @deprecated Use extractCodexMessageExtras when file citations are also needed. */
@@ -120,6 +168,8 @@ export function AgentMessage({
   copyable = true,
   followups = [],
   fileCitations = [],
+  visualizations = [],
+  onOpenVisualization,
   onFollowup
 }: {
   text: string
@@ -129,6 +179,10 @@ export function AgentMessage({
   followups?: readonly CodexFollowup[]
   /** 완료된 Codex 응답이 남긴 출력 파일. 경로는 title에서만 확인한다. */
   fileCitations?: readonly CodexFileCitation[]
+  /** Codex가 만든 독립 HTML 시각화. 본문 HTML은 renderer에 넣지 않는다. */
+  visualizations?: readonly CodexVisualization[]
+  /** main이 검증한 안전한 hosted view로 여는 opaque action. */
+  onOpenVisualization?: (visualization: CodexVisualization) => Promise<void>
   onFollowup?: (prompt: string) => Promise<void>
 }): React.JSX.Element {
   const [sendingPrompt, setSendingPrompt] = useState<string>()
@@ -182,6 +236,17 @@ export function AgentMessage({
           ))}
         </div>
       )}
+      {visualizations.length > 0 && (
+        <div className="mt-3 flex flex-col gap-2" aria-label="Visualizations">
+          {visualizations.map((visualization, index) => (
+            <CodexVisualizationCard
+              key={`${visualization.path}:${index}`}
+              visualization={visualization}
+              onOpen={onOpenVisualization}
+            />
+          ))}
+        </div>
+      )}
       {/* focus-visible 이 아니라 focus-within 을 쓴다 — opacity-0 을 쥔 이 div 자체는
           포커스를 받지 않고, 안의 CopyButton 이 받는다. focus-visible 은 자기 자신이
           포커스일 때만 반응하므로 자식이 포커스여도 절대 켜지지 않는다. */}
@@ -189,6 +254,56 @@ export function AgentMessage({
         <div className="absolute -top-1 right-0 opacity-0 group-hover/msg:opacity-100 focus-within:opacity-100 transition">
           <CopyButton text={text} />
         </div>
+      )}
+    </div>
+  )
+}
+
+function CodexVisualizationCard({
+  visualization,
+  onOpen
+}: {
+  visualization: CodexVisualization
+  onOpen?: (visualization: CodexVisualization) => Promise<void>
+}): React.JSX.Element {
+  const [opening, setOpening] = useState(false)
+  const label = visualization.title || fileBasename(visualization.path) || 'Visualization'
+
+  const open = async () => {
+    if (!onOpen || opening) return
+    setOpening(true)
+    try {
+      await onOpen(visualization)
+    } finally {
+      setOpening(false)
+    }
+  }
+
+  return (
+    <div
+      className={`flex items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5 ${
+        visualization.mode === 'wide' ? 'w-full' : 'max-w-xl'
+      }`}
+      title={visualization.path}
+    >
+      <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-[var(--surface-3)] text-sky-300">
+        <ChartNoAxesCombined size={17} aria-hidden="true" />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm font-medium text-neutral-200">{label}</span>
+        <span className="block text-xs text-neutral-500">Interactive visualization</span>
+      </span>
+      {onOpen ? (
+        <button
+          type="button"
+          disabled={opening}
+          onClick={() => void open()}
+          className="shrink-0 rounded-lg border border-[var(--border-strong)] px-2.5 py-1.5 text-sm text-neutral-300 hover:bg-[var(--surface-2)] disabled:cursor-wait disabled:opacity-60"
+        >
+          {opening ? 'Opening…' : 'Open'}
+        </button>
+      ) : (
+        <span className="shrink-0 text-xs text-neutral-500">Preview unavailable</span>
       )}
     </div>
   )

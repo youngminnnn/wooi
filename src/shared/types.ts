@@ -2781,6 +2781,9 @@ export function isArtifactPartition(partition: string): boolean {
 /** 아티팩트 본문을 게스트에게 건네는 전용 스킴. */
 export const ARTIFACT_SCHEME = 'wooi-artifact'
 
+/** Codex가 만든 로컬 HTML 시각화의 최대 크기. */
+export const VISUALIZATION_MAX_BYTES = 1024 * 1024
+
 /**
  * 아티팩트 URL 의 host 자리.
  *
@@ -4193,6 +4196,8 @@ export const IPC = {
   tabsGet: 'tabs:get',
   /** 탭을 연다. 같은 kind+target 탭이 이미 있으면 새로 만들지 않고 그것을 활성화한다. */
   tabsOpen: 'tabs:open',
+  /** Opaque visualization URL로만 여는, 앱 세션 한정 탭. */
+  tabsOpenVisualization: 'tabs:openVisualization',
   /** 탭을 닫는다. 작업 탭(work)은 조용히 무시한다. */
   tabsClose: 'tabs:close',
   /** 보고 있는 탭을 바꾼다. */
@@ -4243,6 +4248,8 @@ export const IPC = {
   artifactsRead: 'artifacts:read',
   /** 아티팩트 하나를 지운다(모든 버전). */
   artifactsRemove: 'artifacts:remove',
+  /** 작업공간 안의 Codex visualization HTML을 격리된 hosted view로 연다. */
+  visualizationsOpen: 'visualizations:open',
   // Dock 미확인 배지
   appSetBadge: 'app:setBadge',
   // 앱 버전 / 자동 업데이트
@@ -5257,7 +5264,7 @@ export const MENTION_DROP_HINT_BYTES = 256 * 1024
  * 탭 종류 전부가 아니라 **네이티브 뷰가 필요한 것만** 여기 온다 — 파일·스택 탭은 DOM 으로
  * 그리므로 자리·가림 문제가 애초에 없다.
  */
-export type HostedViewKind = 'dev' | 'web' | 'artifact'
+export type HostedViewKind = 'dev' | 'web' | 'artifact' | 'visualization'
 
 /** 렌더러가 잰 뷰 하나의 자리. 창 콘텐츠 영역 기준 DIP 좌표다(스케일 환산은 하지 않는다). */
 export interface HostedViewLayout {
@@ -5362,7 +5369,8 @@ export interface TerminalTabsState {
  *
  * 작업 탭(`work`)은 늘 첫 탭이고 닫을 수 없다([[main/workspaceTabs]]).
  */
-export type WorkspaceTabKind = 'work' | 'dev' | 'web' | 'file' | 'artifact' | 'stack'
+export type WorkspaceTabKind =
+  'work' | 'dev' | 'web' | 'file' | 'artifact' | 'visualization' | 'stack'
 
 export interface WorkspaceTab {
   id: string

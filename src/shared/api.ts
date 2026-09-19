@@ -370,6 +370,14 @@ export interface WooiApi {
     onOpen(cb: (e: ArtifactOpenEvent) => void): () => void
     onChanged(cb: (e: ArtifactsChangedEvent) => void): () => void
   }
+  visualizations: {
+    /** 절대 경로는 main 에서만 검증·보관하고, 게스트에는 opaque URL만 돌려준다. */
+    open(
+      workspaceId: string,
+      path: string,
+      title?: string
+    ): Promise<{ tabId: string; url: string; title?: string }>
+  }
   preview: {
     /** 마지막으로 본 주소를 워크스페이스에 영속한다(다음에 열면 여기서 시작한다). */
     setUrl(workspaceId: string, url: string): Promise<void>
@@ -732,6 +740,8 @@ export interface WooiApi {
       workspaceId: string,
       opts: { kind: WorkspaceTabKind; target?: string; title?: string; activate?: boolean }
     ): Promise<WorkspaceTabsState>
+    /** Visualization capability URL을 붙이는 세션 한정 탭. 일반 open은 이 kind를 거절한다. */
+    openVisualization(workspaceId: string, url: string, title?: string): Promise<WorkspaceTabsState>
     /** 탭을 닫는다. 대화 탭(chat)은 조용히 무시된다. */
     close(workspaceId: string, tabId: string): Promise<WorkspaceTabsState>
     /** 보고 있는 탭을 바꾼다. */

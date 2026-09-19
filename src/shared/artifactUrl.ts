@@ -56,8 +56,14 @@ export function artifactUrl(
   return `${ORIGIN}/w/${workspaceId}/${artifactId}/${version}/${file}`
 }
 
+/** main 메모리에만 있는 시각화 파일의 opaque handle URL. */
+export function visualizationUrl(id: string): string {
+  return `${ORIGIN}/visualization/${id}.html`
+}
+
 export type ArtifactRoute =
   | { kind: 'vendor'; file: string }
+  | { kind: 'visualization'; id: string }
   | {
       kind: 'artifact'
       workspaceId: string
@@ -106,6 +112,11 @@ export function parseArtifactUrl(rawUrl: string): ArtifactRoute | null {
     if (parts.length !== 2) return null
     if (!VENDOR_FILE_RE.test(parts[1])) return null
     return { kind: 'vendor', file: parts[1] }
+  }
+
+  if (parts[0] === 'visualization') {
+    if (parts.length !== 2 || !/^[a-f0-9-]{36}\.html$/.test(parts[1])) return null
+    return { kind: 'visualization', id: parts[1].slice(0, -'.html'.length) }
   }
 
   if (parts[0] === 'w') {

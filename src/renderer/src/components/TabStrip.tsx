@@ -1,5 +1,14 @@
 import { useState } from 'react'
-import { MessageSquare, Globe, FileCode, Layers, Sparkles, Plus, X } from 'lucide-react'
+import {
+  ChartNoAxesCombined,
+  MessageSquare,
+  Globe,
+  FileCode,
+  Layers,
+  Sparkles,
+  Plus,
+  X
+} from 'lucide-react'
 import MenuPanel, { menuItemCls } from './MenuPanel'
 import type { WorkspaceTab } from '@shared/types'
 
@@ -165,6 +174,8 @@ function TabIcon({ tab }: { tab: WorkspaceTab }): React.JSX.Element {
   // 모델이 만든 것은 한눈에 갈려야 한다 — dev 서버나 진짜 사이트로 착각하면 안 된다.
   if (tab.kind === 'artifact')
     return <Sparkles size={12} className="shrink-0 text-[var(--accent-400)]" />
+  if (tab.kind === 'visualization')
+    return <ChartNoAxesCombined size={12} className="shrink-0 text-sky-300" />
   return <Globe size={12} className="shrink-0" />
 }
 
@@ -174,6 +185,7 @@ function tabLabel(tab: WorkspaceTab): string {
   // target 은 앵커 워크스페이스 id라 그대로 쓰면 읽을 수 없다 — 종류 이름으로 대신한다.
   if (tab.kind === 'stack') return 'Stack'
   if (tab.kind === 'artifact') return 'Artifacts'
+  if (tab.kind === 'visualization') return 'Visualization'
   if (!tab.target) return tab.kind
   try {
     const url = new URL(tab.target)

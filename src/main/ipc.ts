@@ -18,7 +18,11 @@ import { setSleepBlockerEnabled } from './sleepBlocker'
 import { getTranscripts } from './transcripts'
 import { relayOriginLabel, relayPrompt, relayedUserItem } from './subagentRelay'
 import { ArtifactError, getArtifacts } from './artifacts'
-import { notifyArtifactsChanged } from './artifactProtocol'
+import {
+  isVisualizationUrlForWorkspace,
+  notifyArtifactsChanged,
+  registerVisualization
+} from './artifactProtocol'
 import { buildHandoffPrompt, estimateHandoffTokens, formatHandoffTokens } from '@shared/handoff'
 import { listDir, readFileInRoot, searchFiles, writeFileInRoot } from './fsbrowse'
 import { importMigration, scanMigration } from './migrate'
@@ -1746,6 +1750,17 @@ export function registerIpc(ctx: IpcContext): void {
     } catch (err) {
       if (!(err instanceof ArtifactError)) throw err
     }
+  })
+
+  handle(IPC.visualizationsOpen, (_e, workspaceId: string, path: string, title?: string) => {
+    const ws = store.getState().workspaces.find((w) => w.id === workspaceId && !w.archived)
+    if (!ws) throw new Error('Workspace not found.')
+    if (typeof path !== 'string' || (title !== undefined && typeof title !== 'string')) {
+      throw new Error('Invalid visualization request.')
+    }
+    const url = registerVisualization(workspaceId, ws.worktreePath, path)
+    const tabs = ctx.tabs.openVisualization(workspaceId, url, title)
+    return { tabId: tabs.activeId, url, ...(title ? { title } : {}) }
   })
 
   handle(IPC.previewSendIssues, (_e, workspaceId: string, tabId: string, issueIds: string[]) => {
@@ -3487,6 +3502,12 @@ export function registerIpc(ctx: IpcContext): void {
     (_e, workspaceId: string, opts: { kind: WorkspaceTabKind; target?: string; title?: string }) =>
       ctx.tabs.openTab(workspaceId, opts)
   )
+
+  handle(IPC.tabsOpenVisualization, (_e, workspaceId: string, url: string, title?: string) => {
+    if (!isVisualizationUrlForWorkspace(workspaceId, url))
+      throw new Error('Invalid visualization URL.')
+    return ctx.tabs.openVisualization(workspaceId, url, title)
+  })
 
   // 탭을 닫으면 그 탭이 붙들고 있던 것도 함께 놓는다. 탭(영속)과 뷰(캐시)의 수명을 나눈
   // 설계라 뷰는 닫아도 주소로 되살아나지만, **놓아 주는 쪽을 아무도 안 부르면** 그 설계가

@@ -44,6 +44,7 @@ import Splitter from './components/Splitter'
 import TabStrip from './components/TabStrip'
 import BrowserTab from './components/tabs/BrowserTab'
 import ArtifactTab from './components/tabs/ArtifactTab'
+import VisualizationTab from './components/tabs/VisualizationTab'
 import FileTab from './components/tabs/FileTab'
 import StackTab from './components/tabs/StackTab'
 import { useWorkspaceTabs } from './lib/workspaceTabs'
@@ -1349,6 +1350,8 @@ export default function App(): React.JSX.Element {
                   tabId={wsTabs.active.id}
                   target={artifactNav}
                 />
+              ) : wsTabs.active?.kind === 'visualization' ? (
+                <VisualizationTab key={wsTabs.active.id} workspace={selected} tab={wsTabs.active} />
               ) : wsTabs.active?.kind === 'file' ? (
                 // key 를 일부러 안 건다 — 이유는 FileTab 자신의 주석 참고(파일 탭 사이를
                 // 오가는 동안 저장하지 않은 초안을 잃지 않기 위해서다).
