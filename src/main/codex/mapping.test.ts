@@ -1037,6 +1037,27 @@ describe('사용자 훅', () => {
     expect(r.persist).toEqual([])
   })
 
+  it('sessionStart 정상 종료는 긴 context 출력 대신 짧게 표시한다', () => {
+    const r = map(NOTIFY.hookCompleted, {
+      run: {
+        id: 'h-session',
+        eventName: 'sessionStart',
+        status: 'completed',
+        durationMs: 156,
+        entries: [
+          {
+            kind: 'context',
+            text: '[project-memory:auto-loaded] 공유 프로젝트 메모리 인덱스를 자동으로 불러왔습니다.\n- [항목](entry.md)'
+          }
+        ]
+      }
+    })
+    const item = items(r)[0] as Extract<ChatItem, { type: 'system' }>
+    expect(item.text).toBe('Workspace context loaded in 156ms.')
+    expect(item.text).not.toContain('project-memory')
+    expect(r.persist).toEqual([])
+  })
+
   it('턴을 막은 훅은 에러로 남기고 훅 출력을 싣는다', () => {
     const r = map(NOTIFY.hookCompleted, {
       run: {
