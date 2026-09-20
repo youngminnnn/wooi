@@ -8,7 +8,7 @@ const TRANSCRIPT = [
   {
     id: 'assistant-e2e',
     type: 'assistant',
-    text: 'Done.\n- :codex-followup[Run checks]{prompt="Run npm run typecheck"}\n:codex-file-citation{path="/tmp/probability_homework_images.pdf" purpose="output"}',
+    text: 'Done.\n- :codex-followup[Run checks]{prompt="Run npm run typecheck"}\n완성본: :codex-file-citation{path="/tmp/probability_homework_images.pdf" purpose="output"}',
     ts: Date.now()
   }
 ]
@@ -57,6 +57,11 @@ export default async function Codex_후속_제안은_모델_턴_없이_같은_�
         }
         if ((await win.getByText(':codex-file-citation', { exact: false }).count()) !== 0) {
           throw new Error('raw :codex-file-citation markup was rendered in the message body')
+        }
+        if ((await win.getByText('완성본:', { exact: true }).count()) !== 1) {
+          throw new Error(
+            'text preceding the output file citation was not retained in the message body'
+          )
         }
         const outputFile = outputFiles.getByText('probability_homework_images.pdf', { exact: true })
         if ((await outputFile.count()) !== 1) {
