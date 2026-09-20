@@ -72,6 +72,27 @@ describe('Codex output file citations', () => {
 
     expect(extractCodexMessageExtras(source)).toMatchObject({ body: source, fileCitations: [] })
   })
+
+  it('removes one or more output directives appended to prose while retaining the prose', () => {
+    const result = extractCodexMessageExtras(
+      '완성본: :codex-file-citation{path="/tmp/probability_homework_images.pdf" purpose="output"} :codex-file-citation{path="/tmp/answer-key.pdf" purpose="output"}'
+    )
+
+    expect(result.body).toBe('완성본: ')
+    expect(result.fileCitations).toEqual([
+      { path: '/tmp/probability_homework_images.pdf' },
+      { path: '/tmp/answer-key.pdf' }
+    ])
+  })
+
+  it('keeps standalone citation behavior when Markdown permits up to three leading spaces', () => {
+    const result = extractCodexMessageExtras(
+      '   :codex-file-citation{path="/tmp/indented-output.pdf" purpose="output"}'
+    )
+
+    expect(result.body).toBe('')
+    expect(result.fileCitations).toEqual([{ path: '/tmp/indented-output.pdf' }])
+  })
 })
 
 describe('Codex visualizations', () => {

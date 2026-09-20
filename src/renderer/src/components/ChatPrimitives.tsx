@@ -100,17 +100,32 @@ export function extractCodexMessageExtras(text: string): CodexMessageExtras {
         }
       }
 
-      const citationMatch = part.match(
-        /^ {0,3}:codex-file-citation\{path=("(?:[^"\\]|\\.)*") purpose="output"\}\s*$/
-      )
-      if (citationMatch) {
-        try {
-          const path = JSON.parse(citationMatch[1])
-          if (typeof path !== 'string') return part
-          fileCitations.push({ path })
-          return ''
-        } catch {
-          return part
+      // Output citations may be emitted on their own or appended to prose. Only peel
+      // complete directives from the end of a non-code line, so malformed directives
+      // and ordinary inline text remain visible.
+      if (!/^ {4}/.test(part)) {
+        let remaining = part
+        const citations: CodexFileCitation[] = []
+        const trailingCitation =
+          /^(.*):codex-file-citation\{path=("(?:[^"\\]|\\.)*") purpose="output"\}\s*$/
+
+        while (true) {
+          const citationMatch = remaining.match(trailingCitation)
+          if (!citationMatch) break
+
+          try {
+            const path = JSON.parse(citationMatch[2])
+            if (typeof path !== 'string') return part
+            citations.unshift({ path })
+            remaining = citationMatch[1]
+          } catch {
+            return part
+          }
+        }
+
+        if (citations.length > 0) {
+          fileCitations.push(...citations)
+          return /^ {0,3}$/.test(remaining) ? '' : remaining
         }
       }
 
