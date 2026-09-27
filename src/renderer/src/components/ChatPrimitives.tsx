@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react'
-import ReactMarkdown from 'react-markdown'
+import ReactMarkdown, { defaultUrlTransform } from 'react-markdown'
+import { useStore } from '../store'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import rehypeHighlight from 'rehype-highlight'
@@ -389,10 +390,15 @@ function normalizeLatexDelimiters(text: string): string {
   return result + normalizeText(prose)
 }
 
-/** 마크다운 본문만. 링크는 기본 브라우저로, 코드 블록에는 복사 버튼이 붙는다. */
+/** 마크다운 본문. 웹 링크와 로컬 파일은 각각의 기본 앱으로 연다. */
 export function MarkdownBody({ text }: { text: string }): React.JSX.Element {
   return (
     <ReactMarkdown
+      urlTransform={(url, key) =>
+        key === 'href' && (/^file:\/\//i.test(url) || /^\/(?!\/)/.test(url))
+          ? url
+          : defaultUrlTransform(url)
+      }
       remarkPlugins={[remarkGfm, remarkMath]}
       rehypePlugins={[rehypeHighlight, rehypeKatex]}
       components={{ a: ExternalLinkRenderer, pre: PreWithCopy }}
@@ -510,7 +516,7 @@ export function PreWithCopy({ children }: { children?: React.ReactNode }): React
   )
 }
 
-/** 채팅 메시지 안의 링크는 항상 사용자의 기본 브라우저로 연다(앱 내 이동 방지). */
+/** 기본 탐색을 막고 main에서 웹 URL과 로컬 파일을 구분해 연다. */
 export function ExternalLinkRenderer({
   href,
   children
@@ -523,7 +529,10 @@ export function ExternalLinkRenderer({
       href={href}
       onClick={(e) => {
         e.preventDefault()
-        if (href) void window.api.openExternal(href)
+        if (href)
+          void window.api.openExternal(href).catch((error: unknown) => {
+            useStore.getState().pushToast('error', `Could not open link: ${String(error)}`)
+          })
       }}
     >
       {children}
