@@ -7,7 +7,7 @@ import {
   extractCodexMessageExtras,
   MarkdownBody
 } from './ChatPrimitives'
-import { renderWithStore } from '../test/harness'
+import { fakeApi, renderWithStore, useStore } from '../test/harness'
 
 describe('Codex follow-up parsing', () => {
   it('removes complete list items and preserves their order and escaped prompts', () => {
@@ -247,5 +247,29 @@ describe('MarkdownBody math', () => {
     expect(document.querySelectorAll('.katex')).toHaveLength(1)
     expect(screen.getByText(String.raw`\(x^2\)`)).toBeInTheDocument()
     expect(screen.getByText(String.raw`\[x^2\]`)).toBeInTheDocument()
+  })
+})
+
+describe('Markdown file hyperlinks', () => {
+  it.each([
+    ['[Report](/Users/test/report.pdf)', '/Users/test/report.pdf'],
+    ['[Report](</Users/test/My Report.md:12>)', '/Users/test/My%20Report.md:12'],
+    ['[Report](file:///Users/test/report.pdf)', 'file:///Users/test/report.pdf']
+  ])('preserves and dispatches %s', async (text, target) => {
+    renderWithStore(<MarkdownBody text={text} />)
+    await userEvent.click(screen.getByRole('link', { name: 'Report' }))
+    expect(fakeApi.called('openExternal')).toEqual([{ path: 'openExternal', args: [target] }])
+  })
+
+  it('shows an error when the file cannot be opened', async () => {
+    fakeApi.override('openExternal', () => Promise.reject(new Error('File not found')))
+    renderWithStore(<MarkdownBody text="[Missing](/missing.pdf)" />)
+    await userEvent.click(screen.getByRole('link', { name: 'Missing' }))
+    expect(useStore.getState().toasts.at(-1)?.message).toContain('File not found')
+  })
+
+  it('keeps unsafe link schemes stripped', () => {
+    renderWithStore(<MarkdownBody text="[Unsafe](javascript:alert)" />)
+    expect(screen.getByText('Unsafe')).toHaveAttribute('href', '')
   })
 })

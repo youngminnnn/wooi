@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path'
 import { handle } from './commandRegistry'
 import { compareBaseBranch, normalizeCompareBase } from '@shared/compareBase'
 import { openInEditor } from './openInEditor'
+import { openLink } from './openLink'
 import { memoryFile } from './claude/memory'
 import { getStore } from './store'
 import { getRemoteBridge } from './remote'
@@ -3247,9 +3248,7 @@ export function registerIpc(ctx: IpcContext): void {
     })
   })
 
-  handle(IPC.openExternal, (_e, url: string) => {
-    if (/^https?:\/\//.test(url)) shell.openExternal(url)
-  })
+  handle(IPC.openExternal, (_e, url: string) => openLink(url, shell))
 
   // ── 파일 브라우저 (All files 탭) ─────────────────────────────────────────
 
